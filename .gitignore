@@ -1,0 +1,20 @@
+# Cursor設定
+.cursor/
+
+# IDE設定
+.vscode/
+.idea/
+
+# OS設定
+.DS_Store
+Thumbs.db
+
+# 一時ファイル
+*.tmp
+*.log
+
+# ビルド成果物（将来追加）
+# bin/
+# obj/
+# .godot/
+
