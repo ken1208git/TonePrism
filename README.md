@@ -32,7 +32,8 @@
 
 ## ドキュメント
 
-詳細な仕様については [SPECIFICATION.md](SPECIFICATION.md) を参照してください。
+- [仕様書](SPECIFICATION.md) - 詳細な機能仕様
+- [変更履歴](CHANGELOG.md) - バージョン履歴
 
 ## ライセンス
 
