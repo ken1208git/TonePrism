@@ -126,9 +126,37 @@ git config --global i18n.logoutputencoding utf-8
   1. `write`ツールを使用して`commit_message.txt`ファイルを作成する（PowerShellの`Out-File`は使用しない）
   2. `git commit -F commit_message.txt`でコミットする
   3. `git commit --amend -F commit_message.txt`でコミットを修正する場合も同様
-  4. コミット後は`Remove-Item commit_message.txt`で一時ファイルを削除する
+  4. **コミット後は必ず`Remove-Item commit_message.txt`で一時ファイルを削除する**
 - 日本語のコミットメッセージは必ずUTF-8エンコーディングで保存する
 - PowerShellの`Out-File`コマンドは文字化けの原因となるため使用禁止
+
+## 一時ファイル管理
+
+### 一時ファイルの命名規則
+- コミットメッセージ: `commit_message.txt`
+- Issue作成用: `issue_temp.md`, `issue_01.md`, `issue_02.md`など
+- その他の一時作業: `temp_*.txt`, `draft_*.md`など
+
+### 一時ファイル削除のタイミング（重要）
+- **コミット完了後**: `commit_message.txt`を必ず削除
+- **Issue作成完了後**: `issue_temp.md`や`issue_XX.md`を必ず削除
+- **作業完了後**: すべての一時ファイルを削除
+- **タスク終了時**: プロジェクトルートに一時ファイルが残っていないか確認
+
+### AI Assistantの動作
+- 一時ファイル作成後は、必ず削除するステップを実行する
+- 削除し忘れがないよう、作業完了時に確認を促す
+- 一時ファイルが残っている場合は削除を提案する
+
+### 推奨: .gitignoreに一時ファイルのパターンを追加
+```gitignore
+# 一時ファイル
+commit_message.txt
+issue_temp.md
+issue_*.md
+temp_*.txt
+draft_*.md
+```
 
 ## プロジェクト構造
 

@@ -12,6 +12,11 @@ Thumbs.db
 # 一時ファイル
 *.tmp
 *.log
+commit_message.txt
+issue_temp.md
+issue_*.md
+temp_*.txt
+draft_*.md
 
 # ビルド成果物（将来追加）
 # bin/
