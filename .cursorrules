@@ -309,3 +309,73 @@ git stash pop
 - 機能が完成したら、動作確認してからコミット・マージする
 - コードレビュー（自己レビュー）: プルリクエスト作成前に自分でコードを見直す
 
+## バージョン管理戦略
+
+このプロジェクトでは、**3つのバージョンシステム**を使用します：
+
+### 1. プロジェクトマイルストーン（開発進捗管理）
+- **用途**: 開発計画の進捗管理、GitHub Milestones
+- **形式**: マイルストーン1, マイルストーン2, ..., マイルストーン12
+- **管理場所**: `SPECIFICATION.md`, `CHANGELOG.md`, GitHub Milestones
+
+### 2. Launcherバージョン（ランチャー本体）
+- **用途**: ランチャーアプリケーションの実際のバージョン
+- **形式**: Semantic Versioning（v0.1.0, v1.0.0, v1.1.0...）
+- **管理場所**:
+  - コード内: `Launcher/version.gd` または `Launcher/main.gd`
+  - Gitタグ: `launcher-v1.0.0`
+  - `CHANGELOG.md`（Launcherセクション）
+
+### 3. Managerバージョン（管理ソフト）
+- **用途**: 管理ソフトウェアの実際のバージョン
+- **形式**: Semantic Versioning（v0.1.0, v1.0.0, v1.1.0...）
+- **管理場所**:
+  - コード内: `Manager/Properties/AssemblyInfo.cs` または専用クラス
+  - Gitタグ: `manager-v1.0.0`
+  - `CHANGELOG.md`（Managerセクション）
+
+### バージョンアップのルール
+
+#### Launcherのみ変更した場合
+- Launcherのバージョンのみ上げる
+- `CHANGELOG.md`のLauncherセクションに記録
+- Gitタグ: `launcher-vX.Y.Z`
+
+#### Managerのみ変更した場合
+- Managerのバージョンのみ上げる
+- `CHANGELOG.md`のManagerセクションに記録
+- Gitタグ: `manager-vX.Y.Z`
+
+#### 両方変更した場合（マイルストーン達成時など）
+- 両方のバージョンを上げる
+- `CHANGELOG.md`の両セクションに記録
+- プロジェクトマイルストーンを更新
+- 必要に応じて複数のGitタグを作成
+
+### Gitタグの命名規則
+```bash
+# ランチャーのリリース
+git tag -a launcher-v1.0.0 -m "Launcher v1.0.0: MVP完成"
+
+# 管理ソフトのリリース
+git tag -a manager-v1.0.0 -m "Manager v1.0.0: 完全版完成"
+```
+
+### マイルストーンとバージョンの対応例
+- **マイルストーン1**: Launcher v0.1.0
+- **マイルストーン2**: Manager v0.1.0
+- **マイルストーン8**: Launcher v1.0.0, Manager v0.2.0（MVP完成）
+- **マイルストーン11**: Manager v1.0.0（管理ソフト完全版）
+- **マイルストーン12**: Launcher v2.0.0, Manager v1.1.0（完全版）
+
+### 利点
+- 各アプリケーションの変更が明確
+- 独立したリリースが可能
+- Semantic Versioningが正しく機能
+- ユーザーに分かりやすい
+
+### 注意点
+- 3つのバージョンを適切に管理する
+- ランチャーと管理ソフトのバージョン互換性を意識する
+- CHANGELOG.mdはLauncherとManagerで分けて記録する
+
