@@ -57,6 +57,45 @@ Conventional Commits形式に従う：
 - `fix: データベース接続エラーを修正`
 - `docs: READMEにセットアップ手順を追加`
 
+### Windows環境での文字化け対策
+
+Windows（PowerShell）環境でコミットメッセージが文字化けしないようにするため、以下の方法を使用する：
+
+#### 推奨方法1: 一時ファイル経由でコミット
+```bash
+# コミットメッセージをUTF-8で一時ファイルに保存してからコミット
+# 注意: PowerShellのOut-Fileは文字化けの原因となるため、直接ファイルを編集するか、
+#       AI Assistantに依頼してwriteツールで作成してもらうこと
+git commit -F commit_message.txt
+Remove-Item commit_message.txt
+```
+
+#### 推奨方法2: Gitエディタを使用
+```bash
+# デフォルトエディタでコミットメッセージを編集
+git commit
+# または特定のエディタを指定
+git commit --edit
+```
+
+#### 設定の確認
+```bash
+# Gitの文字エンコーディング設定を確認
+git config --global core.quotepath false
+git config --global gui.encoding utf-8
+git config --global i18n.commitencoding utf-8
+git config --global i18n.logoutputencoding utf-8
+```
+
+#### AI Assistantへの指示
+- **コミット時は必ず以下の手順を実行する**：
+  1. `write`ツールを使用して`commit_message.txt`ファイルを作成する（PowerShellの`Out-File`は使用しない）
+  2. `git commit -F commit_message.txt`でコミットする
+  3. `git commit --amend -F commit_message.txt`でコミットを修正する場合も同様
+  4. コミット後は`Remove-Item commit_message.txt`で一時ファイルを削除する
+- 日本語のコミットメッセージは必ずUTF-8エンコーディングで保存する
+- PowerShellの`Out-File`コマンドは文字化けの原因となるため使用禁止
+
 ## プロジェクト構造
 
 - `Manager/` - 管理ソフト（C# WinForms）
