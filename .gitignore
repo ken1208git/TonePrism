@@ -18,8 +18,26 @@ issue_*.md
 temp_*.txt
 draft_*.md
 
-# ビルド成果物（将来追加）
-# bin/
-# obj/
-# .godot/
+# Godot
+.godot/
+.import/
+*.import
+export_presets.cfg
+.mono/
+data_*/
 
+# C# / .NET (Manager用)
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.csproj.user
+
+# データベース
+prism.db
+*.db-journal
+*.db-wal
+
+# ゲームファイル（容量が大きいため除外）
+games/

@@ -26,9 +26,37 @@
 
 ## 技術スタック
 
-- **ランチャー**: Godot Engine
+- **ランチャー**: Godot Engine 4.5
 - **管理ソフト**: C# (Windows Forms)
 - **データ形式**: SQLite
+
+## 開発環境
+
+### ランチャー開発
+- **Godot Engine**: 4.5以降
+- **SQLiteプラグイン**: [godot-sqlite](https://github.com/2shady4u/godot-sqlite)
+- **OS**: Windows 10/11
+
+### 管理ソフト開発
+- **IDE**: Visual Studio 2022（推奨）
+- **.NET Framework**: （実装時に確定）
+- **OS**: Windows 10/11
+
+## セットアップ
+
+### Launcherのセットアップ
+
+1. Godot Engine 4.5以降をインストール
+2. このリポジトリをクローン
+   ```bash
+   git clone https://github.com/your-username/GCTonePrism.git
+   ```
+3. Godotエディタで `Launcher/project.godot` を開く
+4. SQLiteプラグインは既に含まれています
+
+### Managerのセットアップ
+
+（実装後に追加予定）
 
 ## ドキュメント
 
