@@ -242,6 +242,46 @@ public GameInfo GetGameInfo(string gameId)
 - 主要な機能追加、変更、修正があった時
 - 仕様書の変更はCHANGELOGではなくSPECIFICATION.mdの変更履歴に記録
 
+## ドキュメント変更時のブランチ戦略
+
+### 実装ブランチで変更する場合
+以下の場合は、現在の実装ブランチでドキュメントも一緒に変更する：
+- 実装に直接関連するドキュメント変更
+- 実装の詳細を追記する程度の変更
+- 軽微なタイポ修正
+- READMEやコメントの更新
+- コミットは実装とドキュメントで分ける（履歴の明確化）
+
+例:
+```bash
+git add src/game_selection.gd
+git commit -m "feat: ゲーム選択UIを実装"
+git add SPECIFICATION.md
+git commit -m "docs: ゲーム選択UIの仕様を実装に合わせて更新"
+```
+
+### 別ブランチで変更する場合
+以下の場合は、`git stash`で現在の作業を保存してから別ブランチを作成する：
+- 実装と無関係なドキュメント修正
+- 大きな仕様変更（実装の見直しが必要）
+- 緊急性のある修正
+- 他のメンバーがすぐに必要とする情報
+
+例:
+```bash
+git stash
+git checkout main
+git checkout -b docs/fix-specification
+# ドキュメントを修正してコミット・プッシュ
+git checkout feature/original-branch
+git stash pop
+```
+
+### 判断に迷った場合
+- 小さな変更 → 同じブランチで変更
+- 大きな変更 → 別ブランチで変更
+- 実装の方向性に影響する変更 → 実装を一時停止して仕様を先に固める
+
 ## アクセシビリティ
 
 - 色覚モード機能の実装を考慮する（将来実装予定）
