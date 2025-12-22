@@ -28,7 +28,7 @@
 
 - **ランチャー**: Godot Engine
 - **管理ソフト**: C# (Windows Forms)
-- **データ形式**: JSON（初期実装）、SQLite（将来検討）
+- **データ形式**: SQLite
 
 ## ドキュメント
 
