@@ -5,7 +5,6 @@ namespace GCTonePrism.Manager
 {
     /// <summary>
     /// アプリケーションのファイルパスを管理するクラス
-    /// 開発時・本番時どちらも同じロジックでプロジェクトルートを自動検出
     /// </summary>
     public static class PathManager
     {
@@ -45,8 +44,6 @@ namespace GCTonePrism.Manager
         /// <summary>
         /// 指定したゲームのフォルダパス
         /// </summary>
-        /// <param name="gameId">ゲームID</param>
-        /// <returns>ゲームフォルダのフルパス</returns>
         public static string GetGameFolder(string gameId)
         {
             return Path.Combine(GamesFolder, gameId);
@@ -56,7 +53,6 @@ namespace GCTonePrism.Manager
         /// プロジェクトルートを自動検出
         /// 開発時・本番時どちらも同じロジックで検出
         /// </summary>
-        /// <returns>プロジェクトルートのフルパス</returns>
         private static string FindBaseDirectory()
         {
             string exePath = AppDomain.CurrentDomain.BaseDirectory;
@@ -86,9 +82,9 @@ namespace GCTonePrism.Manager
                 
                 // 優先順位3: Launcher + Manager（プロジェクト構造）
                 if (Directory.Exists(Path.Combine(currentPath, "Launcher")) &&
-                    Directory.Exists(Path.Combine(currentPath, "Manager")))
+                    Directory.Exists(Path.Combine(currentPath, "GCTonePrism.Manager")))
                 {
-                    Console.WriteLine($"[PathManager] Launcher + Manager を検出: {currentPath}");
+                    Console.WriteLine($"[PathManager] Launcher + GCTonePrism.Manager を検出: {currentPath}");
                     return currentPath;
                 }
                 

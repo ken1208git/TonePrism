@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
-using Microsoft.Data.Sqlite;
+using System.Data.SQLite;
 using GCTonePrism.Manager.Models;
 
 namespace GCTonePrism.Manager
@@ -28,7 +28,7 @@ namespace GCTonePrism.Manager
         /// </summary>
         public void InitializeDatabase()
         {
-            using (var connection = new SqliteConnection(connectionString))
+            using (var connection = new SQLiteConnection(connectionString))
             {
                 connection.Open();
 
@@ -54,7 +54,7 @@ namespace GCTonePrism.Manager
         /// <summary>
         /// gamesテーブルを作成
         /// </summary>
-        private void CreateGamesTable(SqliteConnection connection)
+        private void CreateGamesTable(SQLiteConnection connection)
         {
             var sql = @"
                 CREATE TABLE IF NOT EXISTS games (
@@ -77,7 +77,7 @@ namespace GCTonePrism.Manager
                     key_mapping TEXT
                 )";
 
-            using (var command = new SqliteCommand(sql, connection))
+            using (var command = new SQLiteCommand(sql, connection))
             {
                 command.ExecuteNonQuery();
             }
@@ -86,7 +86,7 @@ namespace GCTonePrism.Manager
         /// <summary>
         /// developersテーブルを作成
         /// </summary>
-        private void CreateDevelopersTable(SqliteConnection connection)
+        private void CreateDevelopersTable(SQLiteConnection connection)
         {
             var sql = @"
                 CREATE TABLE IF NOT EXISTS developers (
@@ -98,7 +98,7 @@ namespace GCTonePrism.Manager
                     FOREIGN KEY (game_id) REFERENCES games(game_id) ON DELETE CASCADE
                 )";
 
-            using (var command = new SqliteCommand(sql, connection))
+            using (var command = new SQLiteCommand(sql, connection))
             {
                 command.ExecuteNonQuery();
             }
@@ -107,7 +107,7 @@ namespace GCTonePrism.Manager
         /// <summary>
         /// play_recordsテーブルを作成
         /// </summary>
-        private void CreatePlayRecordsTable(SqliteConnection connection)
+        private void CreatePlayRecordsTable(SQLiteConnection connection)
         {
             var sql = @"
                 CREATE TABLE IF NOT EXISTS play_records (
@@ -119,7 +119,7 @@ namespace GCTonePrism.Manager
                     FOREIGN KEY (game_id) REFERENCES games(game_id) ON DELETE CASCADE
                 )";
 
-            using (var command = new SqliteCommand(sql, connection))
+            using (var command = new SQLiteCommand(sql, connection))
             {
                 command.ExecuteNonQuery();
             }
@@ -128,7 +128,7 @@ namespace GCTonePrism.Manager
         /// <summary>
         /// surveysテーブルを作成
         /// </summary>
-        private void CreateSurveysTable(SqliteConnection connection)
+        private void CreateSurveysTable(SQLiteConnection connection)
         {
             var sql = @"
                 CREATE TABLE IF NOT EXISTS surveys (
@@ -139,7 +139,7 @@ namespace GCTonePrism.Manager
                     FOREIGN KEY (game_id) REFERENCES games(game_id) ON DELETE CASCADE
                 )";
 
-            using (var command = new SqliteCommand(sql, connection))
+            using (var command = new SQLiteCommand(sql, connection))
             {
                 command.ExecuteNonQuery();
             }
@@ -148,7 +148,7 @@ namespace GCTonePrism.Manager
         /// <summary>
         /// settingsテーブルを作成
         /// </summary>
-        private void CreateSettingsTable(SqliteConnection connection)
+        private void CreateSettingsTable(SQLiteConnection connection)
         {
             var sql = @"
                 CREATE TABLE IF NOT EXISTS settings (
@@ -158,7 +158,7 @@ namespace GCTonePrism.Manager
                     filter_settings TEXT
                 )";
 
-            using (var command = new SqliteCommand(sql, connection))
+            using (var command = new SQLiteCommand(sql, connection))
             {
                 command.ExecuteNonQuery();
             }
@@ -168,7 +168,7 @@ namespace GCTonePrism.Manager
                 INSERT OR IGNORE INTO settings (id, color_theme, launcher_settings, filter_settings)
                 VALUES (1, '{}', '{}', '{}')";
 
-            using (var command = new SqliteCommand(insertSql, connection))
+            using (var command = new SQLiteCommand(insertSql, connection))
             {
                 command.ExecuteNonQuery();
             }
@@ -191,12 +191,12 @@ namespace GCTonePrism.Manager
 
             try
             {
-                using (var connection = new SqliteConnection(connectionString))
+                using (var connection = new SQLiteConnection(connectionString))
                 {
                     connection.Open();
 
                     var sql = "SELECT name FROM sqlite_master WHERE type='table' AND name='games'";
-                    using (var command = new SqliteCommand(sql, connection))
+                    using (var command = new SQLiteCommand(sql, connection))
                     {
                         var result = command.ExecuteScalar();
                         return result != null;
@@ -218,12 +218,12 @@ namespace GCTonePrism.Manager
         {
             var games = new List<GameInfo>();
 
-            using (var connection = new SqliteConnection(connectionString))
+            using (var connection = new SQLiteConnection(connectionString))
             {
                 connection.Open();
 
                 var sql = "SELECT * FROM games ORDER BY display_order, title";
-                using (var command = new SqliteCommand(sql, connection))
+                using (var command = new SQLiteCommand(sql, connection))
                 using (var reader = command.ExecuteReader())
                 {
                     while (reader.Read())
@@ -244,12 +244,12 @@ namespace GCTonePrism.Manager
         /// </summary>
         public GameInfo GetGameById(string gameId)
         {
-            using (var connection = new SqliteConnection(connectionString))
+            using (var connection = new SQLiteConnection(connectionString))
             {
                 connection.Open();
 
                 var sql = "SELECT * FROM games WHERE game_id = @gameId";
-                using (var command = new SqliteCommand(sql, connection))
+                using (var command = new SQLiteCommand(sql, connection))
                 {
                     command.Parameters.AddWithValue("@gameId", gameId);
 
@@ -274,7 +274,7 @@ namespace GCTonePrism.Manager
         /// </summary>
         public void AddGame(GameInfo game)
         {
-            using (var connection = new SqliteConnection(connectionString))
+            using (var connection = new SQLiteConnection(connectionString))
             {
                 connection.Open();
 
@@ -298,7 +298,7 @@ namespace GCTonePrism.Manager
                                 @displayOrder, @isVisible, @controls, @keyMapping
                             )";
 
-                        using (var command = new SqliteCommand(sql, connection, transaction))
+                        using (var command = new SQLiteCommand(sql, connection, transaction))
                         {
                             AddGameParameters(command, game);
                             command.ExecuteNonQuery();
@@ -329,7 +329,7 @@ namespace GCTonePrism.Manager
         /// </summary>
         public void UpdateGame(GameInfo game)
         {
-            using (var connection = new SqliteConnection(connectionString))
+            using (var connection = new SQLiteConnection(connectionString))
             {
                 connection.Open();
 
@@ -358,7 +358,7 @@ namespace GCTonePrism.Manager
                                 key_mapping = @keyMapping
                             WHERE game_id = @gameId";
 
-                        using (var command = new SqliteCommand(sql, connection, transaction))
+                        using (var command = new SQLiteCommand(sql, connection, transaction))
                         {
                             AddGameParameters(command, game);
                             command.ExecuteNonQuery();
@@ -392,13 +392,13 @@ namespace GCTonePrism.Manager
         /// </summary>
         public void DeleteGame(string gameId)
         {
-            using (var connection = new SqliteConnection(connectionString))
+            using (var connection = new SQLiteConnection(connectionString))
             {
                 connection.Open();
 
                 // FOREIGN KEY制約により、関連するdevelopers、play_records、surveysも自動削除される
                 var sql = "DELETE FROM games WHERE game_id = @gameId";
-                using (var command = new SqliteCommand(sql, connection))
+                using (var command = new SQLiteCommand(sql, connection))
                 {
                     command.Parameters.AddWithValue("@gameId", gameId);
                     command.ExecuteNonQuery();
@@ -411,12 +411,12 @@ namespace GCTonePrism.Manager
         /// <summary>
         /// ゲームIDで製作者情報を取得
         /// </summary>
-        private List<DeveloperInfo> GetDevelopersByGameId(SqliteConnection connection, string gameId)
+        private List<DeveloperInfo> GetDevelopersByGameId(SQLiteConnection connection, string gameId)
         {
             var developers = new List<DeveloperInfo>();
 
             var sql = "SELECT * FROM developers WHERE game_id = @gameId";
-            using (var command = new SqliteCommand(sql, connection))
+            using (var command = new SQLiteCommand(sql, connection))
             {
                 command.Parameters.AddWithValue("@gameId", gameId);
 
@@ -442,13 +442,13 @@ namespace GCTonePrism.Manager
         /// <summary>
         /// 製作者情報を追加
         /// </summary>
-        private void AddDeveloper(SqliteConnection connection, SqliteTransaction transaction, string gameId, DeveloperInfo developer)
+        private void AddDeveloper(SQLiteConnection connection, SQLiteTransaction transaction, string gameId, DeveloperInfo developer)
         {
             var sql = @"
                 INSERT INTO developers (game_id, last_name, first_name, grade)
                 VALUES (@gameId, @lastName, @firstName, @grade)";
 
-            using (var command = new SqliteCommand(sql, connection, transaction))
+            using (var command = new SQLiteCommand(sql, connection, transaction))
             {
                 command.Parameters.AddWithValue("@gameId", gameId);
                 command.Parameters.AddWithValue("@lastName", developer.LastName);
@@ -461,10 +461,10 @@ namespace GCTonePrism.Manager
         /// <summary>
         /// ゲームIDで製作者情報を削除
         /// </summary>
-        private void DeleteDevelopersByGameId(SqliteConnection connection, SqliteTransaction transaction, string gameId)
+        private void DeleteDevelopersByGameId(SQLiteConnection connection, SQLiteTransaction transaction, string gameId)
         {
             var sql = "DELETE FROM developers WHERE game_id = @gameId";
-            using (var command = new SqliteCommand(sql, connection, transaction))
+            using (var command = new SQLiteCommand(sql, connection, transaction))
             {
                 command.Parameters.AddWithValue("@gameId", gameId);
                 command.ExecuteNonQuery();
@@ -476,7 +476,7 @@ namespace GCTonePrism.Manager
         /// <summary>
         /// SqlDataReaderからGameInfoオブジェクトを読み取る
         /// </summary>
-        private GameInfo ReadGameFromReader(SqliteDataReader reader)
+        private GameInfo ReadGameFromReader(SQLiteDataReader reader)
         {
             var game = new GameInfo
             {
@@ -513,9 +513,9 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
-        /// SqliteCommandにゲーム情報のパラメータを追加
+        /// SQLiteCommandにゲーム情報のパラメータを追加
         /// </summary>
-        private void AddGameParameters(SqliteCommand command, GameInfo game)
+        private void AddGameParameters(SQLiteCommand command, GameInfo game)
         {
             command.Parameters.AddWithValue("@gameId", game.GameId);
             command.Parameters.AddWithValue("@title", game.Title);
