@@ -59,19 +59,39 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
-        /// データベース初期化ボタンクリック
+        /// データベースリセットメニュークリック
         /// </summary>
-        private void btnInitDatabase_Click(object sender, EventArgs e)
+        private void menuItemResetDatabase_Click(object sender, EventArgs e)
         {
-            var result = MessageBox.Show(
-                "データベースを初期化します。\n既存のデータは保持されます。\nよろしいですか？",
-                "データベース初期化",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Warning);
-
-            if (result == DialogResult.Yes)
+            // カスタム確認フォームを表示（ランダム文字列入力、ボタンが逃げる）
+            using (var confirmForm = new ResetDatabaseConfirmForm())
             {
-                InitializeDatabase();
+                if (confirmForm.ShowDialog() == DialogResult.Yes)
+                {
+                    try
+                    {
+                        // データベースをリセット
+                        dbManager.ResetDatabase();
+
+                        MessageBox.Show(
+                            "データベースのリセットが完了しました。",
+                            "成功",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information);
+
+                        // 一覧を更新
+                        LoadGames();
+                        UpdateStatusBar();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(
+                            $"データベースのリセットに失敗しました。\n\n{ex.Message}",
+                            "エラー",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
+                    }
+                }
             }
         }
 
@@ -124,6 +144,21 @@ namespace GCTonePrism.Manager
                 ConfigureDataGridView();
 
                 UpdateStatusBar();
+                
+                // デバッグ: コンソールに詳細情報を出力
+                Console.WriteLine("\n=== データベース確認 ===");
+                foreach (var game in games)
+                {
+                    Console.WriteLine($"ゲームID: {game.GameId}");
+                    Console.WriteLine($"タイトル: {game.Title}");
+                    Console.WriteLine($"実行ファイル: {game.ExecutablePath}");
+                    Console.WriteLine($"サムネイル: {(string.IsNullOrEmpty(game.ThumbnailPath) ? "(未設定)" : game.ThumbnailPath)}");
+                    Console.WriteLine($"背景: {(string.IsNullOrEmpty(game.BackgroundPath) ? "(未設定)" : game.BackgroundPath)}");
+                    Console.WriteLine($"表示: {game.IsVisible}");
+                    Console.WriteLine($"表示順: {game.DisplayOrder}");
+                    Console.WriteLine("---");
+                }
+                Console.WriteLine($"合計: {games.Count}件\n");
             }
             catch (Exception ex)
             {
@@ -192,11 +227,19 @@ namespace GCTonePrism.Manager
         /// </summary>
         private void btnAddGame_Click(object sender, EventArgs e)
         {
-            MessageBox.Show(
-                "ゲーム追加フォームは次のステップで実装します。",
-                "情報",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+            using (var form = new AddGameForm(dbManager))
+            {
+                if (form.ShowDialog() == DialogResult.OK)
+                {
+                    // ゲームが追加された場合、一覧を更新
+                    LoadGames();
+                    MessageBox.Show(
+                        $"ゲーム「{form.AddedGame.Title}」を追加しました。",
+                        "成功",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+            }
         }
 
         /// <summary>

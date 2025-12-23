@@ -52,6 +52,79 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
+        /// データベースをリセット（すべてのテーブルを削除して再作成）
+        /// 警告: すべてのデータが削除されます（データベース情報とgamesフォルダ内のファイル）
+        /// </summary>
+        public void ResetDatabase()
+        {
+            using (var connection = new SQLiteConnection(connectionString))
+            {
+                connection.Open();
+
+                // 外部キー制約を無効化
+                using (var command = new SQLiteCommand("PRAGMA foreign_keys = OFF", connection))
+                {
+                    command.ExecuteNonQuery();
+                }
+
+                // すべてのテーブルを削除
+                var dropTables = new[]
+                {
+                    "DROP TABLE IF EXISTS surveys",
+                    "DROP TABLE IF EXISTS play_records",
+                    "DROP TABLE IF EXISTS developers",
+                    "DROP TABLE IF EXISTS games",
+                    "DROP TABLE IF EXISTS settings"
+                };
+
+                foreach (var sql in dropTables)
+                {
+                    using (var command = new SQLiteCommand(sql, connection))
+                    {
+                        command.ExecuteNonQuery();
+                    }
+                }
+
+                // 外部キー制約を再有効化
+                using (var command = new SQLiteCommand("PRAGMA foreign_keys = ON", connection))
+                {
+                    command.ExecuteNonQuery();
+                }
+
+                // gamesフォルダの中身を削除（フォルダ自体は残す）
+                string gamesFolder = PathManager.GamesFolder;
+                if (System.IO.Directory.Exists(gamesFolder))
+                {
+                    try
+                    {
+                        // フォルダ内のすべてのサブフォルダとファイルを削除
+                        var subDirectories = System.IO.Directory.GetDirectories(gamesFolder);
+                        foreach (var subDir in subDirectories)
+                        {
+                            System.IO.Directory.Delete(subDir, true);
+                        }
+                        var files = System.IO.Directory.GetFiles(gamesFolder);
+                        foreach (var file in files)
+                        {
+                            System.IO.File.Delete(file);
+                        }
+                        Console.WriteLine($"[DatabaseManager] gamesフォルダの中身を削除しました: {gamesFolder}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[DatabaseManager] gamesフォルダの中身の削除に失敗しました: {ex.Message}");
+                        // エラーが発生しても続行（フォルダが使用中の場合など）
+                    }
+                }
+
+                // テーブルを再作成
+                InitializeDatabase();
+
+                Console.WriteLine("[DatabaseManager] データベースリセット完了");
+            }
+        }
+
+        /// <summary>
         /// gamesテーブルを作成
         /// </summary>
         private void CreateGamesTable(SQLiteConnection connection)
@@ -388,7 +461,7 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
-        /// ゲーム情報を削除
+        /// ゲーム情報を削除（データベースとgamesフォルダの両方を削除）
         /// </summary>
         public void DeleteGame(string gameId)
         {
@@ -402,6 +475,23 @@ namespace GCTonePrism.Manager
                 {
                     command.Parameters.AddWithValue("@gameId", gameId);
                     command.ExecuteNonQuery();
+                }
+            }
+
+            // gamesフォルダ内の対応するゲームフォルダを削除
+            string gameFolder = PathManager.GetGameFolder(gameId);
+            if (System.IO.Directory.Exists(gameFolder))
+            {
+                try
+                {
+                    System.IO.Directory.Delete(gameFolder, true);
+                    Console.WriteLine($"[DatabaseManager] ゲームフォルダを削除しました: {gameFolder}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[DatabaseManager] ゲームフォルダの削除に失敗しました: {ex.Message}");
+                    // エラーが発生しても続行（フォルダが使用中の場合など）
+                    // ただし、データベースからは既に削除されているため、警告を出すべきかもしれない
                 }
             }
         }
