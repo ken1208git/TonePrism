@@ -14,6 +14,9 @@ namespace GCTonePrism.Manager
         [STAThread]
         static void Main()
         {
+            // パスの確認（デバッグ用）
+            PathManager.VerifyPaths();
+            
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new Form1());
