@@ -73,12 +73,14 @@ namespace GCTonePrism.Manager
                 // 優先順位1: prism.db（データベースファイル）
                 if (File.Exists(Path.Combine(currentPath, "prism.db")))
                 {
+                    Console.WriteLine($"[PathManager] prism.db を検出: {currentPath}");
                     return currentPath;
                 }
                 
                 // 優先順位2: .git（Gitリポジトリのルート）
                 if (Directory.Exists(Path.Combine(currentPath, ".git")))
                 {
+                    Console.WriteLine($"[PathManager] .git フォルダを検出: {currentPath}");
                     return currentPath;
                 }
                 
@@ -86,6 +88,7 @@ namespace GCTonePrism.Manager
                 if (Directory.Exists(Path.Combine(currentPath, "Launcher")) &&
                     Directory.Exists(Path.Combine(currentPath, "Manager")))
                 {
+                    Console.WriteLine($"[PathManager] Launcher + Manager を検出: {currentPath}");
                     return currentPath;
                 }
                 
@@ -94,6 +97,7 @@ namespace GCTonePrism.Manager
             }
             
             // どの目印も見つからない場合は実行ファイルと同じ場所を使う
+            Console.WriteLine($"[PathManager] 警告: プロジェクトルートが見つかりません。実行パスを使用: {exePath}");
             return exePath;
         }
         
