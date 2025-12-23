@@ -1114,7 +1114,6 @@ prism.db (SQLiteデータベースファイル)
   │    ├─ difficulty
   │    ├─ play_time
        ├─ controller_support
-       ├─ lan_multiplayer_support
        ├─ thumbnail_path
        ├─ background_path
        ├─ executable_path
@@ -1172,7 +1171,6 @@ SQLiteデータベースのテーブル設計：
   | difficulty | INTEGER | CHECK(1-3) | 難易度（1-3の3段階） |
   | play_time | INTEGER | CHECK(1-3) | プレイ時間の分類（1=～5分、2=5分～15分、3=15分以上） |
   | controller_support | INTEGER | DEFAULT 0 | コントローラーサポート（0=false, 1=true） |
-  | lan_multiplayer_support | INTEGER | DEFAULT 0 | LANマルチプレイサポート（0=false, 1=true） |
   | thumbnail_path | TEXT | | サムネイル画像のパス |
   | background_path | TEXT | | 背景画像のパス |
   | executable_path | TEXT | NOT NULL | 実行ファイルのパス |
@@ -1258,7 +1256,6 @@ erDiagram
         INTEGER difficulty
         INTEGER play_time
         INTEGER controller_support
-        INTEGER lan_multiplayer_support
         TEXT thumbnail_path
         TEXT background_path
         TEXT executable_path
@@ -1688,6 +1685,7 @@ erDiagram
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 |------|-----------|---------|--------|
+| 2025-12-23 | 1.2.3 | LANマルチプレイサポート機能を削除（lan_multiplayer_supportフィールドを削除） | Kenshiro Kuroga |
 | 2025-12-23 | 1.2.2 | Godotのバージョンを4.5に明記、godot-sqliteプラグインの情報を追加、GDScriptをメイン言語として明記 | Kenshiro Kuroga |
 | 2025-12-23 | 1.2.1 | 自動アップデート通知機能（機能21）を追加、マイルストーン12に自動アップデート通知機能を追加 | Kenshiro Kuroga |
 | 2025-12-22 | 1.2.0 | バージョン管理方針の変更：マイルストーン番号を単純な数字（マイルストーン1～12）に変更し、ランチャー本体とマネージャーのバージョンを独立して管理する方式に変更。CHANGELOG.mdをLauncherとManagerで分割。各マイルストーンに「リリース予定バージョン」を明記。プロジェクト全体のバージョン管理戦略を.cursorrulesに追加。 | Kenshiro Kuroga |
