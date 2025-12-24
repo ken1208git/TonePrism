@@ -60,11 +60,17 @@ namespace GCTonePrism.Manager
             this.lblExecutablePath = new System.Windows.Forms.Label();
             this.txtExecutablePath = new System.Windows.Forms.TextBox();
             this.btnSelectExecutable = new System.Windows.Forms.Button();
+            this.lblDevelopers = new System.Windows.Forms.Label();
+            this.dgvDevelopers = new System.Windows.Forms.DataGridView();
+            this.btnAddDeveloper = new System.Windows.Forms.Button();
+            this.btnEditDeveloper = new System.Windows.Forms.Button();
+            this.btnDeleteDeveloper = new System.Windows.Forms.Button();
             this.btnOK = new System.Windows.Forms.Button();
             this.btnCancel = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.numReleaseYear)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numMinPlayers)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numMaxPlayers)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.dgvDevelopers)).BeginInit();
             this.SuspendLayout();
             // 
             // lblGameFolder
@@ -382,10 +388,58 @@ namespace GCTonePrism.Manager
             this.btnSelectExecutable.UseVisualStyleBackColor = true;
             this.btnSelectExecutable.Click += new System.EventHandler(this.btnSelectExecutable_Click);
             // 
+            // lblDevelopers
+            // 
+            this.lblDevelopers.AutoSize = true;
+            this.lblDevelopers.Location = new System.Drawing.Point(12, 395);
+            this.lblDevelopers.Name = "lblDevelopers";
+            this.lblDevelopers.Size = new System.Drawing.Size(65, 15);
+            this.lblDevelopers.TabIndex = 34;
+            this.lblDevelopers.Text = "製作者情報";
+            // 
+            // dgvDevelopers
+            // 
+            this.dgvDevelopers.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            this.dgvDevelopers.Location = new System.Drawing.Point(120, 392);
+            this.dgvDevelopers.Name = "dgvDevelopers";
+            this.dgvDevelopers.RowHeadersWidth = 51;
+            this.dgvDevelopers.Size = new System.Drawing.Size(427, 120);
+            this.dgvDevelopers.TabIndex = 35;
+            // 
+            // btnAddDeveloper
+            // 
+            this.btnAddDeveloper.Location = new System.Drawing.Point(553, 392);
+            this.btnAddDeveloper.Name = "btnAddDeveloper";
+            this.btnAddDeveloper.Size = new System.Drawing.Size(75, 23);
+            this.btnAddDeveloper.TabIndex = 36;
+            this.btnAddDeveloper.Text = "追加";
+            this.btnAddDeveloper.UseVisualStyleBackColor = true;
+            this.btnAddDeveloper.Click += new System.EventHandler(this.btnAddDeveloper_Click);
+            // 
+            // btnEditDeveloper
+            // 
+            this.btnEditDeveloper.Location = new System.Drawing.Point(553, 421);
+            this.btnEditDeveloper.Name = "btnEditDeveloper";
+            this.btnEditDeveloper.Size = new System.Drawing.Size(75, 23);
+            this.btnEditDeveloper.TabIndex = 37;
+            this.btnEditDeveloper.Text = "編集";
+            this.btnEditDeveloper.UseVisualStyleBackColor = true;
+            this.btnEditDeveloper.Click += new System.EventHandler(this.btnEditDeveloper_Click);
+            // 
+            // btnDeleteDeveloper
+            // 
+            this.btnDeleteDeveloper.Location = new System.Drawing.Point(553, 450);
+            this.btnDeleteDeveloper.Name = "btnDeleteDeveloper";
+            this.btnDeleteDeveloper.Size = new System.Drawing.Size(75, 23);
+            this.btnDeleteDeveloper.TabIndex = 38;
+            this.btnDeleteDeveloper.Text = "削除";
+            this.btnDeleteDeveloper.UseVisualStyleBackColor = true;
+            this.btnDeleteDeveloper.Click += new System.EventHandler(this.btnDeleteDeveloper_Click);
+            // 
             // btnOK
             // 
             this.btnOK.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnOK.Location = new System.Drawing.Point(420, 394);
+            this.btnOK.Location = new System.Drawing.Point(420, 524);
             this.btnOK.Name = "btnOK";
             this.btnOK.Size = new System.Drawing.Size(95, 30);
             this.btnOK.TabIndex = 32;
@@ -397,7 +451,7 @@ namespace GCTonePrism.Manager
             // 
             this.btnCancel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(521, 394);
+            this.btnCancel.Location = new System.Drawing.Point(521, 524);
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(95, 30);
             this.btnCancel.TabIndex = 33;
@@ -411,7 +465,12 @@ namespace GCTonePrism.Manager
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(632, 440);
+            this.ClientSize = new System.Drawing.Size(632, 570);
+            this.Controls.Add(this.btnDeleteDeveloper);
+            this.Controls.Add(this.btnEditDeveloper);
+            this.Controls.Add(this.btnAddDeveloper);
+            this.Controls.Add(this.dgvDevelopers);
+            this.Controls.Add(this.lblDevelopers);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnOK);
             this.Controls.Add(this.btnSelectExecutable);
@@ -456,6 +515,7 @@ namespace GCTonePrism.Manager
             ((System.ComponentModel.ISupportInitialize)(this.numReleaseYear)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numMinPlayers)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numMaxPlayers)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.dgvDevelopers)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
 
@@ -495,6 +555,11 @@ namespace GCTonePrism.Manager
         private System.Windows.Forms.Label lblExecutablePath;
         private System.Windows.Forms.TextBox txtExecutablePath;
         private System.Windows.Forms.Button btnSelectExecutable;
+        private System.Windows.Forms.Label lblDevelopers;
+        private System.Windows.Forms.DataGridView dgvDevelopers;
+        private System.Windows.Forms.Button btnAddDeveloper;
+        private System.Windows.Forms.Button btnEditDeveloper;
+        private System.Windows.Forms.Button btnDeleteDeveloper;
         private System.Windows.Forms.Button btnOK;
         private System.Windows.Forms.Button btnCancel;
     }

@@ -29,7 +29,7 @@ namespace GCTonePrism.Manager.Models
         public string FirstName { get; set; }
 
         /// <summary>
-        /// 学年（0を指定すると「教員」と表記）
+        /// 期生（0を指定すると「教員」と表記）
         /// </summary>
         public string Grade { get; set; }
 
@@ -42,7 +42,7 @@ namespace GCTonePrism.Manager.Models
         }
 
         /// <summary>
-        /// 学年表示を取得（0の場合は「教員」と表示）
+        /// 期生表示を取得（0の場合は「教員」と表示）
         /// </summary>
         public string GradeDisplay
         {
@@ -52,7 +52,11 @@ namespace GCTonePrism.Manager.Models
                 {
                     return "教員";
                 }
-                return Grade + "年";
+                if (string.IsNullOrEmpty(Grade))
+                {
+                    return "";
+                }
+                return Grade + "期生";
             }
         }
 

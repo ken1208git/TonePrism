@@ -17,6 +17,7 @@ namespace GCTonePrism.Manager
         private DatabaseManager dbManager;
         private string sourceGameFolder;
         private string destinationGameFolder;
+        private List<DeveloperInfo> developers;
 
         /// <summary>
         /// 追加されたゲーム情報（OKボタンがクリックされた場合のみ設定される）
@@ -30,6 +31,7 @@ namespace GCTonePrism.Manager
             AddedGame = null;
             sourceGameFolder = null;
             destinationGameFolder = null;
+            developers = new List<DeveloperInfo>();
         }
 
         /// <summary>
@@ -76,6 +78,58 @@ namespace GCTonePrism.Manager
 
             // リリース年の初期値を今年に設定
             numReleaseYear.Value = DateTime.Now.Year;
+
+            // 製作者情報のDataGridViewを初期化
+            InitializeDevelopersGrid();
+        }
+
+        /// <summary>
+        /// 製作者情報のDataGridViewを初期化
+        /// </summary>
+        private void InitializeDevelopersGrid()
+        {
+            dgvDevelopers.AutoGenerateColumns = false;
+            dgvDevelopers.AllowUserToAddRows = false;
+            dgvDevelopers.AllowUserToDeleteRows = false;
+            dgvDevelopers.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            dgvDevelopers.MultiSelect = false;
+            dgvDevelopers.ReadOnly = true;
+
+            // カラムを追加
+            dgvDevelopers.Columns.Clear();
+            dgvDevelopers.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "LastName",
+                HeaderText = "姓",
+                DataPropertyName = "LastName",
+                Width = 100
+            });
+            dgvDevelopers.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "FirstName",
+                HeaderText = "名",
+                DataPropertyName = "FirstName",
+                Width = 100
+            });
+            dgvDevelopers.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "GradeDisplay",
+                HeaderText = "期生",
+                DataPropertyName = "GradeDisplay",
+                Width = 60
+            });
+
+            // データソースを設定
+            dgvDevelopers.DataSource = developers;
+        }
+
+        /// <summary>
+        /// 製作者情報を更新
+        /// </summary>
+        private void RefreshDevelopersGrid()
+        {
+            dgvDevelopers.DataSource = null;
+            dgvDevelopers.DataSource = developers;
         }
 
         /// <summary>
@@ -386,6 +440,9 @@ namespace GCTonePrism.Manager
                     game.Genre = txtGenre.Text.Split(',').Select(g => g.Trim()).Where(g => !string.IsNullOrEmpty(g)).ToList();
                 }
 
+                // 製作者情報を設定
+                game.Developers = developers;
+
                 // データベースに追加
                 dbManager.AddGame(game);
 
@@ -544,6 +601,76 @@ namespace GCTonePrism.Manager
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// 製作者追加ボタンクリック
+        /// </summary>
+        private void btnAddDeveloper_Click(object sender, EventArgs e)
+        {
+            using (var form = new DeveloperForm())
+            {
+                if (form.ShowDialog() == DialogResult.OK && form.Developer != null)
+                {
+                    developers.Add(form.Developer);
+                    RefreshDevelopersGrid();
+                }
+            }
+        }
+
+        /// <summary>
+        /// 製作者編集ボタンクリック
+        /// </summary>
+        private void btnEditDeveloper_Click(object sender, EventArgs e)
+        {
+            if (dgvDevelopers.SelectedRows.Count == 0)
+            {
+                MessageBox.Show("編集する製作者を選択してください。", "情報", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var selectedDeveloper = dgvDevelopers.SelectedRows[0].DataBoundItem as DeveloperInfo;
+            if (selectedDeveloper == null) return;
+
+            using (var form = new DeveloperForm(selectedDeveloper))
+            {
+                if (form.ShowDialog() == DialogResult.OK && form.Developer != null)
+                {
+                    int index = developers.IndexOf(selectedDeveloper);
+                    if (index >= 0)
+                    {
+                        developers[index] = form.Developer;
+                        RefreshDevelopersGrid();
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// 製作者削除ボタンクリック
+        /// </summary>
+        private void btnDeleteDeveloper_Click(object sender, EventArgs e)
+        {
+            if (dgvDevelopers.SelectedRows.Count == 0)
+            {
+                MessageBox.Show("削除する製作者を選択してください。", "情報", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var selectedDeveloper = dgvDevelopers.SelectedRows[0].DataBoundItem as DeveloperInfo;
+            if (selectedDeveloper == null) return;
+
+            var result = MessageBox.Show(
+                $"製作者「{selectedDeveloper.FullName}」を削除しますか？",
+                "削除確認",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (result == DialogResult.Yes)
+            {
+                developers.Remove(selectedDeveloper);
+                RefreshDevelopersGrid();
+            }
         }
     }
 }
