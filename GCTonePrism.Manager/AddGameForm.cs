@@ -524,6 +524,42 @@ namespace GCTonePrism.Manager
                 return false;
             }
 
+            // サムネイル画像パスのチェック（指定されている場合）
+            if (!string.IsNullOrWhiteSpace(txtThumbnailPath.Text))
+            {
+                if (!File.Exists(txtThumbnailPath.Text))
+                {
+                    MessageBox.Show("選択されたサムネイル画像が見つかりません。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    btnSelectThumbnail.Focus();
+                    return false;
+                }
+                if (!string.IsNullOrEmpty(sourceGameFolder) && 
+                    !txtThumbnailPath.Text.StartsWith(sourceGameFolder, StringComparison.OrdinalIgnoreCase))
+                {
+                    MessageBox.Show("サムネイル画像は選択されたゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    btnSelectThumbnail.Focus();
+                    return false;
+                }
+            }
+
+            // 背景画像パスのチェック（指定されている場合）
+            if (!string.IsNullOrWhiteSpace(txtBackgroundPath.Text))
+            {
+                if (!File.Exists(txtBackgroundPath.Text))
+                {
+                    MessageBox.Show("選択された背景画像が見つかりません。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    btnSelectBackground.Focus();
+                    return false;
+                }
+                if (!string.IsNullOrEmpty(sourceGameFolder) && 
+                    !txtBackgroundPath.Text.StartsWith(sourceGameFolder, StringComparison.OrdinalIgnoreCase))
+                {
+                    MessageBox.Show("背景画像は選択されたゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    btnSelectBackground.Focus();
+                    return false;
+                }
+            }
+
             // ゲームIDの重複チェック
             var existingGame = dbManager.GetGameById(txtGameId.Text.Trim());
             if (existingGame != null)
