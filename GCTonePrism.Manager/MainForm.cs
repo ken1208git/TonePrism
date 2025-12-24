@@ -336,11 +336,34 @@ namespace GCTonePrism.Manager
                 return;
             }
 
-            MessageBox.Show(
-                "ゲーム編集フォームは次のステップで実装します。",
-                "情報",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+            var selectedGame = dgvGames.SelectedRows[0].DataBoundItem as GameInfo;
+            if (selectedGame == null) return;
+
+            // データベースから最新のゲーム情報を取得
+            var game = dbManager.GetGameById(selectedGame.GameId);
+            if (game == null)
+            {
+                MessageBox.Show(
+                    "選択されたゲームが見つかりません。",
+                    "エラー",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return;
+            }
+
+            using (var form = new EditGameForm(dbManager, game))
+            {
+                if (form.ShowDialog() == DialogResult.OK)
+                {
+                    // ゲームが更新された場合、一覧を更新
+                    LoadGames();
+                    MessageBox.Show(
+                        $"ゲーム「{form.EditedGame.Title}」を更新しました。",
+                        "成功",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+            }
         }
 
         /// <summary>
