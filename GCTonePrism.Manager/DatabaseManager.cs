@@ -285,6 +285,30 @@ namespace GCTonePrism.Manager
         // ==================== ゲーム情報のCRUD操作 ====================
 
         /// <summary>
+        /// 表示順序の最小値を取得（新規ゲームを一番上に配置するため）
+        /// </summary>
+        public int GetMinDisplayOrder()
+        {
+            using (var connection = new SQLiteConnection(connectionString))
+            {
+                connection.Open();
+
+                var sql = "SELECT MIN(display_order) FROM games WHERE display_order IS NOT NULL";
+                using (var command = new SQLiteCommand(sql, connection))
+                {
+                    var result = command.ExecuteScalar();
+                    if (result != null && result != DBNull.Value)
+                    {
+                        return Convert.ToInt32(result);
+                    }
+                }
+            }
+
+            // ゲームが存在しない、またはすべてのdisplay_orderがNULLの場合は0を返す
+            return 0;
+        }
+
+        /// <summary>
         /// すべてのゲーム情報を取得
         /// </summary>
         public List<GameInfo> GetAllGames()

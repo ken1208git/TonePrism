@@ -1,4 +1,5 @@
 using System;
+using System.Drawing;
 using System.Windows.Forms;
 using GCTonePrism.Manager.Models;
 
@@ -181,16 +182,14 @@ namespace GCTonePrism.Manager
             dgvGames.Columns["GameId"].HeaderText = "ゲームID";
             dgvGames.Columns["Title"].HeaderText = "タイトル";
             dgvGames.Columns["ReleaseYear"].HeaderText = "リリース年";
-            dgvGames.Columns["Difficulty"].HeaderText = "難易度";
-            dgvGames.Columns["IsVisible"].HeaderText = "表示";
-            dgvGames.Columns["DisplayOrder"].HeaderText = "表示順";
+            dgvGames.Columns["IsVisible"].HeaderText = "ランチャー表示";
 
             // 非表示にするカラム
             string[] hiddenColumns = { 
                 "Description", "Genre", "MinPlayers", "MaxPlayers", 
-                "PlayTime", "ControllerSupport", "ThumbnailPath", 
+                "Difficulty", "PlayTime", "ControllerSupport", "ThumbnailPath", 
                 "BackgroundPath", "ExecutablePath", "Controls", 
-                "KeyMapping", "Developers" 
+                "KeyMapping", "Developers", "DisplayOrder" 
             };
 
             foreach (var columnName in hiddenColumns)
@@ -203,12 +202,10 @@ namespace GCTonePrism.Manager
 
             // カラム幅の自動調整
             dgvGames.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            dgvGames.Columns["GameId"].FillWeight = 80;
-            dgvGames.Columns["Title"].FillWeight = 150;
-            dgvGames.Columns["ReleaseYear"].FillWeight = 60;
-            dgvGames.Columns["Difficulty"].FillWeight = 50;
-            dgvGames.Columns["IsVisible"].FillWeight = 40;
-            dgvGames.Columns["DisplayOrder"].FillWeight = 60;
+            dgvGames.Columns["GameId"].FillWeight = 100;
+            dgvGames.Columns["Title"].FillWeight = 250;
+            dgvGames.Columns["ReleaseYear"].FillWeight = 80;
+            dgvGames.Columns["IsVisible"].FillWeight = 120;
         }
 
         /// <summary>
@@ -220,6 +217,88 @@ namespace GCTonePrism.Manager
             int gameCount = dgvGames.Rows.Count;
             
             lblStatus.Text = $"データベース: {dbStatus} | ゲーム数: {gameCount}件";
+        }
+
+        private int dragRowIndex = -1;
+
+        /// <summary>
+        /// ドラッグ開始（マウスダウン時）
+        /// </summary>
+        private void dgvGames_MouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                DataGridView.HitTestInfo hitTest = dgvGames.HitTest(e.X, e.Y);
+                if (hitTest.Type == DataGridViewHitTestType.Cell || hitTest.Type == DataGridViewHitTestType.RowHeader)
+                {
+                    dragRowIndex = hitTest.RowIndex;
+                    if (dragRowIndex >= 0 && dragRowIndex < dgvGames.Rows.Count)
+                    {
+                        dgvGames.DoDragDrop(dragRowIndex, DragDropEffects.Move);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// ドラッグオーバー時（ドロップ可能かチェック）
+        /// </summary>
+        private void dgvGames_DragOver(object sender, DragEventArgs e)
+        {
+            e.Effect = DragDropEffects.Move;
+        }
+
+        /// <summary>
+        /// ドロップ時（行を移動してdisplay_orderを更新）
+        /// </summary>
+        private void dgvGames_DragDrop(object sender, DragEventArgs e)
+        {
+            try
+            {
+                Point clientPoint = dgvGames.PointToClient(new Point(e.X, e.Y));
+                DataGridView.HitTestInfo hitTest = dgvGames.HitTest(clientPoint.X, clientPoint.Y);
+
+                if (hitTest.RowIndex >= 0 && hitTest.RowIndex < dgvGames.Rows.Count)
+                {
+                    int dropRowIndex = hitTest.RowIndex;
+
+                    if (dragRowIndex >= 0 && dragRowIndex != dropRowIndex && dragRowIndex < dgvGames.Rows.Count)
+                    {
+                        // データソースからGameInfoを取得
+                        var sourceGame = dgvGames.Rows[dragRowIndex].DataBoundItem as GameInfo;
+                        var games = dbManager.GetAllGames();
+
+                        if (sourceGame != null)
+                        {
+                            // 行を移動
+                            games.RemoveAt(dragRowIndex);
+                            games.Insert(dropRowIndex, sourceGame);
+
+                            // display_orderを更新（0から始まる連番）
+                            for (int i = 0; i < games.Count; i++)
+                            {
+                                games[i].DisplayOrder = i;
+                                dbManager.UpdateGame(games[i]);
+                            }
+
+                            // 一覧を再読み込み
+                            LoadGames();
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"表示順序の更新に失敗しました。\n\n{ex.Message}",
+                    "エラー",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+            finally
+            {
+                dragRowIndex = -1;
+            }
         }
 
         /// <summary>

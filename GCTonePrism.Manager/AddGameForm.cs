@@ -50,9 +50,7 @@ namespace GCTonePrism.Manager
             cmbPlayTime.SelectedIndex = 1; // デフォルト: 5分～15分
 
             // デフォルト値の設定
-            chkIsVisible.Checked = true;
             chkControllerSupport.Checked = false;
-            numDisplayOrder.Value = 0;
             numMinPlayers.Value = 1;
             numMaxPlayers.Value = 1;
 
@@ -72,12 +70,12 @@ namespace GCTonePrism.Manager
                 }
             };
 
-            // ゲームIDの入力検証（英数字と一部の記号のみ許可）
-            txtGameId.TextChanged += txtGameId_TextChanged;
-            
-            // 初期状態では警告を非表示、OKボタンを無効化（ゲームIDが空のため）
+            // 初期状態では警告を非表示、OKボタンを有効化
             lblGameIdWarning.Visible = false;
-            btnOK.Enabled = false;
+            btnOK.Enabled = true;
+
+            // リリース年の初期値を今年に設定
+            numReleaseYear.Value = DateTime.Now.Year;
         }
 
         /// <summary>
@@ -136,39 +134,6 @@ namespace GCTonePrism.Manager
             }
         }
 
-        /// <summary>
-        /// ゲームIDの入力検証
-        /// </summary>
-        private void txtGameId_TextChanged(object sender, EventArgs e)
-        {
-            string input = txtGameId.Text;
-            
-            // 許可する文字: 英数字（a-z, A-Z, 0-9）、アンダースコア（_）、ハイフン（-）
-            // フォルダ名として使えない文字（/ \ : * ? " < > | 空白など）は禁止
-            var validPattern = new Regex(@"^[a-zA-Z0-9_-]*$");
-            
-            if (string.IsNullOrEmpty(input))
-            {
-                // 空の場合は警告を非表示、OKボタンを無効化
-                lblGameIdWarning.Visible = false;
-                btnOK.Enabled = false;
-                return;
-            }
-            
-            if (!validPattern.IsMatch(input))
-            {
-                // 無効な文字が含まれている場合、警告を表示してOKボタンを無効化
-                lblGameIdWarning.Visible = true;
-                lblGameIdWarning.Text = "ゲームIDは英数字、アンダースコア（_）、ハイフン（-）のみ使用できます。";
-                btnOK.Enabled = false;
-            }
-            else
-            {
-                // 有効な文字のみの場合、警告を非表示してOKボタンを有効化
-                lblGameIdWarning.Visible = false;
-                btnOK.Enabled = true;
-            }
-        }
 
         /// <summary>
         /// ゲームフォルダ選択ボタンクリック
@@ -408,8 +373,8 @@ namespace GCTonePrism.Manager
                     ThumbnailPath = thumbnailAbsolutePath,
                     BackgroundPath = backgroundAbsolutePath,
                     ExecutablePath = executableAbsolutePath,
-                    DisplayOrder = numDisplayOrder.Value >= 0 ? (int?)numDisplayOrder.Value : null,
-                    IsVisible = chkIsVisible.Checked,
+                    DisplayOrder = dbManager.GetMinDisplayOrder() - 1, // 既存の最小値より1小さい値（一番上に配置）
+                    IsVisible = true, // 新規追加のゲームは常にランチャーに表示
                     Controls = null, // 後で実装
                     KeyMapping = null // 後で実装
                 };
@@ -469,6 +434,15 @@ namespace GCTonePrism.Manager
             if (string.IsNullOrWhiteSpace(txtGameId.Text))
             {
                 MessageBox.Show("ゲームIDを入力してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtGameId.Focus();
+                return false;
+            }
+
+            // ゲームIDの文字種チェック（英数字と一部の記号のみ許可）
+            var validPattern = new Regex(@"^[a-zA-Z0-9_-]+$");
+            if (!validPattern.IsMatch(txtGameId.Text.Trim()))
+            {
+                MessageBox.Show("ゲームIDは英数字、アンダースコア（_）、ハイフン（-）のみ使用できます。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtGameId.Focus();
                 return false;
             }

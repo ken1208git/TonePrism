@@ -126,6 +126,7 @@ namespace GCTonePrism.Manager
             // 
             // dgvGames
             // 
+            this.dgvGames.AllowDrop = true;
             this.dgvGames.AllowUserToAddRows = false;
             this.dgvGames.AllowUserToDeleteRows = false;
             this.dgvGames.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
@@ -139,6 +140,9 @@ namespace GCTonePrism.Manager
             this.dgvGames.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
             this.dgvGames.Size = new System.Drawing.Size(1000, 545);
             this.dgvGames.TabIndex = 1;
+            this.dgvGames.MouseDown += new System.Windows.Forms.MouseEventHandler(this.dgvGames_MouseDown);
+            this.dgvGames.DragOver += new System.Windows.Forms.DragEventHandler(this.dgvGames_DragOver);
+            this.dgvGames.DragDrop += new System.Windows.Forms.DragEventHandler(this.dgvGames_DragDrop);
             // 
             // statusStrip1
             // 
