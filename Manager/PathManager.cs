@@ -82,9 +82,9 @@ namespace GCTonePrism.Manager
                 
                 // 優先順位3: Launcher + Manager（プロジェクト構造）
                 if (Directory.Exists(Path.Combine(currentPath, "Launcher")) &&
-                    Directory.Exists(Path.Combine(currentPath, "GCTonePrism.Manager")))
+                    Directory.Exists(Path.Combine(currentPath, "Manager")))
                 {
-                    Console.WriteLine($"[PathManager] Launcher + GCTonePrism.Manager を検出: {currentPath}");
+                    Console.WriteLine($"[PathManager] Launcher + Manager を検出: {currentPath}");
                     return currentPath;
                 }
                 
