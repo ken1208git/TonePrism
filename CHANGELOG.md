@@ -2,7 +2,8 @@
 
 このプロジェクト（Prismランチャーシステム）の重要な変更点を全て記録します。
 
-このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) に従い、このプロジェクトは [Semantic Versioning](https://semver.org/lang/ja/) に準拠しています。
+このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) に従い、
+このプロジェクトは [Semantic Versioning](https://semver.org/lang/ja/) に準拠しています。
 
 **注意**: このCHANGELOGはソフトウェア本体のバージョンを追跡します。仕様書の変更履歴については、[SPECIFICATION.md](SPECIFICATION.md)の「変更履歴」セクションを参照してください。
 
@@ -37,9 +38,11 @@
 ### [Manager v0.1.1] - 2025-12-26
 
 #### Changed
+
 - プロジェクトフォルダ名を`Manager`から`GCTonePrism_Manager`に変更
 
 #### Fixed
+
 - PathManagerの検出ロジックを簡素化（Launcherフォルダの検出ロジックを削除）
 - GCTonePrism_Managerフォルダ内に実行ファイルがない場合のエラーチェックを追加
 - 不正な配置での実行を防止（エラーメッセージを表示して起動を停止）
@@ -49,6 +52,7 @@
 マイルストーン2: 管理ソフト基本機能完成
 
 #### Added
+
 - 管理ソフトプロジェクトの新規作成（Windows Forms C#アプリケーション）
 - PathManager: アプリケーションパス、データベースパス、ゲームフォルダパスの管理機能
 - DatabaseManager: SQLiteデータベースの作成、初期化、操作機能
@@ -73,10 +77,12 @@
 - 製作者管理画面（DeveloperForm）の実装
 
 #### Changed
+
 - プロジェクトフォルダ名を`GCTonePrism.Manager`から`Manager`に変更
 - プロジェクト名を`Manager`に変更（RootNamespaceとAssemblyNameを更新）
 
 #### Fixed
+
 - ゲーム追加時の画像ファイルのバリデーションを追加
 - 期生入力フィールドを数値形式に変更
 
@@ -114,6 +120,5 @@
 ---
 
 [Launcher Unreleased]: https://github.com/ken1208git/GCTonePrism/compare/launcher-v1.0.0...HEAD
-[Manager Unreleased]: https://github.com/ken1208git/GCTonePrism/compare/manager-v0.1.1...HEAD
 [Manager v0.1.1]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.1.1
 [Manager v0.1.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.1.0
