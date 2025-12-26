@@ -160,8 +160,8 @@ draft_*.md
 
 ## プロジェクト構造
 
-- `Manager/` - 管理ソフト（C# WinForms）
-- `Launcher/` - ランチャーアプリ（Godot）
+- `GCTonePrism_Manager/` - 管理ソフト（C# WinForms）
+- `GCTonePrism_Launcher/` - ランチャーアプリ（Godot）
 - `games/` - ゲームファイル格納用
 - ルート - ドキュメント（README.md、SPECIFICATION.md、CHANGELOG.md）
 
@@ -423,7 +423,7 @@ git stash pop
 - **用途**: ランチャーアプリケーションの実際のバージョン
 - **形式**: Semantic Versioning（v0.1.0, v1.0.0, v1.1.0...）
 - **管理場所**:
-  - コード内: `Launcher/version.gd` または `Launcher/main.gd`
+  - コード内: `GCTonePrism_Launcher/version.gd` または `GCTonePrism_Launcher/main.gd`
   - Gitタグ: `launcher-v1.0.0`
   - `CHANGELOG.md`（Launcherセクション）
 

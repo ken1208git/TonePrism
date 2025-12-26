@@ -1393,7 +1393,7 @@ erDiagram
 - **技術的達成項目**:
   - Godotエンジンのインストール・セットアップ
   - SQLiteプラグイン/ライブラリの導入（GDScriptまたはC#）
-  - Launcher/フォルダとManager/フォルダの作成
+  - GCTonePrism_Launcher/フォルダとGCTonePrism_Manager/フォルダの作成
   - 空のprism.dbファイルの作成
   - 接続確認用の簡単なスクリプト作成
 
@@ -1627,7 +1627,7 @@ erDiagram
 
 - **用途**: ランチャーアプリケーションの実際のバージョン
 - **形式**: Semantic Versioning（v0.1.0, v1.0.0, v1.1.0...）
-- **管理場所**: コード内（`Launcher/version.gd`）、Gitタグ（`launcher-vX.Y.Z`）
+- **管理場所**: コード内（`GCTonePrism_Launcher/version.gd`）、Gitタグ（`launcher-vX.Y.Z`）
 - **セマンティックバージョニング（SemVer）**を採用:
   - **メジャーバージョン（x.0.0）**: 大きな機能追加、後方互換性のない変更
   - **マイナーバージョン（0.x.0）**: 新機能の追加、後方互換性のある変更

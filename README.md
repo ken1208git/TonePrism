@@ -55,7 +55,7 @@
    git clone https://github.com/your-username/GCTonePrism.git
    ```
 
-3. Godotエディタで `Launcher/project.godot` を開く
+3. Godotエディタで `GCTonePrism_Launcher/project.godot` を開く
 4. SQLiteプラグインは既に含まれています
 
 ### Managerのセットアップ
