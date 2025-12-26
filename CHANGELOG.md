@@ -13,6 +13,50 @@
 
 ### [Launcher Unreleased]
 
+### [Launcher v0.2.0] - 2025-12-26
+
+マイルストーン3: 基本画面・画面遷移
+
+#### Added
+
+- スクリーンセーバー画面の実装
+  - ロゴ画像（GCToneLogo.png）の表示
+  - レスポンシブレイアウト（解像度・アスペクト比に応じた動的サイズ調整）
+  - スタートメッセージの表示
+- 画面遷移の基本実装
+  - スクリーンセーバー → ゲーム選択画面への遷移（EnterキーまたはAボタン）
+  - ゲーム選択画面 → スクリーンセーバーへの遷移（ESCキー）
+- ゲーム選択画面のテスト実装（将来実装予定のプレースホルダー）
+- Noto Sans JPフォントの導入（Regular/Bold）
+
+#### Changed
+
+- 背景色を統一（Color(0.1, 0.1, 0.1, 1)）
+
+#### Technical
+
+- Godot 4.5のシーン管理システムを使用
+- 基本的なUIノードの配置（Control, ColorRect, VBoxContainer, Label, TextureRect）
+- ビューポートサイズ変更時の動的レイアウト更新
+
+### [Launcher v0.1.0] - 2025-12-26
+
+マイルストーン1: Godotプロジェクトセットアップ完了
+
+#### Added
+
+- Godot 4.5プロジェクトのセットアップ
+- SQLiteプラグイン（godot-sqlite）の導入
+- プロジェクト構造の確立（scenes/, fonts/, images/フォルダなど）
+- データベース接続確認機能
+
+#### Technical
+
+- Godot Engine 4.5のセットアップ
+- GDExtension（godot-sqlite）の導入と動作確認
+- SQLiteデータベース（prism.db）への接続確認
+- データベース接続テストスクリプトの実装
+
 ### Launcher 将来のリリース予定
 
 #### Launcher 開発版（v0.x.x）
