@@ -80,11 +80,21 @@ namespace GCTonePrism.Manager
                     return currentPath;
                 }
                 
-                // 優先順位3: Launcher + Manager（プロジェクト構造）
+                // 優先順位3: Launcher + GCTonePrism_Manager（プロジェクト構造）
                 if (Directory.Exists(Path.Combine(currentPath, "Launcher")) &&
-                    Directory.Exists(Path.Combine(currentPath, "Manager")))
+                    Directory.Exists(Path.Combine(currentPath, "GCTonePrism_Manager")))
                 {
-                    Console.WriteLine($"[PathManager] Launcher + Manager を検出: {currentPath}");
+                    Console.WriteLine($"[PathManager] Launcher + GCTonePrism_Manager を検出: {currentPath}");
+                    return currentPath;
+                }
+                
+                // 優先順位3-2: GCTonePrism_Managerフォルダのみ存在する場合（Launcherがまだない場合）
+                // 実行ファイルがGCTonePrism_Managerフォルダ内にある場合のみ
+                if (Directory.Exists(Path.Combine(currentPath, "GCTonePrism_Manager")) &&
+                    exePath.StartsWith(Path.Combine(currentPath, "GCTonePrism_Manager"), StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine($"[PathManager] 警告: Launcherフォルダが見つかりません。GCTonePrism_Managerフォルダのみで動作します: {currentPath}");
+                    Console.WriteLine($"[PathManager] プロジェクトルートを検出: {currentPath}");
                     return currentPath;
                 }
                 
