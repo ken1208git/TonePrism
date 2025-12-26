@@ -34,6 +34,16 @@
 
 ## Manager（管理ソフト）
 
+### [Manager v0.1.1] - 2025-12-26
+
+#### Changed
+- プロジェクトフォルダ名を`Manager`から`GCTonePrism_Manager`に変更
+
+#### Fixed
+- PathManagerの検出ロジックを簡素化（Launcherフォルダの検出ロジックを削除）
+- GCTonePrism_Managerフォルダ内に実行ファイルがない場合のエラーチェックを追加
+- 不正な配置での実行を防止（エラーメッセージを表示して起動を停止）
+
 ### [Manager v0.1.0] - 2025-12-26
 
 マイルストーン2: 管理ソフト基本機能完成
@@ -104,5 +114,6 @@
 ---
 
 [Launcher Unreleased]: https://github.com/ken1208git/GCTonePrism/compare/launcher-v1.0.0...HEAD
-[Manager Unreleased]: https://github.com/ken1208git/GCTonePrism/compare/manager-v0.1.0...HEAD
+[Manager Unreleased]: https://github.com/ken1208git/GCTonePrism/compare/manager-v0.1.1...HEAD
+[Manager v0.1.1]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.1.1
 [Manager v0.1.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.1.0
