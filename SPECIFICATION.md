@@ -1160,7 +1160,7 @@ SQLiteデータベースのテーブル設計：
 - **カラム**:
 
   | カラム名 | データ型 | 制約 | 説明 |
-  |---------|---------|------|------|
+  | --- | --- | --- | --- |
   | game_id | TEXT | PRIMARY KEY | ゲームID（一意の識別子） |
   | title | TEXT | NOT NULL | ゲームタイトル |
   | description | TEXT | | 説明文 |
@@ -1186,7 +1186,7 @@ SQLiteデータベースのテーブル設計：
 - **カラム**:
 
   | カラム名 | データ型 | 制約 | 説明 |
-  |---------|---------|------|------|
+  | --- | --- | --- | --- |
   | id | INTEGER | PRIMARY KEY AUTOINCREMENT | 製作者ID |
   | game_id | TEXT | NOT NULL, FOREIGN KEY | ゲームID（games.game_idを参照） |
   | last_name | TEXT | NOT NULL | 姓 |
@@ -1200,7 +1200,7 @@ SQLiteデータベースのテーブル設計：
 - **カラム**:
 
   | カラム名 | データ型 | 制約 | 説明 |
-  |---------|---------|------|------|
+  | --- | --- | --- | --- |
   | id | INTEGER | PRIMARY KEY AUTOINCREMENT | レコードID |
   | game_id | TEXT | NOT NULL, FOREIGN KEY | ゲームID（games.game_idを参照） |
   | play_count | INTEGER | DEFAULT 0 | プレイ回数 |
@@ -1214,7 +1214,7 @@ SQLiteデータベースのテーブル設計：
 - **カラム**:
 
   | カラム名 | データ型 | 制約 | 説明 |
-  |---------|---------|------|------|
+  | --- | --- | --- | --- |
   | id | TEXT | PRIMARY KEY | アンケートID（UUID） |
   | game_id | TEXT | NOT NULL, FOREIGN KEY | ゲームID（games.game_idを参照） |
   | submitted_at | TEXT | NOT NULL | 提出日時（ISO8601形式） |
@@ -1227,7 +1227,7 @@ SQLiteデータベースのテーブル設計：
 - **カラム**:
 
   | カラム名 | データ型 | 制約 | 説明 |
-  |---------|---------|------|------|
+  | --- | --- | --- | --- |
   | id | INTEGER | PRIMARY KEY DEFAULT 1 | 設定ID（常に1） |
   | color_theme | TEXT | | カラーテーマ設定（JSON形式） |
   | launcher_settings | TEXT | | ランチャー設定（JSON形式） |
@@ -1684,7 +1684,7 @@ erDiagram
 ## 変更履歴
 
 | 日付 | バージョン | 変更内容 | 変更者 |
-|------|-----------|---------|--------|
+| --- | --- | --- | --- |
 | 2025-12-23 | 1.2.3 | LANマルチプレイサポート機能を削除（lan_multiplayer_supportフィールドを削除） | Kenshiro Kuroga |
 | 2025-12-23 | 1.2.2 | Godotのバージョンを4.5に明記、godot-sqliteプラグインの情報を追加、GDScriptをメイン言語として明記 | Kenshiro Kuroga |
 | 2025-12-23 | 1.2.1 | 自動アップデート通知機能（機能21）を追加、マイルストーン12に自動アップデート通知機能を追加 | Kenshiro Kuroga |
