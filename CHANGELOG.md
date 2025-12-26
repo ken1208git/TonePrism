@@ -34,7 +34,41 @@
 
 ## Manager（管理ソフト）
 
-### [Manager Unreleased]
+### [Manager v0.1.0] - 2025-12-26
+
+マイルストーン2: 管理ソフト基本機能完成
+
+#### Added
+- 管理ソフトプロジェクトの新規作成（Windows Forms C#アプリケーション）
+- PathManager: アプリケーションパス、データベースパス、ゲームフォルダパスの管理機能
+- DatabaseManager: SQLiteデータベースの作成、初期化、操作機能
+- データモデルの実装（GameInfo, DeveloperInfo, PlayRecord, Survey, Settings）
+- Microsoft.Data.Sqliteパッケージの導入
+- ゲーム追加機能（AddGameForm）
+  - ゲームフォルダの選択とコピー
+  - 実行ファイルの選択
+  - サムネイル画像・背景画像の選択
+  - ゲーム情報の入力（タイトル、説明、ジャンル、制作年など）
+  - 製作者情報の追加・編集（DataGridViewを使用）
+- ゲーム編集機能（EditGameForm）
+  - 既存ゲーム情報の編集
+  - 製作者情報の編集
+- ゲーム削除機能
+- ゲーム表示順序の変更機能（表示順序の並び替え）
+- データベースリセット機能（確認ダイアログ付き）
+- メイン画面（MainForm）の実装
+  - ゲーム一覧の表示
+  - ゲーム追加・編集・削除ボタン
+  - データベースリセットボタン
+- 製作者管理画面（DeveloperForm）の実装
+
+#### Changed
+- プロジェクトフォルダ名を`GCTonePrism.Manager`から`Manager`に変更
+- プロジェクト名を`Manager`に変更（RootNamespaceとAssemblyNameを更新）
+
+#### Fixed
+- ゲーム追加時の画像ファイルのバリデーションを追加
+- 期生入力フィールドを数値形式に変更
 
 ### Manager 将来のリリース予定
 
@@ -70,4 +104,5 @@
 ---
 
 [Launcher Unreleased]: https://github.com/ken1208git/GCTonePrism/compare/launcher-v1.0.0...HEAD
-[Manager Unreleased]: https://github.com/ken1208git/GCTonePrism/compare/manager-v1.0.0...HEAD
+[Manager Unreleased]: https://github.com/ken1208git/GCTonePrism/compare/manager-v0.1.0...HEAD
+[Manager v0.1.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.1.0
