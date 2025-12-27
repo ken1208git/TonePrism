@@ -1065,8 +1065,20 @@ graph TB
 
 ### 6.5 データの整合性
 
-- ランチャーと管理ソフトが同時に書き込みを行う場合は、ファイルロックなどの仕組みで整合性を保つ
-- または、管理ソフト使用時はランチャーを閉じる運用とする
+- **WALモードによる同時アクセス対応**:
+  - SQLiteのWAL（Write-Ahead Logging）モードを使用して、ランチャーと管理ソフトの同時アクセスを可能にする
+  - ランチャー起動中でも管理ソフトでデータベース操作（ゲーム追加・編集・削除など）が可能
+  - 接続時に自動的にWALモードを有効化し、既存データベースにも適用される
+  - 接続文字列に`Journal Mode=WAL`と`Busy Timeout=5000`を設定
+
+- **リトライ機構**:
+  - ネットワークドライブ経由での一時的なロックエラーに対して自動リトライ機能を実装
+  - 最大3回リトライ、指数バックオフ（50ms, 100ms, 200ms）で待機
+  - 学校サーバー経由での使用に最適化
+
+- **エラーハンドリング**:
+  - SQLiteExceptionを具体的に処理し、ユーザーに分かりやすいエラーメッセージを表示
+  - データベースロック時、破損時、読み取り専用時など、エラー種別に応じた適切なメッセージを表示
 
 ---
 
@@ -1098,6 +1110,11 @@ graph TB
   - フォルダ構造: `games/{game_id}/`（game_idはデータベースのgamesテーブルのgame_idと一致）
   - 各ゲームフォルダには実行ファイル、画像ファイルなどが格納される
   - ゲームファイルは管理ソフトが自動的にコピー・管理する（管理者がエクスプローラーで直接操作する必要はない）
+
+- **パスの保存方式**:
+  - `games`テーブルのパスフィールド（`thumbnail_path`, `background_path`, `executable_path`）は、`games/{game_id}/`フォルダからの相対パスで保存される
+  - これにより、プロジェクト全体を別の場所に移動してもパスが有効なまま維持される
+  - 管理ソフトがファイルを保存・読み込みする際に、相対パスと絶対パスを適切に変換する
 
 ### 7.2 データモデル概要図
 
@@ -1171,9 +1188,9 @@ SQLiteデータベースのテーブル設計：
   | difficulty | INTEGER | CHECK(1-3) | 難易度（1-3の3段階） |
   | play_time | INTEGER | CHECK(1-3) | プレイ時間の分類（1=～5分、2=5分～15分、3=15分以上） |
   | controller_support | INTEGER | DEFAULT 0 | コントローラーサポート（0=false, 1=true） |
-  | thumbnail_path | TEXT | | サムネイル画像のパス |
-  | background_path | TEXT | | 背景画像のパス |
-  | executable_path | TEXT | NOT NULL | 実行ファイルのパス |
+  | thumbnail_path | TEXT | | サムネイル画像のパス（相対パス：games/{game_id}/フォルダからの相対パス） |
+  | background_path | TEXT | | 背景画像のパス（相対パス：games/{game_id}/フォルダからの相対パス） |
+  | executable_path | TEXT | NOT NULL | 実行ファイルのパス（相対パス：games/{game_id}/フォルダからの相対パス） |
   | display_order | INTEGER | | 表示順序（数値が小さいほど先に表示） |
   | is_visible | INTEGER | DEFAULT 1 | 表示/非表示（0=false=非表示、1=true=表示） |
   | controls | TEXT | | 操作説明（JSON形式） |
@@ -1189,7 +1206,7 @@ SQLiteデータベースのテーブル設計：
   | --- | --- | --- | --- |
   | id | INTEGER | PRIMARY KEY AUTOINCREMENT | 製作者ID |
   | game_id | TEXT | NOT NULL, FOREIGN KEY | ゲームID（games.game_idを参照） |
-  | last_name | TEXT | NOT NULL | 姓 |
+  | last_name | TEXT | | 姓（NULL可） |
   | first_name | TEXT | NOT NULL | 名 |
   | grade | TEXT | | 学年（0を指定すると「教員」と表記） |
 
@@ -1228,7 +1245,7 @@ SQLiteデータベースのテーブル設計：
 
   | カラム名 | データ型 | 制約 | 説明 |
   | --- | --- | --- | --- |
-  | id | INTEGER | PRIMARY KEY DEFAULT 1 | 設定ID（常に1） |
+  | id | INTEGER | PRIMARY KEY CHECK(id = 1) | 設定ID（常に1） |
   | color_theme | TEXT | | カラーテーマ設定（JSON形式） |
   | launcher_settings | TEXT | | ランチャー設定（JSON形式） |
   | filter_settings | TEXT | | フィルター設定（JSON形式） |
@@ -1685,6 +1702,8 @@ erDiagram
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
+| 2025-12-27 | 1.2.5 | データベース技術仕様を追加：WALモードによる同時アクセス対応、リトライ機構、エラーハンドリングの詳細を6.5データの整合性セクションに追加。パス保存方式（相対パス）を7.3 SQLiteデータベース設計に明記。 | AI Assistant |
+| 2025-12-27 | 1.2.4 | データベーススキーマの仕様を実装に合わせて更新：developersテーブルのlast_nameカラムをNULL可に変更、settingsテーブルのidカラムの制約をCHECK制約に明確化 | AI Assistant |
 | 2025-12-23 | 1.2.3 | LANマルチプレイサポート機能を削除（lan_multiplayer_supportフィールドを削除） | Kenshiro Kuroga |
 | 2025-12-23 | 1.2.2 | Godotのバージョンを4.5に明記、godot-sqliteプラグインの情報を追加、GDScriptをメイン言語として明記 | Kenshiro Kuroga |
 | 2025-12-23 | 1.2.1 | 自動アップデート通知機能（機能21）を追加、マイルストーン12に自動アップデート通知機能を追加 | Kenshiro Kuroga |
