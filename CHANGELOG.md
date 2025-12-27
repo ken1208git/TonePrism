@@ -13,6 +13,17 @@
 
 ### [Launcher Unreleased]
 
+### [Launcher v0.3.1] - 2025-12-27
+
+#### Fixed
+
+- データベースから取得したnull値の処理を修正
+  - すべての文字列型プロパティ（game_id, title, description, genre, thumbnail_path, background_path, executable_path, controls, key_mapping）にnullチェックを追加
+  - データベースのNULL値が原因で発生していたエラーを解消
+- SQLite APIの互換性問題を修正
+  - `query_with_args()`が存在しないため、`query()`メソッドを使用するように変更
+  - SQLインジェクション対策として`_escape_sql_string()`関数を追加
+
 ### [Launcher v0.3.0] - 2025-12-27
 
 マイルストーン4: データベース連携
