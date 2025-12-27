@@ -5,7 +5,7 @@ namespace GCTonePrism.Manager
 {
     /// <summary>
     /// ゲームジャンル一覧
-    /// マイニンテンドーストアのソフトジャンルに準拠
+    /// PlayStation Storeのジャンル分類に準拠
     /// </summary>
     public static class GenreList
     {
