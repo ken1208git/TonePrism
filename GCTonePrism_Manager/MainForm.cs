@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Reflection;
 using System.Windows.Forms;
 using GCTonePrism.Manager.Models;
 
@@ -452,6 +453,59 @@ namespace GCTonePrism.Manager
         private void btnRefresh_Click(object sender, EventArgs e)
         {
             LoadGames();
+        }
+
+        /// <summary>
+        /// バージョン情報メニュークリック
+        /// </summary>
+        private void menuItemVersionInfo_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                // アセンブリ情報を取得
+                Assembly assembly = Assembly.GetExecutingAssembly();
+                AssemblyName assemblyName = assembly.GetName();
+                Version version = assemblyName.Version;
+
+                // アセンブリの詳細情報を取得
+                string productName = assembly.GetCustomAttribute<AssemblyProductAttribute>()?.Product ?? "GCTonePrism 管理ソフト";
+                string copyright = assembly.GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright ?? "";
+                string company = assembly.GetCustomAttribute<AssemblyCompanyAttribute>()?.Company ?? "";
+
+                // バージョン情報を構築
+                string versionInfo = $"バージョン情報\n\n";
+                versionInfo += $"製品名: {productName}\n";
+                versionInfo += $"バージョン: {version.Major}.{version.Minor}.{version.Build}";
+                if (version.Revision > 0)
+                {
+                    versionInfo += $".{version.Revision}";
+                }
+                versionInfo += "\n\n";
+                
+                if (!string.IsNullOrEmpty(company))
+                {
+                    versionInfo += $"会社: {company}\n";
+                }
+                if (!string.IsNullOrEmpty(copyright))
+                {
+                    versionInfo += $"{copyright}\n";
+                }
+
+                // メッセージボックスで表示
+                MessageBox.Show(
+                    versionInfo,
+                    "バージョン情報",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"バージョン情報の取得に失敗しました。\n\n{ex.Message}",
+                    "エラー",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
         }
     }
 }

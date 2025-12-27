@@ -79,6 +79,15 @@
 
 ## Manager（管理ソフト）
 
+### [Manager v0.3.0] - 2025-12-27
+
+#### Added
+
+- バージョン情報表示機能
+  - 設定メニューに「バージョン情報」メニュー項目を追加
+  - アセンブリ情報から製品名、バージョン、会社名、著作権情報を取得して表示
+  - AssemblyInfo.csのAssemblyProductとAssemblyTitleをGCTonePrism_Managerに統一
+
 ### [Manager v0.2.0] - 2025-12-27
 
 #### Added
