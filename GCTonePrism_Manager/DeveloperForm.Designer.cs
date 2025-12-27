@@ -76,9 +76,9 @@ namespace GCTonePrism.Manager
             this.lblGrade.AutoSize = true;
             this.lblGrade.Location = new System.Drawing.Point(12, 71);
             this.lblGrade.Name = "lblGrade";
-            this.lblGrade.Size = new System.Drawing.Size(37, 15);
+            this.lblGrade.Size = new System.Drawing.Size(100, 15);
             this.lblGrade.TabIndex = 4;
-            this.lblGrade.Text = "期生";
+            this.lblGrade.Text = "期生（0で教員）";
             // 
             // numGrade
             // 
