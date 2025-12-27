@@ -211,12 +211,6 @@ namespace GCTonePrism.Manager
         {
             if (dgvGames.Columns.Count == 0) return;
 
-            // 表示するカラムを設定
-            dgvGames.Columns["GameId"].HeaderText = "ゲームID";
-            dgvGames.Columns["Title"].HeaderText = "タイトル";
-            dgvGames.Columns["ReleaseYear"].HeaderText = "リリース年";
-            dgvGames.Columns["IsVisible"].HeaderText = "ランチャー表示";
-
             // 非表示にするカラム
             string[] hiddenColumns = { 
                 "Description", "Genre", "MinPlayers", "MaxPlayers", 
@@ -233,12 +227,51 @@ namespace GCTonePrism.Manager
                 }
             }
 
+            // 製作者情報カラムを追加（まだ存在しない場合）
+            if (dgvGames.Columns["DevelopersDisplay"] == null)
+            {
+                var developersColumn = new DataGridViewTextBoxColumn
+                {
+                    Name = "DevelopersDisplay",
+                    HeaderText = "製作者",
+                    DataPropertyName = "DevelopersDisplay",
+                    ReadOnly = true
+                };
+                
+                dgvGames.Columns.Add(developersColumn);
+            }
+
+            // カラムの順序を設定（ゲームID → タイトル → リリース年 → 製作者 → ランチャー表示）
+            if (dgvGames.Columns["GameId"] != null)
+                dgvGames.Columns["GameId"].DisplayIndex = 0;
+            if (dgvGames.Columns["Title"] != null)
+                dgvGames.Columns["Title"].DisplayIndex = 1;
+            if (dgvGames.Columns["ReleaseYear"] != null)
+                dgvGames.Columns["ReleaseYear"].DisplayIndex = 2;
+            if (dgvGames.Columns["DevelopersDisplay"] != null)
+                dgvGames.Columns["DevelopersDisplay"].DisplayIndex = 3;
+            if (dgvGames.Columns["IsVisible"] != null)
+                dgvGames.Columns["IsVisible"].DisplayIndex = 4;
+
+            // 表示するカラムのヘッダーテキストを日本語に設定
+            if (dgvGames.Columns["GameId"] != null)
+                dgvGames.Columns["GameId"].HeaderText = "ゲームID";
+            if (dgvGames.Columns["Title"] != null)
+                dgvGames.Columns["Title"].HeaderText = "タイトル";
+            if (dgvGames.Columns["ReleaseYear"] != null)
+                dgvGames.Columns["ReleaseYear"].HeaderText = "リリース年";
+            if (dgvGames.Columns["IsVisible"] != null)
+                dgvGames.Columns["IsVisible"].HeaderText = "ランチャー表示";
+            if (dgvGames.Columns["DevelopersDisplay"] != null)
+                dgvGames.Columns["DevelopersDisplay"].HeaderText = "製作者";
+
             // カラム幅の自動調整
             dgvGames.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             dgvGames.Columns["GameId"].FillWeight = 100;
             dgvGames.Columns["Title"].FillWeight = 250;
             dgvGames.Columns["ReleaseYear"].FillWeight = 80;
-            dgvGames.Columns["IsVisible"].FillWeight = 120;
+            dgvGames.Columns["IsVisible"].FillWeight = 90; // ランチャー表示のカラム幅を少し太く
+            dgvGames.Columns["DevelopersDisplay"].FillWeight = 200;
         }
 
         /// <summary>

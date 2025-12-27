@@ -102,6 +102,34 @@ namespace GCTonePrism.Manager.Models
         public List<DeveloperInfo> Developers { get; set; }
 
         /// <summary>
+        /// 製作者情報の表示用文字列（DataGridView用）
+        /// 「姓 名 (期生)」形式で複数の製作者をカンマ区切りで表示
+        /// </summary>
+        public string DevelopersDisplay
+        {
+            get
+            {
+                if (Developers == null || Developers.Count == 0)
+                {
+                    return "";
+                }
+
+                var displayList = new List<string>();
+                foreach (var dev in Developers)
+                {
+                    string display = dev.FullName;
+                    if (!string.IsNullOrEmpty(dev.GradeDisplay))
+                    {
+                        display += " (" + dev.GradeDisplay + ")";
+                    }
+                    displayList.Add(display);
+                }
+
+                return string.Join(", ", displayList);
+            }
+        }
+
+        /// <summary>
         /// コンストラクタ
         /// </summary>
         public GameInfo()
