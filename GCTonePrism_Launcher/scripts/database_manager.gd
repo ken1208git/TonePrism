@@ -47,6 +47,13 @@ func close() -> void:
 func is_open() -> bool:
 	return db != null
 
+## SQL文字列をエスケープする（SQLインジェクション対策）
+## @param value: エスケープする文字列
+## @return: エスケープされた文字列
+func _escape_sql_string(value: String) -> String:
+	# シングルクォートを2つのシングルクォートに置き換える
+	return value.replace("'", "''")
+
 ## すべてのゲーム情報を取得（表示対象のみ）
 ## @return: GameInfoの配列
 func get_all_games() -> Array[GameInfo]:
@@ -94,6 +101,8 @@ func get_game_by_id(game_id: String) -> GameInfo:
 		if not open():
 			return null
 	
+	# SQLインジェクション対策: 値をエスケープしてクエリに埋め込む
+	var escaped_game_id = _escape_sql_string(game_id)
 	var query = """
 		SELECT 
 			game_id, title, description, release_year, genre,
@@ -101,12 +110,12 @@ func get_game_by_id(game_id: String) -> GameInfo:
 			thumbnail_path, background_path, executable_path,
 			display_order, is_visible, controls, key_mapping
 		FROM games
-		WHERE game_id = ?
-	"""
+		WHERE game_id = '%s'
+	""" % escaped_game_id
 	
-	# パラメータ化クエリを実行（godot-sqliteのAPI）
-	# query_with_args()メソッドはboolを返す
-	if db.query_with_args(query, [game_id]):
+	# クエリを実行（godot-sqliteのAPI）
+	# query()メソッドはboolを返す
+	if db.query(query):
 		# 結果を取得（get_query_result()で全行を取得）
 		var result_array = db.get_query_result()
 		if result_array != null and result_array.size() > 0:
@@ -132,16 +141,18 @@ func get_developers_by_game_id(game_id: String) -> Array[DeveloperInfo]:
 	
 	var developers: Array[DeveloperInfo] = []
 	
+	# SQLインジェクション対策: 値をエスケープしてクエリに埋め込む
+	var escaped_game_id = _escape_sql_string(game_id)
 	var query = """
 		SELECT id, game_id, last_name, first_name, grade
 		FROM developers
-		WHERE game_id = ?
+		WHERE game_id = '%s'
 		ORDER BY id ASC
-	"""
+	""" % escaped_game_id
 	
-	# パラメータ化クエリを実行（godot-sqliteのAPI）
-	# query_with_args()メソッドはboolを返す
-	if db.query_with_args(query, [game_id]):
+	# クエリを実行（godot-sqliteのAPI）
+	# query()メソッドはboolを返す
+	if db.query(query):
 		# 結果を取得（get_query_result()で全行を取得）
 		var result_array = db.get_query_result()
 		if result_array != null:
@@ -173,42 +184,62 @@ func _create_game_info_from_row_dict(row) -> GameInfo:
 	
 	# 結果は辞書形式で返される可能性があるため、両方に対応
 	if row is Dictionary:
-		game.game_id = row.get("game_id", "") if row.has("game_id") else ""
-		game.title = row.get("title", "") if row.has("title") else ""
-		game.description = row.get("description", "") if row.has("description") else ""
+		# 文字列型プロパティはnullチェックが必要
+		var game_id_value = row.get("game_id", "") if row.has("game_id") else ""
+		game.game_id = game_id_value if game_id_value != null else ""
+		var title_value = row.get("title", "") if row.has("title") else ""
+		game.title = title_value if title_value != null else ""
+		var description_value = row.get("description", "") if row.has("description") else ""
+		game.description = description_value if description_value != null else ""
 		game.release_year = row.get("release_year", -1) if row.has("release_year") else -1
-		game.genre = _parse_genre(row.get("genre", "") if row.has("genre") else "")
+		var genre_value = row.get("genre", "") if row.has("genre") else ""
+		game.genre = _parse_genre(genre_value if genre_value != null else "")
 		game.min_players = row.get("min_players", -1) if row.has("min_players") else -1
 		game.max_players = row.get("max_players", -1) if row.has("max_players") else -1
 		game.difficulty = row.get("difficulty", -1) if row.has("difficulty") else -1
 		game.play_time = row.get("play_time", -1) if row.has("play_time") else -1
 		game.controller_support = (row.get("controller_support", 0) if row.has("controller_support") else 0) == 1
-		game.thumbnail_path = row.get("thumbnail_path", "") if row.has("thumbnail_path") else ""
-		game.background_path = row.get("background_path", "") if row.has("background_path") else ""
-		game.executable_path = row.get("executable_path", "") if row.has("executable_path") else ""
+		var thumbnail_path_value = row.get("thumbnail_path", "") if row.has("thumbnail_path") else ""
+		game.thumbnail_path = thumbnail_path_value if thumbnail_path_value != null else ""
+		var background_path_value = row.get("background_path", "") if row.has("background_path") else ""
+		game.background_path = background_path_value if background_path_value != null else ""
+		var executable_path_value = row.get("executable_path", "") if row.has("executable_path") else ""
+		game.executable_path = executable_path_value if executable_path_value != null else ""
 		game.display_order = row.get("display_order", -1) if row.has("display_order") else -1
 		game.is_visible = (row.get("is_visible", 0) if row.has("is_visible") else 0) == 1
-		game.controls = row.get("controls", "") if row.has("controls") else ""
-		game.key_mapping = row.get("key_mapping", "") if row.has("key_mapping") else ""
+		var controls_value = row.get("controls", "") if row.has("controls") else ""
+		game.controls = controls_value if controls_value != null else ""
+		var key_mapping_value = row.get("key_mapping", "") if row.has("key_mapping") else ""
+		game.key_mapping = key_mapping_value if key_mapping_value != null else ""
 	else:
 		# 配列形式の場合
-		game.game_id = row[0] if row.size() > 0 and row[0] != null else ""
-		game.title = row[1] if row.size() > 1 and row[1] != null else ""
-		game.description = row[2] if row.size() > 2 and row[2] != null else ""
+		# 文字列型プロパティはnullチェックが必要
+		var game_id_value = row[0] if row.size() > 0 and row[0] != null else ""
+		game.game_id = game_id_value if game_id_value != null else ""
+		var title_value = row[1] if row.size() > 1 and row[1] != null else ""
+		game.title = title_value if title_value != null else ""
+		var description_value = row[2] if row.size() > 2 and row[2] != null else ""
+		game.description = description_value if description_value != null else ""
 		game.release_year = row[3] if row.size() > 3 and row[3] != null else -1
-		game.genre = _parse_genre(row[4] if row.size() > 4 and row[4] != null else "")
+		var genre_value = row[4] if row.size() > 4 and row[4] != null else ""
+		game.genre = _parse_genre(genre_value if genre_value != null else "")
 		game.min_players = row[5] if row.size() > 5 and row[5] != null else -1
 		game.max_players = row[6] if row.size() > 6 and row[6] != null else -1
 		game.difficulty = row[7] if row.size() > 7 and row[7] != null else -1
 		game.play_time = row[8] if row.size() > 8 and row[8] != null else -1
 		game.controller_support = (row[9] if row.size() > 9 and row[9] != null else 0) == 1
-		game.thumbnail_path = row[10] if row.size() > 10 and row[10] != null else ""
-		game.background_path = row[11] if row.size() > 11 and row[11] != null else ""
-		game.executable_path = row[12] if row.size() > 12 and row[12] != null else ""
+		var thumbnail_path_value = row[10] if row.size() > 10 and row[10] != null else ""
+		game.thumbnail_path = thumbnail_path_value if thumbnail_path_value != null else ""
+		var background_path_value = row[11] if row.size() > 11 and row[11] != null else ""
+		game.background_path = background_path_value if background_path_value != null else ""
+		var executable_path_value = row[12] if row.size() > 12 and row[12] != null else ""
+		game.executable_path = executable_path_value if executable_path_value != null else ""
 		game.display_order = row[13] if row.size() > 13 and row[13] != null else -1
 		game.is_visible = (row[14] if row.size() > 14 and row[14] != null else 0) == 1
-		game.controls = row[15] if row.size() > 15 and row[15] != null else ""
-		game.key_mapping = row[16] if row.size() > 16 and row[16] != null else ""
+		var controls_value = row[15] if row.size() > 15 and row[15] != null else ""
+		game.controls = controls_value if controls_value != null else ""
+		var key_mapping_value = row[16] if row.size() > 16 and row[16] != null else ""
+		game.key_mapping = key_mapping_value if key_mapping_value != null else ""
 	
 	return game
 
