@@ -13,4 +13,3 @@ static func get_version_string() -> String:
 
 static func get_version_number() -> String:
 	return "%d.%d.%d" % [MAJOR, MINOR, PATCH]
-

@@ -46,7 +46,7 @@ namespace GCTonePrism.Manager
             this.lblLastName.Name = "lblLastName";
             this.lblLastName.Size = new System.Drawing.Size(31, 15);
             this.lblLastName.TabIndex = 0;
-            this.lblLastName.Text = "姓*";
+            this.lblLastName.Text = "姓";
             // 
             // txtLastName
             // 

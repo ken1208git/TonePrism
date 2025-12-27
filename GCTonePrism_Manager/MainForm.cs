@@ -146,15 +146,47 @@ namespace GCTonePrism.Manager
 
                 UpdateStatusBar();
                 
-                // デバッグ: コンソールに詳細情報を出力
+                // デバッグ: コンソールに詳細情報を出力（相対パスを表示）
                 Console.WriteLine("\n=== データベース確認 ===");
                 foreach (var game in games)
                 {
                     Console.WriteLine($"ゲームID: {game.GameId}");
                     Console.WriteLine($"タイトル: {game.Title}");
-                    Console.WriteLine($"実行ファイル: {game.ExecutablePath}");
-                    Console.WriteLine($"サムネイル: {(string.IsNullOrEmpty(game.ThumbnailPath) ? "(未設定)" : game.ThumbnailPath)}");
-                    Console.WriteLine($"背景: {(string.IsNullOrEmpty(game.BackgroundPath) ? "(未設定)" : game.BackgroundPath)}");
+                    
+                    // 実行ファイルパス（データベースに保存されている相対パスを表示）
+                    string executablePath = game.ExecutablePath ?? "(未設定)";
+                    if (!string.IsNullOrEmpty(executablePath) && System.IO.Path.IsPathRooted(executablePath))
+                    {
+                        // 絶対パスの場合は警告を表示
+                        Console.WriteLine($"実行ファイル: {executablePath} [警告: 絶対パスが保存されています]");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"実行ファイル: {executablePath} [相対パス]");
+                    }
+                    
+                    // サムネイルパス
+                    string thumbnailPath = string.IsNullOrEmpty(game.ThumbnailPath) ? "(未設定)" : game.ThumbnailPath;
+                    if (!string.IsNullOrEmpty(game.ThumbnailPath) && System.IO.Path.IsPathRooted(game.ThumbnailPath))
+                    {
+                        Console.WriteLine($"サムネイル: {thumbnailPath} [警告: 絶対パスが保存されています]");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"サムネイル: {thumbnailPath} {(string.IsNullOrEmpty(game.ThumbnailPath) ? "" : "[相対パス]")}");
+                    }
+                    
+                    // 背景パス
+                    string backgroundPath = string.IsNullOrEmpty(game.BackgroundPath) ? "(未設定)" : game.BackgroundPath;
+                    if (!string.IsNullOrEmpty(game.BackgroundPath) && System.IO.Path.IsPathRooted(game.BackgroundPath))
+                    {
+                        Console.WriteLine($"背景: {backgroundPath} [警告: 絶対パスが保存されています]");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"背景: {backgroundPath} {(string.IsNullOrEmpty(game.BackgroundPath) ? "" : "[相対パス]")}");
+                    }
+                    
                     Console.WriteLine($"表示: {game.IsVisible}");
                     Console.WriteLine($"表示順: {game.DisplayOrder}");
                     Console.WriteLine("---");

@@ -56,21 +56,12 @@ namespace GCTonePrism.Manager
             numMinPlayers.Value = 1;
             numMaxPlayers.Value = 1;
 
-            // ジャンルフィールドのプレースホルダー処理
-            txtGenre.Enter += (s, args) =>
+            // ジャンルチェックボックスリストを初期化
+            clbGenre.Items.Clear();
+            foreach (var genre in GenreList.AvailableGenres)
             {
-                if (txtGenre.Text == "（カンマ区切りで複数入力可）")
-                {
-                    txtGenre.Text = "";
-                }
-            };
-            txtGenre.Leave += (s, args) =>
-            {
-                if (string.IsNullOrWhiteSpace(txtGenre.Text))
-                {
-                    txtGenre.Text = "（カンマ区切りで複数入力可）";
-                }
-            };
+                clbGenre.Items.Add(genre, false);
+            }
 
             // 初期状態では警告を非表示、OKボタンを有効化
             lblGameIdWarning.Visible = false;
@@ -146,19 +137,36 @@ namespace GCTonePrism.Manager
             var exeFiles = Directory.GetFiles(sourceGameFolder, "*.exe", SearchOption.AllDirectories);
             if (exeFiles.Length > 0)
             {
-                // .console.exeを除外し、それ以外のexeファイルを優先
+                // 除外するファイル名パターン（クラッシュハンドラーやヘルパー系）
+                var excludedPatterns = new[]
+                {
+                    ".console.exe",
+                    "UnityCrashHandler64.exe",
+                    "UnityCrashHandler32.exe",
+                    "UnityCrashHandler.exe",
+                    "CrashHandler.exe",
+                    "CrashHandler64.exe",
+                    "CrashHandler32.exe"
+                };
+
+                // 除外パターンに一致しないexeファイルを優先
                 var preferredExeFiles = exeFiles
-                    .Where(file => !file.EndsWith(".console.exe", StringComparison.OrdinalIgnoreCase))
+                    .Where(file =>
+                    {
+                        string fileName = Path.GetFileName(file);
+                        return !excludedPatterns.Any(pattern =>
+                            fileName.EndsWith(pattern, StringComparison.OrdinalIgnoreCase));
+                    })
                     .ToList();
                 
                 if (preferredExeFiles.Count > 0)
                 {
-                    // .console.exe以外のexeファイルがあれば、その中から最初のものを選択
+                    // 除外パターンに一致しないexeファイルがあれば、その中から最初のものを選択
                     txtExecutablePath.Text = preferredExeFiles[0];
                 }
                 else
                 {
-                    // .console.exeしかない場合は、それを使用
+                    // 除外パターンに一致するファイルしかない場合は、最初のものを選択（フォールバック）
                     txtExecutablePath.Text = exeFiles[0];
                 }
             }
@@ -319,15 +327,21 @@ namespace GCTonePrism.Manager
         {
             Directory.CreateDirectory(destDir);
 
+            // デバッグログ
+            Console.WriteLine($"[CopyDirectoryRecursive] コピー元: {sourceDir}");
+            Console.WriteLine($"[CopyDirectoryRecursive] コピー先: {destDir}");
+
             foreach (string file in Directory.GetFiles(sourceDir))
             {
                 string destFile = Path.Combine(destDir, Path.GetFileName(file));
+                Console.WriteLine($"[CopyDirectoryRecursive] ファイルをコピー: {file} -> {destFile}");
                 File.Copy(file, destFile, true);
             }
 
             foreach (string subDir in Directory.GetDirectories(sourceDir))
             {
                 string destSubDir = Path.Combine(destDir, Path.GetFileName(subDir));
+                Console.WriteLine($"[CopyDirectoryRecursive] サブフォルダをコピー: {subDir} -> {destSubDir}");
                 CopyDirectoryRecursive(subDir, destSubDir);
             }
         }
@@ -347,7 +361,8 @@ namespace GCTonePrism.Manager
 
             if (string.Equals(fromPath, toPath, StringComparison.OrdinalIgnoreCase))
             {
-                return ".";
+                // 同じパスの場合は、ファイル名のみを返す
+                return Path.GetFileName(toPath);
             }
 
             if (!toPath.StartsWith(fromPath, StringComparison.OrdinalIgnoreCase))
@@ -356,7 +371,8 @@ namespace GCTonePrism.Manager
             }
 
             string relativePath = toPath.Substring(fromPath.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            return string.IsNullOrEmpty(relativePath) ? "." : relativePath;
+            // 空の場合はファイル名のみを返す（ルートフォルダ内のファイルの場合）
+            return string.IsNullOrEmpty(relativePath) ? Path.GetFileName(toPath) : relativePath;
         }
 
         /// <summary>
@@ -390,6 +406,70 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
+        /// 絶対パスから相対パスを取得（games/{game_id}/フォルダからの相対パス）
+        /// </summary>
+        private string GetRelativePathFromGameFolder(string absolutePath, string gameId)
+        {
+            if (string.IsNullOrEmpty(absolutePath))
+            {
+                return null;
+            }
+
+            string gameFolder = PathManager.GetGameFolder(gameId);
+
+            if (!Path.IsPathRooted(absolutePath))
+            {
+                return absolutePath; // 既に相対パスの場合
+            }
+
+            if (absolutePath.StartsWith(gameFolder, StringComparison.OrdinalIgnoreCase))
+            {
+                string relativePath = absolutePath.Substring(gameFolder.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                return string.IsNullOrEmpty(relativePath) ? null : relativePath;
+            }
+
+            // games/{game_id}/フォルダ外のパスは絶対パスのまま保存
+            return absolutePath;
+        }
+
+        /// <summary>
+        /// コピー後にコピー先フォルダからの相対パスに変換
+        /// コピー後は必ずコピー先フォルダ内にあるはずなので、相対パスに変換する
+        /// </summary>
+        private string ConvertToRelativePathAfterCopy(string absolutePath, string destinationGameFolder)
+        {
+            if (string.IsNullOrEmpty(absolutePath))
+            {
+                return null;
+            }
+
+            // 既に相対パスの場合はそのまま返す
+            if (!Path.IsPathRooted(absolutePath))
+            {
+                return absolutePath;
+            }
+
+            // パスを正規化（大文字小文字を区別しない比較のため）
+            string normalizedAbsolutePath = Path.GetFullPath(absolutePath);
+            string normalizedDestinationFolder = Path.GetFullPath(destinationGameFolder);
+
+            // コピー先フォルダ内のパスか確認
+            if (normalizedAbsolutePath.StartsWith(normalizedDestinationFolder, StringComparison.OrdinalIgnoreCase))
+            {
+                // コピー先フォルダからの相対パスに変換
+                string relativePath = normalizedAbsolutePath.Substring(normalizedDestinationFolder.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                // 空の場合はファイル名のみを返す（ルートフォルダ内のファイルの場合）
+                return string.IsNullOrEmpty(relativePath) ? Path.GetFileName(normalizedAbsolutePath) : relativePath;
+            }
+
+            // コピー先フォルダ外のパスは警告を出して絶対パスのまま返す（フォールバック）
+            // 通常は発生しないはずだが、手動でパスを変更した場合などに対応
+            Console.WriteLine($"[警告] パスがコピー先フォルダ内にありません。絶対パスのまま保存します: {absolutePath}");
+            Console.WriteLine($"[警告] コピー先フォルダ: {destinationGameFolder}");
+            return absolutePath;
+        }
+
+        /// <summary>
         /// OKボタンクリック
         /// </summary>
         private void btnOK_Click(object sender, EventArgs e)
@@ -407,10 +487,29 @@ namespace GCTonePrism.Manager
                 // ゲームフォルダをコピー
                 CopyGameFolder(gameId);
 
-                // コピー元のパスをコピー先のパスに変換
+                string destinationGameFolder = PathManager.GetGameFolder(gameId);
+
+                // コピー元のパスをコピー先の絶対パスに変換
                 string executableAbsolutePath = ConvertSourcePathToDestinationPath(txtExecutablePath.Text.Trim(), gameId);
                 string thumbnailAbsolutePath = string.IsNullOrWhiteSpace(txtThumbnailPath.Text) ? null : ConvertSourcePathToDestinationPath(txtThumbnailPath.Text.Trim(), gameId);
                 string backgroundAbsolutePath = string.IsNullOrWhiteSpace(txtBackgroundPath.Text) ? null : ConvertSourcePathToDestinationPath(txtBackgroundPath.Text.Trim(), gameId);
+
+                // デバッグログ（開発時のみ）
+                Console.WriteLine($"[AddGameForm] コピー先フォルダ: {destinationGameFolder}");
+                Console.WriteLine($"[AddGameForm] 実行ファイル絶対パス: {executableAbsolutePath}");
+                Console.WriteLine($"[AddGameForm] サムネイル絶対パス: {thumbnailAbsolutePath}");
+                Console.WriteLine($"[AddGameForm] 背景絶対パス: {backgroundAbsolutePath}");
+
+                // コピー後にコピー先フォルダ（games/{game_id}/）からの相対パスに変換
+                // コピー後は必ずコピー先フォルダ内にあるはずなので、相対パスに変換する
+                string executablePath = ConvertToRelativePathAfterCopy(executableAbsolutePath, destinationGameFolder);
+                string thumbnailPath = ConvertToRelativePathAfterCopy(thumbnailAbsolutePath, destinationGameFolder);
+                string backgroundPath = ConvertToRelativePathAfterCopy(backgroundAbsolutePath, destinationGameFolder);
+
+                // デバッグログ（開発時のみ）
+                Console.WriteLine($"[AddGameForm] 実行ファイル相対パス: {executablePath}");
+                Console.WriteLine($"[AddGameForm] サムネイル相対パス: {thumbnailPath}");
+                Console.WriteLine($"[AddGameForm] 背景相対パス: {backgroundPath}");
 
                 // GameInfoオブジェクトを作成
                 var game = new GameInfo
@@ -424,20 +523,24 @@ namespace GCTonePrism.Manager
                     Difficulty = cmbDifficulty.SelectedIndex >= 0 ? cmbDifficulty.SelectedIndex + 1 : (int?)null,
                     PlayTime = cmbPlayTime.SelectedIndex >= 0 ? cmbPlayTime.SelectedIndex + 1 : (int?)null,
                     ControllerSupport = chkControllerSupport.Checked,
-                    ThumbnailPath = thumbnailAbsolutePath,
-                    BackgroundPath = backgroundAbsolutePath,
-                    ExecutablePath = executableAbsolutePath,
+                    ThumbnailPath = thumbnailPath,
+                    BackgroundPath = backgroundPath,
+                    ExecutablePath = executablePath,
                     DisplayOrder = dbManager.GetMinDisplayOrder() - 1, // 既存の最小値より1小さい値（一番上に配置）
                     IsVisible = true, // 新規追加のゲームは常にランチャーに表示
                     Controls = null, // 後で実装
                     KeyMapping = null // 後で実装
                 };
 
-                // ジャンルを処理（カンマ区切り）
-                if (!string.IsNullOrWhiteSpace(txtGenre.Text) && 
-                    !txtGenre.Text.Contains("（カンマ区切りで複数入力可）"))
+                // ジャンルを処理（チェックボックスから選択されたものを取得）
+                game.Genre = new List<string>();
+                for (int i = 0; i < clbGenre.CheckedItems.Count; i++)
                 {
-                    game.Genre = txtGenre.Text.Split(',').Select(g => g.Trim()).Where(g => !string.IsNullOrEmpty(g)).ToList();
+                    string genre = clbGenre.CheckedItems[i].ToString();
+                    if (!string.IsNullOrEmpty(genre))
+                    {
+                        game.Genre.Add(genre);
+                    }
                 }
 
                 // 製作者情報を設定
