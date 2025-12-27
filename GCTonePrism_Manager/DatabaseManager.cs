@@ -20,7 +20,119 @@ namespace GCTonePrism.Manager
         public DatabaseManager()
         {
             string dbPath = PathManager.DatabasePath;
-            connectionString = $"Data Source={dbPath}";
+            // WALモードとタイムアウト設定を追加
+            // Journal Mode=WAL: 同時アクセスを可能にする
+            // Busy Timeout=5000: データベースロック時の待機時間（5秒）
+            connectionString = $"Data Source={dbPath};Journal Mode=WAL;Busy Timeout=5000;";
+        }
+
+        /// <summary>
+        /// データベース操作をリトライ機構付きで実行
+        /// ネットワークドライブ経由での一時的なエラーに対応
+        /// </summary>
+        private T ExecuteWithRetry<T>(Func<T> operation, int maxRetries = 3)
+        {
+            int retryCount = 0;
+            while (retryCount < maxRetries)
+            {
+                try
+                {
+                    return operation();
+                }
+                catch (SQLiteException ex) when (ex.ResultCode == SQLiteErrorCode.Busy || 
+                                                  ex.ResultCode == SQLiteErrorCode.Locked)
+                {
+                    retryCount++;
+                    if (retryCount >= maxRetries)
+                    {
+                        // 最大リトライ回数に達した場合は例外を再スロー
+                        throw;
+                    }
+                    
+                    // 指数バックオフで待機（50ms, 100ms, 200ms）
+                    int waitTime = 50 * (int)Math.Pow(2, retryCount - 1);
+                    Console.WriteLine($"[DatabaseManager] データベースがロックされています。{waitTime}ms待機してリトライします（{retryCount}/{maxRetries - 1}）");
+                    System.Threading.Thread.Sleep(waitTime);
+                }
+            }
+            
+            throw new Exception("最大リトライ回数に達しました");
+        }
+
+        /// <summary>
+        /// データベース操作をリトライ機構付きで実行（戻り値なし）
+        /// </summary>
+        private void ExecuteWithRetry(Action operation, int maxRetries = 3)
+        {
+            ExecuteWithRetry<object>(() =>
+            {
+                operation();
+                return null;
+            }, maxRetries);
+        }
+
+        /// <summary>
+        /// SQLiteExceptionから分かりやすいエラーメッセージを取得
+        /// </summary>
+        public static string GetUserFriendlyErrorMessage(SQLiteException ex)
+        {
+            switch (ex.ResultCode)
+            {
+                case SQLiteErrorCode.Busy:
+                case SQLiteErrorCode.Locked:
+                    return "データベースが使用中です。\n\n" +
+                           "ランチャーが起動中の可能性があります。\n" +
+                           "しばらく待ってから再試行してください。";
+                case SQLiteErrorCode.Corrupt:
+                    return "データベースが破損しています。\n\n" +
+                           "データベースリセット機能を使用して初期化してください。";
+                case SQLiteErrorCode.ReadOnly:
+                    return "データベースが読み取り専用です。\n\n" +
+                           "書き込み権限を確認してください。";
+                case SQLiteErrorCode.Full:
+                    return "ディスク容量が不足しています。\n\n" +
+                           "空き容量を確保してから再試行してください。";
+                default:
+                    return $"データベースエラーが発生しました。\n\n{ex.Message}";
+            }
+        }
+
+        /// <summary>
+        /// データベース接続を開き、WALモードを有効化
+        /// 既存のデータベースにも適用可能
+        /// </summary>
+        private void OpenConnectionWithWalMode(SQLiteConnection connection)
+        {
+            connection.Open();
+            EnsureWalMode(connection);
+        }
+
+        /// <summary>
+        /// WALモードを有効化（接続時に常に確認・設定）
+        /// 既存のデータベースにも適用可能
+        /// </summary>
+        private void EnsureWalMode(SQLiteConnection connection)
+        {
+            try
+            {
+                using (var command = new SQLiteCommand("PRAGMA journal_mode=WAL;", connection))
+                {
+                    var result = command.ExecuteScalar()?.ToString();
+                    if (result != null && result.ToLower() == "wal")
+                    {
+                        Console.WriteLine("[DatabaseManager] WALモードが有効です");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[DatabaseManager] WALモードを設定しました（以前: {result}）");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DatabaseManager] WALモード設定エラー: {ex.Message}");
+                // エラーが発生しても続行（WALモードが使えない環境の可能性）
+            }
         }
 
         /// <summary>
@@ -30,7 +142,7 @@ namespace GCTonePrism.Manager
         {
             using (var connection = new SQLiteConnection(connectionString))
             {
-                connection.Open();
+                OpenConnectionWithWalMode(connection);
 
                 // developersテーブルのマイグレーション（last_nameのNOT NULL制約を削除）
                 MigrateDevelopersTable(connection);
@@ -167,7 +279,7 @@ namespace GCTonePrism.Manager
         {
             using (var connection = new SQLiteConnection(connectionString))
             {
-                connection.Open();
+                OpenConnectionWithWalMode(connection);
 
                 // 外部キー制約を無効化
                 using (var command = new SQLiteCommand("PRAGMA foreign_keys = OFF", connection))
@@ -374,7 +486,7 @@ namespace GCTonePrism.Manager
             {
                 using (var connection = new SQLiteConnection(connectionString))
                 {
-                    connection.Open();
+                    OpenConnectionWithWalMode(connection);
 
                     var sql = "SELECT name FROM sqlite_master WHERE type='table' AND name='games'";
                     using (var command = new SQLiteCommand(sql, connection))
@@ -399,7 +511,7 @@ namespace GCTonePrism.Manager
         {
             using (var connection = new SQLiteConnection(connectionString))
             {
-                connection.Open();
+                OpenConnectionWithWalMode(connection);
 
                 var sql = "SELECT MIN(display_order) FROM games WHERE display_order IS NOT NULL";
                 using (var command = new SQLiteCommand(sql, connection))
@@ -425,7 +537,7 @@ namespace GCTonePrism.Manager
 
             using (var connection = new SQLiteConnection(connectionString))
             {
-                connection.Open();
+                OpenConnectionWithWalMode(connection);
 
                 var sql = "SELECT * FROM games ORDER BY display_order, title";
                 using (var command = new SQLiteCommand(sql, connection))
@@ -451,7 +563,7 @@ namespace GCTonePrism.Manager
         {
             using (var connection = new SQLiteConnection(connectionString))
             {
-                connection.Open();
+                OpenConnectionWithWalMode(connection);
 
                 var sql = "SELECT * FROM games WHERE game_id = @gameId";
                 using (var command = new SQLiteCommand(sql, connection))
@@ -479,54 +591,57 @@ namespace GCTonePrism.Manager
         /// </summary>
         public void AddGame(GameInfo game)
         {
-            using (var connection = new SQLiteConnection(connectionString))
+            ExecuteWithRetry(() =>
             {
-                connection.Open();
-
-                using (var transaction = connection.BeginTransaction())
+                using (var connection = new SQLiteConnection(connectionString))
                 {
-                    try
+                    OpenConnectionWithWalMode(connection);
+
+                    using (var transaction = connection.BeginTransaction())
                     {
-                        // ゲーム情報を挿入
-                        var sql = @"
-                            INSERT INTO games (
-                                game_id, title, description, release_year, genre,
-                                min_players, max_players, difficulty, play_time,
-                                controller_support,
-                                thumbnail_path, background_path, executable_path,
-                                display_order, is_visible, controls, key_mapping
-                            ) VALUES (
-                                @gameId, @title, @description, @releaseYear, @genre,
-                                @minPlayers, @maxPlayers, @difficulty, @playTime,
-                                @controllerSupport,
-                                @thumbnailPath, @backgroundPath, @executablePath,
-                                @displayOrder, @isVisible, @controls, @keyMapping
-                            )";
-
-                        using (var command = new SQLiteCommand(sql, connection, transaction))
+                        try
                         {
-                            AddGameParameters(command, game);
-                            command.ExecuteNonQuery();
-                        }
+                            // ゲーム情報を挿入
+                            var sql = @"
+                                INSERT INTO games (
+                                    game_id, title, description, release_year, genre,
+                                    min_players, max_players, difficulty, play_time,
+                                    controller_support,
+                                    thumbnail_path, background_path, executable_path,
+                                    display_order, is_visible, controls, key_mapping
+                                ) VALUES (
+                                    @gameId, @title, @description, @releaseYear, @genre,
+                                    @minPlayers, @maxPlayers, @difficulty, @playTime,
+                                    @controllerSupport,
+                                    @thumbnailPath, @backgroundPath, @executablePath,
+                                    @displayOrder, @isVisible, @controls, @keyMapping
+                                )";
 
-                        // 製作者情報を挿入
-                        if (game.Developers != null)
-                        {
-                            foreach (var developer in game.Developers)
+                            using (var command = new SQLiteCommand(sql, connection, transaction))
                             {
-                                AddDeveloper(connection, transaction, game.GameId, developer);
+                                AddGameParameters(command, game);
+                                command.ExecuteNonQuery();
                             }
-                        }
 
-                        transaction.Commit();
-                    }
-                    catch
-                    {
-                        transaction.Rollback();
-                        throw;
+                            // 製作者情報を挿入
+                            if (game.Developers != null)
+                            {
+                                foreach (var developer in game.Developers)
+                                {
+                                    AddDeveloper(connection, transaction, game.GameId, developer);
+                                }
+                            }
+
+                            transaction.Commit();
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
                     }
                 }
-            }
+            });
         }
 
         /// <summary>
@@ -534,62 +649,65 @@ namespace GCTonePrism.Manager
         /// </summary>
         public void UpdateGame(GameInfo game)
         {
-            using (var connection = new SQLiteConnection(connectionString))
+            ExecuteWithRetry(() =>
             {
-                connection.Open();
-
-                using (var transaction = connection.BeginTransaction())
+                using (var connection = new SQLiteConnection(connectionString))
                 {
-                    try
+                    OpenConnectionWithWalMode(connection);
+
+                    using (var transaction = connection.BeginTransaction())
                     {
-                        // ゲーム情報を更新
-                        var sql = @"
-                            UPDATE games SET
-                                title = @title,
-                                description = @description,
-                                release_year = @releaseYear,
-                                genre = @genre,
-                                min_players = @minPlayers,
-                                max_players = @maxPlayers,
-                                difficulty = @difficulty,
-                                play_time = @playTime,
-                                controller_support = @controllerSupport,
-                                thumbnail_path = @thumbnailPath,
-                                background_path = @backgroundPath,
-                                executable_path = @executablePath,
-                                display_order = @displayOrder,
-                                is_visible = @isVisible,
-                                controls = @controls,
-                                key_mapping = @keyMapping
-                            WHERE game_id = @gameId";
-
-                        using (var command = new SQLiteCommand(sql, connection, transaction))
+                        try
                         {
-                            AddGameParameters(command, game);
-                            command.ExecuteNonQuery();
-                        }
+                            // ゲーム情報を更新
+                            var sql = @"
+                                UPDATE games SET
+                                    title = @title,
+                                    description = @description,
+                                    release_year = @releaseYear,
+                                    genre = @genre,
+                                    min_players = @minPlayers,
+                                    max_players = @maxPlayers,
+                                    difficulty = @difficulty,
+                                    play_time = @playTime,
+                                    controller_support = @controllerSupport,
+                                    thumbnail_path = @thumbnailPath,
+                                    background_path = @backgroundPath,
+                                    executable_path = @executablePath,
+                                    display_order = @displayOrder,
+                                    is_visible = @isVisible,
+                                    controls = @controls,
+                                    key_mapping = @keyMapping
+                                WHERE game_id = @gameId";
 
-                        // 既存の製作者情報を削除
-                        DeleteDevelopersByGameId(connection, transaction, game.GameId);
-
-                        // 新しい製作者情報を挿入
-                        if (game.Developers != null)
-                        {
-                            foreach (var developer in game.Developers)
+                            using (var command = new SQLiteCommand(sql, connection, transaction))
                             {
-                                AddDeveloper(connection, transaction, game.GameId, developer);
+                                AddGameParameters(command, game);
+                                command.ExecuteNonQuery();
                             }
-                        }
 
-                        transaction.Commit();
-                    }
-                    catch
-                    {
-                        transaction.Rollback();
-                        throw;
+                            // 既存の製作者情報を削除
+                            DeleteDevelopersByGameId(connection, transaction, game.GameId);
+
+                            // 新しい製作者情報を挿入
+                            if (game.Developers != null)
+                            {
+                                foreach (var developer in game.Developers)
+                                {
+                                    AddDeveloper(connection, transaction, game.GameId, developer);
+                                }
+                            }
+
+                            transaction.Commit();
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
                     }
                 }
-            }
+            });
         }
 
         /// <summary>
@@ -597,18 +715,22 @@ namespace GCTonePrism.Manager
         /// </summary>
         public void DeleteGame(string gameId)
         {
+            // データベース削除はリトライ機構付きで実行
+            ExecuteWithRetry(() =>
+            {
             using (var connection = new SQLiteConnection(connectionString))
             {
-                connection.Open();
+                OpenConnectionWithWalMode(connection);
 
                 // FOREIGN KEY制約により、関連するdevelopers、play_records、surveysも自動削除される
-                var sql = "DELETE FROM games WHERE game_id = @gameId";
-                using (var command = new SQLiteCommand(sql, connection))
-                {
-                    command.Parameters.AddWithValue("@gameId", gameId);
-                    command.ExecuteNonQuery();
+                    var sql = "DELETE FROM games WHERE game_id = @gameId";
+                    using (var command = new SQLiteCommand(sql, connection))
+                    {
+                        command.Parameters.AddWithValue("@gameId", gameId);
+                        command.ExecuteNonQuery();
+                    }
                 }
-            }
+            });
 
             // gamesフォルダ内の対応するゲームフォルダを削除
             string gameFolder = PathManager.GetGameFolder(gameId);
