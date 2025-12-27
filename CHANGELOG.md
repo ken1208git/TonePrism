@@ -79,6 +79,40 @@
 
 ## Manager（管理ソフト）
 
+### [Manager v0.2.0] - 2025-12-27
+
+#### Added
+
+- ジャンル選択機能の改善
+  - マイニンテンドーストア準拠の16ジャンルを定義（GenreList.cs）
+  - ジャンル入力UIをTextBoxからCheckedListBoxに変更（複数選択可能）
+  - 既存のジャンルデータも正しく読み込めるように実装
+
+#### Changed
+
+- 製作者情報の登録ルールを変更
+  - 姓（LastName）を空欄でも登録可能に変更
+  - データベースのdevelopersテーブルのlast_nameカラムのNOT NULL制約を削除
+  - 既存データベースのマイグレーション処理を追加
+- ファイルパスの保存方式を変更
+  - サムネイル・背景・実行ファイルのパスを相対パスで保存（games/{game_id}/フォルダからの相対パス）
+  - サブフォルダ内のファイルも正しく相対パスで保存されるように改善
+  - パス入力欄を編集可能に変更（ReadOnlyをfalseに）
+- 実行ファイルの自動検出を改善
+  - UnityCrashHandlerなどのクラッシュハンドラーを除外
+  - 除外パターン: .console.exe, UnityCrashHandler64.exe, UnityCrashHandler32.exe など
+
+#### Fixed
+
+- ジャンルUIの表示崩れを修正（CheckedListBoxの高さと下のコントロールの位置を調整）
+- IndexOutOfRangeExceptionを修正（CheckedListBoxの操作を安全に）
+- サブフォルダ内の実行ファイルの相対パス保存を修正
+
+#### Technical
+
+- データベース確認ログに相対パス/絶対パスの判定を追加
+- デバッグログを追加（開発時の確認用）
+
 ### [Manager v0.1.1] - 2025-12-26
 
 #### Changed
