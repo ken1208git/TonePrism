@@ -37,6 +37,8 @@ namespace GCTonePrism.Manager
             this.menuStrip1 = new System.Windows.Forms.MenuStrip();
             this.menuSettings = new System.Windows.Forms.ToolStripMenuItem();
             this.menuItemResetDatabase = new System.Windows.Forms.ToolStripMenuItem();
+            this.toolStripSeparator3 = new System.Windows.Forms.ToolStripSeparator();
+            this.menuItemVersionInfo = new System.Windows.Forms.ToolStripMenuItem();
             this.dgvGames = new System.Windows.Forms.DataGridView();
             this.statusStrip1 = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
@@ -112,7 +114,9 @@ namespace GCTonePrism.Manager
             // menuSettings
             // 
             this.menuSettings.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.menuItemResetDatabase});
+            this.menuItemResetDatabase,
+            this.toolStripSeparator3,
+            this.menuItemVersionInfo});
             this.menuSettings.Name = "menuSettings";
             this.menuSettings.Size = new System.Drawing.Size(67, 24);
             this.menuSettings.Text = "設定(&S)";
@@ -123,6 +127,18 @@ namespace GCTonePrism.Manager
             this.menuItemResetDatabase.Size = new System.Drawing.Size(224, 26);
             this.menuItemResetDatabase.Text = "データベースリセット";
             this.menuItemResetDatabase.Click += new System.EventHandler(this.menuItemResetDatabase_Click);
+            // 
+            // toolStripSeparator3
+            // 
+            this.toolStripSeparator3.Name = "toolStripSeparator3";
+            this.toolStripSeparator3.Size = new System.Drawing.Size(221, 6);
+            // 
+            // menuItemVersionInfo
+            // 
+            this.menuItemVersionInfo.Name = "menuItemVersionInfo";
+            this.menuItemVersionInfo.Size = new System.Drawing.Size(224, 26);
+            this.menuItemVersionInfo.Text = "バージョン情報";
+            this.menuItemVersionInfo.Click += new System.EventHandler(this.menuItemVersionInfo_Click);
             // 
             // dgvGames
             // 
@@ -198,6 +214,8 @@ namespace GCTonePrism.Manager
         private System.Windows.Forms.MenuStrip menuStrip1;
         private System.Windows.Forms.ToolStripMenuItem menuSettings;
         private System.Windows.Forms.ToolStripMenuItem menuItemResetDatabase;
+        private System.Windows.Forms.ToolStripSeparator toolStripSeparator3;
+        private System.Windows.Forms.ToolStripMenuItem menuItemVersionInfo;
         private System.Windows.Forms.DataGridView dgvGames;
         private System.Windows.Forms.StatusStrip statusStrip1;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
