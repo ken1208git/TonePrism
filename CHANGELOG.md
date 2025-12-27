@@ -79,6 +79,14 @@
 
 ## Manager（管理ソフト）
 
+### [Manager v0.4.1] - 2025-12-27
+
+#### Fixed
+
+- developers.last_nameがNULLの場合の処理を修正
+  - `DatabaseManager.GetDevelopersByGameId`でlast_nameがNULLの場合にIsDBNullでチェックするように修正
+  - `DeveloperInfo.FullName`でLastNameがNULLの場合はFirstNameのみを返すように修正
+
 ### [Manager v0.4.0] - 2025-12-27
 
 #### Added

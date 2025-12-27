@@ -38,7 +38,14 @@ namespace GCTonePrism.Manager.Models
         /// </summary>
         public string FullName
         {
-            get { return LastName + " " + FirstName; }
+            get 
+            { 
+                if (string.IsNullOrEmpty(LastName))
+                {
+                    return FirstName;
+                }
+                return LastName + " " + FirstName; 
+            }
         }
 
         /// <summary>

@@ -772,7 +772,7 @@ namespace GCTonePrism.Manager
                         {
                             Id = reader.GetInt32(reader.GetOrdinal("id")),
                             GameId = reader.GetString(reader.GetOrdinal("game_id")),
-                            LastName = reader.GetString(reader.GetOrdinal("last_name")),
+                            LastName = reader.IsDBNull(reader.GetOrdinal("last_name")) ? null : reader.GetString(reader.GetOrdinal("last_name")),
                             FirstName = reader.GetString(reader.GetOrdinal("first_name")),
                             Grade = reader.IsDBNull(reader.GetOrdinal("grade")) ? null : reader.GetString(reader.GetOrdinal("grade"))
                         });
