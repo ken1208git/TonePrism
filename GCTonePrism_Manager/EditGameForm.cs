@@ -379,6 +379,15 @@ namespace GCTonePrism.Manager
                 DialogResult = DialogResult.OK;
                 Close();
             }
+            catch (System.Data.SQLite.SQLiteException ex)
+            {
+                string errorMessage = DatabaseManager.GetUserFriendlyErrorMessage(ex);
+                MessageBox.Show(
+                    $"ゲームの更新に失敗しました。\n\n{errorMessage}",
+                    "データベースエラー",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
             catch (Exception ex)
             {
                 MessageBox.Show(

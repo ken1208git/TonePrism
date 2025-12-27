@@ -320,6 +320,15 @@ namespace GCTonePrism.Manager
                     }
                 }
             }
+            catch (System.Data.SQLite.SQLiteException ex)
+            {
+                string errorMessage = DatabaseManager.GetUserFriendlyErrorMessage(ex);
+                MessageBox.Show(
+                    $"表示順序の更新に失敗しました。\n\n{errorMessage}",
+                    "データベースエラー",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
             catch (Exception ex)
             {
                 MessageBox.Show(
@@ -435,6 +444,15 @@ namespace GCTonePrism.Manager
                         MessageBoxIcon.Information);
                     
                     LoadGames();
+                }
+                catch (System.Data.SQLite.SQLiteException ex)
+                {
+                    string errorMessage = DatabaseManager.GetUserFriendlyErrorMessage(ex);
+                    MessageBox.Show(
+                        $"ゲームの削除に失敗しました。\n\n{errorMessage}",
+                        "データベースエラー",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
                 }
                 catch (Exception ex)
                 {

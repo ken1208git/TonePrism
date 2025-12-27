@@ -553,6 +553,28 @@ namespace GCTonePrism.Manager
                 DialogResult = DialogResult.OK;
                 Close();
             }
+            catch (System.Data.SQLite.SQLiteException ex)
+            {
+                // エラーが発生した場合、コピーしたフォルダを削除（ロールバック）
+                if (!string.IsNullOrEmpty(destinationGameFolder) && Directory.Exists(destinationGameFolder))
+                {
+                    try
+                    {
+                        Directory.Delete(destinationGameFolder, true);
+                    }
+                    catch
+                    {
+                        // 削除に失敗しても続行
+                    }
+                }
+
+                string errorMessage = DatabaseManager.GetUserFriendlyErrorMessage(ex);
+                MessageBox.Show(
+                    $"ゲームの追加に失敗しました。\n\n{errorMessage}",
+                    "データベースエラー",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
             catch (Exception ex)
             {
                 // エラーが発生した場合、コピーしたフォルダを削除（ロールバック）
