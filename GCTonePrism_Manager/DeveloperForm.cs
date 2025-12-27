@@ -127,14 +127,7 @@ namespace GCTonePrism.Manager
         /// </summary>
         private bool ValidateInput()
         {
-            // 姓
-            if (string.IsNullOrWhiteSpace(txtLastName.Text))
-            {
-                MessageBox.Show("姓を入力してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                txtLastName.Focus();
-                return false;
-            }
-
+            // 姓は空欄でも可（姓が不明な場合に対応）
             // 名
             if (string.IsNullOrWhiteSpace(txtFirstName.Text))
             {

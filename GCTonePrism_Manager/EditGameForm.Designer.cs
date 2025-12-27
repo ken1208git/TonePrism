@@ -38,7 +38,7 @@ namespace GCTonePrism.Manager
             this.lblDescription = new System.Windows.Forms.Label();
             this.txtDescription = new System.Windows.Forms.TextBox();
             this.lblGenre = new System.Windows.Forms.Label();
-            this.txtGenre = new System.Windows.Forms.TextBox();
+            this.clbGenre = new System.Windows.Forms.CheckedListBox();
             this.lblReleaseYear = new System.Windows.Forms.Label();
             this.numReleaseYear = new System.Windows.Forms.NumericUpDown();
             this.lblMinPlayers = new System.Windows.Forms.Label();
@@ -160,18 +160,19 @@ namespace GCTonePrism.Manager
             this.lblGenre.TabIndex = 9;
             this.lblGenre.Text = "ジャンル";
             // 
-            // txtGenre
+            // clbGenre
             // 
-            this.txtGenre.Location = new System.Drawing.Point(120, 164);
-            this.txtGenre.Name = "txtGenre";
-            this.txtGenre.Size = new System.Drawing.Size(300, 22);
-            this.txtGenre.TabIndex = 10;
-            this.txtGenre.Text = "（カンマ区切りで複数入力可）";
+            this.clbGenre.CheckOnClick = true;
+            this.clbGenre.FormattingEnabled = true;
+            this.clbGenre.Location = new System.Drawing.Point(120, 164);
+            this.clbGenre.Name = "clbGenre";
+            this.clbGenre.Size = new System.Drawing.Size(300, 200);
+            this.clbGenre.TabIndex = 10;
             // 
             // lblReleaseYear
             // 
             this.lblReleaseYear.AutoSize = true;
-            this.lblReleaseYear.Location = new System.Drawing.Point(12, 195);
+            this.lblReleaseYear.Location = new System.Drawing.Point(12, 375);
             this.lblReleaseYear.Name = "lblReleaseYear";
             this.lblReleaseYear.Size = new System.Drawing.Size(65, 15);
             this.lblReleaseYear.TabIndex = 11;
@@ -179,7 +180,7 @@ namespace GCTonePrism.Manager
             // 
             // numReleaseYear
             // 
-            this.numReleaseYear.Location = new System.Drawing.Point(120, 192);
+            this.numReleaseYear.Location = new System.Drawing.Point(120, 372);
             this.numReleaseYear.Maximum = new decimal(new int[] {
             2100,
             0,
@@ -202,7 +203,7 @@ namespace GCTonePrism.Manager
             // lblMinPlayers
             // 
             this.lblMinPlayers.AutoSize = true;
-            this.lblMinPlayers.Location = new System.Drawing.Point(12, 223);
+            this.lblMinPlayers.Location = new System.Drawing.Point(12, 403);
             this.lblMinPlayers.Name = "lblMinPlayers";
             this.lblMinPlayers.Size = new System.Drawing.Size(104, 15);
             this.lblMinPlayers.TabIndex = 13;
@@ -210,7 +211,7 @@ namespace GCTonePrism.Manager
             // 
             // numMinPlayers
             // 
-            this.numMinPlayers.Location = new System.Drawing.Point(120, 220);
+            this.numMinPlayers.Location = new System.Drawing.Point(120, 400);
             this.numMinPlayers.Minimum = new decimal(new int[] {
             1,
             0,
@@ -228,7 +229,7 @@ namespace GCTonePrism.Manager
             // lblMaxPlayers
             // 
             this.lblMaxPlayers.AutoSize = true;
-            this.lblMaxPlayers.Location = new System.Drawing.Point(260, 223);
+            this.lblMaxPlayers.Location = new System.Drawing.Point(260, 403);
             this.lblMaxPlayers.Name = "lblMaxPlayers";
             this.lblMaxPlayers.Size = new System.Drawing.Size(104, 15);
             this.lblMaxPlayers.TabIndex = 15;
@@ -236,7 +237,7 @@ namespace GCTonePrism.Manager
             // 
             // numMaxPlayers
             // 
-            this.numMaxPlayers.Location = new System.Drawing.Point(370, 220);
+            this.numMaxPlayers.Location = new System.Drawing.Point(370, 400);
             this.numMaxPlayers.Minimum = new decimal(new int[] {
             1,
             0,
@@ -254,7 +255,7 @@ namespace GCTonePrism.Manager
             // lblDifficulty
             // 
             this.lblDifficulty.AutoSize = true;
-            this.lblDifficulty.Location = new System.Drawing.Point(12, 251);
+            this.lblDifficulty.Location = new System.Drawing.Point(12, 431);
             this.lblDifficulty.Name = "lblDifficulty";
             this.lblDifficulty.Size = new System.Drawing.Size(52, 15);
             this.lblDifficulty.TabIndex = 17;
@@ -264,7 +265,7 @@ namespace GCTonePrism.Manager
             // 
             this.cmbDifficulty.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbDifficulty.FormattingEnabled = true;
-            this.cmbDifficulty.Location = new System.Drawing.Point(120, 248);
+            this.cmbDifficulty.Location = new System.Drawing.Point(120, 428);
             this.cmbDifficulty.Name = "cmbDifficulty";
             this.cmbDifficulty.Size = new System.Drawing.Size(200, 23);
             this.cmbDifficulty.TabIndex = 18;
@@ -272,7 +273,7 @@ namespace GCTonePrism.Manager
             // lblPlayTime
             // 
             this.lblPlayTime.AutoSize = true;
-            this.lblPlayTime.Location = new System.Drawing.Point(340, 251);
+            this.lblPlayTime.Location = new System.Drawing.Point(340, 431);
             this.lblPlayTime.Name = "lblPlayTime";
             this.lblPlayTime.Size = new System.Drawing.Size(78, 15);
             this.lblPlayTime.TabIndex = 19;
@@ -282,7 +283,7 @@ namespace GCTonePrism.Manager
             // 
             this.cmbPlayTime.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbPlayTime.FormattingEnabled = true;
-            this.cmbPlayTime.Location = new System.Drawing.Point(420, 248);
+            this.cmbPlayTime.Location = new System.Drawing.Point(420, 428);
             this.cmbPlayTime.Name = "cmbPlayTime";
             this.cmbPlayTime.Size = new System.Drawing.Size(200, 23);
             this.cmbPlayTime.TabIndex = 20;
@@ -290,7 +291,7 @@ namespace GCTonePrism.Manager
             // chkControllerSupport
             // 
             this.chkControllerSupport.AutoSize = true;
-            this.chkControllerSupport.Location = new System.Drawing.Point(12, 277);
+            this.chkControllerSupport.Location = new System.Drawing.Point(12, 457);
             this.chkControllerSupport.Name = "chkControllerSupport";
             this.chkControllerSupport.Size = new System.Drawing.Size(149, 19);
             this.chkControllerSupport.TabIndex = 21;
@@ -300,7 +301,7 @@ namespace GCTonePrism.Manager
             // chkIsVisible
             // 
             this.chkIsVisible.AutoSize = true;
-            this.chkIsVisible.Location = new System.Drawing.Point(180, 277);
+            this.chkIsVisible.Location = new System.Drawing.Point(180, 457);
             this.chkIsVisible.Name = "chkIsVisible";
             this.chkIsVisible.Size = new System.Drawing.Size(136, 19);
             this.chkIsVisible.TabIndex = 22;
@@ -310,7 +311,7 @@ namespace GCTonePrism.Manager
             // lblThumbnailPath
             // 
             this.lblThumbnailPath.AutoSize = true;
-            this.lblThumbnailPath.Location = new System.Drawing.Point(12, 305);
+            this.lblThumbnailPath.Location = new System.Drawing.Point(12, 485);
             this.lblThumbnailPath.Name = "lblThumbnailPath";
             this.lblThumbnailPath.Size = new System.Drawing.Size(104, 15);
             this.lblThumbnailPath.TabIndex = 23;
@@ -318,15 +319,15 @@ namespace GCTonePrism.Manager
             // 
             // txtThumbnailPath
             // 
-            this.txtThumbnailPath.Location = new System.Drawing.Point(120, 302);
+            this.txtThumbnailPath.Location = new System.Drawing.Point(120, 482);
             this.txtThumbnailPath.Name = "txtThumbnailPath";
-            this.txtThumbnailPath.ReadOnly = true;
+            this.txtThumbnailPath.ReadOnly = false;
             this.txtThumbnailPath.Size = new System.Drawing.Size(400, 22);
             this.txtThumbnailPath.TabIndex = 24;
             // 
             // btnSelectThumbnail
             // 
-            this.btnSelectThumbnail.Location = new System.Drawing.Point(526, 301);
+            this.btnSelectThumbnail.Location = new System.Drawing.Point(526, 481);
             this.btnSelectThumbnail.Name = "btnSelectThumbnail";
             this.btnSelectThumbnail.Size = new System.Drawing.Size(94, 23);
             this.btnSelectThumbnail.TabIndex = 25;
@@ -337,7 +338,7 @@ namespace GCTonePrism.Manager
             // lblBackgroundPath
             // 
             this.lblBackgroundPath.AutoSize = true;
-            this.lblBackgroundPath.Location = new System.Drawing.Point(12, 333);
+            this.lblBackgroundPath.Location = new System.Drawing.Point(12, 513);
             this.lblBackgroundPath.Name = "lblBackgroundPath";
             this.lblBackgroundPath.Size = new System.Drawing.Size(78, 15);
             this.lblBackgroundPath.TabIndex = 26;
@@ -345,15 +346,15 @@ namespace GCTonePrism.Manager
             // 
             // txtBackgroundPath
             // 
-            this.txtBackgroundPath.Location = new System.Drawing.Point(120, 330);
+            this.txtBackgroundPath.Location = new System.Drawing.Point(120, 510);
             this.txtBackgroundPath.Name = "txtBackgroundPath";
-            this.txtBackgroundPath.ReadOnly = true;
+            this.txtBackgroundPath.ReadOnly = false;
             this.txtBackgroundPath.Size = new System.Drawing.Size(400, 22);
             this.txtBackgroundPath.TabIndex = 27;
             // 
             // btnSelectBackground
             // 
-            this.btnSelectBackground.Location = new System.Drawing.Point(526, 329);
+            this.btnSelectBackground.Location = new System.Drawing.Point(526, 509);
             this.btnSelectBackground.Name = "btnSelectBackground";
             this.btnSelectBackground.Size = new System.Drawing.Size(94, 23);
             this.btnSelectBackground.TabIndex = 28;
@@ -364,7 +365,7 @@ namespace GCTonePrism.Manager
             // lblExecutablePath
             // 
             this.lblExecutablePath.AutoSize = true;
-            this.lblExecutablePath.Location = new System.Drawing.Point(12, 361);
+            this.lblExecutablePath.Location = new System.Drawing.Point(12, 541);
             this.lblExecutablePath.Name = "lblExecutablePath";
             this.lblExecutablePath.Size = new System.Drawing.Size(104, 15);
             this.lblExecutablePath.TabIndex = 29;
@@ -372,15 +373,15 @@ namespace GCTonePrism.Manager
             // 
             // txtExecutablePath
             // 
-            this.txtExecutablePath.Location = new System.Drawing.Point(120, 358);
+            this.txtExecutablePath.Location = new System.Drawing.Point(120, 538);
             this.txtExecutablePath.Name = "txtExecutablePath";
-            this.txtExecutablePath.ReadOnly = true;
+            this.txtExecutablePath.ReadOnly = false;
             this.txtExecutablePath.Size = new System.Drawing.Size(400, 22);
             this.txtExecutablePath.TabIndex = 30;
             // 
             // btnSelectExecutable
             // 
-            this.btnSelectExecutable.Location = new System.Drawing.Point(526, 357);
+            this.btnSelectExecutable.Location = new System.Drawing.Point(526, 537);
             this.btnSelectExecutable.Name = "btnSelectExecutable";
             this.btnSelectExecutable.Size = new System.Drawing.Size(94, 23);
             this.btnSelectExecutable.TabIndex = 31;
@@ -391,7 +392,7 @@ namespace GCTonePrism.Manager
             // lblDevelopers
             // 
             this.lblDevelopers.AutoSize = true;
-            this.lblDevelopers.Location = new System.Drawing.Point(12, 395);
+            this.lblDevelopers.Location = new System.Drawing.Point(12, 569);
             this.lblDevelopers.Name = "lblDevelopers";
             this.lblDevelopers.Size = new System.Drawing.Size(65, 15);
             this.lblDevelopers.TabIndex = 34;
@@ -400,7 +401,7 @@ namespace GCTonePrism.Manager
             // dgvDevelopers
             // 
             this.dgvDevelopers.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-            this.dgvDevelopers.Location = new System.Drawing.Point(120, 392);
+            this.dgvDevelopers.Location = new System.Drawing.Point(120, 566);
             this.dgvDevelopers.Name = "dgvDevelopers";
             this.dgvDevelopers.RowHeadersWidth = 51;
             this.dgvDevelopers.Size = new System.Drawing.Size(427, 120);
@@ -408,7 +409,7 @@ namespace GCTonePrism.Manager
             // 
             // btnAddDeveloper
             // 
-            this.btnAddDeveloper.Location = new System.Drawing.Point(553, 392);
+            this.btnAddDeveloper.Location = new System.Drawing.Point(553, 566);
             this.btnAddDeveloper.Name = "btnAddDeveloper";
             this.btnAddDeveloper.Size = new System.Drawing.Size(75, 23);
             this.btnAddDeveloper.TabIndex = 36;
@@ -418,7 +419,7 @@ namespace GCTonePrism.Manager
             // 
             // btnEditDeveloper
             // 
-            this.btnEditDeveloper.Location = new System.Drawing.Point(553, 421);
+            this.btnEditDeveloper.Location = new System.Drawing.Point(553, 595);
             this.btnEditDeveloper.Name = "btnEditDeveloper";
             this.btnEditDeveloper.Size = new System.Drawing.Size(75, 23);
             this.btnEditDeveloper.TabIndex = 37;
@@ -428,7 +429,7 @@ namespace GCTonePrism.Manager
             // 
             // btnDeleteDeveloper
             // 
-            this.btnDeleteDeveloper.Location = new System.Drawing.Point(553, 450);
+            this.btnDeleteDeveloper.Location = new System.Drawing.Point(553, 624);
             this.btnDeleteDeveloper.Name = "btnDeleteDeveloper";
             this.btnDeleteDeveloper.Size = new System.Drawing.Size(75, 23);
             this.btnDeleteDeveloper.TabIndex = 38;
@@ -439,7 +440,7 @@ namespace GCTonePrism.Manager
             // btnOK
             // 
             this.btnOK.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnOK.Location = new System.Drawing.Point(420, 524);
+            this.btnOK.Location = new System.Drawing.Point(420, 698);
             this.btnOK.Name = "btnOK";
             this.btnOK.Size = new System.Drawing.Size(95, 30);
             this.btnOK.TabIndex = 32;
@@ -451,7 +452,7 @@ namespace GCTonePrism.Manager
             // 
             this.btnCancel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(521, 524);
+            this.btnCancel.Location = new System.Drawing.Point(521, 698);
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(95, 30);
             this.btnCancel.TabIndex = 33;
@@ -465,7 +466,7 @@ namespace GCTonePrism.Manager
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(632, 570);
+            this.ClientSize = new System.Drawing.Size(632, 744);
             this.Controls.Add(this.btnDeleteDeveloper);
             this.Controls.Add(this.btnEditDeveloper);
             this.Controls.Add(this.btnAddDeveloper);
@@ -494,7 +495,7 @@ namespace GCTonePrism.Manager
             this.Controls.Add(this.lblMinPlayers);
             this.Controls.Add(this.numReleaseYear);
             this.Controls.Add(this.lblReleaseYear);
-            this.Controls.Add(this.txtGenre);
+            this.Controls.Add(this.clbGenre);
             this.Controls.Add(this.lblGenre);
             this.Controls.Add(this.txtDescription);
             this.Controls.Add(this.lblDescription);
@@ -533,7 +534,7 @@ namespace GCTonePrism.Manager
         private System.Windows.Forms.Label lblDescription;
         private System.Windows.Forms.TextBox txtDescription;
         private System.Windows.Forms.Label lblGenre;
-        private System.Windows.Forms.TextBox txtGenre;
+        private System.Windows.Forms.CheckedListBox clbGenre;
         private System.Windows.Forms.Label lblReleaseYear;
         private System.Windows.Forms.NumericUpDown numReleaseYear;
         private System.Windows.Forms.Label lblMinPlayers;

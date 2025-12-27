@@ -56,13 +56,28 @@ namespace GCTonePrism.Manager
                 numReleaseYear.Value = DateTime.Now.Year;
             }
 
+            // ジャンルチェックボックスリストを初期化
+            clbGenre.Items.Clear();
+            foreach (var genre in GenreList.AvailableGenres)
+            {
+                clbGenre.Items.Add(genre, false);
+            }
+
+            // 既存のジャンルをチェック
             if (originalGame.Genre != null && originalGame.Genre.Count > 0)
             {
-                txtGenre.Text = string.Join(", ", originalGame.Genre);
-            }
-            else
-            {
-                txtGenre.Text = "（カンマ区切りで複数入力可）";
+                foreach (string genre in originalGame.Genre)
+                {
+                    // GenreListに含まれるジャンルのみチェック（既存データに無効なジャンルが含まれている場合に対応）
+                    if (GenreList.IsValidGenre(genre))
+                    {
+                        int index = clbGenre.Items.IndexOf(genre);
+                        if (index >= 0 && index < clbGenre.Items.Count)
+                        {
+                            clbGenre.SetItemChecked(index, true);
+                        }
+                    }
+                }
             }
 
             if (originalGame.MinPlayers.HasValue)
@@ -152,21 +167,6 @@ namespace GCTonePrism.Manager
             // ゲームフォルダの表示（既存のgames/{game_id}/フォルダを表示、編集不可）
             txtGameFolder.Text = gameFolder;
 
-            // ジャンルフィールドのプレースホルダー処理
-            txtGenre.Enter += (s, args) =>
-            {
-                if (txtGenre.Text == "（カンマ区切りで複数入力可）")
-                {
-                    txtGenre.Text = "";
-                }
-            };
-            txtGenre.Leave += (s, args) =>
-            {
-                if (string.IsNullOrWhiteSpace(txtGenre.Text))
-                {
-                    txtGenre.Text = "（カンマ区切りで複数入力可）";
-                }
-            };
 
             // 警告ラベルを非表示
             lblGameIdWarning.Visible = false;
@@ -358,15 +358,15 @@ namespace GCTonePrism.Manager
                     KeyMapping = originalGame.KeyMapping // 後で実装
                 };
 
-                // ジャンルを処理（カンマ区切り）
-                if (!string.IsNullOrWhiteSpace(txtGenre.Text) && 
-                    !txtGenre.Text.Contains("（カンマ区切りで複数入力可）"))
+                // ジャンルを処理（チェックボックスから選択されたものを取得）
+                game.Genre = new List<string>();
+                for (int i = 0; i < clbGenre.CheckedItems.Count; i++)
                 {
-                    game.Genre = txtGenre.Text.Split(',').Select(g => g.Trim()).Where(g => !string.IsNullOrEmpty(g)).ToList();
-                }
-                else
-                {
-                    game.Genre = new List<string>();
+                    string genre = clbGenre.CheckedItems[i].ToString();
+                    if (!string.IsNullOrEmpty(genre))
+                    {
+                        game.Genre.Add(genre);
+                    }
                 }
 
                 // 製作者情報は既存のものを保持

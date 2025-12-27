@@ -32,6 +32,9 @@ namespace GCTonePrism.Manager
             {
                 connection.Open();
 
+                // developersテーブルのマイグレーション（last_nameのNOT NULL制約を削除）
+                MigrateDevelopersTable(connection);
+
                 // gamesテーブルを作成
                 CreateGamesTable(connection);
 
@@ -48,6 +51,111 @@ namespace GCTonePrism.Manager
                 CreateSettingsTable(connection);
 
                 Console.WriteLine("[DatabaseManager] データベース初期化完了");
+            }
+        }
+
+        /// <summary>
+        /// developersテーブルのマイグレーション（last_nameのNOT NULL制約を削除）
+        /// </summary>
+        private void MigrateDevelopersTable(SQLiteConnection connection)
+        {
+            try
+            {
+                // developersテーブルが存在するか確認
+                var checkTableSql = "SELECT name FROM sqlite_master WHERE type='table' AND name='developers'";
+                bool tableExists = false;
+                using (var command = new SQLiteCommand(checkTableSql, connection))
+                {
+                    var result = command.ExecuteScalar();
+                    tableExists = result != null;
+                }
+
+                if (!tableExists)
+                {
+                    // テーブルが存在しない場合はマイグレーション不要
+                    return;
+                }
+
+                // テーブル定義を確認（last_nameにNOT NULL制約があるか確認）
+                var tableInfoSql = "PRAGMA table_info(developers)";
+                bool hasNotNullConstraint = false;
+                using (var command = new SQLiteCommand(tableInfoSql, connection))
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        string columnName = reader["name"].ToString();
+                        int notNull = Convert.ToInt32(reader["notnull"]);
+                        if (columnName == "last_name" && notNull == 1)
+                        {
+                            hasNotNullConstraint = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!hasNotNullConstraint)
+                {
+                    // 既にNOT NULL制約がない場合はマイグレーション不要
+                    return;
+                }
+
+                // マイグレーション実行：一時テーブルにデータをコピーして再作成
+                Console.WriteLine("[DatabaseManager] developersテーブルのマイグレーションを実行中...");
+
+                // 外部キー制約を一時的に無効化
+                using (var command = new SQLiteCommand("PRAGMA foreign_keys = OFF", connection))
+                {
+                    command.ExecuteNonQuery();
+                }
+
+                // 一時テーブルにデータをコピー
+                var copySql = @"
+                    CREATE TABLE developers_temp AS 
+                    SELECT id, game_id, last_name, first_name, grade 
+                    FROM developers";
+                using (var command = new SQLiteCommand(copySql, connection))
+                {
+                    command.ExecuteNonQuery();
+                }
+
+                // 既存テーブルを削除
+                using (var command = new SQLiteCommand("DROP TABLE developers", connection))
+                {
+                    command.ExecuteNonQuery();
+                }
+
+                // 新しいテーブルを作成（NOT NULL制約なし）
+                CreateDevelopersTable(connection);
+
+                // データを戻す
+                var restoreSql = @"
+                    INSERT INTO developers (id, game_id, last_name, first_name, grade)
+                    SELECT id, game_id, last_name, first_name, grade 
+                    FROM developers_temp";
+                using (var command = new SQLiteCommand(restoreSql, connection))
+                {
+                    command.ExecuteNonQuery();
+                }
+
+                // 一時テーブルを削除
+                using (var command = new SQLiteCommand("DROP TABLE developers_temp", connection))
+                {
+                    command.ExecuteNonQuery();
+                }
+
+                // 外部キー制約を再有効化
+                using (var command = new SQLiteCommand("PRAGMA foreign_keys = ON", connection))
+                {
+                    command.ExecuteNonQuery();
+                }
+
+                Console.WriteLine("[DatabaseManager] developersテーブルのマイグレーション完了");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DatabaseManager] developersテーブルのマイグレーションエラー: {ex.Message}");
+                // エラーが発生しても続行（既存テーブルがそのまま残る）
             }
         }
 
@@ -165,7 +273,7 @@ namespace GCTonePrism.Manager
                 CREATE TABLE IF NOT EXISTS developers (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     game_id TEXT NOT NULL,
-                    last_name TEXT NOT NULL,
+                    last_name TEXT,
                     first_name TEXT NOT NULL,
                     grade TEXT,
                     FOREIGN KEY (game_id) REFERENCES games(game_id) ON DELETE CASCADE
