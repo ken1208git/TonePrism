@@ -331,18 +331,112 @@ namespace GCTonePrism.Manager
             Console.WriteLine($"[CopyDirectoryRecursive] コピー元: {sourceDir}");
             Console.WriteLine($"[CopyDirectoryRecursive] コピー先: {destDir}");
 
-            foreach (string file in Directory.GetFiles(sourceDir))
+            // ゲームエンジン/開発環境の不要なフォルダをスキップ
+            // 注意: bin/obj/Binariesは実行ファイルが含まれる可能性があるため、スキップしない
+            var excludedFolders = new[]
             {
-                string destFile = Path.Combine(destDir, Path.GetFileName(file));
-                Console.WriteLine($"[CopyDirectoryRecursive] ファイルをコピー: {file} -> {destFile}");
-                File.Copy(file, destFile, true);
-            }
+                // Unity
+                "Library",
+                "Temp",
+                "Logs",
+                "Build", // Unityのビルドフォルダ（実行ファイルは通常別の場所）
+                "Builds", // Unityのビルドフォルダ
+                // Unreal Engine（Binariesは実行ファイルが含まれるため除外しない）
+                "Intermediate",
+                "Saved",
+                "DerivedDataCache",
+                // Godot (プロジェクトファイルは含めるが、.importは除外)
+                ".import",
+                // Visual Studio / 一般的な開発環境（IDE設定ファイルのみ）
+                // bin/objは実行ファイルが含まれる可能性があるため除外しない
+                ".vs",
+                ".idea",
+                ".vscode",
+                // バージョン管理
+                ".git",
+                ".svn",
+                ".hg",
+                // Node.js / 一般的なパッケージマネージャー
+                "node_modules",
+                // その他
+                "__pycache__",
+                ".pytest_cache",
+                ".mypy_cache"
+            };
 
-            foreach (string subDir in Directory.GetDirectories(sourceDir))
+            try
             {
-                string destSubDir = Path.Combine(destDir, Path.GetFileName(subDir));
-                Console.WriteLine($"[CopyDirectoryRecursive] サブフォルダをコピー: {subDir} -> {destSubDir}");
-                CopyDirectoryRecursive(subDir, destSubDir);
+                foreach (string file in Directory.GetFiles(sourceDir))
+                {
+                    try
+                    {
+                        string fileName = Path.GetFileName(file);
+                        string destFile = Path.Combine(destDir, fileName);
+                        
+                        // 長いパス名をサポート（\\?\プレフィックスを使用）
+                        string longPathSource = file;
+                        string longPathDest = destFile;
+                        
+                        if (file.Length > 260 || destFile.Length > 260)
+                        {
+                            if (!file.StartsWith(@"\\?\"))
+                            {
+                                longPathSource = @"\\?\" + Path.GetFullPath(file);
+                            }
+                            if (!destFile.StartsWith(@"\\?\"))
+                            {
+                                longPathDest = @"\\?\" + Path.GetFullPath(destFile);
+                            }
+                        }
+                        
+                        Console.WriteLine($"[CopyDirectoryRecursive] ファイルをコピー: {file} -> {destFile}");
+                        File.Copy(longPathSource, longPathDest, true);
+                    }
+                    catch (PathTooLongException ex)
+                    {
+                        Console.WriteLine($"[警告] パスが長すぎるためスキップ: {file}");
+                        Console.WriteLine($"[警告] エラー: {ex.Message}");
+                        // 長いパス名のファイルはスキップして続行
+                        continue;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[警告] ファイルのコピーに失敗: {file}");
+                        Console.WriteLine($"[警告] エラー: {ex.Message}");
+                        // エラーが発生しても続行（一部のファイルがコピーできない場合でも処理を続ける）
+                        continue;
+                    }
+                }
+
+                foreach (string subDir in Directory.GetDirectories(sourceDir))
+                {
+                    try
+                    {
+                        string subDirName = Path.GetFileName(subDir);
+                        
+                        // 除外フォルダをスキップ
+                        if (excludedFolders.Contains(subDirName, StringComparer.OrdinalIgnoreCase))
+                        {
+                            Console.WriteLine($"[CopyDirectoryRecursive] スキップ: {subDir}");
+                            continue;
+                        }
+                        
+                        string destSubDir = Path.Combine(destDir, subDirName);
+                        Console.WriteLine($"[CopyDirectoryRecursive] サブフォルダをコピー: {subDir} -> {destSubDir}");
+                        CopyDirectoryRecursive(subDir, destSubDir);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[警告] サブフォルダのコピーに失敗: {subDir}");
+                        Console.WriteLine($"[警告] エラー: {ex.Message}");
+                        // エラーが発生しても続行
+                        continue;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"フォルダのコピー中にエラーが発生しました: {ex.Message}", ex);
             }
         }
 

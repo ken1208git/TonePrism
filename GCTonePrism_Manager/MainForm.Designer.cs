@@ -189,7 +189,7 @@ namespace GCTonePrism.Manager
             this.MainMenuStrip = this.menuStrip1;
             this.Name = "MainForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-            this.Text = "GCTonePrism 管理ソフト";
+            this.Text = "ゲームセンターTONE Prism 管理ソフト";
             this.Load += new System.EventHandler(this.MainForm_Load);
             this.toolStrip1.ResumeLayout(false);
             this.toolStrip1.PerformLayout();
