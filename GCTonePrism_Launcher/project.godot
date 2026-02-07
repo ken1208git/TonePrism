@@ -11,6 +11,8 @@ config_version=5
 [autoload]
 
 ErrorManager="*res://scripts/error_manager.gd"
+DialogManager="*res://scripts/dialog_manager.gd"
+AppManager="*res://scripts/app_manager.gd"
 
 [application]
 

@@ -8,7 +8,7 @@ extends Control
 @onready var retry_button = $Panel/VBoxContainer/ButtonBox/RetryButton
 
 var _error_code: int = 0
-var _pending_message: String = ""
+
 
 func _ready():
 	exit_button.pressed.connect(_on_exit_pressed)

@@ -12,6 +12,9 @@ const SCALE_ACTIVE := 1.8                # 選択中のカードの拡大率
 const SCALE_INACTIVE := 1.0              # 非選択カードの拡大率（等倍）
 const OPACITY_INACTIVE := 0.6
 
+const IDLE_WARNING_TIME := 30.0          # 警告を表示するまでの無操作時間（秒）
+const IDLE_RESET_TIME := 60.0            # リセットするまでの無操作時間（秒）
+
 # --- ノード参照 ---
 # --- ノード参照 ---
 @onready var _background_texture: TextureRect = $BackgroundLayer/BackgroundTexture
@@ -32,6 +35,8 @@ var _selected_index: int = 0
 var _current_scroll_index: float = 0.0 # インデックス単位の現在位置
 var _running_pid: int = -1 # 実行中のゲームPID (-1: 実行なし)
 var _game_window_activated: bool = false # ゲームウィンドウが一度でもアクティブになったか
+var _idle_timer: float = 0.0 # 無操作経過時間
+var _timeout_dialog: CommonDialog = null # 表示中のタイムアウト警告ダイアログ
 
 # --- リソース ---
 var _placeholder_texture: Texture2D
@@ -55,6 +60,10 @@ func _ready():
 
 	set_process(true)
 	set_process_input(true)
+
+func _exit_tree():
+	# シーンが破棄される際にダイアログも閉じる
+	DialogManager.close_current_dialog()
 
 func _load_resources():
 	_placeholder_texture = load("res://icon.svg")
@@ -152,6 +161,10 @@ func _resolve_path(path: String, game_id: String) -> String:
 
 # --- 入力処理 ---
 func _input(event):
+	# 何らかの操作があったらアイドルタイマーをリセット
+	if event is InputEventKey or event is InputEventJoypadButton or event is InputEventJoypadMotion:
+		_reset_idle_timer()
+
 	if _games.is_empty():
 		if event.is_action_pressed("ui_cancel"):
 			_transition_to_screensaver()
@@ -238,10 +251,47 @@ func _launch_game():
 	_running_pid = -1
 
 func _transition_to_screensaver():
+	# 遷移前にダイアログを閉じる
+	DialogManager.close_current_dialog()
 	get_tree().change_scene_to_file("res://scenes/screensaver.tscn")
+
+func _reset_idle_timer():
+	_idle_timer = 0.0
+	if _timeout_dialog != null:
+		# DialogManager経由で作ったダイアログならDialogManagerで閉じるのが筋だが
+		# 個別に保持している参照を消す
+		_timeout_dialog.queue_free()
+		_timeout_dialog = null
+		# DialogManager側の参照もクリアしておく（念のため）
+		DialogManager.close_current_dialog()
 
 # --- アニメーション処理 ---
 func _process(delta):
+	# ゲーム実行中でなければアイドルタイマー更新
+	if _running_pid == -1:
+		_idle_timer += delta
+		
+		if _idle_timer >= IDLE_RESET_TIME:
+			# タイムアウト：スクリーンセーバーへ戻る
+			print("[GameSelection] Idle timeout. Returning to screensaver.")
+			_transition_to_screensaver()
+			return
+			
+		elif _idle_timer >= IDLE_WARNING_TIME:
+			# 警告表示
+			var remain = ceil(IDLE_RESET_TIME - _idle_timer)
+			var msg = "操作がありません。\nあと %d 秒でタイトル画面に戻ります。\nキャンセルするには何かボタンを押してください。" % remain
+			
+			if _timeout_dialog == null:
+				# まだダイアログが出ていなければ出す
+				_timeout_dialog = DialogManager.show_dialog("確認", msg)
+				# ボタンを追加してもいいが、メッセージだけで十分かも
+				# 一応OKボタンだけ置いておく（押せば当然inputイベントでリセットされる）
+				_timeout_dialog.add_button("キャンセル", _reset_idle_timer, true)
+			else:
+				# 既に出ているならメッセージ（秒数）だけ更新
+				_timeout_dialog.set_message(msg)
+
 	# ゲーム実行中の監視ロジック
 	if _running_pid != -1:
 		if OS.is_process_running(_running_pid):
