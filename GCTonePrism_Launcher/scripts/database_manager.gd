@@ -16,7 +16,7 @@ func open() -> bool:
 	
 	# データベースファイルが存在するか確認
 	if not FileAccess.file_exists(db_path):
-		push_error("[DatabaseManager] データベースファイルが見つかりません: " + db_path)
+		print("[DatabaseManager] Error: データベースファイルが見つかりません: " + db_path)
 		return false
 	
 	# SQLiteインスタンスを作成
@@ -30,7 +30,7 @@ func open() -> bool:
 	
 	# データベースが開けたか確認（エラーが発生した場合はdbがnullになる可能性がある）
 	if db == null:
-		push_error("[DatabaseManager] データベースを開けませんでした: " + db_path)
+		print("[DatabaseManager] Error: データベースを開けませんでした: " + db_path)
 		return false
 	
 	print("[DatabaseManager] データベースを開きました: ", db_path)

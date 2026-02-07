@@ -20,6 +20,8 @@ const OPACITY_INACTIVE := 0.6
 # _info_panelは直接操作しないため削除（警告対応）
 @onready var _title_label: Label = $InfoPanel/MarginContainer/VBoxContainer/TitleLabel
 @onready var _desc_label: Label = $InfoPanel/MarginContainer/VBoxContainer/DescLabel
+@onready var _running_overlay: ColorRect = $RunningOverlay
+@onready var _status_label: Label = $RunningOverlay/StatusLabel
 
 var _card_nodes: Array[Panel] = []
 
@@ -28,6 +30,8 @@ var _db_manager: DatabaseManager
 var _games: Array[GameInfo] = []
 var _selected_index: int = 0
 var _current_scroll_index: float = 0.0 # インデックス単位の現在位置
+var _running_pid: int = -1 # 実行中のゲームPID (-1: 実行なし)
+var _game_window_activated: bool = false # ゲームウィンドウが一度でもアクティブになったか
 
 # --- リソース ---
 var _placeholder_texture: Texture2D
@@ -35,10 +39,14 @@ var _placeholder_texture: Texture2D
 func _ready():
 	_load_resources()
 	# UI構築はtscnで行われるため不要
-	_load_games_from_db()
+	# 既に_load_games_from_db内でエラー処理済みだが、
+	# ゲームリストが空の場合はUI更新を行わない（エラーダイアログが表示されているはず）
+	if not _load_games_from_db() or _games.is_empty():
+		return
 	
-	if _games.is_empty():
-		_create_dummy_data()
+	# _create_dummy_data呼び出しは削除済み
+	# if _games.is_empty():
+	# 	_create_dummy_data()
 	
 	_create_carousel_cards()
 	# 初期位置セット
@@ -52,23 +60,34 @@ func _load_resources():
 	_placeholder_texture = load("res://icon.svg")
 
 # --- データ読み込み ---
-func _load_games_from_db():
+func _load_games_from_db() -> bool:
 	_db_manager = DatabaseManager.new()
-	if _db_manager.open():
-		_games = _db_manager.get_all_games()
-		_db_manager.close()
-		print("[GameSelection] DB Load: %d games found" % _games.size())
-	else:
-		push_error("Failed to open database")
-
-func _create_dummy_data():
-	print("[GameSelection] Generating Dummy Data...")
-	for i in range(10):
-		var g = GameInfo.new()
-		g.game_id = "dummy_%d" % i
-		g.title = "Dummy Game %02d" % (i + 1)
-		g.description = "これはテスト用のダミーゲームデータです。\n詳細な説明文がここに入ります。"
-		_games.append(g)
+	# データベースを開く
+	if not _db_manager.open():
+		ErrorManager.show_error(ErrorCode.DATABASE_NOT_FOUND)
+		set_process_input(false) # 入力を無効化
+		return false
+	
+	# ゲームリストを読み込む
+	_games = _db_manager.get_all_games()
+	_db_manager.close() # DBは読み込み後すぐに閉じる
+	
+	# ゲームが見つからない場合の処理
+	if _games.is_empty():
+		# 以前のダミーデータ生成ロジックを廃止し、エラーダイアログを表示
+		# TODO: テーブルはあるがデータがない場合は別のコード(DATABASE_TABLE_MISSING等)にするなども検討可能
+		# ここでは「表示するゲームがない」という意味で、一旦DB_NOT_FOUNDまたは専用コードを使う
+		# 今回はシンプルにDATABASE_TABLE_MISSING（データなし）として扱うか、
+		# あるいは「ゲームが登録されていません」というメッセージを出す
+		
+		# 専用のエラーコードがないため、一旦DATABASE_NOT_FOUNDに近い扱いにするか、
+		# メッセージを上書きして表示する
+		ErrorManager.show_error(ErrorCode.DATABASE_TABLE_MISSING)
+		set_process_input(false)
+		return true # エラーダイアログを出したが、アプリとしては「初期化自体は完了（エラー画面ボーン）」とする
+		
+	print("[GameSelection] DB Load: %d games found" % _games.size())
+	return true
 
 # --- カルーセル生成 ---
 func _create_carousel_cards():
@@ -138,6 +157,10 @@ func _input(event):
 			_transition_to_screensaver()
 		return
 
+	# ゲーム実行中は操作を受け付けない
+	if _running_pid != -1:
+		return
+
 	if event.is_action_pressed("ui_up"):
 		_move_selection(-1)
 	elif event.is_action_pressed("ui_down"):
@@ -195,20 +218,57 @@ func _launch_game():
 	
 	# 外部プロセスとして実行
 	# 第2引数は引数リスト（必要ならDBに追加検討だが現状は空で）
-	# var pid = OS.create_process(exec_path, [])
+	var pid = OS.create_process(exec_path, [])
 	
-	# if pid == -1:
-	# 	push_error("[GameSelection] Failed to create process for: %s" % exec_path)
-	# else:
-	# 	print("[GameSelection] Process started with PID: %d" % pid)
-	
-	print("[GameSelection] ⚠️ Launch feature is currently DISABLED (WIP). Path: %s" % exec_path)
+	if pid != -1:
+		print("[GameSelection] Process started with PID: %d" % pid)
+		_running_pid = pid
+		_game_window_activated = false
+		_running_overlay.visible = true
+		_status_label.text = "起動中..."
+		# 起動成功時はここでreturn（復帰は_processで行う）
+		return
+
+	# 以下、起動失敗時の処理
+	push_error("[GameSelection] Failed to create process for: %s" % exec_path)
+	print("[GameSelection] Launch Failed. Path: %s" % exec_path)
+	ErrorManager.show_error(ErrorCode.GAME_EXECUTION_FAILED)
+	# オーバーレイを隠す（失敗時）
+	_running_overlay.visible = false
+	_running_pid = -1
 
 func _transition_to_screensaver():
 	get_tree().change_scene_to_file("res://scenes/screensaver.tscn")
 
 # --- アニメーション処理 ---
 func _process(delta):
+	# ゲーム実行中の監視ロジック
+	if _running_pid != -1:
+		if OS.is_process_running(_running_pid):
+			# ゲームが実行中
+			if not get_window().has_focus():
+				# ランチャーがフォーカスを失った＝ゲームが前面に来た
+				_game_window_activated = true
+				_status_label.text = "ゲーム実行中..."
+			else:
+				# ランチャーがフォーカスを持っている
+				if _game_window_activated:
+					# 一度アクティブになったのに戻ってきた（Alt-Tab等で裏に行った）
+					_status_label.text = "ゲーム実行中\n(ウィンドウが裏に隠れています)"
+				else:
+					# まだ一度もアクティブになっていない（起動ロード中）
+					_status_label.text = "起動中..."
+		else:
+			# ゲームが終了した
+			print("[GameSelection] Process %d finished. Returning to launcher." % _running_pid)
+			_running_pid = -1
+			_running_overlay.visible = false
+			# 必要であればここでランチャーを全面に出す処理（grab_focusなど）を入れる
+			get_window().grab_focus()
+			
+		# ゲーム実行中はカルーセルのアニメーション等はスキップ
+		return
+
 	if _games.is_empty(): return
 	
 	# インデックス単位でスムーズに移動

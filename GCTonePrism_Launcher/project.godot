@@ -8,6 +8,10 @@
 
 config_version=5
 
+[autoload]
+
+ErrorManager="*res://scripts/error_manager.gd"
+
 [application]
 
 config/name="ゲームセンターTONE Prism"

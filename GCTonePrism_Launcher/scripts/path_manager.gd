@@ -50,7 +50,14 @@ static func _find_base_directory() -> String:
 				print("[PathManager] res://の親ディレクトリからプロジェクトルートを検出: ", parent_path)
 				return parent_path
 			else:
-				print("[PathManager] res://から取得したパスにprism.dbが見つかりません。実行ファイルのパスから検出します。")
+				# DBが見つからない場合でも、もしここが "GCTonePrism_Launcher" なら
+				# その親をプロジェクトルートとみなして返す（開発中のフォルダ構造を信じる）
+				# これは、DBファイルがまだ存在しない初期状態などでのパス解決を防ぐため
+				if project_root.ends_with("GCTonePrism_Launcher") or parent_path.ends_with("GCTonePrism"):
+					print("[PathManager] DB未検出だがフォルダ構造からルートを推測: ", parent_path)
+					return parent_path
+				
+				print("[PathManager] res://から取得したパスにprism.dbが見つかりません。")
 	
 	# res://が使えない場合（エクスポート時など）、実行ファイルのパスから検出
 	return _find_base_directory_from_executable()
