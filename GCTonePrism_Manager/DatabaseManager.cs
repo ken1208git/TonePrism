@@ -205,7 +205,7 @@ namespace GCTonePrism.Manager
                                 command.ExecuteNonQuery();
                             }
 
-                            // surveysテーブル作成（アンケート機能用）
+                            // surveysテーブル作成（ゲーム個別アンケート用）
                             string createSurveysTable = @"
                                 CREATE TABLE IF NOT EXISTS surveys (
                                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -217,6 +217,21 @@ namespace GCTonePrism.Manager
                                 )";
 
                             using (var command = new SQLiteCommand(createSurveysTable, connection, transaction))
+                            {
+                                command.ExecuteNonQuery();
+                            }
+
+                            // launcher_surveysテーブル作成（全体アンケート用）
+                            string createLauncherSurveysTable = @"
+                                CREATE TABLE IF NOT EXISTS launcher_surveys (
+                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                    rating INTEGER CHECK(rating BETWEEN 1 AND 5),
+                                    favorite_game_id TEXT,
+                                    comment TEXT,
+                                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                                )";
+
+                            using (var command = new SQLiteCommand(createLauncherSurveysTable, connection, transaction))
                             {
                                 command.ExecuteNonQuery();
                             }
@@ -234,8 +249,10 @@ namespace GCTonePrism.Manager
                             }
 
                             // developersテーブルのカラム追加について確認
-                            // 既存のデータベースに対して新しいカラムがない場合に備えて確認を行う
                             MigrateDevelopersTable(connection, transaction);
+
+                            // surveysテーブルのカラム追加について確認
+                            MigrateSurveysTable(connection, transaction);
 
                             // データベースバージョンのチェックとマイグレーション
                             CheckAndMigrateDatabase(connection, transaction);
@@ -299,6 +316,15 @@ namespace GCTonePrism.Manager
             
             // nameカラムが存在し、last_name/first_nameが空の場合のデータ移行は
             // 複雑さを避けるため、ここでは行わない（新規実装を優先）
+        }
+
+        /// <summary>
+        /// surveysテーブルの構造を確認する（今回はシンプル化のため、追加カラムロジックは削除）
+        /// 将来的な拡張のためにメソッド自体は残しておく
+        /// </summary>
+        private void MigrateSurveysTable(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            // 必要に応じてマイグレーションロジックをここに記述
         }
 
         public void ResetDatabase()
