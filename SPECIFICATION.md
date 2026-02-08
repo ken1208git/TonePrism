@@ -1334,7 +1334,7 @@ erDiagram
     launcher_surveys {
         INTEGER id PK
         INTEGER rating
-        TEXT favorite_game_id FK
+        TEXT favorite_game_id FK "REFERENCES games(game_id)"
         TEXT comment
         TEXT created_at
     }

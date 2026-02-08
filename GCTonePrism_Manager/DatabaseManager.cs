@@ -228,7 +228,8 @@ namespace GCTonePrism.Manager
                                     rating INTEGER CHECK(rating BETWEEN 1 AND 5),
                                     favorite_game_id TEXT,
                                     comment TEXT,
-                                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                                    FOREIGN KEY(favorite_game_id) REFERENCES games(game_id) ON DELETE SET NULL
                                 )";
 
                             using (var command = new SQLiteCommand(createLauncherSurveysTable, connection, transaction))
