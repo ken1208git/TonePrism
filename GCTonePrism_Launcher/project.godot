@@ -11,10 +11,21 @@ config_version=5
 [application]
 
 config/name="ゲームセンターTONE Prism"
-config/version="0.3.0"
+config/version="0.4.0"
 run/main_scene="res://scenes/screensaver.tscn"
 config/features=PackedStringArray("4.5", "Forward Plus")
 config/icon="res://icon.svg"
+
+[autoload]
+
+ErrorManager="*res://scripts/error_manager.gd"
+DialogManager="*res://scripts/dialog_manager.gd"
+AppManager="*res://scripts/app_manager.gd"
+
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
 
 [editor_plugins]
 

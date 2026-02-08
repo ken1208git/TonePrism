@@ -1,63 +1,158 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=6 format=3 uid="uid://bjoy2n8lqir0y"]
 
-[ext_resource type="Script" path="res://scenes/game_selection.gd" id="1_game_selection"]
-[ext_resource type="FontFile" path="res://fonts/NotoSansJP-Regular.ttf" id="2_font_regular"]
-[ext_resource type="FontFile" path="res://fonts/NotoSansJP-Bold.ttf" id="3_font_bold"]
+[ext_resource type="Script" uid="uid://dj0y4s0v4pp1c" path="res://scenes/game_selection.gd" id="1_game_selection"]
+[ext_resource type="FontFile" uid="uid://dolk7yphok5xu" path="res://fonts/NotoSansJP-Regular.ttf" id="2_font_regular"]
+[ext_resource type="FontFile" uid="uid://xjqfmx60jtvo" path="res://fonts/NotoSansJP-Bold.ttf" id="3_font_bold"]
+[ext_resource type="Texture2D" uid="uid://j27gk8qemr4d" path="res://icon.svg" id="4_icon"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_rounded"]
+bg_color = Color(1, 1, 1, 1)
+corner_radius_top_left = 20
+corner_radius_top_right = 20
+corner_radius_bottom_right = 20
+corner_radius_bottom_left = 20
 
 [node name="GameSelection" type="Control"]
-layout_mode=3
-anchors_preset=15
-anchor_right=1.0
-anchor_bottom=1.0
-grow_horizontal=2
-grow_vertical=2
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 script = ExtResource("1_game_selection")
 
-[node name="Background" type="ColorRect" parent="."]
-layout_mode=1
-anchors_preset=15
-anchor_right=1.0
-anchor_bottom=1.0
-grow_horizontal=2
-grow_vertical=2
-color=Color(0.1, 0.1, 0.1, 1)
+[node name="BackgroundLayer" type="CanvasLayer" parent="."]
+layer = -1
 
-[node name="Title" type="Label" parent="."]
-layout_mode=1
-anchors_preset=5
-anchor_left=0.5
-anchor_top=0.0
-anchor_right=0.5
-anchor_bottom=0.0
-offset_left=-200.0
-offset_top=50.0
-offset_right=200.0
-offset_bottom=100.0
-grow_horizontal=2
-grow_vertical=0
+[node name="BackgroundColor" type="ColorRect" parent="BackgroundLayer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.1, 0.1, 0.1, 1)
+
+[node name="BackgroundTexture" type="TextureRect" parent="BackgroundLayer"]
+modulate = Color(0.5, 0.5, 0.5, 1)
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+expand_mode = 1
+stretch_mode = 6
+
+[node name="CarouselContainer" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 9
+anchor_bottom = 1.0
+offset_right = 500.0
+grow_vertical = 2
+
+[node name="CardTemplate" type="Panel" parent="CarouselContainer"]
+visible = false
+clip_children = 1
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -100.0
+offset_top = -100.0
+offset_right = 100.0
+offset_bottom = 100.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(100, 100)
+theme_override_styles/panel = SubResource("StyleBoxFlat_rounded")
+
+[node name="Icon" type="TextureRect" parent="CarouselContainer/CardTemplate"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("4_icon")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="InfoPanel" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -850.0
+offset_top = -350.0
+offset_right = -50.0
+offset_bottom = -50.0
+grow_horizontal = 0
+grow_vertical = 0
+
+[node name="MarginContainer" type="MarginContainer" parent="InfoPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 30
+theme_override_constants/margin_top = 30
+theme_override_constants/margin_right = 30
+theme_override_constants/margin_bottom = 30
+
+[node name="VBoxContainer" type="VBoxContainer" parent="InfoPanel/MarginContainer"]
+layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
 theme_override_fonts/font = ExtResource("3_font_bold")
 theme_override_font_sizes/font_size = 48
-text="ゲーム選択画面"
-horizontal_alignment=1
-vertical_alignment=1
+text = "ゲームタイトル"
 
-[node name="Message" type="Label" parent="."]
-layout_mode=1
-anchors_preset=8
-anchor_left=0.5
-anchor_top=0.5
-anchor_right=0.5
-anchor_bottom=0.5
-offset_left=-300.0
-offset_top=-50.0
-offset_right=300.0
-offset_bottom=50.0
-grow_horizontal=2
-grow_vertical=2
+[node name="DescLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer"]
+custom_minimum_size = Vector2(0, 100)
+layout_mode = 2
 theme_override_fonts/font = ExtResource("2_font_regular")
 theme_override_font_sizes/font_size = 24
-text="この画面は将来実装予定です
-ESCキーでスクリーンセーバーに戻ります"
-horizontal_alignment=1
-vertical_alignment=1
+text = "ゲームの説明文がここに入ります。"
+autowrap_mode = 2
 
+[node name="GuideLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.827451, 0.827451, 0.827451, 1)
+theme_override_fonts/font = ExtResource("2_font_regular")
+text = "↑↓: 選択  |  Enter: 決定  |  ESC: 戻る"
+horizontal_alignment = 2
+
+[node name="RunningOverlay" type="ColorRect" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.862745)
+
+[node name="StatusLabel" type="Label" parent="RunningOverlay"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = -50.0
+offset_right = 200.0
+offset_bottom = 50.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_fonts/font = ExtResource("3_font_bold")
+theme_override_font_sizes/font_size = 48
+text = "起動準備中..."
+horizontal_alignment = 1
+vertical_alignment = 1

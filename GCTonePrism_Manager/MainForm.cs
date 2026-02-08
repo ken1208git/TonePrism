@@ -531,6 +531,14 @@ namespace GCTonePrism.Manager
                 {
                     versionInfo += $".{version.Revision}";
                 }
+                
+                // データベースバージョン情報を取得
+                int targetVersion = dbManager.GetTargetDatabaseVersion();
+                int actualVersion = dbManager.GetActualDatabaseVersion();
+                
+                versionInfo += $"\n\nデータベース\n";
+                versionInfo += $"構造バージョン: v{actualVersion} (ターゲット: v{targetVersion})";
+                
                 versionInfo += "\n\n";
                 
                 if (!string.IsNullOrEmpty(company))

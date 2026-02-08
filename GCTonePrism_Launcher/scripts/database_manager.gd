@@ -7,6 +7,10 @@ class_name DatabaseManager
 var db: SQLite = null
 var db_path: String = ""
 
+# 現在のデータベースバージョン
+# 構造変更があるたびにインクリメントする
+const CURRENT_DB_VERSION: int = 1
+
 ## データベースを開く
 func open() -> bool:
 	if db != null:
@@ -16,7 +20,7 @@ func open() -> bool:
 	
 	# データベースファイルが存在するか確認
 	if not FileAccess.file_exists(db_path):
-		push_error("[DatabaseManager] データベースファイルが見つかりません: " + db_path)
+		print("[DatabaseManager] Error: データベースファイルが見つかりません: " + db_path)
 		return false
 	
 	# SQLiteインスタンスを作成
@@ -30,10 +34,14 @@ func open() -> bool:
 	
 	# データベースが開けたか確認（エラーが発生した場合はdbがnullになる可能性がある）
 	if db == null:
-		push_error("[DatabaseManager] データベースを開けませんでした: " + db_path)
+		print("[DatabaseManager] Error: データベースを開けませんでした: " + db_path)
 		return false
 	
 	print("[DatabaseManager] データベースを開きました: ", db_path)
+	
+	# データベースのバージョンチェックとマイグレーション
+	_check_and_migrate_db()
+	
 	return true
 
 ## データベースを閉じる
@@ -269,3 +277,64 @@ func _parse_genre(genre_str: String) -> Array[String]:
 			genres.append(trimmed)
 	
 	return genres
+
+## データベースのバージョンを取得
+func _get_db_version() -> int:
+	if db == null:
+		return 0
+	
+	# PRAGMA user_version を取得
+	db.query("PRAGMA user_version")
+	var result = db.get_query_result()
+	
+	if result != null and result.size() > 0:
+		# 結果の形式に合わせて取得（辞書または配列）
+		var row = result[0]
+		if row is Dictionary:
+			return row.get("user_version", 0)
+		elif row is Array and row.size() > 0:
+			return row[0]
+			
+	return 0
+
+## データベースのバージョンを設定
+func _set_db_version(version: int) -> void:
+	if db == null:
+		return
+	
+	db.query("PRAGMA user_version = %d" % version)
+	print("[DatabaseManager] データベースバージョンを %d に更新しました" % version)
+
+## データベースのバージョンチェックとマイグレーションを実行
+func _check_and_migrate_db() -> void:
+	var current_version = _get_db_version()
+	print("[DatabaseManager] 現在のDBバージョン: %d, 最新バージョン: %d" % [current_version, CURRENT_DB_VERSION])
+	
+	# バージョンが0の場合（新規作成時など）、最新バージョンを設定
+	if current_version == 0:
+		_set_db_version(CURRENT_DB_VERSION)
+		return
+	
+	# マイグレーションが必要な場合
+	if current_version < CURRENT_DB_VERSION:
+		print("[DatabaseManager] マイグレーションを開始します: v%d -> v%d" % [current_version, CURRENT_DB_VERSION])
+		
+		# トランザクション開始
+		db.query("BEGIN TRANSACTION")
+		
+		# バージョンごとにマイグレーションを実行
+		# 例: v1 -> v2
+		# if current_version < 2:
+		# 	if _migrate_v1_to_v2():
+		# 		current_version = 2
+		# 	else:
+		# 		db.query("ROLLBACK")
+		# 		push_error("[DatabaseManager] マイグレーション(v1->v2)に失敗しました")
+		# 		return
+		
+		# 最新バージョンに更新
+		_set_db_version(CURRENT_DB_VERSION)
+		
+		# コミット
+		db.query("COMMIT")
+		print("[DatabaseManager] マイグレーションが完了しました")

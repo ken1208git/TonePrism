@@ -79,8 +79,8 @@ func _on_viewport_size_changed():
 func _update_layout():
 	# フルスクリーン表示を確保
 	var viewport_size = get_viewport().get_visible_rect().size
-	size = viewport_size
-	position = Vector2.ZERO
+	# size = viewport_size  <-- アンカー設定と競合するため削除
+	# position = Vector2.ZERO <-- アンカー設定と競合するため削除
 	
 	# ロゴコンテナのサイズを画面サイズに応じて調整
 	var logo_container = $LogoContainer
