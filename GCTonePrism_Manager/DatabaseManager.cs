@@ -17,7 +17,7 @@ namespace GCTonePrism.Manager
 
         // 現在のデータベースバージョン
         // 構造変更があるたびにインクリメントする
-        private const int CurrentDbVersion = 1;
+        private const int CurrentDbVersion = 2;
 
         public DatabaseManager()
         {
@@ -830,11 +830,11 @@ namespace GCTonePrism.Manager
                 {
                     // バージョンごとにマイグレーションを実行
                     // 例: v1 -> v2
-                    // if (currentVersion < 2)
-                    // {
-                    //    MigrateV1ToV2(connection, migTransaction);
-                    //    currentVersion = 2;
-                    // }
+                    if (currentVersion < 2)
+                    {
+                       MigrateV1ToV2(connection, migTransaction);
+                       currentVersion = 2;
+                    }
 
                     // 最新バージョンに更新
                     SetDbVersion(connection, CurrentDbVersion, migTransaction);
@@ -884,6 +884,63 @@ namespace GCTonePrism.Manager
                 command.ExecuteNonQuery();
             }
             Console.WriteLine($"[DatabaseManager] データベースバージョンを {version} に更新しました");
+        }
+
+        /// <summary>
+        /// v1からv2へのマイグレーション（アンケート機能の刷新）
+        /// surveysテーブルの再作成（カラム構成変更のため）
+        /// launcher_surveysテーブルの作成はInitializeDatabaseで行われるが、念のためここでもCREATE文を実行するか、ドロップして再作成を促す
+        /// </summary>
+        private void MigrateV1ToV2(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            Console.WriteLine("[DatabaseManager] Executing migration V1 -> V2");
+            
+            // 旧surveysテーブルを削除（データはリセット）
+            string dropSurveys = "DROP TABLE IF EXISTS surveys";
+            using (var command = new SQLiteCommand(dropSurveys, connection, transaction))
+            {
+                command.ExecuteNonQuery();
+            }
+
+            // launcher_surveysも念のため削除
+            string dropLauncherSurveys = "DROP TABLE IF EXISTS launcher_surveys";
+            using (var command = new SQLiteCommand(dropLauncherSurveys, connection, transaction))
+            {
+                command.ExecuteNonQuery();
+            }
+
+            // 新しいスキーマで再作成
+            // surveysテーブル作成（ゲーム個別アンケート用）
+            string createSurveysTable = @"
+                CREATE TABLE IF NOT EXISTS surveys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_id TEXT,
+                    rating INTEGER CHECK(rating BETWEEN 1 AND 5),
+                    comment TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE
+                )";
+
+            using (var command = new SQLiteCommand(createSurveysTable, connection, transaction))
+            {
+                command.ExecuteNonQuery();
+            }
+
+            // launcher_surveysテーブル作成（全体アンケート用）
+            string createLauncherSurveysTable = @"
+                CREATE TABLE IF NOT EXISTS launcher_surveys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    rating INTEGER CHECK(rating BETWEEN 1 AND 5),
+                    favorite_game_id TEXT,
+                    comment TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(favorite_game_id) REFERENCES games(game_id) ON DELETE SET NULL
+                )";
+
+            using (var command = new SQLiteCommand(createLauncherSurveysTable, connection, transaction))
+            {
+                command.ExecuteNonQuery();
+            }
         }
     }
 }
