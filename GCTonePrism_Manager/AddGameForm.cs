@@ -4,6 +4,8 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using GCTonePrism.Manager.Models;
 using Microsoft.WindowsAPICodePack.Dialogs;
@@ -83,6 +85,7 @@ namespace GCTonePrism.Manager
             chkControllerSupport.Checked = false;
             numMinPlayers.Value = 1;
             numMaxPlayers.Value = 1;
+
             
             // ジャンルチェックボックスリストを初期化
             clbGenre.Items.Clear();
@@ -99,7 +102,7 @@ namespace GCTonePrism.Manager
             numReleaseYear.Value = DateTime.Now.Year;
 
             // バージョンの初期値を設定
-            txtVersion.Text = "1.0.0";
+            txtVersion.Text = "v1.0.0";
 
             // 製作者情報のDataGridViewを初期化
             InitializeDevelopersGrid();
@@ -334,30 +337,65 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
-        /// ゲームフォルダをコピー
+        /// ゲームフォルダをコピー（バージョンフォルダ構造）
         /// </summary>
-        private void CopyGameFolder(string gameId)
+        private void CopyGameFolder(string gameId, string version, IProgress<ProgressInfo> progress, System.Threading.CancellationToken token)
         {
-            destinationGameFolder = PathManager.GetGameFolder(gameId);
+            // ゲームベースフォルダを作成
+            string gameBaseFolder = PathManager.GetGameFolder(gameId);
+            if (!Directory.Exists(gameBaseFolder))
+            {
+                Directory.CreateDirectory(gameBaseFolder);
+            }
+            
+            // バージョンフォルダにコピー
+            destinationGameFolder = PathManager.GetVersionFolder(gameId, version);
 
             // 既に存在する場合はエラー
             if (Directory.Exists(destinationGameFolder))
             {
-                throw new Exception($"ゲームフォルダ '{destinationGameFolder}' は既に存在します。");
+                throw new Exception($"バージョンフォルダ '{destinationGameFolder}' は既に存在します。");
             }
 
-            // ゲームフォルダを作成
+            // バージョンフォルダを作成
             Directory.CreateDirectory(destinationGameFolder);
+            
+            // 進捗計算用ファイル数カウント
+            progress.Report(new ProgressInfo(0, "ファイル数を計算中..."));
+            int totalFiles = CountFiles(sourceGameFolder);
+            int copiedFiles = 0;
 
             // フォルダ内のすべてのファイルとサブフォルダをコピー
-            CopyDirectoryRecursive(sourceGameFolder, destinationGameFolder);
+            CopyDirectoryRecursive(sourceGameFolder, destinationGameFolder, progress, token, totalFiles, ref copiedFiles);
+        }
+
+        private int CountFiles(string dir)
+        {
+            int count = 0;
+            try
+            {
+                count += Directory.GetFiles(dir).Length;
+                
+                var excludedFolders = new[] { "Library", "Temp", "Logs", "Build", "Builds", "Intermediate", "Saved", "DerivedDataCache", ".import", ".vs", ".idea", ".vscode", ".git", ".svn", ".hg", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache" };
+
+                foreach (string subDir in Directory.GetDirectories(dir))
+                {
+                    string subDirName = Path.GetFileName(subDir);
+                    if (excludedFolders.Contains(subDirName, StringComparer.OrdinalIgnoreCase)) continue;
+                    count += CountFiles(subDir);
+                }
+            }
+            catch { }
+            return count;
         }
 
         /// <summary>
         /// ディレクトリを再帰的にコピー
         /// </summary>
-        private void CopyDirectoryRecursive(string sourceDir, string destDir)
+        private void CopyDirectoryRecursive(string sourceDir, string destDir, IProgress<ProgressInfo> progress, System.Threading.CancellationToken token, int totalFiles, ref int copiedFiles)
         {
+            token.ThrowIfCancellationRequested();
+            
             Directory.CreateDirectory(destDir);
 
             // デバッグログ
@@ -365,84 +403,61 @@ namespace GCTonePrism.Manager
             Console.WriteLine($"[CopyDirectoryRecursive] コピー先: {destDir}");
 
             // ゲームエンジン/開発環境の不要なフォルダをスキップ
-            // 注意: bin/obj/Binariesは実行ファイルが含まれる可能性があるため、スキップしない
             var excludedFolders = new[]
             {
-                // Unity
-                "Library",
-                "Temp",
-                "Logs",
-                "Build", // Unityのビルドフォルダ（実行ファイルは通常別の場所）
-                "Builds", // Unityのビルドフォルダ
-                // Unreal Engine（Binariesは実行ファイルが含まれるため除外しない）
-                "Intermediate",
-                "Saved",
-                "DerivedDataCache",
-                // Godot (プロジェクトファイルは含めるが、.importは除外)
+                "Library", "Temp", "Logs", "Build", "Builds",
+                "Intermediate", "Saved", "DerivedDataCache",
                 ".import",
-                // Visual Studio / 一般的な開発環境（IDE設定ファイルのみ）
-                // bin/objは実行ファイルが含まれる可能性があるため除外しない
-                ".vs",
-                ".idea",
-                ".vscode",
-                // バージョン管理
-                ".git",
-                ".svn",
-                ".hg",
-                // Node.js / 一般的なパッケージマネージャー
+                ".vs", ".idea", ".vscode",
+                ".git", ".svn", ".hg",
                 "node_modules",
-                // その他
-                "__pycache__",
-                ".pytest_cache",
-                ".mypy_cache"
+                "__pycache__", ".pytest_cache", ".mypy_cache"
             };
 
             try
             {
                 foreach (string file in Directory.GetFiles(sourceDir))
                 {
+                    token.ThrowIfCancellationRequested();
+
                     try
                     {
                         string fileName = Path.GetFileName(file);
                         string destFile = Path.Combine(destDir, fileName);
                         
-                        // 長いパス名をサポート（\\?\プレフィックスを使用）
+                        // 長いパス名をサポート
                         string longPathSource = file;
                         string longPathDest = destFile;
                         
                         if (file.Length > 260 || destFile.Length > 260)
                         {
-                            if (!file.StartsWith(@"\\?\"))
-                            {
-                                longPathSource = @"\\?\" + Path.GetFullPath(file);
-                            }
-                            if (!destFile.StartsWith(@"\\?\"))
-                            {
-                                longPathDest = @"\\?\" + Path.GetFullPath(destFile);
-                            }
+                            if (!file.StartsWith(@"\\?\")) longPathSource = @"\\?\" + Path.GetFullPath(file);
+                            if (!destFile.StartsWith(@"\\?\")) longPathDest = @"\\?\" + Path.GetFullPath(destFile);
                         }
                         
-                        Console.WriteLine($"[CopyDirectoryRecursive] ファイルをコピー: {file} -> {destFile}");
+                        // console.WriteLine($"[CopyDirectoryRecursive] ファイルをコピー: {file} -> {destFile}");
                         File.Copy(longPathSource, longPathDest, true);
+                        
+                        copiedFiles++;
+                        int percentage = totalFiles > 0 ? (int)((double)copiedFiles / totalFiles * 100) : 100;
+                        progress.Report(new ProgressInfo(percentage, "ファイルをコピー中...", fileName));
                     }
                     catch (PathTooLongException ex)
                     {
                         Console.WriteLine($"[警告] パスが長すぎるためスキップ: {file}");
-                        Console.WriteLine($"[警告] エラー: {ex.Message}");
-                        // 長いパス名のファイルはスキップして続行
                         continue;
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[警告] ファイルのコピーに失敗: {file}");
-                        Console.WriteLine($"[警告] エラー: {ex.Message}");
-                        // エラーが発生しても続行（一部のファイルがコピーできない場合でも処理を続ける）
+                        Console.WriteLine($"[警告] ファイルのコピーに失敗: {file} - {ex.Message}");
                         continue;
                     }
                 }
 
                 foreach (string subDir in Directory.GetDirectories(sourceDir))
                 {
+                    token.ThrowIfCancellationRequested();
+
                     try
                     {
                         string subDirName = Path.GetFileName(subDir);
@@ -455,14 +470,11 @@ namespace GCTonePrism.Manager
                         }
                         
                         string destSubDir = Path.Combine(destDir, subDirName);
-                        Console.WriteLine($"[CopyDirectoryRecursive] サブフォルダをコピー: {subDir} -> {destSubDir}");
-                        CopyDirectoryRecursive(subDir, destSubDir);
+                        CopyDirectoryRecursive(subDir, destSubDir, progress, token, totalFiles, ref copiedFiles);
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[警告] サブフォルダのコピーに失敗: {subDir}");
-                        Console.WriteLine($"[警告] エラー: {ex.Message}");
-                        // エラーが発生しても続行
+                        Console.WriteLine($"[警告] サブフォルダのコピーに失敗: {subDir} - {ex.Message}");
                         continue;
                     }
                 }
@@ -505,16 +517,16 @@ namespace GCTonePrism.Manager
         /// <summary>
         /// コピー元のパスをコピー先の絶対パスに変換
         /// </summary>
-        private string ConvertSourcePathToDestinationPath(string sourcePath, string gameId)
+        private string ConvertSourcePathToDestinationPath(string sourcePath, string gameId, string version)
         {
             if (string.IsNullOrEmpty(sourcePath))
             {
                 return null;
             }
 
-            string destinationGameFolder = PathManager.GetGameFolder(gameId);
+            string destinationVersionFolder = PathManager.GetVersionFolder(gameId, version);
             
-            if (sourcePath.StartsWith(destinationGameFolder, StringComparison.OrdinalIgnoreCase))
+            if (sourcePath.StartsWith(destinationVersionFolder, StringComparison.OrdinalIgnoreCase))
             {
                 // 既にコピー先フォルダ内のパス
                 return sourcePath;
@@ -523,7 +535,7 @@ namespace GCTonePrism.Manager
             {
                 // コピー元フォルダ内のパス → コピー先の絶対パスに変換
                 string relativePath = GetRelativePath(sourceGameFolder, sourcePath);
-                return Path.Combine(destinationGameFolder, relativePath);
+                return Path.Combine(destinationVersionFolder, relativePath);
             }
             else
             {
@@ -611,15 +623,48 @@ namespace GCTonePrism.Manager
 
             try
             {
-                // ゲームフォルダをコピー
-                CopyGameFolder(gameId);
+                // 初期バージョン番号
+                string version = txtVersion.Text.Trim();
+                
+                // ProcessingDialog を使用して非同期コピー
+                var processingDialog = new ProcessingDialog((IProgress<ProgressInfo> progress, CancellationToken token) =>
+                {
+                    try
+                    {
+                        CopyGameFolder(gameId, version, progress, token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new Exception($"ファイルコピー中にエラーが発生しました: {ex.Message}", ex);
+                    }
+                });
 
-                string destinationGameFolder = PathManager.GetGameFolder(gameId);
+                if (processingDialog.ShowDialog() != DialogResult.OK)
+                {
+                    // キャンセルまたはエラー時
+                    if (processingDialog.DialogResult == DialogResult.Cancel)
+                    {
+                        MessageBox.Show("処理がキャンセルされました。", "キャンセル", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    
+                    // コピー失敗時のロールバック（フォルダ削除）
+                    if (!string.IsNullOrEmpty(destinationGameFolder) && Directory.Exists(destinationGameFolder))
+                    {
+                        try { Directory.Delete(destinationGameFolder, true); } catch { }
+                    }
+                    return;
+                }
+
+                destinationGameFolder = PathManager.GetVersionFolder(gameId, version);
 
                 // コピー元のパスをコピー先の絶対パスに変換
-                string executableAbsolutePath = ConvertSourcePathToDestinationPath(txtExecutablePath.Text.Trim(), gameId);
-                string thumbnailAbsolutePath = string.IsNullOrWhiteSpace(txtThumbnailPath.Text) ? null : ConvertSourcePathToDestinationPath(txtThumbnailPath.Text.Trim(), gameId);
-                string backgroundAbsolutePath = string.IsNullOrWhiteSpace(txtBackgroundPath.Text) ? null : ConvertSourcePathToDestinationPath(txtBackgroundPath.Text.Trim(), gameId);
+                string executableAbsolutePath = ConvertSourcePathToDestinationPath(txtExecutablePath.Text.Trim(), gameId, version);
+                string thumbnailAbsolutePath = string.IsNullOrWhiteSpace(txtThumbnailPath.Text) ? null : ConvertSourcePathToDestinationPath(txtThumbnailPath.Text.Trim(), gameId, version);
+                string backgroundAbsolutePath = string.IsNullOrWhiteSpace(txtBackgroundPath.Text) ? null : ConvertSourcePathToDestinationPath(txtBackgroundPath.Text.Trim(), gameId, version);
 
                 // デバッグログ（開発時のみ）
                 Console.WriteLine($"[AddGameForm] コピー先フォルダ: {destinationGameFolder}");

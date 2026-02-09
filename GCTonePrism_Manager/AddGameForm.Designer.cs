@@ -163,11 +163,11 @@ namespace GCTonePrism.Manager
             // 
             // txtVersion
             // 
-            this.txtVersion.Location = new System.Drawing.Point(500, 49);
+            this.txtVersion.Location = new System.Drawing.Point(520, 49);
             this.txtVersion.Name = "txtVersion";
             this.txtVersion.Size = new System.Drawing.Size(100, 22);
             this.txtVersion.TabIndex = 41;
-            this.txtVersion.Text = "1.0.0";
+            this.txtVersion.Text = "v1.0.0";
             // 
             // lblTitle
             // 

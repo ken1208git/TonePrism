@@ -123,6 +123,7 @@ namespace GCTonePrism.Manager
             this.txtNextVersion.Name = "txtNextVersion";
             this.txtNextVersion.Size = new System.Drawing.Size(150, 22);
             this.txtNextVersion.TabIndex = 3;
+            this.txtNextVersion.Text = "v";
             // 
             // lblVersionHint
             // 
@@ -133,7 +134,7 @@ namespace GCTonePrism.Manager
             this.lblVersionHint.Name = "lblVersionHint";
             this.lblVersionHint.Size = new System.Drawing.Size(250, 11);
             this.lblVersionHint.TabIndex = 100;
-            this.lblVersionHint.Text = "※セマンティックバージョニング（例: 1.0.0）がおすすめです";
+            this.lblVersionHint.Text = "※セマンティックバージョニング（例: v1.0.0）がおすすめです";
             // 
             // lblGameFolder
             // 

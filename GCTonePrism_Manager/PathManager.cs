@@ -50,6 +50,15 @@ namespace GCTonePrism.Manager
         }
         
         /// <summary>
+        /// 指定したゲームのバージョンフォルダパス
+        /// </summary>
+        public static string GetVersionFolder(string gameId, string version)
+        {
+            string versionFolder = version.StartsWith("v") ? version : "v" + version;
+            return Path.Combine(GetGameFolder(gameId), versionFolder);
+        }
+        
+        /// <summary>
         /// プロジェクトルートを自動検出
         /// 開発時・本番時どちらも同じロジックで検出
         /// </summary>

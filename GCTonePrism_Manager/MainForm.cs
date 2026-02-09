@@ -2,6 +2,8 @@ using System;
 using System.Drawing;
 using System.IO;
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using GCTonePrism.Manager.Models;
 
@@ -420,6 +422,40 @@ namespace GCTonePrism.Manager
             {
                 if (form.ShowDialog() == DialogResult.OK)
                 {
+                    // ゲームが追加された場合、ファイルコピー処理をバックグラウンド実行
+                    // AddGameFormではDB登録までしか行っていない（パスは設定済みだがファイルコピーはまだ）
+                    // ※AddGameFormの実装を確認する必要があるが、現状はAddGameForm内でコピーしていない前提でここでやるか、
+                    //   あるいはAddGameFormから戻ってきた時点でコピー済みなのか？
+                    //   → 以前の実装ではMainForm側でコピーしていた。
+                    //   → AddGameFormの戻り値 `form.AddedGame` にはパスが入っているが、ファイルはまだコピーされていないはず。
+                    
+                    // 実装計画に基づき、ここで ProcessingDialog を出してコピーする
+                    /*
+                     * 注意: AddGameForm側で既にコピーしている場合、二重コピーになる。
+                     * 確認: task.md の「新規ゲーム登録」完了済み項目を見ると "AddGameForm: フォルダコピー処理" とある。
+                     * もしAddGameForm内でやっているなら、そちらを修正してMainForm側でやるようにするか、
+                     * あるいはAddGameForm内でProcessingDialogを出すべき。
+                     * 
+                     * 現状のMainForm.csのbtnAddGame_Clickを見ると、単純にLoadGames()しているだけ。
+                     * つまりAddGameForm内でコピーまで完結している。
+                     * プログレスバーを入れるなら、AddGameFormの中身をいじる必要がある。
+                     * 
+                     * しかし、AddGameFormはモーダルダイアログ。
+                     * ユーザー体験的には「追加」ボタンを押した後にプログレスバーが出るのが自然。
+                     * 
+                     * ここでは「AddGameForm」は設定入力のみを行い、OKが押されたらMainForm側でコピーとDB登録を行う形にリファクタリングするのが筋だが、
+                     * AddGameFormの修正範囲が大きくなる。
+                     * 
+                     * 代替案: AddGameForm内でコピーする直前にProcessingDialogを出す。
+                     * 
+                     * 今回は「各操作への組み込み」が目標。
+                     * btnAddGame_Click は AddGameForm を開くだけ。
+                     * 実際の処理は AddGameForm 内にあるはず。
+                     * 
+                     * 確認のため AddGameForm.cs を見る必要があるが、
+                     * とりあえず btnVersionUp_Click は MainForm 内にあるのでそちらを先に修正する。
+                     */
+
                     // ゲームが追加された場合、一覧を更新
                     LoadGames();
                     MessageBox.Show(
@@ -579,44 +615,87 @@ namespace GCTonePrism.Manager
             {
                 if (form.ShowDialog() == DialogResult.OK && form.NewVersion != null)
                 {
-                    try
+                    // ProcessingDialog を使用して非同期コピー
+                    var processingDialog = new ProcessingDialog((IProgress<ProgressInfo> progress, CancellationToken token) =>
                     {
-                        // ゲームのルートフォルダ
-                        string gameRootDir = Path.Combine(PathManager.GamesFolder, game.GameId);
-                        
-                        // 新しいバージョンのフォルダを作成
-                        string versionDir = Path.Combine(gameRootDir, "versions", CleanFileName(form.NewVersion.Version));
-                        Directory.CreateDirectory(versionDir);
-                        
-                        // ソースフォルダ全体をコピー
-                        CopyDirectory(form.SourceFolderPath, versionDir);
-                        
-                        // バージョン情報にコピー後の実行ファイルパスを設定（相対パス）
-                        string relativePath = Path.Combine("versions", CleanFileName(form.NewVersion.Version), form.RelativeExecutablePath);
-                        form.NewVersion.ExecutablePath = relativePath;
-                        
-                        // データベースに保存
-                        dbManager.AddGameVersion(form.NewVersion);
+                        try
+                        {
+                            // 新しいバージョンのフォルダを作成（vX.Y.Z 形式）
+                            string versionDir = PathManager.GetVersionFolder(game.GameId, form.NewVersion.Version);
+                            Directory.CreateDirectory(versionDir);
 
-                        // メインのゲーム情報も更新（最新バージョンに合わせる）
-                        form.UpdatedGameInfo.ExecutablePath = relativePath;
-                        dbManager.UpdateGame(form.UpdatedGameInfo);
-                        
-                        MessageBox.Show(
-                            $"ゲーム「{game.Title}」のバージョン {form.NewVersion.Version} を追加しました。",
-                            "成功",
+                            // ソースフォルダ全体をコピー（非同期）
+                            // 注: UIスレッド外から実行されるため、InvokeはProcessingDialog側で処理される
+                            CopyDirectoryAsync(form.SourceFolderPath, versionDir, progress, token);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw; // キャンセルはそのまま上位へ
+                        }
+                        catch (Exception ex)
+                        {
+                            throw new Exception($"ファイルコピー中にエラーが発生しました: {ex.Message}", ex);
+                        }
+                    });
+
+                    if (processingDialog.ShowDialog() == DialogResult.OK)
+                    {
+                        try
+                        {
+                             // コピー成功後、DB登録処理
+                            string versionDir = PathManager.GetVersionFolder(game.GameId, form.NewVersion.Version);
+                            
+                            // バージョン情報にコピー後の実行ファイルパスを設定（相対パス: vX.Y.Z/relative/path）
+                            string versionFolderName = form.NewVersion.Version.StartsWith("v") ? form.NewVersion.Version : "v" + form.NewVersion.Version;
+                            string relativePath = Path.Combine(versionFolderName, form.RelativeExecutablePath);
+                            form.NewVersion.ExecutablePath = relativePath;
+                            
+                            // データベースに保存
+                            dbManager.AddGameVersion(form.NewVersion);
+
+                            // アクティブバージョンにするか確認
+                            var activationResult = MessageBox.Show(
+                                $"バージョン {form.NewVersion.Version} を現在のバージョン（アクティブ）として設定しますか？\n\n「いいえ」を選択した場合、バージョンは作成されますが、ランチャーで起動するバージョンは変更されません。",
+                                "アクティブバージョンの確認",
+                                MessageBoxButtons.YesNo,
+                                MessageBoxIcon.Question);
+
+                            if (activationResult == DialogResult.Yes)
+                            {
+                                // メインのゲーム情報も更新（最新バージョンに合わせる）
+                                form.UpdatedGameInfo.ExecutablePath = relativePath;
+                                dbManager.UpdateGame(form.UpdatedGameInfo);
+                            }
+                            
+                            MessageBox.Show(
+                                $"ゲーム「{game.Title}」のバージョン {form.NewVersion.Version} を追加しました。",
+                                "成功",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Information);
+                            
+                            LoadGames();
+                        }
+                        catch (Exception ex)
+                        {
+                             MessageBox.Show(
+                                $"データベースへの保存に失敗しました。\n\n{ex.Message}",
+                                "エラー",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Error);
+                        }
+                    }
+                    else if (processingDialog.DialogResult == DialogResult.Cancel)
+                    {
+                         MessageBox.Show(
+                            "処理がキャンセルされました。",
+                            "キャンセル",
                             MessageBoxButtons.OK,
                             MessageBoxIcon.Information);
-                        
-                        LoadGames();
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show(
-                            $"バージョンアップに失敗しました。\n\n{ex.Message}",
-                            "エラー",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Error);
+                         
+                         // キャンセル時はコピー途中の中途半端なフォルダが残っている可能性があるので削除する？
+                         // 安全のため、ここでは削除しない（ユーザーが手動で確認できるように）
+                         // 完全に削除するなら:
+                         // try { Directory.Delete(PathManager.GetVersionFolder(game.GameId, form.NewVersion.Version), true); } catch { }
                     }
                 }
             }
@@ -635,22 +714,141 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
+        /// バージョンフォルダかどうかを判定（v + 数字 で始まるか）
+        /// </summary>
+        private bool IsVersionFolder(string folderName)
+        {
+            if (string.IsNullOrEmpty(folderName)) return false;
+            // "v" または "V" で始まり、その次が数字である
+            if (!folderName.StartsWith("v", StringComparison.OrdinalIgnoreCase)) return false;
+            if (folderName.Length < 2) return false;
+            return char.IsDigit(folderName[1]);
+        }
+
+        /// <summary>
+        /// パスを正規化（\\?\ プレフィックスの除去と絶対パス化）
+        /// </summary>
+        private string NormalizePath(string path)
+        {
+            if (path.StartsWith(@"\\?\")) path = path.Substring(4);
+            return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+
+        /// <summary>
         /// ディレクトリを再帰的にコピー
         /// </summary>
-        private void CopyDirectory(string sourceDir, string destDir)
+        /// <summary>
+        /// ディレクトリを非同期で再帰的にコピー
+        /// </summary>
+        private void CopyDirectoryAsync(string sourceDir, string destDir, IProgress<ProgressInfo> progress, System.Threading.CancellationToken token)
         {
-            Directory.CreateDirectory(destDir);
+            // まず総ファイル数をカウント（進捗計算用）
+            // 再帰的にカウントする必要があるが、深い階層やアクセス権エラーで止まる可能性があるため、
+            // 簡易的にトップレベルと、コピーしながら計算する方式などを検討
+            // ここではシンプルに「ファイル単位で進捗報告」するが、分母（総数）がわからないと％が出せない。
+            // なので最初にスキャンする。
             
+            progress.Report(new ProgressInfo(0, "ファイル数を計算中..."));
+            int totalFiles = CountFiles(sourceDir);
+            int copiedFiles = 0;
+
+            CopyDirectoryRecursive(sourceDir, destDir, progress, token, totalFiles, ref copiedFiles);
+        }
+
+        private int CountFiles(string dir)
+        {
+            int count = 0;
+            try
+            {
+                count += Directory.GetFiles(dir).Length;
+                var excludedFolders = new[] { "Library", "Temp", "Logs", "Build", "Builds", "Intermediate", "Saved", "DerivedDataCache", ".import", ".vs", ".idea", ".vscode", ".git", ".svn", ".hg", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache" };
+
+                foreach (string subDir in Directory.GetDirectories(dir))
+                {
+                    // バージョンフォルダ等は除外
+                    string folderName = Path.GetFileName(subDir);
+                    if (IsVersionFolder(folderName)) continue;
+                    
+                    // 除外フォルダをスキップ
+                    if (System.Linq.Enumerable.Contains(excludedFolders, folderName, StringComparer.OrdinalIgnoreCase)) continue;
+                    
+                    count += CountFiles(subDir);
+                }
+            }
+            catch { }
+            return count;
+        }
+
+        private void CopyDirectoryRecursive(string sourceDir, string destDir, IProgress<ProgressInfo> progress, System.Threading.CancellationToken token, int totalFiles, ref int copiedFiles)
+        {
+            token.ThrowIfCancellationRequested();
+
+            string safeDestDir = destDir;
+            if (safeDestDir.Length >= 240 && !safeDestDir.StartsWith(@"\\?\"))
+            {
+                safeDestDir = @"\\?\" + safeDestDir;
+            }
+
+            Directory.CreateDirectory(safeDestDir);
+            
+            string fullSourceDir = NormalizePath(sourceDir);
+            string fullDestDir = NormalizePath(destDir);
+            
+            // 親子関係ガード
+            if (fullDestDir.StartsWith(fullSourceDir, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
             foreach (string file in Directory.GetFiles(sourceDir))
             {
-                string destFile = Path.Combine(destDir, Path.GetFileName(file));
-                File.Copy(file, destFile, true);
+                token.ThrowIfCancellationRequested();
+
+                string fileName = Path.GetFileName(file);
+                string destFile = Path.Combine(safeDestDir, fileName);
+                string sourceFile = file;
+
+                if (destFile.Length >= 240 && !destFile.StartsWith(@"\\?\")) destFile = @"\\?\" + destFile;
+                if (sourceFile.Length >= 240 && !sourceFile.StartsWith(@"\\?\")) sourceFile = @"\\?\" + sourceFile;
+
+                // ファイルコピー（非同期的にやりたいが、System.IO.File.CopyにはAsyncがない。
+                // Streamを使うと遅くなることもあるので、ここではFile.Copyを使う。
+                // BackgroundTask内で実行されているのでUIはフリーズしない）
+                File.Copy(sourceFile, destFile, true);
+                
+                copiedFiles++;
+                int percentage = totalFiles > 0 ? (int)((double)copiedFiles / totalFiles * 100) : 100;
+                progress.Report(new ProgressInfo(percentage, "ファイルをコピー中...", fileName));
             }
             
+            var excludedFolders = new[] { "Library", "Temp", "Logs", "Build", "Builds", "Intermediate", "Saved", "DerivedDataCache", ".import", ".vs", ".idea", ".vscode", ".git", ".svn", ".hg", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache" };
+
             foreach (string subDir in Directory.GetDirectories(sourceDir))
             {
-                string destSubDir = Path.Combine(destDir, Path.GetFileName(subDir));
-                CopyDirectory(subDir, destSubDir);
+                token.ThrowIfCancellationRequested();
+
+                string folderName = Path.GetFileName(subDir);
+                string fullSubPath = NormalizePath(subDir);
+
+                if (fullSubPath.Equals(fullDestDir, StringComparison.OrdinalIgnoreCase) || 
+                    fullDestDir.StartsWith(fullSubPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (IsVersionFolder(folderName))
+                {
+                    continue;
+                }
+
+                // 除外フォルダをスキップ
+                if (System.Linq.Enumerable.Contains(excludedFolders, folderName, StringComparer.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string destSubDir = Path.Combine(safeDestDir, folderName);
+                CopyDirectoryRecursive(subDir, destSubDir, progress, token, totalFiles, ref copiedFiles);
             }
         }
 
