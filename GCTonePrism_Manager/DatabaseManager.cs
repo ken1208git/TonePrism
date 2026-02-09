@@ -1068,6 +1068,7 @@ namespace GCTonePrism.Manager
                        currentVersion = 2;
                     }
 
+
                     // v2 -> v3
                     if (currentVersion < 3)
                     {
@@ -1095,6 +1096,7 @@ namespace GCTonePrism.Manager
                         MigrateV5ToV6(connection, migTransaction);
                         currentVersion = 6;
                     }
+
 
                     // 最新バージョンに更新
                     SetDbVersion(connection, CurrentDbVersion, migTransaction);
@@ -1201,6 +1203,7 @@ namespace GCTonePrism.Manager
             {
                 command.ExecuteNonQuery();
             }
+
 
             // game_genresテーブル作成とデータ移行
             string createGameGenresTable = @"
@@ -1757,6 +1760,7 @@ namespace GCTonePrism.Manager
         {
             var versions = GetGameVersions(gameId);
             return versions.FirstOrDefault();
+
         }
     }
 }
