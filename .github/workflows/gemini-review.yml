@@ -23,4 +23,4 @@ jobs:
         with:
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
           gemini_model: 'gemini-3-flash-preview'
-          prompt: "以下のプルリクエストを日本語でレビューして改善点を教えて。"
+          prompt: "以下のプルリクエストを日本語でレビューして改善点を教えて。結果はGitHubのPRコメントとして投稿してください。"
