@@ -761,11 +761,16 @@ namespace GCTonePrism.Manager
             try
             {
                 count += Directory.GetFiles(dir).Length;
+                var excludedFolders = new[] { "Library", "Temp", "Logs", "Build", "Builds", "Intermediate", "Saved", "DerivedDataCache", ".import", ".vs", ".idea", ".vscode", ".git", ".svn", ".hg", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache" };
+
                 foreach (string subDir in Directory.GetDirectories(dir))
                 {
-                    // バージョンフォルダ等は除外（CopyDirectoryと同じロジックが必要）
+                    // バージョンフォルダ等は除外
                     string folderName = Path.GetFileName(subDir);
                     if (IsVersionFolder(folderName)) continue;
+                    
+                    // 除外フォルダをスキップ
+                    if (System.Linq.Enumerable.Contains(excludedFolders, folderName, StringComparer.OrdinalIgnoreCase)) continue;
                     
                     count += CountFiles(subDir);
                 }
@@ -816,6 +821,8 @@ namespace GCTonePrism.Manager
                 progress.Report(new ProgressInfo(percentage, "ファイルをコピー中...", fileName));
             }
             
+            var excludedFolders = new[] { "Library", "Temp", "Logs", "Build", "Builds", "Intermediate", "Saved", "DerivedDataCache", ".import", ".vs", ".idea", ".vscode", ".git", ".svn", ".hg", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache" };
+
             foreach (string subDir in Directory.GetDirectories(sourceDir))
             {
                 token.ThrowIfCancellationRequested();
@@ -830,6 +837,12 @@ namespace GCTonePrism.Manager
                 }
 
                 if (IsVersionFolder(folderName))
+                {
+                    continue;
+                }
+
+                // 除外フォルダをスキップ
+                if (System.Linq.Enumerable.Contains(excludedFolders, folderName, StringComparer.OrdinalIgnoreCase))
                 {
                     continue;
                 }
