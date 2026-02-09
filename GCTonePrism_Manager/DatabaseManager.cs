@@ -158,8 +158,6 @@ namespace GCTonePrism.Manager
                                     max_players INTEGER,
                                     difficulty INTEGER CHECK(difficulty BETWEEN 1 AND 5),
                                     play_time INTEGER,
-                                    difficulty INTEGER CHECK(difficulty BETWEEN 1 AND 5),
-                                    play_time INTEGER,
                                     controller_support INTEGER DEFAULT 0,
                                     supported_connection INTEGER DEFAULT 0,
                                     thumbnail_path TEXT,
