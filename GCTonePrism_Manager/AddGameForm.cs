@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -18,6 +19,9 @@ namespace GCTonePrism.Manager
         private string sourceGameFolder;
         private string destinationGameFolder;
         private List<DeveloperInfo> developers;
+        private Label lblArgumentsPlaceholder;
+
+        private const string ARGUMENTS_PLACEHOLDER = "通常は空欄で構いません。\r\n特殊な起動オプションが必要な場合のみ記述してください。\r\n例: Unity製ゲームでフルスクリーン起動を強制する場合 -> -screen-fullscreen 1";
 
         /// <summary>
         /// 追加されたゲーム情報（OKボタンがクリックされた場合のみ設定される）
@@ -51,11 +55,35 @@ namespace GCTonePrism.Manager
             cmbPlayTime.Items.Add("3 - 15分以上");
             cmbPlayTime.SelectedIndex = 1; // デフォルト: 5分～15分
 
+            // 通信プレイ対応のコンボボックスを初期化
+            cmbSupportedConnection.Items.Add("なし（1台で遊ぶ）");
+            cmbSupportedConnection.Items.Add("ローカル通信（部室のLANで対戦）");
+            cmbSupportedConnection.Items.Add("オンライン通信（インターネット対戦）");
+            cmbSupportedConnection.SelectedIndex = 0; // デフォルト: なし
+
+            // 起動オプションのプレースホルダー設定（ラベルを重ねて表示）
+            lblArgumentsPlaceholder = new Label();
+            lblArgumentsPlaceholder.Text = ARGUMENTS_PLACEHOLDER;
+            lblArgumentsPlaceholder.ForeColor = System.Drawing.Color.Gray;
+            lblArgumentsPlaceholder.BackColor = System.Drawing.Color.White; // テキストボックスの背景色に合わせる
+            lblArgumentsPlaceholder.AutoSize = false;
+            lblArgumentsPlaceholder.Size = new System.Drawing.Size(txtArguments.Width - 4, txtArguments.Height - 4);
+            lblArgumentsPlaceholder.Location = new System.Drawing.Point(txtArguments.Location.X + 2, txtArguments.Location.Y + 2); // 枠線の分だけずらす
+            lblArgumentsPlaceholder.Font = txtArguments.Font;
+            lblArgumentsPlaceholder.Cursor = Cursors.IBeam;
+            lblArgumentsPlaceholder.Click += (s, ev) => txtArguments.Focus();
+            this.Controls.Add(lblArgumentsPlaceholder);
+            lblArgumentsPlaceholder.BringToFront();
+
+            // テキスト変更時のイベントハンドラ
+            txtArguments.TextChanged += (s, ev) => UpdatePlaceholderVisibility();
+            UpdatePlaceholderVisibility(); // 初期状態の更新
+
             // デフォルト値の設定
             chkControllerSupport.Checked = false;
             numMinPlayers.Value = 1;
             numMaxPlayers.Value = 1;
-
+            
             // ジャンルチェックボックスリストを初期化
             clbGenre.Items.Clear();
             foreach (var genre in GenreList.AvailableGenres)
@@ -69,6 +97,9 @@ namespace GCTonePrism.Manager
 
             // リリース年の初期値を今年に設定
             numReleaseYear.Value = DateTime.Now.Year;
+
+            // バージョンの初期値を設定
+            txtVersion.Text = "1.0.0";
 
             // 製作者情報のDataGridViewを初期化
             InitializeDevelopersGrid();
@@ -271,6 +302,7 @@ namespace GCTonePrism.Manager
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
                     txtThumbnailPath.Text = dialog.FileName;
+                    UpdateThumbnailPreview();
                 }
             }
         }
@@ -296,6 +328,7 @@ namespace GCTonePrism.Manager
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
                     txtBackgroundPath.Text = dialog.FileName;
+                    UpdateBackgroundPreview();
                 }
             }
         }
@@ -605,6 +638,9 @@ namespace GCTonePrism.Manager
                 Console.WriteLine($"[AddGameForm] サムネイル相対パス: {thumbnailPath}");
                 Console.WriteLine($"[AddGameForm] 背景相対パス: {backgroundPath}");
 
+                // 起動オプション
+                string arguments = txtArguments.Text;
+
                 // GameInfoオブジェクトを作成
                 var game = new GameInfo
                 {
@@ -616,14 +652,17 @@ namespace GCTonePrism.Manager
                     MaxPlayers = numMaxPlayers.Value > 0 ? (int?)numMaxPlayers.Value : null,
                     Difficulty = cmbDifficulty.SelectedIndex >= 0 ? cmbDifficulty.SelectedIndex + 1 : (int?)null,
                     PlayTime = cmbPlayTime.SelectedIndex >= 0 ? cmbPlayTime.SelectedIndex + 1 : (int?)null,
+                    SupportedConnection = cmbSupportedConnection.SelectedIndex >= 0 ? cmbSupportedConnection.SelectedIndex : 0,
                     ControllerSupport = chkControllerSupport.Checked,
                     ThumbnailPath = thumbnailPath,
                     BackgroundPath = backgroundPath,
                     ExecutablePath = executablePath,
+                    Arguments = arguments,
                     DisplayOrder = dbManager.GetMinDisplayOrder() - 1, // 既存の最小値より1小さい値（一番上に配置）
                     IsVisible = true, // 新規追加のゲームは常にランチャーに表示
                     Controls = null, // 後で実装
-                    KeyMapping = null // 後で実装
+                    KeyMapping = null, // 後で実装
+                    Version = txtVersion.Text.Trim() // 初期バージョンを設定
                 };
 
                 // ジャンルを処理（チェックボックスから選択されたものを取得）
@@ -642,6 +681,17 @@ namespace GCTonePrism.Manager
 
                 // データベースに追加
                 dbManager.AddGame(game);
+
+                // 初期バージョン情報を追加
+                var initialVersion = new GameVersion
+                {
+                    GameId = game.GameId,
+                    Version = txtVersion.Text.Trim(),
+                    ExecutablePath = game.ExecutablePath,
+                    Description = "初期バージョン",
+                    RegisteredAt = DateTime.Now
+                };
+                dbManager.AddGameVersion(initialVersion);
 
                 AddedGame = game;
                 DialogResult = DialogResult.OK;
@@ -889,6 +939,124 @@ namespace GCTonePrism.Manager
             {
                 developers.Remove(selectedDeveloper);
                 RefreshDevelopersGrid();
+            }
+        }
+
+        private void UpdatePlaceholderVisibility()
+        {
+            if (lblArgumentsPlaceholder != null)
+            {
+                lblArgumentsPlaceholder.Visible = string.IsNullOrEmpty(txtArguments.Text);
+            }
+        }
+
+        /// <summary>
+        /// サムネイルプレビューを更新
+        /// </summary>
+        private void UpdateThumbnailPreview()
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(txtThumbnailPath.Text))
+                {
+                    picThumbnailPreview.Image = null;
+                    return;
+                }
+                
+                string path = txtThumbnailPath.Text.Trim();
+                if (File.Exists(path))
+                {
+                    using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read))
+                    {
+                        using (var ms = new MemoryStream())
+                        {
+                            stream.CopyTo(ms);
+                            ms.Position = 0;
+                            picThumbnailPreview.Image = Image.FromStream(ms);
+                        }
+                    }
+                }
+                else
+                {
+                    picThumbnailPreview.Image = null;
+                }
+            }
+            catch
+            {
+                picThumbnailPreview.Image = null;
+            }
+        }
+
+        /// <summary>
+        /// 背景プレビューを更新
+        /// </summary>
+        private void UpdateBackgroundPreview()
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(txtBackgroundPath.Text))
+                {
+                    picBackgroundPreview.Image = null;
+                    return;
+                }
+                
+                string path = txtBackgroundPath.Text.Trim();
+                if (File.Exists(path))
+                {
+                    using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read))
+                    {
+                        using (var ms = new MemoryStream())
+                        {
+                            stream.CopyTo(ms);
+                            ms.Position = 0;
+                            picBackgroundPreview.Image = Image.FromStream(ms);
+                        }
+                    }
+                }
+                else
+                {
+                    picBackgroundPreview.Image = null;
+                }
+            }
+            catch
+            {
+                picBackgroundPreview.Image = null;
+            }
+        }
+
+        /// <summary>
+        /// テスト起動ボタンクリック
+        /// </summary>
+        private void btnTestRun_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                string exePath = txtExecutablePath.Text.Trim();
+                if (string.IsNullOrWhiteSpace(exePath))
+                {
+                    MessageBox.Show("実行ファイルが指定されていません。", "テスト起動", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                
+                if (!File.Exists(exePath))
+                {
+                    MessageBox.Show($"実行ファイルが見つかりません:\n{exePath}", "テスト起動", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+                
+                var startInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = exePath,
+                    Arguments = txtArguments.Text ?? "",
+                    WorkingDirectory = Path.GetDirectoryName(exePath),
+                    UseShellExecute = true
+                };
+                
+                System.Diagnostics.Process.Start(startInfo);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"実行ファイルの起動に失敗しました:\n{ex.Message}", "テスト起動", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
     }

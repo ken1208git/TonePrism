@@ -110,7 +110,7 @@ namespace GCTonePrism.Manager
             this.lblButtonWarning.Name = "lblButtonWarning";
             this.lblButtonWarning.Size = new System.Drawing.Size(350, 12);
             this.lblButtonWarning.TabIndex = 6;
-            this.lblButtonWarning.Text = "※注意: 「リセット実行」ボタンはマウスが近づくと逃げます";
+            this.lblButtonWarning.Text = "※リセット実行ボタンは押そうとすると逃げますので、頑張って押してください";
             // 
             // btnConfirm
             // 

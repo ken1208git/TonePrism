@@ -9,7 +9,7 @@ var db_path: String = ""
 
 # 現在のデータベースバージョン
 # 構造変更があるたびにインクリメントする
-const CURRENT_DB_VERSION: int = 1
+const CURRENT_DB_VERSION: int = 2
 
 ## データベースを開く
 func open() -> bool:
@@ -38,6 +38,9 @@ func open() -> bool:
 		return false
 	
 	print("[DatabaseManager] データベースを開きました: ", db_path)
+	
+	# WALモードを有効化（同時書き込み対策）
+	db.query("PRAGMA journal_mode=WAL;")
 	
 	# データベースのバージョンチェックとマイグレーション
 	_check_and_migrate_db()
@@ -73,16 +76,7 @@ func get_all_games() -> Array[GameInfo]:
 	
 	# 表示対象のゲームのみを取得（is_visible = 1）
 	# display_orderでソート
-	var query = """
-		SELECT 
-			game_id, title, description, release_year, genre,
-			min_players, max_players, difficulty, play_time, controller_support,
-			thumbnail_path, background_path, executable_path,
-			display_order, is_visible, controls, key_mapping
-		FROM games
-		WHERE is_visible = 1
-		ORDER BY display_order ASC, title ASC
-	"""
+	var query = "SELECT * FROM games WHERE is_visible = 1 ORDER BY display_order ASC, title ASC"
 	
 	# クエリを実行（godot-sqliteのAPI）
 	# query()メソッドはboolを返す
@@ -111,15 +105,7 @@ func get_game_by_id(game_id: String) -> GameInfo:
 	
 	# SQLインジェクション対策: 値をエスケープしてクエリに埋め込む
 	var escaped_game_id = _escape_sql_string(game_id)
-	var query = """
-		SELECT 
-			game_id, title, description, release_year, genre,
-			min_players, max_players, difficulty, play_time, controller_support,
-			thumbnail_path, background_path, executable_path,
-			display_order, is_visible, controls, key_mapping
-		FROM games
-		WHERE game_id = '%s'
-	""" % escaped_game_id
+	var query = "SELECT * FROM games WHERE game_id = '%s'" % escaped_game_id
 	
 	# クエリを実行（godot-sqliteのAPI）
 	# query()メソッドはboolを返す
@@ -168,18 +154,36 @@ func get_developers_by_game_id(game_id: String) -> Array[DeveloperInfo]:
 				var developer = DeveloperInfo.new()
 				# 結果は辞書形式で返される可能性があるため、両方に対応
 				if row is Dictionary:
-					developer.id = row.get("id", -1) if row.has("id") else -1
-					developer.game_id = row.get("game_id", "") if row.has("game_id") else ""
-					developer.last_name = row.get("last_name", "") if row.has("last_name") else ""
-					developer.first_name = row.get("first_name", "") if row.has("first_name") else ""
-					developer.grade = row.get("grade", "") if row.has("grade") else ""
+					var id_val = row.get("id", -1) if row.has("id") else -1
+					developer.id = int(id_val) if id_val != null else -1
+					
+					var game_id_val = row.get("game_id", "") if row.has("game_id") else ""
+					developer.game_id = game_id_val if game_id_val != null else ""
+					
+					var last_name_val = row.get("last_name", "") if row.has("last_name") else ""
+					developer.last_name = last_name_val if last_name_val != null else ""
+					
+					var first_name_val = row.get("first_name", "") if row.has("first_name") else ""
+					developer.first_name = first_name_val if first_name_val != null else ""
+					
+					var grade_val = row.get("grade", "") if row.has("grade") else ""
+					developer.grade = grade_val if grade_val != null else ""
 				else:
 					# 配列形式の場合
-					developer.id = row[0] if row.size() > 0 and row[0] != null else -1
-					developer.game_id = row[1] if row.size() > 1 and row[1] != null else ""
-					developer.last_name = row[2] if row.size() > 2 and row[2] != null else ""
-					developer.first_name = row[3] if row.size() > 3 and row[3] != null else ""
-					developer.grade = row[4] if row.size() > 4 and row[4] != null else ""
+					var id_val = row[0] if row.size() > 0 else -1
+					developer.id = int(id_val) if id_val != null else -1
+					
+					var game_id_val = row[1] if row.size() > 1 else ""
+					developer.game_id = game_id_val if game_id_val != null else ""
+					
+					var last_name_val = row[2] if row.size() > 2 else ""
+					developer.last_name = last_name_val if last_name_val != null else ""
+					
+					var first_name_val = row[3] if row.size() > 3 else ""
+					developer.first_name = first_name_val if first_name_val != null else ""
+					
+					var grade_val = row[4] if row.size() > 4 else ""
+					developer.grade = grade_val if grade_val != null else ""
 				developers.append(developer)
 	else:
 		push_error("[DatabaseManager] 製作者情報の取得に失敗しました")
@@ -191,6 +195,7 @@ func _create_game_info_from_row_dict(row) -> GameInfo:
 	var game = GameInfo.new()
 	
 	# 結果は辞書形式で返される可能性があるため、両方に対応
+	# 結果は辞書形式で返される可能性があるため、両方に対応
 	if row is Dictionary:
 		# 文字列型プロパティはnullチェックが必要
 		var game_id_value = row.get("game_id", "") if row.has("game_id") else ""
@@ -199,26 +204,51 @@ func _create_game_info_from_row_dict(row) -> GameInfo:
 		game.title = title_value if title_value != null else ""
 		var description_value = row.get("description", "") if row.has("description") else ""
 		game.description = description_value if description_value != null else ""
-		game.release_year = row.get("release_year", -1) if row.has("release_year") else -1
+		
+		# 数値型・ブール型のnullチェック
+		var release_year_val = row.get("release_year", -1) if row.has("release_year") else -1
+		game.release_year = int(release_year_val) if release_year_val != null else -1
+		
 		var genre_value = row.get("genre", "") if row.has("genre") else ""
 		game.genre = _parse_genre(genre_value if genre_value != null else "")
-		game.min_players = row.get("min_players", -1) if row.has("min_players") else -1
-		game.max_players = row.get("max_players", -1) if row.has("max_players") else -1
-		game.difficulty = row.get("difficulty", -1) if row.has("difficulty") else -1
-		game.play_time = row.get("play_time", -1) if row.has("play_time") else -1
-		game.controller_support = (row.get("controller_support", 0) if row.has("controller_support") else 0) == 1
+		
+		var min_players_val = row.get("min_players", -1) if row.has("min_players") else -1
+		game.min_players = int(min_players_val) if min_players_val != null else -1
+		
+		var max_players_val = row.get("max_players", -1) if row.has("max_players") else -1
+		game.max_players = int(max_players_val) if max_players_val != null else -1
+		
+		var difficulty_val = row.get("difficulty", -1) if row.has("difficulty") else -1
+		game.difficulty = int(difficulty_val) if difficulty_val != null else -1
+		
+		var play_time_val = row.get("play_time", -1) if row.has("play_time") else -1
+		game.play_time = int(play_time_val) if play_time_val != null else -1
+		
+		var controller_support_val = row.get("controller_support", 0) if row.has("controller_support") else 0
+		game.controller_support = (int(controller_support_val) == 1) if controller_support_val != null else false
+		
+		var supported_connection_val = row.get("supported_connection", 0) if row.has("supported_connection") else 0
+		game.supported_connection = int(supported_connection_val) if supported_connection_val != null else 0
+		
 		var thumbnail_path_value = row.get("thumbnail_path", "") if row.has("thumbnail_path") else ""
 		game.thumbnail_path = thumbnail_path_value if thumbnail_path_value != null else ""
 		var background_path_value = row.get("background_path", "") if row.has("background_path") else ""
 		game.background_path = background_path_value if background_path_value != null else ""
 		var executable_path_value = row.get("executable_path", "") if row.has("executable_path") else ""
 		game.executable_path = executable_path_value if executable_path_value != null else ""
-		game.display_order = row.get("display_order", -1) if row.has("display_order") else -1
-		game.is_visible = (row.get("is_visible", 0) if row.has("is_visible") else 0) == 1
+		
+		var display_order_val = row.get("display_order", -1) if row.has("display_order") else -1
+		game.display_order = int(display_order_val) if display_order_val != null else -1
+		
+		var is_visible_val = row.get("is_visible", 0) if row.has("is_visible") else 0
+		game.is_visible = (int(is_visible_val) == 1) if is_visible_val != null else true
+		
 		var controls_value = row.get("controls", "") if row.has("controls") else ""
 		game.controls = controls_value if controls_value != null else ""
 		var key_mapping_value = row.get("key_mapping", "") if row.has("key_mapping") else ""
 		game.key_mapping = key_mapping_value if key_mapping_value != null else ""
+		var arguments_value = row.get("arguments", "") if row.has("arguments") else ""
+		game.arguments = arguments_value if arguments_value != null else ""
 	else:
 		# 配列形式の場合
 		# 文字列型プロパティはnullチェックが必要
@@ -228,26 +258,51 @@ func _create_game_info_from_row_dict(row) -> GameInfo:
 		game.title = title_value if title_value != null else ""
 		var description_value = row[2] if row.size() > 2 and row[2] != null else ""
 		game.description = description_value if description_value != null else ""
-		game.release_year = row[3] if row.size() > 3 and row[3] != null else -1
+		
+		var release_year_val = row[3] if row.size() > 3 else -1
+		game.release_year = int(release_year_val) if release_year_val != null else -1
+		
 		var genre_value = row[4] if row.size() > 4 and row[4] != null else ""
 		game.genre = _parse_genre(genre_value if genre_value != null else "")
-		game.min_players = row[5] if row.size() > 5 and row[5] != null else -1
-		game.max_players = row[6] if row.size() > 6 and row[6] != null else -1
-		game.difficulty = row[7] if row.size() > 7 and row[7] != null else -1
-		game.play_time = row[8] if row.size() > 8 and row[8] != null else -1
-		game.controller_support = (row[9] if row.size() > 9 and row[9] != null else 0) == 1
-		var thumbnail_path_value = row[10] if row.size() > 10 and row[10] != null else ""
+		
+		var min_players_val = row[5] if row.size() > 5 else -1
+		game.min_players = int(min_players_val) if min_players_val != null else -1
+		
+		var max_players_val = row[6] if row.size() > 6 else -1
+		game.max_players = int(max_players_val) if max_players_val != null else -1
+		
+		var difficulty_val = row[7] if row.size() > 7 else -1
+		game.difficulty = int(difficulty_val) if difficulty_val != null else -1
+		
+		var play_time_val = row[8] if row.size() > 8 else -1
+		game.play_time = int(play_time_val) if play_time_val != null else -1
+		
+		var controller_support_val = row[9] if row.size() > 9 else 0
+		game.controller_support = (int(controller_support_val) == 1) if controller_support_val != null else false
+		
+		var supported_connection_val = row[10] if row.size() > 10 else 0
+		game.supported_connection = int(supported_connection_val) if supported_connection_val != null else 0
+		
+		var thumbnail_path_value = row[11] if row.size() > 11 and row[11] != null else ""
 		game.thumbnail_path = thumbnail_path_value if thumbnail_path_value != null else ""
-		var background_path_value = row[11] if row.size() > 11 and row[11] != null else ""
+		var background_path_value = row[12] if row.size() > 12 and row[12] != null else ""
 		game.background_path = background_path_value if background_path_value != null else ""
-		var executable_path_value = row[12] if row.size() > 12 and row[12] != null else ""
+		var executable_path_value = row[13] if row.size() > 13 and row[13] != null else ""
 		game.executable_path = executable_path_value if executable_path_value != null else ""
-		game.display_order = row[13] if row.size() > 13 and row[13] != null else -1
-		game.is_visible = (row[14] if row.size() > 14 and row[14] != null else 0) == 1
-		var controls_value = row[15] if row.size() > 15 and row[15] != null else ""
+		
+		var display_order_val = row[14] if row.size() > 14 else -1
+		game.display_order = int(display_order_val) if display_order_val != null else -1
+		
+		var is_visible_val = row[15] if row.size() > 15 else 0
+		game.is_visible = (int(is_visible_val) == 1) if is_visible_val != null else true
+		
+		var controls_value = row[16] if row.size() > 16 and row[16] != null else ""
 		game.controls = controls_value if controls_value != null else ""
-		var key_mapping_value = row[16] if row.size() > 16 and row[16] != null else ""
+		var key_mapping_value = row[17] if row.size() > 17 and row[17] != null else ""
 		game.key_mapping = key_mapping_value if key_mapping_value != null else ""
+		
+		var arguments_value = row[18] if row.size() > 18 and row[18] != null else ""
+		game.arguments = arguments_value if arguments_value != null else ""
 	
 	return game
 
@@ -291,9 +346,11 @@ func _get_db_version() -> int:
 		# 結果の形式に合わせて取得（辞書または配列）
 		var row = result[0]
 		if row is Dictionary:
-			return row.get("user_version", 0)
+			var ver = row.get("user_version", 0)
+			return int(ver) if ver != null else 0
 		elif row is Array and row.size() > 0:
-			return row[0]
+			var ver = row[0]
+			return int(ver) if ver != null else 0
 			
 	return 0
 
