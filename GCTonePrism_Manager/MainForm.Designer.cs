@@ -31,6 +31,7 @@ namespace GCTonePrism.Manager
             this.toolStrip1 = new System.Windows.Forms.ToolStrip();
             this.btnAddGame = new System.Windows.Forms.ToolStripButton();
             this.btnEditGame = new System.Windows.Forms.ToolStripButton();
+            this.btnVersionUp = new System.Windows.Forms.ToolStripButton();
             this.btnDeleteGame = new System.Windows.Forms.ToolStripButton();
             this.toolStripSeparator2 = new System.Windows.Forms.ToolStripSeparator();
             this.btnRefresh = new System.Windows.Forms.ToolStripButton();
@@ -54,6 +55,7 @@ namespace GCTonePrism.Manager
             this.toolStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.btnAddGame,
             this.btnEditGame,
+            this.btnVersionUp,
             this.btnDeleteGame,
             this.toolStripSeparator2,
             this.btnRefresh});
@@ -78,6 +80,14 @@ namespace GCTonePrism.Manager
             this.btnEditGame.Size = new System.Drawing.Size(39, 24);
             this.btnEditGame.Text = "編集";
             this.btnEditGame.Click += new System.EventHandler(this.btnEditGame_Click);
+            // 
+            // btnVersionUp
+            // 
+            this.btnVersionUp.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this.btnVersionUp.Name = "btnVersionUp";
+            this.btnVersionUp.Size = new System.Drawing.Size(91, 24);
+            this.btnVersionUp.Text = "バージョンアップ";
+            this.btnVersionUp.Click += new System.EventHandler(this.btnVersionUp_Click);
             // 
             // btnDeleteGame
             // 
@@ -208,6 +218,7 @@ namespace GCTonePrism.Manager
         private System.Windows.Forms.ToolStrip toolStrip1;
         private System.Windows.Forms.ToolStripButton btnAddGame;
         private System.Windows.Forms.ToolStripButton btnEditGame;
+        private System.Windows.Forms.ToolStripButton btnVersionUp;
         private System.Windows.Forms.ToolStripButton btnDeleteGame;
         private System.Windows.Forms.ToolStripSeparator toolStripSeparator2;
         private System.Windows.Forms.ToolStripButton btnRefresh;

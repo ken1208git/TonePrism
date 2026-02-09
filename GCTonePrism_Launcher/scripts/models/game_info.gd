@@ -36,6 +36,12 @@ var play_time: int = -1
 ## コントローラーサポート
 var controller_support: bool = false
 
+## 通信対戦の対応状況
+## 0: なし (オフラインのみ)
+## 1: ローカル通信 (LAN)
+## 2: オンライン通信 (WAN)
+var supported_connection: int = 0
+
 ## サムネイル画像のパス（相対パス：games/{game_id}/フォルダからの相対パス）
 var thumbnail_path: String = ""
 
@@ -56,6 +62,9 @@ var controls: String = ""
 
 ## キーマッピング設定（JSON形式で保存）
 var key_mapping: String = ""
+
+## 起動オプション（引数）
+var arguments: String = ""
 
 ## 製作者リスト（データベースではdevelopersテーブルとして分離）
 var developers: Array[DeveloperInfo] = []

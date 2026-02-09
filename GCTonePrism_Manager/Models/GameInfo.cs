@@ -60,6 +60,14 @@ namespace GCTonePrism.Manager.Models
         /// コントローラーサポート
         /// </summary>
         public bool ControllerSupport { get; set; }
+        
+        /// <summary>
+        /// 通信対戦の対応状況
+        /// 0: なし (オフラインのみ)
+        /// 1: ローカル通信 (LAN)
+        /// 2: オンライン通信 (WAN)
+        /// </summary>
+        public int SupportedConnection { get; set; }
 
         /// <summary>
         /// サムネイル画像のパス
@@ -75,6 +83,11 @@ namespace GCTonePrism.Manager.Models
         /// 実行ファイルのパス
         /// </summary>
         public string ExecutablePath { get; set; }
+
+        /// <summary>
+        /// 起動オプション（引数）
+        /// </summary>
+        public string Arguments { get; set; }
 
         /// <summary>
         /// 表示順序（数値が小さいほど先に表示）
@@ -95,6 +108,11 @@ namespace GCTonePrism.Manager.Models
         /// キーマッピング設定（JSON形式で保存）
         /// </summary>
         public string KeyMapping { get; set; }
+
+        /// <summary>
+        /// 最新バージョン（表示用）
+        /// </summary>
+        public string Version { get; set; }
 
         /// <summary>
         /// 製作者リスト（データベースではdevelopersテーブルとして分離）

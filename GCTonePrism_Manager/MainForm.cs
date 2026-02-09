@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.IO;
 using System.Reflection;
 using System.Windows.Forms;
 using GCTonePrism.Manager.Models;
@@ -16,6 +17,10 @@ namespace GCTonePrism.Manager
         public MainForm()
         {
             InitializeComponent();
+            
+            // ウィンドウサイズを少し広げる（バージョンカラム追加のため）
+            if (this.Width < 1100) this.Width = 1100;
+
             dbManager = new DatabaseManager();
         }
 
@@ -24,6 +29,13 @@ namespace GCTonePrism.Manager
         /// </summary>
         private void MainForm_Load(object sender, EventArgs e)
         {
+            // 起動時に同時使用に関する警告を表示
+            MessageBox.Show(
+                "【重要】管理ソフトは必ず「1台のPC」だけで起動してください。\n\n複数のPCで同時に管理ソフトを開くと、データの保存に失敗したり、最悪の場合ファイルが破損して全てのデータが失われる可能性があります。\n（ランチャーは複数のPCで同時に動かしても大丈夫です）",
+                "同時起動に関する注意",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+
             // データベースが存在するか確認
             if (!dbManager.DatabaseExists())
             {
@@ -53,7 +65,11 @@ namespace GCTonePrism.Manager
             }
             else
             {
-                // データベースが存在する場合、ゲーム一覧を読み込む
+                // データベースが存在する場合でも、バージョンアップやカラム追加のために初期化（マイグレーション）を実行する
+                // これを行わないと、新しく追加されたカラム（supported_connectionなど）が反映されずにエラーになる
+                dbManager.InitializeDatabase();
+
+                // ゲーム一覧を読み込む
                 LoadGames();
             }
 
@@ -216,7 +232,7 @@ namespace GCTonePrism.Manager
                 "Description", "Genre", "MinPlayers", "MaxPlayers", 
                 "Difficulty", "PlayTime", "ControllerSupport", "ThumbnailPath", 
                 "BackgroundPath", "ExecutablePath", "Controls", 
-                "KeyMapping", "Developers", "DisplayOrder" 
+                "KeyMapping", "Developers", "DisplayOrder", "SupportedConnection", "Arguments" 
             };
 
             foreach (var columnName in hiddenColumns)
@@ -241,7 +257,21 @@ namespace GCTonePrism.Manager
                 dgvGames.Columns.Add(developersColumn);
             }
 
-            // カラムの順序を設定（ゲームID → タイトル → リリース年 → 製作者 → ランチャー表示）
+            // バージョンカラムを追加
+            if (dgvGames.Columns["Version"] == null)
+            {
+                var versionColumn = new DataGridViewTextBoxColumn
+                {
+                    Name = "Version",
+                    HeaderText = "バージョン",
+                    DataPropertyName = "Version",
+                    ReadOnly = true
+                };
+                
+                dgvGames.Columns.Add(versionColumn);
+            }
+
+            // カラムの順序を設定（ゲームID → タイトル → リリース年 → 製作者 → バージョン → ランチャー表示）
             if (dgvGames.Columns["GameId"] != null)
                 dgvGames.Columns["GameId"].DisplayIndex = 0;
             if (dgvGames.Columns["Title"] != null)
@@ -250,8 +280,10 @@ namespace GCTonePrism.Manager
                 dgvGames.Columns["ReleaseYear"].DisplayIndex = 2;
             if (dgvGames.Columns["DevelopersDisplay"] != null)
                 dgvGames.Columns["DevelopersDisplay"].DisplayIndex = 3;
+            if (dgvGames.Columns["Version"] != null)
+                dgvGames.Columns["Version"].DisplayIndex = 4;
             if (dgvGames.Columns["IsVisible"] != null)
-                dgvGames.Columns["IsVisible"].DisplayIndex = 4;
+                dgvGames.Columns["IsVisible"].DisplayIndex = 5;
 
             // 表示するカラムのヘッダーテキストを日本語に設定
             if (dgvGames.Columns["GameId"] != null)
@@ -264,14 +296,17 @@ namespace GCTonePrism.Manager
                 dgvGames.Columns["IsVisible"].HeaderText = "ランチャー表示";
             if (dgvGames.Columns["DevelopersDisplay"] != null)
                 dgvGames.Columns["DevelopersDisplay"].HeaderText = "製作者";
+            if (dgvGames.Columns["Version"] != null)
+                dgvGames.Columns["Version"].HeaderText = "バージョン";
 
             // カラム幅の自動調整
             dgvGames.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            dgvGames.Columns["GameId"].FillWeight = 100;
-            dgvGames.Columns["Title"].FillWeight = 250;
+            dgvGames.Columns["GameId"].FillWeight = 80;
+            dgvGames.Columns["Title"].FillWeight = 200;
             dgvGames.Columns["ReleaseYear"].FillWeight = 80;
-            dgvGames.Columns["IsVisible"].FillWeight = 90; // ランチャー表示のカラム幅を少し太く
-            dgvGames.Columns["DevelopersDisplay"].FillWeight = 200;
+            dgvGames.Columns["DevelopersDisplay"].FillWeight = 150;
+            dgvGames.Columns["Version"].FillWeight = 80;
+            dgvGames.Columns["IsVisible"].FillWeight = 100; // ランチャー表示のカラム幅を少し太く
         }
 
         /// <summary>
@@ -504,6 +539,119 @@ namespace GCTonePrism.Manager
         private void btnRefresh_Click(object sender, EventArgs e)
         {
             LoadGames();
+        }
+
+        /// <summary>
+        /// バージョンアップボタンクリック
+        /// </summary>
+        private void btnVersionUp_Click(object sender, EventArgs e)
+        {
+            if (dgvGames.SelectedRows.Count == 0)
+            {
+                MessageBox.Show(
+                    "バージョンアップするゲームを選択してください。",
+                    "情報",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var selectedGame = dgvGames.SelectedRows[0].DataBoundItem as GameInfo;
+            if (selectedGame == null) return;
+
+            // データベースから最新のゲーム情報を取得
+            var game = dbManager.GetGameById(selectedGame.GameId);
+            if (game == null)
+            {
+                MessageBox.Show(
+                    "選択されたゲームが見つかりません。",
+                    "エラー",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return;
+            }
+
+            // 現在のバージョン（最新のバージョン or 初期登録）を取得
+            var latestVersion = dbManager.GetLatestVersion(game.GameId);
+            string currentVersion = latestVersion?.Version ?? "1.0.0";
+
+            using (var form = new VersionUpForm(game, currentVersion, latestVersion))
+            {
+                if (form.ShowDialog() == DialogResult.OK && form.NewVersion != null)
+                {
+                    try
+                    {
+                        // ゲームのルートフォルダ
+                        string gameRootDir = Path.Combine(PathManager.GamesFolder, game.GameId);
+                        
+                        // 新しいバージョンのフォルダを作成
+                        string versionDir = Path.Combine(gameRootDir, "versions", CleanFileName(form.NewVersion.Version));
+                        Directory.CreateDirectory(versionDir);
+                        
+                        // ソースフォルダ全体をコピー
+                        CopyDirectory(form.SourceFolderPath, versionDir);
+                        
+                        // バージョン情報にコピー後の実行ファイルパスを設定（相対パス）
+                        string relativePath = Path.Combine("versions", CleanFileName(form.NewVersion.Version), form.RelativeExecutablePath);
+                        form.NewVersion.ExecutablePath = relativePath;
+                        
+                        // データベースに保存
+                        dbManager.AddGameVersion(form.NewVersion);
+
+                        // メインのゲーム情報も更新（最新バージョンに合わせる）
+                        form.UpdatedGameInfo.ExecutablePath = relativePath;
+                        dbManager.UpdateGame(form.UpdatedGameInfo);
+                        
+                        MessageBox.Show(
+                            $"ゲーム「{game.Title}」のバージョン {form.NewVersion.Version} を追加しました。",
+                            "成功",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information);
+                        
+                        LoadGames();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(
+                            $"バージョンアップに失敗しました。\n\n{ex.Message}",
+                            "エラー",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// ファイル名として使用可能な文字列に変換
+        /// </summary>
+        private string CleanFileName(string fileName)
+        {
+            foreach (char c in Path.GetInvalidFileNameChars())
+            {
+                fileName = fileName.Replace(c, '_');
+            }
+            return fileName;
+        }
+
+        /// <summary>
+        /// ディレクトリを再帰的にコピー
+        /// </summary>
+        private void CopyDirectory(string sourceDir, string destDir)
+        {
+            Directory.CreateDirectory(destDir);
+            
+            foreach (string file in Directory.GetFiles(sourceDir))
+            {
+                string destFile = Path.Combine(destDir, Path.GetFileName(file));
+                File.Copy(file, destFile, true);
+            }
+            
+            foreach (string subDir in Directory.GetDirectories(sourceDir))
+            {
+                string destSubDir = Path.Combine(destDir, Path.GetFileName(subDir));
+                CopyDirectory(subDir, destSubDir);
+            }
         }
 
         /// <summary>
