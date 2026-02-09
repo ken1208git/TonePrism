@@ -593,12 +593,23 @@ namespace GCTonePrism.Manager
                         string relativePath = Path.Combine(versionFolderName, form.RelativeExecutablePath);
                         form.NewVersion.ExecutablePath = relativePath;
                         
+
                         // データベースに保存
                         dbManager.AddGameVersion(form.NewVersion);
 
-                        // メインのゲーム情報も更新（最新バージョンに合わせる）
-                        form.UpdatedGameInfo.ExecutablePath = relativePath;
-                        dbManager.UpdateGame(form.UpdatedGameInfo);
+                        // アクティブバージョンにするか確認
+                        var activationResult = MessageBox.Show(
+                            $"バージョン {form.NewVersion.Version} を現在のバージョン（アクティブ）として設定しますか？\n\n「いいえ」を選択した場合、バージョンは作成されますが、ランチャーで起動するバージョンは変更されません。",
+                            "アクティブバージョンの確認",
+                            MessageBoxButtons.YesNo,
+                            MessageBoxIcon.Question);
+
+                        if (activationResult == DialogResult.Yes)
+                        {
+                            // メインのゲーム情報も更新（最新バージョンに合わせる）
+                            form.UpdatedGameInfo.ExecutablePath = relativePath;
+                            dbManager.UpdateGame(form.UpdatedGameInfo);
+                        }
                         
                         MessageBox.Show(
                             $"ゲーム「{game.Title}」のバージョン {form.NewVersion.Version} を追加しました。",
@@ -633,21 +644,87 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
+        /// バージョンフォルダかどうかを判定（v + 数字 で始まるか）
+        /// </summary>
+        private bool IsVersionFolder(string folderName)
+        {
+            if (string.IsNullOrEmpty(folderName)) return false;
+            // "v" または "V" で始まり、その次が数字である
+            if (!folderName.StartsWith("v", StringComparison.OrdinalIgnoreCase)) return false;
+            if (folderName.Length < 2) return false;
+            return char.IsDigit(folderName[1]);
+        }
+
+        /// <summary>
+        /// パスを正規化（\\?\ プレフィックスの除去と絶対パス化）
+        /// </summary>
+        private string NormalizePath(string path)
+        {
+            if (path.StartsWith(@"\\?\")) path = path.Substring(4);
+            return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+
+        /// <summary>
         /// ディレクトリを再帰的にコピー
         /// </summary>
         private void CopyDirectory(string sourceDir, string destDir)
         {
-            Directory.CreateDirectory(destDir);
+            // コピー先のパスが長い場合、\\?\ プレフィックスを付加して長いパスに対応
+            string safeDestDir = destDir;
+            if (safeDestDir.Length >= 240 && !safeDestDir.StartsWith(@"\\?\"))
+            {
+                safeDestDir = @"\\?\" + safeDestDir;
+            }
+
+            Directory.CreateDirectory(safeDestDir);
             
+            // 無限ループ防止のため、絶対パスを正規化して比較
+            string fullSourceDir = NormalizePath(sourceDir);
+            string fullDestDir = NormalizePath(destDir);
+
+            // コピー先がコピー元の中にある場合（親子関係）、コピー元がコピー先の中にある場合（逆親子）をガード
+            if (fullDestDir.StartsWith(fullSourceDir, StringComparison.OrdinalIgnoreCase))
+            {
+                // コピー先がコピー元のサブフォルダの場合、その中身をコピーしようとすると無限ループになる可能性があるため注意が必要
+                // ただし、destDir自体を除外すればよい
+            }
+
             foreach (string file in Directory.GetFiles(sourceDir))
             {
-                string destFile = Path.Combine(destDir, Path.GetFileName(file));
-                File.Copy(file, destFile, true);
+                string fileName = Path.GetFileName(file);
+                string destFile = Path.Combine(safeDestDir, fileName);
+                string sourceFile = file;
+
+                // 長いパス対応
+                if (destFile.Length >= 240 && !destFile.StartsWith(@"\\?\")) destFile = @"\\?\" + destFile;
+                if (sourceFile.Length >= 240 && !sourceFile.StartsWith(@"\\?\")) sourceFile = @"\\?\" + sourceFile;
+
+                File.Copy(sourceFile, destFile, true);
             }
             
             foreach (string subDir in Directory.GetDirectories(sourceDir))
             {
-                string destSubDir = Path.Combine(destDir, Path.GetFileName(subDir));
+                string folderName = Path.GetFileName(subDir);
+                string fullSubPath = NormalizePath(subDir);
+
+                // ガード処理:
+                // 1. コピー先ディレクトリ自体を除外（無限再帰防止）
+                //    または コピー先がサブディレクトリの中にある場合も除外
+                if (fullSubPath.Equals(fullDestDir, StringComparison.OrdinalIgnoreCase) || 
+                    fullDestDir.StartsWith(fullSubPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                // 2. バージョン管理フォルダ（vX.Y.Z）を除外
+                //    コピー元として「ゲームのルートフォルダ」を選択した場合、
+                //    その中の既存バージョンフォルダ（v1.0.0など）をコピーしないようにする。
+                if (IsVersionFolder(folderName))
+                {
+                    continue;
+                }
+
+                string destSubDir = Path.Combine(safeDestDir, folderName);
                 CopyDirectory(subDir, destSubDir);
             }
         }
