@@ -968,7 +968,12 @@ namespace GCTonePrism.Manager
                 {
                     using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read))
                     {
-                        picThumbnailPreview.Image = Image.FromStream(stream);
+                        using (var ms = new MemoryStream())
+                        {
+                            stream.CopyTo(ms);
+                            ms.Position = 0;
+                            picThumbnailPreview.Image = Image.FromStream(ms);
+                        }
                     }
                 }
                 else
@@ -1000,7 +1005,12 @@ namespace GCTonePrism.Manager
                 {
                     using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read))
                     {
-                        picBackgroundPreview.Image = Image.FromStream(stream);
+                        using (var ms = new MemoryStream())
+                        {
+                            stream.CopyTo(ms);
+                            ms.Position = 0;
+                            picBackgroundPreview.Image = Image.FromStream(ms);
+                        }
                     }
                 }
                 else

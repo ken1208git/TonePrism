@@ -76,16 +76,7 @@ func get_all_games() -> Array[GameInfo]:
 	
 	# 表示対象のゲームのみを取得（is_visible = 1）
 	# display_orderでソート
-	var query = """
-		SELECT 
-			game_id, title, description, release_year, genre,
-			min_players, max_players, difficulty, play_time, controller_support, supported_connection,
-			thumbnail_path, background_path, executable_path,
-			display_order, is_visible, controls, key_mapping, arguments
-		FROM games
-		WHERE is_visible = 1
-		ORDER BY display_order ASC, title ASC
-	"""
+	var query = "SELECT * FROM games WHERE is_visible = 1 ORDER BY display_order ASC, title ASC"
 	
 	# クエリを実行（godot-sqliteのAPI）
 	# query()メソッドはboolを返す
@@ -114,15 +105,7 @@ func get_game_by_id(game_id: String) -> GameInfo:
 	
 	# SQLインジェクション対策: 値をエスケープしてクエリに埋め込む
 	var escaped_game_id = _escape_sql_string(game_id)
-	var query = """
-		SELECT 
-			game_id, title, description, release_year, genre,
-			min_players, max_players, difficulty, play_time, controller_support, supported_connection,
-			thumbnail_path, background_path, executable_path,
-			display_order, is_visible, controls, key_mapping, arguments
-		FROM games
-		WHERE game_id = '%s'
-	""" % escaped_game_id
+	var query = "SELECT * FROM games WHERE game_id = '%s'" % escaped_game_id
 	
 	# クエリを実行（godot-sqliteのAPI）
 	# query()メソッドはboolを返す
