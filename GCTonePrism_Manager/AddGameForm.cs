@@ -334,19 +334,27 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
-        /// ゲームフォルダをコピー
+        /// ゲームフォルダをコピー（バージョンフォルダ構造）
         /// </summary>
-        private void CopyGameFolder(string gameId)
+        private void CopyGameFolder(string gameId, string version)
         {
-            destinationGameFolder = PathManager.GetGameFolder(gameId);
+            // ゲームベースフォルダを作成
+            string gameBaseFolder = PathManager.GetGameFolder(gameId);
+            if (!Directory.Exists(gameBaseFolder))
+            {
+                Directory.CreateDirectory(gameBaseFolder);
+            }
+            
+            // バージョンフォルダにコピー
+            destinationGameFolder = PathManager.GetVersionFolder(gameId, version);
 
             // 既に存在する場合はエラー
             if (Directory.Exists(destinationGameFolder))
             {
-                throw new Exception($"ゲームフォルダ '{destinationGameFolder}' は既に存在します。");
+                throw new Exception($"バージョンフォルダ '{destinationGameFolder}' は既に存在します。");
             }
 
-            // ゲームフォルダを作成
+            // バージョンフォルダを作成
             Directory.CreateDirectory(destinationGameFolder);
 
             // フォルダ内のすべてのファイルとサブフォルダをコピー
@@ -505,16 +513,16 @@ namespace GCTonePrism.Manager
         /// <summary>
         /// コピー元のパスをコピー先の絶対パスに変換
         /// </summary>
-        private string ConvertSourcePathToDestinationPath(string sourcePath, string gameId)
+        private string ConvertSourcePathToDestinationPath(string sourcePath, string gameId, string version)
         {
             if (string.IsNullOrEmpty(sourcePath))
             {
                 return null;
             }
 
-            string destinationGameFolder = PathManager.GetGameFolder(gameId);
+            string destinationVersionFolder = PathManager.GetVersionFolder(gameId, version);
             
-            if (sourcePath.StartsWith(destinationGameFolder, StringComparison.OrdinalIgnoreCase))
+            if (sourcePath.StartsWith(destinationVersionFolder, StringComparison.OrdinalIgnoreCase))
             {
                 // 既にコピー先フォルダ内のパス
                 return sourcePath;
@@ -523,7 +531,7 @@ namespace GCTonePrism.Manager
             {
                 // コピー元フォルダ内のパス → コピー先の絶対パスに変換
                 string relativePath = GetRelativePath(sourceGameFolder, sourcePath);
-                return Path.Combine(destinationGameFolder, relativePath);
+                return Path.Combine(destinationVersionFolder, relativePath);
             }
             else
             {
@@ -611,15 +619,18 @@ namespace GCTonePrism.Manager
 
             try
             {
-                // ゲームフォルダをコピー
-                CopyGameFolder(gameId);
+                // 初期バージョン番号
+                string version = txtVersion.Text.Trim();
+                
+                // ゲームフォルダをバージョンフォルダにコピー
+                CopyGameFolder(gameId, version);
 
-                string destinationGameFolder = PathManager.GetGameFolder(gameId);
+                string destinationGameFolder = PathManager.GetVersionFolder(gameId, version);
 
                 // コピー元のパスをコピー先の絶対パスに変換
-                string executableAbsolutePath = ConvertSourcePathToDestinationPath(txtExecutablePath.Text.Trim(), gameId);
-                string thumbnailAbsolutePath = string.IsNullOrWhiteSpace(txtThumbnailPath.Text) ? null : ConvertSourcePathToDestinationPath(txtThumbnailPath.Text.Trim(), gameId);
-                string backgroundAbsolutePath = string.IsNullOrWhiteSpace(txtBackgroundPath.Text) ? null : ConvertSourcePathToDestinationPath(txtBackgroundPath.Text.Trim(), gameId);
+                string executableAbsolutePath = ConvertSourcePathToDestinationPath(txtExecutablePath.Text.Trim(), gameId, version);
+                string thumbnailAbsolutePath = string.IsNullOrWhiteSpace(txtThumbnailPath.Text) ? null : ConvertSourcePathToDestinationPath(txtThumbnailPath.Text.Trim(), gameId, version);
+                string backgroundAbsolutePath = string.IsNullOrWhiteSpace(txtBackgroundPath.Text) ? null : ConvertSourcePathToDestinationPath(txtBackgroundPath.Text.Trim(), gameId, version);
 
                 // デバッグログ（開発時のみ）
                 Console.WriteLine($"[AddGameForm] コピー先フォルダ: {destinationGameFolder}");

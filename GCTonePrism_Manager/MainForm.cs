@@ -581,18 +581,16 @@ namespace GCTonePrism.Manager
                 {
                     try
                     {
-                        // ゲームのルートフォルダ
-                        string gameRootDir = Path.Combine(PathManager.GamesFolder, game.GameId);
-                        
-                        // 新しいバージョンのフォルダを作成
-                        string versionDir = Path.Combine(gameRootDir, "versions", CleanFileName(form.NewVersion.Version));
+                        // 新しいバージョンのフォルダを作成（vX.Y.Z 形式）
+                        string versionDir = PathManager.GetVersionFolder(game.GameId, form.NewVersion.Version);
                         Directory.CreateDirectory(versionDir);
                         
                         // ソースフォルダ全体をコピー
                         CopyDirectory(form.SourceFolderPath, versionDir);
                         
-                        // バージョン情報にコピー後の実行ファイルパスを設定（相対パス）
-                        string relativePath = Path.Combine("versions", CleanFileName(form.NewVersion.Version), form.RelativeExecutablePath);
+                        // バージョン情報にコピー後の実行ファイルパスを設定（相対パス: vX.Y.Z/relative/path）
+                        string versionFolderName = form.NewVersion.Version.StartsWith("v") ? form.NewVersion.Version : "v" + form.NewVersion.Version;
+                        string relativePath = Path.Combine(versionFolderName, form.RelativeExecutablePath);
                         form.NewVersion.ExecutablePath = relativePath;
                         
                         // データベースに保存
