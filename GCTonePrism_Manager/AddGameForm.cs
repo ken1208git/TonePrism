@@ -83,6 +83,7 @@ namespace GCTonePrism.Manager
             chkControllerSupport.Checked = false;
             numMinPlayers.Value = 1;
             numMaxPlayers.Value = 1;
+
             
             // ジャンルチェックボックスリストを初期化
             clbGenre.Items.Clear();
@@ -99,7 +100,7 @@ namespace GCTonePrism.Manager
             numReleaseYear.Value = DateTime.Now.Year;
 
             // バージョンの初期値を設定
-            txtVersion.Text = "1.0.0";
+            txtVersion.Text = "v1.0.0";
 
             // 製作者情報のDataGridViewを初期化
             InitializeDevelopersGrid();
