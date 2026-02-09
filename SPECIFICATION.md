@@ -1793,7 +1793,7 @@ erDiagram
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
-| 2026-02-09 | 1.5.0 | データベーススキーマ拡張（v6）：game_versionsテーブルの拡充、argumentsカラムおよびsupported_connectionカラムの追加、Manager v0.6.0/Launcher v0.4.1の機能追加（バージョン管理、テスト起動、プレビュー機能など）を包括的に反映 | Kenshiro Kuroga |
+| 2026-02-09 | 1.4.0 | データベーススキーマ拡張（v6）：game_versionsテーブルの拡充、argumentsカラムおよびsupported_connectionカラムの追加、Manager v0.6.0/Launcher v0.4.1の機能追加（バージョン管理、テスト起動、プレビュー機能など）を包括的に反映 | Kenshiro Kuroga |
 | 2026-02-08 | 1.3.1 | データベース設計の更新：play_records（ログ形式）、settings（KVS形式）、surveys（★評価・コメント）、launcher_surveys（★評価・気に入ったゲーム・コメント）の仕様を実装および新要件に合わせて変更 | Kenshiro Kuroga |
 | 2026-02-08 | 1.3.0 | スクリーンセーバー（ロゴ表示）、ゲーム選択画面（カルーセルのみ）、共通ダイアログシステム、エラーコードシステム（E-xxxx）、管理者用終了確認機能（Alt+F4フック）、アイドルタイマー（30秒警告/60秒リセット）の仕様を反映 | Kenshiro Kuroga |
 | 2025-12-27 | 1.2.6 | ジャンル分類の準拠先をPlayStation Storeに変更：機能3（ゲームフィルター機能）、機能9（フィルター条件管理機能）、データベース設計のgenreフィールドにPlayStation Store準拠であることを明記。 | Kenshiro Kuroga |
