@@ -1,0 +1,42 @@
+name: Gemini PR Reviewer
+
+on:
+  pull_request:
+    types: [opened, synchronize] # PR作成時と、追加コミット(修正)時に動く
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR Diff
+        id: get_diff
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          diff=$(gh pr diff ${{ github.event.pull_request.number }})
+          echo "PR_DIFF<<EOF" >> $GITHUB_ENV
+          echo "$diff" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Gemini Code Review
+        uses: google-github-actions/run-gemini-cli@v0 # Google公式のAction
+        with:
+          api-key: ${{ secrets.GEMINI_API_KEY }}
+          model: 'gemini-3-flash-preview' # 速くて安い(無料枠内)Flashがおすすめ
+          prompt: |
+            あなたは優秀なシニアエンジニアです。
+            以下のプルリクエストの差分をレビューし、改善点やバグの可能性、
+            または良い実装について日本語で簡潔にコメントしてください。
+            コードブロックを使って修正案を提示してください。
+
+            ## 変更内容 (Diff)
+            ${{ env.PR_DIFF }}
