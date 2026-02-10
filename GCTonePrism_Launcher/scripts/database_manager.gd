@@ -147,7 +147,7 @@ func get_developers_by_game_id(game_id: String) -> Array[DeveloperInfo]:
 			for row in result_array:
 				if row is Dictionary:
 					var developer = DeveloperInfo.new()
-					developer.id = int(row.get("id", -1))
+					developer.id = _safe_int(row.get("id"), -1)
 					developer.game_id = str(row.get("game_id", ""))
 					developer.last_name = str(row.get("last_name", ""))
 					developer.first_name = str(row.get("first_name", ""))
@@ -174,17 +174,17 @@ func _create_game_info_from_row_dict(row: Dictionary) -> GameInfo:
 	game.arguments = str(row.get("arguments", ""))
 	
 	# 数値型 (デフォルト値: -1 または 0)
-	game.release_year = int(row.get("release_year", -1))
-	game.min_players = int(row.get("min_players", -1))
-	game.max_players = int(row.get("max_players", -1))
-	game.difficulty = int(row.get("difficulty", -1))
-	game.play_time = int(row.get("play_time", -1))
-	game.display_order = int(row.get("display_order", -1))
-	game.supported_connection = int(row.get("supported_connection", 0))
+	game.release_year = _safe_int(row.get("release_year"), -1)
+	game.min_players = _safe_int(row.get("min_players"), -1)
+	game.max_players = _safe_int(row.get("max_players"), -1)
+	game.difficulty = _safe_int(row.get("difficulty"), -1)
+	game.play_time = _safe_int(row.get("play_time"), -1)
+	game.display_order = _safe_int(row.get("display_order"), -1)
+	game.supported_connection = _safe_int(row.get("supported_connection"), 0)
 	
 	# ブール型 (0/1 から変換)
-	game.controller_support = bool(row.get("controller_support", 0))
-	game.is_visible = bool(row.get("is_visible", 1)) # デフォルト表示
+	game.controller_support = _safe_bool(row.get("controller_support"), false)
+	game.is_visible = _safe_bool(row.get("is_visible"), true) # デフォルト表示
 	
 	# 特殊な型（ジャンル）
 	game.genre = _parse_genre(str(row.get("genre", "")))
@@ -274,3 +274,16 @@ func _check_and_migrate_db() -> void:
 		# db.query("BEGIN TRANSACTION")
 		# ... マイグレーションロジックが必要ならここに追加 ...
 		# db.query("COMMIT")
+
+## 値を安全にintに変換する（null対策）
+func _safe_int(val, default_val: int = 0) -> int:
+	if val == null:
+		return default_val
+	return int(val)
+
+## 値を安全にboolに変換する（null対策）
+func _safe_bool(val, default_val: bool = false) -> bool:
+	if val == null:
+		return default_val
+	# 数値（0 or 1）として扱われる場合が多いため、int経由で変換
+	return bool(int(val))
