@@ -132,9 +132,9 @@ namespace GCTonePrism.Manager
 
         public void InitializeDatabase()
         {
-            // 既存の接続が残っている可能性があるため、GCを強制実行して解放を試みる
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
+            // 既存の接続が残っている可能性があるため、接続プールをクリアするなどの対策が望ましいが、
+            // 強制GCはパフォーマンスへの影響があるため削除。usingブロックの徹底で対応。
+
 
             ExecuteWithRetry(() =>
             {
@@ -515,9 +515,8 @@ namespace GCTonePrism.Manager
 
         public void ResetDatabase()
         {
-            // 既存の接続が残っている可能性があるため、GCを強制実行して解放を試みる
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
+            // 既存の接続が残っている可能性があるため、注意が必要
+
 
             // データベースファイルを削除
             if (File.Exists(dbPath))

@@ -13,6 +13,13 @@
 
 ### [Launcher Unreleased]
 
+### [Launcher v0.4.2] - 2026-02-10
+
+#### Fixed
+
+- **データベース読み込みの安定性向上**
+  - データベースのカラムが`NULL`の場合にクラッシュする問題を修正（`_safe_int`, `_safe_bool`の導入）
+
 ### [Launcher v0.4.1] - 2026-02-09
 
 #### Fixed

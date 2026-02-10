@@ -150,7 +150,16 @@ namespace GCTonePrism.Manager
                 progress?.Invoke(10, "一時フォルダに移動中...");
                 
                 // 現在のフォルダを一時フォルダに移動
-                Directory.Move(currentFolder, tempFolder);
+                // Directory.Moveは同一ボリュームでしか動作しないため、失敗時はコピー＆削除で対応
+                try
+                {
+                    Directory.Move(currentFolder, tempFolder);
+                }
+                catch (IOException)
+                {
+                    CopyDirectoryRecursive(currentFolder, tempFolder);
+                    Directory.Delete(currentFolder, true);
+                }
 
                 progress?.Invoke(30, "新しいフォルダ構造を作成中...");
                 
@@ -159,7 +168,15 @@ namespace GCTonePrism.Manager
                 
                 // バージョンフォルダとしてリネーム
                 string newVersionFolder = Path.Combine(currentFolder, VersionPrefix + version);
-                Directory.Move(tempFolder, newVersionFolder);
+                try 
+                {
+                    Directory.Move(tempFolder, newVersionFolder);
+                }
+                catch (IOException)
+                {
+                    CopyDirectoryRecursive(tempFolder, newVersionFolder);
+                    Directory.Delete(tempFolder, true);
+                }
 
                 progress?.Invoke(100, "完了");
 
@@ -324,6 +341,26 @@ namespace GCTonePrism.Manager
                 return relativePath;
 
             return Path.Combine(versionFolder, relativePath);
+        }
+
+        /// <summary>
+        /// 再帰的にディレクトリをコピーするヘルパーメソッド
+        /// </summary>
+        private static void CopyDirectoryRecursive(string sourceDir, string destinationDir)
+        {
+            Directory.CreateDirectory(destinationDir);
+
+            foreach (var file in Directory.GetFiles(sourceDir))
+            {
+                string destFile = Path.Combine(destinationDir, Path.GetFileName(file));
+                File.Copy(file, destFile, true);
+            }
+
+            foreach (var dir in Directory.GetDirectories(sourceDir))
+            {
+                string destDir = Path.Combine(destinationDir, Path.GetFileName(dir));
+                CopyDirectoryRecursive(dir, destDir);
+            }
         }
     }
 }
