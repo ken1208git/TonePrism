@@ -13,6 +13,7 @@ const DATABASE_CONNECTION_FAILED = 1002 # データベース接続に失敗
 const DATABASE_TABLE_MISSING = 1003     # 必要なテーブルが存在しない
 const DATABASE_QUERY_FAILED = 1004      # クエリ実行に失敗
 const DATABASE_DATA_INVALID = 1005      # データの整合性に問題がある
+const DATABASE_NO_GAMES_REGISTERED = 1006 # ゲームが1つも登録されていない
 
 # --- 2000番台: ゲーム起動・実行関連 ---
 const GAME_EXECUTION_FAILED = 2001      # ゲームの起動に失敗（プロセス生成失敗）

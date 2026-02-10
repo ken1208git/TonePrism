@@ -71,8 +71,12 @@ func _load_resources():
 # --- データ読み込み ---
 func _load_games_from_db() -> bool:
 	_db_manager = DatabaseManager.new()
+	var db_path = PathManager.get_database_path()
+	print("[GameSelection] データベース読み込み開始. ターゲットパス: ", db_path)
+	
 	# データベースを開く
 	if not _db_manager.open():
+		print("[GameSelection] ❌ データベースのオープンに失敗しました (E-1001)")
 		ErrorManager.show_error(ErrorCode.DATABASE_NOT_FOUND)
 		set_process_input(false) # 入力を無効化
 		return false
@@ -83,19 +87,12 @@ func _load_games_from_db() -> bool:
 	
 	# ゲームが見つからない場合の処理
 	if _games.is_empty():
-		# 以前のダミーデータ生成ロジックを廃止し、エラーダイアログを表示
-		# TODO: テーブルはあるがデータがない場合は別のコード(DATABASE_TABLE_MISSING等)にするなども検討可能
-		# ここでは「表示するゲームがない」という意味で、一旦DB_NOT_FOUNDまたは専用コードを使う
-		# 今回はシンプルにDATABASE_TABLE_MISSING（データなし）として扱うか、
-		# あるいは「ゲームが登録されていません」というメッセージを出す
-		
-		# 専用のエラーコードがないため、一旦DATABASE_NOT_FOUNDに近い扱いにするか、
-		# メッセージを上書きして表示する
-		ErrorManager.show_error(ErrorCode.DATABASE_TABLE_MISSING)
+		print("[GameSelection] ⚠️ データベースは開けましたが、表示対象のゲームが0件です (E-1006)")
+		ErrorManager.show_error(ErrorCode.DATABASE_NO_GAMES_REGISTERED)
 		set_process_input(false)
-		return true # エラーダイアログを出したが、アプリとしては「初期化自体は完了（エラー画面ボーン）」とする
+		return true 
 		
-	print("[GameSelection] DB Load: %d games found" % _games.size())
+	print("[GameSelection] ✅ DB読み込み完了: %d 件のゲームが見つかりました" % _games.size())
 	return true
 
 # --- カルーセル生成 ---

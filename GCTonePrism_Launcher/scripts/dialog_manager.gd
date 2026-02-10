@@ -1,7 +1,13 @@
-extends Node
+extends CanvasLayer
 
 # シングルトンとしてAutoLoadに登録する
 # DialogManager
+
+func _ready():
+	# エラーダイアログよりは下のレイヤーに設定
+	layer = 127
+	# プロセスモードを常に実行（ポーズ中も表示可能）に設定
+	process_mode = Node.PROCESS_MODE_ALWAYS
 
 const CommonDialogScene = preload("res://scenes/components/common_dialog.tscn")
 
@@ -12,15 +18,14 @@ func show_dialog(title: String, message: String) -> CommonDialog:
 	close_current_dialog()
 	
 	var dialog = CommonDialogScene.instantiate()
-	get_tree().root.call_deferred("add_child", dialog)
+	# CanvasLayer（自分自身）の下に追加
+	add_child(dialog)
 	
-	# add_child完了・ready完了を待つのは難しいので、setupはawaitするか
-	# CommonDialog側でready待ちをしているので続けて呼ぶ
 	dialog.setup(title, message)
 	
 	_current_dialog = dialog
 	
-	# ダイアログ表示中はゲーム全体をポーズ（入力ブロック）
+	# ダイアログ表示中はゲーム自体をポーズ（入力を制限するが、ダイアログ自身は動く）
 	get_tree().paused = true
 	
 	return dialog
