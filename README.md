@@ -71,4 +71,4 @@
 
 MIT License
 
-Copyright (c) 2025 Kenshiro Kuroga (Osaka Prefectural Toneyama Upper Secondary School PC Club)
+Copyright (c) 2025-2026 Kenshiro Kuroga (Osaka Prefectural Toneyama Upper Secondary School PC Club)
