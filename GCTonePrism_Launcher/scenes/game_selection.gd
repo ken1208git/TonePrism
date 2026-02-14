@@ -11,62 +11,864 @@ const SCROLL_SPEED := 10.0
 const SCALE_ACTIVE := 1.8                # 選択中のカードの拡大率
 const SCALE_INACTIVE := 1.0              # 非選択カードの拡大率（等倍）
 const OPACITY_INACTIVE := 0.6
+const CORNER_RADIUS := 20.0              # カードの角丸半径
+const FOCUS_MARGIN := 8.0                # フォーカス枠のマージン
 
-const IDLE_WARNING_TIME := 30.0          # 警告を表示するまでの無操作時間（秒）
-const IDLE_RESET_TIME := 60.0            # リセットするまでの無操作時間（秒）
+# キーリピート（長押し）設定
+const KEY_REPEAT_DELAY := 0.4            # 初回リピートまでの待機時間
+const KEY_REPEAT_RATE := 0.06            # リピート間隔（秒） "ドウルルル"用
+
+const IDLE_WARNING_TIME := 60.0          # 警告を表示するまでの無操作時間（秒）
+const IDLE_RESET_TIME := 90.0            # リセットするまでの無操作時間（秒） = 警告(60) + ダイアログ(30)
+# フォントリソース
+var _font_regular: FontFile = preload("res://fonts/NotoSansJP-Regular.ttf")
+var _font_bold: FontFile = preload("res://fonts/NotoSansJP-Bold.ttf")
+
+
 
 # --- ノード参照 ---
 # --- ノード参照 ---
 @onready var _background_texture: TextureRect = $BackgroundLayer/BackgroundTexture
 @onready var _carousel_container: Control = $CarouselContainer
 @onready var _card_template: Panel = $CarouselContainer/CardTemplate
-# _info_panelは直接操作しないため削除（警告対応）
+@onready var _info_panel: Panel = $InfoPanel
+
+var _static_focus_border: Panel
+
 @onready var _title_label: Label = $InfoPanel/MarginContainer/VBoxContainer/TitleLabel
+@onready var _creator_label: Label = $InfoPanel/MarginContainer/VBoxContainer/CreatorLabel
+
+# Specs UI Components
+@onready var _players_label: Label = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayersContainer/PlayersValueLabel
+@onready var _difficulty_bar: ProgressBar = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/DifficultyContainer/DifficultyBar
+@onready var _difficulty_val_label: Label = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/DifficultyContainer/DifficultyValueLabel
+@onready var _playtime_bar: ProgressBar = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayTimeContainer/PlayTimeBar
+@onready var _playtime_val_label: Label = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayTimeContainer/PlayTimeValueLabel
+@onready var _controller_label: Label = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/ControllerContainer/ControllerValueLabel
+@onready var _online_label: Label = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/OnlineContainer/OnlineValueLabel
+
 @onready var _desc_label: Label = $InfoPanel/MarginContainer/VBoxContainer/DescLabel
-@onready var _running_overlay: ColorRect = $RunningOverlay
-@onready var _status_label: Label = $RunningOverlay/StatusLabel
+@onready var _running_overlay: Control = $RunningOverlay
+@onready var _running_icon_container: Panel = $RunningOverlay/RunningIconContainer
+@onready var _running_icon: TextureRect = $RunningOverlay/RunningIconContainer/Icon
+@onready var _status_label: Label = $RunningOverlay/StatusContainer/StatusLabel
+
 
 var _card_nodes: Array[Panel] = []
+var _play_button: Button
 
 # --- 状態管理 ---
 var _db_manager: DatabaseManager
 var _games: Array[GameInfo] = []
 var _selected_index: int = 0
+var _active_index: int = 0   # 現在画面中央にあり、フォーカスを持つべきインデックス
+var _glow_styles: Array[StyleBoxFlat] = [] # ブリージング（明滅）させるスタイルリスト
+var _glow_timer: float = 0.0
 var _current_scroll_index: float = 0.0 # インデックス単位の現在位置
+
+# 入力制御用 (Drum Roll)
+var _input_hold_timer: float = 0.0
+var _last_input_dir: int = 0
+var _using_mouse: bool = false # マウス操作中かどうか
+
+# ... (rest of variables)
+
+# ...
+
+# --- Helper logic changes ---
+
+func _move_selection(dir: int):
+	# 目標インデックスだけ更新（即時反映しない）
+	_selected_index = clampi(_selected_index + dir, 0, _games.size() - 1)
+	# 背景と情報は即時更新
+	_update_info_display(_selected_index)
+
+func _update_focus_to_current_card():
+	# _active_index に基づいてフォーカス
+	if _card_nodes.size() > _active_index:
+		var card = _card_nodes[_active_index]
+		if not card.has_focus():
+			card.grab_focus()
+
+func _update_info_display(index: int):
+	# 指定インデックス（基本は_selected_index）の情報で画面を更新
+	var game = _games[index]
+	
+	# 情報表示更新
+	
+	var title_text = game.title
+	if title_text == null or str(title_text) == "null" or str(title_text) == "<null>":
+		title_text = ""
+		
+	var desc_text = game.description
+	if desc_text == null or str(desc_text) == "null" or str(desc_text) == "<null>" or desc_text.strip_edges().is_empty():
+		desc_text = "このゲームには説明文がありません。"
+
+	# --- 詳細情報作成 ---
+	# 1. 製作者情報
+	var creator_text = ""
+	var seen_devs = [] # 重複チェック用
+	for dev in game.developers:
+		var name = "%s %s" % [dev.last_name, dev.first_name]
+		# gradeはStringで来る可能性があるためint変換
+		var grade_val = int(dev.grade) if dev.grade != null else -1
+		var grade_str = _get_grade_string(grade_val)
+		
+		# 重複チェック（名前と学年が同じならスキップ）
+		var unique_key = name + grade_str
+		if unique_key in seen_devs:
+			continue
+		seen_devs.append(unique_key)
+		
+		creator_text += "%s %s　" % [name, grade_str]
+	
+	if game.release_year > 0:
+		creator_text += "%d年　" % game.release_year
+		
+	if not game.genre.is_empty():
+		creator_text += "ジャンル: " + ", ".join(game.genre)
+		
+	# 2. スペック情報
+	# プレイ人数
+	var min_p = game.min_players
+	var max_p = game.max_players
+	var players_text = ""
+	if min_p > 0 and max_p > 0:
+		if min_p == max_p:
+			players_text = "%d人" % min_p
+		else:
+			players_text = "%d～%d人" % [min_p, max_p]
+	elif max_p > 0:
+		players_text = "%d人" % max_p
+	else:
+		players_text = "不明"
+	_players_label.text = players_text
+
+	# 難易度
+	var diff_val = game.difficulty
+	if diff_val > 0:
+		_difficulty_bar.value = diff_val
+		_difficulty_val_label.text = _get_difficulty_text_only(diff_val)
+		_update_bar_style(_difficulty_bar, diff_val)
+		_difficulty_bar.get_parent().show()
+	else:
+		_difficulty_bar.get_parent().hide()
+		
+	# プレイ時間
+	var time_val = game.play_time
+	if time_val > 0:
+		_playtime_bar.value = time_val
+		_playtime_val_label.text = _get_play_time_text_only(time_val)
+		_update_bar_style(_playtime_bar, time_val)
+		_playtime_bar.get_parent().show()
+	else:
+		_playtime_bar.get_parent().hide()
+		
+	# コントローラー
+	var controller_text = "対応" if game.controller_support else "非対応"
+	_controller_label.text = controller_text
+	
+	# 通信対戦
+	# supported_connection: 0=なし, 1=ローカル, 2=オンライン
+	var online_text = "対応" if game.supported_connection > 0 else "非対応"
+	_online_label.text = online_text
+
+	_title_label.text = title_text
+	if _creator_label: _creator_label.text = creator_text
+	_desc_label.text = desc_text
+	
+	# 背景画像更新
+	var bg_path = _resolve_path(game.background_path, game.game_id)
+	if not bg_path.is_empty() and FileAccess.file_exists(bg_path):
+		var img = Image.load_from_file(bg_path)
+		var tex = ImageTexture.create_from_image(img)
+		_background_texture.texture = tex
+	else:
+		# 背景が見つからない場合はデフォルト（または無し）
+		_background_texture.texture = null
+		if not game.background_path.is_empty():
+			push_warning("[GameSelection] Background not found: %s" % bg_path)
+
+# --- フォーマットヘルパー ---
+func _get_current_fiscal_year() -> int:
+	var date = Time.get_date_dict_from_system()
+	# 4月始まり
+	if date.month >= 4:
+		return date.year
+	else:
+		return date.year - 1
+
+func _get_grade_string(grade: int) -> String:
+	if grade == 0:
+		return "(教員)"
+	
+	var fy = _get_current_fiscal_year()
+	# 基準: 1975年 (ユーザー指定の計算式: (CurrentFY - 1975) - Grade = 学年)
+	# 例: 2025年度 - 1975 = 50. 49期生 -> 50 - 49 = 1年生
+	var base_year = 1975
+	var school_year = (fy - base_year) - grade
+	
+	if school_year >= 1 and school_year <= 3:
+		return "(%d年生)" % school_year
+	elif school_year > 3:
+		return "(卒業生: %d期生)" % grade
+	else:
+		# まだ入学していない、あるいは計算外
+		return "(%d期生)" % grade
+
+func _get_difficulty_text_only(level: int) -> String:
+	match level:
+		1: return "簡単"
+		2: return "普通"
+		3: return "難しい"
+		_: return "---"
+
+func _get_play_time_text_only(level: int) -> String:
+	match level:
+		1: return "～5分"
+		2: return "5分～15分"
+		3: return "15分～"
+		_: return "---"
+
+func _update_bar_style(bar: ProgressBar, value: int):
+	# スタイルボックスを動的に生成して色を変更
+	var style = StyleBoxFlat.new()
+	style.set_corner_radius_all(4)
+	
+	if value <= 1:
+		style.bg_color = Color(0.2, 0.8, 0.2, 1.0) # 緑
+	elif value == 2:
+		style.bg_color = Color(0.9, 0.9, 0.2, 1.0) # 黄色
+	else:
+		style.bg_color = Color(0.9, 0.2, 0.2, 1.0) # 赤
+		
+	bar.add_theme_stylebox_override("fill", style)
+	
+	# 背景（空の部分）も少し暗くする
+	var bg = StyleBoxFlat.new()
+	bg.set_corner_radius_all(4)
+	bg.bg_color = Color(0.2, 0.2, 0.2, 1.0)
+	bar.add_theme_stylebox_override("background", bg)
+
+func _get_connection_string(type: int) -> String:
+	match type:
+		1: return "教室内"
+		2: return "オンライン"
+		_: return "非対応"
+
+func _update_focus_state():
+	# _active_index に基づいてフォーカス移動を行う
+	# フォーカス移動
+	var focus_owner = get_viewport().gui_get_focus_owner()
+	if focus_owner and (focus_owner is Panel and focus_owner in _card_nodes):
+		_update_focus_to_current_card()
+
+func _launch_game():
+	if _games.is_empty(): return
+	# 既に起動中の場合は無視
+	if _running_pid != -1: return
+
+	var game = _games[_active_index]
+	print("[GameSelection] Launching game: ", game.title, " (ID: ", game.game_id, ")")
+	
+	var exe_path = ""
+	
+	# パスの解決
+	# 1. games/{game_id}/{executable_path}
+	var game_folder = PathManager.get_game_folder(game.game_id)
+	var candidate1 = game_folder.path_join(game.executable_path)
+	
+	if FileAccess.file_exists(candidate1):
+		exe_path = candidate1
+	else:
+		# 2. プロジェクトルート直下 (互換性/デバッグ)
+		var candidate2 = PathManager.get_base_directory().path_join(game.executable_path)
+		if FileAccess.file_exists(candidate2):
+			exe_path = candidate2
+	
+	if exe_path.is_empty():
+		print("❌ Executable not found: ", game.executable_path)
+		DialogManager.show_message("起動エラー", "実行ファイルが見つかりませんでした。\n%s" % game.executable_path)
+		return
+
+	# 引数の処理
+	var args = []
+	if not game.arguments.is_empty():
+		# 簡易的なスペース区切り（引用符などは考慮していないため注意）
+		args = game.arguments.split(" ", false)
+	
+	# 起動中表示（プロセス生成前）
+	# 即座にUIを隠す
+	if _running_overlay:
+		_running_overlay.visible = true
+	
+	_switch_to_running_view()
+
+	if _status_label:
+		_status_label.text = "ゲーム起動中: %s\nお楽しみください！" % game.title
+		
+	# UIの描画更新を待つ
+	await get_tree().process_frame
+	await get_tree().process_frame
+	
+	# 起動待ち（1秒）
+	await get_tree().create_timer(1.0).timeout
+
+	print("  Path: ", exe_path)
+	print("  Args: ", args)
+	
+	# プロセス起動
+	var pid = OS.create_process(exe_path, args)
+	
+	if pid == -1:
+		print("❌ Failed to create process.")
+		DialogManager.show_message("起動エラー", "ゲームの起動に失敗しました。")
+		# エラー時は表示を消す
+		if _running_overlay: _running_overlay.visible = false
+		# UIを戻す
+		if _carousel_container: _carousel_container.visible = true
+		if _info_panel: _info_panel.visible = true
+		if _top_bar: _top_bar.visible = true
+		if _static_focus_border: _static_focus_border.visible = true
+		for card in _card_nodes: card.visible = true
+	else:
+		print("✅ Process started. PID: %d" % pid)
+		_running_pid = pid
+		
+		# 文言更新は _process でフォーカスが外れたときに行う
+
+# ...
+
+func _process(delta):
+	# --- 時計更新 ---
+	_update_clock()
+	
+	# --- グローアニメーション（ブリージング） ---
+	# 周期2秒程度 (0.003 * msec ≒ rate) -> 単純に delta で計算
+	_glow_timer += delta
+	# sin波: 0.2 ~ 0.8 の範囲で変動させる
+	# sin(-1~1) -> +1(0~2) -> /2(0~1) -> *0.6(0~0.6) -> +0.2(0.2~0.8)
+	var glow_alpha = 0.5 + 0.3 * sin(_glow_timer * 3.0) # 3.0 rad/sec ≒ 2秒周期
+	
+	for style in _glow_styles:
+		if style:
+			var c = Color(1, 1, 1, glow_alpha)
+			style.shadow_color = c
+			style.border_color = c
+
+	# グローアニメーション（ブリージング）
+	# ... (略)
+
+	# ゲーム実行中の監視ロジック
+	# ゲーム実行中はここが先に処理され、終了したら _running_pid = -1 になる
+	if _running_pid != -1:
+		
+		# フォーカスが外れたら（ゲームウィンドウが前面に出たら）文言を「実行中」に変更
+		if not get_window().has_focus():
+			if _status_label and "起動中" in _status_label.text:
+				var game = _games[_selected_index]
+				_status_label.text = "ゲーム実行中: %s\nお楽しみください！" % game.title
+
+		if not OS.is_process_running(_running_pid):
+			print("[GameSelection] Game process %d finished." % _running_pid)
+			_running_pid = -1
+			# ゲーム終了時の処理（必要ならウィンドウをアクティブにするなど）
+			# Grab focus back to the selection
+			_update_focus_to_current_card()
+			
+			# 起動中表示を消す
+			if _running_overlay:
+				_running_overlay.visible = false
+			
+			# UI再表示
+			# if _carousel_container: _carousel_container.visible = true
+			
+			# 全てのカードを表示状態に戻す
+			for card in _card_nodes:
+				card.visible = true
+				
+			if _info_panel: _info_panel.visible = true
+			if _top_bar: _top_bar.visible = true
+			if _static_focus_border: _static_focus_border.visible = true
+	
+	# --- アイドルタイマー更新 ---
+	# ゲーム実行中はカウントしない
+	if _running_pid > 0:
+		_idle_timer = 0.0
+		return
+
+	# ダイアログ表示中（ポーズ中）はカウントしない
+	# ただし、タイムアウト警告ダイアログ表示中はカウントを継続する（リセットへ移行するため）
+	if not get_tree().paused or _timeout_dialog != null:
+		_idle_timer += delta
+	
+	if _idle_timer >= IDLE_RESET_TIME:
+		print("[GameSelection] Idle timeout. Transitioning to screensaver.")
+		_transition_to_screensaver()
+		
+	elif _idle_timer >= IDLE_WARNING_TIME:
+		var remaining = int(ceil(IDLE_RESET_TIME - _idle_timer))
+		var msg = "長時間操作がなかったため、タイトル画面に戻ります。\n\nあと %d 秒\n\n続ける場合は、何かボタンを押してください。" % remaining
+		
+		if _timeout_dialog == null:
+			# ダイアログをまだ出していない場合
+			# キャンセルボタンのみ表示（放置で戻る、操作でキャンセル）
+			_timeout_dialog = DialogManager.show_message("確認", msg, 
+				["キャンセル"], 
+				func(_idx): 
+					# キャンセルボタンが押された場合（インデックス0）
+					_reset_idle_timer()
+			)
+		else:
+			# ダイアログ表示中はメッセージを更新（カウントダウン）
+			if _timeout_dialog.has_method("set_message"):
+				_timeout_dialog.set_message(msg)
+
+	# ポーズ中（ダイアログ表示中など）はここから下のアニメーションを行わない
+	# ただし、DialogManagerでpauseがかかるとここも止まってしまうため、
+	# DialogManager側で process_mode = ALWAYS になっているか、
+	# もしくはこのスクリプト自体が pause_mode = process になっている必要がある。
+	# 現在、DialogManagerは ALWAYS だが、GameSelection自体は PAUSABLE (デフォルト) なので、
+	# show_message で pause = true にされると _process が止まってしまう！
+	# -> DialogManagerを使っている間はここが動かない。
+	
+	# これを解決するには、DialogManagerが表示している間は、DialogManager側でカウントダウンするか、
+	# GameSelectionを PROCESS_MODE_ALWAYS にして、ここでのアニメーション更新を自前で pause チェックする必要がある。
+	# 先ほど process_mode = ALWAYS を消してしまったが、アイドル監視のためには必要だった可能性がある。
+	# しかし、ALWAYSにするとポーズ中のアニメーション停止を手動でやる必要がある。
+	
+	# とりあえず、DialogManagerの仕様上 pause されるので、
+	# 「DialogManagerが表示されている間も _process を動かす」ために、
+	# process_mode を再度 ALWAYS に設定し、アニメーション部分だけ if get_tree().paused: return でガードする形にする。
+	# シーン遷移中などで get_tree() が無効な場合のガード
+	if not is_inside_tree() or get_tree() == null:
+		return
+		
+	if get_tree().paused:
+		# ダイアログ表示中など
+		return
+
+	# --- Drum Roll Input (高速スクロール) ---
+	# --- Drum Roll Input (高速スクロール) ---
+	var input_allowed = true
+	# プレイボタン、または終了ボタンにフォーカスがある、または実行中は操作不可
+	if (_play_button and _play_button.has_focus()) or \
+	   (_exit_button and _exit_button.has_focus()) or \
+	   _running_pid != -1:
+		input_allowed = false
+	
+	if input_allowed:
+		# 上下入力の取得 (Up=-1, Down=1)
+		var dir = 0
+		if Input.is_action_pressed("ui_down"): dir += 1
+		if Input.is_action_pressed("ui_up"):   dir -= 1
+		
+		# マウスホイール等は _input で処理されるのでここではキー/ボタンのみ
+		
+		if dir != 0:
+			if _last_input_dir != dir:
+				# 初回押し
+				_move_selection(dir)
+				_update_focus_to_current_card()
+				_input_hold_timer = KEY_REPEAT_DELAY
+				_last_input_dir = dir
+			else:
+				# 押しっぱなし
+				_input_hold_timer -= delta
+				if _input_hold_timer <= 0:
+					_move_selection(dir)
+					# 高速移動中なのでフォーカス移動は_process後半の自動追従に任せてもいいが、
+					# 音を鳴らすタイミング等も考慮してここでは明示的に呼ばない（_active_indexが変われば勝手に処理される）
+					# ただし _move_selection はインデックスを変えるだけ。
+					
+					_input_hold_timer = KEY_REPEAT_RATE
+		else:
+			_last_input_dir = 0
+			_input_hold_timer = 0.0
+
+
+			
+	if _games.is_empty(): return
+	
+	# インデックス単位でスムーズに移動
+	var target = float(_selected_index)
+	_current_scroll_index = lerpf(_current_scroll_index, target, SCROLL_SPEED * delta)
+	
+	# Leashロジック削除: 高速スクロール時に「動きがリセットされる（スナップする）」違和感を防ぐため、
+	# 目標位置が遠くても lerp で自然に追従させる。
+	# var leash_diff = _current_scroll_index - target
+	# if abs(leash_diff) > 1.0:
+	# 	_current_scroll_index = target + sign(leash_diff) * 1.0
+	
+	# --- Active Index Update Integration ---
+	var new_active = int(round(_current_scroll_index))
+	new_active = clampi(new_active, 0, _games.size() - 1)
+	
+	if new_active != _active_index:
+		_active_index = new_active
+		_update_focus_state() # フォーカス移動のみ行う
+		
+		# 音を鳴らすならここ
+	
+	var viewport_center_y = get_viewport_rect().size.y / 2
+	var container_center_x = _carousel_container.size.x / 2
+	
+	# --- StaticFocusBorderの制御 ---
+	var static_border = _carousel_container.get_node_or_null("StaticFocusBorder")
+	if static_border:
+		# プレイボタンにフォーカスがある時は隠す
+		# また、マウス操作中も隠す
+		var focus_owner = get_viewport().gui_get_focus_owner()
+		var processing_focus = (focus_owner == null) or (focus_owner is Panel and focus_owner in _card_nodes)
+		
+		# フォーカスが有効かつ、マウス操作中でない場合に表示
+		static_border.visible = processing_focus and not _using_mouse
+		
+		# 位置合わせ: 画面中央（diff=0）のカード位置に合わせる
+		# Active時のサイズ
+		var active_size = CARD_SIZE * SCALE_ACTIVE
+		# カードの基準位置（中央）
+		# Y座標: center + 0 (diff=0なのでoffsetなし)
+		var center_y = viewport_center_y
+		
+		# StaticBorderはTopLeft基準なので補正
+		# container_center_x はコンテナローカルのX中心
+		static_border.position = Vector2(
+			container_center_x - (active_size.x / 2),
+			center_y - (active_size.y / 2)
+		)
+		static_border.size = active_size # 念のためサイズも維持
+	
+	# 各カードの座標とスケールを更新
+	for i in range(_card_nodes.size()):
+		var card = _card_nodes[i]
+		
+		# FocusBorder更新処理は削除（StaticFocusBorderに変更したため）
+		
+		# 中心（現在選択されているインデックス）からの距離（インデックス単位）
+		# 例: selected=2.5, i=2 なら diff=-0.5 (少し上)
+		var diff = float(i) - _current_scroll_index
+		
+		# Y座標計算
+		# 1. 基本的な等間隔配置 (狭い間隔)
+		var base_y_offset = diff * (CARD_SIZE.y + GAP_NARROW)
+		
+		# 2. 中心付近だけ間隔を広げる「押し出し」処理
+		# diffが 0 から ±1 になるまでの間に、GAP_WIDE 分だけ余分に移動させる
+		var push_amount = remap(abs(diff), 0.0, 1.0, 0.0, GAP_WIDE)
+		push_amount = clamp(push_amount, 0.0, GAP_WIDE)
+		var push_offset = sign(diff) * push_amount
+		
+		var screen_y = viewport_center_y + base_y_offset + push_offset
+		
+		# 画面中央からの絶対距離（スケーリング用）
+		var dist_from_center_px = abs(screen_y - viewport_center_y)
+		
+		# スケーリング計算
+		# 150px以上離れたら最小サイズ
+		var scale_factor = remap(dist_from_center_px, 0, 150, SCALE_ACTIVE, SCALE_INACTIVE)
+		scale_factor = clamp(scale_factor, SCALE_INACTIVE, SCALE_ACTIVE)
+		
+		# 透明度
+		# 選択ターゲット（_selected_index）と一致する場合のみ不透明、それ以外は半透明
+		# これにより入力した瞬間に切り替わる（ラグなし）
+		var opacity = OPACITY_INACTIVE
+		if i == _selected_index:
+			opacity = 1.0
+		
+		# 反映
+		card.position = Vector2(container_center_x - (CARD_SIZE.x / 2), screen_y - (CARD_SIZE.y / 2))
+		card.scale = Vector2(scale_factor, scale_factor)
+		card.modulate.a = opacity
+		
+		# Z-Index制御
+		card.z_index = 100 - int(dist_from_center_px / 10)
 var _running_pid: int = -1 # 実行中のゲームPID (-1: 実行なし)
-var _game_window_activated: bool = false # ゲームウィンドウが一度でもアクティブになったか
 var _idle_timer: float = 0.0 # 無操作経過時間
 var _timeout_dialog: CommonDialog = null # 表示中のタイムアウト警告ダイアログ
 
-# --- リソース ---
-var _placeholder_texture: Texture2D
+
 
 func _ready():
-	_load_resources()
 	# UI構築はtscnで行われるため不要
 	# 既に_load_games_from_db内でエラー処理済みだが、
 	# ゲームリストが空の場合はUI更新を行わない（エラーダイアログが表示されているはず）
 	if not _load_games_from_db() or _games.is_empty():
 		return
+		
+	# ダイアログ表示中（Pause中）もアイドルタイマーを動かすため常にプロセスを実行
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	
 	# _create_dummy_data呼び出しは削除済み
 	# if _games.is_empty():
 	# 	_create_dummy_data()
 	
 	_create_carousel_cards()
+	_create_static_focus_border()
+	_create_play_button()
+	_create_top_bar() # トップバー作成
+	_create_bottom_bar() # ボトムバー作成
+	
+	# InfoPanelの背景を角丸にする
+	var info_style = StyleBoxFlat.new()
+	info_style.bg_color = Color(0, 0, 0, 0.7) # 半透明黒
+	info_style.set_corner_radius_all(20)
+	
+	var info_panel = $InfoPanel
+	if info_panel:
+		info_panel.add_theme_stylebox_override("panel", info_style)
+		# 操作説明ラベル（GuideLabel）を非表示にする（ボトムバーに移動したため）
+		var guide_label = info_panel.get_node_or_null("MarginContainer/VBoxContainer/GuideLabel")
+		if guide_label:
+			guide_label.visible = false
+	
 	# 初期位置セット
 	_current_scroll_index = float(_selected_index)
-	_update_selection(true)
+	_update_info_display(_selected_index)
+	_update_focus_state()
 
 	set_process(true)
 	set_process_input(true)
 
+# --- トップバー ---
+var _top_bar: Control
+var _clock_label: Label
+var _exit_button: Button
+
+func _create_top_bar():
+	# トップバーのコンテナ（全幅、高さ80px程度）
+	_top_bar = Control.new()
+	_top_bar.name = "TopBar"
+	_top_bar.custom_minimum_size = Vector2(0, 80)
+	_top_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_top_bar.size_flags_vertical = Control.SIZE_SHRINK_BEGIN # 上部に配置
+	_top_bar.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	_top_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE # 下のレイヤーへの入力を阻害しないように（ボタン等は個別に有効）
+	
+	# 背景（グラデーション：上部黒 -> 透明）
+	var bg_rect = TextureRect.new()
+	bg_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	
+	var gradient = Gradient.new()
+	gradient.set_color(0, Color(0, 0, 0, 0.8)) # 上部: 濃い黒
+	gradient.set_color(1, Color(0, 0, 0, 0.0)) # 下部: 透明
+	
+	var gradient_tex = GradientTexture2D.new()
+	gradient_tex.gradient = gradient
+	gradient_tex.fill = GradientTexture2D.FILL_LINEAR
+	gradient_tex.fill_from = Vector2(0, 0)
+	gradient_tex.fill_to = Vector2(0, 1) # 上から下へ
+	gradient_tex.width = 1
+	gradient_tex.height = 64 # テクスチャ高さ
+	
+	bg_rect.texture = gradient_tex
+	_top_bar.add_child(bg_rect)
+	
+	# コンテンツ用マージンコンテナ
+	var margin = MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	margin.add_theme_constant_override("margin_left", 40)
+	margin.add_theme_constant_override("margin_right", 40)
+	margin.add_theme_constant_override("margin_top", 20)
+	margin.add_theme_constant_override("margin_bottom", 20) # 下は少し開ける
+	_top_bar.add_child(margin)
+	
+	# コンテンツ配置用HBox
+	var hbox = HBoxContainer.new()
+	margin.add_child(hbox)
+	
+	# 左側：時計
+	_clock_label = Label.new()
+	_clock_label.text = "00:00"
+	_clock_label.add_theme_font_size_override("font_size", 32)
+	_clock_label.add_theme_font_override("font", _font_regular) # 太字から普通へ変更
+	_clock_label.add_theme_color_override("font_color", Color.WHITE)
+	hbox.add_child(_clock_label)
+	
+	# スペーサー（右寄せ用）
+	var spacer = Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hbox.add_child(spacer)
+	
+	# 右側：「遊び終わる」ボタン
+	_exit_button = Button.new()
+	_exit_button.text = "" # テキストなし
+	var icon_tex = load("res://images/exit.jpg")
+	if icon_tex:
+		_exit_button.icon = icon_tex
+		_exit_button.expand_icon = true # アイコンをリサイズ
+		_exit_button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	
+	_exit_button.custom_minimum_size = Vector2(60, 60) # 正方形
+	# _exit_button.add_theme_font_size_override("font_size", 24) # テキストがないので不要
+	
+	# 白ボタンに変更
+	var style_normal = StyleBoxFlat.new()
+	style_normal.bg_color = Color.WHITE # 白
+	style_normal.set_corner_radius_all(12) # 角丸
+	# 影をつける（全方向均等）
+	style_normal.shadow_color = Color(0, 0, 0, 0.3)
+	style_normal.shadow_size = 4
+	style_normal.shadow_offset = Vector2(0, 0)
+	# アイコンを大きくするためにマージンを減らす
+	style_normal.content_margin_left = 4
+	style_normal.content_margin_right = 4
+	style_normal.content_margin_top = 4
+	style_normal.content_margin_bottom = 4
+	_exit_button.add_theme_stylebox_override("normal", style_normal)
+	
+	# ホバー時は背景を少し暗くするだけ（枠線はフォーカスで出す）
+	var style_hover = style_normal.duplicate()
+	style_hover.bg_color = Color(0.9, 0.9, 0.9, 1.0)
+	_exit_button.add_theme_stylebox_override("hover", style_hover)
+
+	# 押下時はさらに暗く
+	var style_pressed = style_normal.duplicate()
+	style_pressed.bg_color = Color(0.7, 0.7, 0.7, 1.0)
+	_exit_button.add_theme_stylebox_override("pressed", style_pressed)
+
+	# フォーカス時は「白い輪っか」を表示（ボタンの外側にギャップを空けて枠線）
+	# ベース（normal）の上に描画されるため、背景は透明にする
+	var style_focus = StyleBoxFlat.new()
+	style_focus.bg_color = Color.TRANSPARENT
+	style_focus.draw_center = false
+	style_focus.border_width_left = 0
+	style_focus.border_width_top = 0
+	style_focus.border_width_right = 0
+	style_focus.border_width_bottom = 0
+	style_focus.border_color = Color.WHITE
+	# 枠を外側に広げる（ギャップを作る）
+	style_focus.expand_margin_left = 6
+	style_focus.expand_margin_right = 6
+	style_focus.expand_margin_top = 6
+	style_focus.expand_margin_bottom = 6
+	# 外枠の角丸（内側が12なので、少し大きくして同心円状に見せる）
+	style_focus.set_corner_radius_all(18)
+	
+	# 光彩（グロー）効果を追加
+	style_focus.shadow_color = Color(1, 1, 1, 0.5)
+	style_focus.shadow_size = 12
+	style_focus.shadow_offset = Vector2(0, 0)
+	
+	_glow_styles.append(style_focus) # アニメーション対象に追加
+	
+	_exit_button.add_theme_stylebox_override("focus", style_focus) 
+	
+	_exit_button.pressed.connect(_on_exit_button_pressed)
+	# マウスホバーでフォーカスを得る（これでホバー時も輪っかが出る）
+	_exit_button.mouse_entered.connect(func(): _exit_button.grab_focus())
+	
+	hbox.add_child(_exit_button)
+	
+	# ツリーに追加（最前面）
+	add_child(_top_bar)
+	_top_bar.z_index = 300 # フォーカスの枠(200)より上
+
+	# フォーカス制御
+	# 下入力で「プレイ」ボタンへ戻る
+	# 左/右/上は自分自身（トップバーから抜けない）
+	# ※ add_child 後でないと get_path() がエラーになる
+	_exit_button.focus_neighbor_left = _exit_button.get_path()
+	_exit_button.focus_neighbor_right = _exit_button.get_path()
+	_exit_button.focus_neighbor_top = _exit_button.get_path()
+	
+	# 下はプレイボタンが生成済みなら設定できるが、実行順序に注意
+	# _create_play_button() は先に呼ばれているので _play_button は存在するはず
+	if _play_button:
+		_exit_button.focus_neighbor_bottom = _play_button.get_path()
+		# 相互参照を設定（プレイボタンの上をこれにする）
+		# _create_play_button時点では _exit_button がないのでここで設定するのが確実
+		_play_button.focus_neighbor_top = _exit_button.get_path()
+
+# --- ボトムバー（操作説明） ---
+var _bottom_bar: Control
+var _bottom_label: Label
+
+func _create_bottom_bar():
+	# ボトムバーのコンテナ（全幅、高さ50px程度）
+	_bottom_bar = Control.new()
+	_bottom_bar.name = "BottomBar"
+	_bottom_bar.custom_minimum_size = Vector2(0, 50)
+	# アンカーを下に固定、ただしオフセットを明示的に指定して画面内に入れる
+	_bottom_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_bottom_bar.size_flags_vertical = Control.SIZE_SHRINK_END
+	# PRESET_BOTTOM_WIDE は Top=1, Bottom=1 になるため、高さを持たせるにはオフセットが必要
+	_bottom_bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_bottom_bar.offset_top = -50
+	_bottom_bar.offset_bottom = 0
+	
+	_bottom_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	
+	# 背景（グラデーション：下部黒 -> 透明）
+	var bg_rect = TextureRect.new()
+	bg_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	
+	var gradient = Gradient.new()
+	gradient.set_color(0, Color(0, 0, 0, 0.0)) # 上部: 透明
+	gradient.set_color(1, Color(0, 0, 0, 0.8)) # 下部: 濃い黒
+	
+	var gradient_tex = GradientTexture2D.new()
+	gradient_tex.gradient = gradient
+	gradient_tex.fill = GradientTexture2D.FILL_LINEAR
+	gradient_tex.fill_from = Vector2(0, 0)
+	gradient_tex.fill_to = Vector2(0, 1) # 上から下へ
+	gradient_tex.width = 1
+	gradient_tex.height = 32 # テクスチャ高さ
+	
+	bg_rect.texture = gradient_tex
+	_bottom_bar.add_child(bg_rect)
+	
+	# ラベル（右寄せ、マージンあり）
+	var label_margin = MarginContainer.new()
+	label_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	label_margin.add_theme_constant_override("margin_right", 40) # 右端に余裕を持たせる
+	_bottom_bar.add_child(label_margin)
+
+	_bottom_label = Label.new()
+	_bottom_label.text = "Enter: 決定"
+	_bottom_label.add_theme_font_override("font", _font_regular)
+	_bottom_label.add_theme_font_size_override("font_size", 20)
+	_bottom_label.add_theme_color_override("font_color", Color.WHITE)
+	_bottom_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT # 右寄せ
+	_bottom_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	# label_marginの子にするのでFullRectでOK
+	_bottom_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_bottom_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	
+	label_margin.add_child(_bottom_label)
+	
+	add_child(_bottom_bar)
+	_bottom_bar.z_index = 290 # トップバーよりは下だが、カードよりは上
+
+	# 初期状態は入力デバイスに応じて表示切り替え
+	_update_bottom_bar_visibility()
+
+func _update_bottom_bar_visibility():
+	if _bottom_bar:
+		# マウス操作中は非表示、キー/パッド操作中は表示
+		_bottom_bar.visible = not _using_mouse
+
+func _on_exit_button_pressed():
+	var callback = func(idx):
+		if idx == 1: # 「退出する」
+			_transition_to_screensaver()
+
+	DialogManager.show_message("確認", "退出しますか？\nタイトル画面に戻ります。",
+		["キャンセル", "退出する"],
+		callback,
+		[Color(0.3, 0.3, 0.3), Color(0.8, 0.2, 0.2)] # ボタン色: キャンセル=グレー, 退出する=赤
+	)
+
+func _update_clock():
+	if _clock_label:
+		var time = Time.get_time_dict_from_system()
+		_clock_label.text = "%02d:%02d" % [time.hour, time.minute]
+
 func _exit_tree():
 	# シーンが破棄される際にダイアログも閉じる
 	DialogManager.close_current_dialog()
-
-func _load_resources():
-	_placeholder_texture = load("res://icon.svg")
 
 # --- データ読み込み ---
 func _load_games_from_db() -> bool:
@@ -109,15 +911,62 @@ func _create_carousel_cards():
 		# サイズはテンプレートに従うが、念のため設定
 		card.custom_minimum_size = CARD_SIZE
 		card.pivot_offset = CARD_SIZE / 2
+		card.focus_mode = Control.FOCUS_ALL # フォーカス可能にする
 		
-		# アイコン用TextureRectを取得
-		var icon_rect = card.get_node("Icon") as TextureRect
+		# 自動フォーカス移動を無効化（スクリプトで完全制御するため、すべて自分自身に向ける）
+		# 注意: add_child後に設定しないと get_path() が正しく機能しない可能性があるため移動
+		
+		# RootのCardはクリッピング無効
+		card.clip_children = CanvasItem.CLIP_CHILDREN_DISABLED
+		
+		# --- 内部構造の再構築 ---
+		# Iconを角丸でクリッピングするためのコンテナを作成
+		var clipper = Panel.new()
+		clipper.name = "Clipper"
+		clipper.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		clipper.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		
+		# 元のCardからStyleBox（角丸設定）を移植
+		var original_style = card.get_theme_stylebox("panel")
+		if original_style:
+			# 1. 親(Card)に影を設定
+			var card_style = original_style.duplicate()
+			if card_style is StyleBoxFlat:
+				# アイコン自体の影（薄く）
+				card_style.shadow_color = Color(0, 0, 0, 0.5)
+				card_style.shadow_size = 12
+				card_style.shadow_offset = Vector2(0, 0)
+			card.add_theme_stylebox_override("panel", card_style)
+			
+			# 2. Clipperには影なしの形状マスクを設定
+			var clipper_style = original_style.duplicate()
+			if clipper_style is StyleBoxFlat:
+				clipper_style.shadow_color = Color.TRANSPARENT
+				clipper_style.shadow_size = 0
+				# マスク用なので色は不透明なら何でも良い
+				clipper_style.bg_color = Color.BLACK
+			
+			clipper.add_theme_stylebox_override("panel", clipper_style)
+		
+		# クリッピング設定: CLIP_CHILDREN_ONLY
+		# 親(clipper)の描画領域（StyleBox）を使って子をクリップするが、親自体は描画しない
+		# 背景や影はCard側で描画されている
+		clipper.clip_children = CanvasItem.CLIP_CHILDREN_ONLY
+		
+		card.add_child(clipper)
+		
+		# IconをClipperの子に移動
+		var icon_rect = card.get_node("Icon")
+		card.remove_child(icon_rect)
+		clipper.add_child(icon_rect)
+		
+		# アイコン参照の更新（Clipperの下に移動したのでパスが変わるが、参照は変数で持てばOK）
+		# icon_rectは既に取得済み
 		
 		# サムネイル読み込み
 		var thumb_path = _resolve_path(game.thumbnail_path, game.game_id)
-		# 成功ログは出さず、失敗時のみ警告を出す（ログが流れるのを防ぐため）
 		
-		var tex_to_set = _placeholder_texture
+		var tex_to_set = null
 		if not thumb_path.is_empty() and FileAccess.file_exists(thumb_path):
 			var img = Image.load_from_file(thumb_path)
 			var tex = ImageTexture.create_from_image(img)
@@ -128,11 +977,190 @@ func _create_carousel_cards():
 				push_warning("[GameSelection] ⚠️ Thumbnail NOT found for '%s' (ID: %s)\n  - DB Path: '%s'\n  - Check: '%s'" % 
 					[game.title, game.game_id, game.thumbnail_path, thumb_path])
 		
-		if icon_rect:
-			icon_rect.texture = tex_to_set
+		if tex_to_set:
+			if icon_rect:
+				icon_rect.texture = tex_to_set
+				icon_rect.visible = true
+		else:
+			# 画像がない場合は "NO IMAGE" ラベルを表示
+			if icon_rect:
+				icon_rect.visible = false
+			
+			var no_image_label = Label.new()
+			no_image_label.text = "NO IMAGE"
+			no_image_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			no_image_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			no_image_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			no_image_label.add_theme_font_size_override("font_size", 30) # 20 -> 30 に変更
+			no_image_label.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5)) # グレー
+			no_image_label.add_theme_font_override("font", _font_bold) # ボールドフォントは維持
+			clipper.add_child(no_image_label)
 		
 		_carousel_container.add_child(card)
+		
+		# トラップ設定: ツリーに追加してからパスを取得して設定
+		card.focus_neighbor_top = card.get_path()
+		card.focus_neighbor_bottom = card.get_path()
+		card.focus_neighbor_left = card.get_path()
+		card.focus_neighbor_right = card.get_path()
+		
 		_card_nodes.append(card)
+
+func _create_static_focus_border():
+	# 画面中央に固定表示される白い枠を作成
+	_static_focus_border = Panel.new()
+	_static_focus_border.name = "StaticFocusBorder"
+	_static_focus_border.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	
+	# サイズ計算: アクティブ時のカードサイズに合わせる
+	# カードサイズ * 拡大率
+	var active_size = CARD_SIZE * SCALE_ACTIVE
+	_static_focus_border.custom_minimum_size = active_size
+	_static_focus_border.size = active_size
+	
+	# 中央配置
+	# アンカーを中央に設定
+	_static_focus_border.anchors_preset = Control.PRESET_CENTER
+	# ピボットも中央へ（念のため）
+	_static_focus_border.pivot_offset = active_size / 2
+	
+	# ポジション調整（PRESET_CENTERで自動的に中央になるはずだが、親がFullRectならOK）
+	# 親はControl(self)なので、layout modeによる。
+	# 明示的に position を設定する場合:
+	# var viewport_size = get_viewport_rect().size
+	# static_border.position = (viewport_size - active_size) / 2
+	# しかしリサイズ対応を考えると、ControlのLayout機能を使うべき。
+	# _carousel_containerの兄弟として追加し、中央寄せにする。
+	
+	var style = StyleBoxFlat.new()
+	style.draw_center = false
+	style.border_width_left = 0
+	style.border_width_top = 0
+	style.border_width_right = 0
+	style.border_width_bottom = 0
+	style.border_color = Color.WHITE
+	
+	# 白枠のグロー効果（復活）
+	style.shadow_color = Color(1, 1, 1, 0.5)
+	style.shadow_size = 12
+	style.shadow_offset = Vector2(0, 0)
+	
+	_glow_styles.append(style) # アニメーション対象に追加
+	
+	# 角丸とマージン設定
+	# カード自体が拡大されているため、角丸も拡大率に合わせて大きくする
+	var scaled_radius = (CORNER_RADIUS + FOCUS_MARGIN) * SCALE_ACTIVE
+	style.set_corner_radius_all(scaled_radius)
+	
+	# マージンも拡大
+	var scaled_margin = FOCUS_MARGIN * SCALE_ACTIVE
+	style.expand_margin_left = scaled_margin
+	style.expand_margin_top = scaled_margin
+	style.expand_margin_right = scaled_margin
+	style.expand_margin_bottom = scaled_margin
+	
+	_static_focus_border.add_theme_stylebox_override("panel", style)
+	
+	# _carousel_container の子として追加（カードと同じ座標系にする）
+	_carousel_container.add_child(_static_focus_border)
+	
+	# カードのZ-Indexが100付近になるため、それより手前に表示
+	_static_focus_border.z_index = 200
+
+# ...
+
+# ... (In _process)
+
+
+
+func _create_play_button():
+	_play_button = Button.new()
+	_play_button.text = "プレイ"
+	_play_button.custom_minimum_size = Vector2(120, 50)
+	_play_button.add_theme_font_size_override("font_size", 24)
+	_play_button.add_theme_font_override("font", _font_bold) # ボールドフォント適用
+	
+	# 緑色スタイル（不透明）
+	var style_normal = StyleBoxFlat.new()
+	style_normal.bg_color = Color(0.0, 0.6, 0.0, 1.0) # 緑
+	style_normal.set_corner_radius_all(10)
+	style_normal.content_margin_left = 20
+	style_normal.content_margin_right = 20
+	
+	_play_button.add_theme_stylebox_override("normal", style_normal)
+	
+	var style_hover = style_normal.duplicate()
+	style_hover.bg_color = Color(0.2, 0.8, 0.2, 1.0) # 明るい緑
+	_play_button.add_theme_stylebox_override("hover", style_hover)
+	# Focusは別スタイル（白枠）
+	
+	var style_focus = StyleBoxFlat.new()
+	style_focus.bg_color = Color.TRANSPARENT
+	style_focus.draw_center = false
+	style_focus.border_width_left = 0
+	style_focus.border_width_top = 0
+	style_focus.border_width_right = 0
+	style_focus.border_width_bottom = 0
+	style_focus.border_color = Color.WHITE
+	
+	# 光彩（グロー）効果を追加
+	style_focus.shadow_color = Color(1, 1, 1, 0.5)
+	style_focus.shadow_size = 12
+	style_focus.shadow_offset = Vector2(0, 0)
+	
+	_glow_styles.append(style_focus) # アニメーション対象に追加
+	
+	# 少し外側に広げる
+	var focus_margin = 8
+	style_focus.expand_margin_left = focus_margin
+	style_focus.expand_margin_right = focus_margin
+	style_focus.expand_margin_top = focus_margin
+	style_focus.expand_margin_bottom = focus_margin
+	style_focus.set_corner_radius_all(10 + focus_margin)
+	
+	_play_button.add_theme_stylebox_override("focus", style_focus)
+	
+	var style_pressed = style_normal.duplicate()
+	style_pressed.bg_color = Color(0.0, 0.4, 0.0, 1.0) # 暗い緑
+	_play_button.add_theme_stylebox_override("pressed", style_pressed)
+	
+	# InfoPanel内のVBoxContainerにあるTitleLabelの横に配置するため、HBoxContainerを作成して差し替える
+	var parent_vbox = _title_label.get_parent()
+	if parent_vbox:
+		var hbox = HBoxContainer.new()
+		hbox.name = "TitleButtonContainer"
+		hbox.add_theme_constant_override("separation", 20) # タイトルとボタンの間隔
+		
+		# 位置を保持して入れ替え
+		var idx = _title_label.get_index()
+		parent_vbox.remove_child(_title_label)
+		parent_vbox.add_child(hbox)
+		parent_vbox.move_child(hbox, idx)
+		
+		# TitleLabelをHBoxに追加
+		hbox.add_child(_title_label)
+		# タイトルが余白を埋めるように設定（ボタンを右に寄せる場合）
+		# _title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		# 単に横に並べるだけならデフォルトでOKだが、長いタイトルでボタンが潰れないように注意
+		_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		
+		# ボタンを追加
+		hbox.add_child(_play_button)
+	
+	_play_button.pressed.connect(_launch_game)
+	
+	# フォーカス制御用シグナル
+	# ボタンから左入力でカルーセルに戻る
+	# 上下右も含めて、すべて自分自身を設定することでエンジンの自動移動を封じる
+	_play_button.focus_neighbor_left = _play_button.get_path()
+	# _play_button.focus_neighbor_top = _play_button.get_path() # 上は「遊び終わる」ボタンへ行くため制限解除（または明示的に設定）
+	_play_button.focus_neighbor_bottom = _play_button.get_path()
+	_play_button.focus_neighbor_right = _play_button.get_path()
+	
+	# マウスでフォーカスされたときの処理
+	_play_button.mouse_entered.connect(func(): _play_button.grab_focus())
+	
+	# process_mode = Node.PROCESS_MODE_ALWAYS # _readyで設定済み
 
 # --- パス解決ヘルパー ---
 func _resolve_path(path: String, game_id: String) -> String:
@@ -158,10 +1186,44 @@ func _resolve_path(path: String, game_id: String) -> String:
 
 # --- 入力処理 ---
 func _input(event):
+	# ポーズ中（ダイアログ表示中など）は入力を無視
+	if get_tree().paused:
+		return
+
 	# 何らかの操作があったらアイドルタイマーをリセット
-	if event is InputEventKey or event is InputEventJoypadButton or event is InputEventJoypadMotion:
+	# MouseMotionはリセット対象から外す（微細な動きでタイマーが進まないのを防ぐため）
+	if event is InputEventKey or event is InputEventJoypadButton or event is InputEventJoypadMotion or event is InputEventMouseButton:
 		_reset_idle_timer()
 
+	# 入力デバイス判定
+	if event is InputEventKey or event is InputEventJoypadButton or event is InputEventJoypadMotion:
+		if _using_mouse:
+			_using_mouse = false
+			_update_bottom_bar_visibility()
+	elif event is InputEventMouseButton:
+		# マウスモーションは除外（微細な動きで消えるのを防ぐ）
+		if not _using_mouse:
+			_using_mouse = true
+			_update_bottom_bar_visibility()
+
+	# マウス操作時はフォーカスを外す（マウスカーソルでの操作を優先）
+	if event is InputEventMouseMotion:
+		# ある程度大きく動いた場合のみフォーカス外しを行うなどの調整も可能だが、
+		# 現状は動いたら即外しとする（ただしタイマーはリセットしない）
+		var focus_owner = get_viewport().gui_get_focus_owner()
+		if focus_owner:
+			focus_owner.release_focus()
+
+	# マウスホイール操作（どこにフォーカスがあっても効くように最優先）
+	if event is InputEventMouseButton:
+		if event.is_pressed():
+			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+				_move_selection(-1)
+				get_viewport().set_input_as_handled()
+			elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				_move_selection(1)
+				get_viewport().set_input_as_handled()
+	
 	if _games.is_empty():
 		if event.is_action_pressed("ui_cancel"):
 			_transition_to_screensaver()
@@ -171,82 +1233,62 @@ func _input(event):
 	if _running_pid != -1:
 		return
 
-	if event.is_action_pressed("ui_up"):
-		_move_selection(-1)
-	elif event.is_action_pressed("ui_down"):
-		_move_selection(1)
-	elif event.is_action_pressed("ui_accept"):
-		_launch_game()
+	# キー入力/パッド入力検知
+	if event is InputEventKey or event is InputEventJoypadButton or event is InputEventJoypadMotion:
+		# 何かキーを押したら、フォーカスがない場合は現在選択中のカードにフォーカスを当てる
+		if not get_viewport().gui_get_focus_owner():
+			_update_focus_to_current_card()
+
+	# プレイボタンにフォーカスがある場合の例外処理
+	if _play_button and _play_button.has_focus():
+		if event.is_action_pressed("ui_left"):
+			_update_focus_to_current_card() # カルーセルに戻る
+			get_viewport().set_input_as_handled()
+		elif event.is_action_pressed("ui_up"):
+			# 上入力で「遊び終わる」ボタンへフォーカス移動
+			if _exit_button:
+				_exit_button.grab_focus()
+				get_viewport().set_input_as_handled()
+		elif event.is_action_pressed("ui_down") or event.is_action_pressed("ui_right"):
+			# 下右は無効化（ボタンから抜けない）
+			get_viewport().set_input_as_handled()
+		return
+
+	# 遊び終わるボタンにフォーカスがある場合の例外処理
+	if _exit_button and _exit_button.has_focus():
+		if event.is_action_pressed("ui_down"):
+			# 下入力で「プレイ」ボタンへフォーカス移動
+			if _play_button:
+				_play_button.grab_focus()
+				get_viewport().set_input_as_handled()
+		elif event.is_action_pressed("ui_up") or event.is_action_pressed("ui_right") or event.is_action_pressed("ui_left"):
+			# 他の方向は無効化（ボタンから抜けない）
+			get_viewport().set_input_as_handled()
+		return
+
+	# カルーセル操作（プレイボタンにフォーカスがない時）
+	# 上下は _process で処理されるため、ここではイベントを消費するだけ（デフォルトのフォーカス移動を防ぐ）
+	# カルーセル操作（プレイボタンにフォーカスがない時）
+	# 上下は _process で処理されるため、ここではイベントを消費するだけ（デフォルトのフォーカス移動を防ぐ）
+	if event.is_action_pressed("ui_up") or event.is_action_pressed("ui_down"):
+		get_viewport().set_input_as_handled()
+	
+	if event.is_action_pressed("ui_right") or event.is_action_pressed("ui_accept"):
+		# 上下移動中（_processでのドラムロール中）は誤爆防止のため入力を無視
+		if _last_input_dir != 0:
+			get_viewport().set_input_as_handled()
+			return
+
+		# 右入力 または 決定キー でプレイボタンにフォーカス
+		if _play_button:
+			_play_button.grab_focus()
+			get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("ui_cancel"):
+		if get_viewport():
+			get_viewport().set_input_as_handled()
 		_transition_to_screensaver()
 
-func _move_selection(dir: int):
-	var prev = _selected_index
-	_selected_index = clampi(_selected_index + dir, 0, _games.size() - 1)
-	
-	if prev != _selected_index:
-		_update_selection()
-
-func _update_selection(_instant: bool = false):
-	var game = _games[_selected_index]
-	
-	# 情報表示更新
-	_title_label.text = game.title
-	_desc_label.text = game.description
-	
-	# 背景画像読み込み
-	var bg_path = _resolve_path(game.background_path, game.game_id)
-	if not bg_path.is_empty() and FileAccess.file_exists(bg_path):
-		var img = Image.load_from_file(bg_path)
-		var tex = ImageTexture.create_from_image(img)
-		_background_texture.texture = tex
-	else:
-		# 背景は見つからなくても警告までは出さない（必須ではない場合も多いため）
-		# が、設定されているのに見つからない場合は一応デバッグログだけ出す
-		if not game.background_path.is_empty():
-			print_verbose("[GameSelection] Background image not found: %s" % bg_path)
-			
-		_background_texture.texture = null # またはデフォルト背景
-
-func _launch_game():
-	var game = _games[_selected_index]
-	print("[GameSelection] Launching Game: %s" % game.title)
-	
-	# 実行ファイルのパス解決
-	var exec_path = _resolve_path(game.executable_path, game.game_id)
-	
-	if exec_path.is_empty():
-		push_warning("[GameSelection] ⚠️ No executable path set for '%s' (ID: %s)" % [game.title, game.game_id])
-		return
-
-	if not FileAccess.file_exists(exec_path):
-		push_warning("[GameSelection] ⚠️ Executable NOT found for '%s' (ID: %s)\n  - Path: '%s'" % 
-			[game.title, game.game_id, exec_path])
-		return
-
-	print("[GameSelection] Executing: %s" % exec_path)
-	
-	# 外部プロセスとして実行
-	# 第2引数は引数リスト（必要ならDBに追加検討だが現状は空で）
-	var pid = OS.create_process(exec_path, [])
-	
-	if pid != -1:
-		print("[GameSelection] Process started with PID: %d" % pid)
-		_running_pid = pid
-		_game_window_activated = false
-		_running_overlay.visible = true
-		_status_label.text = "起動中..."
-		# 起動成功時はここでreturn（復帰は_processで行う）
-		return
-
-	# 以下、起動失敗時の処理
-	push_error("[GameSelection] Failed to create process for: %s" % exec_path)
-	print("[GameSelection] Launch Failed. Path: %s" % exec_path)
-	ErrorManager.show_error(ErrorCode.GAME_EXECUTION_FAILED)
-	# オーバーレイを隠す（失敗時）
-	_running_overlay.visible = false
-	_running_pid = -1
-
+# ... (Previous helper functions) ...
 func _transition_to_screensaver():
 	# 遷移前にダイアログを閉じる
 	DialogManager.close_current_dialog()
@@ -260,106 +1302,24 @@ func _reset_idle_timer():
 		_timeout_dialog.queue_free()
 		_timeout_dialog = null
 		# DialogManager側の参照もクリアしておく（念のため）
-		DialogManager.close_current_dialog()
+	DialogManager.close_current_dialog()
 
-# --- アニメーション処理 ---
-func _process(delta):
-	# ゲーム実行中でなければアイドルタイマー更新
-	if _running_pid == -1:
-		_idle_timer += delta
+func _switch_to_running_view():
+	print("[GameSelection] Focus lost, switching to Running View")
+	if _running_overlay:
+		_running_overlay.visible = true
 		
-		if _idle_timer >= IDLE_RESET_TIME:
-			# タイムアウト：スクリーンセーバーへ戻る
-			print("[GameSelection] Idle timeout. Returning to screensaver.")
-			_transition_to_screensaver()
-			return
-			
-		elif _idle_timer >= IDLE_WARNING_TIME:
-			# 警告表示
-			var remain = ceil(IDLE_RESET_TIME - _idle_timer)
-			var msg = "操作がありません。\nあと %d 秒でタイトル画面に戻ります。\nキャンセルするには何かボタンを押してください。" % remain
-			
-			if _timeout_dialog == null:
-				# まだダイアログが出ていなければ出す
-				_timeout_dialog = DialogManager.show_dialog("確認", msg)
-				# ボタンを追加してもいいが、メッセージだけで十分かも
-				# 一応OKボタンだけ置いておく（押せば当然inputイベントでリセットされる）
-				_timeout_dialog.add_button("キャンセル", _reset_idle_timer, true)
-			else:
-				# 既に出ているならメッセージ（秒数）だけ更新
-				_timeout_dialog.set_message(msg)
-
-	# ゲーム実行中の監視ロジック
-	if _running_pid != -1:
-		if OS.is_process_running(_running_pid):
-			# ゲームが実行中
-			if not get_window().has_focus():
-				# ランチャーがフォーカスを失った＝ゲームが前面に来た
-				_game_window_activated = true
-				_status_label.text = "ゲーム実行中..."
-			else:
-				# ランチャーがフォーカスを持っている
-				if _game_window_activated:
-					# 一度アクティブになったのに戻ってきた（Alt-Tab等で裏に行った）
-					_status_label.text = "ゲーム実行中\n(ウィンドウが裏に隠れています)"
-				else:
-					# まだ一度もアクティブになっていない（起動ロード中）
-					_status_label.text = "起動中..."
-		else:
-			# ゲームが終了した
-			print("[GameSelection] Process %d finished. Returning to launcher." % _running_pid)
-			_running_pid = -1
-			_running_overlay.visible = false
-			# 必要であればここでランチャーを全面に出す処理（grab_focusなど）を入れる
-			get_window().grab_focus()
-			
-		# ゲーム実行中はカルーセルのアニメーション等はスキップ
-		return
-
-	if _games.is_empty(): return
-	
-	# インデックス単位でスムーズに移動
-	_current_scroll_index = lerpf(_current_scroll_index, float(_selected_index), SCROLL_SPEED * delta)
-	
-	var viewport_center_y = get_viewport_rect().size.y / 2
-	var container_center_x = _carousel_container.size.x / 2
-	
-	# 各カードの座標とスケールを更新
-	for i in range(_card_nodes.size()):
-		var card = _card_nodes[i]
+		# 他のカードを非表示にする
+		for i in range(_card_nodes.size()):
+			if i != _selected_index:
+				_card_nodes[i].visible = false
 		
-		# 中心（現在選択されているインデックス）からの距離（インデックス単位）
-		# 例: selected=2.5, i=2 なら diff=-0.5 (少し上)
-		var diff = float(i) - _current_scroll_index
+		# その他のUIコンポーネントを非表示
+		if _info_panel: _info_panel.visible = false
+		if _top_bar: _top_bar.visible = false
+		if _static_focus_border: _static_focus_border.visible = false 
 		
-		# Y座標計算
-		# 1. 基本的な等間隔配置 (狭い間隔)
-		var base_y_offset = diff * (CARD_SIZE.y + GAP_NARROW)
-		
-		# 2. 中心付近だけ間隔を広げる「押し出し」処理
-		# diffが 0 から ±1 になるまでの間に、GAP_WIDE 分だけ余分に移動させる
-		var push_amount = remap(abs(diff), 0.0, 1.0, 0.0, GAP_WIDE)
-		push_amount = clamp(push_amount, 0.0, GAP_WIDE)
-		var push_offset = sign(diff) * push_amount
-		
-		var screen_y = viewport_center_y + base_y_offset + push_offset
-		
-		# 画面中央からの絶対距離（スケーリング用）
-		var dist_from_center_px = abs(screen_y - viewport_center_y)
-		
-		# スケーリング計算
-		# 150px以上離れたら最小サイズ
-		var scale_factor = remap(dist_from_center_px, 0, 150, SCALE_ACTIVE, SCALE_INACTIVE)
-		scale_factor = clamp(scale_factor, SCALE_INACTIVE, SCALE_ACTIVE)
-		
-		# 透明度
-		var opacity = remap(dist_from_center_px, 0, 300, 1.0, OPACITY_INACTIVE)
-		opacity = clamp(opacity, 0.0, 1.0)
-		
-		# 反映
-		card.position = Vector2(container_center_x - (CARD_SIZE.x / 2), screen_y - (CARD_SIZE.y / 2))
-		card.scale = Vector2(scale_factor, scale_factor)
-		card.modulate.a = opacity
-		
-		# Z-Index制御
-		card.z_index = 100 - int(dist_from_center_px / 10)
+		if _running_icon_container:
+			_running_icon_container.visible = false
+		if _running_icon:
+			_running_icon.visible = false

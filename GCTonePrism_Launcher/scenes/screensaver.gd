@@ -28,11 +28,25 @@ func _ready():
 	# キー入力とコントローラー入力を有効化
 	set_process_input(true)
 	set_process(true)
+	
+	# ラベルのテキストをコードから強制的に変更
+	var message_label = $LogoContainer/StartMessage
+	if message_label:
+		message_label.text = "PRESS ANY KEY"
 
 func _process(delta):
 	# アイドルタイマーの更新
 	if current_state == ScreenState.LOGO_DISPLAY:
 		idle_timer += delta
+		
+		# PRESS ANY KEY のブリージングアニメーション
+		# 周期2秒程度 (3.0 rad/sec)
+		# alpha: 0.2 ~ 1.0 (少し広めに)
+		var scroll_alpha = 0.6 + 0.4 * sin(idle_timer * 3.0)
+		var message_label = $LogoContainer/StartMessage
+		if message_label:
+			message_label.modulate.a = scroll_alpha
+
 		if idle_timer >= idle_timeout:
 			# スライドショーに遷移（将来実装）
 			# _transition_to_slideshow()
@@ -43,11 +57,13 @@ func _input(event):
 	if not viewport:
 		return
 	
-	# キー入力またはコントローラー入力でゲーム選択画面に遷移
-	if event.is_action_pressed("ui_accept") or event.is_action_pressed("ui_select"):
-		_transition_to_game_selection()
-		viewport.set_input_as_handled()
-		return
+	# キー入力、マウスボタン、コントローラーボタンでゲーム選択画面に遷移
+	# マウス移動（Motion）は除外する（誤作動防止）
+	if event is InputEventKey or event is InputEventMouseButton or event is InputEventJoypadButton:
+		if event.is_pressed():
+			_transition_to_game_selection()
+			viewport.set_input_as_handled()
+			return
 	
 	# 任意のキー/ボタンでロゴ表示画面に戻る（スライドショー表示時）
 	if current_state == ScreenState.SLIDESHOW:
@@ -116,6 +132,6 @@ func _update_layout():
 			# メッセージのフォントサイズ: ロゴの約1/3（最小16px、最大32px）
 			var message_font_size = clamp(viewport_size.x * 0.02, 16.0, 32.0)
 			message_label.add_theme_font_size_override("font_size", message_font_size)
-			# フォントを設定（Regular）
-			if noto_sans_regular:
-				message_label.add_theme_font_override("font", noto_sans_regular)
+			# フォントを設定（Bold）
+			if noto_sans_bold:
+				message_label.add_theme_font_override("font", noto_sans_bold)

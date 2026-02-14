@@ -12,6 +12,17 @@ corner_radius_top_right = 20
 corner_radius_bottom_right = 20
 corner_radius_bottom_left = 20
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_StatusBg"]
+bg_color = Color(0, 0, 0, 0.8)
+corner_radius_top_left = 16
+corner_radius_top_right = 16
+corner_radius_bottom_right = 16
+corner_radius_bottom_left = 16
+expand_margin_left = 40.0
+expand_margin_top = 20.0
+expand_margin_right = 40.0
+expand_margin_bottom = 20.0
+
 [node name="GameSelection" type="Control"]
 layout_mode = 3
 anchors_preset = 15
@@ -33,7 +44,6 @@ grow_vertical = 2
 color = Color(0.1, 0.1, 0.1, 1)
 
 [node name="BackgroundTexture" type="TextureRect" parent="BackgroundLayer"]
-modulate = Color(0.5, 0.5, 0.5, 1)
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -85,10 +95,10 @@ anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -850.0
-offset_top = -350.0
+offset_left = -1000.0
+offset_top = -450.0
 offset_right = -50.0
-offset_bottom = -50.0
+offset_bottom = -80.0
 grow_horizontal = 0
 grow_vertical = 0
 
@@ -113,6 +123,127 @@ theme_override_fonts/font = ExtResource("3_font_bold")
 theme_override_font_sizes/font_size = 48
 text = "ゲームタイトル"
 
+[node name="CreatorLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("2_font_regular")
+theme_override_font_sizes/font_size = 22
+text = "Creator Info"
+autowrap_mode = 2
+
+[node name="SpecsContainer" type="HFlowContainer" parent="InfoPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/h_separation = 20
+theme_override_constants/v_separation = 5
+
+[node name="PlayersContainer" type="HBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayersContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_fonts/font = ExtResource("2_font_regular")
+theme_override_font_sizes/font_size = 20
+text = "プレイ人数: "
+
+[node name="PlayersValueLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayersContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_fonts/font = ExtResource("3_font_bold")
+theme_override_font_sizes/font_size = 20
+text = "1〜4人"
+
+[node name="DifficultyContainer" type="HBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/DifficultyContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_fonts/font = ExtResource("2_font_regular")
+theme_override_font_sizes/font_size = 20
+text = "難易度:"
+
+[node name="DifficultyBar" type="ProgressBar" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/DifficultyContainer"]
+custom_minimum_size = Vector2(100, 20)
+layout_mode = 2
+size_flags_vertical = 4
+max_value = 3.0
+step = 1.0
+value = 1.0
+show_percentage = false
+
+[node name="DifficultyValueLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/DifficultyContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_fonts/font = ExtResource("3_font_bold")
+theme_override_font_sizes/font_size = 20
+text = "普通"
+
+[node name="PlayTimeContainer" type="HBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayTimeContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_fonts/font = ExtResource("2_font_regular")
+theme_override_font_sizes/font_size = 20
+text = "想定プレイ時間:"
+
+[node name="PlayTimeBar" type="ProgressBar" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayTimeContainer"]
+custom_minimum_size = Vector2(100, 20)
+layout_mode = 2
+size_flags_vertical = 4
+max_value = 3.0
+step = 1.0
+value = 1.0
+show_percentage = false
+
+[node name="PlayTimeValueLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayTimeContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_fonts/font = ExtResource("3_font_bold")
+theme_override_font_sizes/font_size = 20
+text = "5分〜15分"
+
+[node name="ControllerContainer" type="HBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/ControllerContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_fonts/font = ExtResource("2_font_regular")
+theme_override_font_sizes/font_size = 20
+text = "コントローラー: "
+
+[node name="ControllerValueLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/ControllerContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_fonts/font = ExtResource("3_font_bold")
+theme_override_font_sizes/font_size = 20
+text = "対応"
+
+[node name="OnlineContainer" type="HBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/OnlineContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_fonts/font = ExtResource("2_font_regular")
+theme_override_font_sizes/font_size = 20
+text = "通信プレイ: "
+
+[node name="OnlineValueLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/OnlineContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_fonts/font = ExtResource("3_font_bold")
+theme_override_font_sizes/font_size = 20
+text = "非対応"
+
+[node name="Spacer" type="Control" parent="InfoPanel/MarginContainer/VBoxContainer"]
+custom_minimum_size = Vector2(0, 10)
+layout_mode = 2
+
 [node name="DescLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer"]
 custom_minimum_size = Vector2(0, 100)
 layout_mode = 2
@@ -128,7 +259,7 @@ theme_override_fonts/font = ExtResource("2_font_regular")
 text = "↑↓: 選択  |  Enter: 決定  |  ESC: 戻る"
 horizontal_alignment = 2
 
-[node name="RunningOverlay" type="ColorRect" parent="."]
+[node name="RunningOverlay" type="Control" parent="."]
 visible = false
 layout_mode = 1
 anchors_preset = 15
@@ -136,23 +267,52 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0, 0, 0, 0.862745)
 
-[node name="StatusLabel" type="Label" parent="RunningOverlay"]
+[node name="RunningIconContainer" type="Panel" parent="RunningOverlay"]
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -200.0
-offset_top = -50.0
-offset_right = 200.0
-offset_bottom = 50.0
+offset_left = -180.0
+offset_top = -180.0
+offset_right = 180.0
+offset_bottom = 180.0
 grow_horizontal = 2
 grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_rounded")
+
+[node name="Icon" type="TextureRect" parent="RunningOverlay/RunningIconContainer"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+expand_mode = 1
+stretch_mode = 6
+
+[node name="StatusContainer" type="PanelContainer" parent="RunningOverlay"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -400.0
+offset_top = 220.0
+offset_right = 400.0
+offset_bottom = 340.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_StatusBg")
+
+[node name="StatusLabel" type="Label" parent="RunningOverlay/StatusContainer"]
+layout_mode = 2
 theme_override_fonts/font = ExtResource("3_font_bold")
 theme_override_font_sizes/font_size = 48
-text = "起動準備中..."
+text = "ゲーム起動中: 
+お楽しみください！"
 horizontal_alignment = 1
 vertical_alignment = 1
