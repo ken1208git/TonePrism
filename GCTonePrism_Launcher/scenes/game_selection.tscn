@@ -1,205 +1,16 @@
-[gd_scene load_steps=18 format=3 uid="uid://bjoy2n8lqir0y"]
+[gd_scene load_steps=6 format=3 uid="uid://bjoy2n8lqir0y"]
 
 [ext_resource type="Script" uid="uid://dj0y4s0v4pp1c" path="res://scenes/game_selection.gd" id="1_game_selection"]
 [ext_resource type="FontFile" uid="uid://dolk7yphok5xu" path="res://fonts/NotoSansJP-Regular.ttf" id="2_font_regular"]
 [ext_resource type="FontFile" uid="uid://xjqfmx60jtvo" path="res://fonts/NotoSansJP-Bold.ttf" id="3_font_bold"]
-[ext_resource type="Texture2D" uid="uid://c5q3y5q3y5q3y" path="res://icon.svg" id="4_icon"]
-[ext_resource type="Script" path="res://scenes/components/auto_scroll_container.gd" id="5_auto_scroll"]
-
-[sub_resource type="Animation" id="Animation_transition_down"]
-resource_name = "transition_down"
-length = 0.3
-tracks/0/type = "value"
-tracks/0/imported = false
-tracks/0/enabled = true
-tracks/0/path = NodePath("BackgroundTexture:modulate")
-tracks/0/interp = 1
-tracks/0/loop_wrap = true
-tracks/0/keys = {
-"times": PackedFloat32Array(0, 0.3),
-"transitions": PackedFloat32Array(1, 1),
-"update": 0,
-"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
-}
-tracks/1/type = "value"
-tracks/1/imported = false
-tracks/1/enabled = true
-tracks/1/path = NodePath("BackgroundTexture:position")
-tracks/1/interp = 1
-tracks/1/loop_wrap = true
-tracks/1/keys = {
-"times": PackedFloat32Array(0, 0.3),
-"transitions": PackedFloat32Array(0.5, 1),
-"update": 0,
-"values": [Vector2(0, -50), Vector2(0, 0)]
-}
-tracks/2/type = "value"
-tracks/2/imported = false
-tracks/2/enabled = true
-tracks/2/path = NodePath("BackgroundTextureOld:modulate")
-tracks/2/interp = 1
-tracks/2/loop_wrap = true
-tracks/2/keys = {
-"times": PackedFloat32Array(0, 0.3),
-"transitions": PackedFloat32Array(1, 1),
-"update": 0,
-"values": [Color(1, 1, 1, 1), Color(1, 1, 1, 0)]
-}
-tracks/3/type = "value"
-tracks/3/imported = false
-tracks/3/enabled = true
-tracks/3/path = NodePath("BackgroundTextureOld:position")
-tracks/3/interp = 1
-tracks/3/loop_wrap = true
-tracks/3/keys = {
-"times": PackedFloat32Array(0, 0.3),
-"transitions": PackedFloat32Array(0.5, 1),
-"update": 0,
-"values": [Vector2(0, 0), Vector2(0, 50)]
-}
-
-[sub_resource type="Animation" id="Animation_transition_up"]
-resource_name = "transition_up"
-length = 0.3
-tracks/0/type = "value"
-tracks/0/imported = false
-tracks/0/enabled = true
-tracks/0/path = NodePath("BackgroundTexture:modulate")
-tracks/0/interp = 1
-tracks/0/loop_wrap = true
-tracks/0/keys = {
-"times": PackedFloat32Array(0, 0.3),
-"transitions": PackedFloat32Array(1, 1),
-"update": 0,
-"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
-}
-tracks/1/type = "value"
-tracks/1/imported = false
-tracks/1/enabled = true
-tracks/1/path = NodePath("BackgroundTexture:position")
-tracks/1/interp = 1
-tracks/1/loop_wrap = true
-tracks/1/keys = {
-"times": PackedFloat32Array(0, 0.3),
-"transitions": PackedFloat32Array(0.5, 1),
-"update": 0,
-"values": [Vector2(0, 50), Vector2(0, 0)]
-}
-tracks/2/type = "value"
-tracks/2/imported = false
-tracks/2/enabled = true
-tracks/2/path = NodePath("BackgroundTextureOld:modulate")
-tracks/2/interp = 1
-tracks/2/loop_wrap = true
-tracks/2/keys = {
-"times": PackedFloat32Array(0, 0.3),
-"transitions": PackedFloat32Array(1, 1),
-"update": 0,
-"values": [Color(1, 1, 1, 1), Color(1, 1, 1, 0)]
-}
-tracks/3/type = "value"
-tracks/3/imported = false
-tracks/3/enabled = true
-tracks/3/path = NodePath("BackgroundTextureOld:position")
-tracks/3/interp = 1
-tracks/3/loop_wrap = true
-tracks/3/keys = {
-"times": PackedFloat32Array(0, 0.3),
-"transitions": PackedFloat32Array(0.5, 1),
-"update": 0,
-"values": [Vector2(0, 0), Vector2(0, -50)]
-}
-
-[sub_resource type="AnimationLibrary" id="AnimationLibrary_bg"]
-_data = {
-"transition_down": SubResource("Animation_transition_down"),
-"transition_up": SubResource("Animation_transition_up")
-}
+[ext_resource type="Texture2D" uid="uid://j27gk8qemr4d" path="res://icon.svg" id="4_icon"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_rounded"]
 bg_color = Color(1, 1, 1, 1)
-corner_radius_top_left = 16
-corner_radius_top_right = 16
-corner_radius_bottom_right = 16
-corner_radius_bottom_left = 16
-shadow_color = Color(0, 0, 0, 0.25)
-shadow_size = 4
-shadow_offset = Vector2(0, 0)
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_Focus"]
-bg_color = Color(0.6, 0.6, 0.6, 0)
-draw_center = false
-corner_radius_top_left = 43
-corner_radius_top_right = 43
-corner_radius_bottom_right = 43
-corner_radius_bottom_left = 43
-expand_margin_left = 24.0
-expand_margin_top = 24.0
-expand_margin_right = 24.0
-expand_margin_bottom = 24.0
-shadow_color = Color(1, 1, 1, 0.5)
-shadow_size = 12
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_Clipper"]
-bg_color = Color(0, 0, 0, 1)
-corner_radius_top_left = 16
-corner_radius_top_right = 16
-corner_radius_bottom_right = 16
-corner_radius_bottom_left = 16
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ClockBg"]
-bg_color = Color(0, 0, 0, 0.5)
-corner_radius_top_left = 8
-corner_radius_top_right = 8
-corner_radius_bottom_right = 8
-corner_radius_bottom_left = 8
-expand_margin_left = 10.0
-expand_margin_top = 0.0
-expand_margin_right = 10.0
-expand_margin_bottom = 0.0
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_FocusBorder"]
-bg_color = Color(0.6, 0.6, 0.6, 0)
-draw_center = false
-border_color = Color(1, 1, 1, 1)
-corner_radius_top_left = 36
-corner_radius_top_right = 36
-corner_radius_bottom_right = 36
-corner_radius_bottom_left = 36
-expand_margin_left = 12.0
-expand_margin_top = 12.0
-expand_margin_right = 12.0
-expand_margin_bottom = 12.0
-shadow_color = Color(1, 1, 1, 1)
-shadow_size = 18
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_StatusBg"]
-bg_color = Color(0, 0, 0, 0.8)
-corner_radius_top_left = 16
-corner_radius_top_right = 16
-corner_radius_bottom_right = 16
-corner_radius_bottom_left = 16
-expand_margin_left = 40.0
-expand_margin_top = 20.0
-expand_margin_right = 40.0
-expand_margin_bottom = 20.0
-
-[sub_resource type="Gradient" id="Gradient_TopBar"]
-colors = PackedColorArray(0, 0, 0, 0.8, 0, 0, 0, 0)
-
-[sub_resource type="GradientTexture2D" id="GradientTexture2D_TopBar"]
-gradient = SubResource("Gradient_TopBar")
-width = 1
-fill_to = Vector2(0, 1)
-
-[sub_resource type="Gradient" id="Gradient_BottomBar"]
-colors = PackedColorArray(0, 0, 0, 0, 0, 0, 0, 0.8)
-
-[sub_resource type="GradientTexture2D" id="GradientTexture2D_BottomBar"]
-gradient = SubResource("Gradient_BottomBar")
-width = 1
-height = 32
-fill_to = Vector2(0, 1)
+corner_radius_top_left = 20
+corner_radius_top_right = 20
+corner_radius_bottom_right = 20
+corner_radius_bottom_left = 20
 
 [node name="GameSelection" type="Control"]
 layout_mode = 3
@@ -221,16 +32,8 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0.1, 0.1, 0.1, 1)
 
-[node name="BackgroundTextureOld" type="TextureRect" parent="BackgroundLayer"]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-expand_mode = 1
-stretch_mode = 6
-
 [node name="BackgroundTexture" type="TextureRect" parent="BackgroundLayer"]
+modulate = Color(0.5, 0.5, 0.5, 1)
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -238,11 +41,6 @@ grow_horizontal = 2
 grow_vertical = 2
 expand_mode = 1
 stretch_mode = 6
-
-[node name="BgAnimationPlayer" type="AnimationPlayer" parent="BackgroundLayer"]
-libraries = {
-"": SubResource("AnimationLibrary_bg")
-}
 
 [node name="CarouselContainer" type="Control" parent="."]
 layout_mode = 1
@@ -253,7 +51,7 @@ grow_vertical = 2
 
 [node name="CardTemplate" type="Panel" parent="CarouselContainer"]
 visible = false
-clip_children = 0
+clip_children = 1
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
@@ -269,18 +67,7 @@ grow_vertical = 2
 pivot_offset = Vector2(100, 100)
 theme_override_styles/panel = SubResource("StyleBoxFlat_rounded")
 
-[node name="Clipper" type="Panel" parent="CarouselContainer/CardTemplate"]
-clip_children = 1
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_Clipper")
-
-[node name="Icon" type="TextureRect" parent="CarouselContainer/CardTemplate/Clipper"]
+[node name="Icon" type="TextureRect" parent="CarouselContainer/CardTemplate"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -291,37 +78,6 @@ texture = ExtResource("4_icon")
 expand_mode = 1
 stretch_mode = 6
 
-[node name="NoImageLabel" type="Label" parent="CarouselContainer/CardTemplate/Clipper"]
-visible = false
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_colors/font_color = Color(0.5, 0.5, 0.5, 1)
-theme_override_fonts/font = ExtResource("3_font_bold")
-theme_override_font_sizes/font_size = 30
-text = "NO IMAGE"
-horizontal_alignment = 1
-vertical_alignment = 1
-
-[node name="StaticFocusBorder" type="Panel" parent="CarouselContainer"]
-layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -150.0
-offset_top = -210.0
-offset_right = 150.0
-offset_bottom = 210.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_FocusBorder")
-
 [node name="InfoPanel" type="Panel" parent="."]
 layout_mode = 1
 anchors_preset = 3
@@ -329,10 +85,10 @@ anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -1000.0
-offset_top = -450.0
-offset_right = -40.0
-offset_bottom = -60.0
+offset_left = -850.0
+offset_top = -350.0
+offset_right = -50.0
+offset_bottom = -50.0
 grow_horizontal = 0
 grow_vertical = 0
 
@@ -350,171 +106,29 @@ theme_override_constants/margin_bottom = 30
 
 [node name="VBoxContainer" type="VBoxContainer" parent="InfoPanel/MarginContainer"]
 layout_mode = 2
-theme_override_constants/separation = 24
 
-[node name="TitleContainer" type="HBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer"]
+[node name="TitleLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
-theme_override_constants/separation = 20
-
-[node name="TitleScrollWrapper" type="Control" parent="InfoPanel/MarginContainer/VBoxContainer/TitleContainer"]
-layout_mode = 2
-size_flags_horizontal = 3
-custom_minimum_size = Vector2(0, 80)
-script = ExtResource("5_auto_scroll")
-
-[node name="TitleLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/TitleContainer/TitleScrollWrapper"]
-layout_mode = 0
 theme_override_fonts/font = ExtResource("3_font_bold")
 theme_override_font_sizes/font_size = 48
 text = "ゲームタイトル"
-vertical_alignment = 1
 
-[node name="PlayButton" type="Button" parent="InfoPanel/MarginContainer/VBoxContainer/TitleContainer"]
-custom_minimum_size = Vector2(140, 50)
+[node name="DescLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer"]
+custom_minimum_size = Vector2(0, 100)
 layout_mode = 2
-size_flags_vertical = 4
-theme_override_fonts/font = ExtResource("3_font_bold")
-theme_override_font_sizes/font_size = 24
-text = "プレイ"
-
-[node name="CreatorScrollWrapper" type="Control" parent="InfoPanel/MarginContainer/VBoxContainer"]
-custom_minimum_size = Vector2(0, 36)
-layout_mode = 2
-script = ExtResource("5_auto_scroll")
-
-[node name="CreatorLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/CreatorScrollWrapper"]
-layout_mode = 0
-theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 22
-text = "Creator Info"
-vertical_alignment = 1
-
-[node name="SpecsContainer" type="HFlowContainer" parent="InfoPanel/MarginContainer/VBoxContainer"]
-layout_mode = 2
-theme_override_constants/h_separation = 20
-theme_override_constants/v_separation = 5
-
-[node name="PlayersContainer" type="HBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer"]
-layout_mode = 2
-
-[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayersContainer"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 20
-text = "プレイ人数: "
-
-[node name="PlayersValueLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayersContainer"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-theme_override_fonts/font = ExtResource("3_font_bold")
-theme_override_font_sizes/font_size = 20
-text = "1〜4人"
-
-[node name="DifficultyContainer" type="HBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer"]
-layout_mode = 2
-theme_override_constants/separation = 10
-
-[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/DifficultyContainer"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 20
-text = "難易度:"
-
-[node name="DifficultyBar" type="ProgressBar" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/DifficultyContainer"]
-custom_minimum_size = Vector2(100, 20)
-layout_mode = 2
-size_flags_vertical = 4
-max_value = 3.0
-step = 1.0
-value = 1.0
-show_percentage = false
-
-[node name="DifficultyValueLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/DifficultyContainer"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-theme_override_fonts/font = ExtResource("3_font_bold")
-theme_override_font_sizes/font_size = 20
-text = "普通"
-
-[node name="PlayTimeContainer" type="HBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer"]
-layout_mode = 2
-theme_override_constants/separation = 10
-
-[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayTimeContainer"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 20
-text = "想定プレイ時間:"
-
-[node name="PlayTimeBar" type="ProgressBar" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayTimeContainer"]
-custom_minimum_size = Vector2(100, 20)
-layout_mode = 2
-size_flags_vertical = 4
-max_value = 3.0
-step = 1.0
-value = 1.0
-show_percentage = false
-
-[node name="PlayTimeValueLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayTimeContainer"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-theme_override_fonts/font = ExtResource("3_font_bold")
-theme_override_font_sizes/font_size = 20
-text = "5分〜15分"
-
-[node name="ControllerContainer" type="HBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer"]
-layout_mode = 2
-
-[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/ControllerContainer"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 20
-text = "コントローラー: "
-
-[node name="ControllerValueLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/ControllerContainer"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-theme_override_fonts/font = ExtResource("3_font_bold")
-theme_override_font_sizes/font_size = 20
-text = "対応"
-
-[node name="OnlineContainer" type="HBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer"]
-layout_mode = 2
-
-[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/OnlineContainer"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 20
-text = "通信プレイ: "
-
-[node name="OnlineValueLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/OnlineContainer"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-theme_override_fonts/font = ExtResource("3_font_bold")
-theme_override_font_sizes/font_size = 20
-text = "非対応"
-
-
-
-[node name="DescriptionScroll" type="ScrollContainer" parent="InfoPanel/MarginContainer/VBoxContainer"]
-layout_mode = 2
-size_flags_vertical = 3
-horizontal_scroll_mode = 0
-
-[node name="DescLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/DescriptionScroll"]
-layout_mode = 2
-size_flags_horizontal = 3
 theme_override_fonts/font = ExtResource("2_font_regular")
 theme_override_font_sizes/font_size = 24
 text = "ゲームの説明文がここに入ります。"
 autowrap_mode = 2
 
-[node name="RunningOverlay" type="Control" parent="."]
+[node name="GuideLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.827451, 0.827451, 0.827451, 1)
+theme_override_fonts/font = ExtResource("2_font_regular")
+text = "↑↓: 選択  |  Enter: 決定  |  ESC: 戻る"
+horizontal_alignment = 2
+
+[node name="RunningOverlay" type="ColorRect" parent="."]
 visible = false
 layout_mode = 1
 anchors_preset = 15
@@ -522,146 +136,23 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+color = Color(0, 0, 0, 0.862745)
 
-[node name="RunningIconContainer" type="Panel" parent="RunningOverlay"]
+[node name="StatusLabel" type="Label" parent="RunningOverlay"]
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -180.0
-offset_top = -180.0
-offset_right = 180.0
-offset_bottom = 180.0
+offset_left = -200.0
+offset_top = -50.0
+offset_right = 200.0
+offset_bottom = 50.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_rounded")
-
-
-
-[node name="Icon" type="TextureRect" parent="RunningOverlay/RunningIconContainer"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-expand_mode = 1
-stretch_mode = 6
-
-[node name="StatusContainer" type="PanelContainer" parent="RunningOverlay"]
-layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -400.0
-offset_top = 220.0
-offset_right = 400.0
-offset_bottom = 340.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_StatusBg")
-
-[node name="StatusLabel" type="Label" parent="RunningOverlay/StatusContainer"]
-layout_mode = 2
 theme_override_fonts/font = ExtResource("3_font_bold")
 theme_override_font_sizes/font_size = 48
-text = "ゲーム起動中: 
-お楽しみください！"
+text = "起動準備中..."
 horizontal_alignment = 1
-vertical_alignment = 1
-
-[node name="TopBar" type="Control" parent="."]
-layout_mode = 1
-anchors_preset = 10
-anchor_right = 1.0
-offset_bottom = 120.0
-grow_horizontal = 2
-mouse_filter = 2
-
-
-
-[node name="Background" type="TextureRect" parent="TopBar"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-texture = SubResource("GradientTexture2D_TopBar")
-expand_mode = 1
-
-[node name="MarginContainer" type="MarginContainer" parent="TopBar"]
-layout_mode = 1
-anchors_preset = 10
-anchor_right = 1.0
-offset_bottom = 80.0
-grow_horizontal = 2
-theme_override_constants/margin_left = 40
-theme_override_constants/margin_top = 20
-theme_override_constants/margin_right = 40
-theme_override_constants/margin_bottom = 20
-
-[node name="HBoxContainer" type="HBoxContainer" parent="TopBar/MarginContainer"]
-layout_mode = 2
-
-[node name="ClockLabel" type="Label" parent="TopBar/MarginContainer/HBoxContainer"]
-layout_mode = 2
-theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 32
-text = "00:00"
-
-[node name="Spacer" type="Control" parent="TopBar/MarginContainer/HBoxContainer"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="ExitButton" type="Button" parent="TopBar/MarginContainer/HBoxContainer"]
-custom_minimum_size = Vector2(60, 60)
-layout_mode = 2
-icon_alignment = 1
-expand_icon = true
-
-[node name="BottomBar" type="Control" parent="."]
-layout_mode = 1
-anchors_preset = 12
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_top = -100.0
-grow_horizontal = 2
-grow_vertical = 0
-mouse_filter = 2
-
-[node name="Background" type="TextureRect" parent="BottomBar"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-texture = SubResource("GradientTexture2D_BottomBar")
-expand_mode = 1
-
-[node name="LabelMargin" type="MarginContainer" parent="BottomBar"]
-layout_mode = 1
-anchors_preset = 12
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_top = -50.0
-grow_horizontal = 2
-grow_vertical = 0
-theme_override_constants/margin_right = 40
-
-[node name="GuideLabel" type="Label" parent="BottomBar/LabelMargin"]
-layout_mode = 2
-theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 20
-text = "Enter: 決定"
-horizontal_alignment = 2
 vertical_alignment = 1
