@@ -341,7 +341,7 @@ func _launch_game():
 	# 既に起動中の場合は無視
 	if _running_pid != -1: return
 
-	var game = _games[_active_index]
+	var game = _games[_selected_index]
 	print("[GameSelection] Launching game: ", game.title, " (ID: ", game.game_id, ")")
 	
 	var exe_path = ""
@@ -401,7 +401,11 @@ func _launch_game():
 	# cmd /c "cd /d WORK_DIR && EXE_PATH ARGS"
 	var cmd_command = 'cd /d "%s" && "%s"' % [working_dir, exe_path]
 	if not args.is_empty():
-		cmd_command += " " + " ".join(args)
+		var escaped_args = []
+		for arg in args:
+			# 引数をダブルクォーテーションで囲み、内部のクォーテーションをエスケープする
+			escaped_args.append('"%s"' % arg.replace('"', '\\"'))
+		cmd_command += " " + " ".join(escaped_args)
 	
 	print("[GameSelection] CMD Command: ", cmd_command)
 	
