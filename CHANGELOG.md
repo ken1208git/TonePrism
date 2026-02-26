@@ -11,6 +11,43 @@
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.4.5] - 2026-02-27
+
+#### Added
+
+- **ゲーム選択時の背景アニメーション改善**
+  - ゲーム選択画面でスクロール操作に合わせて背景が上下にスライドする演出（`transition_up`, `transition_down`）を追加
+  - スクロールを連続して行った場合（ドラムロール）でも、アニメーションが途切れずに次の位置から引き継がれてスムーズに繋がるように、内部制御を `AnimationPlayer` から `Tween` に移行
+
+#### Changed
+
+- **UIコンポーネントの tscn 化**
+  - `CommonDialog`, `ErrorDialog` 内の UI 定義・スタイル割り当てをコードベースから `.tscn` ファイルの GUI エディタ設定へ統合
+  - ダイアログボタンの動的サイズ調整やグローエフェクト、フォーカス時のスタイルを改善
+- **スクリーンセーバーの機能改善**
+  - `CenterContainer` を用いてロゴの配置とリサイズ制御を簡素化・安定化
+  - 画面の「PRESS ENTER OR A BUTTON」の文字を「PRESS ANY KEY」に変更し、フォントサイズを拡大
+
+### [Launcher v0.4.4] - 2026-02-14
+
+#### Added
+
+- **ゲーム選択画面のUI拡張**
+  - 画面上部に現在時刻と「遊び終わる」ボタン（トップバー）を追加
+  - 画面下部に操作ガイド（ボトムバー）を追加
+  - 選択中のゲーム情報パネル内に「プレイ」ボタンを追加
+  - サムネイル画像がない場合の「NO IMAGE」プレースホルダー表示を追加
+  - マウスホイールによるスクロール操作に対応
+- **UIエフェクトの追加**
+  - フォーカスされたボタンやカード枠に対し、時間経過で明滅するブリージング（グロー）アニメーションを追加
+- **共通ダイアログの機能拡張**
+  - ダイアログボタン個別に色（緑のプレイボタンなど）を指定できるオーバーライド機能を追加
+
+#### Changed
+
+- **アイドルタイマーの仕様変更**
+  - 警告ダイアログ表示までの時間を変更し、タイムアウト時にカウントダウンメッセージを更新するように修正
+
 ### [Launcher v0.4.3] - 2026-02-10
 
 #### Added
@@ -449,5 +486,7 @@
 ---
 
 [Launcher Unreleased]: https://github.com/ken1208git/GCTonePrism/compare/launcher-v1.0.0...HEAD
+[Launcher v0.4.5]: https://github.com/ken1208git/GCTonePrism/releases/tag/launcher-v0.4.5
+[Launcher v0.4.4]: https://github.com/ken1208git/GCTonePrism/releases/tag/launcher-v0.4.4
 [Manager v0.1.1]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.1.1
 [Manager v0.1.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.1.0
