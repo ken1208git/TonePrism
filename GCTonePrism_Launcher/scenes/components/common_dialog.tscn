@@ -4,58 +4,6 @@
 [ext_resource type="FontFile" uid="uid://dolk7yphok5xu" path="res://fonts/NotoSansJP-Regular.ttf" id="2_font_reg"]
 [ext_resource type="FontFile" uid="uid://xjqfmx60jtvo" path="res://fonts/NotoSansJP-Bold.ttf" id="3_font_bold"]
 
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_DialogBg"]
-bg_color = Color(0.15, 0.15, 0.15, 1)
-border_width_left = 2
-border_width_top = 2
-border_width_right = 2
-border_width_bottom = 2
-border_color = Color(0.4, 0.4, 0.4, 1)
-corner_radius_top_left = 20
-corner_radius_top_right = 20
-corner_radius_bottom_right = 20
-corner_radius_bottom_left = 20
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_BtnNormal"]
-bg_color = Color(0.2, 0.2, 0.2, 1)
-corner_radius_top_left = 10
-corner_radius_top_right = 10
-corner_radius_bottom_right = 10
-corner_radius_bottom_left = 10
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_BtnHover"]
-bg_color = Color(0.26, 0.26, 0.26, 1)
-corner_radius_top_left = 10
-corner_radius_top_right = 10
-corner_radius_bottom_right = 10
-corner_radius_bottom_left = 10
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_BtnPressed"]
-bg_color = Color(0.14, 0.14, 0.14, 1)
-corner_radius_top_left = 10
-corner_radius_top_right = 10
-corner_radius_bottom_right = 10
-corner_radius_bottom_left = 10
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_BtnFocus"]
-bg_color = Color(0.6, 0.6, 0.6, 0)
-draw_center = false
-border_width_left = 0
-border_width_top = 0
-border_width_right = 0
-border_width_bottom = 0
-border_color = Color(1, 1, 1, 1)
-corner_radius_top_left = 16
-corner_radius_top_right = 16
-corner_radius_bottom_right = 16
-corner_radius_bottom_left = 16
-expand_margin_left = 6.0
-expand_margin_top = 6.0
-expand_margin_right = 6.0
-expand_margin_bottom = 6.0
-shadow_color = Color(1, 1, 1, 0.5)
-shadow_size = 12
-
 [node name="CommonDialog" type="Control"]
 process_mode = 3
 layout_mode = 3
@@ -89,10 +37,14 @@ offset_right = 300.0
 offset_bottom = 150.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_DialogBg")
 
 [node name="MarginContainer" type="MarginContainer" parent="Panel"]
-layout_mode = 2
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 theme_override_constants/margin_left = 40
 theme_override_constants/margin_top = 40
 theme_override_constants/margin_right = 40
@@ -123,15 +75,3 @@ autowrap_mode = 2
 layout_mode = 2
 theme_override_constants/separation = 20
 alignment = 1
-
-[node name="ButtonTemplate" type="Button" parent="Panel/MarginContainer/VBoxContainer/ButtonContainer"]
-visible = false
-custom_minimum_size = Vector2(160, 50)
-layout_mode = 2
-theme_override_fonts/font = ExtResource("2_font_reg")
-theme_override_font_sizes/font_size = 24
-theme_override_styles/normal = SubResource("StyleBoxFlat_BtnNormal")
-theme_override_styles/hover = SubResource("StyleBoxFlat_BtnHover")
-theme_override_styles/pressed = SubResource("StyleBoxFlat_BtnPressed")
-theme_override_styles/focus = SubResource("StyleBoxFlat_BtnFocus")
-text = "Button"
