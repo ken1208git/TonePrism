@@ -347,17 +347,20 @@ func _launch_game():
 	var exe_path = ""
 	
 	# パスの解決
-	# 1. games/{game_id}/{executable_path}
-	var game_folder = PathManager.get_game_folder(game.game_id)
-	var candidate1 = game_folder.path_join(game.executable_path)
-	
-	if FileAccess.file_exists(candidate1):
-		exe_path = candidate1
+	if game.executable_path.is_absolute_path() and FileAccess.file_exists(game.executable_path):
+		exe_path = game.executable_path
 	else:
-		# 2. プロジェクトルート直下 (互換性/デバッグ)
-		var candidate2 = PathManager.get_base_directory().path_join(game.executable_path)
-		if FileAccess.file_exists(candidate2):
-			exe_path = candidate2
+		# 1. games/{game_id}/{executable_path}
+		var game_folder = PathManager.get_game_folder(game.game_id)
+		var candidate1 = game_folder.path_join(game.executable_path)
+		
+		if FileAccess.file_exists(candidate1):
+			exe_path = candidate1
+		else:
+			# 2. プロジェクトルート直下 (互換性/デバッグ)
+			var candidate2 = PathManager.get_base_directory().path_join(game.executable_path)
+			if FileAccess.file_exists(candidate2):
+				exe_path = candidate2
 	
 	if exe_path.is_empty():
 		print("❌ Executable not found: ", game.executable_path)
@@ -468,15 +471,11 @@ func _process(delta):
 		
 		# 終了判定:
 		# 1. プロセスが死んだ (cmdが終了した)
-		# 2. 起動後にフォーカスを失い、かつフォーカスが戻ってきた (ゲーム終了 or Alt-Tab)
 		var process_dead = not OS.is_process_running(_running_pid)
-		var focus_returned = _has_lost_focus_since_launch and get_window().has_focus()
 		
-		if process_dead or focus_returned:
-			if focus_returned:
-				print("[GameSelection] Focus returned. Assuming game finished.")
-			else:
-				print("[GameSelection] Game process %d finished." % _running_pid)
+		# プロセスが終了している場合のみ、ゲーム終了と判定する
+		if process_dead:
+			print("[GameSelection] Game process %d finished." % _running_pid)
 			_running_pid = -1
 			# ゲーム終了時の処理（必要ならウィンドウをアクティブにするなど）
 			# Grab focus back to the selection
