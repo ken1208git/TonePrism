@@ -24,23 +24,15 @@ func _process(delta):
 			style.shadow_color = c
 			style.border_color = c
 
+@onready var _button_template: Button = $Panel/MarginContainer/VBoxContainer/ButtonContainer/ButtonTemplate
+
 func _ready():
 	_title_label.text = ""
 	_message_label.text = ""
 	
-	# ダイアログの背景スタイル設定（不透明・角丸）
-	# PanelContainerのStyleBoxを上書き
-	var panel = $Panel
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.15, 0.15, 0.15, 1.0) # 不透明なダークグレー
-	style.set_corner_radius_all(20)
-	style.border_width_bottom = 2
-	style.border_width_left = 2
-	style.border_width_right = 2
-	style.border_width_top = 2
-	style.border_color = Color(0.4, 0.4, 0.4)
-	
-	panel.add_theme_stylebox_override("panel", style)
+	# パネルスタイルはtscnで設定済みのため、コードによる上書きは削除
+	# var panel = $Panel
+	# ...
 
 func setup(title: String, message: String):
 	if not is_node_ready():
@@ -49,14 +41,15 @@ func setup(title: String, message: String):
 	_title_label.text = title
 	_message_label.text = message
 	
-	if _message_label:
-		_message_label.text = message
-	
-	# ボタンコンテナをクリア
+	# ボタンコンテナをクリア（テンプレート以外）
 	for child in _button_container.get_children():
-		child.queue_free()
+		if child != _button_template:
+			child.queue_free()
 	_buttons.clear()
 	_glow_styles.clear()
+	
+	# テンプレートからFocusスタイルを取得してGlow対象に追加（テンプレート自体は非表示だがアニメーション用）
+	# 実際のボタン追加時に個別に登録する
 
 func set_message(message: String):
 	if _message_label:
@@ -66,70 +59,56 @@ func add_button(text: String, callback: Callable = Callable(), should_grab_focus
 	if not is_node_ready():
 		await ready
 
-	var btn = Button.new()
+	if not _button_template:
+		push_error("ButtonTemplate not found!")
+		return
+
+	var btn = _button_template.duplicate()
+	btn.visible = true
 	btn.text = text
-	btn.add_theme_font_override("font", load("res://fonts/NotoSansJP-Regular.ttf"))
-	btn.add_theme_font_size_override("font_size", 24)
-	btn.custom_minimum_size = Vector2(160, 50)
 	
+	# 色上書きがある場合のみスタイルを複製して変更
 	if color_override != Color.TRANSPARENT:
-		# スタイルボックスをオーバーライド
-		var style_normal = StyleBoxFlat.new()
-		style_normal.bg_color = color_override
-		style_normal.set_corner_radius_all(10)
-		btn.add_theme_stylebox_override("normal", style_normal)
+		# Normal
+		var style_normal = btn.get_theme_stylebox("normal").duplicate()
+		if style_normal is StyleBoxFlat:
+			style_normal.bg_color = color_override
+			btn.add_theme_stylebox_override("normal", style_normal)
 		
-		# ホバー時は少し明るく
-		var style_hover = style_normal.duplicate()
-		style_hover.bg_color = color_override.lightened(0.1)
-		btn.add_theme_stylebox_override("hover", style_hover)
-		
-		# Focusは別スタイル（白枠）
-		var style_focus = StyleBoxFlat.new()
-		style_focus.bg_color = Color.TRANSPARENT
-		style_focus.draw_center = false
-		style_focus.border_width_left = 0
-		style_focus.border_width_top = 0
-		style_focus.border_width_right = 0
-		style_focus.border_width_bottom = 0
-		style_focus.border_color = Color.WHITE
-		
-		# 光彩（グロー）効果を追加
-		style_focus.shadow_color = Color(1, 1, 1, 0.5)
-		style_focus.shadow_size = 12
-		style_focus.shadow_offset = Vector2(0, 0)
-		
-		_glow_styles.append(style_focus) # アニメーション対象に追加
-		
-		# 少し外側に広げる
-		# マージンや角丸はボタンのサイズや元の角丸(10)に合わせて調整
-		var focus_margin = 6
-		style_focus.expand_margin_left = focus_margin
-		style_focus.expand_margin_right = focus_margin
-		style_focus.expand_margin_top = focus_margin
-		style_focus.expand_margin_bottom = focus_margin
-		style_focus.set_corner_radius_all(10 + focus_margin)
-		
-		btn.add_theme_stylebox_override("focus", style_focus)
-		
-		# 押下時は暗く
-		var style_pressed = style_normal.duplicate()
-		style_pressed.bg_color = color_override.darkened(0.2)
-		btn.add_theme_stylebox_override("pressed", style_pressed)
+		# Hover
+		var style_hover = btn.get_theme_stylebox("hover").duplicate()
+		if style_hover is StyleBoxFlat:
+			style_hover.bg_color = color_override.lightened(0.1)
+			btn.add_theme_stylebox_override("hover", style_hover)
+			
+		# Pressed
+		var style_pressed = btn.get_theme_stylebox("pressed").duplicate()
+		if style_pressed is StyleBoxFlat:
+			style_pressed.bg_color = color_override.darkened(0.2)
+			btn.add_theme_stylebox_override("pressed", style_pressed)
+			
+	# FocusスタイルをGlowリストに追加
+	var style_focus = btn.get_theme_stylebox("focus")
+	if style_focus and style_focus is StyleBoxFlat:
+		# 複製しなくても良いが、個別にアニメーションさせるなら複製も可
+		# ここではTscnのリソースを共有している可能性があるため、複製して割り当てる
+		# (Tscnのリソースは共有されるため、全てのボタンが同期して明滅するのはOK)
+		# ただし、add_theme_stylebox_overrideしていない場合はテーマから取得されるので
+		# 明示的に複製してoverrideする
+		var new_focus = style_focus.duplicate()
+		btn.add_theme_stylebox_override("focus", new_focus)
+		_glow_styles.append(new_focus)
 	
 	var index = _buttons.size()
 	btn.pressed.connect(func():
 		if callback.is_valid():
 			callback.call()
 		button_pressed.emit(index)
-		# 基本的にボタンを押したら閉じるかどうかは呼び出し元が決めるが
-		# DialogManager経由の場合は閉じる処理が含まれることが多い
 	)
 	
 	_button_container.add_child(btn)
 	_buttons.append(btn)
 	
-	# フォーカストラップ（ボタン間の循環）を設定
 	_update_focus_neighbors()
 	
 	if should_grab_focus:

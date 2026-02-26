@@ -28,15 +28,15 @@ var _font_bold: FontFile = preload("res://fonts/NotoSansJP-Bold.ttf")
 
 # --- ノード参照 ---
 # --- ノード参照 ---
-@onready var _background_texture: TextureRect = $BackgroundLayer/BackgroundTexture
 @onready var _carousel_container: Control = $CarouselContainer
 @onready var _card_template: Panel = $CarouselContainer/CardTemplate
+@onready var _static_focus_border: Panel = $CarouselContainer/StaticFocusBorder
 @onready var _info_panel: Panel = $InfoPanel
 
-var _static_focus_border: Panel
+# _static_focus_border removed (now @onready)
 
-@onready var _title_label: Label = $InfoPanel/MarginContainer/VBoxContainer/TitleLabel
-@onready var _creator_label: Label = $InfoPanel/MarginContainer/VBoxContainer/CreatorLabel
+@onready var _title_label: Label = $InfoPanel/MarginContainer/VBoxContainer/TitleContainer/TitleScrollWrapper/TitleLabel
+@onready var _creator_label: Label = $InfoPanel/MarginContainer/VBoxContainer/CreatorScrollWrapper/CreatorLabel
 
 # Specs UI Components
 @onready var _players_label: Label = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayersContainer/PlayersValueLabel
@@ -47,21 +47,32 @@ var _static_focus_border: Panel
 @onready var _controller_label: Label = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/ControllerContainer/ControllerValueLabel
 @onready var _online_label: Label = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/OnlineContainer/OnlineValueLabel
 
-@onready var _desc_label: Label = $InfoPanel/MarginContainer/VBoxContainer/DescLabel
+@onready var _desc_label: Label = $InfoPanel/MarginContainer/VBoxContainer/DescriptionScroll/DescLabel
 @onready var _running_overlay: Control = $RunningOverlay
 @onready var _running_icon_container: Panel = $RunningOverlay/RunningIconContainer
 @onready var _running_icon: TextureRect = $RunningOverlay/RunningIconContainer/Icon
 @onready var _status_label: Label = $RunningOverlay/StatusContainer/StatusLabel
 
+# New UI components from TSCN
+@onready var _play_button: Button = $InfoPanel/MarginContainer/VBoxContainer/TitleContainer/PlayButton
+@onready var _top_bar: Control = $TopBar
+@onready var _bottom_bar: Control = $BottomBar
+@onready var _clock_label: Label = $TopBar/MarginContainer/HBoxContainer/ClockLabel
+@onready var _exit_button: Button = $TopBar/MarginContainer/HBoxContainer/ExitButton
+@onready var _bottom_label: Label = $BottomBar/LabelMargin/GuideLabel
+@onready var _background_texture: TextureRect = $BackgroundLayer/BackgroundTexture
+@onready var _background_old: TextureRect = $BackgroundLayer/BackgroundTextureOld
+
+var _bg_tween: Tween = null
 
 var _card_nodes: Array[Panel] = []
-var _play_button: Button
-
-# --- 状態管理 ---
+# _play_button removed (now @onready)
+var _target_scroll_index: float = 0.0
 var _db_manager: DatabaseManager
 var _games: Array[GameInfo] = []
 var _selected_index: int = 0
 var _active_index: int = 0   # 現在画面中央にあり、フォーカスを持つべきインデックス
+var _has_lost_focus_since_launch: bool = false # 起動後にフォーカスを失ったかどうか（終了検知用）
 var _glow_styles: Array[StyleBoxFlat] = [] # ブリージング（明滅）させるスタイルリスト
 var _glow_timer: float = 0.0
 var _current_scroll_index: float = 0.0 # インデックス単位の現在位置
@@ -78,10 +89,20 @@ var _using_mouse: bool = false # マウス操作中かどうか
 # --- Helper logic changes ---
 
 func _move_selection(dir: int):
-	# 目標インデックスだけ更新（即時反映しない）
-	_selected_index = clampi(_selected_index + dir, 0, _games.size() - 1)
-	# 背景と情報は即時更新
-	_update_info_display(_selected_index)
+	# dir: +1 (下へスクロール -> 視覚的にはゲームリストが上へ移動し、選択枠が下へ)
+	# dir: -1 (上へスクロール -> 視覚的にはゲームリストが下へ移動し、選択枠が上へ)
+	var new_index = clampi(_selected_index + dir, 0, _games.size() - 1)
+	
+	if new_index != _selected_index:
+		_selected_index = new_index
+		
+		# どのアニメーションを流すかを決める
+		# 下のゲーム(インデックス大)に移動 -> リストは上へスライド、新しい背景は下から上へスライド(transition_up)
+		# 上のゲーム(インデックス小)に移動 -> リストは下へスライド、新しい背景は上から下へスライド(transition_down)
+		var dir_y = -1 if dir > 0 else 1 # dir > 0 は「下へ(index増)」なので背景は「下から上へ(Yはマイナス方向へ移動)」
+		
+		# 背景と情報は即時更新
+		_update_info_display(_selected_index, dir_y)
 
 func _update_focus_to_current_card():
 	# _active_index に基づいてフォーカス
@@ -90,7 +111,7 @@ func _update_focus_to_current_card():
 		if not card.has_focus():
 			card.grab_focus()
 
-func _update_info_display(index: int):
+func _update_info_display(index: int, slide_dir_y: int = 0):
 	# 指定インデックス（基本は_selected_index）の情報で画面を更新
 	var game = _games[index]
 	
@@ -174,10 +195,33 @@ func _update_info_display(index: int):
 	_online_label.text = online_text
 
 	_title_label.text = title_text
-	if _creator_label: _creator_label.text = creator_text
+	if _title_label.get_parent().has_method("reset"):
+		_title_label.get_parent().reset()
+		
+	if _creator_label: 
+		_creator_label.text = creator_text
+		if _creator_label.get_parent().has_method("reset"):
+			_creator_label.get_parent().reset()
+
 	_desc_label.text = desc_text
 	
 	# 背景画像更新
+	
+	# もし前のTweenが実行中ならキルする
+	if _bg_tween and _bg_tween.is_valid():
+		_bg_tween.kill()
+
+	# 現在の背景を古いテクスチャに移す（ただし、すでにフェードアウト中のものはそのままにしたいが、TextureRectが2つしかないので上書きする）
+	# 見た目をスムーズにするため、古いテクスチャの現在の不透明度や位置を維持しつつ、画像だけ差し替える
+	if _background_texture.texture != null:
+		_background_old.texture = _background_texture.texture
+		# 現在のアニメーション途中の状態を引き継ぐ
+		_background_old.modulate = _background_texture.modulate
+		_background_old.position = _background_texture.position
+	else:
+		_background_old.texture = null
+		_background_old.modulate = Color(1, 1, 1, 0)
+		
 	var bg_path = _resolve_path(game.background_path, game.game_id)
 	if not bg_path.is_empty() and FileAccess.file_exists(bg_path):
 		var img = Image.load_from_file(bg_path)
@@ -188,6 +232,35 @@ func _update_info_display(index: int):
 		_background_texture.texture = null
 		if not game.background_path.is_empty():
 			push_warning("[GameSelection] Background not found: %s" % bg_path)
+
+	# アニメーション再生（Tweenによる動的アニメーション）
+	_bg_tween = create_tween()
+	_bg_tween.set_parallel(true)
+	
+	if slide_dir_y == 0:
+		# 初回表示や方向指定なしの場合は単なるフェードイン
+		_background_texture.position = Vector2.ZERO
+		_background_texture.modulate = Color(1, 1, 1, 0)
+		_bg_tween.tween_property(_background_texture, "modulate", Color(1, 1, 1, 1), 0.3)
+	else:
+		# 移動方向の決定 (slide_dir_y: -1なら新しい絵は下から上へ, 1なら上から下へ)
+		# 画面の縦幅より少し小さいくらいのオフセット50px
+		var offset_y = 50.0 * -slide_dir_y 
+		
+		# 新しいテクスチャの初期状態設定（古い状態から引き継がない、常に一定のオフセットから出現させる）
+		_background_texture.position = Vector2(0, offset_y)
+		_background_texture.modulate = Color(1, 1, 1, 0)
+		
+		# トゥイーンアニメーション
+		# 新しい背景：フェードインしつつ定位置(0,0)へ
+		_bg_tween.tween_property(_background_texture, "position", Vector2.ZERO, 0.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		_bg_tween.tween_property(_background_texture, "modulate", Color(1, 1, 1, 1), 0.3)
+		
+		# 古い背景：現在の位置からさらに同じ方向へ押し出されつつフェードアウト
+		# slide_dir_y は新しい絵の進行方向（例：-1 は上へ向かう）。古い絵も同じ方向へ向かうので -1 * 50 = -50
+		var old_target_y = _background_old.position.y + (50 * slide_dir_y)
+		_bg_tween.tween_property(_background_old, "position", Vector2(0, old_target_y), 0.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		_bg_tween.tween_property(_background_old, "modulate", Color(1, 1, 1, 0), 0.3)
 
 # --- フォーマットヘルパー ---
 func _get_current_fiscal_year() -> int:
@@ -293,9 +366,13 @@ func _launch_game():
 
 	# 引数の処理
 	var args = []
-	if not game.arguments.is_empty():
+	if not game.arguments.is_empty() and game.arguments != "<null>":
 		# 簡易的なスペース区切り（引用符などは考慮していないため注意）
-		args = game.arguments.split(" ", false)
+		# "<null>" という文字列が含まれている場合は除外
+		var raw_args = game.arguments.split(" ", false)
+		for arg in raw_args:
+			if arg != "<null>" and arg != "null":
+				args.append(arg)
 	
 	# 起動中表示（プロセス生成前）
 	# 即座にUIを隠す
@@ -317,8 +394,21 @@ func _launch_game():
 	print("  Path: ", exe_path)
 	print("  Args: ", args)
 	
-	# プロセス起動
-	var pid = OS.create_process(exe_path, args)
+	var working_dir = exe_path.get_base_dir()
+	print("[GameSelection] Working Directory: %s" % working_dir)
+	
+	# プロセス起動 (cmd経由で作業ディレクトリを設定)
+	# cmd /c "cd /d WORK_DIR && EXE_PATH ARGS"
+	var cmd_command = 'cd /d "%s" && "%s"' % [working_dir, exe_path]
+	if not args.is_empty():
+		cmd_command += " " + " ".join(args)
+	
+	print("[GameSelection] CMD Command: ", cmd_command)
+	
+	# _has_lost_focus_since_launch をリセット
+	_has_lost_focus_since_launch = false
+	
+	var pid = OS.create_process("cmd.exe", ["/C", cmd_command])
 	
 	if pid == -1:
 		print("❌ Failed to create process.")
@@ -363,14 +453,26 @@ func _process(delta):
 	# ゲーム実行中はここが先に処理され、終了したら _running_pid = -1 になる
 	if _running_pid != -1:
 		
-		# フォーカスが外れたら（ゲームウィンドウが前面に出たら）文言を「実行中」に変更
+		# フォーカス状態の監視
 		if not get_window().has_focus():
+			# 一度でもフォーカスを失ったらフラグを立てる
+			_has_lost_focus_since_launch = true
+			
 			if _status_label and "起動中" in _status_label.text:
 				var game = _games[_selected_index]
 				_status_label.text = "ゲーム実行中: %s\nお楽しみください！" % game.title
-
-		if not OS.is_process_running(_running_pid):
-			print("[GameSelection] Game process %d finished." % _running_pid)
+		
+		# 終了判定:
+		# 1. プロセスが死んだ (cmdが終了した)
+		# 2. 起動後にフォーカスを失い、かつフォーカスが戻ってきた (ゲーム終了 or Alt-Tab)
+		var process_dead = not OS.is_process_running(_running_pid)
+		var focus_returned = _has_lost_focus_since_launch and get_window().has_focus()
+		
+		if process_dead or focus_returned:
+			if focus_returned:
+				print("[GameSelection] Focus returned. Assuming game finished.")
+			else:
+				print("[GameSelection] Game process %d finished." % _running_pid)
 			_running_pid = -1
 			# ゲーム終了時の処理（必要ならウィンドウをアクティブにするなど）
 			# Grab focus back to the selection
@@ -604,11 +706,42 @@ func _ready():
 	# 	_create_dummy_data()
 	
 	_create_carousel_cards()
-	_create_static_focus_border()
-	_create_play_button()
-	_create_top_bar() # トップバー作成
-	_create_bottom_bar() # ボトムバー作成
+
 	
+	# StaticFocusBorderのスタイルを取得してGlowリストに追加
+	if _static_focus_border:
+		var style = _static_focus_border.get_theme_stylebox("panel")
+		if style is StyleBoxFlat:
+			_glow_styles.append(style)
+	
+	# _create_play_button() # Now in TSCN
+	# _create_top_bar() # Now in TSCN
+	# _create_bottom_bar() # Now in TSCN
+	
+	# Initial Setup for Static Focus Border (glow animation handling)
+	if _static_focus_border:
+		var style = _static_focus_border.get_theme_stylebox("panel")
+		if style:
+			_glow_styles.append(style)
+
+	# Initial Setup for Exit Button (Icon & Styles)
+	if _exit_button:
+		var icon_tex = load("res://images/exit.jpg")
+		if icon_tex:
+			_exit_button.icon = icon_tex
+			
+		# Apply Exit Button Styles (Complex styles kept in code or move to Theme resource ideally)
+		_setup_exit_button_styles()
+		
+		# Signals
+		_exit_button.pressed.connect(_on_exit_button_pressed)
+		_exit_button.mouse_entered.connect(func(): _exit_button.grab_focus())
+
+	# Initial Setup for Play Button (Styles)
+	if _play_button:
+		_setup_play_button_styles()
+		_play_button.pressed.connect(func(): _launch_game())
+
 	# InfoPanelの背景を角丸にする
 	var info_style = StyleBoxFlat.new()
 	info_style.bg_color = Color(0, 0, 0, 0.7) # 半透明黒
@@ -624,84 +757,24 @@ func _ready():
 	
 	# 初期位置セット
 	_current_scroll_index = float(_selected_index)
-	_update_info_display(_selected_index)
-	_update_focus_state()
+	_update_info_display(_selected_index) # 初期状態ではアニメーション不要
+	# フォーカス状態の初期化はフレーム確定後に行う（トラップ設定のため）
+	call_deferred("_update_focus_state") # Changed to deferred to ensure nodes are ready
+	
+	# 相互参照の更新 (PlayButton <-> ExitButton)
+	if _play_button and _exit_button:
+		_exit_button.focus_neighbor_bottom = _play_button.get_path()
+		_play_button.focus_neighbor_top = _exit_button.get_path()
+		# PlayButton navigation
+		_play_button.focus_neighbor_left = _play_button.get_path() # Loop/Trap
+		_play_button.focus_neighbor_right = _play_button.get_path()
 
 	set_process(true)
 	set_process_input(true)
 
-# --- トップバー ---
-var _top_bar: Control
-var _clock_label: Label
-var _exit_button: Button
-
-func _create_top_bar():
-	# トップバーのコンテナ（全幅、高さ80px程度）
-	_top_bar = Control.new()
-	_top_bar.name = "TopBar"
-	_top_bar.custom_minimum_size = Vector2(0, 80)
-	_top_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_top_bar.size_flags_vertical = Control.SIZE_SHRINK_BEGIN # 上部に配置
-	_top_bar.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	_top_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE # 下のレイヤーへの入力を阻害しないように（ボタン等は個別に有効）
-	
-	# 背景（グラデーション：上部黒 -> 透明）
-	var bg_rect = TextureRect.new()
-	bg_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	bg_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	
-	var gradient = Gradient.new()
-	gradient.set_color(0, Color(0, 0, 0, 0.8)) # 上部: 濃い黒
-	gradient.set_color(1, Color(0, 0, 0, 0.0)) # 下部: 透明
-	
-	var gradient_tex = GradientTexture2D.new()
-	gradient_tex.gradient = gradient
-	gradient_tex.fill = GradientTexture2D.FILL_LINEAR
-	gradient_tex.fill_from = Vector2(0, 0)
-	gradient_tex.fill_to = Vector2(0, 1) # 上から下へ
-	gradient_tex.width = 1
-	gradient_tex.height = 64 # テクスチャ高さ
-	
-	bg_rect.texture = gradient_tex
-	_top_bar.add_child(bg_rect)
-	
-	# コンテンツ用マージンコンテナ
-	var margin = MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 40)
-	margin.add_theme_constant_override("margin_right", 40)
-	margin.add_theme_constant_override("margin_top", 20)
-	margin.add_theme_constant_override("margin_bottom", 20) # 下は少し開ける
-	_top_bar.add_child(margin)
-	
-	# コンテンツ配置用HBox
-	var hbox = HBoxContainer.new()
-	margin.add_child(hbox)
-	
-	# 左側：時計
-	_clock_label = Label.new()
-	_clock_label.text = "00:00"
-	_clock_label.add_theme_font_size_override("font_size", 32)
-	_clock_label.add_theme_font_override("font", _font_regular) # 太字から普通へ変更
-	_clock_label.add_theme_color_override("font_color", Color.WHITE)
-	hbox.add_child(_clock_label)
-	
-	# スペーサー（右寄せ用）
-	var spacer = Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	hbox.add_child(spacer)
-	
-	# 右側：「遊び終わる」ボタン
-	_exit_button = Button.new()
-	_exit_button.text = "" # テキストなし
-	var icon_tex = load("res://images/exit.jpg")
-	if icon_tex:
-		_exit_button.icon = icon_tex
-		_exit_button.expand_icon = true # アイコンをリサイズ
-		_exit_button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	
-	_exit_button.custom_minimum_size = Vector2(60, 60) # 正方形
-	# _exit_button.add_theme_font_size_override("font_size", 24) # テキストがないので不要
+# --- Style Setup Helpers ---
+func _setup_exit_button_styles():
+	if not _exit_button: return
 	
 	# 白ボタンに変更
 	var style_normal = StyleBoxFlat.new()
@@ -718,7 +791,7 @@ func _create_top_bar():
 	style_normal.content_margin_bottom = 4
 	_exit_button.add_theme_stylebox_override("normal", style_normal)
 	
-	# ホバー時は背景を少し暗くするだけ（枠線はフォーカスで出す）
+	# ホバー時は背景を少し暗くするだけ
 	var style_hover = style_normal.duplicate()
 	style_hover.bg_color = Color(0.9, 0.9, 0.9, 1.0)
 	_exit_button.add_theme_stylebox_override("hover", style_hover)
@@ -728,8 +801,7 @@ func _create_top_bar():
 	style_pressed.bg_color = Color(0.7, 0.7, 0.7, 1.0)
 	_exit_button.add_theme_stylebox_override("pressed", style_pressed)
 
-	# フォーカス時は「白い輪っか」を表示（ボタンの外側にギャップを空けて枠線）
-	# ベース（normal）の上に描画されるため、背景は透明にする
+	# フォーカス時は「白い輪っか」を表示
 	var style_focus = StyleBoxFlat.new()
 	style_focus.bg_color = Color.TRANSPARENT
 	style_focus.draw_center = false
@@ -738,12 +810,11 @@ func _create_top_bar():
 	style_focus.border_width_right = 0
 	style_focus.border_width_bottom = 0
 	style_focus.border_color = Color.WHITE
-	# 枠を外側に広げる（ギャップを作る）
+	# 枠を外側に広げる
 	style_focus.expand_margin_left = 6
 	style_focus.expand_margin_right = 6
 	style_focus.expand_margin_top = 6
 	style_focus.expand_margin_bottom = 6
-	# 外枠の角丸（内側が12なので、少し大きくして同心円状に見せる）
 	style_focus.set_corner_radius_all(18)
 	
 	# 光彩（グロー）効果を追加
@@ -754,96 +825,57 @@ func _create_top_bar():
 	_glow_styles.append(style_focus) # アニメーション対象に追加
 	
 	_exit_button.add_theme_stylebox_override("focus", style_focus) 
-	
-	_exit_button.pressed.connect(_on_exit_button_pressed)
-	# マウスホバーでフォーカスを得る（これでホバー時も輪っかが出る）
-	_exit_button.mouse_entered.connect(func(): _exit_button.grab_focus())
-	
-	hbox.add_child(_exit_button)
-	
-	# ツリーに追加（最前面）
-	add_child(_top_bar)
-	_top_bar.z_index = 300 # フォーカスの枠(200)より上
 
-	# フォーカス制御
-	# 下入力で「プレイ」ボタンへ戻る
-	# 左/右/上は自分自身（トップバーから抜けない）
-	# ※ add_child 後でないと get_path() がエラーになる
+	# フォーカス制御 (Self-loop)
 	_exit_button.focus_neighbor_left = _exit_button.get_path()
 	_exit_button.focus_neighbor_right = _exit_button.get_path()
 	_exit_button.focus_neighbor_top = _exit_button.get_path()
-	
-	# 下はプレイボタンが生成済みなら設定できるが、実行順序に注意
-	# _create_play_button() は先に呼ばれているので _play_button は存在するはず
-	if _play_button:
-		_exit_button.focus_neighbor_bottom = _play_button.get_path()
-		# 相互参照を設定（プレイボタンの上をこれにする）
-		# _create_play_button時点では _exit_button がないのでここで設定するのが確実
-		_play_button.focus_neighbor_top = _exit_button.get_path()
 
-# --- ボトムバー（操作説明） ---
-var _bottom_bar: Control
-var _bottom_label: Label
+func _setup_play_button_styles():
+	if not _play_button: return
+	
+	# 緑色スタイル（不透明）
+	var style_normal = StyleBoxFlat.new()
+	style_normal.bg_color = Color(0.0, 0.6, 0.0, 1.0) # 緑
+	style_normal.set_corner_radius_all(10)
+	style_normal.content_margin_left = 20
+	style_normal.content_margin_right = 20
+	
+	_play_button.add_theme_stylebox_override("normal", style_normal)
+	
+	var style_hover = style_normal.duplicate()
+	style_hover.bg_color = Color(0.2, 0.8, 0.2, 1.0) # 明るい緑
+	_play_button.add_theme_stylebox_override("hover", style_hover)
+	
+	# Focusは別スタイル（白枠）
+	var style_focus = StyleBoxFlat.new()
+	style_focus.bg_color = Color.TRANSPARENT
+	style_focus.draw_center = false
+	style_focus.border_width_left = 0
+	style_focus.border_width_top = 0
+	style_focus.border_width_right = 0
+	style_focus.border_width_bottom = 0
+	style_focus.border_color = Color.WHITE
+	# 枠を外側に広げる
+	var focus_margin = 8
+	style_focus.expand_margin_left = focus_margin
+	style_focus.expand_margin_right = focus_margin
+	style_focus.expand_margin_top = focus_margin
+	style_focus.expand_margin_bottom = focus_margin
+	style_focus.set_corner_radius_all(10 + focus_margin)
+	
+	# 光彩（グロー）
+	style_focus.shadow_color = Color(1, 1, 1, 0.5)
+	style_focus.shadow_size = 8
+	style_focus.shadow_offset = Vector2(0, 0)
+	
+	_glow_styles.append(style_focus)
+	
+	_play_button.add_theme_stylebox_override("focus", style_focus)
 
-func _create_bottom_bar():
-	# ボトムバーのコンテナ（全幅、高さ50px程度）
-	_bottom_bar = Control.new()
-	_bottom_bar.name = "BottomBar"
-	_bottom_bar.custom_minimum_size = Vector2(0, 50)
-	# アンカーを下に固定、ただしオフセットを明示的に指定して画面内に入れる
-	_bottom_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_bottom_bar.size_flags_vertical = Control.SIZE_SHRINK_END
-	# PRESET_BOTTOM_WIDE は Top=1, Bottom=1 になるため、高さを持たせるにはオフセットが必要
-	_bottom_bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_bottom_bar.offset_top = -50
-	_bottom_bar.offset_bottom = 0
-	
-	_bottom_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	
-	# 背景（グラデーション：下部黒 -> 透明）
-	var bg_rect = TextureRect.new()
-	bg_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	bg_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	
-	var gradient = Gradient.new()
-	gradient.set_color(0, Color(0, 0, 0, 0.0)) # 上部: 透明
-	gradient.set_color(1, Color(0, 0, 0, 0.8)) # 下部: 濃い黒
-	
-	var gradient_tex = GradientTexture2D.new()
-	gradient_tex.gradient = gradient
-	gradient_tex.fill = GradientTexture2D.FILL_LINEAR
-	gradient_tex.fill_from = Vector2(0, 0)
-	gradient_tex.fill_to = Vector2(0, 1) # 上から下へ
-	gradient_tex.width = 1
-	gradient_tex.height = 32 # テクスチャ高さ
-	
-	bg_rect.texture = gradient_tex
-	_bottom_bar.add_child(bg_rect)
-	
-	# ラベル（右寄せ、マージンあり）
-	var label_margin = MarginContainer.new()
-	label_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	label_margin.add_theme_constant_override("margin_right", 40) # 右端に余裕を持たせる
-	_bottom_bar.add_child(label_margin)
-
-	_bottom_label = Label.new()
-	_bottom_label.text = "Enter: 決定"
-	_bottom_label.add_theme_font_override("font", _font_regular)
-	_bottom_label.add_theme_font_size_override("font_size", 20)
-	_bottom_label.add_theme_color_override("font_color", Color.WHITE)
-	_bottom_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT # 右寄せ
-	_bottom_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	# label_marginの子にするのでFullRectでOK
-	_bottom_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_bottom_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	
-	label_margin.add_child(_bottom_label)
-	
-	add_child(_bottom_bar)
-	_bottom_bar.z_index = 290 # トップバーよりは下だが、カードよりは上
-
-	# 初期状態は入力デバイスに応じて表示切り替え
-	_update_bottom_bar_visibility()
+	var style_pressed = style_normal.duplicate()
+	style_pressed.bg_color = Color(0.0, 0.4, 0.0, 1.0) # 暗い緑
+	_play_button.add_theme_stylebox_override("pressed", style_pressed)
 
 func _update_bottom_bar_visibility():
 	if _bottom_bar:
@@ -868,7 +900,9 @@ func _update_clock():
 
 func _exit_tree():
 	# シーンが破棄される際にダイアログも閉じる
-	DialogManager.close_current_dialog()
+	# リソース解放などはここで行うが、シーン遷移は行わない
+	if DialogManager and DialogManager.has_method("close_current_dialog"):
+		DialogManager.close_current_dialog()
 
 # --- データ読み込み ---
 func _load_games_from_db() -> bool:
@@ -913,56 +947,20 @@ func _create_carousel_cards():
 		card.pivot_offset = CARD_SIZE / 2
 		card.focus_mode = Control.FOCUS_ALL # フォーカス可能にする
 		
-		# 自動フォーカス移動を無効化（スクリプトで完全制御するため、すべて自分自身に向ける）
-		# 注意: add_child後に設定しないと get_path() が正しく機能しない可能性があるため移動
+		_carousel_container.add_child(card)
 		
-		# RootのCardはクリッピング無効
-		card.clip_children = CanvasItem.CLIP_CHILDREN_DISABLED
+		# トラップ設定: ツリーに追加してからパスを取得して設定
+		card.focus_neighbor_top = card.get_path()
+		card.focus_neighbor_bottom = card.get_path()
+		card.focus_neighbor_left = card.get_path()
+		card.focus_neighbor_right = card.get_path()
 		
-		# --- 内部構造の再構築 ---
-		# Iconを角丸でクリッピングするためのコンテナを作成
-		var clipper = Panel.new()
-		clipper.name = "Clipper"
-		clipper.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		clipper.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		
-		# 元のCardからStyleBox（角丸設定）を移植
-		var original_style = card.get_theme_stylebox("panel")
-		if original_style:
-			# 1. 親(Card)に影を設定
-			var card_style = original_style.duplicate()
-			if card_style is StyleBoxFlat:
-				# アイコン自体の影（薄く）
-				card_style.shadow_color = Color(0, 0, 0, 0.5)
-				card_style.shadow_size = 12
-				card_style.shadow_offset = Vector2(0, 0)
-			card.add_theme_stylebox_override("panel", card_style)
-			
-			# 2. Clipperには影なしの形状マスクを設定
-			var clipper_style = original_style.duplicate()
-			if clipper_style is StyleBoxFlat:
-				clipper_style.shadow_color = Color.TRANSPARENT
-				clipper_style.shadow_size = 0
-				# マスク用なので色は不透明なら何でも良い
-				clipper_style.bg_color = Color.BLACK
-			
-			clipper.add_theme_stylebox_override("panel", clipper_style)
-		
-		# クリッピング設定: CLIP_CHILDREN_ONLY
-		# 親(clipper)の描画領域（StyleBox）を使って子をクリップするが、親自体は描画しない
-		# 背景や影はCard側で描画されている
-		clipper.clip_children = CanvasItem.CLIP_CHILDREN_ONLY
-		
-		card.add_child(clipper)
-		
-		# IconをClipperの子に移動
-		var icon_rect = card.get_node("Icon")
-		card.remove_child(icon_rect)
-		clipper.add_child(icon_rect)
-		
-		# アイコン参照の更新（Clipperの下に移動したのでパスが変わるが、参照は変数で持てばOK）
-		# icon_rectは既に取得済み
-		
+		_card_nodes.append(card)
+
+		# --- 内部コンテンツの設定 ---
+		var icon_rect = card.get_node("Clipper/Icon")
+		var no_image_label = card.get_node("Clipper/NoImageLabel")
+
 		# サムネイル読み込み
 		var thumb_path = _resolve_path(game.thumbnail_path, game.game_id)
 		
@@ -981,91 +979,19 @@ func _create_carousel_cards():
 			if icon_rect:
 				icon_rect.texture = tex_to_set
 				icon_rect.visible = true
+			if no_image_label:
+				no_image_label.visible = false
 		else:
 			# 画像がない場合は "NO IMAGE" ラベルを表示
 			if icon_rect:
 				icon_rect.visible = false
-			
-			var no_image_label = Label.new()
-			no_image_label.text = "NO IMAGE"
-			no_image_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			no_image_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-			no_image_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-			no_image_label.add_theme_font_size_override("font_size", 30) # 20 -> 30 に変更
-			no_image_label.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5)) # グレー
-			no_image_label.add_theme_font_override("font", _font_bold) # ボールドフォントは維持
-			clipper.add_child(no_image_label)
-		
-		_carousel_container.add_child(card)
-		
-		# トラップ設定: ツリーに追加してからパスを取得して設定
-		card.focus_neighbor_top = card.get_path()
-		card.focus_neighbor_bottom = card.get_path()
-		card.focus_neighbor_left = card.get_path()
-		card.focus_neighbor_right = card.get_path()
-		
-		_card_nodes.append(card)
+			if no_image_label:
+				no_image_label.visible = true
 
-func _create_static_focus_border():
-	# 画面中央に固定表示される白い枠を作成
-	_static_focus_border = Panel.new()
-	_static_focus_border.name = "StaticFocusBorder"
-	_static_focus_border.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	
-	# サイズ計算: アクティブ時のカードサイズに合わせる
-	# カードサイズ * 拡大率
-	var active_size = CARD_SIZE * SCALE_ACTIVE
-	_static_focus_border.custom_minimum_size = active_size
-	_static_focus_border.size = active_size
-	
-	# 中央配置
-	# アンカーを中央に設定
-	_static_focus_border.anchors_preset = Control.PRESET_CENTER
-	# ピボットも中央へ（念のため）
-	_static_focus_border.pivot_offset = active_size / 2
-	
-	# ポジション調整（PRESET_CENTERで自動的に中央になるはずだが、親がFullRectならOK）
-	# 親はControl(self)なので、layout modeによる。
-	# 明示的に position を設定する場合:
-	# var viewport_size = get_viewport_rect().size
-	# static_border.position = (viewport_size - active_size) / 2
-	# しかしリサイズ対応を考えると、ControlのLayout機能を使うべき。
-	# _carousel_containerの兄弟として追加し、中央寄せにする。
-	
-	var style = StyleBoxFlat.new()
-	style.draw_center = false
-	style.border_width_left = 0
-	style.border_width_top = 0
-	style.border_width_right = 0
-	style.border_width_bottom = 0
-	style.border_color = Color.WHITE
-	
-	# 白枠のグロー効果（復活）
-	style.shadow_color = Color(1, 1, 1, 0.5)
-	style.shadow_size = 12
-	style.shadow_offset = Vector2(0, 0)
-	
-	_glow_styles.append(style) # アニメーション対象に追加
-	
-	# 角丸とマージン設定
-	# カード自体が拡大されているため、角丸も拡大率に合わせて大きくする
-	var scaled_radius = (CORNER_RADIUS + FOCUS_MARGIN) * SCALE_ACTIVE
-	style.set_corner_radius_all(scaled_radius)
-	
-	# マージンも拡大
-	var scaled_margin = FOCUS_MARGIN * SCALE_ACTIVE
-	style.expand_margin_left = scaled_margin
-	style.expand_margin_top = scaled_margin
-	style.expand_margin_right = scaled_margin
-	style.expand_margin_bottom = scaled_margin
-	
-	_static_focus_border.add_theme_stylebox_override("panel", style)
-	
-	# _carousel_container の子として追加（カードと同じ座標系にする）
-	_carousel_container.add_child(_static_focus_border)
-	
-	# カードのZ-Indexが100付近になるため、それより手前に表示
-	_static_focus_border.z_index = 200
+
+			
+	# 初期情報の表示
+	# ...
 
 # ...
 
@@ -1200,8 +1126,7 @@ func _input(event):
 		if _using_mouse:
 			_using_mouse = false
 			_update_bottom_bar_visibility()
-	elif event is InputEventMouseButton:
-		# マウスモーションは除外（微細な動きで消えるのを防ぐ）
+	elif event is InputEventMouseButton or event is InputEventMouseMotion:
 		if not _using_mouse:
 			_using_mouse = true
 			_update_bottom_bar_visibility()
@@ -1213,16 +1138,6 @@ func _input(event):
 		var focus_owner = get_viewport().gui_get_focus_owner()
 		if focus_owner:
 			focus_owner.release_focus()
-
-	# マウスホイール操作（どこにフォーカスがあっても効くように最優先）
-	if event is InputEventMouseButton:
-		if event.is_pressed():
-			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-				_move_selection(-1)
-				get_viewport().set_input_as_handled()
-			elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-				_move_selection(1)
-				get_viewport().set_input_as_handled()
 	
 	if _games.is_empty():
 		if event.is_action_pressed("ui_cancel"):
@@ -1321,5 +1236,18 @@ func _switch_to_running_view():
 		
 		if _running_icon_container:
 			_running_icon_container.visible = false
-		if _running_icon:
-			_running_icon.visible = false
+	if _running_icon:
+		_running_icon.visible = false
+
+func _unhandled_input(event):
+	if get_tree().paused: return
+	
+	# マウスホイール操作（どこにフォーカスがあっても効くように、ただしScrollContainer上ではScrollContainerが優先されるように_unhandled_inputで）
+	if event is InputEventMouseButton:
+		if event.is_pressed():
+			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+				_move_selection(-1)
+				get_viewport().set_input_as_handled()
+			elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				_move_selection(1)
+				get_viewport().set_input_as_handled()
