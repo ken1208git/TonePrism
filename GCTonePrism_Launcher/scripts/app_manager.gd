@@ -21,11 +21,22 @@ func _handle_quit_request():
 	# 既存のダイアログがあれば閉じてから出す
 	DialogManager.close_current_dialog()
 	
-	var dialog = DialogManager.show_dialog("終了確認", msg)
-	# キャンセル時はダイアログ閉じる
-	dialog.add_button("キャンセル", DialogManager.close_current_dialog, true)
-	# 終了時はquitを実行
-	dialog.add_button("終了する", _quit_application, false)
+	# ボタンを "終了する", "キャンセル" の順にする
+	# Left: 終了する (Index 0), Right: キャンセル (Index 1)
+	# Default focus on Cancel (Index 1) is safer? Or Exit?
+	# Typically left is affirmative, right is cancel.
+	# User screenshot had: OK, Cancel, Exit.
+	# Let's do: [終了する, キャンセル]
+	
+	# キャンセルを左（デフォルトフォーカス）にする
+	DialogManager.show_message("終了確認", msg, ["キャンセル", "終了する"], func(idx):
+		if idx == 1:
+			# 終了する
+			_quit_application()
+		else:
+			# キャンセル
+			pass
+	)
 
 func _quit_application():
 	print("[AppManager] Quitting application...")
