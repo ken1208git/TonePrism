@@ -223,6 +223,22 @@
 
 ## Manager（管理ソフト）
 
+### [Manager v0.6.2] - 2026-03-21
+
+#### Changed
+
+- **Form群から共通ロジックをさらに抽出（Phase 2）**
+  - `Services/GameFormHelper.cs`: ComboBox初期化、ジャンル操作、テスト起動、プレースホルダー設定、ファイル自動検出を共通化
+  - `Services/PathConversionHelper.cs`: 相対パス⇔絶対パス変換を一元化（ToRelativePath, ToAbsolutePath, ConvertSourceToDestination, ToRelativePathAfterCopy）
+  - AddGameForm/EditGameForm/VersionUpFormから約766行削減
+
+#### Removed
+
+- **未使用コード・ファイルの削除**
+  - `FileVersioningHelper.cs`: 呼び出し元ゼロのデッドコードを削除（機能はFileOperationService・PathConversionHelperで代替済み）
+  - `scene_manager.gd`（Launcher側）: AutoLoad未登録・参照なしの未使用スクリプトを削除
+  - `EditGameForm.cs`内の60行の開発時メモコメントを整理
+
 ### [Manager v0.6.1] - 2026-03-21
 
 #### Changed
