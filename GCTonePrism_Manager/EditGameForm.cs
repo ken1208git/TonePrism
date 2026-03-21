@@ -760,11 +760,21 @@ namespace GCTonePrism.Manager
                         }
                     }
                     
-                    // 3. メインのゲーム情報を更新（最新の選択中バージョンに合わせる）
+                    // 3. メインのゲーム情報を更新（選択中バージョンの全フィールドを反映）
+                    game.Title = selectedVersion.Title ?? game.Title;
+                    game.Description = selectedVersion.Description;
+                    game.Genre = selectedVersion.Genre ?? game.Genre;
+                    game.MinPlayers = selectedVersion.MinPlayers;
+                    game.MaxPlayers = selectedVersion.MaxPlayers;
+                    game.Difficulty = selectedVersion.Difficulty;
+                    game.PlayTime = selectedVersion.PlayTime;
+                    game.ControllerSupport = selectedVersion.ControllerSupport;
+                    game.SupportedConnection = selectedVersion.SupportedConnection;
                     game.ExecutablePath = selectedVersion.ExecutablePath;
                     game.ThumbnailPath = selectedVersion.ThumbnailPath;
                     game.BackgroundPath = selectedVersion.BackgroundPath;
-                    game.Version = selectedVersion.Version; // アクティブなバージョンを設定
+                    game.Arguments = selectedVersion.Arguments;
+                    game.Version = selectedVersion.Version;
                     
                     dbManager.UpdateGame(game);
                 }
