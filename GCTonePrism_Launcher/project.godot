@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="ゲームセンターTONE Prism"
-config/version="0.4.5"
+config/version="0.4.6"
 run/main_scene="res://scenes/screensaver.tscn"
 config/features=PackedStringArray("4.5", "Forward Plus")
 config/icon="res://icon.svg"
