@@ -60,20 +60,10 @@ namespace GCTonePrism.Manager
 
         private void VersionUpForm_Load(object sender, EventArgs e)
         {
-            // 難易度のコンボボックスを初期化
-            cmbDifficulty.Items.Add("1 - 易しい");
-            cmbDifficulty.Items.Add("2 - 普通");
-            cmbDifficulty.Items.Add("3 - 難しい");
-            
-            // プレイ時間のコンボボックスを初期化
-            cmbPlayTime.Items.Add("1 - ～5分");
-            cmbPlayTime.Items.Add("2 - 5分～15分");
-            cmbPlayTime.Items.Add("3 - 15分以上");
-
-            // 通信プレイ対応のコンボボックスを初期化
-            cmbSupportedConnection.Items.Add("なし（1台で遊ぶ）");
-            cmbSupportedConnection.Items.Add("ローカル通信（部室のLANで対戦）");
-            cmbSupportedConnection.Items.Add("オンライン通信（インターネット対戦）");
+            // コンボボックスを初期化（選択値はbaseVersion読み込み時に設定）
+            GameFormHelper.InitializeDifficultyCombo(cmbDifficulty);
+            GameFormHelper.InitializePlayTimeCombo(cmbPlayTime);
+            GameFormHelper.InitializeConnectionCombo(cmbSupportedConnection);
 
             // ジャンルチェックボックスリストを初期化
             clbGenre.Items.Clear();
@@ -93,35 +83,18 @@ namespace GCTonePrism.Manager
                 // コンボボックス等の選択
                 if (baseVersion.Difficulty.HasValue && baseVersion.Difficulty.Value >= 1 && baseVersion.Difficulty.Value <= 3)
                     cmbDifficulty.SelectedIndex = baseVersion.Difficulty.Value - 1;
-                else
-                    cmbDifficulty.SelectedIndex = 1;
-
                 if (baseVersion.PlayTime.HasValue && baseVersion.PlayTime.Value >= 1 && baseVersion.PlayTime.Value <= 3)
                     cmbPlayTime.SelectedIndex = baseVersion.PlayTime.Value - 1;
-                else
-                    cmbPlayTime.SelectedIndex = 1;
 
                 numMinPlayers.Value = baseVersion.MinPlayers ?? 1;
                 numMaxPlayers.Value = baseVersion.MaxPlayers ?? 1;
                 chkControllerSupport.Checked = baseVersion.ControllerSupport;
-                
+
                 if (baseVersion.SupportedConnection >= 0 && baseVersion.SupportedConnection < cmbSupportedConnection.Items.Count)
                     cmbSupportedConnection.SelectedIndex = baseVersion.SupportedConnection;
-                else
-                    cmbSupportedConnection.SelectedIndex = 0;
 
                 // ジャンルのチェック
-                if (baseVersion.Genre != null)
-                {
-                    for (int i = 0; i < clbGenre.Items.Count; i++)
-                    {
-                        string genre = clbGenre.Items[i].ToString();
-                        if (baseVersion.Genre.Contains(genre))
-                        {
-                            clbGenre.SetItemChecked(i, true);
-                        }
-                    }
-                }
+                GameFormHelper.SetSelectedGenres(clbGenre, baseVersion.Genre);
 
                 // 製作者情報のコピー (Deep Copy)
                 if (baseVersion.Developers != null)
@@ -199,70 +172,14 @@ namespace GCTonePrism.Manager
         /// </summary>
         private void AutoDetectFiles()
         {
-            if (string.IsNullOrEmpty(selectedFolderPath) || !Directory.Exists(selectedFolderPath))
+            var (exePath, thumbPath, bgPath) = GameFormHelper.AutoDetectFiles(selectedFolderPath);
+            if (exePath != null)
             {
-                return;
+                txtExecutablePath.Text = exePath;
+                RelativeExecutablePath = PathConversionHelper.ToRelativePath(selectedFolderPath, exePath);
             }
-
-            // 実行ファイルを自動検出
-            var exeFiles = Directory.GetFiles(selectedFolderPath, "*.exe", SearchOption.AllDirectories);
-            if (exeFiles.Length > 0)
-            {
-                var excludedPatterns = new[]
-                {
-                    ".console.exe",
-                    "UnityCrashHandler64.exe",
-                    "UnityCrashHandler32.exe",
-                    "UnityCrashHandler.exe",
-                    "CrashHandler.exe",
-                    "CrashHandler64.exe",
-                    "CrashHandler32.exe"
-                };
-
-                var preferredExeFiles = exeFiles
-                    .Where(file =>
-                    {
-                        string fileName = Path.GetFileName(file);
-                        return !excludedPatterns.Any(pattern =>
-                            fileName.EndsWith(pattern, StringComparison.OrdinalIgnoreCase));
-                    })
-                    .ToList();
-                
-                if (preferredExeFiles.Count > 0)
-                {
-                    txtExecutablePath.Text = preferredExeFiles[0];
-                    RelativeExecutablePath = preferredExeFiles[0].Substring(selectedFolderPath.Length).TrimStart(Path.DirectorySeparatorChar);
-                }
-                else if (exeFiles.Length > 0)
-                {
-                    txtExecutablePath.Text = exeFiles[0];
-                    RelativeExecutablePath = exeFiles[0].Substring(selectedFolderPath.Length).TrimStart(Path.DirectorySeparatorChar);
-                }
-            }
-
-            // サムネイル画像を自動検出
-            var thumbnailPatterns = new[] { "thumbnail.png", "thumb.png", "thumb.jpg", "icon.png", "icon.jpg" };
-            foreach (var pattern in thumbnailPatterns)
-            {
-                var files = Directory.GetFiles(selectedFolderPath, pattern, SearchOption.AllDirectories);
-                if (files.Length > 0)
-                {
-                    txtThumbnailPath.Text = files[0];
-                    break;
-                }
-            }
-
-            // 背景画像を自動検出
-            var backgroundPatterns = new[] { "background.png", "background.jpg", "bg.png", "bg.jpg", "preview.png", "preview.jpg" };
-            foreach (var pattern in backgroundPatterns)
-            {
-                var files = Directory.GetFiles(selectedFolderPath, pattern, SearchOption.AllDirectories);
-                if (files.Length > 0)
-                {
-                    txtBackgroundPath.Text = files[0];
-                    break;
-                }
-            }
+            if (thumbPath != null) txtThumbnailPath.Text = thumbPath;
+            if (bgPath != null) txtBackgroundPath.Text = bgPath;
         }
 
         private void btnSelectExecutable_Click(object sender, EventArgs e)
@@ -362,7 +279,7 @@ namespace GCTonePrism.Manager
                     UpdateNote = txtUpdateNote.Text.Trim(), // 更新内容
                     
                     Title = txtTitle.Text.Trim(),
-                    Genre = GetSelectedGenres(),
+                    Genre = GameFormHelper.GetSelectedGenres(clbGenre),
                     MinPlayers = (int)numMinPlayers.Value,
                     MaxPlayers = (int)numMaxPlayers.Value,
                     Difficulty = GetDifficultyValue(),
@@ -391,7 +308,7 @@ namespace GCTonePrism.Manager
                     GameId = originalGameInfo.GameId,
                     Title = txtTitle.Text.Trim(),
                     Description = txtDescription.Text.Trim(),
-                    Genre = GetSelectedGenres(),
+                    Genre = GameFormHelper.GetSelectedGenres(clbGenre),
                     
                     // フォームにない項目は既存の値を引き継ぐ
                     ReleaseYear = originalGameInfo.ReleaseYear,
@@ -416,21 +333,13 @@ namespace GCTonePrism.Manager
                 // サムネイルと背景のパスを計算（コピー後に相対パスになる）
                 if (!string.IsNullOrEmpty(txtThumbnailPath.Text) && File.Exists(txtThumbnailPath.Text))
                 {
-                    string relativePath = txtThumbnailPath.Text;
-                    if (relativePath.StartsWith(selectedFolderPath))
-                    {
-                        relativePath = relativePath.Substring(selectedFolderPath.Length).TrimStart(Path.DirectorySeparatorChar);
-                    }
+                    string relativePath = PathConversionHelper.ToRelativePath(selectedFolderPath, txtThumbnailPath.Text);
                     UpdatedGameInfo.ThumbnailPath = relativePath;
                     NewVersion.ThumbnailPath = relativePath;
                 }
                 if (!string.IsNullOrEmpty(txtBackgroundPath.Text) && File.Exists(txtBackgroundPath.Text))
                 {
-                    string relativePath = txtBackgroundPath.Text;
-                    if (relativePath.StartsWith(selectedFolderPath))
-                    {
-                        relativePath = relativePath.Substring(selectedFolderPath.Length).TrimStart(Path.DirectorySeparatorChar);
-                    }
+                    string relativePath = PathConversionHelper.ToRelativePath(selectedFolderPath, txtBackgroundPath.Text);
                     UpdatedGameInfo.BackgroundPath = relativePath;
                     NewVersion.BackgroundPath = relativePath;
                 }
@@ -440,35 +349,14 @@ namespace GCTonePrism.Manager
             }
         }
 
-        private List<string> GetSelectedGenres()
-        {
-            var selectedGenres = new List<string>();
-            for (int i = 0; i < clbGenre.Items.Count; i++)
-            {
-                if (clbGenre.GetItemChecked(i))
-                {
-                    selectedGenres.Add(clbGenre.Items[i].ToString());
-                }
-            }
-            return selectedGenres;
-        }
-
         private int GetDifficultyValue()
         {
-            if (cmbDifficulty.SelectedIndex >= 0)
-            {
-                return cmbDifficulty.SelectedIndex + 1;
-            }
-            return 2; // デフォルト: 普通
+            return cmbDifficulty.SelectedIndex >= 0 ? cmbDifficulty.SelectedIndex + 1 : 2;
         }
 
         private int GetPlayTimeValue()
         {
-            if (cmbPlayTime.SelectedIndex >= 0)
-            {
-                return cmbPlayTime.SelectedIndex + 1;
-            }
-            return 2; // デフォルト: 5分～15分
+            return cmbPlayTime.SelectedIndex >= 0 ? cmbPlayTime.SelectedIndex + 1 : 2;
         }
 
         private void btnCancel_Click(object sender, EventArgs e)
@@ -534,40 +422,7 @@ namespace GCTonePrism.Manager
         private void UpdateThumbnailPreview() => ImagePreviewHelper.UpdatePreview(picThumbnailPreview, txtThumbnailPath.Text);
         private void UpdateBackgroundPreview() => ImagePreviewHelper.UpdatePreview(picBackgroundPreview, txtBackgroundPath.Text);
 
-        /// <summary>
-        /// テスト起動ボタンクリック
-        /// </summary>
-        private void btnTestRun_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                string exePath = txtExecutablePath.Text.Trim();
-                if (string.IsNullOrWhiteSpace(exePath))
-                {
-                    MessageBox.Show("実行ファイルが指定されていません。", "テスト起動", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return;
-                }
-                
-                if (!File.Exists(exePath))
-                {
-                    MessageBox.Show($"実行ファイルが見つかりません:\n{exePath}", "テスト起動", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-                
-                var startInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = exePath,
-                    Arguments = txtArguments.Text ?? "",
-                    WorkingDirectory = Path.GetDirectoryName(exePath),
-                    UseShellExecute = true
-                };
-                
-                System.Diagnostics.Process.Start(startInfo);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"実行ファイルの起動に失敗しました:\n{ex.Message}", "テスト起動", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
+        private void btnTestRun_Click(object sender, EventArgs e) =>
+            GameFormHelper.TestRunGame(txtExecutablePath.Text.Trim(), txtArguments.Text);
     }
 }

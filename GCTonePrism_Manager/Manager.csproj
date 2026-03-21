@@ -125,7 +125,9 @@
     <Compile Include="PathManager.cs" />
     <Compile Include="Services\DeveloperListManager.cs" />
     <Compile Include="Services\FileOperationService.cs" />
+    <Compile Include="Services\GameFormHelper.cs" />
     <Compile Include="Services\ImagePreviewHelper.cs" />
+    <Compile Include="Services\PathConversionHelper.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="AddGameForm.resx">

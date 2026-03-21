@@ -24,8 +24,6 @@ namespace GCTonePrism.Manager
         private DeveloperListManager devListManager;
         private Label lblArgumentsPlaceholder;
 
-        private const string ARGUMENTS_PLACEHOLDER = "通常は空欄で構いません。\r\n特殊な起動オプションが必要な場合のみ記述してください。\r\n例: Unity製ゲームでフルスクリーン起動を強制する場合 -> -screen-fullscreen 1";
-
         /// <summary>
         /// 編集されたゲーム情報（OKボタンがクリックされた場合のみ設定される）
         /// </summary>
@@ -68,23 +66,7 @@ namespace GCTonePrism.Manager
             {
                 clbGenre.Items.Add(genre, false);
             }
-
-            // 既存のジャンルをチェック
-            if (originalGame.Genre != null && originalGame.Genre.Count > 0)
-            {
-                foreach (string genre in originalGame.Genre)
-                {
-                    // GenreListに含まれるジャンルのみチェック（既存データに無効なジャンルが含まれている場合に対応）
-                    if (GenreList.IsValidGenre(genre))
-                    {
-                        int index = clbGenre.Items.IndexOf(genre);
-                        if (index >= 0 && index < clbGenre.Items.Count)
-                        {
-                            clbGenre.SetItemChecked(index, true);
-                        }
-                    }
-                }
-            }
+            GameFormHelper.SetSelectedGenres(clbGenre, originalGame.Genre);
 
             if (originalGame.MinPlayers.HasValue)
             {
@@ -104,84 +86,21 @@ namespace GCTonePrism.Manager
                 numMaxPlayers.Value = 1;
             }
 
-            // 難易度のコンボボックスを初期化
-            cmbDifficulty.Items.Add("1 - 易しい");
-            cmbDifficulty.Items.Add("2 - 普通");
-            cmbDifficulty.Items.Add("3 - 難しい");
-            if (originalGame.Difficulty.HasValue && originalGame.Difficulty.Value >= 1 && originalGame.Difficulty.Value <= 3)
-            {
-                cmbDifficulty.SelectedIndex = originalGame.Difficulty.Value - 1;
-            }
-            else
-            {
-                cmbDifficulty.SelectedIndex = 1; // デフォルト: 普通
-            }
-
-            // プレイ時間のコンボボックスを初期化
-            cmbPlayTime.Items.Add("1 - ～5分");
-            cmbPlayTime.Items.Add("2 - 5分～15分");
-            cmbPlayTime.Items.Add("3 - 15分以上");
-            if (originalGame.PlayTime.HasValue && originalGame.PlayTime.Value >= 1 && originalGame.PlayTime.Value <= 3)
-            {
-                cmbPlayTime.SelectedIndex = originalGame.PlayTime.Value - 1;
-            }
-            else
-            {
-                cmbPlayTime.SelectedIndex = 1; // デフォルト: 5分～15分
-            }
-
-            // 通信プレイ対応のコンボボックスを初期化
-            cmbSupportedConnection.Items.Add("なし（1台で遊ぶ）");
-            cmbSupportedConnection.Items.Add("ローカル通信（部室のLANで対戦）");
-            cmbSupportedConnection.Items.Add("オンライン通信（インターネット対戦）");
-            if (originalGame.SupportedConnection >= 0 && originalGame.SupportedConnection <= 2)
-            {
-                cmbSupportedConnection.SelectedIndex = originalGame.SupportedConnection;
-            }
-            else
-            {
-                cmbSupportedConnection.SelectedIndex = 0; // デフォルト: なし
-            }
+            // コンボボックスを初期化
+            GameFormHelper.InitializeDifficultyCombo(cmbDifficulty, originalGame.Difficulty);
+            GameFormHelper.InitializePlayTimeCombo(cmbPlayTime, originalGame.PlayTime);
+            GameFormHelper.InitializeConnectionCombo(cmbSupportedConnection, originalGame.SupportedConnection);
 
             chkControllerSupport.Checked = originalGame.ControllerSupport;
             chkIsVisible.Checked = originalGame.IsVisible;
 
-            // ファイルパスの設定（既存のgames/{game_id}/フォルダからの相対パスを絶対パスに変換）
+            // ファイルパスの設定（相対パスを絶対パスに変換して表示）
             if (!string.IsNullOrEmpty(originalGame.ExecutablePath))
-            {
-                if (Path.IsPathRooted(originalGame.ExecutablePath))
-                {
-                    txtExecutablePath.Text = originalGame.ExecutablePath;
-                }
-                else
-                {
-                    txtExecutablePath.Text = Path.Combine(gameFolder, originalGame.ExecutablePath);
-                }
-            }
-
+                txtExecutablePath.Text = PathConversionHelper.ToAbsolutePath(gameFolder, originalGame.ExecutablePath);
             if (!string.IsNullOrEmpty(originalGame.ThumbnailPath))
-            {
-                if (Path.IsPathRooted(originalGame.ThumbnailPath))
-                {
-                    txtThumbnailPath.Text = originalGame.ThumbnailPath;
-                }
-                else
-                {
-                    txtThumbnailPath.Text = Path.Combine(gameFolder, originalGame.ThumbnailPath);
-                }
-            }
-
+                txtThumbnailPath.Text = PathConversionHelper.ToAbsolutePath(gameFolder, originalGame.ThumbnailPath);
             if (!string.IsNullOrEmpty(originalGame.BackgroundPath))
-            {
-                if (Path.IsPathRooted(originalGame.BackgroundPath))
-                {
-                    txtBackgroundPath.Text = originalGame.BackgroundPath;
-                }
-                else
-                {
-                    txtBackgroundPath.Text = Path.Combine(gameFolder, originalGame.BackgroundPath);
-                }
-            }
+                txtBackgroundPath.Text = PathConversionHelper.ToAbsolutePath(gameFolder, originalGame.BackgroundPath);
 
             // ゲームフォルダの表示（既存のgames/{game_id}/フォルダを表示、編集不可）
             txtGameFolder.Text = gameFolder;
@@ -212,23 +131,8 @@ namespace GCTonePrism.Manager
                 txtArguments.Text = originalGame.Arguments;
             }
             
-            // 起動オプションのプレースホルダー設定（ラベルを重ねて表示）
-            lblArgumentsPlaceholder = new Label();
-            lblArgumentsPlaceholder.Text = ARGUMENTS_PLACEHOLDER;
-            lblArgumentsPlaceholder.ForeColor = System.Drawing.Color.Gray;
-            lblArgumentsPlaceholder.BackColor = System.Drawing.Color.White; // テキストボックスの背景色に合わせる
-            lblArgumentsPlaceholder.AutoSize = false;
-            lblArgumentsPlaceholder.Size = new System.Drawing.Size(txtArguments.Width - 4, txtArguments.Height - 4);
-            lblArgumentsPlaceholder.Location = new System.Drawing.Point(txtArguments.Location.X + 2, txtArguments.Location.Y + 2); // 枠線の分だけずらす
-            lblArgumentsPlaceholder.Font = txtArguments.Font;
-            lblArgumentsPlaceholder.Cursor = Cursors.IBeam;
-            lblArgumentsPlaceholder.Click += (s, ev) => txtArguments.Focus();
-            this.Controls.Add(lblArgumentsPlaceholder);
-            lblArgumentsPlaceholder.BringToFront();
-
-            // テキスト変更時のイベントハンドラ
-            txtArguments.TextChanged += (s, ev) => UpdatePlaceholderVisibility();
-            UpdatePlaceholderVisibility(); // 初期状態の更新
+            // 起動オプションのプレースホルダー設定
+            lblArgumentsPlaceholder = GameFormHelper.SetupArgumentsPlaceholder(txtArguments, this);
 
             // 製作者情報のDataGridViewを初期化
             InitializeDevelopersGrid();
@@ -325,44 +229,13 @@ namespace GCTonePrism.Manager
         private void ApplyRelativePaths(GameVersion version)
         {
             if (version == null) return;
-            
-            // Note: This logic assumes txt*Path.Text holds the *current* absolute path or relative path being edited.
-            // When switching versions, txt*Path is updated. When hitting OK, we use the text box values for the *selected* version.
-            // For other versions, their paths are already stored in the attributes.
-            
-            string exePath = txtExecutablePath.Text;
-            string thumbPath = txtThumbnailPath.Text;
-            string bgPath = txtBackgroundPath.Text;
 
-            // ExecutablePath
-            if (!string.IsNullOrEmpty(exePath))
-            {
-                if (exePath.StartsWith(gameFolder, StringComparison.OrdinalIgnoreCase))
-                    version.ExecutablePath = exePath.Substring(gameFolder.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                else
-                    version.ExecutablePath = exePath; 
-            }
-            else version.ExecutablePath = "";
-
-            // ThumbnailPath
-            if (!string.IsNullOrEmpty(thumbPath))
-            {
-                if (thumbPath.StartsWith(gameFolder, StringComparison.OrdinalIgnoreCase))
-                    version.ThumbnailPath = thumbPath.Substring(gameFolder.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                else
-                    version.ThumbnailPath = thumbPath;
-            }
-            else version.ThumbnailPath = "";
-
-            // BackgroundPath
-            if (!string.IsNullOrEmpty(bgPath))
-            {
-                if (bgPath.StartsWith(gameFolder, StringComparison.OrdinalIgnoreCase))
-                    version.BackgroundPath = bgPath.Substring(gameFolder.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                else
-                    version.BackgroundPath = bgPath;
-            }
-            else version.BackgroundPath = "";
+            version.ExecutablePath = !string.IsNullOrEmpty(txtExecutablePath.Text)
+                ? PathConversionHelper.ToRelativePath(gameFolder, txtExecutablePath.Text) : "";
+            version.ThumbnailPath = !string.IsNullOrEmpty(txtThumbnailPath.Text)
+                ? PathConversionHelper.ToRelativePath(gameFolder, txtThumbnailPath.Text) : "";
+            version.BackgroundPath = !string.IsNullOrEmpty(txtBackgroundPath.Text)
+                ? PathConversionHelper.ToRelativePath(gameFolder, txtBackgroundPath.Text) : "";
         }
 
         private void SaveGameDataToVersion(GameVersion version)
@@ -382,15 +255,7 @@ namespace GCTonePrism.Manager
                 version.Version = txtVersionName.Text.Trim();
             }
             
-            version.Genre = new List<string>();
-            for (int i = 0; i < clbGenre.CheckedItems.Count; i++)
-            {
-                string genre = clbGenre.CheckedItems[i].ToString();
-                if (!string.IsNullOrEmpty(genre))
-                {
-                    version.Genre.Add(genre);
-                }
-            }
+            version.Genre = GameFormHelper.GetSelectedGenres(clbGenre);
             
             version.MinPlayers = (int)numMinPlayers.Value;
             version.MaxPlayers = (int)numMaxPlayers.Value;
@@ -477,18 +342,7 @@ namespace GCTonePrism.Manager
             txtDescription.Text = version.Description ?? ""; // Game Description
             
             // ジャンル
-            for (int i = 0; i < clbGenre.Items.Count; i++)
-            {
-                clbGenre.SetItemChecked(i, false);
-            }
-            if (version.Genre != null)
-            {
-                foreach (string g in version.Genre)
-                {
-                     int index = clbGenre.Items.IndexOf(g);
-                     if (index >= 0) clbGenre.SetItemChecked(index, true);
-                }
-            }
+            GameFormHelper.SetSelectedGenres(clbGenre, version.Genre);
 
             // 数値系
             if (version.MinPlayers.HasValue) numMinPlayers.Value = version.MinPlayers.Value;
@@ -511,24 +365,13 @@ namespace GCTonePrism.Manager
 
             chkControllerSupport.Checked = version.ControllerSupport;
             
-            // Paths
-            if (!string.IsNullOrEmpty(version.ExecutablePath))
-            {
-                 txtExecutablePath.Text = Path.IsPathRooted(version.ExecutablePath) ? version.ExecutablePath : Path.Combine(gameFolder, version.ExecutablePath);
-            }
-            else txtExecutablePath.Text = "";
-
-            if (!string.IsNullOrEmpty(version.ThumbnailPath))
-            {
-                 txtThumbnailPath.Text = Path.IsPathRooted(version.ThumbnailPath) ? version.ThumbnailPath : Path.Combine(gameFolder, version.ThumbnailPath);
-            }
-            else txtThumbnailPath.Text = "";
-
-            if (!string.IsNullOrEmpty(version.BackgroundPath))
-            {
-                 txtBackgroundPath.Text = Path.IsPathRooted(version.BackgroundPath) ? version.BackgroundPath : Path.Combine(gameFolder, version.BackgroundPath);
-            }
-            else txtBackgroundPath.Text = "";
+            // Paths（相対パスを絶対パスに変換して表示）
+            txtExecutablePath.Text = !string.IsNullOrEmpty(version.ExecutablePath)
+                ? PathConversionHelper.ToAbsolutePath(gameFolder, version.ExecutablePath) : "";
+            txtThumbnailPath.Text = !string.IsNullOrEmpty(version.ThumbnailPath)
+                ? PathConversionHelper.ToAbsolutePath(gameFolder, version.ThumbnailPath) : "";
+            txtBackgroundPath.Text = !string.IsNullOrEmpty(version.BackgroundPath)
+                ? PathConversionHelper.ToAbsolutePath(gameFolder, version.BackgroundPath) : "";
 
             // Developers
             developers.Clear();
@@ -614,30 +457,7 @@ namespace GCTonePrism.Manager
             }
         }
 
-        /// <summary>
-        /// 絶対パスから相対パスを取得（games/{game_id}/フォルダからの相対パス）
-        /// </summary>
-        private string GetRelativePath(string absolutePath)
-        {
-            if (string.IsNullOrEmpty(absolutePath))
-            {
-                return null;
-            }
-
-            if (!Path.IsPathRooted(absolutePath))
-            {
-                return absolutePath; // 既に相対パスの場合
-            }
-
-            if (absolutePath.StartsWith(gameFolder, StringComparison.OrdinalIgnoreCase))
-            {
-                string relativePath = absolutePath.Substring(gameFolder.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                return string.IsNullOrEmpty(relativePath) ? null : relativePath;
-            }
-
-            // games/{game_id}/フォルダ外のパスは絶対パスのまま保存
-            return absolutePath;
-        }
+        // パス変換はPathConversionHelperに委譲
 
         /// <summary>
         /// OKボタンクリック
@@ -653,9 +473,9 @@ namespace GCTonePrism.Manager
             try
             {
                 // パスを相対パスに変換（可能な場合）
-                string executablePath = GetRelativePath(txtExecutablePath.Text.Trim());
-                string thumbnailPath = string.IsNullOrWhiteSpace(txtThumbnailPath.Text) ? null : GetRelativePath(txtThumbnailPath.Text.Trim());
-                string backgroundPath = string.IsNullOrWhiteSpace(txtBackgroundPath.Text) ? null : GetRelativePath(txtBackgroundPath.Text.Trim());
+                string executablePath = PathConversionHelper.ToRelativePath(gameFolder, txtExecutablePath.Text.Trim());
+                string thumbnailPath = string.IsNullOrWhiteSpace(txtThumbnailPath.Text) ? null : PathConversionHelper.ToRelativePath(gameFolder, txtThumbnailPath.Text.Trim());
+                string backgroundPath = string.IsNullOrWhiteSpace(txtBackgroundPath.Text) ? null : PathConversionHelper.ToRelativePath(gameFolder, txtBackgroundPath.Text.Trim());
 
                 // 起動オプション
                 string arguments = txtArguments.Text;
@@ -683,16 +503,8 @@ namespace GCTonePrism.Manager
                     KeyMapping = originalGame.KeyMapping // 後で実装
                 };
 
-                // ジャンルを処理（チェックボックスから選択されたものを取得）
-                game.Genre = new List<string>();
-                for (int i = 0; i < clbGenre.CheckedItems.Count; i++)
-                {
-                    string genre = clbGenre.CheckedItems[i].ToString();
-                    if (!string.IsNullOrEmpty(genre))
-                    {
-                        game.Genre.Add(genre);
-                    }
-                }
+                // ジャンルを処理
+                game.Genre = GameFormHelper.GetSelectedGenres(clbGenre);
 
                 // 製作者情報は既存のものを保持
                 game.Developers = originalGame.Developers ?? new List<DeveloperInfo>();
@@ -852,13 +664,6 @@ namespace GCTonePrism.Manager
         private void btnEditDeveloper_Click(object sender, EventArgs e) => devListManager.Edit();
         private void btnDeleteDeveloper_Click(object sender, EventArgs e) => devListManager.Delete();
 
-        private void UpdatePlaceholderVisibility()
-        {
-            if (lblArgumentsPlaceholder != null)
-            {
-                lblArgumentsPlaceholder.Visible = string.IsNullOrEmpty(txtArguments.Text);
-            }
-        }
         private void btnVersionUp_Click(object sender, EventArgs e)
         {
              // Deprecated
@@ -872,46 +677,8 @@ namespace GCTonePrism.Manager
         private void UpdateThumbnailPreview() => ImagePreviewHelper.UpdatePreview(picThumbnailPreview, txtThumbnailPath.Text, gameFolder);
         private void UpdateBackgroundPreview() => ImagePreviewHelper.UpdatePreview(picBackgroundPreview, txtBackgroundPath.Text, gameFolder);
 
-        /// <summary>
-        /// テスト起動ボタンクリック
-        /// </summary>
-        private void btnTestRun_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                string exePath = txtExecutablePath.Text.Trim();
-                if (string.IsNullOrWhiteSpace(exePath))
-                {
-                    MessageBox.Show("実行ファイルが指定されていません。", "テスト起動", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return;
-                }
-                
-                if (!Path.IsPathRooted(exePath))
-                {
-                    exePath = Path.Combine(gameFolder, exePath);
-                }
-                
-                if (!File.Exists(exePath))
-                {
-                    MessageBox.Show($"実行ファイルが見つかりません:\n{exePath}", "テスト起動", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-                
-                var startInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = exePath,
-                    Arguments = txtArguments.Text ?? "",
-                    WorkingDirectory = Path.GetDirectoryName(exePath),
-                    UseShellExecute = true
-                };
-                
-                System.Diagnostics.Process.Start(startInfo);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"実行ファイルの起動に失敗しました:\n{ex.Message}", "テスト起動", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
+        private void btnTestRun_Click(object sender, EventArgs e) =>
+            GameFormHelper.TestRunGame(txtExecutablePath.Text.Trim(), txtArguments.Text, gameFolder);
     }
 }
 
