@@ -47,19 +47,19 @@ var _selected_index: int = 0
 var _active_index: int = 0
 
 func _ready():
-	if not _load_games_from_db() or _games.is_empty():
-		return
-
-	# ダイアログ表示中もアイドルタイマーを動かすため
-	process_mode = Node.PROCESS_MODE_ALWAYS
-
-	# コンポーネント初期化
+	# コンポーネント初期化（_process()で参照されるため、早期returnより先に生成）
 	_carousel = CarouselController.new()
 	_game_launcher = GameLauncher.new()
 	_idle_mgr = IdleManager.new()
 	_style_mgr = ButtonStyleManager.new()
 	_info_display = GameInfoDisplay.new()
 	_input_handler = InputHandler.new()
+
+	if not _load_games_from_db() or _games.is_empty():
+		return
+
+	# ダイアログ表示中もアイドルタイマーを動かすため
+	process_mode = Node.PROCESS_MODE_ALWAYS
 
 	# カルーセル生成
 	_carousel.create_cards(_games, _card_template, _carousel_container)

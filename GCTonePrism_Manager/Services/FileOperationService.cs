@@ -71,8 +71,10 @@ namespace GCTonePrism.Manager.Services
             string fullSourceDir = NormalizePath(sourceDir);
             string fullDestDir = NormalizePath(destDir);
 
-            // 親子関係ガード
-            if (fullDestDir.StartsWith(fullSourceDir, StringComparison.OrdinalIgnoreCase))
+            // 親子関係ガード（パス区切り文字を含めて比較し、Foo と Foo2 の誤マッチを防止）
+            string sourceDirWithSep = fullSourceDir.EndsWith("\\") ? fullSourceDir : fullSourceDir + "\\";
+            if (fullDestDir.StartsWith(sourceDirWithSep, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(fullDestDir, fullSourceDir, StringComparison.OrdinalIgnoreCase))
                 return;
 
             // ファイルコピー
