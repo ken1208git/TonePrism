@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using GCTonePrism.Manager.Models;
+using GCTonePrism.Manager.Services;
 
 namespace GCTonePrism.Manager
 {
@@ -702,154 +703,13 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
-        /// ファイル名として使用可能な文字列に変換
-        /// </summary>
-        private string CleanFileName(string fileName)
-        {
-            foreach (char c in Path.GetInvalidFileNameChars())
-            {
-                fileName = fileName.Replace(c, '_');
-            }
-            return fileName;
-        }
-
-        /// <summary>
-        /// バージョンフォルダかどうかを判定（v + 数字 で始まるか）
-        /// </summary>
-        private bool IsVersionFolder(string folderName)
-        {
-            if (string.IsNullOrEmpty(folderName)) return false;
-            // "v" または "V" で始まり、その次が数字である
-            if (!folderName.StartsWith("v", StringComparison.OrdinalIgnoreCase)) return false;
-            if (folderName.Length < 2) return false;
-            return char.IsDigit(folderName[1]);
-        }
-
-        /// <summary>
-        /// パスを正規化（\\?\ プレフィックスの除去と絶対パス化）
-        /// </summary>
-        private string NormalizePath(string path)
-        {
-            if (path.StartsWith(@"\\?\")) path = path.Substring(4);
-            return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        }
-
-        /// <summary>
-        /// ディレクトリを再帰的にコピー
-        /// </summary>
-        /// <summary>
-        /// ディレクトリを非同期で再帰的にコピー
+        /// ディレクトリを非同期で再帰的にコピー（FileOperationServiceに委譲）
         /// </summary>
         private void CopyDirectoryAsync(string sourceDir, string destDir, IProgress<ProgressInfo> progress, System.Threading.CancellationToken token)
         {
-            // まず総ファイル数をカウント（進捗計算用）
-            // 再帰的にカウントする必要があるが、深い階層やアクセス権エラーで止まる可能性があるため、
-            // 簡易的にトップレベルと、コピーしながら計算する方式などを検討
-            // ここではシンプルに「ファイル単位で進捗報告」するが、分母（総数）がわからないと％が出せない。
-            // なので最初にスキャンする。
-            
-            progress.Report(new ProgressInfo(0, "ファイル数を計算中..."));
-            int totalFiles = CountFiles(sourceDir);
-            int copiedFiles = 0;
-
-            CopyDirectoryRecursive(sourceDir, destDir, progress, token, totalFiles, ref copiedFiles);
-        }
-
-        private int CountFiles(string dir)
-        {
-            int count = 0;
-            try
-            {
-                count += Directory.GetFiles(dir).Length;
-                var excludedFolders = new[] { "Library", "Temp", "Logs", "Build", "Builds", "Intermediate", "Saved", "DerivedDataCache", ".import", ".vs", ".idea", ".vscode", ".git", ".svn", ".hg", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache" };
-
-                foreach (string subDir in Directory.GetDirectories(dir))
-                {
-                    // バージョンフォルダ等は除外
-                    string folderName = Path.GetFileName(subDir);
-                    if (IsVersionFolder(folderName)) continue;
-                    
-                    // 除外フォルダをスキップ
-                    if (System.Linq.Enumerable.Contains(excludedFolders, folderName, StringComparer.OrdinalIgnoreCase)) continue;
-                    
-                    count += CountFiles(subDir);
-                }
-            }
-            catch { }
-            return count;
-        }
-
-        private void CopyDirectoryRecursive(string sourceDir, string destDir, IProgress<ProgressInfo> progress, System.Threading.CancellationToken token, int totalFiles, ref int copiedFiles)
-        {
-            token.ThrowIfCancellationRequested();
-
-            string safeDestDir = destDir;
-            if (safeDestDir.Length >= 240 && !safeDestDir.StartsWith(@"\\?\"))
-            {
-                safeDestDir = @"\\?\" + safeDestDir;
-            }
-
-            Directory.CreateDirectory(safeDestDir);
-            
-            string fullSourceDir = NormalizePath(sourceDir);
-            string fullDestDir = NormalizePath(destDir);
-            
-            // 親子関係ガード
-            if (fullDestDir.StartsWith(fullSourceDir, StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            foreach (string file in Directory.GetFiles(sourceDir))
-            {
-                token.ThrowIfCancellationRequested();
-
-                string fileName = Path.GetFileName(file);
-                string destFile = Path.Combine(safeDestDir, fileName);
-                string sourceFile = file;
-
-                if (destFile.Length >= 240 && !destFile.StartsWith(@"\\?\")) destFile = @"\\?\" + destFile;
-                if (sourceFile.Length >= 240 && !sourceFile.StartsWith(@"\\?\")) sourceFile = @"\\?\" + sourceFile;
-
-                // ファイルコピー（非同期的にやりたいが、System.IO.File.CopyにはAsyncがない。
-                // Streamを使うと遅くなることもあるので、ここではFile.Copyを使う。
-                // BackgroundTask内で実行されているのでUIはフリーズしない）
-                File.Copy(sourceFile, destFile, true);
-                
-                copiedFiles++;
-                int percentage = totalFiles > 0 ? (int)((double)copiedFiles / totalFiles * 100) : 100;
-                progress.Report(new ProgressInfo(percentage, "ファイルをコピー中...", fileName));
-            }
-            
-            var excludedFolders = new[] { "Library", "Temp", "Logs", "Build", "Builds", "Intermediate", "Saved", "DerivedDataCache", ".import", ".vs", ".idea", ".vscode", ".git", ".svn", ".hg", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache" };
-
-            foreach (string subDir in Directory.GetDirectories(sourceDir))
-            {
-                token.ThrowIfCancellationRequested();
-
-                string folderName = Path.GetFileName(subDir);
-                string fullSubPath = NormalizePath(subDir);
-
-                if (fullSubPath.Equals(fullDestDir, StringComparison.OrdinalIgnoreCase) || 
-                    fullDestDir.StartsWith(fullSubPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (IsVersionFolder(folderName))
-                {
-                    continue;
-                }
-
-                // 除外フォルダをスキップ
-                if (System.Linq.Enumerable.Contains(excludedFolders, folderName, StringComparer.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                string destSubDir = Path.Combine(safeDestDir, folderName);
-                CopyDirectoryRecursive(subDir, destSubDir, progress, token, totalFiles, ref copiedFiles);
-            }
+            FileOperationService.CopyDirectoryWithProgress(
+                sourceDir, destDir, progress, token,
+                excludeFolderPredicate: FileOperationService.IsVersionFolder);
         }
 
         /// <summary>

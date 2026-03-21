@@ -123,6 +123,9 @@
     <Compile Include="Models\Survey.cs" />
     <Compile Include="GenreList.cs" />
     <Compile Include="PathManager.cs" />
+    <Compile Include="Services\DeveloperListManager.cs" />
+    <Compile Include="Services\FileOperationService.cs" />
+    <Compile Include="Services\ImagePreviewHelper.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="AddGameForm.resx">
