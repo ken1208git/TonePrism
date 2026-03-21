@@ -42,15 +42,28 @@ namespace GCTonePrism.Manager.Repositories
                         );
                         SELECT last_insert_rowid();";
 
-                    using (var command = new SQLiteCommand(query, connection))
+                    using (var transaction = connection.BeginTransaction())
                     {
-                        SetVersionParameters(command, version);
-                        command.Parameters.AddWithValue("@registeredAt", version.RegisteredAt.ToString("yyyy-MM-dd HH:mm:ss"));
+                        try
+                        {
+                            using (var command = new SQLiteCommand(query, connection, transaction))
+                            {
+                                SetVersionParameters(command, version);
+                                command.Parameters.AddWithValue("@registeredAt", version.RegisteredAt.ToString("yyyy-MM-dd HH:mm:ss"));
 
-                        long versionId = (long)command.ExecuteScalar();
-                        version.Id = (int)versionId;
+                                long versionId = (long)command.ExecuteScalar();
+                                version.Id = (int)versionId;
+                            }
 
-                        InsertVersionDevelopers(connection, null, version);
+                            InsertVersionDevelopers(connection, transaction, version);
+
+                            transaction.Commit();
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
                     }
                 }
             });

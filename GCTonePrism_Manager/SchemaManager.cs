@@ -194,6 +194,7 @@ namespace GCTonePrism.Manager
                     supported_connection INTEGER DEFAULT 0,
                     thumbnail_path TEXT,
                     background_path TEXT,
+                    update_note TEXT,
                     registered_at TEXT NOT NULL,
                     FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE
                 )";
