@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using GCTonePrism.Manager.Models;
+using GCTonePrism.Manager.Services;
 using Microsoft.WindowsAPICodePack.Dialogs;
 
 namespace GCTonePrism.Manager
@@ -15,6 +16,7 @@ namespace GCTonePrism.Manager
         private string currentVersion;
         private string selectedFolderPath;
         private List<DeveloperInfo> developers;
+        private DeveloperListManager devListManager;
         private GameVersion baseVersion; // コピー元のバージョン情報
         private GameInfo originalGameInfo; // 元のゲーム情報
 
@@ -162,48 +164,10 @@ namespace GCTonePrism.Manager
             InitializeDevelopersGrid();
         }
 
-        /// <summary>
-        /// 製作者情報のDataGridViewを初期化
-        /// </summary>
         private void InitializeDevelopersGrid()
         {
-            dgvDevelopers.AutoGenerateColumns = false;
-            dgvDevelopers.AllowUserToAddRows = false;
-            dgvDevelopers.AllowUserToDeleteRows = false;
-            dgvDevelopers.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-            dgvDevelopers.MultiSelect = false;
-            dgvDevelopers.ReadOnly = true;
-
-            dgvDevelopers.Columns.Clear();
-            dgvDevelopers.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "LastName",
-                HeaderText = "姓",
-                DataPropertyName = "LastName",
-                Width = 100
-            });
-            dgvDevelopers.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "FirstName",
-                HeaderText = "名",
-                DataPropertyName = "FirstName",
-                Width = 100
-            });
-            dgvDevelopers.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "GradeDisplay",
-                HeaderText = "期生",
-                DataPropertyName = "GradeDisplay",
-                Width = 60
-            });
-
-            dgvDevelopers.DataSource = developers;
-        }
-
-        private void RefreshDevelopersGrid()
-        {
-            dgvDevelopers.DataSource = null;
-            dgvDevelopers.DataSource = developers;
+            devListManager = new DeveloperListManager(dgvDevelopers, developers);
+            devListManager.InitializeGrid();
         }
 
         private void btnSelectGameFolder_Click(object sender, EventArgs e)
@@ -379,64 +343,9 @@ namespace GCTonePrism.Manager
             }
         }
 
-        private void btnAddDeveloper_Click(object sender, EventArgs e)
-        {
-            using (var form = new DeveloperForm())
-            {
-                if (form.ShowDialog() == DialogResult.OK)
-                {
-                    developers.Add(form.Developer);
-                    RefreshDevelopersGrid();
-                }
-            }
-        }
-
-        private void btnEditDeveloper_Click(object sender, EventArgs e)
-        {
-            if (dgvDevelopers.SelectedRows.Count == 0)
-            {
-                MessageBox.Show("編集する製作者を選択してください。", "情報", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            int selectedIndex = dgvDevelopers.SelectedRows[0].Index;
-            if (selectedIndex >= 0 && selectedIndex < developers.Count)
-            {
-                using (var form = new DeveloperForm(developers[selectedIndex]))
-                {
-                    if (form.ShowDialog() == DialogResult.OK)
-                    {
-                        developers[selectedIndex] = form.Developer;
-                        RefreshDevelopersGrid();
-                    }
-                }
-            }
-        }
-
-        private void btnDeleteDeveloper_Click(object sender, EventArgs e)
-        {
-            if (dgvDevelopers.SelectedRows.Count == 0)
-            {
-                MessageBox.Show("削除する製作者を選択してください。", "情報", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            int selectedIndex = dgvDevelopers.SelectedRows[0].Index;
-            if (selectedIndex >= 0 && selectedIndex < developers.Count)
-            {
-                var result = MessageBox.Show(
-                    $"製作者「{developers[selectedIndex].FullName}」を削除しますか？",
-                    "確認",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question);
-                
-                if (result == DialogResult.Yes)
-                {
-                    developers.RemoveAt(selectedIndex);
-                    RefreshDevelopersGrid();
-                }
-            }
-        }
+        private void btnAddDeveloper_Click(object sender, EventArgs e) => devListManager.Add();
+        private void btnEditDeveloper_Click(object sender, EventArgs e) => devListManager.Edit();
+        private void btnDeleteDeveloper_Click(object sender, EventArgs e) => devListManager.Delete();
 
         private void btnOK_Click(object sender, EventArgs e)
         {
@@ -622,79 +531,8 @@ namespace GCTonePrism.Manager
             return true;
         }
 
-        /// <summary>
-        /// サムネイルプレビューを更新
-        /// </summary>
-        private void UpdateThumbnailPreview()
-        {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(txtThumbnailPath.Text))
-                {
-                    picThumbnailPreview.Image = null;
-                    return;
-                }
-                
-                string path = txtThumbnailPath.Text.Trim();
-                if (File.Exists(path))
-                {
-                    using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read))
-                    {
-                         using (var ms = new MemoryStream())
-                        {
-                            stream.CopyTo(ms);
-                            ms.Position = 0;
-                            picThumbnailPreview.Image = Image.FromStream(ms);
-                        }
-                    }
-                }
-                else
-                {
-                    picThumbnailPreview.Image = null;
-                }
-            }
-            catch
-            {
-                picThumbnailPreview.Image = null;
-            }
-        }
-
-        /// <summary>
-        /// 背景プレビューを更新
-        /// </summary>
-        private void UpdateBackgroundPreview()
-        {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(txtBackgroundPath.Text))
-                {
-                    picBackgroundPreview.Image = null;
-                    return;
-                }
-                
-                string path = txtBackgroundPath.Text.Trim();
-                if (File.Exists(path))
-                {
-                    using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read))
-                    {
-                         using (var ms = new MemoryStream())
-                        {
-                            stream.CopyTo(ms);
-                            ms.Position = 0;
-                            picBackgroundPreview.Image = Image.FromStream(ms);
-                        }
-                    }
-                }
-                else
-                {
-                    picBackgroundPreview.Image = null;
-                }
-            }
-            catch
-            {
-                picBackgroundPreview.Image = null;
-            }
-        }
+        private void UpdateThumbnailPreview() => ImagePreviewHelper.UpdatePreview(picThumbnailPreview, txtThumbnailPath.Text);
+        private void UpdateBackgroundPreview() => ImagePreviewHelper.UpdatePreview(picBackgroundPreview, txtBackgroundPath.Text);
 
         /// <summary>
         /// テスト起動ボタンクリック

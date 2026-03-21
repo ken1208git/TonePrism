@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using GCTonePrism.Manager.Models;
+using GCTonePrism.Manager.Services;
 using Microsoft.WindowsAPICodePack.Dialogs;
 
 namespace GCTonePrism.Manager
@@ -21,6 +22,7 @@ namespace GCTonePrism.Manager
         private string sourceGameFolder;
         private string destinationGameFolder;
         private List<DeveloperInfo> developers;
+        private DeveloperListManager devListManager;
         private Label lblArgumentsPlaceholder;
 
         private const string ARGUMENTS_PLACEHOLDER = "通常は空欄で構いません。\r\n特殊な起動オプションが必要な場合のみ記述してください。\r\n例: Unity製ゲームでフルスクリーン起動を強制する場合 -> -screen-fullscreen 1";
@@ -113,48 +115,8 @@ namespace GCTonePrism.Manager
         /// </summary>
         private void InitializeDevelopersGrid()
         {
-            dgvDevelopers.AutoGenerateColumns = false;
-            dgvDevelopers.AllowUserToAddRows = false;
-            dgvDevelopers.AllowUserToDeleteRows = false;
-            dgvDevelopers.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-            dgvDevelopers.MultiSelect = false;
-            dgvDevelopers.ReadOnly = true;
-
-            // カラムを追加
-            dgvDevelopers.Columns.Clear();
-            dgvDevelopers.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "LastName",
-                HeaderText = "姓",
-                DataPropertyName = "LastName",
-                Width = 100
-            });
-            dgvDevelopers.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "FirstName",
-                HeaderText = "名",
-                DataPropertyName = "FirstName",
-                Width = 100
-            });
-            dgvDevelopers.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "GradeDisplay",
-                HeaderText = "期生",
-                DataPropertyName = "GradeDisplay",
-                Width = 60
-            });
-
-            // データソースを設定
-            dgvDevelopers.DataSource = developers;
-        }
-
-        /// <summary>
-        /// 製作者情報を更新
-        /// </summary>
-        private void RefreshDevelopersGrid()
-        {
-            dgvDevelopers.DataSource = null;
-            dgvDevelopers.DataSource = developers;
+            devListManager = new DeveloperListManager(dgvDevelopers, developers);
+            devListManager.InitializeGrid();
         }
 
         /// <summary>
@@ -360,130 +322,10 @@ namespace GCTonePrism.Manager
             // バージョンフォルダを作成
             Directory.CreateDirectory(destinationGameFolder);
             
-            // 進捗計算用ファイル数カウント
-            progress.Report(new ProgressInfo(0, "ファイル数を計算中..."));
-            int totalFiles = CountFiles(sourceGameFolder);
-            int copiedFiles = 0;
-
-            // フォルダ内のすべてのファイルとサブフォルダをコピー
-            CopyDirectoryRecursive(sourceGameFolder, destinationGameFolder, progress, token, totalFiles, ref copiedFiles);
+            // FileOperationServiceに委譲してコピー
+            FileOperationService.CopyDirectoryWithProgress(sourceGameFolder, destinationGameFolder, progress, token);
         }
 
-        private int CountFiles(string dir)
-        {
-            int count = 0;
-            try
-            {
-                count += Directory.GetFiles(dir).Length;
-                
-                var excludedFolders = new[] { "Library", "Temp", "Logs", "Build", "Builds", "Intermediate", "Saved", "DerivedDataCache", ".import", ".vs", ".idea", ".vscode", ".git", ".svn", ".hg", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache" };
-
-                foreach (string subDir in Directory.GetDirectories(dir))
-                {
-                    string subDirName = Path.GetFileName(subDir);
-                    if (excludedFolders.Contains(subDirName, StringComparer.OrdinalIgnoreCase)) continue;
-                    count += CountFiles(subDir);
-                }
-            }
-            catch { }
-            return count;
-        }
-
-        /// <summary>
-        /// ディレクトリを再帰的にコピー
-        /// </summary>
-        private void CopyDirectoryRecursive(string sourceDir, string destDir, IProgress<ProgressInfo> progress, System.Threading.CancellationToken token, int totalFiles, ref int copiedFiles)
-        {
-            token.ThrowIfCancellationRequested();
-            
-            Directory.CreateDirectory(destDir);
-
-            // デバッグログ
-            Console.WriteLine($"[CopyDirectoryRecursive] コピー元: {sourceDir}");
-            Console.WriteLine($"[CopyDirectoryRecursive] コピー先: {destDir}");
-
-            // ゲームエンジン/開発環境の不要なフォルダをスキップ
-            var excludedFolders = new[]
-            {
-                "Library", "Temp", "Logs", "Build", "Builds",
-                "Intermediate", "Saved", "DerivedDataCache",
-                ".import",
-                ".vs", ".idea", ".vscode",
-                ".git", ".svn", ".hg",
-                "node_modules",
-                "__pycache__", ".pytest_cache", ".mypy_cache"
-            };
-
-            try
-            {
-                foreach (string file in Directory.GetFiles(sourceDir))
-                {
-                    token.ThrowIfCancellationRequested();
-
-                    try
-                    {
-                        string fileName = Path.GetFileName(file);
-                        string destFile = Path.Combine(destDir, fileName);
-                        
-                        // 長いパス名をサポート
-                        string longPathSource = file;
-                        string longPathDest = destFile;
-                        
-                        if (file.Length > 260 || destFile.Length > 260)
-                        {
-                            if (!file.StartsWith(@"\\?\")) longPathSource = @"\\?\" + Path.GetFullPath(file);
-                            if (!destFile.StartsWith(@"\\?\")) longPathDest = @"\\?\" + Path.GetFullPath(destFile);
-                        }
-                        
-                        // console.WriteLine($"[CopyDirectoryRecursive] ファイルをコピー: {file} -> {destFile}");
-                        File.Copy(longPathSource, longPathDest, true);
-                        
-                        copiedFiles++;
-                        int percentage = totalFiles > 0 ? (int)((double)copiedFiles / totalFiles * 100) : 100;
-                        progress.Report(new ProgressInfo(percentage, "ファイルをコピー中...", fileName));
-                    }
-                    catch (PathTooLongException ex)
-                    {
-                        Console.WriteLine($"[警告] パスが長すぎるためスキップ: {file}");
-                        continue;
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[警告] ファイルのコピーに失敗: {file} - {ex.Message}");
-                        continue;
-                    }
-                }
-
-                foreach (string subDir in Directory.GetDirectories(sourceDir))
-                {
-                    token.ThrowIfCancellationRequested();
-
-                    try
-                    {
-                        string subDirName = Path.GetFileName(subDir);
-                        
-                        // 除外フォルダをスキップ
-                        if (excludedFolders.Contains(subDirName, StringComparer.OrdinalIgnoreCase))
-                        {
-                            Console.WriteLine($"[CopyDirectoryRecursive] スキップ: {subDir}");
-                            continue;
-                        }
-                        
-                        string destSubDir = Path.Combine(destDir, subDirName);
-                        CopyDirectoryRecursive(subDir, destSubDir, progress, token, totalFiles, ref copiedFiles);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[警告] サブフォルダのコピーに失敗: {subDir} - {ex.Message}");
-                        continue;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                throw new Exception($"フォルダのコピー中にエラーが発生しました: {ex.Message}", ex);
-            }
-        }
 
         /// <summary>
         /// 絶対パスから相対パスを取得（.NET Framework 4.8対応）
@@ -917,75 +759,9 @@ namespace GCTonePrism.Manager
             return true;
         }
 
-        /// <summary>
-        /// 製作者追加ボタンクリック
-        /// </summary>
-        private void btnAddDeveloper_Click(object sender, EventArgs e)
-        {
-            using (var form = new DeveloperForm())
-            {
-                if (form.ShowDialog() == DialogResult.OK && form.Developer != null)
-                {
-                    developers.Add(form.Developer);
-                    RefreshDevelopersGrid();
-                }
-            }
-        }
-
-        /// <summary>
-        /// 製作者編集ボタンクリック
-        /// </summary>
-        private void btnEditDeveloper_Click(object sender, EventArgs e)
-        {
-            if (dgvDevelopers.SelectedRows.Count == 0)
-            {
-                MessageBox.Show("編集する製作者を選択してください。", "情報", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            var selectedDeveloper = dgvDevelopers.SelectedRows[0].DataBoundItem as DeveloperInfo;
-            if (selectedDeveloper == null) return;
-
-            using (var form = new DeveloperForm(selectedDeveloper))
-            {
-                if (form.ShowDialog() == DialogResult.OK && form.Developer != null)
-                {
-                    int index = developers.IndexOf(selectedDeveloper);
-                    if (index >= 0)
-                    {
-                        developers[index] = form.Developer;
-                        RefreshDevelopersGrid();
-                    }
-                }
-            }
-        }
-
-        /// <summary>
-        /// 製作者削除ボタンクリック
-        /// </summary>
-        private void btnDeleteDeveloper_Click(object sender, EventArgs e)
-        {
-            if (dgvDevelopers.SelectedRows.Count == 0)
-            {
-                MessageBox.Show("削除する製作者を選択してください。", "情報", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            var selectedDeveloper = dgvDevelopers.SelectedRows[0].DataBoundItem as DeveloperInfo;
-            if (selectedDeveloper == null) return;
-
-            var result = MessageBox.Show(
-                $"製作者「{selectedDeveloper.FullName}」を削除しますか？",
-                "削除確認",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question);
-
-            if (result == DialogResult.Yes)
-            {
-                developers.Remove(selectedDeveloper);
-                RefreshDevelopersGrid();
-            }
-        }
+        private void btnAddDeveloper_Click(object sender, EventArgs e) => devListManager.Add();
+        private void btnEditDeveloper_Click(object sender, EventArgs e) => devListManager.Edit();
+        private void btnDeleteDeveloper_Click(object sender, EventArgs e) => devListManager.Delete();
 
         private void UpdatePlaceholderVisibility()
         {
@@ -995,79 +771,8 @@ namespace GCTonePrism.Manager
             }
         }
 
-        /// <summary>
-        /// サムネイルプレビューを更新
-        /// </summary>
-        private void UpdateThumbnailPreview()
-        {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(txtThumbnailPath.Text))
-                {
-                    picThumbnailPreview.Image = null;
-                    return;
-                }
-                
-                string path = txtThumbnailPath.Text.Trim();
-                if (File.Exists(path))
-                {
-                    using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read))
-                    {
-                        using (var ms = new MemoryStream())
-                        {
-                            stream.CopyTo(ms);
-                            ms.Position = 0;
-                            picThumbnailPreview.Image = Image.FromStream(ms);
-                        }
-                    }
-                }
-                else
-                {
-                    picThumbnailPreview.Image = null;
-                }
-            }
-            catch
-            {
-                picThumbnailPreview.Image = null;
-            }
-        }
-
-        /// <summary>
-        /// 背景プレビューを更新
-        /// </summary>
-        private void UpdateBackgroundPreview()
-        {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(txtBackgroundPath.Text))
-                {
-                    picBackgroundPreview.Image = null;
-                    return;
-                }
-                
-                string path = txtBackgroundPath.Text.Trim();
-                if (File.Exists(path))
-                {
-                    using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read))
-                    {
-                        using (var ms = new MemoryStream())
-                        {
-                            stream.CopyTo(ms);
-                            ms.Position = 0;
-                            picBackgroundPreview.Image = Image.FromStream(ms);
-                        }
-                    }
-                }
-                else
-                {
-                    picBackgroundPreview.Image = null;
-                }
-            }
-            catch
-            {
-                picBackgroundPreview.Image = null;
-            }
-        }
+        private void UpdateThumbnailPreview() => ImagePreviewHelper.UpdatePreview(picThumbnailPreview, txtThumbnailPath.Text);
+        private void UpdateBackgroundPreview() => ImagePreviewHelper.UpdatePreview(picBackgroundPreview, txtBackgroundPath.Text);
 
         /// <summary>
         /// テスト起動ボタンクリック

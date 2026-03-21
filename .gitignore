@@ -2,6 +2,10 @@
 .cursor/
 prism.md
 
+# AI設定
+.claude/
+.agent/
+
 # IDE設定
 .vscode/
 .idea/

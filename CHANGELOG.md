@@ -11,6 +11,20 @@
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.4.6] - 2026-03-21
+
+#### Changed
+
+- **game_selection.gd を6つのコンポーネントに分割**
+  - 1,257行のメインスクリプトを責務ごとに分離し、保守性を向上
+  - `carousel_controller.gd`: カルーセルUIの座標計算・アニメーション
+  - `input_handler.gd`: キーボード・コントローラー・マウス入力処理
+  - `game_launcher.gd`: ゲーム起動・プロセス監視ロジック
+  - `idle_manager.gd`: アイドル検知・スクリーンセーバー遷移
+  - `game_info_display.gd`: ゲーム情報パネルの表示・更新
+  - `button_style_manager.gd`: ボタンスタイル生成・グローアニメーション
+  - メインの `game_selection.gd` はオーケストレーター（各コンポーネントの連携役）として残存
+
 ### [Launcher v0.4.5] - 2026-02-27
 
 #### Added
@@ -208,6 +222,27 @@
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.6.1] - 2026-03-21
+
+#### Changed
+
+- **DatabaseManager.cs をRepositoryパターンで分割**
+  - 1,763行のファイルを責務ごとに分離
+  - `DatabaseConnection.cs`: 接続管理、WALモード、リトライロジック
+  - `SchemaManager.cs`: テーブル作成・マイグレーション
+  - `Repositories/GameRepository.cs`: ゲームのCRUD操作
+  - `Repositories/VersionRepository.cs`: バージョン管理のCRUD
+  - `Repositories/DeveloperRepository.cs`: 開発者情報のCRUD
+  - `DatabaseManager.cs` は既存コードとの互換性を保つファサードとして残存
+- **Formファイル群から共通ロジックを抽出**
+  - `Services/DeveloperListManager.cs`: 開発者DataGridView管理（AddGameForm, EditGameForm, VersionUpFormで共通化）
+  - `Services/FileOperationService.cs`: ファイルコピー・進捗追跡（AddGameForm, MainFormで共通化）
+  - `Services/ImagePreviewHelper.cs`: 画像プレビュー処理（全Formで共通化）
+  - AddGameForm: 1,109行 → 814行
+  - EditGameForm: 1,130行 → 917行
+  - MainForm: 917行 → 777行
+  - VersionUpForm: 735行 → 573行
 
 ### [Manager v0.6.0] - 2026-02-09
 

@@ -97,7 +97,12 @@
     <Compile Include="DeveloperForm.Designer.cs">
       <DependentUpon>DeveloperForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="DatabaseConnection.cs" />
     <Compile Include="DatabaseManager.cs" />
+    <Compile Include="SchemaManager.cs" />
+    <Compile Include="Repositories\DeveloperRepository.cs" />
+    <Compile Include="Repositories\GameRepository.cs" />
+    <Compile Include="Repositories\VersionRepository.cs" />
     <Compile Include="MainForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -118,6 +123,9 @@
     <Compile Include="Models\Survey.cs" />
     <Compile Include="GenreList.cs" />
     <Compile Include="PathManager.cs" />
+    <Compile Include="Services\DeveloperListManager.cs" />
+    <Compile Include="Services\FileOperationService.cs" />
+    <Compile Include="Services\ImagePreviewHelper.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="AddGameForm.resx">

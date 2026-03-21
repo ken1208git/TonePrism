@@ -1,9 +1,9 @@
-[gd_scene load_steps=18 format=3 uid="uid://bjoy2n8lqir0y"]
+[gd_scene load_steps=17 format=3 uid="uid://bjoy2n8lqir0y"]
 
 [ext_resource type="Script" uid="uid://dj0y4s0v4pp1c" path="res://scenes/game_selection.gd" id="1_game_selection"]
 [ext_resource type="FontFile" uid="uid://dolk7yphok5xu" path="res://fonts/NotoSansJP-Regular.ttf" id="2_font_regular"]
 [ext_resource type="FontFile" uid="uid://xjqfmx60jtvo" path="res://fonts/NotoSansJP-Bold.ttf" id="3_font_bold"]
-[ext_resource type="Texture2D" uid="uid://c5q3y5q3y5q3y" path="res://icon.svg" id="4_icon"]
+[ext_resource type="Texture2D" uid="uid://j27gk8qemr4d" path="res://icon.svg" id="4_icon"]
 [ext_resource type="Script" path="res://scenes/components/auto_scroll_container.gd" id="5_auto_scroll"]
 
 [sub_resource type="Animation" id="Animation_transition_down"]
@@ -112,8 +112,8 @@ tracks/3/keys = {
 
 [sub_resource type="AnimationLibrary" id="AnimationLibrary_bg"]
 _data = {
-"transition_down": SubResource("Animation_transition_down"),
-"transition_up": SubResource("Animation_transition_up")
+&"transition_down": SubResource("Animation_transition_down"),
+&"transition_up": SubResource("Animation_transition_up")
 }
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_rounded"]
@@ -124,21 +124,6 @@ corner_radius_bottom_right = 16
 corner_radius_bottom_left = 16
 shadow_color = Color(0, 0, 0, 0.25)
 shadow_size = 4
-shadow_offset = Vector2(0, 0)
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_Focus"]
-bg_color = Color(0.6, 0.6, 0.6, 0)
-draw_center = false
-corner_radius_top_left = 43
-corner_radius_top_right = 43
-corner_radius_bottom_right = 43
-corner_radius_bottom_left = 43
-expand_margin_left = 24.0
-expand_margin_top = 24.0
-expand_margin_right = 24.0
-expand_margin_bottom = 24.0
-shadow_color = Color(1, 1, 1, 0.5)
-shadow_size = 12
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_Clipper"]
 bg_color = Color(0, 0, 0, 1)
@@ -146,17 +131,6 @@ corner_radius_top_left = 16
 corner_radius_top_right = 16
 corner_radius_bottom_right = 16
 corner_radius_bottom_left = 16
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ClockBg"]
-bg_color = Color(0, 0, 0, 0.5)
-corner_radius_top_left = 8
-corner_radius_top_right = 8
-corner_radius_bottom_right = 8
-corner_radius_bottom_left = 8
-expand_margin_left = 10.0
-expand_margin_top = 0.0
-expand_margin_right = 10.0
-expand_margin_bottom = 0.0
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_FocusBorder"]
 bg_color = Color(0.6, 0.6, 0.6, 0)
@@ -241,7 +215,7 @@ stretch_mode = 6
 
 [node name="BgAnimationPlayer" type="AnimationPlayer" parent="BackgroundLayer"]
 libraries = {
-"": SubResource("AnimationLibrary_bg")
+&"": SubResource("AnimationLibrary_bg")
 }
 
 [node name="CarouselContainer" type="Control" parent="."]
@@ -253,7 +227,6 @@ grow_vertical = 2
 
 [node name="CardTemplate" type="Panel" parent="CarouselContainer"]
 visible = false
-clip_children = 0
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
@@ -357,9 +330,9 @@ layout_mode = 2
 theme_override_constants/separation = 20
 
 [node name="TitleScrollWrapper" type="Control" parent="InfoPanel/MarginContainer/VBoxContainer/TitleContainer"]
+custom_minimum_size = Vector2(0, 80)
 layout_mode = 2
 size_flags_horizontal = 3
-custom_minimum_size = Vector2(0, 80)
 script = ExtResource("5_auto_scroll")
 
 [node name="TitleLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/TitleContainer/TitleScrollWrapper"]
@@ -499,8 +472,6 @@ theme_override_fonts/font = ExtResource("3_font_bold")
 theme_override_font_sizes/font_size = 20
 text = "非対応"
 
-
-
 [node name="DescriptionScroll" type="ScrollContainer" parent="InfoPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
 size_flags_vertical = 3
@@ -537,8 +508,6 @@ offset_bottom = 180.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_rounded")
-
-
 
 [node name="Icon" type="TextureRect" parent="RunningOverlay/RunningIconContainer"]
 layout_mode = 1
@@ -581,8 +550,6 @@ anchor_right = 1.0
 offset_bottom = 120.0
 grow_horizontal = 2
 mouse_filter = 2
-
-
 
 [node name="Background" type="TextureRect" parent="TopBar"]
 layout_mode = 1
