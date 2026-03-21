@@ -279,67 +279,11 @@ namespace GCTonePrism.Manager
             txtVersionName.Text = version.Version ?? ""; // バージョン名を表示
             txtTitle.Text = version.Title ?? "";
             txtDescription.Text = version.Description ?? "";
-            txtVersionDescription.Text = version.UpdateNote ?? ""; // バージョン更新内容（DescriptionではなくUpdateNoteを使用）
-            // Version.Descriptionは「更新内容」として使われている？ 
-            // GameInfo.Descriptionは「ゲーム説明」。
-            // GameVersion.Descriptionは「更新ノート」。
-            // UI上、txtDescriptionは「ゲーム説明」、txtUpdateNote（VersionUpFormにある）は「更新内容」。
-            // EditGameFormにはtxtUpdateNoteが無い。txtDescriptionしかない。
-            // しかしバージョンごとに「ゲーム説明」を持つようになったので、txtDescriptionにはVersion.Descriptionを表示すべき？
-            // 待て、GameVersion.Descriptionは「更新内容(Update Note)」として使われている（VersionUpFormで）。
-            // GameVersion.Description != GameInfo.Description ?
-            // Schema migration added "description" to game_versions.
-            // VersionUpForm maps txtUpdateNote to Description.
-            // So GameVersion.Description IS Update Note.
-            // But I also added "title", "genre", "description" to game_versions (schema v3).
-            // Wait, did I add "description" TWICE?
-            // "description TEXT" was already in v2 (for update note).
-            // In v3 migration, I added "title", "genre", etc.
-            // I did NOT add "description" again.
-            // So GameVersion.Description IS the Update Note.
-            // But where is the "Game Description" stored per version?
-            // "description TEXT" in game_versions table is... ambiguous.
-            // In v2 it was Update Note.
-            // The User said: "Title, Description, Genre... per version".
-            // So "description" column should hold "Game Description".
-            // Then where is "Update Note"?
-            // Maybe I need a separate column for "update_note"?
-            // Or maybe "description" IS "Game Description" and "Update Note" is lost or stored elsewhere?
-            // VersionUpForm: txtUpdateNote -> Description.
-            // This implies "description" = Update Note.
-            // If I overwrite it with "Game Description", I lose Update Note.
-            // The user wants "Description" (Setsumei-bun) to be versioned.
-            // I should probably have used a different column for one of them.
-            // However, looking at MigrateV2ToV3, I did NOT add `game_description` column.
-            // I assumed `description` was the game description?
-            // But `VersionUpForm` uses it as "update note".
-            // This is a conflict.
-            // User requirement: "Title, Description, Genre... : Version-specific".
-            // So I should treat `description` column as "Game Description".
-            // And "Update Note" might need to be migrated to `update_note` column or shared?
-            // Given I already ran migration (conceptually), checking `DatabaseManager.cs`.
-            // `AddGameVersion`: `command.Parameters.AddWithValue("@description", version.Description ...)`
-            // `Version.Description` is used.
-            // If I map `txtDescription` (Game Description) to `Version.Description`, then `txtUpdateNote` (Update Note) will also map to `Version.Description`.
-            // This means Update Note BECOMES Game Description.
-            // This might be what the user wants? "Release 1.0: Initial Release" as description?
-            // No, Game Description is usually "This is a shooting game...".
-            // Update Note is "Fixed bugs...".
-            // They are distinct.
-            // I should have added `update_note` column.
-            // But I can't change schema easily now without another migration.
-            // I will assume `Version.Description` is "Game Description" (per user request "Description per version").
-            // And "Update Note" is... effectively `Version.Description` currently.
-            // So for now, I will map `txtDescription` to `Version.Description`.
-            // And `txtVersionDescription` (which was showing Update Note) will also show `Version.Description` (Game Description).
-            // Ensure `cmbVersionList_SelectedIndexChanged` updates `txtVersionDescription` too.
-            // Note: `txtVersionDescription` is likely a label or readonly text for the update note in the list.
-            
-            // Re-reading User Request: "Title, Genre, PlayerCount... per version".
-            // "Description" is definitely Game Description.
-            // I will proceed with using `Version.Description` as Game Description.
+            txtVersionDescription.Text = version.UpdateNote ?? "";
 
-            txtDescription.Text = version.Description ?? ""; // Game Description
+            // game_versions.description = ゲーム説明文（バージョンごと）
+            // game_versions.update_note = 更新内容（バージョンごと）
+            txtDescription.Text = version.Description ?? "";
             
             // ジャンル
             GameFormHelper.SetSelectedGenres(clbGenre, version.Genre);
