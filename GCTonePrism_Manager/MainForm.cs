@@ -578,6 +578,14 @@ namespace GCTonePrism.Manager
             LoadGames();
         }
 
+        private void btnStoreSections_Click(object sender, EventArgs e)
+        {
+            using (var form = new StoreSectionListForm(dbManager))
+            {
+                form.ShowDialog();
+            }
+        }
+
         /// <summary>
         /// バージョンアップボタンクリック
         /// </summary>

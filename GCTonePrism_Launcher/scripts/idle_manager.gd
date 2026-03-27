@@ -42,6 +42,6 @@ func reset() -> void:
 	DialogManager.close_current_dialog()
 
 ## スクリーンセーバーに遷移する
-static func transition_to_screensaver(tree: SceneTree) -> void:
+static func transition_to_screensaver(_tree: SceneTree = null) -> void:
 	DialogManager.close_current_dialog()
-	tree.change_scene_to_file("res://scenes/screensaver.tscn")
+	TransitionManager.change_scene("res://scenes/screensaver.tscn")

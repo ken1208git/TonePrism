@@ -10,29 +10,81 @@ signal button_pressed(button_index: int)
 
 var _buttons: Array[Button] = []
 
-var _glow_styles: Array[StyleBoxFlat] = []
 var _glow_timer: float = 0.0
 
+# フォーカスモーフ用
+var _focus_border: Panel = null
+var _focus_target_rect: Rect2 = Rect2()
+var _focus_target_radius: float = 16.0
+var _focus_current_radius: float = 16.0
+var _focus_initialized: bool = false
+var _focus_prev_target: Control = null
+var _focus_prev_target_pos: Vector2 = Vector2.ZERO
+
 func _process(delta):
+	if not _focus_border:
+		return
+
+	# フォーカスオーナーを取得してモーフ
+	var focus_owner = get_viewport().gui_get_focus_owner()
+	if focus_owner is Button and focus_owner in _buttons:
+		_focus_border.visible = true
+		_focus_target_rect = focus_owner.get_global_rect()
+
+		if not _focus_initialized:
+			_focus_border.global_position = _focus_target_rect.position
+			_focus_border.size = _focus_target_rect.size
+			_focus_current_radius = _focus_target_radius
+			_focus_prev_target = focus_owner
+			_focus_prev_target_pos = _focus_target_rect.position
+			_focus_initialized = true
+		else:
+			if focus_owner == _focus_prev_target:
+				var target_delta = _focus_target_rect.position - _focus_prev_target_pos
+				_focus_border.global_position += target_delta
+			var speed = delta * 25.0
+			_focus_border.global_position = _focus_border.global_position.lerp(
+				_focus_target_rect.position, speed)
+			_focus_border.size = _focus_border.size.lerp(
+				_focus_target_rect.size, speed)
+			_focus_current_radius = lerpf(_focus_current_radius, _focus_target_radius, speed)
+
+		_focus_prev_target = focus_owner
+		_focus_prev_target_pos = _focus_target_rect.position
+	else:
+		_focus_border.visible = false
+
 	# グローアニメーション（ブリージング）
 	_glow_timer += delta
 	var glow_alpha = 0.5 + 0.3 * sin(_glow_timer * 3.0)
-	
-	for style in _glow_styles:
-		if style:
-			var c = Color(1, 1, 1, glow_alpha)
-			style.shadow_color = c
-			style.border_color = c
+	var style = _focus_border.get_theme_stylebox("panel") as StyleBoxFlat
+	if style:
+		style.set_corner_radius_all(int(_focus_current_radius))
+		style.shadow_color = Color(1, 1, 1, glow_alpha)
+		style.border_color = Color(1, 1, 1, glow_alpha)
 
 @onready var _button_template: Button = $Panel/MarginContainer/VBoxContainer/ButtonContainer/ButtonTemplate
 
 func _ready():
 	_title_label.text = ""
 	_message_label.text = ""
-	
-	# パネルスタイルはtscnで設定済みのため、コードによる上書きは削除
-	# var panel = $Panel
-	# ...
+	_setup_focus_border()
+
+func _setup_focus_border() -> void:
+	_focus_border = Panel.new()
+	_focus_border.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_focus_border.z_index = 100
+	_focus_border.visible = false
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.6, 0.6, 0.6, 0)
+	style.draw_center = false
+	style.border_color = Color(1, 1, 1, 1)
+	style.set_corner_radius_all(16)
+	style.set_expand_margin_all(6)
+	style.shadow_color = Color(1, 1, 1, 1)
+	style.shadow_size = 12
+	_focus_border.add_theme_stylebox_override("panel", style)
+	add_child(_focus_border)
 
 func setup(title: String, message: String):
 	if not is_node_ready():
@@ -46,10 +98,7 @@ func setup(title: String, message: String):
 		if child != _button_template:
 			child.queue_free()
 	_buttons.clear()
-	_glow_styles.clear()
-	
-	# テンプレートからFocusスタイルを取得してGlow対象に追加（テンプレート自体は非表示だがアニメーション用）
-	# 実際のボタン追加時に個別に登録する
+	_focus_initialized = false
 
 func set_message(message: String):
 	if _message_label:
@@ -87,17 +136,14 @@ func add_button(text: String, callback: Callable = Callable(), should_grab_focus
 			style_pressed.bg_color = color_override.darkened(0.2)
 			btn.add_theme_stylebox_override("pressed", style_pressed)
 			
-	# FocusスタイルをGlowリストに追加
-	var style_focus = btn.get_theme_stylebox("focus")
-	if style_focus and style_focus is StyleBoxFlat:
-		# 複製しなくても良いが、個別にアニメーションさせるなら複製も可
-		# ここではTscnのリソースを共有している可能性があるため、複製して割り当てる
-		# (Tscnのリソースは共有されるため、全てのボタンが同期して明滅するのはOK)
-		# ただし、add_theme_stylebox_overrideしていない場合はテーマから取得されるので
-		# 明示的に複製してoverrideする
-		var new_focus = style_focus.duplicate()
-		btn.add_theme_stylebox_override("focus", new_focus)
-		_glow_styles.append(new_focus)
+	# Focusスタイルを透明化（共有フォーカス枠で管理）
+	var style_focus = StyleBoxFlat.new()
+	style_focus.bg_color = Color.TRANSPARENT
+	style_focus.draw_center = false
+	style_focus.border_color = Color.TRANSPARENT
+	style_focus.shadow_color = Color.TRANSPARENT
+	style_focus.shadow_size = 0
+	btn.add_theme_stylebox_override("focus", style_focus)
 	
 	var index = _buttons.size()
 	btn.pressed.connect(func():

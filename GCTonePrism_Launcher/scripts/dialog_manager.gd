@@ -52,24 +52,57 @@ func show_message(title: String, message: String, buttons: Array = [], callback:
 func _create_base_dialog() -> CommonDialog:
 	# 既存のダイアログがあれば閉じる
 	close_current_dialog()
-	
+
 	var dialog = CommonDialogScene.instantiate()
 	# CanvasLayer（自分自身）の下に追加
 	add_child(dialog)
 	_current_dialog = dialog
-	
+
 	# ダイアログ表示中はゲーム自体をポーズ
 	get_tree().paused = true
-	
+
+	# ズームフェードインアニメーション
+	_animate_dialog_in(dialog)
+
 	return dialog
+
+func _animate_dialog_in(dialog: Control) -> void:
+	var panel = dialog.get_node_or_null("Panel")
+	if not panel:
+		return
+	panel.pivot_offset = panel.size / 2.0
+	panel.scale = Vector2(1.08, 1.08)
+	panel.modulate = Color(1, 1, 1, 0)
+	var tween = create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(panel, "scale", Vector2.ONE, 0.25)\
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tween.tween_property(panel, "modulate:a", 1.0, 0.25)\
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 func close_current_dialog():
 	if _current_dialog != null:
-		_current_dialog.queue_free()
+		var dialog = _current_dialog
 		_current_dialog = null
-		
-		# ポーズ解除
+		_animate_dialog_out(dialog)
+
+func _animate_dialog_out(dialog: Control) -> void:
+	var panel = dialog.get_node_or_null("Panel")
+	if not panel:
+		dialog.queue_free()
 		get_tree().paused = false
+		return
+	panel.pivot_offset = panel.size / 2.0
+	var tween = create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(panel, "scale", Vector2(0.92, 0.92), 0.2)\
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	tween.tween_property(panel, "modulate:a", 0.0, 0.2)\
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	await tween.finished
+	if is_instance_valid(dialog):
+		dialog.queue_free()
+	get_tree().paused = false
 
 func is_dialog_showing() -> bool:
 	return _current_dialog != null

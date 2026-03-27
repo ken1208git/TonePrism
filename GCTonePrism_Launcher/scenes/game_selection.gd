@@ -46,6 +46,14 @@ var _games: Array[GameInfo] = []
 var _selected_index: int = 0
 var _active_index: int = 0
 
+# --- フォーカスモーフ用 ---
+var _focus_target_rect: Rect2 = Rect2()
+var _focus_target_radius: float = 24.0
+var _focus_current_radius: float = 24.0
+var _focus_initialized: bool = false
+var _focus_prev_target: Control = null
+var _focus_prev_target_pos: Vector2 = Vector2.ZERO
+
 func _ready():
 	# コンポーネント初期化（_process()で参照されるため、早期returnより先に生成）
 	_carousel = CarouselController.new()
@@ -64,10 +72,36 @@ func _ready():
 	# カルーセル生成
 	_carousel.create_cards(_games, _card_template, _carousel_container)
 
+	# フォーカス枠を最前面に
+	_static_focus_border.z_index = 100
+
 	# ボタンスタイル設定
 	_style_mgr.register_focus_border(_static_focus_border)
 	_style_mgr.setup_exit_button(_exit_button)
 	_style_mgr.setup_play_button(_play_button)
+
+	# 戻るボタン（ブラウズから来たときのみ表示）
+	if not AppState.return_scene.is_empty() and _exit_button:
+		var back_button = Button.new()
+		back_button.name = "BackButton"
+		back_button.text = "←"
+		back_button.custom_minimum_size = Vector2(60, 60)
+		back_button.add_theme_font_size_override("font_size", 28)
+		# 退出ボタンと同じスタイル
+		_style_mgr.setup_exit_button(back_button)
+		# 戻るアイコンを適用
+		back_button.text = ""
+		var back_icon = load("res://images/turn_back.png")
+		if back_icon:
+			back_button.icon = back_icon
+		back_button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		back_button.expand_icon = true
+		# 退出ボタンの前に挿入
+		var hbox = _exit_button.get_parent()
+		hbox.add_child(back_button)
+		hbox.move_child(back_button, _exit_button.get_index())
+		back_button.pressed.connect(func(): _go_back())
+		back_button.mouse_entered.connect(func(): back_button.grab_focus())
 
 	# ボタンシグナル
 	if _exit_button:
@@ -89,7 +123,7 @@ func _ready():
 	# 入力ハンドラのシグナル接続
 	_input_handler.selection_moved.connect(_on_selection_moved)
 	_input_handler.play_requested.connect(func(): if _play_button: _play_button.grab_focus())
-	_input_handler.exit_requested.connect(func(): IdleManager.transition_to_screensaver(get_tree()))
+	_input_handler.exit_requested.connect(func(): _go_back())
 	_input_handler.focus_to_card_requested.connect(_update_focus_to_current_card)
 	_input_handler.idle_reset_requested.connect(func(): _idle_mgr.reset())
 
@@ -155,6 +189,9 @@ func _process(delta):
 		_active_index = new_active
 		_update_focus_state()
 
+	# フォーカスモーフ更新
+	_update_focus_morph(delta)
+
 	# ボトムバーの表示切替
 	if _bottom_bar:
 		_bottom_bar.visible = not _input_handler.using_mouse
@@ -211,15 +248,37 @@ func _launch_game() -> void:
 		_static_focus_border, _carousel.card_nodes, _selected_index,
 		get_tree())
 
+func _go_back() -> void:
+	if not AppState.return_scene.is_empty():
+		var scene = AppState.return_scene
+		AppState.clear()
+		TransitionManager.change_scene(scene)
+	else:
+		IdleManager.transition_to_screensaver(get_tree())
+
 func _on_exit_button_pressed() -> void:
 	var callback = func(idx):
 		if idx == 1:
+			AppState.clear()
 			IdleManager.transition_to_screensaver(get_tree())
 	DialogManager.show_message("確認", "退出しますか？\nタイトル画面に戻ります。",
 		["キャンセル", "退出する"], callback,
 		[Color(0.3, 0.3, 0.3), Color(0.8, 0.2, 0.2)])
 
 func _load_games_from_db() -> bool:
+	# AppStateにフィルタ済みゲームがあればそちらを使用
+	if not AppState.filtered_games.is_empty():
+		_games = AppState.filtered_games
+		# initial_game_id に合わせて _selected_index を設定
+		if not AppState.initial_game_id.is_empty():
+			for i in range(_games.size()):
+				if _games[i].game_id == AppState.initial_game_id:
+					_selected_index = i
+					break
+		print("[GameSelection] ✅ AppStateからゲーム読み込み: %d 件 (セクション: %s)" % [_games.size(), AppState.section_title])
+		return true
+
+	# 従来のDB読み込み（フォールバック）
 	_db_manager = DatabaseManager.new()
 	var db_path = PathManager.get_database_path()
 	print("[GameSelection] データベース読み込み開始. ターゲットパス: ", db_path)
@@ -241,3 +300,79 @@ func _load_games_from_db() -> bool:
 
 	print("[GameSelection] ✅ DB読み込み完了: %d 件のゲームが見つかりました" % _games.size())
 	return true
+
+# --- フォーカスモーフ ---
+
+func _update_focus_morph(delta: float) -> void:
+	if not _static_focus_border:
+		return
+
+	# マウス操作中は非表示
+	if _input_handler.using_mouse:
+		_static_focus_border.visible = false
+		_focus_initialized = false
+		return
+
+	# フォーカスオーナーを取得して目標を決定
+	var focus_owner = get_viewport().gui_get_focus_owner()
+	if focus_owner == null:
+		_static_focus_border.visible = false
+		return
+
+	var target: Control = null
+	var target_radius: float = 24.0
+
+	if focus_owner is Panel and focus_owner in _carousel.card_nodes:
+		# カード → アクティブサイズで画面中央に固定（scaleアニメの影響を受けない）
+		target = focus_owner
+		target_radius = CarouselController.CORNER_RADIUS * CarouselController.SCALE_ACTIVE + CarouselController.FOCUS_MARGIN
+		var active_size = CarouselController.CARD_SIZE * CarouselController.SCALE_ACTIVE
+		var viewport_center = get_viewport_rect().size / 2
+		var container_center_x = _carousel_container.size.x / 2
+		_static_focus_border.visible = true
+		_focus_target_rect = Rect2(
+			Vector2(container_center_x - active_size.x / 2, viewport_center.y - active_size.y / 2),
+			active_size)
+		_focus_target_radius = target_radius
+	elif focus_owner is Button:
+		# ボタン（退出/戻る/プレイ）
+		target = focus_owner
+		target_radius = 18
+		_static_focus_border.visible = true
+		_focus_target_rect = target.get_global_rect()
+		_focus_target_radius = target_radius
+	else:
+		_static_focus_border.visible = false
+		return
+
+	# 初回は即座配置
+	if not _focus_initialized:
+		_static_focus_border.global_position = _focus_target_rect.position
+		_static_focus_border.size = _focus_target_rect.size
+		_focus_current_radius = _focus_target_radius
+		_focus_prev_target = target
+		_focus_prev_target_pos = _focus_target_rect.position
+		_focus_initialized = true
+		var style = _static_focus_border.get_theme_stylebox("panel") as StyleBoxFlat
+		if style:
+			style.set_corner_radius_all(int(_focus_current_radius))
+		return
+
+	# 同じターゲットの位置変化（カードアニメーション等）は即座反映
+	if target == _focus_prev_target:
+		var target_delta = _focus_target_rect.position - _focus_prev_target_pos
+		_static_focus_border.global_position += target_delta
+
+	# lerpで補間
+	var speed = delta * 25.0
+	_static_focus_border.global_position = _static_focus_border.global_position.lerp(
+		_focus_target_rect.position, speed)
+	_static_focus_border.size = _static_focus_border.size.lerp(
+		_focus_target_rect.size, speed)
+	_focus_current_radius = lerpf(_focus_current_radius, _focus_target_radius, speed)
+	var style = _static_focus_border.get_theme_stylebox("panel") as StyleBoxFlat
+	if style:
+		style.set_corner_radius_all(int(_focus_current_radius))
+
+	_focus_prev_target = target
+	_focus_prev_target_pos = _focus_target_rect.position

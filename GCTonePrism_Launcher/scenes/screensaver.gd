@@ -62,7 +62,7 @@ func _input(event):
 
 ## ゲーム選択画面に遷移
 func _transition_to_game_selection():
-	get_tree().change_scene_to_file("res://scenes/game_selection.tscn")
+	TransitionManager.change_scene("res://scenes/store_browse.tscn")
 
 ## ロゴ表示画面に遷移
 func _transition_to_logo_display():

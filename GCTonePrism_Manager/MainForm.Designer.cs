@@ -35,6 +35,8 @@ namespace GCTonePrism.Manager
             this.btnDeleteGame = new System.Windows.Forms.ToolStripButton();
             this.toolStripSeparator2 = new System.Windows.Forms.ToolStripSeparator();
             this.btnRefresh = new System.Windows.Forms.ToolStripButton();
+            this.toolStripSeparator4 = new System.Windows.Forms.ToolStripSeparator();
+            this.btnStoreSections = new System.Windows.Forms.ToolStripButton();
             this.menuStrip1 = new System.Windows.Forms.MenuStrip();
             this.menuSettings = new System.Windows.Forms.ToolStripMenuItem();
             this.menuItemResetDatabase = new System.Windows.Forms.ToolStripMenuItem();
@@ -58,7 +60,9 @@ namespace GCTonePrism.Manager
             this.btnVersionUp,
             this.btnDeleteGame,
             this.toolStripSeparator2,
-            this.btnRefresh});
+            this.btnRefresh,
+            this.toolStripSeparator4,
+            this.btnStoreSections});
             this.toolStrip1.Location = new System.Drawing.Point(0, 28);
             this.toolStrip1.Name = "toolStrip1";
             this.toolStrip1.Size = new System.Drawing.Size(1000, 27);
@@ -109,7 +113,20 @@ namespace GCTonePrism.Manager
             this.btnRefresh.Size = new System.Drawing.Size(39, 24);
             this.btnRefresh.Text = "更新";
             this.btnRefresh.Click += new System.EventHandler(this.btnRefresh_Click);
-            // 
+            //
+            // toolStripSeparator4
+            //
+            this.toolStripSeparator4.Name = "toolStripSeparator4";
+            this.toolStripSeparator4.Size = new System.Drawing.Size(6, 27);
+            //
+            // btnStoreSections
+            //
+            this.btnStoreSections.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this.btnStoreSections.Name = "btnStoreSections";
+            this.btnStoreSections.Size = new System.Drawing.Size(75, 24);
+            this.btnStoreSections.Text = "ストア管理";
+            this.btnStoreSections.Click += new System.EventHandler(this.btnStoreSections_Click);
+            //
             // menuStrip1
             // 
             this.menuStrip1.ImageScalingSize = new System.Drawing.Size(20, 20);
@@ -222,6 +239,8 @@ namespace GCTonePrism.Manager
         private System.Windows.Forms.ToolStripButton btnDeleteGame;
         private System.Windows.Forms.ToolStripSeparator toolStripSeparator2;
         private System.Windows.Forms.ToolStripButton btnRefresh;
+        private System.Windows.Forms.ToolStripSeparator toolStripSeparator4;
+        private System.Windows.Forms.ToolStripButton btnStoreSections;
         private System.Windows.Forms.MenuStrip menuStrip1;
         private System.Windows.Forms.ToolStripMenuItem menuSettings;
         private System.Windows.Forms.ToolStripMenuItem menuItemResetDatabase;

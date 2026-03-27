@@ -106,8 +106,6 @@ namespace GCTonePrism.Manager
             txtGameFolder.Text = gameFolder;
 
 
-            // 警告ラベルを非表示
-            lblGameIdWarning.Visible = false;
 
             // 既存の製作者情報をコピー
             if (originalGame.Developers != null)
@@ -623,6 +621,7 @@ namespace GCTonePrism.Manager
 
         private void btnTestRun_Click(object sender, EventArgs e) =>
             GameFormHelper.TestRunGame(txtExecutablePath.Text.Trim(), txtArguments.Text, gameFolder);
+
     }
 }
 

@@ -66,8 +66,6 @@ namespace GCTonePrism.Manager
                 clbGenre.Items.Add(genre, false);
             }
 
-            // 初期状態では警告を非表示、OKボタンを有効化
-            lblGameIdWarning.Visible = false;
             btnOK.Enabled = true;
 
             // リリース年の初期値を今年に設定

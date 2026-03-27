@@ -60,31 +60,26 @@ func setup_exit_button(exit_button: Button) -> void:
 	style_pressed.bg_color = Color(0.7, 0.7, 0.7, 1.0)
 	exit_button.add_theme_stylebox_override("pressed", style_pressed)
 
-	# フォーカス（白い輪っか + グロー）
+	# フォーカス（透明 — 共有フォーカス枠で管理）
 	var style_focus = StyleBoxFlat.new()
 	style_focus.bg_color = Color.TRANSPARENT
 	style_focus.draw_center = false
-	style_focus.border_width_left = 0
-	style_focus.border_width_top = 0
-	style_focus.border_width_right = 0
-	style_focus.border_width_bottom = 0
-	style_focus.border_color = Color.WHITE
-	style_focus.expand_margin_left = 6
-	style_focus.expand_margin_right = 6
-	style_focus.expand_margin_top = 6
-	style_focus.expand_margin_bottom = 6
-	style_focus.set_corner_radius_all(18)
-	style_focus.shadow_color = Color(1, 1, 1, 0.5)
-	style_focus.shadow_size = 12
-	style_focus.shadow_offset = Vector2(0, 0)
-
-	add_glow_style(style_focus)
+	style_focus.border_color = Color.TRANSPARENT
+	style_focus.shadow_color = Color.TRANSPARENT
+	style_focus.shadow_size = 0
 	exit_button.add_theme_stylebox_override("focus", style_focus)
 
-	# フォーカス制御 (Self-loop)
-	exit_button.focus_neighbor_left = exit_button.get_path()
-	exit_button.focus_neighbor_right = exit_button.get_path()
-	exit_button.focus_neighbor_top = exit_button.get_path()
+	# フォーカス制御 (Self-loop) - シーンツリーに追加後に設定
+	if exit_button.is_inside_tree():
+		exit_button.focus_neighbor_left = exit_button.get_path()
+		exit_button.focus_neighbor_right = exit_button.get_path()
+		exit_button.focus_neighbor_top = exit_button.get_path()
+	else:
+		exit_button.ready.connect(func():
+			exit_button.focus_neighbor_left = exit_button.get_path()
+			exit_button.focus_neighbor_right = exit_button.get_path()
+			exit_button.focus_neighbor_top = exit_button.get_path()
+		, CONNECT_ONE_SHOT)
 
 ## プレイボタンのスタイルを設定する
 func setup_play_button(play_button: Button) -> void:
@@ -104,26 +99,13 @@ func setup_play_button(play_button: Button) -> void:
 	style_hover.bg_color = Color(0.2, 0.8, 0.2, 1.0)
 	play_button.add_theme_stylebox_override("hover", style_hover)
 
-	# フォーカス（白枠 + グロー）
+	# フォーカス（透明 — 共有フォーカス枠で管理）
 	var style_focus = StyleBoxFlat.new()
 	style_focus.bg_color = Color.TRANSPARENT
 	style_focus.draw_center = false
-	style_focus.border_width_left = 0
-	style_focus.border_width_top = 0
-	style_focus.border_width_right = 0
-	style_focus.border_width_bottom = 0
-	style_focus.border_color = Color.WHITE
-	var focus_margin = 8
-	style_focus.expand_margin_left = focus_margin
-	style_focus.expand_margin_right = focus_margin
-	style_focus.expand_margin_top = focus_margin
-	style_focus.expand_margin_bottom = focus_margin
-	style_focus.set_corner_radius_all(10 + focus_margin)
-	style_focus.shadow_color = Color(1, 1, 1, 0.5)
-	style_focus.shadow_size = 8
-	style_focus.shadow_offset = Vector2(0, 0)
-
-	add_glow_style(style_focus)
+	style_focus.border_color = Color.TRANSPARENT
+	style_focus.shadow_color = Color.TRANSPARENT
+	style_focus.shadow_size = 0
 	play_button.add_theme_stylebox_override("focus", style_focus)
 
 	# 押下
