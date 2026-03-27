@@ -11,6 +11,28 @@
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.5.0] - 2026-03-27
+
+#### Added
+
+- **StoreBrowse画面を新規導入**
+  - `store_browse.tscn` / `store_browse.gd` / `store_browse_builder.gd` / `store_section_info.gd` を追加
+  - `manual/popular/recent/recently_played/genre/players/difficulty/play_time/online/random/controller` セクションの表示に対応
+- **画面遷移制御を追加**
+  - `AppState` と `TransitionManager` をAutoLoad登録
+  - `screensaver -> store_browse -> game_selection` の遷移フローと戻り導線を実装
+
+#### Changed
+
+- **UI/操作性を改善**
+  - `game_selection` / `common_dialog` / `error_dialog` のフォーカス表示と遷移演出を調整
+  - コントローラ操作時の視認性を改善
+- **DBスキーマをv8へ更新**
+  - `CURRENT_DB_VERSION` を8に更新
+  - `store_sections` / `store_section_games` 取得APIを追加
+- **アプリ名設定を更新**
+  - `project.godot` の `config/name` をプロジェクト意図に合わせて変更
+
 ### [Launcher v0.4.6] - 2026-03-21
 
 #### Changed
@@ -222,6 +244,25 @@
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.7.0] - 2026-03-27
+
+#### Added
+
+- **StoreSection管理機能を追加**
+  - `StoreSectionInfo` / `StoreSectionRepository` / `StoreSectionForm` / `StoreSectionListForm` を追加
+  - セクションの追加・編集・削除・並び替え、`manual` セクションの `display_text` 管理を実装
+- **MainFormにストア管理導線を追加**
+  - ツールバーからStoreSection一覧を開けるように変更
+
+#### Changed
+
+- **DBスキーマをv8へ更新**
+  - `V6 -> V7`: `store_sections` / `store_section_games` テーブルを追加
+  - `V7 -> V8`: `store_sections.display_text` 列を追加
+  - `DatabaseManager` にStoreSection操作APIを追加
+- **ゲーム管理フォーム差分を反映**
+  - `AddGameForm` / `EditGameForm` / `VersionUpForm` のフォーム本体・Designer・resx差分を反映
 
 ### [Manager v0.6.2] - 2026-03-21
 
@@ -537,7 +578,9 @@
 ---
 
 [Launcher Unreleased]: https://github.com/ken1208git/GCTonePrism/compare/launcher-v1.0.0...HEAD
+[Launcher v0.5.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/launcher-v0.5.0
 [Launcher v0.4.5]: https://github.com/ken1208git/GCTonePrism/releases/tag/launcher-v0.4.5
 [Launcher v0.4.4]: https://github.com/ken1208git/GCTonePrism/releases/tag/launcher-v0.4.4
+[Manager v0.7.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.7.0
 [Manager v0.1.1]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.1.1
 [Manager v0.1.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.1.0
