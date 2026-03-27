@@ -71,7 +71,7 @@ namespace GCTonePrism.Manager.Repositories
                             game_id, title, description, release_year, genre,
                             min_players, max_players, difficulty, play_time, controller_support, supported_connection,
                             thumbnail_path, background_path, executable_path,
-                            display_order, is_visible, controls, key_mapping, version
+                            display_order, is_visible, controls, key_mapping, arguments, version
                         FROM games
                         WHERE game_id = @gameId";
 
@@ -127,12 +127,12 @@ namespace GCTonePrism.Manager.Repositories
                                     game_id, title, description, release_year, genre,
                                     min_players, max_players, difficulty, play_time, controller_support, supported_connection,
                                     thumbnail_path, background_path, executable_path,
-                                    display_order, is_visible, controls, key_mapping, version
+                                    display_order, is_visible, controls, key_mapping, arguments, version
                                 ) VALUES (
                                     @gameId, @title, @description, @releaseYear, @genre,
                                     @minPlayers, @maxPlayers, @difficulty, @playTime, @controllerSupport, @supportedConnection,
                                     @thumbnailPath, @backgroundPath, @executablePath,
-                                    @displayOrder, @isVisible, @controls, @keyMapping, @version
+                                    @displayOrder, @isVisible, @controls, @keyMapping, @arguments, @version
                                 )";
 
                             using (var command = new SQLiteCommand(insertGame, connection, transaction))
@@ -193,7 +193,6 @@ namespace GCTonePrism.Manager.Repositories
                             using (var command = new SQLiteCommand(updateGame, connection, transaction))
                             {
                                 SetGameParameters(command, game);
-                                command.Parameters.AddWithValue("@arguments", game.Arguments ?? (object)DBNull.Value);
                                 command.ExecuteNonQuery();
                             }
 
@@ -315,6 +314,7 @@ namespace GCTonePrism.Manager.Repositories
             command.Parameters.AddWithValue("@isVisible", game.IsVisible ? 1 : 0);
             command.Parameters.AddWithValue("@controls", game.Controls ?? (object)DBNull.Value);
             command.Parameters.AddWithValue("@keyMapping", game.KeyMapping ?? (object)DBNull.Value);
+            command.Parameters.AddWithValue("@arguments", game.Arguments ?? (object)DBNull.Value);
             command.Parameters.AddWithValue("@version", game.Version ?? (object)DBNull.Value);
         }
 
