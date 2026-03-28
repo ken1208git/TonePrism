@@ -15,9 +15,14 @@ func _notification(what):
 		_handle_quit_request()
 
 func _handle_quit_request():
+	# エラーダイアログ表示中は確認なしで即終了（スタッフ対応中）
+	if ErrorManager.is_error_showing():
+		_quit_application()
+		return
+
 	# 終了リクエストが来た場合（Alt+F4やウィンドウの×ボタン）
 	var msg = "【警告】アプリケーションを終了します\n\nこの操作は管理者（スタッフ）用です。\n通常、この画面を閉じる必要はありません。\n\n本当に終了してもよろしいですか？"
-	
+
 	# 既存のダイアログがあれば閉じてから出す
 	DialogManager.close_current_dialog()
 	

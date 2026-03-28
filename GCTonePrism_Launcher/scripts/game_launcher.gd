@@ -25,7 +25,7 @@ func launch_game(game: GameInfo, status_label: Label, running_overlay: Control,
 
 	if exe_path.is_empty():
 		print("❌ Executable not found: ", game.executable_path)
-		DialogManager.show_message("起動エラー", "実行ファイルが見つかりませんでした。\n%s" % game.executable_path)
+		ErrorManager.show_error(ErrorCode.GAME_EXECUTABLE_NOT_FOUND)
 		return
 
 	var args = _parse_arguments(game.arguments)
@@ -64,19 +64,8 @@ func launch_game(game: GameInfo, status_label: Label, running_overlay: Control,
 
 	if pid == -1:
 		print("❌ Failed to create process.")
-		DialogManager.show_message("起動エラー", "ゲームの起動に失敗しました。")
-		if running_overlay:
-			running_overlay.visible = false
-		if carousel_container:
-			carousel_container.visible = true
-		if info_panel:
-			info_panel.visible = true
-		if top_bar:
-			top_bar.visible = true
-		if static_focus_border:
-			static_focus_border.visible = true
-		for card in card_nodes:
-			card.visible = true
+		ErrorManager.show_error(ErrorCode.GAME_EXECUTION_FAILED)
+		return
 	else:
 		print("✅ Process started. PID: %d" % pid)
 		running_pid = pid

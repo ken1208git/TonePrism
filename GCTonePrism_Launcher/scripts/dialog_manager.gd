@@ -67,6 +67,9 @@ func _create_base_dialog() -> CommonDialog:
 	return dialog
 
 func _animate_dialog_in(dialog: Control) -> void:
+	var overlay = dialog.get_node_or_null("Overlay")
+	if overlay:
+		overlay.color = Color(0, 0, 0, 0)
 	var panel = dialog.get_node_or_null("Panel")
 	if not panel:
 		return
@@ -79,6 +82,9 @@ func _animate_dialog_in(dialog: Control) -> void:
 		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tween.tween_property(panel, "modulate:a", 1.0, 0.25)\
 		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	if overlay:
+		tween.tween_property(overlay, "color:a", 0.784314, 0.25)\
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 func close_current_dialog():
 	if _current_dialog != null:
@@ -87,6 +93,7 @@ func close_current_dialog():
 		_animate_dialog_out(dialog)
 
 func _animate_dialog_out(dialog: Control) -> void:
+	var overlay = dialog.get_node_or_null("Overlay")
 	var panel = dialog.get_node_or_null("Panel")
 	if not panel:
 		dialog.queue_free()
@@ -100,6 +107,9 @@ func _animate_dialog_out(dialog: Control) -> void:
 		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
 	tween.tween_property(panel, "modulate:a", 0.0, 0.2)\
 		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	if overlay:
+		tween.tween_property(overlay, "color:a", 0.0, 0.2)\
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
 	await tween.finished
 	if is_instance_valid(dialog):
 		dialog.queue_free()
