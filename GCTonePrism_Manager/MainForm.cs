@@ -25,10 +25,6 @@ namespace GCTonePrism.Manager
             _storeSectionPanel = new StoreSectionPanel { Dock = DockStyle.Fill };
             _settingsSectionPanel = new SettingsSectionPanel { Dock = DockStyle.Fill };
 
-            _gameSectionPanel.Initialize(dbManager);
-            _storeSectionPanel.Initialize(dbManager);
-            _settingsSectionPanel.Initialize(dbManager);
-
             _gameSectionPanel.StatusChanged += (msg) => UpdateStatusBar(msg);
             _settingsSectionPanel.DatabaseReset += OnDatabaseReset;
 
@@ -74,9 +70,14 @@ namespace GCTonePrism.Manager
             else
             {
                 dbManager.InitializeDatabase();
-                _gameSectionPanel.LoadGames();
             }
 
+            // DB確認後にパネルを初期化（DB存在前のアクセスを防止）
+            _gameSectionPanel.Initialize(dbManager);
+            _storeSectionPanel.Initialize(dbManager);
+            _settingsSectionPanel.Initialize(dbManager);
+
+            _gameSectionPanel.LoadGames();
             UpdateStatusBar();
         }
 
@@ -90,9 +91,6 @@ namespace GCTonePrism.Manager
                 MessageBox.Show(
                     "データベースの初期化が完了しました。",
                     "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
-
-                _gameSectionPanel.LoadGames();
-                UpdateStatusBar();
             }
             catch (Exception ex)
             {

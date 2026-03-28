@@ -249,10 +249,12 @@ func _launch_game() -> void:
 		get_tree())
 
 func _go_back() -> void:
+	if TransitionManager._transitioning:
+		return
 	if not AppState.return_scene.is_empty():
 		var scene = AppState.return_scene
-		AppState.clear()
 		TransitionManager.change_scene(scene)
+		AppState.clear()
 	else:
 		IdleManager.transition_to_screensaver(get_tree())
 
