@@ -20,6 +20,7 @@ var _focus_current_radius: float = 16.0
 var _focus_initialized: bool = false
 var _focus_prev_target: Control = null
 var _focus_prev_target_pos: Vector2 = Vector2.ZERO
+var _mouse_mode: bool = false  # マウス操作中はフォーカス枠を非表示
 
 func _process(delta):
 	if not _focus_border:
@@ -27,6 +28,9 @@ func _process(delta):
 
 	# フォーカスオーナーを取得してモーフ
 	var focus_owner = get_viewport().gui_get_focus_owner()
+	if _mouse_mode:
+		_focus_border.visible = false
+		return
 	if focus_owner is Button and focus_owner in _buttons:
 		_focus_border.visible = true
 		_focus_target_rect = focus_owner.get_global_rect()
@@ -64,6 +68,12 @@ func _process(delta):
 		style.border_color = Color(1, 1, 1, glow_alpha)
 
 @onready var _button_template: Button = $Panel/MarginContainer/VBoxContainer/ButtonContainer/ButtonTemplate
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton or event is InputEventMouseMotion:
+		_mouse_mode = true
+	elif event is InputEventKey or event is InputEventJoypadButton or event is InputEventJoypadMotion:
+		_mouse_mode = false
 
 func _ready():
 	_title_label.text = ""

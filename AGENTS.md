@@ -21,4 +21,4 @@
 ## Launcher Verification
 - Launcher の動作確認は MCP を用いて行うこと。
 - Godot エディタのパスは以下を使用すること。
-  - `C:\Users\busin\Documents\Godot Engine\Godot_v4.5.1-stable_win64.exe`
+  - `C:\Users\busin\Documents\Godot Engine\Godot_v4.6.1-stable_win64.exe`
