@@ -245,6 +245,24 @@
 
 ## Manager（管理ソフト）
 
+### [Manager v0.7.1] - 2026-03-28
+
+#### Added
+
+- **ゲームID編集機能**: EditGameFormからゲームIDを変更可能に（全関連テーブルの一括更新+フォルダリネーム）
+
+#### Changed
+
+- **タブ+セクションパネル構成に分割**: MainFormをGameSectionPanel / StoreSectionPanel / SettingsSectionPanelに分離
+- **プロジェクト名をGCTonePrism_Managerに統一**: slnx / csproj / AssemblyName をリネーム
+
+#### Fixed
+
+- **ゲームID変更時のDB制約エラー**: PRAGMA foreign_keysをトランザクション外で制御するよう修正
+- **DataGridViewの初期選択ハイライト解除**: ゲーム・ストア一覧で起動時の意図しない行選択を解消
+- **行ヘッダー（三角マーク）非表示**: ゲーム・ストア一覧で左端の行ヘッダーを非表示に
+- **列ヘッダーの選択ハイライト無効化**: セル選択時に列ヘッダーが青くならないよう修正
+
 ### [Manager v0.7.0] - 2026-03-27
 
 #### Added
