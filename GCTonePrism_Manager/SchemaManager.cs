@@ -124,7 +124,7 @@ namespace GCTonePrism.Manager
                     genre TEXT,
                     min_players INTEGER,
                     max_players INTEGER,
-                    difficulty INTEGER CHECK(difficulty BETWEEN 1 AND 5),
+                    difficulty INTEGER CHECK(difficulty BETWEEN 1 AND 3),
                     play_time INTEGER,
                     controller_support INTEGER DEFAULT 0,
                     supported_connection INTEGER DEFAULT 0,

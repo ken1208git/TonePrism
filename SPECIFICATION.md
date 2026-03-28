@@ -1197,9 +1197,9 @@ graph TB
 
 - **ゲーム情報データ**: `games`テーブルに格納（ゲームの基本情報、メタデータなど）
 - **製作者情報データ**: `developers`テーブルに格納（ゲームと多対多の関係）
-- **プレイ記録データ**: `play_records`テーブルに格納（プレイ回数、プレイ時間など）
-- **アンケートデータ**: `surveys`テーブルに格納（アンケート結果）
-- **設定データ**: `settings`テーブルに格納（システム設定、カラーテーマなど）
+- **プレイ記録データ**: `play_records`テーブルに格納（イベントログ方式：プレイ開始/終了時刻、プレイ時間、プレイヤー数）
+- **アンケートデータ**: `surveys`テーブル（ゲーム別：★評価+コメント）、`launcher_surveys`テーブル（全体：★評価+お気に入りゲーム+コメント）に格納
+- **設定データ**: `settings`テーブルに格納（キーバリューストア形式）
 
 各データのフィールド定義とリレーションについては、**7.3 SQLiteデータベース設計**を参照してください。
 
@@ -1322,24 +1322,31 @@ prism.db (SQLiteデータベースファイル)
   │    ├─ first_name
   │    └─ grade
 
-  ├─ play_recordsテーブル (プレイ記録)
+  ├─ play_recordsテーブル (プレイ記録・イベントログ方式)
   │    ├─ id (PRIMARY KEY, AUTOINCREMENT)
   │    ├─ game_id (FOREIGN KEY → games.game_id)
-  │    ├─ play_count
-  │    ├─ total_play_time
-  │    └─ last_played_at
+  │    ├─ start_time
+  │    ├─ end_time
+  │    ├─ play_duration
+  │    └─ player_count
 
-  ├─ surveysテーブル (アンケート結果)
-  │    ├─ id (PRIMARY KEY, UUID)
+  ├─ surveysテーブル (ゲーム別アンケート)
+  │    ├─ id (PRIMARY KEY, AUTOINCREMENT)
   │    ├─ game_id (FOREIGN KEY → games.game_id)
-  │    ├─ submitted_at
-  │    └─ responses (JSON形式)
+  │    ├─ rating (1-5)
+  │    ├─ comment
+  │    └─ created_at
 
-  └─ settingsテーブル (システム設定)
-       ├─ id (PRIMARY KEY, 常に1)
-       ├─ color_theme (JSON形式)
-       ├─ launcher_settings (JSON形式)
-       └─ filter_settings (JSON形式)
+  ├─ launcher_surveysテーブル (ランチャー全体アンケート)
+  │    ├─ id (PRIMARY KEY, AUTOINCREMENT)
+  │    ├─ rating (1-5)
+  │    ├─ favorite_game_id (FOREIGN KEY → games.game_id)
+  │    ├─ comment
+  │    └─ created_at
+
+  └─ settingsテーブル (システム設定・KVS形式)
+       ├─ key (PRIMARY KEY)
+       └─ value
 ```
 
 ### 7.3 SQLiteデータベース設計
@@ -1382,66 +1389,160 @@ SQLiteデータベースのテーブル設計：
   | カラム名 | データ型 | 制約 | 説明 |
   | --- | --- | --- | --- |
   | id | INTEGER | PRIMARY KEY AUTOINCREMENT | 製作者ID |
-  | game_id | TEXT | NOT NULL, FOREIGN KEY | ゲームID（games.game_idを参照） |
+  | game_id | TEXT | FOREIGN KEY | ゲームID（games.game_idを参照） |
   | last_name | TEXT | | 姓（NULL可） |
   | first_name | TEXT | NOT NULL | 名 |
   | grade | TEXT | | 学年（0を指定すると「教員」と表記） |
+  | version_id | INTEGER | | バージョンID（バージョンごとの製作者管理用） |
 
 #### テーブル3: play_records
 
 - **テーブル名**: `play_records`
-- **説明**: プレイ記録を格納するテーブル
+- **説明**: プレイ記録を格納するテーブル（イベントログ方式：プレイごとに1行記録）
 - **カラム**:
 
   | カラム名 | データ型 | 制約 | 説明 |
   | --- | --- | --- | --- |
   | id | INTEGER | PRIMARY KEY AUTOINCREMENT | レコードID |
-  | game_id | TEXT | NOT NULL, FOREIGN KEY | ゲームID（games.game_idを参照） |
-  | play_count | INTEGER | DEFAULT 0 | プレイ回数 |
-  | total_play_time | INTEGER | DEFAULT 0 | 総プレイ時間（秒） |
-  | last_played_at | TEXT | | 最終プレイ日時（ISO8601形式） |
+  | game_id | TEXT | FOREIGN KEY | ゲームID（games.game_idを参照） |
+  | start_time | TEXT | | プレイ開始日時（ISO8601形式） |
+  | end_time | TEXT | | プレイ終了日時（ISO8601形式） |
+  | play_duration | INTEGER | | プレイ時間（秒） |
+  | player_count | INTEGER | | プレイヤー数 |
 
 #### テーブル4: surveys
 
 - **テーブル名**: `surveys`
-- **説明**: アンケート結果を格納するテーブル
+- **説明**: ゲーム別アンケート結果を格納するテーブル（★評価+コメント形式）
 - **カラム**:
 
   | カラム名 | データ型 | 制約 | 説明 |
   | --- | --- | --- | --- |
-  | id | TEXT | PRIMARY KEY | アンケートID（UUID） |
-  | game_id | TEXT | NOT NULL, FOREIGN KEY | ゲームID（games.game_idを参照） |
-  | submitted_at | TEXT | NOT NULL | 提出日時（ISO8601形式） |
-  | responses | TEXT | | 回答内容（JSON形式） |
+  | id | INTEGER | PRIMARY KEY AUTOINCREMENT | アンケートID |
+  | game_id | TEXT | FOREIGN KEY | ゲームID（games.game_idを参照） |
+  | rating | INTEGER | CHECK(rating BETWEEN 1 AND 5) | ★評価（1〜5段階） |
+  | comment | TEXT | | コメント |
+  | created_at | TEXT | DEFAULT CURRENT_TIMESTAMP | 回答日時 |
 
 #### テーブル5: settings
 
 - **テーブル名**: `settings`
-- **説明**: システム設定を格納するテーブル（単一行テーブル）
+- **説明**: システム設定を格納するテーブル（キーバリューストア形式）
 - **カラム**:
 
   | カラム名 | データ型 | 制約 | 説明 |
   | --- | --- | --- | --- |
-  | id | INTEGER | PRIMARY KEY CHECK(id = 1) | 設定ID（常に1） |
-  | color_theme | TEXT | | カラーテーマ設定（JSON形式） |
-  | launcher_settings | TEXT | | ランチャー設定（JSON形式） |
-  | filter_settings | TEXT | | フィルター設定（JSON形式） |
+  | key | TEXT | PRIMARY KEY | 設定キー |
+  | value | TEXT | | 設定値（JSON形式も可） |
+
+#### テーブル6: game_versions
+
+- **テーブル名**: `game_versions`
+- **説明**: ゲームのバージョン管理テーブル（バージョンごとに実行ファイル・画像・メタデータを管理）
+- **カラム**:
+
+  | カラム名 | データ型 | 制約 | 説明 |
+  | --- | --- | --- | --- |
+  | id | INTEGER | PRIMARY KEY AUTOINCREMENT | バージョンID |
+  | game_id | TEXT | NOT NULL, FOREIGN KEY | ゲームID（games.game_idを参照） |
+  | version | TEXT | NOT NULL | バージョン文字列 |
+  | executable_path | TEXT | NOT NULL | 実行ファイルのパス（相対パス） |
+  | arguments | TEXT | | 起動引数 |
+  | description | TEXT | | バージョン説明 |
+  | title | TEXT | | タイトル（バージョン別） |
+  | genre | TEXT | | ジャンル（バージョン別） |
+  | min_players | INTEGER | | 最小プレイヤー数（バージョン別） |
+  | max_players | INTEGER | | 最大プレイヤー数（バージョン別） |
+  | difficulty | INTEGER | | 難易度（バージョン別） |
+  | play_time | INTEGER | | プレイ時間分類（バージョン別） |
+  | controller_support | INTEGER | DEFAULT 0 | コントローラーサポート（バージョン別） |
+  | supported_connection | INTEGER | DEFAULT 0 | 通信対戦対応（バージョン別） |
+  | thumbnail_path | TEXT | | サムネイル画像パス（バージョン別） |
+  | background_path | TEXT | | 背景画像パス（バージョン別） |
+  | update_note | TEXT | | 更新ノート |
+  | registered_at | TEXT | NOT NULL | 登録日時 |
+
+#### テーブル7: game_genres
+
+- **テーブル名**: `game_genres`
+- **説明**: ジャンル正規化テーブル（gamesと多対多の関係）
+- **カラム**:
+
+  | カラム名 | データ型 | 制約 | 説明 |
+  | --- | --- | --- | --- |
+  | id | INTEGER | PRIMARY KEY AUTOINCREMENT | ID |
+  | game_id | TEXT | FOREIGN KEY | ゲームID（games.game_idを参照） |
+  | genre | TEXT | | ジャンル名 |
+
+#### テーブル8: store_sections
+
+- **テーブル名**: `store_sections`
+- **説明**: ストアセクション管理テーブル
+- **カラム**:
+
+  | カラム名 | データ型 | 制約 | 説明 |
+  | --- | --- | --- | --- |
+  | section_id | INTEGER | PRIMARY KEY AUTOINCREMENT | セクションID |
+  | title | TEXT | NOT NULL | セクションタイトル |
+  | section_type | INTEGER | DEFAULT 0 | セクション表示タイプ |
+  | section_source | TEXT | DEFAULT 'manual' | セクションのデータソース |
+  | display_order | INTEGER | DEFAULT 0 | 表示順序 |
+  | max_display_count | INTEGER | DEFAULT 5 | 最大表示件数 |
+  | is_visible | INTEGER | DEFAULT 1 | 表示/非表示 |
+
+#### テーブル9: store_section_games
+
+- **テーブル名**: `store_section_games`
+- **説明**: セクションとゲームの紐付けテーブル
+- **カラム**:
+
+  | カラム名 | データ型 | 制約 | 説明 |
+  | --- | --- | --- | --- |
+  | id | INTEGER | PRIMARY KEY AUTOINCREMENT | ID |
+  | section_id | INTEGER | NOT NULL, FOREIGN KEY | セクションID（store_sections.section_idを参照） |
+  | game_id | TEXT | NOT NULL, FOREIGN KEY | ゲームID（games.game_idを参照） |
+  | display_order | INTEGER | DEFAULT 0 | セクション内の表示順序 |
+  | display_text | TEXT | DEFAULT '' | 表示テキスト |
+
+#### テーブル10: launcher_surveys
+
+- **テーブル名**: `launcher_surveys`
+- **説明**: ランチャー全体アンケート結果を格納するテーブル（★評価+お気に入りゲーム+コメント）
+- **カラム**:
+
+  | カラム名 | データ型 | 制約 | 説明 |
+  | --- | --- | --- | --- |
+  | id | INTEGER | PRIMARY KEY AUTOINCREMENT | アンケートID |
+  | rating | INTEGER | CHECK(rating BETWEEN 1 AND 5) | ★評価（1〜5段階） |
+  | favorite_game_id | TEXT | FOREIGN KEY | お気に入りゲームID（games.game_idを参照、ON DELETE SET NULL） |
+  | comment | TEXT | | コメント |
+  | created_at | TEXT | DEFAULT CURRENT_TIMESTAMP | 回答日時 |
 
 ### 7.4 リレーション
 
 SQLiteデータベースの場合のリレーション：
 
 - `developers.game_id` → `games.game_id` (多対1)
+- `game_versions.game_id` → `games.game_id` (多対1)
+- `game_genres.game_id` → `games.game_id` (多対1)
 - `play_records.game_id` → `games.game_id` (多対1)
 - `surveys.game_id` → `games.game_id` (多対1)
+- `launcher_surveys.favorite_game_id` → `games.game_id` (多対1, ON DELETE SET NULL)
+- `store_section_games.section_id` → `store_sections.section_id` (多対1)
+- `store_section_games.game_id` → `games.game_id` (多対1)
 
 **ER図（SQLite版）**:
 
 ```mermaid
 erDiagram
     games ||--o{ developers : "has"
+    games ||--o{ game_versions : "has"
+    games ||--o{ game_genres : "has"
     games ||--o{ play_records : "has"
     games ||--o{ surveys : "has"
+    games ||--o{ store_section_games : "belongs to"
+    games ||--o{ launcher_surveys : "favorite"
+    store_sections ||--o{ store_section_games : "contains"
     games {
         TEXT game_id PK
         TEXT title
@@ -1456,6 +1557,21 @@ erDiagram
         TEXT executable_path
         INTEGER display_order
         INTEGER is_visible
+        TEXT controls
+        TEXT key_mapping
+        TEXT arguments
+    }
+    game_versions {
+        INTEGER id PK
+        TEXT game_id FK
+        TEXT version
+        TEXT executable_path
+        TEXT arguments
+        TEXT title
+        INTEGER difficulty
+        TEXT thumbnail_path
+        TEXT background_path
+        TEXT registered_at
     }
     developers {
         INTEGER id PK
@@ -1463,6 +1579,12 @@ erDiagram
         TEXT last_name
         TEXT first_name
         TEXT grade
+        INTEGER version_id
+    }
+    game_genres {
+        INTEGER id PK
+        TEXT game_id FK
+        TEXT genre
     }
     play_records {
         INTEGER id PK
@@ -1472,17 +1594,32 @@ erDiagram
         INTEGER play_duration
         INTEGER player_count
     }
-    game_genres {
-        INTEGER id PK
-        TEXT game_id FK
-        TEXT genre
-    }
     surveys {
         INTEGER id PK
         TEXT game_id FK
         INTEGER rating
         TEXT comment
         TEXT created_at
+    }
+    settings {
+        TEXT key PK
+        TEXT value
+    }
+    store_sections {
+        INTEGER section_id PK
+        TEXT title
+        INTEGER section_type
+        TEXT section_source
+        INTEGER display_order
+        INTEGER max_display_count
+        INTEGER is_visible
+    }
+    store_section_games {
+        INTEGER id PK
+        INTEGER section_id FK
+        TEXT game_id FK
+        INTEGER display_order
+        TEXT display_text
     }
     launcher_surveys {
         INTEGER id PK
@@ -1981,6 +2118,7 @@ GCTonePrism/
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
+| 2026-03-28 | 1.5.1 | DBスキーマ定義を実装に合わせて更新：play_records（累計方式→イベントログ方式）、surveys（JSON→★評価+コメント）、settings（単一行→KVS方式）、developers（version_id追加）。新テーブル5つ追記（game_versions, game_genres, store_sections, store_section_games, launcher_surveys）。ER図・リレーション・データ概要を全テーブル反映に更新。games.difficultyのDB制約をCHECK(1-5)→CHECK(1-3)に修正 | Kenshiro Kuroga & Claude |
 | 2026-03-28 | 1.5.0 | 監視ソフトウェア（GCTonePrism_Monitor）の仕様追加：2.3監視機能セクション新設（スタッフ呼び出し通知・PC状況一覧・異常検知・統計ダッシュボード・設定管理）、Launcher-Monitor間通信仕様、画面10-11仕様、マイルストーン9挿入（旧9〜12を10〜13に繰り下げ）、システム構成を2→3アプリに全体更新 | Kenshiro Kuroga & Claude |
 | 2026-02-09 | 1.4.0 | データベーススキーマ拡張（v6）：game_versionsテーブルの拡充、argumentsカラムおよびsupported_connectionカラムの追加、Manager v0.6.0/Launcher v0.4.1の機能追加（バージョン管理、テスト起動、プレビュー機能など）を包括的に反映 | Kenshiro Kuroga & Google Antigravity |
 | 2026-02-08 | 1.3.1 | データベース設計の更新：play_records（ログ形式）、settings（KVS形式）、surveys（★評価・コメント）、launcher_surveys（★評価・気に入ったゲーム・コメント）の仕様を実装および新要件に合わせて変更 | Kenshiro Kuroga & Google Antigravity |
