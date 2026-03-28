@@ -12,6 +12,9 @@ func _ready():
 var _dialog_scene = preload("res://scenes/components/error_dialog.tscn")
 var _current_dialog: Control = null
 
+func is_error_showing() -> bool:
+	return _current_dialog != null
+
 func show_error(code: int):
 	# 既に表示されている場合は何もしない
 	if _current_dialog != null:
@@ -31,6 +34,11 @@ func show_error(code: int):
 
 	_current_dialog = dialog
 
+	# オーバーレイフェードイン
+	var overlay = dialog.get_node_or_null("ColorRect")
+	if overlay:
+		overlay.color = Color(0, 0, 0, 0)
+
 	# ズームフェードインアニメーション
 	var panel = dialog.get_node_or_null("Panel")
 	if panel:
@@ -43,3 +51,6 @@ func show_error(code: int):
 			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 		tween.tween_property(panel, "modulate:a", 1.0, 0.25)\
 			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		if overlay:
+			tween.tween_property(overlay, "color:a", 0.784314, 0.25)\
+				.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)

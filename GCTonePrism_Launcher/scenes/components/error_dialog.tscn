@@ -16,46 +16,6 @@ corner_radius_top_right = 20
 corner_radius_bottom_right = 20
 corner_radius_bottom_left = 20
 
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_BtnNormal"]
-bg_color = Color(0.2, 0.2, 0.2, 1)
-corner_radius_top_left = 10
-corner_radius_top_right = 10
-corner_radius_bottom_right = 10
-corner_radius_bottom_left = 10
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_BtnHover"]
-bg_color = Color(0.26, 0.26, 0.26, 1)
-corner_radius_top_left = 10
-corner_radius_top_right = 10
-corner_radius_bottom_right = 10
-corner_radius_bottom_left = 10
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_BtnPressed"]
-bg_color = Color(0.14, 0.14, 0.14, 1)
-corner_radius_top_left = 10
-corner_radius_top_right = 10
-corner_radius_bottom_right = 10
-corner_radius_bottom_left = 10
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_BtnFocus"]
-bg_color = Color(0.6, 0.6, 0.6, 0)
-draw_center = false
-border_width_left = 0
-border_width_top = 0
-border_width_right = 0
-border_width_bottom = 0
-border_color = Color(1, 1, 1, 1)
-corner_radius_top_left = 16
-corner_radius_top_right = 16
-corner_radius_bottom_right = 16
-corner_radius_bottom_left = 16
-expand_margin_left = 6.0
-expand_margin_top = 6.0
-expand_margin_right = 6.0
-expand_margin_bottom = 6.0
-shadow_color = Color(1, 1, 1, 0.5)
-shadow_size = 12
-
 [node name="ErrorDialog" type="Control"]
 layout_mode = 3
 anchors_preset = 15
@@ -129,31 +89,3 @@ theme_override_fonts/font = ExtResource("2_font_reg")
 theme_override_font_sizes/font_size = 14
 text = "Error Code: 0000"
 horizontal_alignment = 2
-
-[node name="ButtonBox" type="HBoxContainer" parent="Panel/VBoxContainer"]
-layout_mode = 2
-theme_override_constants/separation = 20
-alignment = 1
-
-[node name="ExitButton" type="Button" parent="Panel/VBoxContainer/ButtonBox"]
-custom_minimum_size = Vector2(160, 50)
-layout_mode = 2
-theme_override_fonts/font = ExtResource("2_font_reg")
-theme_override_font_sizes/font_size = 20
-theme_override_styles/normal = SubResource("StyleBoxFlat_BtnNormal")
-theme_override_styles/hover = SubResource("StyleBoxFlat_BtnHover")
-theme_override_styles/pressed = SubResource("StyleBoxFlat_BtnPressed")
-theme_override_styles/focus = SubResource("StyleBoxFlat_BtnFocus")
-text = "終了 (Exit)"
-
-[node name="RetryButton" type="Button" parent="Panel/VBoxContainer/ButtonBox"]
-visible = false
-custom_minimum_size = Vector2(160, 50)
-layout_mode = 2
-theme_override_fonts/font = ExtResource("2_font_reg")
-theme_override_font_sizes/font_size = 20
-theme_override_styles/normal = SubResource("StyleBoxFlat_BtnNormal")
-theme_override_styles/hover = SubResource("StyleBoxFlat_BtnHover")
-theme_override_styles/pressed = SubResource("StyleBoxFlat_BtnPressed")
-theme_override_styles/focus = SubResource("StyleBoxFlat_BtnFocus")
-text = "再試行 (Retry)"
