@@ -11,6 +11,13 @@
   2. 変更者の記載をどうするか（ユーザー名 or 共同作業の場合の記載方法）
 - バージョン番号は既存の変更履歴の最新バージョンをインクリメントすること。
 
+## Session Start
+- セッション開始時に `README.md`、`SPECIFICATION.md`、`CHANGELOG.md` をくまなく読むこと。
+
+## Launcher Implementation
+- ユーザーが調整しやすいよう、UIやレイアウトはなるべく `.tscn`（シーンファイル）で実装すること。
+- 変数はなるべく `@export` で定義し、エディタから調整可能にすること。
+
 ## Launcher Verification
 - Launcher の動作確認は MCP を用いて行うこと。
 - Godot エディタのパスは以下を使用すること。
