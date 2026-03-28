@@ -41,6 +41,8 @@ namespace GCTonePrism.Manager
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
 
+            bool dbReady = false;
+
             if (!dbManager.DatabaseExists())
             {
                 var result = MessageBox.Show(
@@ -52,6 +54,7 @@ namespace GCTonePrism.Manager
                 if (result == DialogResult.Yes)
                 {
                     InitializeDatabase();
+                    dbReady = true;
                 }
             }
             else if (!dbManager.TablesExist())
@@ -65,11 +68,19 @@ namespace GCTonePrism.Manager
                 if (result == DialogResult.Yes)
                 {
                     InitializeDatabase();
+                    dbReady = true;
                 }
             }
             else
             {
                 dbManager.InitializeDatabase();
+                dbReady = true;
+            }
+
+            if (!dbReady)
+            {
+                UpdateStatusBar("データベース未初期化");
+                return;
             }
 
             // DB確認後にパネルを初期化（DB存在前のアクセスを防止）

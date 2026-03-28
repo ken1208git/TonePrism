@@ -428,6 +428,7 @@ namespace GCTonePrism.Manager
                     string oldFolder = PathManager.GetGameFolder(oldGameId);
                     string newFolder = PathManager.GetGameFolder(newGameId);
 
+                    bool folderRenamed = false;
                     if (System.IO.Directory.Exists(oldFolder))
                     {
                         if (System.IO.Directory.Exists(newFolder))
@@ -435,10 +436,23 @@ namespace GCTonePrism.Manager
                             throw new InvalidOperationException($"フォルダ「{newFolder}」が既に存在します。");
                         }
                         System.IO.Directory.Move(oldFolder, newFolder);
+                        folderRenamed = true;
                     }
 
                     // フォルダリネーム成功後にDB側のID更新（重複チェック含む）
-                    dbManager.UpdateGameId(oldGameId, newGameId);
+                    try
+                    {
+                        dbManager.UpdateGameId(oldGameId, newGameId);
+                    }
+                    catch
+                    {
+                        // DB更新失敗時はフォルダを元に戻す
+                        if (folderRenamed)
+                        {
+                            System.IO.Directory.Move(newFolder, oldFolder);
+                        }
+                        throw;
+                    }
 
                     // gameFolderを更新（以降のパス処理で使用）
                     gameFolder = newFolder;
