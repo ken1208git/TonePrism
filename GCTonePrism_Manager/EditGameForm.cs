@@ -421,10 +421,7 @@ namespace GCTonePrism.Manager
 
                 if (gameIdChanged)
                 {
-                    // DB側のID更新（重複チェック含む）
-                    dbManager.UpdateGameId(oldGameId, newGameId);
-
-                    // フォルダリネーム
+                    // フォルダリネームを先に実行（失敗時にDB不整合を防ぐ）
                     string oldFolder = PathManager.GetGameFolder(oldGameId);
                     string newFolder = PathManager.GetGameFolder(newGameId);
 
@@ -437,8 +434,16 @@ namespace GCTonePrism.Manager
                         System.IO.Directory.Move(oldFolder, newFolder);
                     }
 
+                    // フォルダリネーム成功後にDB側のID更新（重複チェック含む）
+                    dbManager.UpdateGameId(oldGameId, newGameId);
+
                     // gameFolderを更新（以降のパス処理で使用）
                     gameFolder = newFolder;
+
+                    // パステキストボックスを新フォルダベースに更新
+                    UpdatePathTextBox(txtExecutablePath, oldFolder, newFolder);
+                    UpdatePathTextBox(txtThumbnailPath, oldFolder, newFolder);
+                    UpdatePathTextBox(txtBackgroundPath, oldFolder, newFolder);
 
                     // バージョンオブジェクトのGameIdを新IDに更新
                     foreach (var item in cmbVersionList.Items)
@@ -563,6 +568,21 @@ namespace GCTonePrism.Manager
         {
             DialogResult = DialogResult.Cancel;
             Close();
+        }
+
+        /// <summary>
+        /// フォルダリネーム後にパステキストボックスの値を新フォルダベースに更新
+        /// </summary>
+        private void UpdatePathTextBox(TextBox textBox, string oldFolder, string newFolder)
+        {
+            string path = textBox.Text.Trim();
+            if (string.IsNullOrEmpty(path)) return;
+
+            // 絶対パスで旧フォルダ配下の場合、新フォルダに置換
+            if (Path.IsPathRooted(path) && path.StartsWith(oldFolder, StringComparison.OrdinalIgnoreCase))
+            {
+                textBox.Text = newFolder + path.Substring(oldFolder.Length);
+            }
         }
 
         /// <summary>

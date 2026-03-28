@@ -81,7 +81,7 @@ func _ready():
 		AppState.initial_game_id = all_games[0].game_id
 		AppState.return_scene = "res://scenes/screensaver.tscn"
 		AppState.section_title = ""
-		TransitionManager.change_scene("res://scenes/game_selection.tscn")
+		TransitionManager.change_scene.call_deferred("res://scenes/game_selection.tscn")
 		return
 
 	print("[StoreBrowse] %d 件のセクションを読み込みました" % _sections.size())
