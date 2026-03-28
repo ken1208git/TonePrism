@@ -44,6 +44,7 @@ namespace GCTonePrism.Manager
         public void AddGame(GameInfo game) => _gameRepo.Add(game);
         public void UpdateGame(GameInfo game) => _gameRepo.Update(game);
         public void DeleteGame(string gameId) => _gameRepo.Delete(gameId);
+        public void UpdateGameId(string oldId, string newId) => _gameRepo.UpdateGameId(oldId, newId);
 
         // --- 開発者 ---
         public List<DeveloperInfo> GetDeveloperInfosByGameId(string gameId) => _devRepo.GetByGameId(gameId);

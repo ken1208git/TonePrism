@@ -414,6 +414,42 @@ namespace GCTonePrism.Manager
 
             try
             {
+                // ゲームID変更処理
+                string newGameId = txtGameId.Text.Trim();
+                string oldGameId = originalGame.GameId;
+                bool gameIdChanged = !string.Equals(newGameId, oldGameId, StringComparison.Ordinal);
+
+                if (gameIdChanged)
+                {
+                    // DB側のID更新（重複チェック含む）
+                    dbManager.UpdateGameId(oldGameId, newGameId);
+
+                    // フォルダリネーム
+                    string oldFolder = PathManager.GetGameFolder(oldGameId);
+                    string newFolder = PathManager.GetGameFolder(newGameId);
+
+                    if (System.IO.Directory.Exists(oldFolder))
+                    {
+                        if (System.IO.Directory.Exists(newFolder))
+                        {
+                            throw new InvalidOperationException($"フォルダ「{newFolder}」が既に存在します。");
+                        }
+                        System.IO.Directory.Move(oldFolder, newFolder);
+                    }
+
+                    // gameFolderを更新（以降のパス処理で使用）
+                    gameFolder = newFolder;
+
+                    // バージョンオブジェクトのGameIdを新IDに更新
+                    foreach (var item in cmbVersionList.Items)
+                    {
+                        if (item is GameVersion v)
+                        {
+                            v.GameId = newGameId;
+                        }
+                    }
+                }
+
                 // パスを相対パスに変換（可能な場合）
                 string executablePath = PathConversionHelper.ToRelativePath(gameFolder, txtExecutablePath.Text.Trim());
                 string thumbnailPath = string.IsNullOrWhiteSpace(txtThumbnailPath.Text) ? null : PathConversionHelper.ToRelativePath(gameFolder, txtThumbnailPath.Text.Trim());
@@ -425,7 +461,7 @@ namespace GCTonePrism.Manager
                 // GameInfoオブジェクトを作成（既存の値をベースに）
                 var game = new GameInfo
                 {
-                    GameId = originalGame.GameId, // ゲームIDは変更不可
+                    GameId = txtGameId.Text.Trim(),
                     Title = txtTitle.Text.Trim(),
                     Description = string.IsNullOrWhiteSpace(txtDescription.Text) ? null : txtDescription.Text.Trim(),
                     ReleaseYear = numReleaseYear.Value > 0 ? (int?)numReleaseYear.Value : null,
@@ -534,6 +570,20 @@ namespace GCTonePrism.Manager
         /// </summary>
         private bool ValidateInput()
         {
+            // ゲームID
+            if (string.IsNullOrWhiteSpace(txtGameId.Text))
+            {
+                MessageBox.Show("ゲームIDを入力してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtGameId.Focus();
+                return false;
+            }
+            if (!GameFormHelper.IsValidGameId(txtGameId.Text))
+            {
+                MessageBox.Show("ゲームIDには半角英数字、ハイフン(-)、アンダースコア(_)のみ使用できます。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtGameId.Focus();
+                return false;
+            }
+
             // タイトル
             if (string.IsNullOrWhiteSpace(txtTitle.Text))
             {

@@ -122,7 +122,7 @@ namespace GCTonePrism.Manager
             // 
             // txtGameId
             // 
-            this.txtGameId.Enabled = false;
+            this.txtGameId.Enabled = true;
             this.txtGameId.Location = new System.Drawing.Point(90, 32);
             this.txtGameId.Margin = new System.Windows.Forms.Padding(2);
             this.txtGameId.Name = "txtGameId";

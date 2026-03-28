@@ -238,6 +238,75 @@ namespace GCTonePrism.Manager.Repositories
             });
         }
 
+        public void UpdateGameId(string oldId, string newId)
+        {
+            _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithWalMode(connection);
+
+                    // 重複チェック（トランザクション前）
+                    using (var cmd = new SQLiteCommand("SELECT COUNT(*) FROM games WHERE game_id = @newId", connection))
+                    {
+                        cmd.Parameters.AddWithValue("@newId", newId);
+                        long count = (long)cmd.ExecuteScalar();
+                        if (count > 0)
+                            throw new InvalidOperationException($"ゲームID「{newId}」は既に使用されています。");
+                    }
+
+                    // PRAGMA foreign_keys はトランザクション外でのみ変更可能
+                    using (var cmd = new SQLiteCommand("PRAGMA foreign_keys = OFF", connection))
+                        cmd.ExecuteNonQuery();
+
+                    using (var transaction = connection.BeginTransaction())
+                    {
+                        try
+                        {
+                            // 子テーブルのgame_idを更新
+                            string[] childTables = { "game_versions", "developers", "game_genres", "play_records", "surveys", "store_section_games" };
+                            foreach (var table in childTables)
+                            {
+                                using (var cmd = new SQLiteCommand($"UPDATE {table} SET game_id = @newId WHERE game_id = @oldId", connection, transaction))
+                                {
+                                    cmd.Parameters.AddWithValue("@newId", newId);
+                                    cmd.Parameters.AddWithValue("@oldId", oldId);
+                                    cmd.ExecuteNonQuery();
+                                }
+                            }
+
+                            // launcher_surveys の favorite_game_id を更新
+                            using (var cmd = new SQLiteCommand("UPDATE launcher_surveys SET favorite_game_id = @newId WHERE favorite_game_id = @oldId", connection, transaction))
+                            {
+                                cmd.Parameters.AddWithValue("@newId", newId);
+                                cmd.Parameters.AddWithValue("@oldId", oldId);
+                                cmd.ExecuteNonQuery();
+                            }
+
+                            // メインテーブルの主キーを更新
+                            using (var cmd = new SQLiteCommand("UPDATE games SET game_id = @newId WHERE game_id = @oldId", connection, transaction))
+                            {
+                                cmd.Parameters.AddWithValue("@newId", newId);
+                                cmd.Parameters.AddWithValue("@oldId", oldId);
+                                cmd.ExecuteNonQuery();
+                            }
+
+                            transaction.Commit();
+                        }
+                        catch (Exception)
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+
+                    // 外部キー制約を再有効化
+                    using (var cmd = new SQLiteCommand("PRAGMA foreign_keys = ON", connection))
+                        cmd.ExecuteNonQuery();
+                }
+            });
+        }
+
         private GameInfo ReadGameInfo(SQLiteDataReader reader, string versionColumnName)
         {
             var game = new GameInfo
