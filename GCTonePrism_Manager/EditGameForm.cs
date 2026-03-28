@@ -329,6 +329,9 @@ namespace GCTonePrism.Manager
             // Update image previews
             UpdateThumbnailPreview();
             UpdateBackgroundPreview();
+
+            // 現在表示中のバージョンを記録（次回切り替え時の保存用）
+            currentDisplayingVersion = version;
         }
 
 

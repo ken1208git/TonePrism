@@ -135,7 +135,6 @@ namespace GCTonePrism.Manager
             this.lblMaxDisplayCount.Name = "lblMaxDisplayCount";
             this.lblMaxDisplayCount.Size = new System.Drawing.Size(70, 15);
             this.lblMaxDisplayCount.Text = "最大表示数:";
-            this.lblMaxDisplayCount.Visible = false;
             //
             // nudMaxDisplayCount
             //
@@ -145,7 +144,6 @@ namespace GCTonePrism.Manager
             this.nudMaxDisplayCount.Name = "nudMaxDisplayCount";
             this.nudMaxDisplayCount.Size = new System.Drawing.Size(80, 23);
             this.nudMaxDisplayCount.Value = new decimal(new int[] { 5, 0, 0, 0 });
-            this.nudMaxDisplayCount.Visible = false;
             //
             // chkIsVisible
             //

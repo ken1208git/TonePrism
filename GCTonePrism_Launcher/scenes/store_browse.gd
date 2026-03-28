@@ -485,7 +485,7 @@ func _switch_slide(section_index: int, dir: int) -> void:
 		return
 	var section: StoreSectionInfo = data["section"]
 	var container: Control = data["container"]
-	if section.games.is_empty():
+	if section.games.size() <= 1:
 		return
 	if _slide_animating.get(section_index, false):
 		return
