@@ -348,10 +348,14 @@ func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 		bindings = [current_year]
 	elif source == "recently_played":
 		query = """
-			SELECT DISTINCT g.* FROM games g
-			JOIN play_records pr ON g.game_id = pr.game_id
+			SELECT g.* FROM games g
+			JOIN (
+				SELECT game_id, MAX(start_time) AS last_played
+				FROM play_records
+				GROUP BY game_id
+			) pr ON g.game_id = pr.game_id
 			WHERE g.is_visible = 1
-			ORDER BY pr.start_time DESC
+			ORDER BY pr.last_played DESC
 		"""
 	elif source.begins_with("genre:"):
 		var genre_name = source.substr(6)

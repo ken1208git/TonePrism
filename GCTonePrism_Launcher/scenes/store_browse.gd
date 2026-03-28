@@ -375,9 +375,16 @@ func _move_tile(dir: int) -> void:
 			if new_tile < 0:
 				return  # 左端で止まる
 			elif new_tile >= tile_list.size():
-				# 右端を超えたら「すべて見る」にフォーカス
-				_on_view_all = true
-				_update_focus_visual()
+				# 「すべて見る」ボタンが存在する場合のみフォーカス移動
+				var has_view_all = false
+				var sec_container = _section_ui[_current_section]["container"] as Control
+				for child in sec_container.get_children():
+					if child is HBoxContainer and child.get_node_or_null("ViewAllButton"):
+						has_view_all = true
+						break
+				if has_view_all:
+					_on_view_all = true
+					_update_focus_visual()
 				return
 			_current_tile = new_tile
 			_update_focus_visual()
@@ -467,8 +474,8 @@ func _on_select() -> void:
 
 # --- スライドショー ---
 
-## スライドショーのアニメーション中かどうか
-var _slide_animating: bool = false
+## スライドショーのアニメーション中かどうか（セクションごとに管理）
+var _slide_animating: Dictionary = {}
 
 func _switch_slide(section_index: int, dir: int) -> void:
 	if section_index >= _section_ui.size():
@@ -480,7 +487,7 @@ func _switch_slide(section_index: int, dir: int) -> void:
 	var container: Control = data["container"]
 	if section.games.is_empty():
 		return
-	if _slide_animating:
+	if _slide_animating.get(section_index, false):
 		return
 
 	var current_idx = _slideshow_indices.get(section_index, 0)
@@ -500,7 +507,7 @@ func _switch_slide(section_index: int, dir: int) -> void:
 	var banner_width = container.custom_minimum_size.x
 
 	# スライドアニメーション
-	_slide_animating = true
+	_slide_animating[section_index] = true
 	var slide_tween = create_tween()
 	slide_tween.set_parallel(true)
 
@@ -521,7 +528,7 @@ func _switch_slide(section_index: int, dir: int) -> void:
 		if old_banner:
 			old_banner.visible = false
 			old_banner.position.x = 0
-		_slide_animating = false
+		_slide_animating[section_index] = false
 	)
 
 	# ゲージバー: 満タンバーをフェードアウト、新バーを0からスタート
