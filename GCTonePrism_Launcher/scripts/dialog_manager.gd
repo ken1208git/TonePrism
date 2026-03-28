@@ -90,7 +90,8 @@ func _animate_dialog_out(dialog: Control) -> void:
 	var panel = dialog.get_node_or_null("Panel")
 	if not panel:
 		dialog.queue_free()
-		get_tree().paused = false
+		if _current_dialog == null:
+			get_tree().paused = false
 		return
 	panel.pivot_offset = panel.size / 2.0
 	var tween = create_tween()
@@ -102,7 +103,9 @@ func _animate_dialog_out(dialog: Control) -> void:
 	await tween.finished
 	if is_instance_valid(dialog):
 		dialog.queue_free()
-	get_tree().paused = false
+	# 新しいダイアログが開かれていなければポーズ解除
+	if _current_dialog == null:
+		get_tree().paused = false
 
 func is_dialog_showing() -> bool:
 	return _current_dialog != null

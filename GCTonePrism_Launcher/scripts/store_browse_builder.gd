@@ -60,10 +60,11 @@ static func build_normal_section(section: StoreSectionInfo, viewport_width: floa
 	# 画面幅から表示上限を自動計算（タイルサイズ+間隔で割る）
 	var available_width = viewport_width - FEATURED_PADDING * 2
 	var max_tiles = int((available_width + TILE_GAP) / (TILE_SIZE.x + TILE_GAP))
-	var display_count = mini(section.games.size(), max_tiles)
+	var effective_max = mini(max_tiles, section.max_display_count) if section.max_display_count > 0 else max_tiles
+	var display_count = mini(section.games.size(), effective_max)
 
 	# ゲーム数が画面に収まるなら「すべて見る」不要
-	if section.games.size() > max_tiles:
+	if section.games.size() > effective_max:
 		var view_all_btn = Button.new()
 		view_all_btn.name = "ViewAllButton"
 		view_all_btn.text = "すべて見る →"
