@@ -2,15 +2,8 @@ namespace GCTonePrism.Manager
 {
     partial class MainForm
     {
-        /// <summary>
-        /// 必要なデザイナー変数です。
-        /// </summary>
         private System.ComponentModel.IContainer components = null;
 
-        /// <summary>
-        /// 使用中のリソースをすべてクリーンアップします。
-        /// </summary>
-        /// <param name="disposing">マネージド リソースを破棄する場合は true を指定し、その他の場合は false を指定します。</param>
         protected override void Dispose(bool disposing)
         {
             if (disposing && (components != null))
@@ -22,233 +15,103 @@ namespace GCTonePrism.Manager
 
         #region Windows フォーム デザイナーで生成されたコード
 
-        /// <summary>
-        /// デザイナー サポートに必要なメソッドです。このメソッドの内容を
-        /// コード エディターで変更しないでください。
-        /// </summary>
         private void InitializeComponent()
         {
-            this.toolStrip1 = new System.Windows.Forms.ToolStrip();
-            this.btnAddGame = new System.Windows.Forms.ToolStripButton();
-            this.btnEditGame = new System.Windows.Forms.ToolStripButton();
-            this.btnVersionUp = new System.Windows.Forms.ToolStripButton();
-            this.btnDeleteGame = new System.Windows.Forms.ToolStripButton();
-            this.toolStripSeparator2 = new System.Windows.Forms.ToolStripSeparator();
-            this.btnRefresh = new System.Windows.Forms.ToolStripButton();
-            this.toolStripSeparator4 = new System.Windows.Forms.ToolStripSeparator();
-            this.btnStoreSections = new System.Windows.Forms.ToolStripButton();
-            this.menuStrip1 = new System.Windows.Forms.MenuStrip();
-            this.menuSettings = new System.Windows.Forms.ToolStripMenuItem();
-            this.menuItemResetDatabase = new System.Windows.Forms.ToolStripMenuItem();
-            this.toolStripSeparator3 = new System.Windows.Forms.ToolStripSeparator();
-            this.menuItemVersionInfo = new System.Windows.Forms.ToolStripMenuItem();
-            this.dgvGames = new System.Windows.Forms.DataGridView();
             this.statusStrip1 = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
-            this.toolStrip1.SuspendLayout();
-            this.menuStrip1.SuspendLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.dgvGames)).BeginInit();
+            this.tabControl1 = new System.Windows.Forms.TabControl();
+            this.tabGame = new System.Windows.Forms.TabPage();
+            this.tabStore = new System.Windows.Forms.TabPage();
+            this.tabSettings = new System.Windows.Forms.TabPage();
             this.statusStrip1.SuspendLayout();
+            this.tabControl1.SuspendLayout();
             this.SuspendLayout();
-            // 
-            // toolStrip1
-            // 
-            this.toolStrip1.ImageScalingSize = new System.Drawing.Size(20, 20);
-            this.toolStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.btnAddGame,
-            this.btnEditGame,
-            this.btnVersionUp,
-            this.btnDeleteGame,
-            this.toolStripSeparator2,
-            this.btnRefresh,
-            this.toolStripSeparator4,
-            this.btnStoreSections});
-            this.toolStrip1.Location = new System.Drawing.Point(0, 28);
-            this.toolStrip1.Name = "toolStrip1";
-            this.toolStrip1.Size = new System.Drawing.Size(1000, 27);
-            this.toolStrip1.TabIndex = 0;
-            this.toolStrip1.Text = "toolStrip1";
-            // 
-            // btnAddGame
-            // 
-            this.btnAddGame.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
-            this.btnAddGame.Name = "btnAddGame";
-            this.btnAddGame.Size = new System.Drawing.Size(75, 24);
-            this.btnAddGame.Text = "ゲーム追加";
-            this.btnAddGame.Click += new System.EventHandler(this.btnAddGame_Click);
-            // 
-            // btnEditGame
-            // 
-            this.btnEditGame.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
-            this.btnEditGame.Name = "btnEditGame";
-            this.btnEditGame.Size = new System.Drawing.Size(39, 24);
-            this.btnEditGame.Text = "編集";
-            this.btnEditGame.Click += new System.EventHandler(this.btnEditGame_Click);
-            // 
-            // btnVersionUp
-            // 
-            this.btnVersionUp.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
-            this.btnVersionUp.Name = "btnVersionUp";
-            this.btnVersionUp.Size = new System.Drawing.Size(91, 24);
-            this.btnVersionUp.Text = "バージョンアップ";
-            this.btnVersionUp.Click += new System.EventHandler(this.btnVersionUp_Click);
-            // 
-            // btnDeleteGame
-            // 
-            this.btnDeleteGame.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
-            this.btnDeleteGame.Name = "btnDeleteGame";
-            this.btnDeleteGame.Size = new System.Drawing.Size(39, 24);
-            this.btnDeleteGame.Text = "削除";
-            this.btnDeleteGame.Click += new System.EventHandler(this.btnDeleteGame_Click);
-            // 
-            // toolStripSeparator2
-            // 
-            this.toolStripSeparator2.Name = "toolStripSeparator2";
-            this.toolStripSeparator2.Size = new System.Drawing.Size(6, 27);
-            // 
-            // btnRefresh
-            // 
-            this.btnRefresh.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
-            this.btnRefresh.Name = "btnRefresh";
-            this.btnRefresh.Size = new System.Drawing.Size(39, 24);
-            this.btnRefresh.Text = "更新";
-            this.btnRefresh.Click += new System.EventHandler(this.btnRefresh_Click);
             //
-            // toolStripSeparator4
-            //
-            this.toolStripSeparator4.Name = "toolStripSeparator4";
-            this.toolStripSeparator4.Size = new System.Drawing.Size(6, 27);
-            //
-            // btnStoreSections
-            //
-            this.btnStoreSections.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
-            this.btnStoreSections.Name = "btnStoreSections";
-            this.btnStoreSections.Size = new System.Drawing.Size(75, 24);
-            this.btnStoreSections.Text = "ストア管理";
-            this.btnStoreSections.Click += new System.EventHandler(this.btnStoreSections_Click);
-            //
-            // menuStrip1
-            // 
-            this.menuStrip1.ImageScalingSize = new System.Drawing.Size(20, 20);
-            this.menuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.menuSettings});
-            this.menuStrip1.Location = new System.Drawing.Point(0, 0);
-            this.menuStrip1.Name = "menuStrip1";
-            this.menuStrip1.Size = new System.Drawing.Size(1000, 28);
-            this.menuStrip1.TabIndex = 3;
-            this.menuStrip1.Text = "menuStrip1";
-            // 
-            // menuSettings
-            // 
-            this.menuSettings.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.menuItemResetDatabase,
-            this.toolStripSeparator3,
-            this.menuItemVersionInfo});
-            this.menuSettings.Name = "menuSettings";
-            this.menuSettings.Size = new System.Drawing.Size(67, 24);
-            this.menuSettings.Text = "設定(&S)";
-            // 
-            // menuItemResetDatabase
-            // 
-            this.menuItemResetDatabase.Name = "menuItemResetDatabase";
-            this.menuItemResetDatabase.Size = new System.Drawing.Size(224, 26);
-            this.menuItemResetDatabase.Text = "データベースリセット";
-            this.menuItemResetDatabase.Click += new System.EventHandler(this.menuItemResetDatabase_Click);
-            // 
-            // toolStripSeparator3
-            // 
-            this.toolStripSeparator3.Name = "toolStripSeparator3";
-            this.toolStripSeparator3.Size = new System.Drawing.Size(221, 6);
-            // 
-            // menuItemVersionInfo
-            // 
-            this.menuItemVersionInfo.Name = "menuItemVersionInfo";
-            this.menuItemVersionInfo.Size = new System.Drawing.Size(224, 26);
-            this.menuItemVersionInfo.Text = "バージョン情報";
-            this.menuItemVersionInfo.Click += new System.EventHandler(this.menuItemVersionInfo_Click);
-            // 
-            // dgvGames
-            // 
-            this.dgvGames.AllowDrop = true;
-            this.dgvGames.AllowUserToAddRows = false;
-            this.dgvGames.AllowUserToDeleteRows = false;
-            this.dgvGames.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-            this.dgvGames.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.dgvGames.Location = new System.Drawing.Point(0, 55);
-            this.dgvGames.MultiSelect = false;
-            this.dgvGames.Name = "dgvGames";
-            this.dgvGames.ReadOnly = true;
-            this.dgvGames.RowHeadersWidth = 51;
-            this.dgvGames.RowTemplate.Height = 24;
-            this.dgvGames.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
-            this.dgvGames.Size = new System.Drawing.Size(1000, 545);
-            this.dgvGames.TabIndex = 1;
-            this.dgvGames.MouseDown += new System.Windows.Forms.MouseEventHandler(this.dgvGames_MouseDown);
-            this.dgvGames.DragOver += new System.Windows.Forms.DragEventHandler(this.dgvGames_DragOver);
-            this.dgvGames.DragDrop += new System.Windows.Forms.DragEventHandler(this.dgvGames_DragDrop);
-            // 
             // statusStrip1
-            // 
+            //
             this.statusStrip1.ImageScalingSize = new System.Drawing.Size(20, 20);
             this.statusStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.lblStatus});
-            this.statusStrip1.Location = new System.Drawing.Point(0, 600);
+            this.statusStrip1.Location = new System.Drawing.Point(0, 628);
             this.statusStrip1.Name = "statusStrip1";
-            this.statusStrip1.Size = new System.Drawing.Size(1000, 22);
-            this.statusStrip1.TabIndex = 2;
-            this.statusStrip1.Text = "statusStrip1";
-            // 
+            this.statusStrip1.Size = new System.Drawing.Size(1100, 22);
+            this.statusStrip1.TabIndex = 0;
+            //
             // lblStatus
-            // 
+            //
             this.lblStatus.Name = "lblStatus";
             this.lblStatus.Size = new System.Drawing.Size(56, 17);
             this.lblStatus.Text = "準備完了";
-            // 
+            //
+            // tabControl1
+            //
+            this.tabControl1.Controls.Add(this.tabGame);
+            this.tabControl1.Controls.Add(this.tabStore);
+            this.tabControl1.Controls.Add(this.tabSettings);
+            this.tabControl1.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.tabControl1.Font = new System.Drawing.Font("Meiryo UI", 9.5F);
+            this.tabControl1.Location = new System.Drawing.Point(0, 0);
+            this.tabControl1.Name = "tabControl1";
+            this.tabControl1.SelectedIndex = 0;
+            this.tabControl1.Size = new System.Drawing.Size(1100, 628);
+            this.tabControl1.TabIndex = 1;
+            this.tabControl1.SelectedIndexChanged += new System.EventHandler(this.tabControl1_SelectedIndexChanged);
+            //
+            // tabGame
+            //
+            this.tabGame.Location = new System.Drawing.Point(4, 28);
+            this.tabGame.Name = "tabGame";
+            this.tabGame.Padding = new System.Windows.Forms.Padding(3);
+            this.tabGame.Size = new System.Drawing.Size(1092, 596);
+            this.tabGame.TabIndex = 0;
+            this.tabGame.Text = "ゲーム";
+            this.tabGame.UseVisualStyleBackColor = true;
+            //
+            // tabStore
+            //
+            this.tabStore.Location = new System.Drawing.Point(4, 28);
+            this.tabStore.Name = "tabStore";
+            this.tabStore.Padding = new System.Windows.Forms.Padding(3);
+            this.tabStore.Size = new System.Drawing.Size(1092, 596);
+            this.tabStore.TabIndex = 1;
+            this.tabStore.Text = "ストア";
+            this.tabStore.UseVisualStyleBackColor = true;
+            //
+            // tabSettings
+            //
+            this.tabSettings.Location = new System.Drawing.Point(4, 28);
+            this.tabSettings.Name = "tabSettings";
+            this.tabSettings.Padding = new System.Windows.Forms.Padding(3);
+            this.tabSettings.Size = new System.Drawing.Size(1092, 596);
+            this.tabSettings.TabIndex = 2;
+            this.tabSettings.Text = "設定";
+            this.tabSettings.UseVisualStyleBackColor = true;
+            //
             // MainForm
-            // 
+            //
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1000, 650);
-            this.Controls.Add(this.dgvGames);
+            this.ClientSize = new System.Drawing.Size(1100, 650);
+            this.Controls.Add(this.tabControl1);
             this.Controls.Add(this.statusStrip1);
-            this.Controls.Add(this.toolStrip1);
-            this.Controls.Add(this.menuStrip1);
-            this.MainMenuStrip = this.menuStrip1;
             this.Name = "MainForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "ゲームセンターTONE Prism 管理ソフト";
             this.Load += new System.EventHandler(this.MainForm_Load);
-            this.toolStrip1.ResumeLayout(false);
-            this.toolStrip1.PerformLayout();
-            this.menuStrip1.ResumeLayout(false);
-            this.menuStrip1.PerformLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.dgvGames)).EndInit();
             this.statusStrip1.ResumeLayout(false);
             this.statusStrip1.PerformLayout();
+            this.tabControl1.ResumeLayout(false);
             this.ResumeLayout(false);
             this.PerformLayout();
-
         }
 
         #endregion
 
-        private System.Windows.Forms.ToolStrip toolStrip1;
-        private System.Windows.Forms.ToolStripButton btnAddGame;
-        private System.Windows.Forms.ToolStripButton btnEditGame;
-        private System.Windows.Forms.ToolStripButton btnVersionUp;
-        private System.Windows.Forms.ToolStripButton btnDeleteGame;
-        private System.Windows.Forms.ToolStripSeparator toolStripSeparator2;
-        private System.Windows.Forms.ToolStripButton btnRefresh;
-        private System.Windows.Forms.ToolStripSeparator toolStripSeparator4;
-        private System.Windows.Forms.ToolStripButton btnStoreSections;
-        private System.Windows.Forms.MenuStrip menuStrip1;
-        private System.Windows.Forms.ToolStripMenuItem menuSettings;
-        private System.Windows.Forms.ToolStripMenuItem menuItemResetDatabase;
-        private System.Windows.Forms.ToolStripSeparator toolStripSeparator3;
-        private System.Windows.Forms.ToolStripMenuItem menuItemVersionInfo;
-        private System.Windows.Forms.DataGridView dgvGames;
         private System.Windows.Forms.StatusStrip statusStrip1;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
+        private System.Windows.Forms.TabControl tabControl1;
+        private System.Windows.Forms.TabPage tabGame;
+        private System.Windows.Forms.TabPage tabStore;
+        private System.Windows.Forms.TabPage tabSettings;
     }
 }
-

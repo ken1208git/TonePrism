@@ -260,5 +260,57 @@ namespace GCTonePrism.Manager.Services
         }
 
         #endregion
+
+        /// <summary>
+        /// ゲームIDが有効な文字列かチェック（半角英数字、ハイフン、アンダースコアのみ、最大64文字）
+        /// </summary>
+        public static bool IsValidGameId(string gameId)
+        {
+            return IsValidGameId(gameId, out _);
+        }
+
+        /// <summary>
+        /// ゲームIDが有効な文字列かチェックし、NGの場合は理由を返す
+        /// </summary>
+        public static bool IsValidGameId(string gameId, out string errorMessage)
+        {
+            errorMessage = null;
+
+            if (string.IsNullOrWhiteSpace(gameId))
+            {
+                errorMessage = "ゲームIDを入力してください。";
+                return false;
+            }
+
+            string trimmed = gameId.Trim();
+
+            if (trimmed.Length > 64)
+            {
+                errorMessage = "ゲームIDは64文字以内で入力してください。";
+                return false;
+            }
+
+            if (!System.Text.RegularExpressions.Regex.IsMatch(trimmed, @"^[a-zA-Z0-9_-]+$"))
+            {
+                errorMessage = "ゲームIDは英数字、アンダースコア（_）、ハイフン（-）のみ使用できます。";
+                return false;
+            }
+
+            // Windowsの予約デバイス名チェック
+            string upper = trimmed.ToUpperInvariant();
+            var reserved = new HashSet<string>
+            {
+                "CON", "PRN", "AUX", "NUL",
+                "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+                "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+            };
+            if (reserved.Contains(upper))
+            {
+                errorMessage = $"「{trimmed}」はWindowsの予約名のため使用できません。";
+                return false;
+            }
+
+            return true;
+        }
     }
 }

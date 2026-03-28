@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -428,8 +427,7 @@ namespace GCTonePrism.Manager
             }
 
             // ゲームIDの文字種チェック（英数字と一部の記号のみ許可）
-            var validPattern = new Regex(@"^[a-zA-Z0-9_-]+$");
-            if (!validPattern.IsMatch(txtGameId.Text.Trim()))
+            if (!GameFormHelper.IsValidGameId(txtGameId.Text))
             {
                 MessageBox.Show("ゲームIDは英数字、アンダースコア（_）、ハイフン（-）のみ使用できます。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtGameId.Focus();
