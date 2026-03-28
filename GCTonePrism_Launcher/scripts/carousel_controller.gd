@@ -86,19 +86,6 @@ func update_cards(delta: float, selected_index: int, viewport_size: Vector2,
 	var new_active = int(round(current_scroll_index))
 	new_active = clampi(new_active, 0, card_nodes.size() - 1)
 
-	# StaticFocusBorderの制御
-	if static_focus_border:
-		var focus_owner = static_focus_border.get_viewport().gui_get_focus_owner()
-		var processing_focus = (focus_owner == null) or (focus_owner is Panel and focus_owner in card_nodes)
-		static_focus_border.visible = processing_focus and not using_mouse
-
-		var active_size = CARD_SIZE * SCALE_ACTIVE
-		static_focus_border.position = Vector2(
-			container_center_x - (active_size.x / 2),
-			viewport_center_y - (active_size.y / 2)
-		)
-		static_focus_border.size = active_size
-
 	# 各カードの位置更新
 	for i in range(card_nodes.size()):
 		var card = card_nodes[i]

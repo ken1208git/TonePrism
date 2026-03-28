@@ -36,7 +36,6 @@ namespace GCTonePrism.Manager
             this.txtNextVersion = new System.Windows.Forms.TextBox();
             this.lblVersionHint = new System.Windows.Forms.Label();
             this.lblGameFolder = new System.Windows.Forms.Label();
-
             this.txtGameFolder = new System.Windows.Forms.TextBox();
             this.btnSelectGameFolder = new System.Windows.Forms.Button();
             this.lblGameFolderHint = new System.Windows.Forms.Label();
@@ -82,19 +81,20 @@ namespace GCTonePrism.Manager
             this.btnTestRun = new System.Windows.Forms.Button();
             this.lblThumbnailHint = new System.Windows.Forms.Label();
             this.lblBackgroundHint = new System.Windows.Forms.Label();
-            ((System.ComponentModel.ISupportInitialize)(this.picThumbnailPreview)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.picBackgroundPreview)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numMinPlayers)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numMaxPlayers)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.dgvDevelopers)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.picThumbnailPreview)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.picBackgroundPreview)).BeginInit();
             this.SuspendLayout();
             // 
             // lblCurrentVersionLabel
             // 
             this.lblCurrentVersionLabel.AutoSize = true;
-            this.lblCurrentVersionLabel.Location = new System.Drawing.Point(12, 15);
+            this.lblCurrentVersionLabel.Location = new System.Drawing.Point(9, 12);
+            this.lblCurrentVersionLabel.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblCurrentVersionLabel.Name = "lblCurrentVersionLabel";
-            this.lblCurrentVersionLabel.Size = new System.Drawing.Size(95, 15);
+            this.lblCurrentVersionLabel.Size = new System.Drawing.Size(86, 12);
             this.lblCurrentVersionLabel.TabIndex = 0;
             this.lblCurrentVersionLabel.Text = "現在のバージョン:";
             // 
@@ -102,26 +102,29 @@ namespace GCTonePrism.Manager
             // 
             this.lblCurrentVersion.AutoSize = true;
             this.lblCurrentVersion.Font = new System.Drawing.Font("MS UI Gothic", 9F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(128)));
-            this.lblCurrentVersion.Location = new System.Drawing.Point(120, 15);
+            this.lblCurrentVersion.Location = new System.Drawing.Point(90, 12);
+            this.lblCurrentVersion.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblCurrentVersion.Name = "lblCurrentVersion";
-            this.lblCurrentVersion.Size = new System.Drawing.Size(41, 15);
+            this.lblCurrentVersion.Size = new System.Drawing.Size(32, 12);
             this.lblCurrentVersion.TabIndex = 1;
             this.lblCurrentVersion.Text = "1.0.0";
             // 
             // lblNextVersion
             // 
             this.lblNextVersion.AutoSize = true;
-            this.lblNextVersion.Location = new System.Drawing.Point(12, 45);
+            this.lblNextVersion.Location = new System.Drawing.Point(9, 36);
+            this.lblNextVersion.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblNextVersion.Name = "lblNextVersion";
-            this.lblNextVersion.Size = new System.Drawing.Size(86, 15);
+            this.lblNextVersion.Size = new System.Drawing.Size(68, 12);
             this.lblNextVersion.TabIndex = 2;
             this.lblNextVersion.Text = "新バージョン*";
             // 
             // txtNextVersion
             // 
-            this.txtNextVersion.Location = new System.Drawing.Point(120, 42);
+            this.txtNextVersion.Location = new System.Drawing.Point(90, 34);
+            this.txtNextVersion.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtNextVersion.Name = "txtNextVersion";
-            this.txtNextVersion.Size = new System.Drawing.Size(150, 22);
+            this.txtNextVersion.Size = new System.Drawing.Size(114, 19);
             this.txtNextVersion.TabIndex = 3;
             this.txtNextVersion.Text = "v";
             // 
@@ -130,34 +133,38 @@ namespace GCTonePrism.Manager
             this.lblVersionHint.AutoSize = true;
             this.lblVersionHint.Font = new System.Drawing.Font("MS UI Gothic", 8F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(128)));
             this.lblVersionHint.ForeColor = System.Drawing.Color.Gray;
-            this.lblVersionHint.Location = new System.Drawing.Point(280, 48);
+            this.lblVersionHint.Location = new System.Drawing.Point(210, 38);
+            this.lblVersionHint.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblVersionHint.Name = "lblVersionHint";
-            this.lblVersionHint.Size = new System.Drawing.Size(250, 11);
+            this.lblVersionHint.Size = new System.Drawing.Size(244, 11);
             this.lblVersionHint.TabIndex = 100;
             this.lblVersionHint.Text = "※セマンティックバージョニング（例: v1.0.0）がおすすめです";
             // 
             // lblGameFolder
             // 
             this.lblGameFolder.AutoSize = true;
-            this.lblGameFolder.Location = new System.Drawing.Point(12, 75);
+            this.lblGameFolder.Location = new System.Drawing.Point(9, 60);
+            this.lblGameFolder.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblGameFolder.Name = "lblGameFolder";
-            this.lblGameFolder.Size = new System.Drawing.Size(104, 15);
+            this.lblGameFolder.Size = new System.Drawing.Size(76, 12);
             this.lblGameFolder.TabIndex = 4;
             this.lblGameFolder.Text = "ゲームフォルダ*";
             // 
             // txtGameFolder
             // 
-            this.txtGameFolder.Location = new System.Drawing.Point(120, 72);
+            this.txtGameFolder.Location = new System.Drawing.Point(90, 58);
+            this.txtGameFolder.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtGameFolder.Name = "txtGameFolder";
             this.txtGameFolder.ReadOnly = true;
-            this.txtGameFolder.Size = new System.Drawing.Size(400, 22);
+            this.txtGameFolder.Size = new System.Drawing.Size(301, 19);
             this.txtGameFolder.TabIndex = 5;
             // 
             // btnSelectGameFolder
             // 
-            this.btnSelectGameFolder.Location = new System.Drawing.Point(526, 71);
+            this.btnSelectGameFolder.Location = new System.Drawing.Point(394, 57);
+            this.btnSelectGameFolder.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.btnSelectGameFolder.Name = "btnSelectGameFolder";
-            this.btnSelectGameFolder.Size = new System.Drawing.Size(94, 23);
+            this.btnSelectGameFolder.Size = new System.Drawing.Size(70, 20);
             this.btnSelectGameFolder.TabIndex = 6;
             this.btnSelectGameFolder.Text = "選択...";
             this.btnSelectGameFolder.UseVisualStyleBackColor = true;
@@ -168,52 +175,58 @@ namespace GCTonePrism.Manager
             this.lblGameFolderHint.AutoSize = true;
             this.lblGameFolderHint.Font = new System.Drawing.Font("MS UI Gothic", 8F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(128)));
             this.lblGameFolderHint.ForeColor = System.Drawing.Color.Gray;
-            this.lblGameFolderHint.Location = new System.Drawing.Point(120, 97);
+            this.lblGameFolderHint.Location = new System.Drawing.Point(90, 78);
+            this.lblGameFolderHint.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblGameFolderHint.Name = "lblGameFolderHint";
-            this.lblGameFolderHint.Size = new System.Drawing.Size(394, 11);
+            this.lblGameFolderHint.Size = new System.Drawing.Size(356, 11);
             this.lblGameFolderHint.TabIndex = 7;
             this.lblGameFolderHint.Text = "新しいバージョンのゲームフォルダを選択してください。フォルダ全体がコピーされます。";
             // 
             // lblTitle
             // 
             this.lblTitle.AutoSize = true;
-            this.lblTitle.Location = new System.Drawing.Point(12, 118);
+            this.lblTitle.Location = new System.Drawing.Point(9, 94);
+            this.lblTitle.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblTitle.Name = "lblTitle";
-            this.lblTitle.Size = new System.Drawing.Size(51, 15);
+            this.lblTitle.Size = new System.Drawing.Size(46, 12);
             this.lblTitle.TabIndex = 8;
             this.lblTitle.Text = "タイトル*";
             // 
             // txtTitle
             // 
-            this.txtTitle.Location = new System.Drawing.Point(120, 115);
+            this.txtTitle.Location = new System.Drawing.Point(90, 92);
+            this.txtTitle.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtTitle.Name = "txtTitle";
-            this.txtTitle.Size = new System.Drawing.Size(500, 22);
+            this.txtTitle.Size = new System.Drawing.Size(376, 19);
             this.txtTitle.TabIndex = 9;
             // 
             // lblDescription
             // 
             this.lblDescription.AutoSize = true;
-            this.lblDescription.Location = new System.Drawing.Point(12, 148);
+            this.lblDescription.Location = new System.Drawing.Point(9, 118);
+            this.lblDescription.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblDescription.Name = "lblDescription";
-            this.lblDescription.Size = new System.Drawing.Size(45, 15);
+            this.lblDescription.Size = new System.Drawing.Size(41, 12);
             this.lblDescription.TabIndex = 10;
             this.lblDescription.Text = "説明文";
             // 
             // txtDescription
             // 
-            this.txtDescription.Location = new System.Drawing.Point(120, 145);
+            this.txtDescription.Location = new System.Drawing.Point(90, 116);
+            this.txtDescription.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtDescription.Multiline = true;
             this.txtDescription.Name = "txtDescription";
             this.txtDescription.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.txtDescription.Size = new System.Drawing.Size(500, 60);
+            this.txtDescription.Size = new System.Drawing.Size(376, 49);
             this.txtDescription.TabIndex = 11;
             // 
             // lblGenre
             // 
             this.lblGenre.AutoSize = true;
-            this.lblGenre.Location = new System.Drawing.Point(12, 215);
+            this.lblGenre.Location = new System.Drawing.Point(9, 172);
+            this.lblGenre.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblGenre.Name = "lblGenre";
-            this.lblGenre.Size = new System.Drawing.Size(52, 15);
+            this.lblGenre.Size = new System.Drawing.Size(42, 12);
             this.lblGenre.TabIndex = 12;
             this.lblGenre.Text = "ジャンル";
             // 
@@ -221,55 +234,85 @@ namespace GCTonePrism.Manager
             // 
             this.clbGenre.CheckOnClick = true;
             this.clbGenre.FormattingEnabled = true;
-            this.clbGenre.Location = new System.Drawing.Point(120, 212);
+            this.clbGenre.Location = new System.Drawing.Point(90, 170);
+            this.clbGenre.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.clbGenre.Name = "clbGenre";
-            this.clbGenre.Size = new System.Drawing.Size(300, 200);
+            this.clbGenre.Size = new System.Drawing.Size(226, 158);
             this.clbGenre.TabIndex = 13;
             // 
             // lblMinPlayers
             // 
             this.lblMinPlayers.AutoSize = true;
-            this.lblMinPlayers.Location = new System.Drawing.Point(12, 425);
+            this.lblMinPlayers.Location = new System.Drawing.Point(9, 340);
+            this.lblMinPlayers.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblMinPlayers.Name = "lblMinPlayers";
-            this.lblMinPlayers.Size = new System.Drawing.Size(104, 15);
+            this.lblMinPlayers.Size = new System.Drawing.Size(88, 12);
             this.lblMinPlayers.TabIndex = 14;
             this.lblMinPlayers.Text = "最小プレイヤー数";
             // 
             // numMinPlayers
             // 
-            this.numMinPlayers.Location = new System.Drawing.Point(120, 422);
-            this.numMinPlayers.Maximum = new decimal(new int[] { 99, 0, 0, 0 });
-            this.numMinPlayers.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
+            this.numMinPlayers.Location = new System.Drawing.Point(101, 338);
+            this.numMinPlayers.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.numMinPlayers.Maximum = new decimal(new int[] {
+            99,
+            0,
+            0,
+            0});
+            this.numMinPlayers.Minimum = new decimal(new int[] {
+            1,
+            0,
+            0,
+            0});
             this.numMinPlayers.Name = "numMinPlayers";
-            this.numMinPlayers.Size = new System.Drawing.Size(120, 22);
+            this.numMinPlayers.Size = new System.Drawing.Size(90, 19);
             this.numMinPlayers.TabIndex = 15;
-            this.numMinPlayers.Value = new decimal(new int[] { 1, 0, 0, 0 });
+            this.numMinPlayers.Value = new decimal(new int[] {
+            1,
+            0,
+            0,
+            0});
             // 
             // lblMaxPlayers
             // 
             this.lblMaxPlayers.AutoSize = true;
-            this.lblMaxPlayers.Location = new System.Drawing.Point(260, 425);
+            this.lblMaxPlayers.Location = new System.Drawing.Point(195, 340);
+            this.lblMaxPlayers.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblMaxPlayers.Name = "lblMaxPlayers";
-            this.lblMaxPlayers.Size = new System.Drawing.Size(104, 15);
+            this.lblMaxPlayers.Size = new System.Drawing.Size(88, 12);
             this.lblMaxPlayers.TabIndex = 16;
             this.lblMaxPlayers.Text = "最大プレイヤー数";
             // 
             // numMaxPlayers
             // 
-            this.numMaxPlayers.Location = new System.Drawing.Point(370, 422);
-            this.numMaxPlayers.Maximum = new decimal(new int[] { 99, 0, 0, 0 });
-            this.numMaxPlayers.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
+            this.numMaxPlayers.Location = new System.Drawing.Point(287, 338);
+            this.numMaxPlayers.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.numMaxPlayers.Maximum = new decimal(new int[] {
+            99,
+            0,
+            0,
+            0});
+            this.numMaxPlayers.Minimum = new decimal(new int[] {
+            1,
+            0,
+            0,
+            0});
             this.numMaxPlayers.Name = "numMaxPlayers";
-            this.numMaxPlayers.Size = new System.Drawing.Size(120, 22);
+            this.numMaxPlayers.Size = new System.Drawing.Size(90, 19);
             this.numMaxPlayers.TabIndex = 17;
-            this.numMaxPlayers.Value = new decimal(new int[] { 1, 0, 0, 0 });
+            this.numMaxPlayers.Value = new decimal(new int[] {
+            1,
+            0,
+            0,
+            0});
             // 
             // lblDifficulty
             // 
             this.lblDifficulty.AutoSize = true;
-            this.lblDifficulty.Location = new System.Drawing.Point(12, 455);
+            this.lblDifficulty.Location = new System.Drawing.Point(9, 364);
+            this.lblDifficulty.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblDifficulty.Name = "lblDifficulty";
-            this.lblDifficulty.Size = new System.Drawing.Size(52, 15);
+            this.lblDifficulty.Size = new System.Drawing.Size(41, 12);
             this.lblDifficulty.TabIndex = 18;
             this.lblDifficulty.Text = "難易度";
             // 
@@ -277,17 +320,19 @@ namespace GCTonePrism.Manager
             // 
             this.cmbDifficulty.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbDifficulty.FormattingEnabled = true;
-            this.cmbDifficulty.Location = new System.Drawing.Point(120, 452);
+            this.cmbDifficulty.Location = new System.Drawing.Point(90, 362);
+            this.cmbDifficulty.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.cmbDifficulty.Name = "cmbDifficulty";
-            this.cmbDifficulty.Size = new System.Drawing.Size(200, 23);
+            this.cmbDifficulty.Size = new System.Drawing.Size(151, 20);
             this.cmbDifficulty.TabIndex = 19;
             // 
             // lblPlayTime
             // 
             this.lblPlayTime.AutoSize = true;
-            this.lblPlayTime.Location = new System.Drawing.Point(340, 455);
+            this.lblPlayTime.Location = new System.Drawing.Point(255, 364);
+            this.lblPlayTime.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblPlayTime.Name = "lblPlayTime";
-            this.lblPlayTime.Size = new System.Drawing.Size(78, 15);
+            this.lblPlayTime.Size = new System.Drawing.Size(56, 12);
             this.lblPlayTime.TabIndex = 20;
             this.lblPlayTime.Text = "プレイ時間";
             // 
@@ -295,17 +340,19 @@ namespace GCTonePrism.Manager
             // 
             this.cmbPlayTime.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbPlayTime.FormattingEnabled = true;
-            this.cmbPlayTime.Location = new System.Drawing.Point(420, 452);
+            this.cmbPlayTime.Location = new System.Drawing.Point(315, 362);
+            this.cmbPlayTime.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.cmbPlayTime.Name = "cmbPlayTime";
-            this.cmbPlayTime.Size = new System.Drawing.Size(200, 23);
+            this.cmbPlayTime.Size = new System.Drawing.Size(151, 20);
             this.cmbPlayTime.TabIndex = 21;
             // 
             // chkControllerSupport
             // 
             this.chkControllerSupport.AutoSize = true;
-            this.chkControllerSupport.Location = new System.Drawing.Point(12, 485);
+            this.chkControllerSupport.Location = new System.Drawing.Point(9, 388);
+            this.chkControllerSupport.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.chkControllerSupport.Name = "chkControllerSupport";
-            this.chkControllerSupport.Size = new System.Drawing.Size(149, 19);
+            this.chkControllerSupport.Size = new System.Drawing.Size(124, 16);
             this.chkControllerSupport.TabIndex = 22;
             this.chkControllerSupport.Text = "コントローラーサポート";
             this.chkControllerSupport.UseVisualStyleBackColor = true;
@@ -313,9 +360,10 @@ namespace GCTonePrism.Manager
             // lblSupportedConnection
             // 
             this.lblSupportedConnection.AutoSize = true;
-            this.lblSupportedConnection.Location = new System.Drawing.Point(12, 515);
+            this.lblSupportedConnection.Location = new System.Drawing.Point(9, 412);
+            this.lblSupportedConnection.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblSupportedConnection.Name = "lblSupportedConnection";
-            this.lblSupportedConnection.Size = new System.Drawing.Size(100, 15);
+            this.lblSupportedConnection.Size = new System.Drawing.Size(80, 12);
             this.lblSupportedConnection.TabIndex = 23;
             this.lblSupportedConnection.Text = "通信プレイ対応";
             // 
@@ -323,33 +371,37 @@ namespace GCTonePrism.Manager
             // 
             this.cmbSupportedConnection.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbSupportedConnection.FormattingEnabled = true;
-            this.cmbSupportedConnection.Location = new System.Drawing.Point(120, 512);
+            this.cmbSupportedConnection.Location = new System.Drawing.Point(90, 410);
+            this.cmbSupportedConnection.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.cmbSupportedConnection.Name = "cmbSupportedConnection";
-            this.cmbSupportedConnection.Size = new System.Drawing.Size(300, 23);
+            this.cmbSupportedConnection.Size = new System.Drawing.Size(226, 20);
             this.cmbSupportedConnection.TabIndex = 24;
             // 
             // lblThumbnailPath
             // 
             this.lblThumbnailPath.AutoSize = true;
-            this.lblThumbnailPath.Location = new System.Drawing.Point(12, 548);
+            this.lblThumbnailPath.Location = new System.Drawing.Point(9, 438);
+            this.lblThumbnailPath.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblThumbnailPath.Name = "lblThumbnailPath";
-            this.lblThumbnailPath.Size = new System.Drawing.Size(104, 15);
+            this.lblThumbnailPath.Size = new System.Drawing.Size(78, 12);
             this.lblThumbnailPath.TabIndex = 25;
             this.lblThumbnailPath.Text = "サムネイル画像";
             // 
             // txtThumbnailPath
             // 
-            this.txtThumbnailPath.Location = new System.Drawing.Point(120, 545);
+            this.txtThumbnailPath.Location = new System.Drawing.Point(90, 436);
+            this.txtThumbnailPath.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtThumbnailPath.Name = "txtThumbnailPath";
             this.txtThumbnailPath.ReadOnly = true;
-            this.txtThumbnailPath.Size = new System.Drawing.Size(400, 22);
+            this.txtThumbnailPath.Size = new System.Drawing.Size(301, 19);
             this.txtThumbnailPath.TabIndex = 26;
             // 
             // btnSelectThumbnail
             // 
-            this.btnSelectThumbnail.Location = new System.Drawing.Point(526, 544);
+            this.btnSelectThumbnail.Location = new System.Drawing.Point(394, 436);
+            this.btnSelectThumbnail.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.btnSelectThumbnail.Name = "btnSelectThumbnail";
-            this.btnSelectThumbnail.Size = new System.Drawing.Size(94, 23);
+            this.btnSelectThumbnail.Size = new System.Drawing.Size(70, 19);
             this.btnSelectThumbnail.TabIndex = 27;
             this.btnSelectThumbnail.Text = "選択...";
             this.btnSelectThumbnail.UseVisualStyleBackColor = true;
@@ -358,102 +410,58 @@ namespace GCTonePrism.Manager
             // lblBackgroundPath
             // 
             this.lblBackgroundPath.AutoSize = true;
-            this.lblBackgroundPath.Location = new System.Drawing.Point(12, 686);
+            this.lblBackgroundPath.Location = new System.Drawing.Point(9, 549);
+            this.lblBackgroundPath.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblBackgroundPath.Name = "lblBackgroundPath";
-            this.lblBackgroundPath.Size = new System.Drawing.Size(78, 15);
+            this.lblBackgroundPath.Size = new System.Drawing.Size(53, 12);
             this.lblBackgroundPath.TabIndex = 28;
             this.lblBackgroundPath.Text = "背景画像";
             // 
             // txtBackgroundPath
             // 
-            this.txtBackgroundPath.Location = new System.Drawing.Point(120, 683);
+            this.txtBackgroundPath.Location = new System.Drawing.Point(90, 546);
+            this.txtBackgroundPath.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtBackgroundPath.Name = "txtBackgroundPath";
             this.txtBackgroundPath.ReadOnly = true;
-            this.txtBackgroundPath.Size = new System.Drawing.Size(400, 22);
+            this.txtBackgroundPath.Size = new System.Drawing.Size(301, 19);
             this.txtBackgroundPath.TabIndex = 29;
             // 
             // btnSelectBackground
             // 
-            this.btnSelectBackground.Location = new System.Drawing.Point(526, 682);
+            this.btnSelectBackground.Location = new System.Drawing.Point(394, 546);
+            this.btnSelectBackground.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.btnSelectBackground.Name = "btnSelectBackground";
-            this.btnSelectBackground.Size = new System.Drawing.Size(94, 23);
+            this.btnSelectBackground.Size = new System.Drawing.Size(70, 19);
             this.btnSelectBackground.TabIndex = 30;
             this.btnSelectBackground.Text = "選択...";
             this.btnSelectBackground.UseVisualStyleBackColor = true;
             this.btnSelectBackground.Click += new System.EventHandler(this.btnSelectBackground_Click);
             // 
-            // picThumbnailPreview
-            // 
-            this.picThumbnailPreview.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.picThumbnailPreview.Location = new System.Drawing.Point(120, 575);
-            this.picThumbnailPreview.Name = "picThumbnailPreview";
-            this.picThumbnailPreview.Size = new System.Drawing.Size(100, 100);
-            this.picThumbnailPreview.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
-            this.picThumbnailPreview.TabIndex = 47;
-            this.picThumbnailPreview.TabStop = false;
-            // 
-            // lblThumbnailHint
-            // 
-            this.lblThumbnailHint.AutoSize = true;
-            this.lblThumbnailHint.ForeColor = System.Drawing.Color.Gray;
-            this.lblThumbnailHint.Location = new System.Drawing.Point(226, 615);
-            this.lblThumbnailHint.Name = "lblThumbnailHint";
-            this.lblThumbnailHint.Size = new System.Drawing.Size(200, 15);
-            this.lblThumbnailHint.TabIndex = 50;
-            this.lblThumbnailHint.Text = "※ 正方形（1:1）の画像を推奨";
-            // 
-            // picBackgroundPreview
-            // 
-            this.picBackgroundPreview.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.picBackgroundPreview.Location = new System.Drawing.Point(120, 711);
-            this.picBackgroundPreview.Name = "picBackgroundPreview";
-            this.picBackgroundPreview.Size = new System.Drawing.Size(178, 100);
-            this.picBackgroundPreview.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
-            this.picBackgroundPreview.TabIndex = 48;
-            this.picBackgroundPreview.TabStop = false;
-            // 
-            // lblBackgroundHint
-            // 
-            this.lblBackgroundHint.AutoSize = true;
-            this.lblBackgroundHint.ForeColor = System.Drawing.Color.Gray;
-            this.lblBackgroundHint.Location = new System.Drawing.Point(304, 751);
-            this.lblBackgroundHint.Name = "lblBackgroundHint";
-            this.lblBackgroundHint.Size = new System.Drawing.Size(200, 15);
-            this.lblBackgroundHint.TabIndex = 51;
-            this.lblBackgroundHint.Text = "※ 16:9の画像を推奨";
-            // 
-            // btnTestRun
-            // 
-            this.btnTestRun.Location = new System.Drawing.Point(120, 855);
-            this.btnTestRun.Name = "btnTestRun";
-            this.btnTestRun.Size = new System.Drawing.Size(120, 28);
-            this.btnTestRun.TabIndex = 49;
-            this.btnTestRun.Text = "テスト起動";
-            this.btnTestRun.UseVisualStyleBackColor = true;
-            this.btnTestRun.Click += new System.EventHandler(this.btnTestRun_Click);
-            // 
             // lblExecutablePath
             // 
             this.lblExecutablePath.AutoSize = true;
-            this.lblExecutablePath.Location = new System.Drawing.Point(12, 822);
+            this.lblExecutablePath.Location = new System.Drawing.Point(9, 658);
+            this.lblExecutablePath.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblExecutablePath.Name = "lblExecutablePath";
-            this.lblExecutablePath.Size = new System.Drawing.Size(86, 15);
+            this.lblExecutablePath.Size = new System.Drawing.Size(69, 12);
             this.lblExecutablePath.TabIndex = 31;
             this.lblExecutablePath.Text = "実行ファイル*";
             // 
             // txtExecutablePath
             // 
-            this.txtExecutablePath.Location = new System.Drawing.Point(120, 819);
+            this.txtExecutablePath.Location = new System.Drawing.Point(90, 655);
+            this.txtExecutablePath.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtExecutablePath.Name = "txtExecutablePath";
             this.txtExecutablePath.ReadOnly = true;
-            this.txtExecutablePath.Size = new System.Drawing.Size(400, 22);
+            this.txtExecutablePath.Size = new System.Drawing.Size(301, 19);
             this.txtExecutablePath.TabIndex = 32;
             // 
             // btnSelectExecutable
             // 
-            this.btnSelectExecutable.Location = new System.Drawing.Point(526, 818);
+            this.btnSelectExecutable.Location = new System.Drawing.Point(394, 654);
+            this.btnSelectExecutable.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.btnSelectExecutable.Name = "btnSelectExecutable";
-            this.btnSelectExecutable.Size = new System.Drawing.Size(94, 23);
+            this.btnSelectExecutable.Size = new System.Drawing.Size(70, 20);
             this.btnSelectExecutable.TabIndex = 33;
             this.btnSelectExecutable.Text = "選択...";
             this.btnSelectExecutable.UseVisualStyleBackColor = true;
@@ -462,27 +470,30 @@ namespace GCTonePrism.Manager
             // lblArguments
             // 
             this.lblArguments.AutoSize = true;
-            this.lblArguments.Location = new System.Drawing.Point(12, 892);
+            this.lblArguments.Location = new System.Drawing.Point(9, 714);
+            this.lblArguments.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblArguments.Name = "lblArguments";
-            this.lblArguments.Size = new System.Drawing.Size(91, 15);
+            this.lblArguments.Size = new System.Drawing.Size(72, 12);
             this.lblArguments.TabIndex = 34;
             this.lblArguments.Text = "起動オプション";
             // 
             // txtArguments
             // 
-            this.txtArguments.Location = new System.Drawing.Point(120, 889);
+            this.txtArguments.Location = new System.Drawing.Point(90, 711);
+            this.txtArguments.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtArguments.Multiline = true;
             this.txtArguments.Name = "txtArguments";
             this.txtArguments.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.txtArguments.Size = new System.Drawing.Size(500, 50);
+            this.txtArguments.Size = new System.Drawing.Size(376, 41);
             this.txtArguments.TabIndex = 35;
             // 
             // lblDevelopers
             // 
             this.lblDevelopers.AutoSize = true;
-            this.lblDevelopers.Location = new System.Drawing.Point(12, 954);
+            this.lblDevelopers.Location = new System.Drawing.Point(9, 763);
+            this.lblDevelopers.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblDevelopers.Name = "lblDevelopers";
-            this.lblDevelopers.Size = new System.Drawing.Size(45, 15);
+            this.lblDevelopers.Size = new System.Drawing.Size(41, 12);
             this.lblDevelopers.TabIndex = 36;
             this.lblDevelopers.Text = "製作者";
             // 
@@ -491,21 +502,23 @@ namespace GCTonePrism.Manager
             this.dgvDevelopers.AllowUserToAddRows = false;
             this.dgvDevelopers.AllowUserToDeleteRows = false;
             this.dgvDevelopers.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-            this.dgvDevelopers.Location = new System.Drawing.Point(120, 951);
+            this.dgvDevelopers.Location = new System.Drawing.Point(90, 761);
+            this.dgvDevelopers.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.dgvDevelopers.MultiSelect = false;
             this.dgvDevelopers.Name = "dgvDevelopers";
             this.dgvDevelopers.ReadOnly = true;
             this.dgvDevelopers.RowHeadersVisible = false;
             this.dgvDevelopers.RowTemplate.Height = 21;
             this.dgvDevelopers.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
-            this.dgvDevelopers.Size = new System.Drawing.Size(400, 100);
+            this.dgvDevelopers.Size = new System.Drawing.Size(300, 80);
             this.dgvDevelopers.TabIndex = 37;
             // 
             // btnAddDeveloper
             // 
-            this.btnAddDeveloper.Location = new System.Drawing.Point(526, 951);
+            this.btnAddDeveloper.Location = new System.Drawing.Point(394, 761);
+            this.btnAddDeveloper.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.btnAddDeveloper.Name = "btnAddDeveloper";
-            this.btnAddDeveloper.Size = new System.Drawing.Size(94, 28);
+            this.btnAddDeveloper.Size = new System.Drawing.Size(70, 22);
             this.btnAddDeveloper.TabIndex = 38;
             this.btnAddDeveloper.Text = "追加";
             this.btnAddDeveloper.UseVisualStyleBackColor = true;
@@ -513,9 +526,10 @@ namespace GCTonePrism.Manager
             // 
             // btnEditDeveloper
             // 
-            this.btnEditDeveloper.Location = new System.Drawing.Point(526, 985);
+            this.btnEditDeveloper.Location = new System.Drawing.Point(394, 788);
+            this.btnEditDeveloper.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.btnEditDeveloper.Name = "btnEditDeveloper";
-            this.btnEditDeveloper.Size = new System.Drawing.Size(94, 28);
+            this.btnEditDeveloper.Size = new System.Drawing.Size(70, 22);
             this.btnEditDeveloper.TabIndex = 39;
             this.btnEditDeveloper.Text = "編集";
             this.btnEditDeveloper.UseVisualStyleBackColor = true;
@@ -523,9 +537,10 @@ namespace GCTonePrism.Manager
             // 
             // btnDeleteDeveloper
             // 
-            this.btnDeleteDeveloper.Location = new System.Drawing.Point(526, 1019);
+            this.btnDeleteDeveloper.Location = new System.Drawing.Point(394, 815);
+            this.btnDeleteDeveloper.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.btnDeleteDeveloper.Name = "btnDeleteDeveloper";
-            this.btnDeleteDeveloper.Size = new System.Drawing.Size(94, 28);
+            this.btnDeleteDeveloper.Size = new System.Drawing.Size(70, 22);
             this.btnDeleteDeveloper.TabIndex = 40;
             this.btnDeleteDeveloper.Text = "削除";
             this.btnDeleteDeveloper.UseVisualStyleBackColor = true;
@@ -534,27 +549,30 @@ namespace GCTonePrism.Manager
             // lblUpdateNote
             // 
             this.lblUpdateNote.AutoSize = true;
-            this.lblUpdateNote.Location = new System.Drawing.Point(12, 1066);
+            this.lblUpdateNote.Location = new System.Drawing.Point(9, 853);
+            this.lblUpdateNote.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblUpdateNote.Name = "lblUpdateNote";
-            this.lblUpdateNote.Size = new System.Drawing.Size(86, 15);
+            this.lblUpdateNote.Size = new System.Drawing.Size(72, 12);
             this.lblUpdateNote.TabIndex = 41;
             this.lblUpdateNote.Text = "更新内容など";
             // 
             // txtUpdateNote
             // 
-            this.txtUpdateNote.Location = new System.Drawing.Point(120, 1063);
+            this.txtUpdateNote.Location = new System.Drawing.Point(90, 850);
+            this.txtUpdateNote.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtUpdateNote.Multiline = true;
             this.txtUpdateNote.Name = "txtUpdateNote";
             this.txtUpdateNote.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.txtUpdateNote.Size = new System.Drawing.Size(500, 60);
+            this.txtUpdateNote.Size = new System.Drawing.Size(376, 49);
             this.txtUpdateNote.TabIndex = 42;
             // 
             // btnOK
             // 
             this.btnOK.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnOK.Location = new System.Drawing.Point(420, 1140);
+            this.btnOK.Location = new System.Drawing.Point(315, 912);
+            this.btnOK.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.btnOK.Name = "btnOK";
-            this.btnOK.Size = new System.Drawing.Size(95, 30);
+            this.btnOK.Size = new System.Drawing.Size(71, 24);
             this.btnOK.TabIndex = 43;
             this.btnOK.Text = "OK";
             this.btnOK.UseVisualStyleBackColor = true;
@@ -564,21 +582,77 @@ namespace GCTonePrism.Manager
             // 
             this.btnCancel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(521, 1140);
+            this.btnCancel.Location = new System.Drawing.Point(391, 912);
+            this.btnCancel.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.btnCancel.Name = "btnCancel";
-            this.btnCancel.Size = new System.Drawing.Size(95, 30);
+            this.btnCancel.Size = new System.Drawing.Size(71, 24);
             this.btnCancel.TabIndex = 44;
             this.btnCancel.Text = "キャンセル";
             this.btnCancel.UseVisualStyleBackColor = true;
             this.btnCancel.Click += new System.EventHandler(this.btnCancel_Click);
             // 
+            // picThumbnailPreview
+            // 
+            this.picThumbnailPreview.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.picThumbnailPreview.Location = new System.Drawing.Point(90, 460);
+            this.picThumbnailPreview.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.picThumbnailPreview.Name = "picThumbnailPreview";
+            this.picThumbnailPreview.Size = new System.Drawing.Size(76, 80);
+            this.picThumbnailPreview.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
+            this.picThumbnailPreview.TabIndex = 47;
+            this.picThumbnailPreview.TabStop = false;
+            // 
+            // picBackgroundPreview
+            // 
+            this.picBackgroundPreview.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.picBackgroundPreview.Location = new System.Drawing.Point(90, 569);
+            this.picBackgroundPreview.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.picBackgroundPreview.Name = "picBackgroundPreview";
+            this.picBackgroundPreview.Size = new System.Drawing.Size(134, 80);
+            this.picBackgroundPreview.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
+            this.picBackgroundPreview.TabIndex = 48;
+            this.picBackgroundPreview.TabStop = false;
+            // 
+            // btnTestRun
+            // 
+            this.btnTestRun.Location = new System.Drawing.Point(90, 684);
+            this.btnTestRun.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.btnTestRun.Name = "btnTestRun";
+            this.btnTestRun.Size = new System.Drawing.Size(90, 22);
+            this.btnTestRun.TabIndex = 49;
+            this.btnTestRun.Text = "テスト起動";
+            this.btnTestRun.UseVisualStyleBackColor = true;
+            this.btnTestRun.Click += new System.EventHandler(this.btnTestRun_Click);
+            // 
+            // lblThumbnailHint
+            // 
+            this.lblThumbnailHint.AutoSize = true;
+            this.lblThumbnailHint.ForeColor = System.Drawing.Color.Gray;
+            this.lblThumbnailHint.Location = new System.Drawing.Point(170, 492);
+            this.lblThumbnailHint.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
+            this.lblThumbnailHint.Name = "lblThumbnailHint";
+            this.lblThumbnailHint.Size = new System.Drawing.Size(150, 12);
+            this.lblThumbnailHint.TabIndex = 50;
+            this.lblThumbnailHint.Text = "※ 正方形（1:1）の画像を推奨";
+            // 
+            // lblBackgroundHint
+            // 
+            this.lblBackgroundHint.AutoSize = true;
+            this.lblBackgroundHint.ForeColor = System.Drawing.Color.Gray;
+            this.lblBackgroundHint.Location = new System.Drawing.Point(228, 601);
+            this.lblBackgroundHint.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
+            this.lblBackgroundHint.Name = "lblBackgroundHint";
+            this.lblBackgroundHint.Size = new System.Drawing.Size(108, 12);
+            this.lblBackgroundHint.TabIndex = 51;
+            this.lblBackgroundHint.Text = "※ 16:9の画像を推奨";
+            // 
             // VersionUpForm
             // 
             this.AcceptButton = this.btnOK;
-            this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 15F);
+            this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(640, 1190);
+            this.ClientSize = new System.Drawing.Size(480, 952);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnOK);
             this.Controls.Add(this.txtUpdateNote);
@@ -630,8 +704,8 @@ namespace GCTonePrism.Manager
             this.Controls.Add(this.lblVersionHint);
             this.Controls.Add(this.lblCurrentVersion);
             this.Controls.Add(this.lblCurrentVersionLabel);
-
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
+            this.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.MaximizeBox = false;
             this.MinimizeBox = false;
             this.Name = "VersionUpForm";
@@ -645,6 +719,7 @@ namespace GCTonePrism.Manager
             ((System.ComponentModel.ISupportInitialize)(this.picBackgroundPreview)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
+
         }
 
         #endregion

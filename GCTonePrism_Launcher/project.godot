@@ -10,8 +10,8 @@ config_version=5
 
 [application]
 
-config/name="ゲームセンターTONE Prism"
-config/version="0.4.6"
+config/name="GCTonePrism_Launcher"
+config/version="0.5.0"
 run/main_scene="res://scenes/screensaver.tscn"
 config/features=PackedStringArray("4.5", "Forward Plus")
 config/icon="res://icon.svg"
@@ -21,6 +21,8 @@ config/icon="res://icon.svg"
 ErrorManager="*res://scripts/error_manager.gd"
 DialogManager="*res://scripts/dialog_manager.gd"
 AppManager="*res://scripts/app_manager.gd"
+AppState="*res://scripts/app_state.gd"
+TransitionManager="*res://scripts/transition_manager.gd"
 
 [display]
 

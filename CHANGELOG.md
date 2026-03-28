@@ -11,6 +11,55 @@
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.5.4] - 2026-03-29
+
+#### Fixed
+
+- **戻る操作時のAppStateクリア順序を修正**: 遷移中の戻る操作を無視し、遷移受理後にAppStateをクリアするよう変更
+
+### [Launcher v0.5.3] - 2026-03-29
+
+#### Fixed
+
+- **スライドショー1枚時の画面消失を修正**: ゲーム1枚以下のスライドショーで遷移アニメーションをスキップ
+
+### [Launcher v0.5.2] - 2026-03-29
+
+#### Fixed
+
+- **最近プレイのソート不具合を修正**: `recently_played` クエリを `GROUP BY` + `MAX(start_time)` に変更し、ゲームごとの最新プレイ時刻で正しくソート
+- **スライドショーアニメーションのロックをセクション単位に変更**: グローバルフラグからDictionaryに変更し、複数セクション間のブロッキングを解消
+- **「すべて見る」ボタン不在時のフォーカス飛びを修正**: ボタンが存在するセクションでのみ `_on_view_all` を有効化
+
+### [Launcher v0.5.1] - 2026-03-29
+
+#### Fixed
+
+- **ダイアログ連続表示時のポーズ解除バグを修正**: ダイアログ閉じアニメーション完了時に新しいダイアログが開かれていればポーズを維持するよう修正
+- **StoreBrowseのmax_display_count未適用を修正**: セクションタイプ0（通常行）でManagerで設定した表示上限が反映されるよう修正
+
+### [Launcher v0.5.0] - 2026-03-27
+
+#### Added
+
+- **StoreBrowse画面を新規導入**
+  - `store_browse.tscn` / `store_browse.gd` / `store_browse_builder.gd` / `store_section_info.gd` を追加
+  - `manual/popular/recent/recently_played/genre/players/difficulty/play_time/online/random/controller` セクションの表示に対応
+- **画面遷移制御を追加**
+  - `AppState` と `TransitionManager` をAutoLoad登録
+  - `screensaver -> store_browse -> game_selection` の遷移フローと戻り導線を実装
+
+#### Changed
+
+- **UI/操作性を改善**
+  - `game_selection` / `common_dialog` / `error_dialog` のフォーカス表示と遷移演出を調整
+  - コントローラ操作時の視認性を改善
+- **DBスキーマをv8へ更新**
+  - `CURRENT_DB_VERSION` を8に更新
+  - `store_sections` / `store_section_games` 取得APIを追加
+- **アプリ名設定を更新**
+  - `project.godot` の `config/name` をプロジェクト意図に合わせて変更
+
 ### [Launcher v0.4.6] - 2026-03-21
 
 #### Changed
@@ -222,6 +271,70 @@
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.7.5] - 2026-03-29
+
+#### Fixed
+
+- **ゲームIDリネーム時のロールバック追加**: DB更新失敗時にフォルダを元に戻すよう修正
+- **DB初期化拒否時のパネル読み込みをスキップ**: DB未作成のまま起動した場合にパネル初期化を行わないよう修正
+
+### [Manager v0.7.4] - 2026-03-29
+
+#### Fixed
+
+- **パネル初期化をDB確認後に移動**: DB存在チェック前にSettingsSectionPanelがDB接続するのを防止
+
+### [Manager v0.7.3] - 2026-03-29
+
+#### Fixed
+
+- **バージョン切り替え時の編集内容保持**: currentDisplayingVersionの代入漏れを修正
+- **ストアセクション編集画面の最大表示数を表示**: 非表示だったmax_display_count入力欄を常時表示に変更
+
+### [Manager v0.7.2] - 2026-03-29
+
+#### Fixed
+
+- **ゲームIDリネーム時のデータ不整合を修正**: フォルダリネームをDB更新より先に実行し、失敗時のDB/ファイルシステム不整合を防止
+- **ゲームIDリネーム後のパス変換を修正**: リネーム後にパステキストボックスを新フォルダベースに更新してから相対パス変換するよう修正
+
+### [Manager v0.7.1] - 2026-03-28
+
+#### Added
+
+- **ゲームID編集機能**: EditGameFormからゲームIDを変更可能に（全関連テーブルの一括更新+フォルダリネーム）
+
+#### Changed
+
+- **タブ+セクションパネル構成に分割**: MainFormをGameSectionPanel / StoreSectionPanel / SettingsSectionPanelに分離
+- **プロジェクト名をGCTonePrism_Managerに統一**: slnx / csproj / AssemblyName をリネーム
+
+#### Fixed
+
+- **ゲームID変更時のDB制約エラー**: PRAGMA foreign_keysをトランザクション外で制御するよう修正
+- **DataGridViewの初期選択ハイライト解除**: ゲーム・ストア一覧で起動時の意図しない行選択を解消
+- **行ヘッダー（三角マーク）非表示**: ゲーム・ストア一覧で左端の行ヘッダーを非表示に
+- **列ヘッダーの選択ハイライト無効化**: セル選択時に列ヘッダーが青くならないよう修正
+
+### [Manager v0.7.0] - 2026-03-27
+
+#### Added
+
+- **StoreSection管理機能を追加**
+  - `StoreSectionInfo` / `StoreSectionRepository` / `StoreSectionForm` / `StoreSectionListForm` を追加
+  - セクションの追加・編集・削除・並び替え、`manual` セクションの `display_text` 管理を実装
+- **MainFormにストア管理導線を追加**
+  - ツールバーからStoreSection一覧を開けるように変更
+
+#### Changed
+
+- **DBスキーマをv8へ更新**
+  - `V6 -> V7`: `store_sections` / `store_section_games` テーブルを追加
+  - `V7 -> V8`: `store_sections.display_text` 列を追加
+  - `DatabaseManager` にStoreSection操作APIを追加
+- **ゲーム管理フォーム差分を反映**
+  - `AddGameForm` / `EditGameForm` / `VersionUpForm` のフォーム本体・Designer・resx差分を反映
 
 ### [Manager v0.6.2] - 2026-03-21
 
@@ -529,15 +642,22 @@
 - **マイルストーン6**: ゲーム起動機能
 - **マイルストーン7**: UI完成・ゲーム情報詳細表示
 - **マイルストーン8**: MVP完成
-- **マイルストーン9**: 基本機能完成
-- **マイルストーン10**: データ管理機能完成
-- **マイルストーン11**: 管理ソフト完全版完成
-- **マイルストーン12**: 完全版リリース
+- **マイルストーン9**: 監視ソフト基本機能完成
+- **マイルストーン10**: 基本機能完成
+- **マイルストーン11**: データ管理機能完成
+- **マイルストーン12**: 管理ソフト完全版完成
+- **マイルストーン13**: 完全版リリース
 
 ---
 
 [Launcher Unreleased]: https://github.com/ken1208git/GCTonePrism/compare/launcher-v1.0.0...HEAD
 [Launcher v0.4.5]: https://github.com/ken1208git/GCTonePrism/releases/tag/launcher-v0.4.5
-[Launcher v0.4.4]: https://github.com/ken1208git/GCTonePrism/releases/tag/launcher-v0.4.4
+[Launcher v0.4.3]: https://github.com/ken1208git/GCTonePrism/releases/tag/launcher-v0.4.3
+[Manager v0.6.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.6.0
+[Manager v0.5.1]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.5.1
+[Manager v0.5.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.5.0
+[Manager v0.4.1]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.4.1
+[Manager v0.4.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.4.0
+[Manager v0.3.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.3.0
 [Manager v0.1.1]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.1.1
 [Manager v0.1.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.1.0

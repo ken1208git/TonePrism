@@ -16,7 +16,7 @@ namespace GCTonePrism.Manager
 
         // 現在のデータベースバージョン
         // 構造変更があるたびにインクリメントする
-        private const int CurrentDbVersion = 6;
+        private const int CurrentDbVersion = 8;
 
         public SchemaManager(DatabaseConnection conn)
         {
@@ -124,7 +124,7 @@ namespace GCTonePrism.Manager
                     genre TEXT,
                     min_players INTEGER,
                     max_players INTEGER,
-                    difficulty INTEGER CHECK(difficulty BETWEEN 1 AND 5),
+                    difficulty INTEGER CHECK(difficulty BETWEEN 1 AND 3),
                     play_time INTEGER,
                     controller_support INTEGER DEFAULT 0,
                     supported_connection INTEGER DEFAULT 0,
@@ -292,6 +292,41 @@ namespace GCTonePrism.Manager
                 )";
 
             using (var command = new SQLiteCommand(createSettingsTable, connection, transaction))
+            {
+                command.ExecuteNonQuery();
+            }
+
+            // store_sectionsテーブル作成
+            string createStoreSectionsTable = @"
+                CREATE TABLE IF NOT EXISTS store_sections (
+                    section_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    section_type INTEGER DEFAULT 0,
+                    section_source TEXT DEFAULT 'manual',
+                    display_order INTEGER DEFAULT 0,
+                    max_display_count INTEGER DEFAULT 5,
+                    is_visible INTEGER DEFAULT 1
+                )";
+
+            using (var command = new SQLiteCommand(createStoreSectionsTable, connection, transaction))
+            {
+                command.ExecuteNonQuery();
+            }
+
+            // store_section_gamesテーブル作成
+            string createStoreSectionGamesTable = @"
+                CREATE TABLE IF NOT EXISTS store_section_games (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    section_id INTEGER NOT NULL,
+                    game_id TEXT NOT NULL,
+                    display_order INTEGER DEFAULT 0,
+                    display_text TEXT DEFAULT '',
+                    FOREIGN KEY(section_id) REFERENCES store_sections(section_id) ON DELETE CASCADE,
+                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE,
+                    UNIQUE(section_id, game_id)
+                )";
+
+            using (var command = new SQLiteCommand(createStoreSectionGamesTable, connection, transaction))
             {
                 command.ExecuteNonQuery();
             }
@@ -480,6 +515,18 @@ namespace GCTonePrism.Manager
                     {
                         MigrateV5ToV6(connection, migTransaction);
                         currentVersion = 6;
+                    }
+
+                    if (currentVersion < 7)
+                    {
+                        MigrateV6ToV7(connection, migTransaction);
+                        currentVersion = 7;
+                    }
+
+                    if (currentVersion < 8)
+                    {
+                        MigrateV7ToV8(connection, migTransaction);
+                        currentVersion = 8;
                     }
 
                     SetDbVersion(connection, CurrentDbVersion, migTransaction);
@@ -809,6 +856,62 @@ namespace GCTonePrism.Manager
             using (var command = new SQLiteCommand(sql, connection, transaction))
             {
                 command.ExecuteNonQuery();
+            }
+        }
+
+        private void MigrateV6ToV7(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            Console.WriteLine("[DatabaseManager] Executing migration V6 -> V7 (Adding store_sections and store_section_games tables)");
+
+            string createStoreSectionsTable = @"
+                CREATE TABLE IF NOT EXISTS store_sections (
+                    section_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    section_type INTEGER DEFAULT 0,
+                    section_source TEXT DEFAULT 'manual',
+                    display_order INTEGER DEFAULT 0,
+                    max_display_count INTEGER DEFAULT 5,
+                    is_visible INTEGER DEFAULT 1
+                )";
+
+            using (var command = new SQLiteCommand(createStoreSectionsTable, connection, transaction))
+            {
+                command.ExecuteNonQuery();
+            }
+
+            string createStoreSectionGamesTable = @"
+                CREATE TABLE IF NOT EXISTS store_section_games (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    section_id INTEGER NOT NULL,
+                    game_id TEXT NOT NULL,
+                    display_order INTEGER DEFAULT 0,
+                    FOREIGN KEY(section_id) REFERENCES store_sections(section_id) ON DELETE CASCADE,
+                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE,
+                    UNIQUE(section_id, game_id)
+                )";
+
+            using (var command = new SQLiteCommand(createStoreSectionGamesTable, connection, transaction))
+            {
+                command.ExecuteNonQuery();
+            }
+        }
+
+        private void MigrateV7ToV8(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            Console.WriteLine("[DatabaseManager] Executing migration V7 -> V8 (Adding display_text to store_section_games)");
+
+            try
+            {
+                string sql = "ALTER TABLE store_section_games ADD COLUMN display_text TEXT DEFAULT ''";
+                using (var command = new SQLiteCommand(sql, connection, transaction))
+                {
+                    command.ExecuteNonQuery();
+                }
+            }
+            catch (Exception ex)
+            {
+                // カラムが既に存在する場合はスキップ
+                Console.WriteLine($"[DatabaseManager] Warning adding display_text: {ex.Message}");
             }
         }
 

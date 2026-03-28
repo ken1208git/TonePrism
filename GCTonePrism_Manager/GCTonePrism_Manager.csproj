@@ -7,7 +7,7 @@
     <ProjectGuid>{EA046367-F4B6-4EE0-80EC-6F87D82FE4EF}</ProjectGuid>
     <OutputType>WinExe</OutputType>
     <RootNamespace>Manager</RootNamespace>
-    <AssemblyName>Manager</AssemblyName>
+    <AssemblyName>GCTonePrism_Manager</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
@@ -96,11 +96,42 @@
     <Compile Include="DeveloperForm.Designer.cs">
       <DependentUpon>DeveloperForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="StoreSectionListForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="StoreSectionListForm.Designer.cs">
+      <DependentUpon>StoreSectionListForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="StoreSectionForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="StoreSectionForm.Designer.cs">
+      <DependentUpon>StoreSectionForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Controls\GameSectionPanel.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Controls\GameSectionPanel.Designer.cs">
+      <DependentUpon>GameSectionPanel.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Controls\StoreSectionPanel.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Controls\StoreSectionPanel.Designer.cs">
+      <DependentUpon>StoreSectionPanel.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Controls\SettingsSectionPanel.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Controls\SettingsSectionPanel.Designer.cs">
+      <DependentUpon>SettingsSectionPanel.cs</DependentUpon>
+    </Compile>
     <Compile Include="DatabaseConnection.cs" />
     <Compile Include="DatabaseManager.cs" />
     <Compile Include="SchemaManager.cs" />
     <Compile Include="Repositories\DeveloperRepository.cs" />
     <Compile Include="Repositories\GameRepository.cs" />
+    <Compile Include="Repositories\StoreSectionRepository.cs" />
     <Compile Include="Repositories\VersionRepository.cs" />
     <Compile Include="MainForm.cs">
       <SubType>Form</SubType>
@@ -119,6 +150,7 @@
     <Compile Include="Models\GameInfo.cs" />
     <Compile Include="Models\PlayRecord.cs" />
     <Compile Include="Models\Settings.cs" />
+    <Compile Include="Models\StoreSectionInfo.cs" />
     <Compile Include="Models\Survey.cs" />
     <Compile Include="GenreList.cs" />
     <Compile Include="PathManager.cs" />
@@ -153,6 +185,12 @@
       <AutoGen>True</AutoGen>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
+    <EmbeddedResource Include="StoreSectionListForm.resx">
+      <DependentUpon>StoreSectionListForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="VersionUpForm.resx">
+      <DependentUpon>VersionUpForm.cs</DependentUpon>
+    </EmbeddedResource>
     <None Include="packages.config" />
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>

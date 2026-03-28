@@ -106,8 +106,6 @@ namespace GCTonePrism.Manager
             txtGameFolder.Text = gameFolder;
 
 
-            // 警告ラベルを非表示
-            lblGameIdWarning.Visible = false;
 
             // 既存の製作者情報をコピー
             if (originalGame.Developers != null)
@@ -331,6 +329,9 @@ namespace GCTonePrism.Manager
             // Update image previews
             UpdateThumbnailPreview();
             UpdateBackgroundPreview();
+
+            // 現在表示中のバージョンを記録（次回切り替え時の保存用）
+            currentDisplayingVersion = version;
         }
 
 
@@ -416,6 +417,61 @@ namespace GCTonePrism.Manager
 
             try
             {
+                // ゲームID変更処理
+                string newGameId = txtGameId.Text.Trim();
+                string oldGameId = originalGame.GameId;
+                bool gameIdChanged = !string.Equals(newGameId, oldGameId, StringComparison.Ordinal);
+
+                if (gameIdChanged)
+                {
+                    // フォルダリネームを先に実行（失敗時にDB不整合を防ぐ）
+                    string oldFolder = PathManager.GetGameFolder(oldGameId);
+                    string newFolder = PathManager.GetGameFolder(newGameId);
+
+                    bool folderRenamed = false;
+                    if (System.IO.Directory.Exists(oldFolder))
+                    {
+                        if (System.IO.Directory.Exists(newFolder))
+                        {
+                            throw new InvalidOperationException($"フォルダ「{newFolder}」が既に存在します。");
+                        }
+                        System.IO.Directory.Move(oldFolder, newFolder);
+                        folderRenamed = true;
+                    }
+
+                    // フォルダリネーム成功後にDB側のID更新（重複チェック含む）
+                    try
+                    {
+                        dbManager.UpdateGameId(oldGameId, newGameId);
+                    }
+                    catch
+                    {
+                        // DB更新失敗時はフォルダを元に戻す
+                        if (folderRenamed)
+                        {
+                            System.IO.Directory.Move(newFolder, oldFolder);
+                        }
+                        throw;
+                    }
+
+                    // gameFolderを更新（以降のパス処理で使用）
+                    gameFolder = newFolder;
+
+                    // パステキストボックスを新フォルダベースに更新
+                    UpdatePathTextBox(txtExecutablePath, oldFolder, newFolder);
+                    UpdatePathTextBox(txtThumbnailPath, oldFolder, newFolder);
+                    UpdatePathTextBox(txtBackgroundPath, oldFolder, newFolder);
+
+                    // バージョンオブジェクトのGameIdを新IDに更新
+                    foreach (var item in cmbVersionList.Items)
+                    {
+                        if (item is GameVersion v)
+                        {
+                            v.GameId = newGameId;
+                        }
+                    }
+                }
+
                 // パスを相対パスに変換（可能な場合）
                 string executablePath = PathConversionHelper.ToRelativePath(gameFolder, txtExecutablePath.Text.Trim());
                 string thumbnailPath = string.IsNullOrWhiteSpace(txtThumbnailPath.Text) ? null : PathConversionHelper.ToRelativePath(gameFolder, txtThumbnailPath.Text.Trim());
@@ -427,7 +483,7 @@ namespace GCTonePrism.Manager
                 // GameInfoオブジェクトを作成（既存の値をベースに）
                 var game = new GameInfo
                 {
-                    GameId = originalGame.GameId, // ゲームIDは変更不可
+                    GameId = txtGameId.Text.Trim(),
                     Title = txtTitle.Text.Trim(),
                     Description = string.IsNullOrWhiteSpace(txtDescription.Text) ? null : txtDescription.Text.Trim(),
                     ReleaseYear = numReleaseYear.Value > 0 ? (int?)numReleaseYear.Value : null,
@@ -532,10 +588,39 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
+        /// フォルダリネーム後にパステキストボックスの値を新フォルダベースに更新
+        /// </summary>
+        private void UpdatePathTextBox(TextBox textBox, string oldFolder, string newFolder)
+        {
+            string path = textBox.Text.Trim();
+            if (string.IsNullOrEmpty(path)) return;
+
+            // 絶対パスで旧フォルダ配下の場合、新フォルダに置換
+            if (Path.IsPathRooted(path) && path.StartsWith(oldFolder, StringComparison.OrdinalIgnoreCase))
+            {
+                textBox.Text = newFolder + path.Substring(oldFolder.Length);
+            }
+        }
+
+        /// <summary>
         /// 入力値のバリデーション
         /// </summary>
         private bool ValidateInput()
         {
+            // ゲームID
+            if (string.IsNullOrWhiteSpace(txtGameId.Text))
+            {
+                MessageBox.Show("ゲームIDを入力してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtGameId.Focus();
+                return false;
+            }
+            if (!GameFormHelper.IsValidGameId(txtGameId.Text))
+            {
+                MessageBox.Show("ゲームIDには半角英数字、ハイフン(-)、アンダースコア(_)のみ使用できます。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtGameId.Focus();
+                return false;
+            }
+
             // タイトル
             if (string.IsNullOrWhiteSpace(txtTitle.Text))
             {
@@ -623,6 +708,7 @@ namespace GCTonePrism.Manager
 
         private void btnTestRun_Click(object sender, EventArgs e) =>
             GameFormHelper.TestRunGame(txtExecutablePath.Text.Trim(), txtArguments.Text, gameFolder);
+
     }
 }
 
