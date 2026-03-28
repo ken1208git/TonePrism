@@ -2,11 +2,11 @@ extends RefCounted
 class_name Version
 
 ## ランチャーのバージョン情報
-## マイルストーン4: データベース連携
+## マイルストーン5: StoreBrowse画面
 
 const MAJOR: int = 0
-const MINOR: int = 4
-const PATCH: int = 6
+const MINOR: int = 5
+const PATCH: int = 0
 
 static func get_version_string() -> String:
 	return "v%d.%d.%d" % [MAJOR, MINOR, PATCH]
