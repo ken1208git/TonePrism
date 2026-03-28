@@ -27,7 +27,7 @@
 
 ## 技術スタック
 
-- **ランチャー**: Godot Engine 4.5
+- **ランチャー**: Godot Engine 4.6
 - **管理ソフト**: C# (Windows Forms)
 - **データ形式**: SQLite
 
@@ -35,7 +35,7 @@
 
 ### ランチャー開発
 
-- **Godot Engine**: 4.5以降
+- **Godot Engine**: 4.6以降
 - **SQLiteプラグイン**: [godot-sqlite](https://github.com/2shady4u/godot-sqlite)
 - **OS**: Windows 10/11
 
@@ -49,7 +49,7 @@
 
 ### Launcherのセットアップ
 
-1. Godot Engine 4.5以降をインストール
+1. Godot Engine 4.6以降をインストール
 2. このリポジトリをクローン
 
    ```bash

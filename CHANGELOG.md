@@ -11,6 +11,18 @@
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.5.5] - 2026-03-29
+
+#### Added
+
+- **フルスクリーンをデフォルト化**: 起動時からフルスクリーンで表示
+- **解像度スケーリング対応**: canvas_items stretchモードでFHD/WQHD等どの解像度でも同じUIレイアウトを維持
+- **ダイアログのフォーカス枠をマウス操作時に非表示**: マウス/キーボード・コントローラーの入力切替を検知して表示制御
+
+#### Changed
+
+- **Godot Engine 4.5 → 4.6にアップデート**: project.godot、SPECIFICATION.md、README.md、AGENTS.mdのバージョン表記を更新
+
 ### [Launcher v0.5.4] - 2026-03-29
 
 #### Fixed
