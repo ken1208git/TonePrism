@@ -1,6 +1,7 @@
 class_name GameInfoDisplay
 extends RefCounted
-## ゲーム情報の表示・背景アニメーション・フォーマットヘルパー
+## ゲーム情報の表示・背景アニメーション
+## フォーマットヘルパーは GameInfoFormatter を参照
 
 var _bg_tween: Tween = null
 
@@ -29,7 +30,7 @@ func update_display(game: GameInfo, slide_dir_y: int,
 	for dev in game.developers:
 		var dev_name = "%s %s" % [dev.last_name, dev.first_name]
 		var grade_val = int(dev.grade) if dev.grade != null else -1
-		var grade_str = _get_grade_string(grade_val)
+		var grade_str = GameInfoFormatter.get_grade_string(grade_val)
 
 		var unique_key = dev_name + grade_str
 		if unique_key in seen_devs:
@@ -62,7 +63,7 @@ func update_display(game: GameInfo, slide_dir_y: int,
 	var diff_val = game.difficulty
 	if diff_val > 0:
 		difficulty_bar.value = diff_val
-		difficulty_val_label.text = _get_difficulty_text(diff_val)
+		difficulty_val_label.text = GameInfoFormatter.get_difficulty_text(diff_val)
 		_update_bar_style(difficulty_bar, diff_val)
 		difficulty_bar.get_parent().show()
 	else:
@@ -72,7 +73,7 @@ func update_display(game: GameInfo, slide_dir_y: int,
 	var time_val = game.play_time
 	if time_val > 0:
 		playtime_bar.value = time_val
-		playtime_val_label.text = _get_play_time_text(time_val)
+		playtime_val_label.text = GameInfoFormatter.get_play_time_text(time_val)
 		_update_bar_style(playtime_bar, time_val)
 		playtime_bar.get_parent().show()
 	else:
@@ -115,7 +116,7 @@ func _update_background(game: GameInfo, slide_dir_y: int,
 		background_old.texture = null
 		background_old.modulate = Color(1, 1, 1, 0)
 
-	var bg_path = GameLauncher.resolve_path(game.background_path, game.game_id)
+	var bg_path = GamePathResolver.resolve_path(game.background_path, game.game_id)
 	if not bg_path.is_empty() and FileAccess.file_exists(bg_path):
 		var img = Image.load_from_file(bg_path)
 		background_texture.texture = ImageTexture.create_from_image(img)
@@ -143,48 +144,6 @@ func _update_background(game: GameInfo, slide_dir_y: int,
 		var old_target_y = background_old.position.y + (50 * slide_dir_y)
 		_bg_tween.tween_property(background_old, "position", Vector2(0, old_target_y), 0.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 		_bg_tween.tween_property(background_old, "modulate", Color(1, 1, 1, 0), 0.3)
-
-## 時計を更新する
-static func update_clock(clock_label: Label) -> void:
-	if clock_label:
-		var time = Time.get_time_dict_from_system()
-		clock_label.text = "%02d:%02d" % [time.hour, time.minute]
-
-# --- フォーマットヘルパー ---
-
-func _get_current_fiscal_year() -> int:
-	var date = Time.get_date_dict_from_system()
-	if date.month >= 4:
-		return date.year
-	else:
-		return date.year - 1
-
-func _get_grade_string(grade: int) -> String:
-	if grade == 0:
-		return "(教員)"
-	var fy = _get_current_fiscal_year()
-	var base_year = 1975
-	var school_year = (fy - base_year) - grade
-	if school_year >= 1 and school_year <= 3:
-		return "(%d年生)" % school_year
-	elif school_year > 3:
-		return "(卒業生: %d期生)" % grade
-	else:
-		return "(%d期生)" % grade
-
-func _get_difficulty_text(level: int) -> String:
-	match level:
-		1: return "簡単"
-		2: return "普通"
-		3: return "難しい"
-		_: return "---"
-
-func _get_play_time_text(level: int) -> String:
-	match level:
-		1: return "～5分"
-		2: return "5分～15分"
-		3: return "15分～"
-		_: return "---"
 
 func _update_bar_style(bar: ProgressBar, value: int) -> void:
 	var style = StyleBoxFlat.new()

@@ -14,9 +14,6 @@ const CommonDialogScene = preload("res://scenes/components/common_dialog.tscn")
 var _current_dialog: CommonDialog = null
 
 func show_dialog(title: String, message: String) -> CommonDialog:
-	# 既存のシンプルなダイアログ表示（OKボタンのみなど、デフォルト挙動が必要ならここで追加）
-	# 現状の実装ではボタンを追加していないため、呼び出し元で追加する必要がある
-	# 互換性のため残すが、推奨はshow_message
 	var dialog = _create_base_dialog()
 	dialog.setup(title, message)
 	dialog.add_button("OK", func(): close_current_dialog(), true)
@@ -25,97 +22,47 @@ func show_dialog(title: String, message: String) -> CommonDialog:
 func show_message(title: String, message: String, buttons: Array = [], callback: Callable = Callable(), button_colors: Array = []) -> CommonDialog:
 	var dialog = _create_base_dialog()
 	dialog.setup(title, message)
-	
+
 	if buttons.is_empty():
-		# デフォルトはOKボタン
-		dialog.add_button("OK", func(): 
+		dialog.add_button("OK", func():
 			if callback.is_valid(): callback.call(0)
 			close_current_dialog()
 		, true)
 	else:
 		for i in range(buttons.size()):
 			var btn_text = buttons[i]
-			var btn_color = Color(0.2, 0.2, 0.2, 1.0) # デフォルトはダークグレー（不透明）
+			var btn_color = Color(0.2, 0.2, 0.2, 1.0)
 			if i < button_colors.size():
 				btn_color = button_colors[i]
-				
-			# コールバックにはインデックスを渡す
-			# ボタンが押されたらダイアログを閉じるのは共通
-			# lambdaでiをキャプチャするためにデフォルト引数を使用
+
 			dialog.add_button(btn_text, func(idx = i):
 				if callback.is_valid(): callback.call(idx)
 				close_current_dialog()
-			, i == 0, btn_color) # 最初のボタンにフォーカス
-			
+			, i == 0, btn_color)
+
 	return dialog
 
 func _create_base_dialog() -> CommonDialog:
-	# 既存のダイアログがあれば閉じる
 	close_current_dialog()
 
 	var dialog = CommonDialogScene.instantiate()
-	# CanvasLayer（自分自身）の下に追加
 	add_child(dialog)
 	_current_dialog = dialog
 
-	# ダイアログ表示中はゲーム自体をポーズ
 	get_tree().paused = true
 
-	# ズームフェードインアニメーション
-	_animate_dialog_in(dialog)
+	DialogAnimator.animate_in(dialog, self)
 
 	return dialog
-
-func _animate_dialog_in(dialog: Control) -> void:
-	var overlay = dialog.get_node_or_null("Overlay")
-	if overlay:
-		overlay.color = Color(0, 0, 0, 0)
-	var panel = dialog.get_node_or_null("Panel")
-	if not panel:
-		return
-	panel.pivot_offset = panel.size / 2.0
-	panel.scale = Vector2(1.08, 1.08)
-	panel.modulate = Color(1, 1, 1, 0)
-	var tween = create_tween()
-	tween.set_parallel(true)
-	tween.tween_property(panel, "scale", Vector2.ONE, 0.25)\
-		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	tween.tween_property(panel, "modulate:a", 1.0, 0.25)\
-		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	if overlay:
-		tween.tween_property(overlay, "color:a", 0.784314, 0.25)\
-			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 func close_current_dialog():
 	if _current_dialog != null:
 		var dialog = _current_dialog
 		_current_dialog = null
-		_animate_dialog_out(dialog)
-
-func _animate_dialog_out(dialog: Control) -> void:
-	var overlay = dialog.get_node_or_null("Overlay")
-	var panel = dialog.get_node_or_null("Panel")
-	if not panel:
-		dialog.queue_free()
-		if _current_dialog == null:
-			get_tree().paused = false
-		return
-	panel.pivot_offset = panel.size / 2.0
-	var tween = create_tween()
-	tween.set_parallel(true)
-	tween.tween_property(panel, "scale", Vector2(0.92, 0.92), 0.2)\
-		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
-	tween.tween_property(panel, "modulate:a", 0.0, 0.2)\
-		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
-	if overlay:
-		tween.tween_property(overlay, "color:a", 0.0, 0.2)\
-			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
-	await tween.finished
-	if is_instance_valid(dialog):
-		dialog.queue_free()
-	# 新しいダイアログが開かれていなければポーズ解除
-	if _current_dialog == null:
-		get_tree().paused = false
+		DialogAnimator.animate_out(dialog, self, func():
+			if _current_dialog == null:
+				get_tree().paused = false
+		)
 
 func is_dialog_showing() -> bool:
 	return _current_dialog != null

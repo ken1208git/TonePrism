@@ -1,32 +1,7 @@
 class_name ButtonStyleManager
 extends RefCounted
-## ボタンスタイル生成・グローアニメーション管理
-
-var _glow_styles: Array[StyleBoxFlat] = []
-var _glow_timer: float = 0.0
-
-## グローアニメーション（ブリージング）を更新する
-func update_glow(delta: float) -> void:
-	_glow_timer += delta
-	var glow_alpha = 0.5 + 0.3 * sin(_glow_timer * 3.0)
-
-	for style in _glow_styles:
-		if style:
-			var c = Color(1, 1, 1, glow_alpha)
-			style.shadow_color = c
-			style.border_color = c
-
-## グローアニメーション対象にスタイルを追加する
-func add_glow_style(style: StyleBoxFlat) -> void:
-	_glow_styles.append(style)
-
-## StaticFocusBorderのスタイルをグローリストに登録する
-func register_focus_border(static_focus_border: Panel) -> void:
-	if not static_focus_border:
-		return
-	var style = static_focus_border.get_theme_stylebox("panel")
-	if style is StyleBoxFlat:
-		add_glow_style(style)
+## ボタンスタイル生成を担当
+## グローアニメーションは GlowAnimator を参照
 
 ## 終了ボタンのスタイルを設定する
 func setup_exit_button(exit_button: Button) -> void:

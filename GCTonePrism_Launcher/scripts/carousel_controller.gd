@@ -49,7 +49,7 @@ func _setup_card_thumbnail(card: Panel, game: GameInfo) -> void:
 	var icon_rect = card.get_node_or_null("Clipper/Icon")
 	var no_image_label = card.get_node_or_null("Clipper/NoImageLabel")
 
-	var thumb_path = GameLauncher.resolve_path(game.thumbnail_path, game.game_id)
+	var thumb_path = GamePathResolver.resolve_path(game.thumbnail_path, game.game_id)
 
 	var tex_to_set = null
 	if not thumb_path.is_empty() and FileAccess.file_exists(thumb_path):
