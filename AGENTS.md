@@ -44,4 +44,6 @@
 ## Launcher Implementation
 - ユーザーが調整しやすいよう、UIやレイアウトはなるべく `.tscn`（シーンファイル）で実装すること。
 - 変数はなるべく `@export` で定義し、エディタから調整可能にすること。
-- UIコンポーネントの新規作成・変更時は、Material Design 3のガイドライン（Typography・Shape・Color・Elevation・Motion）に準拠すること。詳細は SPECIFICATION.md のデザインシステムセクションを参照。
+- UIコンポーネントの新規作成・変更時は、Material Design 3のガイドライン（Typography・Shape・Color・Elevation・Motion）に準拠すること。トークン値やコンポーネント仕様は `docs/design_reference.md` を参照。
+- `docs/design_reference.md` に記載がないコンポーネントを実装する場合は、必ず WebSearch で m3.material.io の該当コンポーネント仕様を確認してから実装すること。
+- デザイントークン（色・Shape・スペーシング等）はハードコードせず、`scripts/design_tokens.gd` の定数を使用すること。
