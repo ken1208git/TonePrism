@@ -1,6 +1,7 @@
 class_name GameLauncher
 extends RefCounted
 ## ゲーム起動・終了監視ロジック
+## パス解決・引数パースは GamePathResolver を参照
 
 signal game_started()
 signal game_ended()
@@ -21,14 +22,14 @@ func launch_game(game: GameInfo, status_label: Label, running_overlay: Control,
 
 	print("[GameLauncher] Launching game: ", game.title, " (ID: ", game.game_id, ")")
 
-	var exe_path = _find_executable(game)
+	var exe_path = GamePathResolver.find_executable(game)
 
 	if exe_path.is_empty():
 		print("❌ Executable not found: ", game.executable_path)
 		ErrorManager.show_error(ErrorCode.GAME_EXECUTABLE_NOT_FOUND)
 		return
 
-	var args = _parse_arguments(game.arguments)
+	var args = GamePathResolver.parse_arguments(game.arguments)
 
 	# 起動中表示
 	if running_overlay:
@@ -102,32 +103,6 @@ func monitor_process(window: Window, status_label: Label, game: GameInfo,
 
 		game_ended.emit()
 
-## 実行ファイルのパスを解決する
-func _find_executable(game: GameInfo) -> String:
-	if game.executable_path.is_absolute_path() and FileAccess.file_exists(game.executable_path):
-		return game.executable_path
-
-	var game_folder = PathManager.get_game_folder(game.game_id)
-	var candidate1 = game_folder.path_join(game.executable_path)
-	if FileAccess.file_exists(candidate1):
-		return candidate1
-
-	var candidate2 = PathManager.get_base_directory().path_join(game.executable_path)
-	if FileAccess.file_exists(candidate2):
-		return candidate2
-
-	return ""
-
-## 引数文字列をパースする
-func _parse_arguments(arguments: String) -> Array[String]:
-	var args: Array[String] = []
-	if not arguments.is_empty() and arguments != "<null>":
-		var raw_args = arguments.split(" ", false)
-		for arg in raw_args:
-			if arg != "<null>" and arg != "null":
-				args.append(arg)
-	return args
-
 ## 起動中表示に切り替え
 func _switch_to_running_view(running_overlay: Control, card_nodes: Array[Panel],
 		selected_index: int, info_panel: Panel, top_bar: Control,
@@ -151,21 +126,3 @@ func _switch_to_running_view(running_overlay: Control, card_nodes: Array[Panel],
 		var running_icon = running_overlay.get_node_or_null("RunningIconContainer/Icon")
 		if running_icon:
 			running_icon.visible = false
-
-## リソースパスを解決するヘルパー
-static func resolve_path(path: String, game_id: String) -> String:
-	if path.is_empty():
-		return ""
-
-	if path.is_absolute_path() or path.begins_with("res://") or path.begins_with("user://"):
-		return path
-
-	var game_folder_path = PathManager.get_game_folder(game_id).path_join(path)
-	if FileAccess.file_exists(game_folder_path):
-		return game_folder_path
-
-	var root_path = PathManager.get_base_directory().path_join(path)
-	if FileAccess.file_exists(root_path):
-		return root_path
-
-	return game_folder_path

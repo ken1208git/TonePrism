@@ -8,6 +8,7 @@ var _carousel: CarouselController
 var _game_launcher: GameLauncher
 var _idle_mgr: IdleManager
 var _style_mgr: ButtonStyleManager
+var _glow_animator: GlowAnimator
 var _info_display: GameInfoDisplay
 var _input_handler: InputHandler
 
@@ -42,6 +43,7 @@ var _input_handler: InputHandler
 
 # --- 状態 ---
 var _db_manager: DatabaseManager
+var _game_repo: GameRepository
 var _games: Array[GameInfo] = []
 var _selected_index: int = 0
 var _active_index: int = 0
@@ -60,6 +62,7 @@ func _ready():
 	_game_launcher = GameLauncher.new()
 	_idle_mgr = IdleManager.new()
 	_style_mgr = ButtonStyleManager.new()
+	_glow_animator = GlowAnimator.new()
 	_info_display = GameInfoDisplay.new()
 	_input_handler = InputHandler.new()
 
@@ -76,7 +79,7 @@ func _ready():
 	_static_focus_border.z_index = 100
 
 	# ボタンスタイル設定
-	_style_mgr.register_focus_border(_static_focus_border)
+	_glow_animator.register_focus_border(_static_focus_border)
 	_style_mgr.setup_exit_button(_exit_button)
 	_style_mgr.setup_play_button(_play_button)
 
@@ -149,10 +152,10 @@ func _ready():
 
 func _process(delta):
 	# 時計更新
-	GameInfoDisplay.update_clock(_clock_label)
+	GameInfoFormatter.update_clock(_clock_label)
 
 	# グローアニメーション
-	_style_mgr.update_glow(delta)
+	_glow_animator.update(delta)
 
 	# ゲーム実行中の監視
 	_game_launcher.monitor_process(get_window(), _status_label,
@@ -291,7 +294,8 @@ func _load_games_from_db() -> bool:
 		set_process_input(false)
 		return false
 
-	_games = _db_manager.get_all_games()
+	_game_repo = GameRepository.new(_db_manager)
+	_games = _game_repo.get_all_games()
 	_db_manager.close()
 
 	if _games.is_empty():

@@ -7,6 +7,8 @@ extends Control
 # --- コンポーネント ---
 var _idle_mgr: IdleManager
 var _db_manager: DatabaseManager
+var _game_repo: GameRepository
+var _section_repo: StoreSectionRepository
 var _style_mgr: ButtonStyleManager
 var _sections: Array[StoreSectionInfo] = []
 
@@ -67,12 +69,14 @@ func _ready():
 		ErrorManager.show_error(ErrorCode.DATABASE_NOT_FOUND)
 		return
 
-	_sections = _db_manager.get_store_sections()
+	_game_repo = GameRepository.new(_db_manager)
+	_section_repo = StoreSectionRepository.new(_db_manager, _game_repo)
+	_sections = _section_repo.get_store_sections()
 
 	# セクション0件 → フォールバック: 全ゲームでカルーセル直接表示
 	if _sections.is_empty():
 		print("[StoreBrowse] セクション0件 → カルーセルにフォールバック")
-		var all_games = _db_manager.get_all_games()
+		var all_games = _game_repo.get_all_games()
 		_db_manager.close()
 		if all_games.is_empty():
 			ErrorManager.show_error(ErrorCode.DATABASE_NO_GAMES_REGISTERED)
@@ -93,11 +97,11 @@ func _ready():
 		var container: Control
 		match section.section_type:
 			1:  # スライドショー
-				container = StoreBrowseBuilder.build_slideshow_section(section, viewport_width)
+				container = StoreBannerBuilder.build_slideshow_section(section, viewport_width)
 				_slideshow_timers[i] = 0.0
 				_slideshow_indices[i] = 0
 			2:  # タイルグリッド
-				container = StoreBrowseBuilder.build_tile_grid_section(section, viewport_width)
+				container = StoreBannerBuilder.build_tile_grid_section(section, viewport_width)
 			_:  # 通常セクション行
 				container = StoreBrowseBuilder.build_normal_section(section, viewport_width)
 
@@ -183,7 +187,7 @@ func _ready():
 
 func _process(delta):
 	# 時計更新
-	GameInfoDisplay.update_clock(_clock_label)
+	GameInfoFormatter.update_clock(_clock_label)
 
 	# アイドルタイマー
 	if _idle_mgr.update(delta, get_tree().paused):
@@ -436,7 +440,7 @@ func _on_select() -> void:
 	var section: StoreSectionInfo = data["section"]
 
 	# 全ゲーム取得（LIMIT なし）
-	var all_games = _db_manager.get_all_games_for_section(section)
+	var all_games = _section_repo.get_all_games_for_section(section)
 	if all_games.is_empty():
 		return
 
@@ -808,7 +812,7 @@ func _on_view_all_pressed(section_index: int) -> void:
 	_on_select()
 
 func _on_all_games_pressed() -> void:
-	var all_games = _db_manager.get_all_games()
+	var all_games = _game_repo.get_all_games()
 	if all_games.is_empty():
 		return
 	AppState.filtered_games = all_games
