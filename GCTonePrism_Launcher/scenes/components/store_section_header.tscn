@@ -1,0 +1,28 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="FontFile" path="res://fonts/NotoSansJP-Bold.ttf" id="1_font_bold"]
+[ext_resource type="FontFile" path="res://fonts/NotoSansJP-Regular.ttf" id="2_font_reg"]
+
+[node name="SectionHeader" type="HBoxContainer"]
+theme_override_constants/separation = 20
+
+[node name="SectionTitle" type="Label" parent="."]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("1_font_bold")
+theme_override_font_sizes/font_size = 28
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+
+[node name="Spacer" type="Control" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ViewAllButton" type="Button" parent="."]
+visible = false
+layout_mode = 2
+focus_mode = 2
+theme_override_fonts/font = ExtResource("2_font_reg")
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
+flat = true
+text = "すべて見る →"

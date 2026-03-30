@@ -1,0 +1,33 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="FontFile" path="res://fonts/NotoSansJP-Regular.ttf" id="1_font_reg"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_Tile"]
+bg_color = Color(0.15, 0.15, 0.15, 1)
+corner_radius_top_left = 16
+corner_radius_top_right = 16
+corner_radius_bottom_right = 16
+corner_radius_bottom_left = 16
+
+[node name="GameTile" type="VBoxContainer"]
+theme_override_constants/separation = 6
+
+[node name="TilePanel" type="Panel" parent="."]
+custom_minimum_size = Vector2(200, 200)
+focus_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_Tile")
+clip_children = 2
+
+[node name="Thumbnail" type="TextureRect" parent="TilePanel"]
+position = Vector2(0, 0)
+size = Vector2(200, 200)
+expand_mode = 1
+stretch_mode = 6
+
+[node name="TitleLabel" type="Label" parent="."]
+custom_minimum_size = Vector2(200, 0)
+theme_override_fonts/font = ExtResource("1_font_reg")
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
+horizontal_alignment = 1
+clip_text = true

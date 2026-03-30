@@ -1,10 +1,25 @@
-[gd_scene load_steps=17 format=3 uid="uid://bjoy2n8lqir0y"]
+[gd_scene load_steps=24 format=3 uid="uid://bjoy2n8lqir0y"]
 
 [ext_resource type="Script" uid="uid://dj0y4s0v4pp1c" path="res://scenes/game_selection.gd" id="1_game_selection"]
 [ext_resource type="FontFile" uid="uid://dolk7yphok5xu" path="res://fonts/NotoSansJP-Regular.ttf" id="2_font_regular"]
 [ext_resource type="FontFile" uid="uid://xjqfmx60jtvo" path="res://fonts/NotoSansJP-Bold.ttf" id="3_font_bold"]
 [ext_resource type="Texture2D" uid="uid://j27gk8qemr4d" path="res://icon.svg" id="4_icon"]
 [ext_resource type="Script" path="res://scenes/components/auto_scroll_container.gd" id="5_auto_scroll"]
+[ext_resource type="StyleBoxFlat" path="res://resources/styles/exit_button_normal.tres" id="6_exit_normal"]
+[ext_resource type="StyleBoxFlat" path="res://resources/styles/exit_button_hover.tres" id="7_exit_hover"]
+[ext_resource type="StyleBoxFlat" path="res://resources/styles/exit_button_pressed.tres" id="8_exit_pressed"]
+[ext_resource type="StyleBoxFlat" path="res://resources/styles/exit_button_focus.tres" id="9_exit_focus"]
+[ext_resource type="StyleBoxFlat" path="res://resources/styles/play_button_normal.tres" id="10_play_normal"]
+[ext_resource type="StyleBoxFlat" path="res://resources/styles/play_button_hover.tres" id="11_play_hover"]
+[ext_resource type="StyleBoxFlat" path="res://resources/styles/play_button_pressed.tres" id="12_play_pressed"]
+[ext_resource type="StyleBoxFlat" path="res://resources/styles/play_button_focus.tres" id="13_play_focus"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_InfoPanel"]
+bg_color = Color(0, 0, 0, 0.7)
+corner_radius_top_left = 20
+corner_radius_top_right = 20
+corner_radius_bottom_right = 20
+corner_radius_bottom_left = 20
 
 [sub_resource type="Animation" id="Animation_transition_down"]
 resource_name = "transition_down"
@@ -308,6 +323,7 @@ offset_right = -40.0
 offset_bottom = -60.0
 grow_horizontal = 0
 grow_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_InfoPanel")
 
 [node name="MarginContainer" type="MarginContainer" parent="InfoPanel"]
 layout_mode = 1
@@ -348,6 +364,10 @@ layout_mode = 2
 size_flags_vertical = 4
 theme_override_fonts/font = ExtResource("3_font_bold")
 theme_override_font_sizes/font_size = 24
+theme_override_styles/normal = ExtResource("10_play_normal")
+theme_override_styles/hover = ExtResource("11_play_hover")
+theme_override_styles/pressed = ExtResource("12_play_pressed")
+theme_override_styles/focus = ExtResource("13_play_focus")
 text = "プレイ"
 
 [node name="CreatorScrollWrapper" type="Control" parent="InfoPanel/MarginContainer/VBoxContainer"]
@@ -589,6 +609,10 @@ size_flags_horizontal = 3
 [node name="ExitButton" type="Button" parent="TopBar/MarginContainer/HBoxContainer"]
 custom_minimum_size = Vector2(60, 60)
 layout_mode = 2
+theme_override_styles/normal = ExtResource("6_exit_normal")
+theme_override_styles/hover = ExtResource("7_exit_hover")
+theme_override_styles/pressed = ExtResource("8_exit_pressed")
+theme_override_styles/focus = ExtResource("9_exit_focus")
 icon_alignment = 1
 expand_icon = true
 

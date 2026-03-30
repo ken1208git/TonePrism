@@ -78,28 +78,13 @@ func _ready():
 	# フォーカス枠を最前面に
 	_static_focus_border.z_index = 100
 
-	# ボタンスタイル設定
+	# ボタンスタイル設定（スタイルは .tscn で適用済み）
 	_glow_animator.register_focus_border(_static_focus_border)
 	_style_mgr.setup_exit_button(_exit_button)
-	_style_mgr.setup_play_button(_play_button)
 
 	# 戻るボタン（ブラウズから来たときのみ表示）
 	if not AppState.return_scene.is_empty() and _exit_button:
-		var back_button = Button.new()
-		back_button.name = "BackButton"
-		back_button.text = "←"
-		back_button.custom_minimum_size = Vector2(60, 60)
-		back_button.add_theme_font_size_override("font_size", 28)
-		# 退出ボタンと同じスタイル
-		_style_mgr.setup_exit_button(back_button)
-		# 戻るアイコンを適用
-		back_button.text = ""
-		var back_icon = load("res://images/turn_back.png")
-		if back_icon:
-			back_button.icon = back_icon
-		back_button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		back_button.expand_icon = true
-		# 退出ボタンの前に挿入
+		var back_button = preload("res://scenes/components/back_button.tscn").instantiate()
 		var hbox = _exit_button.get_parent()
 		hbox.add_child(back_button)
 		hbox.move_child(back_button, _exit_button.get_index())
@@ -113,12 +98,8 @@ func _ready():
 	if _play_button:
 		_play_button.pressed.connect(func(): _launch_game())
 
-	# InfoPanelの背景スタイル
-	var info_style = StyleBoxFlat.new()
-	info_style.bg_color = Color(0, 0, 0, 0.7)
-	info_style.set_corner_radius_all(20)
+	# InfoPanelの背景スタイルは .tscn で適用済み
 	if _info_panel:
-		_info_panel.add_theme_stylebox_override("panel", info_style)
 		var guide_label = _info_panel.get_node_or_null("MarginContainer/VBoxContainer/GuideLabel")
 		if guide_label:
 			guide_label.visible = false

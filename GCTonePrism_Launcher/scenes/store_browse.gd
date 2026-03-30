@@ -173,8 +173,7 @@ func _ready():
 		_exit_button.pressed.connect(_on_exit_button_pressed)
 		_style_mgr.setup_exit_button(_exit_button)
 
-	# フォーカスボーダーのスタイル設定
-	_setup_focus_border()
+	# フォーカスボーダーのスタイルは .tscn で適用済み
 
 	# 初期フォーカス
 	_current_section = 0
@@ -615,20 +614,6 @@ func _update_slideshow_bar(section_index: int) -> void:
 
 # --- フォーカス表示 ---
 
-func _setup_focus_border() -> void:
-	if not _focus_border:
-		return
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.6, 0.6, 0.6, 0)
-	style.draw_center = false
-	style.border_color = Color(1, 1, 1, 1)
-	style.set_corner_radius_all(16)
-	style.set_expand_margin_all(8)
-	style.shadow_color = Color(1, 1, 1, 1)
-	style.shadow_size = 12
-	_focus_border.add_theme_stylebox_override("panel", style)
-	_focus_border.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_focus_border.z_index = 100
 
 func _update_focus_visual() -> void:
 	if not _focus_border or _section_ui.is_empty():
