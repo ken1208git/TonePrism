@@ -1,0 +1,52 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Material" path="res://shaders/gradient_overlay_material.tres" id="1_material"]
+[ext_resource type="Script" path="res://scenes/components/auto_scroll_container.gd" id="2_scroll"]
+[ext_resource type="FontFile" path="res://fonts/NotoSansJP-Bold.ttf" id="3_font_bold"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_Banner"]
+bg_color = Color(0.1, 0.1, 0.1, 1)
+corner_radius_top_left = 16
+corner_radius_top_right = 16
+corner_radius_bottom_right = 16
+corner_radius_bottom_left = 16
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_Gradient"]
+bg_color = Color(1, 1, 1, 1)
+corner_radius_bottom_right = 16
+corner_radius_bottom_left = 16
+
+[node name="StoreBanner" type="Panel"]
+custom_minimum_size = Vector2(800, 500)
+size = Vector2(800, 500)
+focus_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_Banner")
+clip_children = 2
+
+[node name="BackgroundImage" type="TextureRect" parent="."]
+position = Vector2(0, 0)
+size = Vector2(800, 500)
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 6
+
+[node name="GradientOverlay" type="Panel" parent="."]
+position = Vector2(0, 325)
+size = Vector2(800, 175)
+mouse_filter = 2
+material = ExtResource("1_material")
+theme_override_styles/panel = SubResource("StyleBoxFlat_Gradient")
+
+[node name="TitleScroll" type="Control" parent="."]
+script = ExtResource("2_scroll")
+position = Vector2(24, 444)
+size = Vector2(752, 48)
+mouse_filter = 2
+
+[node name="TitleLabel" type="Label" parent="TitleScroll"]
+position = Vector2(0, 0)
+size = Vector2(752, 48)
+mouse_filter = 2
+theme_override_fonts/font = ExtResource("3_font_bold")
+theme_override_font_sizes/font_size = 32
+theme_override_colors/font_color = Color(1, 1, 1, 1)

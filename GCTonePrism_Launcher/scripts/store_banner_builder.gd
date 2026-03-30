@@ -71,25 +71,14 @@ static func build_slideshow_section(section: StoreSectionInfo, viewport_width: f
 	bars.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	container.add_child(bars)
 
-	# 下部グラデーションオーバーレイ
+	# 下部グラデーションオーバーレイ（シェーダーは .tres で定義済み）
 	var ss_gradient_height := StoreBrowseBuilder.FEATURED_HEIGHT * 0.35
 	var ss_gradient = Panel.new()
 	ss_gradient.name = "SlideshowGradient"
 	ss_gradient.position = Vector2(0, StoreBrowseBuilder.FEATURED_HEIGHT - ss_gradient_height)
 	ss_gradient.size = Vector2(banner_width, ss_gradient_height)
 	ss_gradient.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var ss_shader_code = """
-shader_type canvas_item;
-void fragment() {
-	float alpha = smoothstep(0.0, 1.0, UV.y);
-	COLOR = vec4(0.0, 0.0, 0.0, alpha * 0.85 * COLOR.a);
-}
-"""
-	var ss_shader = Shader.new()
-	ss_shader.code = ss_shader_code
-	var ss_mat = ShaderMaterial.new()
-	ss_mat.shader = ss_shader
-	ss_gradient.material = ss_mat
+	ss_gradient.material = preload("res://shaders/gradient_overlay_strong_material.tres")
 	var ss_grad_style = StyleBoxFlat.new()
 	ss_grad_style.bg_color = Color(1, 1, 1, 1)
 	ss_grad_style.corner_radius_bottom_left = 16
@@ -180,25 +169,14 @@ static func create_banner(game: GameInfo, banner_size: Vector2, custom_text: Str
 
 	banner.add_child(tex_rect)
 
-	# 下部グラデーションオーバーレイ
+	# 下部グラデーションオーバーレイ（シェーダーは .tres で定義済み）
 	var gradient_height := banner_size.y * 0.35
 	var gradient_panel = Panel.new()
 	gradient_panel.name = "GradientOverlay"
 	gradient_panel.position = Vector2(0, banner_size.y - gradient_height)
 	gradient_panel.size = Vector2(banner_size.x, gradient_height)
 	gradient_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var shader_code = """
-shader_type canvas_item;
-void fragment() {
-	float alpha = smoothstep(0.0, 1.0, UV.y);
-	COLOR = vec4(0.0, 0.0, 0.0, alpha * 0.5 * COLOR.a);
-}
-"""
-	var shader = Shader.new()
-	shader.code = shader_code
-	var mat = ShaderMaterial.new()
-	mat.shader = shader
-	gradient_panel.material = mat
+	gradient_panel.material = preload("res://shaders/gradient_overlay_material.tres")
 	var grad_style = StyleBoxFlat.new()
 	grad_style.bg_color = Color(1, 1, 1, 1)
 	grad_style.corner_radius_bottom_left = 16

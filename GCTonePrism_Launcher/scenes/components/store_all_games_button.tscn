@@ -1,0 +1,36 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="FontFile" path="res://fonts/NotoSansJP-Bold.ttf" id="1_font_bold"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_Normal"]
+bg_color = Color(0.2, 0.2, 0.2, 0.6)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_Hover"]
+bg_color = Color(0.3, 0.3, 0.3, 0.8)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_Pressed"]
+bg_color = Color(0.25, 0.25, 0.25, 0.9)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
+[node name="AllGamesButton" type="Button"]
+custom_minimum_size = Vector2(0, 60)
+focus_mode = 2
+theme_override_fonts/font = ExtResource("1_font_bold")
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
+theme_override_styles/normal = SubResource("StyleBoxFlat_Normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_Hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_Pressed")
+text = "すべてのゲーム →"

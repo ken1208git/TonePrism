@@ -43,20 +43,9 @@ static func build_normal_section(section: StoreSectionInfo, viewport_width: floa
 	container.name = "Section_%d" % section.section_id
 	container.add_theme_constant_override("separation", 12)
 
-	# ヘッダー行: セクション名 + 「すべて見る →」
-	var header = HBoxContainer.new()
-	header.add_theme_constant_override("separation", 20)
-
-	var title_label = Label.new()
-	title_label.text = section.title
-	title_label.add_theme_font_override("font", _get_font_bold())
-	title_label.add_theme_font_size_override("font_size", 28)
-	title_label.add_theme_color_override("font_color", Color.WHITE)
-	header.add_child(title_label)
-
-	var spacer = Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_child(spacer)
+	# ヘッダー行（.tscn テンプレートを使用）
+	var header = preload("res://scenes/components/store_section_header.tscn").instantiate()
+	header.get_node("SectionTitle").text = section.title
 
 	# 画面幅から表示上限を自動計算（タイルサイズ+間隔で割る）
 	var available_width = viewport_width - FEATURED_PADDING * 2
@@ -66,16 +55,8 @@ static func build_normal_section(section: StoreSectionInfo, viewport_width: floa
 
 	# ゲーム数が画面に収まるなら「すべて見る」不要
 	if section.games.size() > effective_max:
-		var view_all_btn = Button.new()
-		view_all_btn.name = "ViewAllButton"
-		view_all_btn.text = "すべて見る →"
-		view_all_btn.flat = true
-		view_all_btn.add_theme_font_override("font", _get_font_regular())
-		view_all_btn.add_theme_font_size_override("font_size", 20)
-		view_all_btn.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
-		view_all_btn.add_theme_color_override("font_hover_color", Color.WHITE)
-		view_all_btn.focus_mode = Control.FOCUS_ALL
-		header.add_child(view_all_btn)
+		var view_all_btn = header.get_node("ViewAllButton")
+		view_all_btn.visible = true
 
 	container.add_child(header)
 
@@ -95,78 +76,25 @@ static func build_normal_section(section: StoreSectionInfo, viewport_width: floa
 ## ゲームタイル（通常セクション用 200x200 + 下部タイトル）を作成
 ## 戻り値はVBoxContainer（Panel + Label）、フォーカス対象はPanel部分
 static func _create_game_tile(game: GameInfo) -> Control:
-	var wrapper = VBoxContainer.new()
+	var wrapper = preload("res://scenes/components/store_game_tile.tscn").instantiate()
 	wrapper.name = "Tile_%s" % game.game_id
-	wrapper.add_theme_constant_override("separation", 6)
-
-	# サムネイルパネル
-	var tile = Panel.new()
-	tile.name = "TilePanel"
-	tile.custom_minimum_size = TILE_SIZE
-	tile.focus_mode = Control.FOCUS_ALL
-
-	# 背景スタイル
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.15, 0.15, 0.15)
-	style.set_corner_radius_all(16)
-	tile.add_theme_stylebox_override("panel", style)
-	tile.clip_children = CanvasItem.CLIP_CHILDREN_AND_DRAW
 
 	# サムネイル画像
-	var tex_rect = TextureRect.new()
-	tex_rect.name = "Thumbnail"
-	tex_rect.position = Vector2.ZERO
-	tex_rect.size = TILE_SIZE
-	tex_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	tex_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-
 	var thumb_path = _resolve_thumbnail_path(game)
 	if not thumb_path.is_empty():
 		var image = Image.load_from_file(thumb_path)
 		if image != null:
-			tex_rect.texture = ImageTexture.create_from_image(image)
+			wrapper.get_node("TilePanel/Thumbnail").texture = ImageTexture.create_from_image(image)
 
-	tile.add_child(tex_rect)
-	wrapper.add_child(tile)
-
-	# タイトルラベル（アイコン下、中央揃え）
-	var title_label = Label.new()
-	title_label.name = "TitleLabel"
-	title_label.text = game.title
-	title_label.add_theme_font_override("font", _get_font_regular())
-	title_label.add_theme_font_size_override("font_size", 14)
-	title_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85))
-	title_label.custom_minimum_size = Vector2(TILE_SIZE.x, 0)
-	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_label.clip_text = true
-	wrapper.add_child(title_label)
+	# タイトル
+	wrapper.get_node("TitleLabel").text = game.title
 
 	return wrapper
 
-## 「すべてのゲーム」ボタンを構築
+## 「すべてのゲーム」ボタンを構築（.tscn テンプレートを使用）
 static func build_all_games_button(viewport_width: float) -> Button:
-	var btn = Button.new()
-	btn.name = "AllGamesButton"
-	btn.text = "すべてのゲーム →"
-	btn.add_theme_font_override("font", _get_font_bold())
-	btn.add_theme_font_size_override("font_size", 22)
-	btn.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9))
-	btn.add_theme_color_override("font_hover_color", Color.WHITE)
+	var btn = preload("res://scenes/components/store_all_games_button.tscn").instantiate()
 	btn.custom_minimum_size = Vector2(viewport_width - FEATURED_PADDING * 2, 60)
-	btn.focus_mode = Control.FOCUS_ALL
-	# スタイル
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.2, 0.2, 0.2, 0.6)
-	style.set_corner_radius_all(12)
-	btn.add_theme_stylebox_override("normal", style)
-	var hover_style = StyleBoxFlat.new()
-	hover_style.bg_color = Color(0.3, 0.3, 0.3, 0.8)
-	hover_style.set_corner_radius_all(12)
-	btn.add_theme_stylebox_override("hover", hover_style)
-	var pressed_style = StyleBoxFlat.new()
-	pressed_style.bg_color = Color(0.25, 0.25, 0.25, 0.9)
-	pressed_style.set_corner_radius_all(12)
-	btn.add_theme_stylebox_override("pressed", pressed_style)
 	return btn
 
 ## サムネイルパスを解決

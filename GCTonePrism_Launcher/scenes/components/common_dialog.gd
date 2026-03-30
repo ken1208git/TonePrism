@@ -12,8 +12,8 @@ var _buttons: Array[Button] = []
 
 var _glow_timer: float = 0.0
 
-# フォーカスモーフ用
-var _focus_border: Panel = null
+# フォーカスモーフ用（.tscnで定義済み）
+@onready var _focus_border: Panel = $FocusBorder
 var _focus_target_rect: Rect2 = Rect2()
 var _focus_target_radius: float = 16.0
 var _focus_current_radius: float = 16.0
@@ -78,23 +78,6 @@ func _input(event: InputEvent) -> void:
 func _ready():
 	_title_label.text = ""
 	_message_label.text = ""
-	_setup_focus_border()
-
-func _setup_focus_border() -> void:
-	_focus_border = Panel.new()
-	_focus_border.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_focus_border.z_index = 100
-	_focus_border.visible = false
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.6, 0.6, 0.6, 0)
-	style.draw_center = false
-	style.border_color = Color(1, 1, 1, 1)
-	style.set_corner_radius_all(16)
-	style.set_expand_margin_all(6)
-	style.shadow_color = Color(1, 1, 1, 1)
-	style.shadow_size = 12
-	_focus_border.add_theme_stylebox_override("panel", style)
-	add_child(_focus_border)
 
 func setup(title: String, message: String):
 	if not is_node_ready():

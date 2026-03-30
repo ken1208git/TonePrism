@@ -1,8 +1,27 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="Script" path="res://scenes/store_browse.gd" id="1_store_browse"]
 [ext_resource type="FontFile" uid="uid://dolk7yphok5xu" path="res://fonts/NotoSansJP-Regular.ttf" id="2_font_regular"]
 [ext_resource type="FontFile" uid="uid://xjqfmx60jtvo" path="res://fonts/NotoSansJP-Bold.ttf" id="3_font_bold"]
+[ext_resource type="StyleBoxFlat" path="res://resources/styles/exit_button_normal.tres" id="4_exit_normal"]
+[ext_resource type="StyleBoxFlat" path="res://resources/styles/exit_button_hover.tres" id="5_exit_hover"]
+[ext_resource type="StyleBoxFlat" path="res://resources/styles/exit_button_pressed.tres" id="6_exit_pressed"]
+[ext_resource type="StyleBoxFlat" path="res://resources/styles/exit_button_focus.tres" id="7_exit_focus"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_FocusBorder"]
+bg_color = Color(0.6, 0.6, 0.6, 0)
+draw_center = false
+border_color = Color(1, 1, 1, 1)
+corner_radius_top_left = 16
+corner_radius_top_right = 16
+corner_radius_bottom_right = 16
+corner_radius_bottom_left = 16
+expand_margin_left = 8.0
+expand_margin_top = 8.0
+expand_margin_right = 8.0
+expand_margin_bottom = 8.0
+shadow_color = Color(1, 1, 1, 1)
+shadow_size = 12
 
 [sub_resource type="Gradient" id="Gradient_TopBar"]
 colors = PackedColorArray(0, 0, 0, 0.8, 0, 0, 0, 0)
@@ -69,6 +88,8 @@ anchors_preset = 0
 offset_right = 200.0
 offset_bottom = 200.0
 mouse_filter = 2
+z_index = 100
+theme_override_styles/panel = SubResource("StyleBoxFlat_FocusBorder")
 
 [node name="TopBar" type="Control" parent="."]
 layout_mode = 1
@@ -116,6 +137,10 @@ size_flags_horizontal = 3
 [node name="ExitButton" type="Button" parent="TopBar/MarginContainer/HBoxContainer"]
 custom_minimum_size = Vector2(60, 60)
 layout_mode = 2
+theme_override_styles/normal = ExtResource("4_exit_normal")
+theme_override_styles/hover = ExtResource("5_exit_hover")
+theme_override_styles/pressed = ExtResource("6_exit_pressed")
+theme_override_styles/focus = ExtResource("7_exit_focus")
 icon_alignment = 1
 expand_icon = true
 

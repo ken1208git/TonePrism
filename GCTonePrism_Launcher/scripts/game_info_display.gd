@@ -145,18 +145,16 @@ func _update_background(game: GameInfo, slide_dir_y: int,
 		_bg_tween.tween_property(background_old, "position", Vector2(0, old_target_y), 0.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 		_bg_tween.tween_property(background_old, "modulate", Color(1, 1, 1, 0), 0.3)
 
-func _update_bar_style(bar: ProgressBar, value: int) -> void:
-	var style = StyleBoxFlat.new()
-	style.set_corner_radius_all(4)
-	if value <= 1:
-		style.bg_color = Color(0.2, 0.8, 0.2, 1.0)
-	elif value == 2:
-		style.bg_color = Color(0.9, 0.9, 0.2, 1.0)
-	else:
-		style.bg_color = Color(0.9, 0.2, 0.2, 1.0)
-	bar.add_theme_stylebox_override("fill", style)
+static var _fill_easy: StyleBoxFlat = preload("res://resources/styles/progress_fill_easy.tres")
+static var _fill_medium: StyleBoxFlat = preload("res://resources/styles/progress_fill_medium.tres")
+static var _fill_hard: StyleBoxFlat = preload("res://resources/styles/progress_fill_hard.tres")
+static var _progress_bg: StyleBoxFlat = preload("res://resources/styles/progress_background.tres")
 
-	var bg = StyleBoxFlat.new()
-	bg.set_corner_radius_all(4)
-	bg.bg_color = Color(0.2, 0.2, 0.2, 1.0)
-	bar.add_theme_stylebox_override("background", bg)
+func _update_bar_style(bar: ProgressBar, value: int) -> void:
+	if value <= 1:
+		bar.add_theme_stylebox_override("fill", _fill_easy)
+	elif value == 2:
+		bar.add_theme_stylebox_override("fill", _fill_medium)
+	else:
+		bar.add_theme_stylebox_override("fill", _fill_hard)
+	bar.add_theme_stylebox_override("background", _progress_bg)
