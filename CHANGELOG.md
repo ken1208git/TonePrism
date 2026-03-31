@@ -677,11 +677,9 @@
 
 ---
 
-[Launcher Unreleased]: https://github.com/ken1208git/GCTonePrism/compare/launcher-v0.5.6...HEAD
-[Launcher v0.5.6]: https://github.com/ken1208git/GCTonePrism/releases/tag/launcher-v0.5.6
+[Launcher Unreleased]: https://github.com/ken1208git/GCTonePrism/compare/launcher-v0.1.0...HEAD
 [Launcher v0.4.5]: https://github.com/ken1208git/GCTonePrism/releases/tag/launcher-v0.4.5
 [Launcher v0.4.3]: https://github.com/ken1208git/GCTonePrism/releases/tag/launcher-v0.4.3
-[Manager v0.7.6]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.7.6
 [Manager v0.6.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.6.0
 [Manager v0.5.1]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.5.1
 [Manager v0.5.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/manager-v0.5.0
