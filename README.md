@@ -1,72 +1,88 @@
-# ゲームセンターTONE 統合ランチャーシステム「Prism」
+# ゲームセンターTONE Prism
 
-大阪府立刀根山高校パソコン部が文化祭で展示する部員制作ゲームを、スタッフのサポートなしでも誰でも簡単に選択・起動できるようにする統合ランチャーシステムです。
+ゲームセンターTONE Prism は、大阪府立刀根山高校パソコン部の文化祭展示向けに作っている統合ランチャーシステムです。
+来場者がスタッフの補助なしでもゲームを選んで起動できること、展示運営を少ない人数でも回しやすくすることを目的としています。
 
-## 概要
+## このリポジトリにあるもの
 
-- **ランチャーアプリケーション**: 来客向けのゲーム選択・起動UI（Godot）
-- **管理ソフトウェア**: スタッフ向けのゲーム管理ツール（C# WinForms）
-- **監視ソフトウェア**: 先生PC向けの展示PC監視・スタッフ呼び出し通知ツール（C# WinForms）
+- **Launcher**: 来場者向けのゲーム選択・起動アプリです。Godot Engine 4.6 で実装しています。
+- **Manager**: スタッフ向けの管理ツールです。ゲーム情報、開発者情報、バージョン情報、ストア表示用データなどを管理します。C# WinForms / .NET Framework 4.8 で実装しています。
+- **Monitor**: 先生PC向けの監視ソフトです。仕様は [SPECIFICATION.md](SPECIFICATION.md) にありますが、2026-04-01 時点ではこのリポジトリに実装は含まれていません。
 
-## 主な機能
+## 現在の状態
 
-### ランチャー機能
+- Launcher はゲーム選択画面、Store Browse 画面、スクリーンセーバー、ダイアログ表示、エラー表示、画面遷移などの実装が進んでいます。
+- Manager は Windows Forms アプリとして実装済みで、各種データ編集フォームやストアセクション管理画面を含みます。
+- Monitor は仕様策定と Issue 分解が進行中です。
 
-- ゲーム選択・起動機能
-- ゲーム情報表示機能
-- ゲームフィルター機能
-- オーバーレイメニュー機能
-- コントローラー・キーボード両対応
-- その他多数の機能（詳細は[仕様書](SPECIFICATION.md)を参照）
+詳細な仕様は [SPECIFICATION.md](SPECIFICATION.md)、変更履歴は [CHANGELOG.md](CHANGELOG.md) を参照してください。
 
-### 管理機能
+## ディレクトリ構成
 
-- ゲーム追加・編集・削除
-- データ閲覧・エクスポート
-- 設定管理（カラーテーマ設定含む）
+```text
+GCTonePrism/
+├── GCTonePrism_Launcher/   # Godot 製ランチャー本体
+├── GCTonePrism_Manager/    # WinForms 製管理ツール
+├── games/                  # 展示対象ゲームやサンプルデータ
+├── docs/                   # 補助ドキュメント
+├── prism.db                # SQLite データベース
+├── SPECIFICATION.md        # 仕様書
+└── CHANGELOG.md            # 変更履歴
+```
 
-## 技術スタック
+## 動作環境
 
-- **ランチャー**: Godot Engine 4.6
-- **管理ソフト**: C# (Windows Forms)
-- **データ形式**: SQLite
+### 共通
 
-## 開発環境
+- Windows 10 / 11
 
-### ランチャー開発
+### Launcher
 
-- **Godot Engine**: 4.6以降
-- **SQLiteプラグイン**: [godot-sqlite](https://github.com/2shady4u/godot-sqlite)
-- **OS**: Windows 10/11
+- Godot Engine 4.6
+- `godot-sqlite` プラグイン
 
-### 管理ソフト開発
+### Manager
 
-- **IDE**: Visual Studio 2022（推奨）
-- **.NET Framework**: （実装時に確定）
-- **OS**: Windows 10/11
+- Visual Studio 2026
+- .NET Framework 4.8 開発環境
 
-## セットアップ
+## 開発環境のセットアップ
 
-### Launcherのセットアップ
+このセクションは、開発者がこのリポジトリをローカルで開いて編集・実行するための手順です。
+展示用 PC に配布する実行環境のセットアップ手順ではありません。
 
-1. Godot Engine 4.6以降をインストール
-2. このリポジトリをクローン
+### 1. リポジトリを取得
 
-   ```bash
-   git clone https://github.com/your-username/GCTonePrism.git
-   ```
+```bash
+git clone https://github.com/ken1208git/GCTonePrism.git
+```
 
-3. Godotエディタで `GCTonePrism_Launcher/project.godot` を開く
-4. SQLiteプラグインは既に含まれています
+### 2. Launcher を開く
 
-### Managerのセットアップ
+1. Godot Engine 4.6 をインストールします。
+2. Godot エディタで [GCTonePrism_Launcher/project.godot](GCTonePrism_Launcher/project.godot) を開きます。
+3. 必要に応じてそのまま実行します。
 
-（実装後に追加予定）
+補足:
+`godot-sqlite` プラグインはリポジトリ内に含まれています。
 
-## ドキュメント
+### 3. Manager を開く
 
-- [仕様書](SPECIFICATION.md) - 詳細な機能仕様
-- [変更履歴](CHANGELOG.md) - バージョン履歴
+1. Visual Studio 2026 で [GCTonePrism_Manager/GCTonePrism_Manager.csproj](GCTonePrism_Manager/GCTonePrism_Manager.csproj) を開きます。
+2. NuGet パッケージを復元します。
+3. `Debug` もしくは `Release` でビルドして起動します。
+
+## 関連ドキュメント
+
+- [SPECIFICATION.md](SPECIFICATION.md): 全体仕様、画面仕様、マイルストーン、バージョン方針
+- [CHANGELOG.md](CHANGELOG.md): 実装変更の履歴
+- [ERROR_CODES_MANUAL.txt](ERROR_CODES_MANUAL.txt): エラーコード運用メモ
+
+## 補足
+
+- `games/` には展示対象ゲームや確認用データが入っています。
+- `prism.db` は SQLite データベースです。
+- README は「このリポジトリの入口」として簡潔に保ち、詳細仕様は仕様書側に寄せています。
 
 ## ライセンス
 
