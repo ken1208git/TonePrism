@@ -13,6 +13,7 @@ signal focus_to_card_requested()
 signal idle_reset_requested()
 
 var using_mouse: bool = false
+var back_button: Button = null
 var _input_hold_timer: float = 0.0
 var _last_input_dir: int = 0
 
@@ -65,13 +66,33 @@ func handle_input(event: InputEvent, viewport: Viewport,
 			viewport.set_input_as_handled()
 		return
 
+	# 戻るボタンにフォーカスがある場合
+	if back_button and back_button.has_focus():
+		if event.is_action_pressed("ui_down"):
+			_last_input_dir = 1  # process_drum_rollの同フレーム発火を防ぐ
+			focus_to_card_requested.emit()
+			viewport.set_input_as_handled()
+		elif event.is_action_pressed("ui_right"):
+			if exit_button:
+				exit_button.grab_focus()
+				viewport.set_input_as_handled()
+		elif event.is_action_pressed("ui_up") or event.is_action_pressed("ui_left"):
+			viewport.set_input_as_handled()
+		return
+
 	# 終了ボタンにフォーカスがある場合
 	if exit_button and exit_button.has_focus():
 		if event.is_action_pressed("ui_down"):
 			if play_button:
 				play_button.grab_focus()
 				viewport.set_input_as_handled()
-		elif event.is_action_pressed("ui_up") or event.is_action_pressed("ui_right") or event.is_action_pressed("ui_left"):
+		elif event.is_action_pressed("ui_left"):
+			if back_button:
+				back_button.grab_focus()
+				viewport.set_input_as_handled()
+			else:
+				viewport.set_input_as_handled()
+		elif event.is_action_pressed("ui_up") or event.is_action_pressed("ui_right"):
 			viewport.set_input_as_handled()
 		return
 
@@ -107,6 +128,7 @@ func process_drum_roll(delta: float, play_button: Button, exit_button: Button,
 	var input_allowed = true
 	if (play_button and play_button.has_focus()) or \
 	   (exit_button and exit_button.has_focus()) or \
+	   (back_button and back_button.has_focus()) or \
 	   is_running:
 		input_allowed = false
 
@@ -122,7 +144,8 @@ func process_drum_roll(delta: float, play_button: Button, exit_button: Button,
 	if dir != 0:
 		if _last_input_dir != dir:
 			selection_moved.emit(dir)
-			focus_to_card_requested.emit()
+			if not (back_button and back_button.has_focus()):
+				focus_to_card_requested.emit()
 			_input_hold_timer = KEY_REPEAT_DELAY
 			_last_input_dir = dir
 		else:

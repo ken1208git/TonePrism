@@ -15,11 +15,21 @@
 [ext_resource type="StyleBoxFlat" path="res://resources/styles/play_button_focus.tres" id="13_play_focus"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_InfoPanel"]
-bg_color = Color(0, 0, 0, 0.7)
-corner_radius_top_left = 20
-corner_radius_top_right = 20
-corner_radius_bottom_right = 20
-corner_radius_bottom_left = 20
+bg_color = Color(0, 0, 0, 0.8)
+border_width_left = 12
+border_width_top = 12
+border_width_right = 12
+border_width_bottom = 12
+border_color = Color(0, 0, 0, 0)
+border_blend = true
+corner_radius_top_left = 32
+corner_radius_top_right = 32
+corner_radius_bottom_right = 32
+corner_radius_bottom_left = 32
+expand_margin_left = 12.0
+expand_margin_top = 12.0
+expand_margin_right = 12.0
+expand_margin_bottom = 12.0
 
 [sub_resource type="Animation" id="Animation_transition_down"]
 resource_name = "transition_down"
@@ -505,70 +515,13 @@ theme_override_font_sizes/font_size = 24
 text = "ゲームの説明文がここに入ります。"
 autowrap_mode = 2
 
-[node name="RunningOverlay" type="Control" parent="."]
-visible = false
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-
-[node name="RunningIconContainer" type="Panel" parent="RunningOverlay"]
-layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -180.0
-offset_top = -180.0
-offset_right = 180.0
-offset_bottom = 180.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_rounded")
-
-[node name="Icon" type="TextureRect" parent="RunningOverlay/RunningIconContainer"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-expand_mode = 1
-stretch_mode = 6
-
-[node name="StatusContainer" type="PanelContainer" parent="RunningOverlay"]
-layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -400.0
-offset_top = 220.0
-offset_right = 400.0
-offset_bottom = 340.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_StatusBg")
-
-[node name="StatusLabel" type="Label" parent="RunningOverlay/StatusContainer"]
-layout_mode = 2
-theme_override_fonts/font = ExtResource("3_font_bold")
-theme_override_font_sizes/font_size = 48
-text = "ゲーム起動中: 
-お楽しみください！"
-horizontal_alignment = 1
-vertical_alignment = 1
-
 [node name="TopBar" type="Control" parent="."]
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
-offset_bottom = 120.0
+offset_bottom = 250.0
 grow_horizontal = 2
+z_index = 200
 mouse_filter = 2
 
 [node name="Background" type="TextureRect" parent="TopBar"]

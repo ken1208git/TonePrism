@@ -51,11 +51,17 @@ var _focus_target_rect: Rect2 = Rect2()
 var _focus_target_radius: float = 24.0
 var _focus_current_radius: float = 24.0
 var _focus_initialized: bool = false
+var _focus_tweening: bool = false
 var _focus_prev_target: Control = null
 var _focus_prev_target_pos: Vector2 = Vector2.ZERO
+var _was_transitioning: bool = false
 
 # --- スクロールTween ---
 var _scroll_tween: Tween = null
+
+# --- マウスクロール用 ---
+var _target_scroll_y: float = 0.0
+var _is_smooth_scrolling: bool = false
 
 func _ready():
 	_idle_mgr = IdleManager.new()
@@ -212,25 +218,50 @@ func _process(delta):
 	_glow_time += delta
 	_update_glow()
 
+	# シーン遷移中はフォーカス枠を非表示
+	if TransitionManager._transitioning:
+		if _focus_border:
+			_focus_border.visible = false
+			_focus_initialized = false
+		_was_transitioning = true
+		return
+
+	# 遷移完了直後にフォーカスを再設定
+	if _was_transitioning:
+		_was_transitioning = false
+		_update_focus_visual()
+
+	# マウススムーズスクロール
+	if _is_smooth_scrolling:
+		_scroll_container.scroll_vertical = lerpf(_scroll_container.scroll_vertical, _target_scroll_y, 15.0 * delta)
+		if abs(_scroll_container.scroll_vertical - _target_scroll_y) < 1.0:
+			_scroll_container.scroll_vertical = roundi(_target_scroll_y)
+			_is_smooth_scrolling = false
+
 	# フォーカスボーダーをlerp追従（スクロール分は即座反映）
 	_sync_focus_position()
 	if _focus_border and _focus_border.visible and _focus_initialized:
-		# 同じターゲットの位置変化（=スクロール）は即座に反映
-		if _focus_target == _focus_prev_target:
-			var target_delta = _focus_target_rect.position - _focus_prev_target_pos
-			_focus_border.global_position += target_delta
-		# フォーカス移動分はlerpで補間
-		var speed = delta * 25.0
-		_focus_border.global_position = _focus_border.global_position.lerp(
-			_focus_target_rect.position, speed)
-		_focus_border.size = _focus_border.size.lerp(
-			_focus_target_rect.size, speed)
-		_focus_current_radius = lerpf(_focus_current_radius, _focus_target_radius, speed)
-		var morph_style = _focus_border.get_theme_stylebox("panel") as StyleBoxFlat
-		if morph_style:
-			morph_style.set_corner_radius_all(int(_focus_current_radius))
-	_focus_prev_target = _focus_target
-	_focus_prev_target_pos = _focus_target_rect.position
+		# Tween中は位置/サイズの更新をスキップ
+		if _focus_tweening:
+			_focus_prev_target = _focus_target
+			_focus_prev_target_pos = _focus_target_rect.position
+		else:
+			# 同じターゲットの位置変化（=スクロール）は即座に反映
+			if _focus_target == _focus_prev_target:
+				var target_delta = _focus_target_rect.position - _focus_prev_target_pos
+				_focus_border.global_position += target_delta
+			# フォーカス移動分はlerpで補間
+			var speed = delta * 25.0
+			_focus_border.global_position = _focus_border.global_position.lerp(
+				_focus_target_rect.position, speed)
+			_focus_border.size = _focus_border.size.lerp(
+				_focus_target_rect.size, speed)
+			_focus_current_radius = lerpf(_focus_current_radius, _focus_target_radius, speed)
+			var morph_style = _focus_border.get_theme_stylebox("panel") as StyleBoxFlat
+			if morph_style:
+				morph_style.set_corner_radius_all(int(_focus_current_radius))
+			_focus_prev_target = _focus_target
+			_focus_prev_target_pos = _focus_target_rect.position
 
 	# BottomBar表示切替
 	if _bottom_bar:
@@ -250,7 +281,26 @@ func _input(event):
 
 	if event is InputEventMouseButton:
 		_using_mouse = true
-		# マウスホイールはScrollContainerに任せる
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
+			if _scroll_tween and _scroll_tween.is_valid(): _scroll_tween.kill()
+			if not _is_smooth_scrolling: _target_scroll_y = _scroll_container.scroll_vertical
+			_target_scroll_y -= 150.0  # スクロール量
+			_target_scroll_y = max(0.0, _target_scroll_y)
+			_is_smooth_scrolling = true
+			get_viewport().set_input_as_handled()
+			return
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
+			if _scroll_tween and _scroll_tween.is_valid(): _scroll_tween.kill()
+			if not _is_smooth_scrolling: _target_scroll_y = _scroll_container.scroll_vertical
+			var v_scrollbar = _scroll_container.get_v_scroll_bar()
+			var max_scroll = v_scrollbar.max_value - _scroll_container.size.y
+			if max_scroll < 0: max_scroll = v_scrollbar.max_value
+			
+			_target_scroll_y += 150.0
+			_target_scroll_y = min(_target_scroll_y, max_scroll)
+			_is_smooth_scrolling = true
+			get_viewport().set_input_as_handled()
+			return
 		return
 
 	# キーボード/ゲームパッド入力
@@ -477,8 +527,7 @@ func _on_select() -> void:
 
 # --- スライドショー ---
 
-## スライドショーのアニメーション中かどうか（セクションごとに管理）
-var _slide_animating: Dictionary = {}
+var _slide_title_tweens: Dictionary = {}
 
 func _switch_slide(section_index: int, dir: int) -> void:
 	if section_index >= _section_ui.size():
@@ -489,8 +538,6 @@ func _switch_slide(section_index: int, dir: int) -> void:
 	var section: StoreSectionInfo = data["section"]
 	var container: Control = data["container"]
 	if section.games.size() <= 1:
-		return
-	if _slide_animating.get(section_index, false):
 		return
 
 	var current_idx = _slideshow_indices.get(section_index, 0)
@@ -510,19 +557,18 @@ func _switch_slide(section_index: int, dir: int) -> void:
 	var banner_width = container.custom_minimum_size.x
 
 	# スライドアニメーション
-	_slide_animating[section_index] = true
 	var slide_tween = create_tween()
 	slide_tween.set_parallel(true)
 
 	if new_banner:
 		new_banner.visible = true
-		# 新バナーを進行方向から登場
+		# 新バナーを進行方向から登場（連打時のために現在のXに関わらず初期化）
 		new_banner.position.x = banner_width * dir
 		slide_tween.tween_property(new_banner, "position:x", 0.0, 0.4)\
 			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 	if old_banner:
-		# 旧バナーを反対方向にスライドアウト
+		# 旧バナーを現在位置から反対方向にスライドアウト
 		slide_tween.tween_property(old_banner, "position:x", -banner_width * dir, 0.4)\
 			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
@@ -531,7 +577,6 @@ func _switch_slide(section_index: int, dir: int) -> void:
 		if old_banner:
 			old_banner.visible = false
 			old_banner.position.x = 0
-		_slide_animating[section_index] = false
 	)
 
 	# ゲージバー: 満タンバーをフェードアウト、新バーを0からスタート
@@ -545,14 +590,15 @@ func _switch_slide(section_index: int, dir: int) -> void:
 				var fill = bar.get_node_or_null("Fill") as ColorRect
 				if fill:
 					if i == current_idx:
-						# 満タンバーをフェードアウト
+						# 古いバーをフェードアウト
 						bar_tween.tween_property(fill, "color:a", 0.0, 0.3)\
 							.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 						bar_tween.tween_callback(func():
 							fill.size.x = 0
 							fill.color.a = 1.0
 						).set_delay(0.3)
-					else:
+					elif i != new_idx:
+						# 現在でも次でもないバーは即座に0
 						fill.size.x = 0
 						fill.color.a = 1.0
 
@@ -566,14 +612,22 @@ func _switch_slide(section_index: int, dir: int) -> void:
 			new_text = section.game_display_texts[game.game_id]
 		else:
 			new_text = game.title
-		var scroll_origin_x = title_scroll.position.x
+			
+		# 前回のタイトルのTweenがあればキャンセル
+		if _slide_title_tweens.has(section_index) and _slide_title_tweens[section_index] and _slide_title_tweens[section_index].is_valid():
+			_slide_title_tweens[section_index].kill()
+			
+		var title_base_x = 24.0
 		var title_tween = create_tween()
-		# 旧テキストをスライド方向にフェードアウト（コンテナごと移動）
+		_slide_title_tweens[section_index] = title_tween
+		
+		# 旧テキストをスライド方向にフェードアウト（現在位置から目標まで移動）
 		title_tween.set_parallel(true)
-		title_tween.tween_property(title_scroll, "position:x", scroll_origin_x - 80.0 * dir, 0.15)\
+		title_tween.tween_property(title_scroll, "position:x", title_base_x - 80.0 * dir, 0.15)\
 			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
 		title_tween.tween_property(title_scroll, "modulate:a", 0.0, 0.15)\
 			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+			
 		# 新テキスト: テキスト差し替え→スライドイン
 		title_tween.set_parallel(false)
 		title_tween.tween_callback(func():
@@ -582,8 +636,8 @@ func _switch_slide(section_index: int, dir: int) -> void:
 			title_scroll.reset()
 		)
 		title_tween.set_parallel(true)
-		title_tween.tween_property(title_scroll, "position:x", scroll_origin_x, 0.25)\
-			.from(scroll_origin_x + 80.0 * dir)\
+		title_tween.tween_property(title_scroll, "position:x", title_base_x, 0.25)\
+			.from(title_base_x + 80.0 * dir)\
 			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 		title_tween.tween_property(title_scroll, "modulate:a", 1.0, 0.25)\
 			.from(0.0)\
@@ -681,6 +735,8 @@ func _update_focus_visual() -> void:
 	_sync_focus_position()
 
 func _sync_focus_position() -> void:
+	if TransitionManager._transitioning:
+		return
 	if not _focus_border or not _focus_border.visible or _focus_target == null:
 		return
 	if not is_instance_valid(_focus_target):
@@ -689,7 +745,7 @@ func _sync_focus_position() -> void:
 		return
 	# 目標位置・サイズを更新（実際の移動はlerpで行う）
 	_focus_target_rect = _focus_target.get_global_rect()
-	# 初回は即座配置（(0,0)からモーフ防止）
+	# 初回はズームイン登場
 	if not _focus_initialized:
 		_focus_border.global_position = _focus_target_rect.position
 		_focus_border.size = _focus_target_rect.size
@@ -697,6 +753,20 @@ func _sync_focus_position() -> void:
 		_focus_prev_target = _focus_target
 		_focus_prev_target_pos = _focus_target_rect.position
 		_focus_initialized = true
+		_focus_tweening = true
+		var style = _focus_border.get_theme_stylebox("panel") as StyleBoxFlat
+		if style:
+			style.set_corner_radius_all(int(_focus_current_radius))
+		_focus_border.pivot_offset = _focus_target_rect.size / 2.0
+		_focus_border.scale = Vector2(1.15, 1.15)
+		_focus_border.modulate.a = 0.0
+		var tween = create_tween()
+		tween.set_parallel(true)
+		tween.tween_property(_focus_border, "scale", Vector2.ONE, 0.25)\
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tween.tween_property(_focus_border, "modulate:a", 1.0, 0.25)\
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tween.finished.connect(func(): _focus_tweening = false)
 
 func _update_glow() -> void:
 	if not _focus_border or not _focus_border.visible:

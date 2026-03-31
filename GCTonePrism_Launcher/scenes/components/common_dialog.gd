@@ -18,12 +18,20 @@ var _focus_target_rect: Rect2 = Rect2()
 var _focus_target_radius: float = 16.0
 var _focus_current_radius: float = 16.0
 var _focus_initialized: bool = false
+var _focus_tweening: bool = false
 var _focus_prev_target: Control = null
 var _focus_prev_target_pos: Vector2 = Vector2.ZERO
 var _mouse_mode: bool = false  # マウス操作中はフォーカス枠を非表示
 
 func _process(delta):
 	if not _focus_border:
+		return
+
+	# ダイアログのフェードインアニメーション中はフォーカス枠を出さない
+	var panel = get_node_or_null("Panel")
+	if panel and panel.modulate.a < 0.99:
+		_focus_border.visible = false
+		_focus_initialized = false
 		return
 
 	# フォーカスオーナーを取得してモーフ
@@ -42,6 +50,22 @@ func _process(delta):
 			_focus_prev_target = focus_owner
 			_focus_prev_target_pos = _focus_target_rect.position
 			_focus_initialized = true
+			_focus_tweening = true
+			# ズームイン + フェードイン
+			_focus_border.pivot_offset = _focus_target_rect.size / 2.0
+			_focus_border.scale = Vector2(1.15, 1.15)
+			_focus_border.modulate.a = 0.0
+			var tween = create_tween()
+			tween.set_parallel(true)
+			tween.tween_property(_focus_border, "scale", Vector2.ONE, 0.25)\
+				.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+			tween.tween_property(_focus_border, "modulate:a", 1.0, 0.25)\
+				.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+			tween.finished.connect(func(): _focus_tweening = false)
+		elif _focus_tweening:
+			# Tween中は位置/サイズの更新をスキップ
+			_focus_prev_target = focus_owner
+			_focus_prev_target_pos = _focus_target_rect.position
 		else:
 			if focus_owner == _focus_prev_target:
 				var target_delta = _focus_target_rect.position - _focus_prev_target_pos

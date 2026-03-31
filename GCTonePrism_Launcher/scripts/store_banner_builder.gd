@@ -204,7 +204,7 @@ static func create_banner(game: GameInfo, banner_size: Vector2, custom_text: Str
 
 ## 矢印ボタンを追加
 static func _add_arrow_buttons(container: Control, banner_width: float) -> void:
-	var arrow_size := Vector2(48, 48)
+	var arrow_size := Vector2(56, 56)
 	var arrow_y := StoreBrowseBuilder.FEATURED_HEIGHT / 2.0 - arrow_size.y / 2.0
 
 	for arrow_data in [
@@ -213,7 +213,6 @@ static func _add_arrow_buttons(container: Control, banner_width: float) -> void:
 	]:
 		var btn = Button.new()
 		btn.name = arrow_data["name"]
-		btn.text = arrow_data["text"]
 		btn.flat = true
 		btn.position = Vector2(arrow_data["x"], arrow_y)
 		btn.custom_minimum_size = arrow_size
@@ -224,6 +223,37 @@ static func _add_arrow_buttons(container: Control, banner_width: float) -> void:
 		btn.add_theme_color_override("font_color", Color(1, 1, 1, 0.7))
 		btn.add_theme_color_override("font_hover_color", Color.WHITE)
 
+		# 画像アイコンの追加
+		var icon = TextureRect.new()
+		icon.texture = preload("res://resources/icons/arrow.png")
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		
+		# 色を白にするシェーダー（黒背景・テキスト用の反転）
+		var mat = ShaderMaterial.new()
+		mat.shader = preload("res://resources/shaders/invert_color.gdshader")
+		icon.material = mat
+		
+		# 左矢印画像が想定と逆だったので、SlideshowNextでフリップする
+		if arrow_data["name"] == "SlideshowNext":
+			icon.flip_h = true
+			
+		# 余白を作って中央配置
+		var pad = 6.0
+		icon.position = Vector2(pad, pad)
+		icon.size = arrow_size - Vector2(pad * 2, pad * 2)
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		
+		# 基本の透明度は0.7
+		icon.modulate.a = 0.7
+		btn.add_child(icon)
+		
+		# ボタンのフォーカス・ホバー状態でアイコンの透明度を更新
+		btn.mouse_entered.connect(func(): icon.modulate.a = 1.0)
+		btn.mouse_exited.connect(func(): icon.modulate.a = 0.7)
+		btn.focus_entered.connect(func(): icon.modulate.a = 1.0)
+		btn.focus_exited.connect(func(): icon.modulate.a = 0.7)
+
 		for state_data in [
 			{"state": "normal", "alpha": 0.4},
 			{"state": "hover", "alpha": 0.6},
@@ -231,7 +261,7 @@ static func _add_arrow_buttons(container: Control, banner_width: float) -> void:
 		]:
 			var s = StyleBoxFlat.new()
 			s.bg_color = Color(0, 0, 0, state_data["alpha"])
-			s.set_corner_radius_all(24)
+			s.set_corner_radius_all(28)
 			btn.add_theme_stylebox_override(state_data["state"], s)
 
 		container.add_child(btn)

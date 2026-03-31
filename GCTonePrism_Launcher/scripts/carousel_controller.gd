@@ -75,7 +75,7 @@ func _setup_card_thumbnail(card: Panel, game: GameInfo) -> void:
 ## 毎フレーム呼ばれる。カードの位置・スケール・透明度を更新する
 func update_cards(delta: float, selected_index: int, viewport_size: Vector2,
 		container_center_x: float, using_mouse: bool,
-		static_focus_border: Panel) -> int:
+		static_focus_border: Panel, is_running: bool = false) -> int:
 	var viewport_center_y = viewport_size.y / 2
 
 	# スムーズスクロール
@@ -103,13 +103,14 @@ func update_cards(delta: float, selected_index: int, viewport_size: Vector2,
 		var scale_factor = remap(dist_from_center_px, 0, 150, SCALE_ACTIVE, SCALE_INACTIVE)
 		scale_factor = clamp(scale_factor, SCALE_INACTIVE, SCALE_ACTIVE)
 
-		# 透明度
-		var opacity = 1.0 if i == selected_index else OPACITY_INACTIVE
+		# 透明度（起動中(フェード中)は上書きしない）
+		if not is_running:
+			var opacity = 1.0 if i == selected_index else OPACITY_INACTIVE
+			card.modulate.a = opacity
 
 		# 反映
 		card.position = Vector2(container_center_x - (CARD_SIZE.x / 2), screen_y - (CARD_SIZE.y / 2))
 		card.scale = Vector2(scale_factor, scale_factor)
-		card.modulate.a = opacity
 		card.z_index = 100 - int(dist_from_center_px / 10)
 
 	return new_active

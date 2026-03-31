@@ -8,18 +8,20 @@ signal game_ended()
 
 var running_pid: int = -1
 var _has_lost_focus_since_launch: bool = false
+var _is_launching: bool = false
 
 func is_running() -> bool:
-	return running_pid != -1
+	return running_pid != -1 or _is_launching
 
 ## ゲーム起動
 func launch_game(game: GameInfo, status_label: Label, running_overlay: Control,
 		carousel_container: Control, info_panel: Panel, top_bar: Control,
-		static_focus_border: Panel, card_nodes: Array[Panel], selected_index: int,
-		tree: SceneTree) -> void:
-	if running_pid != -1:
+	static_focus_border: Panel, card_nodes: Array[Panel], selected_index: int,
+		tree: SceneTree, bottom_bar: Control = null) -> void:
+	if running_pid != -1 or _is_launching:
 		return
 
+	_is_launching = true
 	print("[GameLauncher] Launching game: ", game.title, " (ID: ", game.game_id, ")")
 
 	var exe_path = GamePathResolver.find_executable(game)
@@ -27,21 +29,18 @@ func launch_game(game: GameInfo, status_label: Label, running_overlay: Control,
 	if exe_path.is_empty():
 		print("❌ Executable not found: ", game.executable_path)
 		ErrorManager.show_error(ErrorCode.GAME_EXECUTABLE_NOT_FOUND)
+		_is_launching = false
 		return
 
 	var args = GamePathResolver.parse_arguments(game.arguments)
 
-	# 起動中表示
+	# 起動中表示（フェードアウト演出）
 	if running_overlay:
-		running_overlay.visible = true
-	_switch_to_running_view(running_overlay, card_nodes, selected_index, info_panel, top_bar, static_focus_border)
+		running_overlay.visible = false # 旧オーバーレイは使わない
+	
+	_switch_to_running_view(running_overlay, card_nodes, selected_index, info_panel, top_bar, static_focus_border, tree, carousel_container, bottom_bar)
 
-	if status_label:
-		status_label.text = "ゲーム起動中: %s\nお楽しみください！" % game.title
-
-	# UIの描画更新を待つ
-	await tree.process_frame
-	await tree.process_frame
+	# UIの描画更新とアニメーションを待つ
 	await tree.create_timer(1.0).timeout
 
 	print("  Path: ", exe_path)
@@ -66,63 +65,147 @@ func launch_game(game: GameInfo, status_label: Label, running_overlay: Control,
 	if pid == -1:
 		print("❌ Failed to create process.")
 		ErrorManager.show_error(ErrorCode.GAME_EXECUTION_FAILED)
+		_switch_to_normal_view(running_overlay, card_nodes, info_panel, top_bar, static_focus_border, tree, carousel_container, bottom_bar) # 失敗時は戻す
+		_is_launching = false
 		return
 	else:
 		print("✅ Process started. PID: %d" % pid)
 		running_pid = pid
+		_is_launching = false
 		game_started.emit()
 
 ## 毎フレーム呼ばれる。ゲーム終了を監視する
 func monitor_process(window: Window, status_label: Label, game: GameInfo,
 		running_overlay: Control, card_nodes: Array[Panel],
-		info_panel: Panel, top_bar: Control, static_focus_border: Panel) -> void:
+		info_panel: Panel, top_bar: Control, static_focus_border: Panel,
+		carousel_container: Control = null, bottom_bar: Control = null) -> void:
 	if running_pid == -1:
 		return
 
 	# フォーカス状態の監視
 	if not window.has_focus():
 		_has_lost_focus_since_launch = true
-		if status_label and "起動中" in status_label.text:
-			status_label.text = "ゲーム実行中: %s\nお楽しみください！" % game.title
 
 	# プロセスの終了判定
 	if not OS.is_process_running(running_pid):
 		print("[GameLauncher] Game process %d finished." % running_pid)
 		running_pid = -1
 
-		if running_overlay:
-			running_overlay.visible = false
-		for card in card_nodes:
-			card.visible = true
-		if info_panel:
-			info_panel.visible = true
-		if top_bar:
-			top_bar.visible = true
-		if static_focus_border:
-			static_focus_border.visible = true
-
+		_switch_to_normal_view(running_overlay, card_nodes, info_panel, top_bar, static_focus_border, window.get_tree(), carousel_container, bottom_bar)
 		game_ended.emit()
 
-## 起動中表示に切り替え
+## 起動中表示に切り替え（UIをフェードアウト）
 func _switch_to_running_view(running_overlay: Control, card_nodes: Array[Panel],
 		selected_index: int, info_panel: Panel, top_bar: Control,
-		static_focus_border: Panel) -> void:
-	print("[GameLauncher] Switching to Running View")
+		static_focus_border: Panel, tree: SceneTree,
+		carousel_container: Control = null, bottom_bar: Control = null) -> void:
+	print("[GameLauncher] Switching to Running View (Fade Out)")
 	if running_overlay:
-		running_overlay.visible = true
-		for i in range(card_nodes.size()):
-			if i != selected_index:
-				card_nodes[i].visible = false
-		if info_panel:
-			info_panel.visible = false
-		if top_bar:
-			top_bar.visible = false
-		if static_focus_border:
-			static_focus_border.visible = false
+		running_overlay.visible = false
 
-		var running_icon_container = running_overlay.get_node_or_null("RunningIconContainer")
-		if running_icon_container:
-			running_icon_container.visible = false
-		var running_icon = running_overlay.get_node_or_null("RunningIconContainer/Icon")
-		if running_icon:
-			running_icon.visible = false
+	var tween = tree.create_tween()
+	tween.set_parallel(true)
+	
+	for i in range(card_nodes.size()):
+		if i != selected_index:
+			tween.tween_property(card_nodes[i], "modulate:a", 0.0, 0.5)\
+				.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		# 選択中のカード（i == selected_index）は何もしない（残す）
+			
+	if info_panel:
+		tween.tween_property(info_panel, "modulate:a", 0.0, 0.5)\
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	if top_bar:
+		tween.tween_property(top_bar, "modulate:a", 0.0, 0.5)\
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	if bottom_bar:
+		tween.tween_property(bottom_bar, "modulate:a", 0.0, 0.5)\
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	if static_focus_border:
+		tween.tween_property(static_focus_border, "modulate:a", 0.0, 0.3)\
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+			
+	if carousel_container:
+		var up_btn = carousel_container.get_node_or_null("ScrollUpButton")
+		var down_btn = carousel_container.get_node_or_null("ScrollDownButton")
+		if up_btn:
+			tween.tween_property(up_btn, "modulate:a", 0.0, 0.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		if down_btn:
+			tween.tween_property(down_btn, "modulate:a", 0.0, 0.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+## 通常表示に戻す（UIをフェードイン）
+func _switch_to_normal_view(running_overlay: Control, card_nodes: Array[Panel],
+		info_panel: Panel, top_bar: Control, static_focus_border: Panel, tree: SceneTree,
+		carousel_container: Control = null, bottom_bar: Control = null) -> void:
+	print("[GameLauncher] Switching to Normal View (Fade In)")
+	
+	if not tree:
+		# ツリーがない場合のフォールバック（強制即時表示）
+		for card in card_nodes:
+			card.visible = true
+			card.modulate.a = 1.0
+		if info_panel:
+			info_panel.visible = true
+			info_panel.modulate.a = 1.0
+		if top_bar:
+			top_bar.visible = true
+			top_bar.modulate.a = 1.0
+		if bottom_bar:
+			bottom_bar.visible = true
+			bottom_bar.modulate.a = 1.0
+		if static_focus_border:
+			static_focus_border.visible = true
+			static_focus_border.modulate.a = 1.0
+		if carousel_container:
+			var up_btn = carousel_container.get_node_or_null("ScrollUpButton")
+			var down_btn = carousel_container.get_node_or_null("ScrollDownButton")
+			if up_btn:
+				up_btn.visible = true
+				up_btn.modulate.a = 1.0
+			if down_btn:
+				down_btn.visible = true
+				down_btn.modulate.a = 1.0
+		return
+
+	var tween = tree.create_tween()
+	tween.set_parallel(true)
+	
+	for card in card_nodes:
+		card.visible = true
+		if card.modulate.a < 1.0: # 選択カードは1.0のままなのでスキップされる
+			tween.tween_property(card, "modulate:a", 1.0, 0.5)\
+				.from(0.0).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+			
+	if info_panel:
+		info_panel.visible = true
+		tween.tween_property(info_panel, "modulate:a", 1.0, 0.5)\
+			.from(0.0).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	if top_bar:
+		top_bar.visible = true
+		tween.tween_property(top_bar, "modulate:a", 1.0, 0.5)\
+			.from(0.0).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	if bottom_bar:
+		bottom_bar.visible = true
+		tween.tween_property(bottom_bar, "modulate:a", 1.0, 0.5)\
+			.from(0.0).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	if static_focus_border:
+		static_focus_border.visible = true
+		tween.tween_property(static_focus_border, "modulate:a", 1.0, 0.5)\
+			.from(0.0).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+			
+	if carousel_container:
+		var up_btn = carousel_container.get_node_or_null("ScrollUpButton")
+		var down_btn = carousel_container.get_node_or_null("ScrollDownButton")
+		if up_btn:
+			up_btn.visible = true
+			tween.tween_property(up_btn, "modulate:a", 1.0, 0.5).from(0.0).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		if down_btn:
+			down_btn.visible = true
+			tween.tween_property(down_btn, "modulate:a", 1.0, 0.5).from(0.0).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+			
+		# フェードインアニメーション完了後にVisibilityを再評価して、端のボタンを正しく消す
+		tween.finished.connect(func():
+			# 厳密なカード状態はここには渡ってこないため
+			# 呼び出し元(game_selection.gd)のgame_endedシグナルで_update_arrow_visibilityを呼ぶのが確実
+			pass
+		)

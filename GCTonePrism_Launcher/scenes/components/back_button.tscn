@@ -1,17 +1,17 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Texture2D" path="res://images/turn_back.png" id="1_icon"]
-[ext_resource type="StyleBoxFlat" path="res://resources/styles/exit_button_normal.tres" id="2_normal"]
-[ext_resource type="StyleBoxFlat" path="res://resources/styles/exit_button_hover.tres" id="3_hover"]
-[ext_resource type="StyleBoxFlat" path="res://resources/styles/exit_button_pressed.tres" id="4_pressed"]
-[ext_resource type="StyleBoxFlat" path="res://resources/styles/exit_button_focus.tres" id="5_focus"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_bg"]
 
 [node name="BackButton" type="Button"]
-custom_minimum_size = Vector2(60, 60)
-theme_override_styles/normal = ExtResource("2_normal")
-theme_override_styles/hover = ExtResource("3_hover")
-theme_override_styles/pressed = ExtResource("4_pressed")
-theme_override_styles/focus = ExtResource("5_focus")
+custom_minimum_size = Vector2(90, 90)
+modulate = Color(1, 1, 1, 1)
+self_modulate = Color(1, 1, 1, 1)
+theme_override_styles/normal = SubResource("StyleBoxEmpty_bg")
+theme_override_styles/hover = SubResource("StyleBoxEmpty_bg")
+theme_override_styles/pressed = SubResource("StyleBoxEmpty_bg")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_bg")
 icon = ExtResource("1_icon")
 icon_alignment = 1
 expand_icon = true
