@@ -30,8 +30,6 @@ var _input_handler: InputHandler
 @onready var _online_label: Label = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/OnlineContainer/OnlineValueLabel
 
 @onready var _desc_label: Label = $InfoPanel/MarginContainer/VBoxContainer/DescriptionScroll/DescLabel
-@onready var _running_overlay: Control = $RunningOverlay
-@onready var _status_label: Label = $RunningOverlay/StatusContainer/StatusLabel
 
 @onready var _play_button: Button = $InfoPanel/MarginContainer/VBoxContainer/TitleContainer/PlayButton
 @onready var _top_bar: Control = $TopBar
@@ -53,6 +51,7 @@ var _focus_target_rect: Rect2 = Rect2()
 var _focus_target_radius: float = 24.0
 var _focus_current_radius: float = 24.0
 var _focus_initialized: bool = false
+var _focus_tweening: bool = false
 var _focus_prev_target: Control = null
 var _focus_prev_target_pos: Vector2 = Vector2.ZERO
 
@@ -85,11 +84,27 @@ func _ready():
 	# 戻るボタン（ブラウズから来たときのみ表示）
 	if not AppState.return_scene.is_empty() and _exit_button:
 		var back_button = preload("res://scenes/components/back_button.tscn").instantiate()
-		var hbox = _exit_button.get_parent()
-		hbox.add_child(back_button)
-		hbox.move_child(back_button, _exit_button.get_index())
+		_top_bar.add_child(back_button)
+		back_button.position = Vector2(40, 80)
+		# 黒アイコンを白に反転
+		var shader = load("res://resources/shaders/invert_color.gdshader")
+		var mat = ShaderMaterial.new()
+		mat.shader = shader
+		back_button.material = mat
 		back_button.pressed.connect(func(): _go_back())
 		back_button.mouse_entered.connect(func(): back_button.grab_focus())
+		_input_handler.back_button = back_button
+		# セクション名ラベル（戻るボタンの横）
+		if not AppState.section_title.is_empty():
+			var section_label = Label.new()
+			section_label.text = AppState.section_title
+			section_label.add_theme_font_override("font", preload("res://fonts/NotoSansJP-Bold.ttf"))
+			section_label.add_theme_font_size_override("font_size", 56)
+			section_label.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+			section_label.custom_minimum_size = Vector2(0, 90)
+			section_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			_top_bar.add_child(section_label)
+			section_label.position = Vector2(160, 80)
 
 	# ボタンシグナル
 	if _exit_button:
@@ -112,7 +127,14 @@ func _ready():
 	_input_handler.idle_reset_requested.connect(func(): _idle_mgr.reset())
 
 	# ゲームランチャーのシグナル接続
-	_game_launcher.game_ended.connect(_update_focus_to_current_card)
+	_game_launcher.game_ended.connect(func():
+		_update_focus_to_current_card()
+		_update_arrow_visibility()
+	)
+
+	# カルーセルの上下矢印ボタンを追加
+	_add_carousel_arrow_buttons()
+	_update_arrow_visibility()
 
 	# 初期表示
 	_carousel.current_scroll_index = float(_selected_index)
@@ -139,10 +161,11 @@ func _process(delta):
 	_glow_animator.update(delta)
 
 	# ゲーム実行中の監視
-	_game_launcher.monitor_process(get_window(), _status_label,
+	_game_launcher.monitor_process(get_window(), null,
 		_games[_selected_index] if not _games.is_empty() else null,
-		_running_overlay, _carousel.card_nodes,
-		_info_panel, _top_bar, _static_focus_border)
+		null, _carousel.card_nodes,
+		_info_panel, _top_bar, _static_focus_border,
+		_carousel_container, _bottom_bar)
 
 	# アイドルタイマー
 	if _game_launcher.is_running():
@@ -167,7 +190,7 @@ func _process(delta):
 	var container_center_x = _carousel_container.size.x / 2
 	var new_active = _carousel.update_cards(delta, _selected_index,
 		get_viewport_rect().size, container_center_x,
-		_input_handler.using_mouse, _static_focus_border)
+		_input_handler.using_mouse, _static_focus_border, _game_launcher.is_running())
 
 	if new_active != _active_index:
 		_active_index = new_active
@@ -204,6 +227,10 @@ func _on_selection_moved(dir: int) -> void:
 		_selected_index = new_index
 		var dir_y = -1 if dir > 0 else 1
 		_update_info_display(_selected_index, dir_y)
+		_update_arrow_visibility()
+	elif dir < 0 and _selected_index == 0 and _input_handler.back_button:
+		# カルーセル最上端で上入力 → 戻るボタンにフォーカス
+		_input_handler.back_button.grab_focus()
 
 func _update_info_display(index: int, slide_dir_y: int = 0) -> void:
 	_info_display.update_display(_games[index], slide_dir_y,
@@ -227,10 +254,10 @@ func _update_focus_state() -> void:
 func _launch_game() -> void:
 	if _games.is_empty() or _game_launcher.is_running():
 		return
-	_game_launcher.launch_game(_games[_selected_index], _status_label, _running_overlay,
+	_game_launcher.launch_game(_games[_selected_index], null, null,
 		_carousel_container, _info_panel, _top_bar,
 		_static_focus_border, _carousel.card_nodes, _selected_index,
-		get_tree())
+		get_tree(), _bottom_bar)
 
 func _go_back() -> void:
 	if TransitionManager._transitioning:
@@ -294,6 +321,12 @@ func _update_focus_morph(delta: float) -> void:
 	if not _static_focus_border:
 		return
 
+	# シーン遷移中は非表示（遷移完了後に正確な位置へ即座配置するためリセット）
+	if TransitionManager._transitioning:
+		_static_focus_border.visible = false
+		_focus_initialized = false
+		return
+
 	# マウス操作中は非表示
 	if _input_handler.using_mouse:
 		_static_focus_border.visible = false
@@ -332,7 +365,7 @@ func _update_focus_morph(delta: float) -> void:
 		_static_focus_border.visible = false
 		return
 
-	# 初回は即座配置
+	# 初回はズームイン登場
 	if not _focus_initialized:
 		_static_focus_border.global_position = _focus_target_rect.position
 		_static_focus_border.size = _focus_target_rect.size
@@ -340,9 +373,27 @@ func _update_focus_morph(delta: float) -> void:
 		_focus_prev_target = target
 		_focus_prev_target_pos = _focus_target_rect.position
 		_focus_initialized = true
+		_focus_tweening = true
 		var style = _static_focus_border.get_theme_stylebox("panel") as StyleBoxFlat
 		if style:
 			style.set_corner_radius_all(int(_focus_current_radius))
+		# ズームイン + フェードイン（中心からスケール）
+		_static_focus_border.pivot_offset = _focus_target_rect.size / 2.0
+		_static_focus_border.scale = Vector2(1.15, 1.15)
+		_static_focus_border.modulate.a = 0.0
+		var tween = create_tween()
+		tween.set_parallel(true)
+		tween.tween_property(_static_focus_border, "scale", Vector2.ONE, 0.25)\
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tween.tween_property(_static_focus_border, "modulate:a", 1.0, 0.25)\
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tween.finished.connect(func(): _focus_tweening = false)
+		return
+
+	# Tween中は位置/サイズの更新をスキップ（干渉防止）
+	if _focus_tweening:
+		_focus_prev_target = target
+		_focus_prev_target_pos = _focus_target_rect.position
 		return
 
 	# 同じターゲットの位置変化（カードアニメーション等）は即座反映
@@ -363,3 +414,86 @@ func _update_focus_morph(delta: float) -> void:
 
 	_focus_prev_target = target
 	_focus_prev_target_pos = _focus_target_rect.position
+
+func _add_carousel_arrow_buttons() -> void:
+	var arrow_size := Vector2(80, 80)
+	var pad = 12.0
+
+	for i in range(2):
+		var is_up = (i == 0)
+		var btn = Button.new()
+		btn.name = "ScrollUpButton" if is_up else "ScrollDownButton"
+		btn.flat = true
+		btn.custom_minimum_size = arrow_size
+		btn.size = arrow_size
+		btn.focus_mode = Control.FOCUS_NONE
+		btn.mouse_filter = Control.MOUSE_FILTER_STOP
+		
+		# 画面中央(選択中の大きなアイコン位置)を基準に配置
+		btn.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+		btn.offset_left = -arrow_size.x / 2.0
+		btn.offset_right = arrow_size.x / 2.0
+		
+		# さっき（240）と今（200）の中間で220pxに設定
+		var y_offset = 220.0
+		if is_up:
+			btn.offset_top = -y_offset - arrow_size.y / 2.0
+			btn.offset_bottom = -y_offset + arrow_size.y / 2.0
+		else:
+			btn.offset_top = y_offset - arrow_size.y / 2.0
+			btn.offset_bottom = y_offset + arrow_size.y / 2.0
+
+		# アイコン
+		var icon = TextureRect.new()
+		icon.texture = preload("res://resources/icons/arrow.png")
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		
+		# 白化シェーダー
+		var mat = ShaderMaterial.new()
+		mat.shader = preload("res://resources/shaders/invert_color.gdshader")
+		icon.material = mat
+		
+		# 向きの回転 (元が左向き◀前提)
+		icon.pivot_offset = (arrow_size - Vector2(pad * 2, pad * 2)) / 2.0
+		icon.rotation_degrees = 90 if is_up else -90
+		
+		icon.position = Vector2(pad, pad)
+		icon.size = arrow_size - Vector2(pad * 2, pad * 2)
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		icon.modulate.a = 0.5
+		btn.add_child(icon)
+		
+		# ホバー/フォーカス時の見た目変化
+		btn.mouse_entered.connect(func(): icon.modulate.a = 1.0)
+		btn.mouse_exited.connect(func(): icon.modulate.a = 0.5)
+		btn.button_down.connect(func(): icon.modulate.a = 0.3)
+		btn.button_up.connect(func(): if btn.is_hovered(): icon.modulate.a = 1.0 else: icon.modulate.a = 0.5)
+		
+		# 押した時の処理
+		if is_up:
+			btn.pressed.connect(func(): _on_selection_moved(-1))
+		else:
+			btn.pressed.connect(func(): _on_selection_moved(1))
+			
+		for state_data in [
+			{"state": "normal", "alpha": 0.2},
+			{"state": "hover", "alpha": 0.5},
+			{"state": "pressed", "alpha": 0.7}
+		]:
+			var s = StyleBoxFlat.new()
+			s.bg_color = Color(0, 0, 0, state_data["alpha"])
+			s.set_corner_radius_all(40) # 丸型
+			btn.add_theme_stylebox_override(state_data["state"], s)
+			
+		_carousel_container.add_child(btn)
+
+func _update_arrow_visibility() -> void:
+	if not is_instance_valid(_carousel_container): return
+	var up_btn = _carousel_container.get_node_or_null("ScrollUpButton")
+	var down_btn = _carousel_container.get_node_or_null("ScrollDownButton")
+	
+	if up_btn:
+		up_btn.visible = (_selected_index > 0)
+	if down_btn:
+		down_btn.visible = (_selected_index < _games.size() - 1)
