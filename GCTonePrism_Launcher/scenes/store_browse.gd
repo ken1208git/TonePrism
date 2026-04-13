@@ -9,7 +9,6 @@ var _idle_mgr: IdleManager
 var _db_manager: DatabaseManager
 var _game_repo: GameRepository
 var _section_repo: StoreSectionRepository
-var _style_mgr: ButtonStyleManager
 var _sections: Array[StoreSectionInfo] = []
 
 # --- ナビゲーション状態 ---
@@ -35,10 +34,9 @@ var _section_ui: Array = []
 # --- ノード参照 ---
 @onready var _scroll_container: ScrollContainer = $ScrollArea
 @onready var _content_container: VBoxContainer = $ScrollArea/MarginContainer/ContentContainer
-@onready var _focus_border: Panel = $FocusBorder
-@onready var _clock_label: Label = $TopBar/MarginContainer/HBoxContainer/ClockLabel
-@onready var _exit_button: Button = $TopBar/MarginContainer/HBoxContainer/ExitButton
-@onready var _bottom_bar: Control = $BottomBar
+@onready var _focus_border: Panel = $FocusLayer/FocusBorder
+@onready var _top_bar: CanvasLayer = $TopBar
+@onready var _bottom_bar: CanvasLayer = $BottomBar
 
 # --- 「すべてのゲーム」ボタン ---
 var _all_games_button: Button = null
@@ -55,6 +53,7 @@ var _focus_tweening: bool = false
 var _focus_prev_target: Control = null
 var _focus_prev_target_pos: Vector2 = Vector2.ZERO
 var _was_transitioning: bool = false
+var _exit_button: Button
 
 # --- スクロールTween ---
 var _scroll_tween: Tween = null
@@ -63,10 +62,16 @@ var _scroll_tween: Tween = null
 var _target_scroll_y: float = 0.0
 var _is_smooth_scrolling: bool = false
 
+# --- 遅延画像読み込み（バックグラウンドスレッド） ---
+var _image_load_queue: Array = []   # スレッドに渡すキュー [{path: String, node_id: int, target: String}]
+var _loaded_images: Array = []      # スレッドが読み込んだ結果 [{image: Image, node_id: int, target: String}]
+var _load_thread: Thread = null
+var _load_mutex: Mutex = Mutex.new()
+var _node_registry: Dictionary = {} # node_id -> Control（スレッドからノード参照できないため）
+
 func _ready():
 	_idle_mgr = IdleManager.new()
 	_db_manager = DatabaseManager.new()
-	_style_mgr = ButtonStyleManager.new()
 
 	process_mode = Node.PROCESS_MODE_ALWAYS
 
@@ -174,10 +179,9 @@ func _ready():
 	)
 	_content_container.add_child(_all_games_button)
 
-	# ExitButton設定（カルーセルと同じスタイル）
-	if _exit_button:
-		_exit_button.pressed.connect(_on_exit_button_pressed)
-		_style_mgr.setup_exit_button(_exit_button)
+	# ExitButton設定（TopBarコンポーネントから取得）
+	_exit_button = _top_bar.get_exit_button()
+	_top_bar.exit_pressed.connect(_on_exit_button_pressed)
 
 	# フォーカスボーダーのスタイルは .tscn で適用済み
 
@@ -187,12 +191,17 @@ func _ready():
 	_on_view_all = false
 	call_deferred("_update_focus_visual")
 
+	# 遅延画像読み込みキューを構築
+	_build_image_load_queue()
+
 	set_process(true)
 	set_process_input(true)
 
 func _process(delta):
-	# 時計更新
-	GameInfoFormatter.update_clock(_clock_label)
+	# 時計更新はTopBarコンポーネントが管理
+
+	# スレッドで読み込み済みの画像をメインスレッドで適用
+	_apply_loaded_images()
 
 	# アイドルタイマー
 	if _idle_mgr.update(delta, get_tree().paused):
@@ -265,7 +274,7 @@ func _process(delta):
 
 	# BottomBar表示切替
 	if _bottom_bar:
-		_bottom_bar.visible = not _using_mouse
+		_bottom_bar.get_panel().visible = not _using_mouse
 
 func _input(event):
 	if get_tree().paused:
@@ -330,10 +339,13 @@ func _input(event):
 		_on_select()
 		viewport.set_input_as_handled()
 	elif event.is_action_pressed("ui_cancel"):
-		IdleManager.transition_to_screensaver(get_tree())
+		_on_exit_button_pressed()
 		viewport.set_input_as_handled()
 
 func _exit_tree():
+	# バックグラウンドスレッドの終了を待つ
+	if _load_thread and _load_thread.is_started():
+		_load_thread.wait_to_finish()
 	if _db_manager:
 		_db_manager.close()
 	if DialogManager and DialogManager.has_method("close_current_dialog"):
@@ -432,7 +444,7 @@ func _move_tile(dir: int) -> void:
 				var has_view_all = false
 				var sec_container = _section_ui[_current_section]["container"] as Control
 				for child in sec_container.get_children():
-					if child is HBoxContainer and child.get_node_or_null("ViewAllButton"):
+					if child is HBoxContainer and child.get_node_or_null("ViewAllButton") and child.get_node("ViewAllButton").visible:
 						has_view_all = true
 						break
 				if has_view_all:
@@ -899,3 +911,122 @@ func _on_exit_button_pressed() -> void:
 	DialogManager.show_message("確認", "退出しますか？\nタイトル画面に戻ります。",
 		["キャンセル", "退出する"], callback,
 		[Color(0.3, 0.3, 0.3), Color(0.8, 0.2, 0.2)])
+
+# --- 遅延画像読み込み ---
+
+## 全セクションのタイル/バナーから読み込みキューを構築し、バックグラウンドスレッドを開始
+func _build_image_load_queue() -> void:
+	for sec_data in _section_ui:
+		var section_type = sec_data["type"] as int
+		var container = sec_data["container"] as Control
+
+		match section_type:
+			0:  # 通常行: ThumbnailRow 内の Tile_* ラッパー
+				var thumb_row = container.get_node_or_null("ThumbnailRow")
+				if thumb_row:
+					for child in thumb_row.get_children():
+						if child.name.begins_with("Tile_") and child.has_meta("image_path"):
+							var nid = child.get_instance_id()
+							_node_registry[nid] = child
+							_image_load_queue.append({
+								"node_id": nid,
+								"path": child.get_meta("image_path"),
+								"target": "TilePanel/Thumbnail"
+							})
+							_start_label_breathing(child.get_node_or_null("TilePanel/LoadingLabel"))
+
+			1:  # スライドショー: BannerClip 内の Banner_*
+				var clip = container.get_node_or_null("BannerClip")
+				if clip:
+					var idx = 0
+					while true:
+						var banner = clip.get_node_or_null("Banner_%d" % idx)
+						if not banner:
+							break
+						if banner.has_meta("image_path"):
+							var nid = banner.get_instance_id()
+							_node_registry[nid] = banner
+							_image_load_queue.append({
+								"node_id": nid,
+								"path": banner.get_meta("image_path"),
+								"target": "BackgroundImage"
+							})
+							_start_label_breathing(banner.get_node_or_null("LoadingLabel"))
+						idx += 1
+
+			2:  # タイルグリッド: GridTile_*
+				for child in container.get_children():
+					if child is Panel and child.name.begins_with("GridTile_") and child.has_meta("image_path"):
+						var nid = child.get_instance_id()
+						_node_registry[nid] = child
+						_image_load_queue.append({
+							"node_id": nid,
+							"path": child.get_meta("image_path"),
+							"target": "BackgroundImage"
+						})
+						_start_label_breathing(child.get_node_or_null("LoadingLabel"))
+
+	# キューが空でなければバックグラウンドスレッドで画像読み込みを開始
+	if not _image_load_queue.is_empty():
+		_load_thread = Thread.new()
+		_load_thread.start(_load_images_in_thread)
+
+## バックグラウンドスレッド: キューからパスを取り出して Image を連続で読み込む
+func _load_images_in_thread() -> void:
+	while true:
+		_load_mutex.lock()
+		if _image_load_queue.is_empty():
+			_load_mutex.unlock()
+			break
+		var item = _image_load_queue.pop_front()
+		_load_mutex.unlock()
+
+		var image = Image.load_from_file(item["path"])
+		if image:
+			_load_mutex.lock()
+			_loaded_images.append({
+				"image": image,
+				"node_id": item["node_id"],
+				"target": item["target"]
+			})
+			_load_mutex.unlock()
+
+## メインスレッド（_process から呼ばれる）: 読み込み済み画像をテクスチャ化してノードに適用
+func _apply_loaded_images() -> void:
+	_load_mutex.lock()
+	if _loaded_images.is_empty():
+		_load_mutex.unlock()
+		return
+
+	# 1フレームあたり最大2枚適用（GPU テクスチャ作成の負荷を分散）
+	var apply_count = mini(2, _loaded_images.size())
+	var to_apply: Array = []
+	for i in range(apply_count):
+		to_apply.append(_loaded_images.pop_front())
+	_load_mutex.unlock()
+
+	for item in to_apply:
+		var node = _node_registry.get(item["node_id"]) as Control
+		if not node or not is_instance_valid(node):
+			continue
+		var tex = ImageTexture.create_from_image(item["image"])
+		var target = node.get_node_or_null(item["target"]) as TextureRect
+		if target:
+			target.texture = tex
+			target.modulate = Color(1, 1, 1, 0)
+			var tween = node.create_tween()
+			tween.tween_property(target, "modulate:a", 1.0, 0.2)
+		# LOADINGラベルを削除
+		var loading_label = node.get_node_or_null("LoadingLabel")
+		if not loading_label:
+			loading_label = node.get_node_or_null("TilePanel/LoadingLabel")
+		if loading_label:
+			loading_label.queue_free()
+
+## LOADINGラベルにブリージングアニメーションを設定
+func _start_label_breathing(label: Label) -> void:
+	if not label:
+		return
+	var tween = label.create_tween().set_loops()
+	tween.tween_property(label, "modulate:a", 0.3, 0.6).set_trans(Tween.TRANS_SINE)
+	tween.tween_property(label, "modulate:a", 0.8, 0.6).set_trans(Tween.TRANS_SINE)

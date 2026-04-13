@@ -65,10 +65,12 @@ func get_developers_by_game_id(game_id: String) -> Array[DeveloperInfo]:
 
 	var developers: Array[DeveloperInfo] = []
 	var query = """
-		SELECT id, game_id, last_name, first_name, grade
-		FROM developers
-		WHERE game_id = ?
-		ORDER BY id ASC
+		SELECT d.id, d.game_id, d.last_name, d.first_name, d.grade
+		FROM developers d
+		JOIN game_versions gv ON d.version_id = gv.id
+		JOIN games g ON g.game_id = gv.game_id AND g.version = gv.version
+		WHERE d.game_id = ?
+		ORDER BY d.id ASC
 	"""
 	var bindings = [game_id]
 

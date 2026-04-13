@@ -9,9 +9,21 @@ func setup_exit_button(exit_button: Button) -> void:
 	if not exit_button:
 		return
 
-	var icon_tex = load("res://images/exit.jpg")
+	var icon_tex = load("res://images/exit.png")
 	if icon_tex:
 		exit_button.icon = icon_tex
+		var img = icon_tex.get_image()
+		
+		for y in range(img.get_height()):
+			for x in range(img.get_width()):
+				var c = img.get_pixel(x, y)
+				if c.a > 0.0:
+					img.set_pixel(x, y, Color(1, 1, 1, c.a))
+		
+		exit_button.icon = ImageTexture.create_from_image(img)
+		exit_button.material = null
+		# .tscnで expand_icon = true になっているため、icon_max_widthでサイズを制限して縮小
+		exit_button.add_theme_constant_override("icon_max_width", 32)
 
 	# フォーカス制御 (Self-loop) - シーンツリーに追加後に設定
 	if exit_button.is_inside_tree():

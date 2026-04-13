@@ -7,7 +7,6 @@ extends Control
 var _carousel: CarouselController
 var _game_launcher: GameLauncher
 var _idle_mgr: IdleManager
-var _style_mgr: ButtonStyleManager
 var _glow_animator: GlowAnimator
 var _info_display: GameInfoDisplay
 var _input_handler: InputHandler
@@ -15,27 +14,24 @@ var _input_handler: InputHandler
 # --- ノード参照 ---
 @onready var _carousel_container: Control = $CarouselContainer
 @onready var _card_template: Panel = $CarouselContainer/CardTemplate
-@onready var _static_focus_border: Panel = $CarouselContainer/StaticFocusBorder
+@onready var _static_focus_border: Panel = $CarouselContainer/FocusLayer/StaticFocusBorder
 @onready var _info_panel: Panel = $InfoPanel
 
 @onready var _title_label: Label = $InfoPanel/MarginContainer/VBoxContainer/TitleContainer/TitleScrollWrapper/TitleLabel
-@onready var _creator_label: Label = $InfoPanel/MarginContainer/VBoxContainer/CreatorScrollWrapper/CreatorLabel
+@onready var _creator_tags_container: HBoxContainer = $InfoPanel/MarginContainer/VBoxContainer/CreatorScrollWrapper/CreatorTagsContainer
 
 @onready var _players_label: Label = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayersContainer/PlayersValueLabel
-@onready var _difficulty_bar: ProgressBar = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/DifficultyContainer/DifficultyBar
 @onready var _difficulty_val_label: Label = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/DifficultyContainer/DifficultyValueLabel
-@onready var _playtime_bar: ProgressBar = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayTimeContainer/PlayTimeBar
 @onready var _playtime_val_label: Label = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayTimeContainer/PlayTimeValueLabel
 @onready var _controller_label: Label = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/ControllerContainer/ControllerValueLabel
 @onready var _online_label: Label = $InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/OnlineContainer/OnlineValueLabel
 
+@onready var _desc_scroll: ScrollContainer = $InfoPanel/MarginContainer/VBoxContainer/DescriptionScroll
 @onready var _desc_label: Label = $InfoPanel/MarginContainer/VBoxContainer/DescriptionScroll/DescLabel
 
 @onready var _play_button: Button = $InfoPanel/MarginContainer/VBoxContainer/TitleContainer/PlayButton
-@onready var _top_bar: Control = $TopBar
-@onready var _bottom_bar: Control = $BottomBar
-@onready var _clock_label: Label = $TopBar/MarginContainer/HBoxContainer/ClockLabel
-@onready var _exit_button: Button = $TopBar/MarginContainer/HBoxContainer/ExitButton
+@onready var _top_bar: CanvasLayer = $TopBar
+@onready var _bottom_bar: CanvasLayer = $BottomBar
 @onready var _background_texture: TextureRect = $BackgroundLayer/BackgroundTexture
 @onready var _background_old: TextureRect = $BackgroundLayer/BackgroundTextureOld
 
@@ -54,13 +50,14 @@ var _focus_initialized: bool = false
 var _focus_tweening: bool = false
 var _focus_prev_target: Control = null
 var _focus_prev_target_pos: Vector2 = Vector2.ZERO
+var _exit_button: Button
+var _desc_hint_active: bool = false
 
 func _ready():
 	# コンポーネント初期化（_process()で参照されるため、早期returnより先に生成）
 	_carousel = CarouselController.new()
 	_game_launcher = GameLauncher.new()
 	_idle_mgr = IdleManager.new()
-	_style_mgr = ButtonStyleManager.new()
 	_glow_animator = GlowAnimator.new()
 	_info_display = GameInfoDisplay.new()
 	_input_handler = InputHandler.new()
@@ -74,17 +71,17 @@ func _ready():
 	# カルーセル生成
 	_carousel.create_cards(_games, _card_template, _carousel_container)
 
-	# フォーカス枠を最前面に
-	_static_focus_border.z_index = 100
+	# フォーカス枠は FocusLayer(CanvasLayer layer=11) で TopBar より前面に表示
 
-	# ボタンスタイル設定（スタイルは .tscn で適用済み）
+	# ボタンスタイル設定
 	_glow_animator.register_focus_border(_static_focus_border)
-	_style_mgr.setup_exit_button(_exit_button)
+	_exit_button = _top_bar.get_exit_button()
+	_top_bar.exit_pressed.connect(_on_exit_button_pressed)
 
 	# 戻るボタン（ブラウズから来たときのみ表示）
 	if not AppState.return_scene.is_empty() and _exit_button:
 		var back_button = preload("res://scenes/components/back_button.tscn").instantiate()
-		_top_bar.add_child(back_button)
+		_top_bar.get_panel().add_child(back_button)
 		back_button.position = Vector2(40, 80)
 		# 黒アイコンを白に反転
 		var shader = load("res://resources/shaders/invert_color.gdshader")
@@ -103,12 +100,11 @@ func _ready():
 			section_label.add_theme_color_override("font_color", Color(1, 1, 1, 1))
 			section_label.custom_minimum_size = Vector2(0, 90)
 			section_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-			_top_bar.add_child(section_label)
+			_top_bar.get_panel().add_child(section_label)
 			section_label.position = Vector2(160, 80)
 
 	# ボタンシグナル
 	if _exit_button:
-		_exit_button.pressed.connect(_on_exit_button_pressed)
 		_exit_button.mouse_entered.connect(func(): _exit_button.grab_focus())
 	if _play_button:
 		_play_button.pressed.connect(func(): _launch_game())
@@ -118,6 +114,10 @@ func _ready():
 		var guide_label = _info_panel.get_node_or_null("MarginContainer/VBoxContainer/GuideLabel")
 		if guide_label:
 			guide_label.visible = false
+
+	# 説明文スクロール参照
+	_input_handler.desc_scroll = _desc_scroll
+	_input_handler.desc_label = _desc_label
 
 	# 入力ハンドラのシグナル接続
 	_input_handler.selection_moved.connect(_on_selection_moved)
@@ -150,13 +150,13 @@ func _ready():
 		_play_button.focus_neighbor_left = _play_button.get_path()
 		_play_button.focus_neighbor_right = _play_button.get_path()
 
+	# カルーセル画面の操作ヒント
+	_bottom_bar.set_hints([["Esc", "戻る"], ["Enter", "決定"]])
+
 	set_process(true)
 	set_process_input(true)
 
 func _process(delta):
-	# 時計更新
-	GameInfoFormatter.update_clock(_clock_label)
-
 	# グローアニメーション
 	_glow_animator.update(delta)
 
@@ -164,8 +164,8 @@ func _process(delta):
 	_game_launcher.monitor_process(get_window(), null,
 		_games[_selected_index] if not _games.is_empty() else null,
 		null, _carousel.card_nodes,
-		_info_panel, _top_bar, _static_focus_border,
-		_carousel_container, _bottom_bar)
+		_info_panel, _top_bar.get_panel(), _static_focus_border,
+		_carousel_container, _bottom_bar.get_panel())
 
 	# アイドルタイマー
 	if _game_launcher.is_running():
@@ -182,6 +182,7 @@ func _process(delta):
 
 	# ドラムロール入力
 	_input_handler.process_drum_roll(delta, _play_button, _exit_button, _game_launcher.is_running())
+	_input_handler.update_desc_scroll(delta)
 
 	if _games.is_empty():
 		return
@@ -199,13 +200,26 @@ func _process(delta):
 	# フォーカスモーフ更新
 	_update_focus_morph(delta)
 
-	# ボトムバーの表示切替
+	# ボトムバーの表示切替・ヒント更新
 	if _bottom_bar:
-		_bottom_bar.visible = not _input_handler.using_mouse
+		_bottom_bar.get_panel().visible = not _input_handler.using_mouse
+		var desc_focused := _desc_scroll and _desc_scroll.has_focus()
+		if desc_focused and not _desc_hint_active:
+			_bottom_bar.set_hints([["Esc", "戻る"]])
+			_desc_hint_active = true
+		elif not desc_focused and _desc_hint_active:
+			_bottom_bar.set_hints([["Esc", "戻る"], ["Enter", "決定"]])
+			_desc_hint_active = false
 
 func _input(event):
 	if get_tree().paused:
 		return
+	# 説明文エリア上のホイールを横取り → lerp補間で滑らかスクロール
+	if event is InputEventMouseButton and event.is_pressed():
+		if _desc_scroll and _desc_scroll.get_global_rect().has_point(event.global_position):
+			if event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				_input_handler.handle_desc_wheel(event, get_viewport())
+				return
 	_input_handler.handle_input(event, get_viewport(),
 		_play_button, _exit_button,
 		_game_launcher.is_running(), _games.is_empty())
@@ -228,15 +242,16 @@ func _on_selection_moved(dir: int) -> void:
 		var dir_y = -1 if dir > 0 else 1
 		_update_info_display(_selected_index, dir_y)
 		_update_arrow_visibility()
+		_input_handler.reset_desc_scroll()
 	elif dir < 0 and _selected_index == 0 and _input_handler.back_button:
 		# カルーセル最上端で上入力 → 戻るボタンにフォーカス
 		_input_handler.back_button.grab_focus()
 
 func _update_info_display(index: int, slide_dir_y: int = 0) -> void:
 	_info_display.update_display(_games[index], slide_dir_y,
-		_title_label, _creator_label, _desc_label,
-		_players_label, _difficulty_bar, _difficulty_val_label,
-		_playtime_bar, _playtime_val_label,
+		_title_label, _creator_tags_container, _desc_label,
+		_players_label, _difficulty_val_label,
+		_playtime_val_label,
 		_controller_label, _online_label,
 		_background_texture, _background_old, self)
 
@@ -255,9 +270,9 @@ func _launch_game() -> void:
 	if _games.is_empty() or _game_launcher.is_running():
 		return
 	_game_launcher.launch_game(_games[_selected_index], null, null,
-		_carousel_container, _info_panel, _top_bar,
+		_carousel_container, _info_panel, _top_bar.get_panel(),
 		_static_focus_border, _carousel.card_nodes, _selected_index,
-		get_tree(), _bottom_bar)
+		get_tree(), _bottom_bar.get_panel())
 
 func _go_back() -> void:
 	if TransitionManager._transitioning:
@@ -358,6 +373,13 @@ func _update_focus_morph(delta: float) -> void:
 		# ボタン（退出/戻る/プレイ）
 		target = focus_owner
 		target_radius = 18
+		_static_focus_border.visible = true
+		_focus_target_rect = target.get_global_rect()
+		_focus_target_radius = target_radius
+	elif focus_owner == _desc_scroll:
+		# 説明文スクロール
+		target = focus_owner
+		target_radius = 8
 		_static_focus_border.visible = true
 		_focus_target_rect = target.get_global_rect()
 		_focus_target_radius = target_radius
@@ -486,6 +508,7 @@ func _add_carousel_arrow_buttons() -> void:
 			s.set_corner_radius_all(40) # 丸型
 			btn.add_theme_stylebox_override(state_data["state"], s)
 			
+		btn.z_index = 100
 		_carousel_container.add_child(btn)
 
 func _update_arrow_visibility() -> void:

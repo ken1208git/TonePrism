@@ -163,11 +163,14 @@ static func create_banner(game: GameInfo, banner_size: Vector2, custom_text: Str
 
 	var bg_path = StoreBrowseBuilder._resolve_background_path(game)
 	if not bg_path.is_empty():
-		var image = Image.load_from_file(bg_path)
-		if image != null:
-			tex_rect.texture = ImageTexture.create_from_image(image)
+		banner.set_meta("image_path", bg_path)
 
 	banner.add_child(tex_rect)
+
+	# 画像パスがある場合、LOADINGラベルを追加（遅延ロード中の表示）
+	if not bg_path.is_empty():
+		var loading_label = StoreBrowseBuilder._create_loading_label(24)
+		banner.add_child(loading_label)
 
 	# 下部グラデーションオーバーレイ（シェーダーは .tres で定義済み）
 	var gradient_height := banner_size.y * 0.35

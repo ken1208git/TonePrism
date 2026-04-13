@@ -9,9 +9,10 @@ signal game_ended()
 var running_pid: int = -1
 var _has_lost_focus_since_launch: bool = false
 var _is_launching: bool = false
+var _is_returning: bool = false
 
 func is_running() -> bool:
-	return running_pid != -1 or _is_launching
+	return running_pid != -1 or _is_launching or _is_returning
 
 ## ゲーム起動
 func launch_game(game: GameInfo, status_label: Label, running_overlay: Control,
@@ -139,11 +140,14 @@ func _switch_to_normal_view(running_overlay: Control, card_nodes: Array[Panel],
 		carousel_container: Control = null, bottom_bar: Control = null) -> void:
 	print("[GameLauncher] Switching to Normal View (Fade In)")
 	
+	_is_returning = true
+	
 	if not tree:
 		# ツリーがない場合のフォールバック（強制即時表示）
 		for card in card_nodes:
 			card.visible = true
-			card.modulate.a = 1.0
+			if card.modulate.a < 1.0:
+				card.modulate.a = CarouselController.OPACITY_INACTIVE
 		if info_panel:
 			info_panel.visible = true
 			info_panel.modulate.a = 1.0
@@ -165,6 +169,7 @@ func _switch_to_normal_view(running_overlay: Control, card_nodes: Array[Panel],
 			if down_btn:
 				down_btn.visible = true
 				down_btn.modulate.a = 1.0
+		_is_returning = false
 		return
 
 	var tween = tree.create_tween()
@@ -173,7 +178,7 @@ func _switch_to_normal_view(running_overlay: Control, card_nodes: Array[Panel],
 	for card in card_nodes:
 		card.visible = true
 		if card.modulate.a < 1.0: # 選択カードは1.0のままなのでスキップされる
-			tween.tween_property(card, "modulate:a", 1.0, 0.5)\
+			tween.tween_property(card, "modulate:a", CarouselController.OPACITY_INACTIVE, 0.5)\
 				.from(0.0).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 			
 	if info_panel:
@@ -202,10 +207,8 @@ func _switch_to_normal_view(running_overlay: Control, card_nodes: Array[Panel],
 		if down_btn:
 			down_btn.visible = true
 			tween.tween_property(down_btn, "modulate:a", 1.0, 0.5).from(0.0).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-			
-		# フェードインアニメーション完了後にVisibilityを再評価して、端のボタンを正しく消す
-		tween.finished.connect(func():
-			# 厳密なカード状態はここには渡ってこないため
-			# 呼び出し元(game_selection.gd)のgame_endedシグナルで_update_arrow_visibilityを呼ぶのが確実
-			pass
-		)
+
+	# フェードインアニメーション完了後に状態を戻す
+	tween.finished.connect(func():
+		_is_returning = false
+	)

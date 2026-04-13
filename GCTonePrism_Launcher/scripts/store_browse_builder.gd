@@ -75,21 +75,39 @@ static func build_normal_section(section: StoreSectionInfo, viewport_width: floa
 
 ## ゲームタイル（通常セクション用 200x200 + 下部タイトル）を作成
 ## 戻り値はVBoxContainer（Panel + Label）、フォーカス対象はPanel部分
+## 画像は読み込まず、パスをメタデータに保持して遅延ロードに委ねる
 static func _create_game_tile(game: GameInfo) -> Control:
 	var wrapper = preload("res://scenes/components/store_game_tile.tscn").instantiate()
 	wrapper.name = "Tile_%s" % game.game_id
 
-	# サムネイル画像
+	# サムネイル画像パスを解決してメタデータに保持（実際の読み込みは遅延）
 	var thumb_path = _resolve_thumbnail_path(game)
 	if not thumb_path.is_empty():
-		var image = Image.load_from_file(thumb_path)
-		if image != null:
-			wrapper.get_node("TilePanel/Thumbnail").texture = ImageTexture.create_from_image(image)
+		wrapper.set_meta("image_path", thumb_path)
+		# LOADINGラベルを追加
+		var loading_label = _create_loading_label(16)
+		wrapper.get_node("TilePanel").add_child(loading_label)
 
 	# タイトル
 	wrapper.get_node("TitleLabel").text = game.title
 
 	return wrapper
+
+## 遅延ロード中に表示する「LOADING」ラベルを生成
+static func _create_loading_label(font_size: int) -> Label:
+	var label = Label.new()
+	label.name = "LoadingLabel"
+	label.text = "LOADING"
+	label.add_theme_font_override("font", _get_font_bold())
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", Color(1, 1, 1, 0.5))
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return label
 
 ## 「すべてのゲーム」ボタンを構築（.tscn テンプレートを使用）
 static func build_all_games_button(viewport_width: float) -> Button:

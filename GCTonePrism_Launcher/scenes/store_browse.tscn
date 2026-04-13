@@ -2,10 +2,8 @@
 
 [ext_resource type="Script" uid="uid://dr2qjpv6qouq0" path="res://scenes/store_browse.gd" id="1_store_browse"]
 [ext_resource type="FontFile" uid="uid://dolk7yphok5xu" path="res://fonts/NotoSansJP-Regular.ttf" id="2_font_regular"]
-[ext_resource type="StyleBox" path="res://resources/styles/exit_button_normal.tres" id="4_exit_normal"]
-[ext_resource type="StyleBox" path="res://resources/styles/exit_button_hover.tres" id="5_exit_hover"]
-[ext_resource type="StyleBox" path="res://resources/styles/exit_button_pressed.tres" id="6_exit_pressed"]
-[ext_resource type="StyleBox" path="res://resources/styles/exit_button_focus.tres" id="7_exit_focus"]
+[ext_resource type="PackedScene" path="res://scenes/components/top_bar.tscn" id="4_top_bar"]
+[ext_resource type="PackedScene" path="res://scenes/components/bottom_bar.tscn" id="5_bottom_bar"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_FocusBorder"]
 bg_color = Color(0.6, 0.6, 0.6, 0)
@@ -22,22 +20,6 @@ expand_margin_bottom = 8.0
 shadow_color = Color(1, 1, 1, 1)
 shadow_size = 12
 
-[sub_resource type="Gradient" id="Gradient_TopBar"]
-colors = PackedColorArray(0, 0, 0, 0.8, 0, 0, 0, 0)
-
-[sub_resource type="GradientTexture2D" id="GradientTexture2D_TopBar"]
-gradient = SubResource("Gradient_TopBar")
-width = 1
-fill_to = Vector2(0, 1)
-
-[sub_resource type="Gradient" id="Gradient_BottomBar"]
-colors = PackedColorArray(0, 0, 0, 0, 0, 0, 0, 0.8)
-
-[sub_resource type="GradientTexture2D" id="GradientTexture2D_BottomBar"]
-gradient = SubResource("Gradient_BottomBar")
-width = 1
-height = 32
-fill_to = Vector2(0, 1)
 
 [node name="StoreBrowse" type="Control" unique_id=1538709108]
 layout_mode = 3
@@ -80,105 +62,16 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 40
 
-[node name="FocusBorder" type="Panel" parent="." unique_id=1221854072]
+[node name="FocusLayer" type="CanvasLayer" parent="."]
+layer = 11
+
+[node name="FocusBorder" type="Panel" parent="FocusLayer"]
 visible = false
-z_index = 100
-layout_mode = 1
 offset_right = 200.0
 offset_bottom = 200.0
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_FocusBorder")
 
-[node name="TopBar" type="Control" parent="." unique_id=1715859965]
-layout_mode = 1
-anchors_preset = 10
-anchor_right = 1.0
-offset_bottom = 120.0
-grow_horizontal = 2
-mouse_filter = 2
+[node name="TopBar" parent="." instance=ExtResource("4_top_bar")]
 
-[node name="Background" type="TextureRect" parent="TopBar" unique_id=367266838]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-texture = SubResource("GradientTexture2D_TopBar")
-expand_mode = 1
-
-[node name="MarginContainer" type="MarginContainer" parent="TopBar" unique_id=822216728]
-layout_mode = 1
-anchors_preset = 10
-anchor_right = 1.0
-offset_bottom = 80.0
-grow_horizontal = 2
-theme_override_constants/margin_left = 40
-theme_override_constants/margin_top = 20
-theme_override_constants/margin_right = 40
-theme_override_constants/margin_bottom = 20
-
-[node name="HBoxContainer" type="HBoxContainer" parent="TopBar/MarginContainer" unique_id=51375256]
-layout_mode = 2
-
-[node name="ClockLabel" type="Label" parent="TopBar/MarginContainer/HBoxContainer" unique_id=2108788252]
-layout_mode = 2
-theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 32
-text = "00:00"
-
-[node name="Spacer" type="Control" parent="TopBar/MarginContainer/HBoxContainer" unique_id=963580587]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="ExitButton" type="Button" parent="TopBar/MarginContainer/HBoxContainer" unique_id=920961982]
-custom_minimum_size = Vector2(60, 60)
-layout_mode = 2
-theme_override_styles/normal = ExtResource("4_exit_normal")
-theme_override_styles/pressed = ExtResource("6_exit_pressed")
-theme_override_styles/hover = ExtResource("5_exit_hover")
-theme_override_styles/focus = ExtResource("7_exit_focus")
-icon_alignment = 1
-expand_icon = true
-
-[node name="BottomBar" type="Control" parent="." unique_id=859702784]
-layout_mode = 1
-anchors_preset = 12
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_top = -100.0
-grow_horizontal = 2
-grow_vertical = 0
-mouse_filter = 2
-
-[node name="Background" type="TextureRect" parent="BottomBar" unique_id=1917049824]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-texture = SubResource("GradientTexture2D_BottomBar")
-expand_mode = 1
-
-[node name="LabelMargin" type="MarginContainer" parent="BottomBar" unique_id=569242742]
-layout_mode = 1
-anchors_preset = 12
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_top = -50.0
-grow_horizontal = 2
-grow_vertical = 0
-theme_override_constants/margin_right = 40
-
-[node name="GuideLabel" type="Label" parent="BottomBar/LabelMargin" unique_id=2117611952]
-layout_mode = 2
-theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 20
-text = "Enter: 決定"
-horizontal_alignment = 2
-vertical_alignment = 1
+[node name="BottomBar" parent="." instance=ExtResource("5_bottom_bar")]
