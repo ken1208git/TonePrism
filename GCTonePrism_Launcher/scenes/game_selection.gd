@@ -53,6 +53,14 @@ var _focus_prev_target_pos: Vector2 = Vector2.ZERO
 var _exit_button: Button
 var _desc_hint_active: bool = false
 
+# --- サムネイル非同期読み込み ---
+var _thumb_load_thread: Thread = null
+var _thumb_load_mutex: Mutex = Mutex.new()
+var _thumb_load_queue: Array = []
+var _thumb_loaded_images: Array = []
+var _thumb_cancel_requested: bool = false
+var _thumb_node_registry: Dictionary = {}  # node_id -> Panel(card)
+
 func _ready():
 	# コンポーネント初期化（_process()で参照されるため、早期returnより先に生成）
 	_carousel = CarouselController.new()
@@ -70,6 +78,9 @@ func _ready():
 
 	# カルーセル生成
 	_carousel.create_cards(_games, _card_template, _carousel_container)
+
+	# サムネイルのバックグラウンド読み込みを開始
+	_start_thumbnail_loading()
 
 	# フォーカス枠は FocusLayer(CanvasLayer layer=11) で TopBar より前面に表示
 
@@ -157,6 +168,9 @@ func _ready():
 	set_process_input(true)
 
 func _process(delta):
+	# サムネイル非同期読み込み適用
+	_apply_thumb_loaded_images()
+
 	# グローアニメーション
 	_glow_animator.update(delta)
 
@@ -230,8 +244,83 @@ func _unhandled_input(event):
 	_input_handler.handle_unhandled_input(event, get_viewport())
 
 func _exit_tree():
+	# サムネイル読み込みスレッドをキャンセル
+	if _thumb_load_thread and _thumb_load_thread.is_started():
+		_thumb_load_mutex.lock()
+		_thumb_cancel_requested = true
+		_thumb_load_queue.clear()
+		_thumb_load_mutex.unlock()
+		_thumb_load_thread.wait_to_finish()
 	if DialogManager and DialogManager.has_method("close_current_dialog"):
 		DialogManager.close_current_dialog()
+
+# --- サムネイル非同期読み込み ---
+
+func _start_thumbnail_loading() -> void:
+	var queue = _carousel.get_image_load_queue()
+	if queue.is_empty():
+		return
+	for item in queue:
+		_thumb_node_registry[item["node_id"]] = item["card"]
+		_thumb_load_queue.append({"node_id": item["node_id"], "path": item["path"]})
+	# LOADINGラベルにブリージングアニメーション
+	for card in _carousel.card_nodes:
+		var label = card.get_node_or_null("Clipper/NoImageLabel")
+		if label and label.visible and label.text == "LOADING":
+			var tween = label.create_tween().set_loops()
+			tween.tween_property(label, "modulate:a", 0.3, 0.6).set_trans(Tween.TRANS_SINE)
+			tween.tween_property(label, "modulate:a", 0.8, 0.6).set_trans(Tween.TRANS_SINE)
+	_thumb_load_thread = Thread.new()
+	_thumb_load_thread.start(_thumb_load_images_in_thread)
+
+func _thumb_load_images_in_thread() -> void:
+	while true:
+		_thumb_load_mutex.lock()
+		if _thumb_cancel_requested or _thumb_load_queue.is_empty():
+			_thumb_load_mutex.unlock()
+			break
+		var item = _thumb_load_queue.pop_front()
+		_thumb_load_mutex.unlock()
+
+		var image = Image.load_from_file(item["path"])
+		if image:
+			_thumb_load_mutex.lock()
+			if _thumb_cancel_requested:
+				_thumb_load_mutex.unlock()
+				break
+			_thumb_loaded_images.append({
+				"image": image,
+				"node_id": item["node_id"]
+			})
+			_thumb_load_mutex.unlock()
+
+func _apply_thumb_loaded_images() -> void:
+	_thumb_load_mutex.lock()
+	if _thumb_loaded_images.is_empty():
+		_thumb_load_mutex.unlock()
+		return
+
+	var apply_count = mini(2, _thumb_loaded_images.size())
+	var to_apply: Array = []
+	for i in range(apply_count):
+		to_apply.append(_thumb_loaded_images.pop_front())
+	_thumb_load_mutex.unlock()
+
+	for item in to_apply:
+		var card = _thumb_node_registry.get(item["node_id"]) as Panel
+		if not card or not is_instance_valid(card):
+			continue
+		var tex = ImageTexture.create_from_image(item["image"])
+		var icon_rect = card.get_node_or_null("Clipper/Icon") as TextureRect
+		if icon_rect:
+			icon_rect.texture = tex
+			icon_rect.visible = true
+			icon_rect.modulate = Color(1, 1, 1, 0)
+			var tween = card.create_tween()
+			tween.tween_property(icon_rect, "modulate:a", 1.0, 0.2)
+		var no_image_label = card.get_node_or_null("Clipper/NoImageLabel")
+		if no_image_label:
+			no_image_label.queue_free()
 
 # --- 内部メソッド ---
 

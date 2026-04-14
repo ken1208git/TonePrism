@@ -65,6 +65,10 @@ func handle_input(event: InputEvent, viewport: Viewport,
 
 	# 説明文スクロールにフォーカスがある場合
 	if desc_scroll and desc_scroll.has_focus():
+		if event.is_action_pressed("ui_cancel"):
+			viewport.set_input_as_handled()
+			exit_requested.emit()
+			return
 		if event.is_action_pressed("ui_up"):
 			if _desc_scroll_target <= 0 and desc_scroll.scroll_vertical <= 0:
 				play_button.grab_focus()
@@ -77,6 +81,10 @@ func handle_input(event: InputEvent, viewport: Viewport,
 
 	# プレイボタンにフォーカスがある場合
 	if play_button and play_button.has_focus():
+		if event.is_action_pressed("ui_cancel"):
+			viewport.set_input_as_handled()
+			exit_requested.emit()
+			return
 		if event.is_action_pressed("ui_left"):
 			focus_to_card_requested.emit()
 			viewport.set_input_as_handled()
@@ -96,6 +104,10 @@ func handle_input(event: InputEvent, viewport: Viewport,
 
 	# 戻るボタンにフォーカスがある場合
 	if back_button and back_button.has_focus():
+		if event.is_action_pressed("ui_cancel"):
+			viewport.set_input_as_handled()
+			exit_requested.emit()
+			return
 		if event.is_action_pressed("ui_down"):
 			_last_input_dir = 1  # process_drum_rollの同フレーム発火を防ぐ
 			focus_to_card_requested.emit()
@@ -110,6 +122,10 @@ func handle_input(event: InputEvent, viewport: Viewport,
 
 	# 終了ボタンにフォーカスがある場合
 	if exit_button and exit_button.has_focus():
+		if event.is_action_pressed("ui_cancel"):
+			viewport.set_input_as_handled()
+			exit_requested.emit()
+			return
 		if event.is_action_pressed("ui_down"):
 			if play_button:
 				play_button.grab_focus()

@@ -18,6 +18,7 @@ var _load_mutex: Mutex = Mutex.new()
 var _image_load_queue: Array = []   # [{path, row, col}]
 var _loaded_images: Array = []      # [{image, row, col}]
 var _tile_rects: Array = []         # 2D配列 [row][col] = TextureRect
+var _cancel_requested: bool = false
 
 ## レイアウトだけ先に構築（テクスチャは後からバックグラウンドで適用）
 func setup(bg_paths: Array[String]) -> void:
@@ -107,7 +108,7 @@ func setup(bg_paths: Array[String]) -> void:
 func _load_images_in_thread() -> void:
 	while true:
 		_load_mutex.lock()
-		if _image_load_queue.is_empty():
+		if _cancel_requested or _image_load_queue.is_empty():
 			_load_mutex.unlock()
 			break
 		var item = _image_load_queue.pop_front()
@@ -118,6 +119,9 @@ func _load_images_in_thread() -> void:
 			continue
 		image.resize(int(tile_size.x), int(tile_size.y), Image.INTERPOLATE_LANCZOS)
 		_load_mutex.lock()
+		if _cancel_requested:
+			_load_mutex.unlock()
+			break
 		_loaded_images.append({
 			"image": image,
 			"row": item["row"],
@@ -185,4 +189,8 @@ func _process(delta: float) -> void:
 
 func _exit_tree() -> void:
 	if _load_thread and _load_thread.is_started():
+		_load_mutex.lock()
+		_cancel_requested = true
+		_image_load_queue.clear()
+		_load_mutex.unlock()
 		_load_thread.wait_to_finish()

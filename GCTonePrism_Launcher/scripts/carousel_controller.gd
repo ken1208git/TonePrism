@@ -44,33 +44,41 @@ func create_cards(games: Array[GameInfo], card_template: Panel,
 		# サムネイル読み込み
 		_setup_card_thumbnail(card, game)
 
-## カードのサムネイルを設定する
+## カードのサムネイルを準備する（画像は後からバックグラウンドで読み込む）
 func _setup_card_thumbnail(card: Panel, game: GameInfo) -> void:
 	var icon_rect = card.get_node_or_null("Clipper/Icon")
 	var no_image_label = card.get_node_or_null("Clipper/NoImageLabel")
 
 	var thumb_path = GamePathResolver.resolve_path(game.thumbnail_path, game.game_id)
 
-	var tex_to_set = null
 	if not thumb_path.is_empty() and FileAccess.file_exists(thumb_path):
-		var img = Image.load_from_file(thumb_path)
-		tex_to_set = ImageTexture.create_from_image(img)
+		# パスを保持し、後でバックグラウンドスレッドから読み込む
+		card.set_meta("thumb_path", thumb_path)
+		if icon_rect:
+			icon_rect.visible = false
+		if no_image_label:
+			no_image_label.text = "LOADING"
+			no_image_label.visible = true
 	else:
 		if not game.thumbnail_path.is_empty():
 			push_warning("[CarouselController] ⚠️ Thumbnail NOT found for '%s' (ID: %s)\n  - DB Path: '%s'\n  - Check: '%s'" %
 				[game.title, game.game_id, game.thumbnail_path, thumb_path])
-
-	if tex_to_set:
-		if icon_rect:
-			icon_rect.texture = tex_to_set
-			icon_rect.visible = true
-		if no_image_label:
-			no_image_label.visible = false
-	else:
 		if icon_rect:
 			icon_rect.visible = false
 		if no_image_label:
 			no_image_label.visible = true
+
+## バックグラウンド読み込み用のキューを返す
+func get_image_load_queue() -> Array:
+	var queue: Array = []
+	for card in card_nodes:
+		if card.has_meta("thumb_path"):
+			queue.append({
+				"node_id": card.get_instance_id(),
+				"path": card.get_meta("thumb_path"),
+				"card": card
+			})
+	return queue
 
 ## 毎フレーム呼ばれる。カードの位置・スケール・透明度を更新する
 func update_cards(delta: float, selected_index: int, viewport_size: Vector2,

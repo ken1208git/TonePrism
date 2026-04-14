@@ -38,6 +38,14 @@ var _section_ui: Array = []
 @onready var _top_bar: CanvasLayer = $TopBar
 @onready var _bottom_bar: CanvasLayer = $BottomBar
 
+# --- 段階的UI構築 ---
+var _build_queue: Array = []
+var _build_complete: bool = false
+var _viewport_width: float = 0.0
+var _progress_bar: ProgressBar = null
+var _progress_label: Label = null
+var _total_sections: int = 0
+
 # --- 「すべてのゲーム」ボタン ---
 var _all_games_button: Button = null
 
@@ -68,6 +76,7 @@ var _loaded_images: Array = []      # スレッドが読み込んだ結果 [{ima
 var _load_thread: Thread = null
 var _load_mutex: Mutex = Mutex.new()
 var _node_registry: Dictionary = {} # node_id -> Control（スレッドからノード参照できないため）
+var _cancel_requested: bool = false
 
 func _ready():
 	_idle_mgr = IdleManager.new()
@@ -101,104 +110,37 @@ func _ready():
 
 	print("[StoreBrowse] %d 件のセクションを読み込みました" % _sections.size())
 
-	# セクションUIを動的生成
-	var viewport_width = get_viewport_rect().size.x
-	for i in range(_sections.size()):
-		var section = _sections[i]
-		var container: Control
-		match section.section_type:
-			1:  # スライドショー
-				container = StoreBannerBuilder.build_slideshow_section(section, viewport_width)
-				_slideshow_timers[i] = 0.0
-				_slideshow_indices[i] = 0
-			2:  # タイルグリッド
-				container = StoreBannerBuilder.build_tile_grid_section(section, viewport_width)
-			_:  # 通常セクション行
-				container = StoreBrowseBuilder.build_normal_section(section, viewport_width)
-
-		_content_container.add_child(container)
-
-		# タイル一覧を収集
-		var tiles: Array[Control] = []
-		_collect_focusable_tiles(container, section.section_type, tiles)
-
-		_section_ui.append({
-			"section": section,
-			"container": container,
-			"tiles": tiles,
-			"type": section.section_type
-		})
-
-		# マウスクリック/ホバーのシグナル接続
-		_connect_tile_signals(i, tiles)
-
-		# スライドショーの左右ボタンにシグナル接続
-		if section.section_type == 1:
-			var prev_btn = container.get_node_or_null("SlideshowPrev")
-			var next_btn = container.get_node_or_null("SlideshowNext")
-			var sec_idx_ss = i
-			if prev_btn:
-				prev_btn.pressed.connect(func():
-					_switch_slide(sec_idx_ss, -1)
-					_slideshow_timers[sec_idx_ss] = 0.0
-				)
-			if next_btn:
-				next_btn.pressed.connect(func():
-					_switch_slide(sec_idx_ss, 1)
-					_slideshow_timers[sec_idx_ss] = 0.0
-				)
-
-		# type=0の「すべて見る」ボタンにシグナル接続
-		if section.section_type == 0:
-			var view_all = container.get_node_or_null("ViewAllButton")
-			if view_all == null:
-				# HBoxContainerの中にある可能性
-				for child in container.get_children():
-					if child is HBoxContainer:
-						view_all = child.get_node_or_null("ViewAllButton")
-						break
-			if view_all:
-				var sec_idx = i
-				view_all.pressed.connect(func(): _on_view_all_pressed(sec_idx))
-				view_all.mouse_entered.connect(func():
-					_using_mouse = true
-					_current_section = sec_idx
-					_on_view_all = true
-					_update_focus_visual()
-				)
-
-	# 「すべてのゲーム」ボタンをセクション末尾に追加
-	_all_games_button = StoreBrowseBuilder.build_all_games_button(viewport_width)
-	_all_games_button.pressed.connect(_on_all_games_pressed)
-	_all_games_button.mouse_entered.connect(func():
-		_using_mouse = true
-		_on_all_games = true
-		_on_view_all = false
-		_on_exit_button = false
-		_update_focus_visual()
-	)
-	_content_container.add_child(_all_games_button)
-
 	# ExitButton設定（TopBarコンポーネントから取得）
 	_exit_button = _top_bar.get_exit_button()
 	_top_bar.exit_pressed.connect(_on_exit_button_pressed)
 
-	# フォーカスボーダーのスタイルは .tscn で適用済み
+	# ContentContainerを非表示にしておく（構築完了後にフェードイン）
+	_content_container.modulate = Color(1, 1, 1, 0)
 
-	# 初期フォーカス
-	_current_section = 0
-	_current_tile = 0
-	_on_view_all = false
-	call_deferred("_update_focus_visual")
+	# 段階的UI構築のキューを準備
+	_viewport_width = get_viewport_rect().size.x
+	_total_sections = _sections.size()
+	for i in range(_total_sections):
+		_build_queue.append(i)
 
-	# 遅延画像読み込みキューを構築
-	_build_image_load_queue()
+	# プログレスバーを画面中央に表示
+	_create_progress_ui()
 
 	set_process(true)
 	set_process_input(true)
 
 func _process(delta):
-	# 時計更新はTopBarコンポーネントが管理
+	# 段階的UI構築
+	if not _build_complete:
+		if _build_queue.is_empty():
+			_on_build_complete()
+		else:
+			var count = mini(2, _build_queue.size())
+			for j in range(count):
+				_build_one_section(_build_queue.pop_front())
+			if _progress_bar:
+				_progress_bar.value = float(_total_sections - _build_queue.size()) / _total_sections * 100.0
+		return
 
 	# スレッドで読み込み済みの画像をメインスレッドで適用
 	_apply_loaded_images()
@@ -279,6 +221,8 @@ func _process(delta):
 func _input(event):
 	if get_tree().paused:
 		return
+	if not _build_complete:
+		return
 
 	# アイドルリセット
 	_idle_mgr.reset()
@@ -342,9 +286,156 @@ func _input(event):
 		_on_exit_button_pressed()
 		viewport.set_input_as_handled()
 
+# --- 段階的UI構築 ---
+
+func _create_progress_ui() -> void:
+	var center := CenterContainer.new()
+	center.name = "LoadingOverlay"
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var vbox := VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 16)
+	center.add_child(vbox)
+
+	_progress_label = Label.new()
+	_progress_label.text = "読み込み中..."
+	_progress_label.add_theme_font_override("font", preload("res://fonts/NotoSansJP-Regular.ttf"))
+	_progress_label.add_theme_font_size_override("font_size", 28)
+	_progress_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.8))
+	_progress_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(_progress_label)
+
+	_progress_bar = ProgressBar.new()
+	_progress_bar.custom_minimum_size = Vector2(400, 8)
+	_progress_bar.max_value = 100.0
+	_progress_bar.value = 0.0
+	_progress_bar.show_percentage = false
+	# スタイル（背景）
+	var bg_style := StyleBoxFlat.new()
+	bg_style.bg_color = Color(1, 1, 1, 0.1)
+	bg_style.set_corner_radius_all(4)
+	_progress_bar.add_theme_stylebox_override("background", bg_style)
+	# スタイル（フィル）
+	var fill_style := StyleBoxFlat.new()
+	fill_style.bg_color = Color(0.4, 0.6, 1.0, 0.9)
+	fill_style.set_corner_radius_all(4)
+	_progress_bar.add_theme_stylebox_override("fill", fill_style)
+	vbox.add_child(_progress_bar)
+
+	add_child(center)
+
+func _build_one_section(i: int) -> void:
+	var section = _sections[i]
+	var container: Control
+	match section.section_type:
+		1:  # スライドショー
+			container = StoreBannerBuilder.build_slideshow_section(section, _viewport_width)
+			_slideshow_timers[i] = 0.0
+			_slideshow_indices[i] = 0
+		2:  # タイルグリッド
+			container = StoreBannerBuilder.build_tile_grid_section(section, _viewport_width)
+		_:  # 通常セクション行
+			container = StoreBrowseBuilder.build_normal_section(section, _viewport_width)
+
+	_content_container.add_child(container)
+
+	# タイル一覧を収集
+	var tiles: Array[Control] = []
+	_collect_focusable_tiles(container, section.section_type, tiles)
+
+	_section_ui.append({
+		"section": section,
+		"container": container,
+		"tiles": tiles,
+		"type": section.section_type
+	})
+
+	# マウスクリック/ホバーのシグナル接続
+	_connect_tile_signals(i, tiles)
+
+	# スライドショーの左右ボタンにシグナル接続
+	if section.section_type == 1:
+		var prev_btn = container.get_node_or_null("SlideshowPrev")
+		var next_btn = container.get_node_or_null("SlideshowNext")
+		var sec_idx_ss = i
+		if prev_btn:
+			prev_btn.pressed.connect(func():
+				_switch_slide(sec_idx_ss, -1)
+				_slideshow_timers[sec_idx_ss] = 0.0
+			)
+		if next_btn:
+			next_btn.pressed.connect(func():
+				_switch_slide(sec_idx_ss, 1)
+				_slideshow_timers[sec_idx_ss] = 0.0
+			)
+
+	# type=0の「すべて見る」ボタンにシグナル接続
+	if section.section_type == 0:
+		var view_all = container.get_node_or_null("ViewAllButton")
+		if view_all == null:
+			for child in container.get_children():
+				if child is HBoxContainer:
+					view_all = child.get_node_or_null("ViewAllButton")
+					break
+		if view_all:
+			var sec_idx = i
+			view_all.pressed.connect(func(): _on_view_all_pressed(sec_idx))
+			view_all.mouse_entered.connect(func():
+				_using_mouse = true
+				_current_section = sec_idx
+				_on_view_all = true
+				_update_focus_visual()
+			)
+
+func _on_build_complete() -> void:
+	_build_complete = true
+
+	# 「すべてのゲーム」ボタンをセクション末尾に追加
+	_all_games_button = StoreBrowseBuilder.build_all_games_button(_viewport_width)
+	_all_games_button.pressed.connect(_on_all_games_pressed)
+	_all_games_button.mouse_entered.connect(func():
+		_using_mouse = true
+		_on_all_games = true
+		_on_view_all = false
+		_on_exit_button = false
+		_update_focus_visual()
+	)
+	_content_container.add_child(_all_games_button)
+
+	# プログレスバーをフェードアウトして削除
+	var overlay = get_node_or_null("LoadingOverlay")
+	if overlay:
+		var tween = create_tween()
+		tween.tween_property(overlay, "modulate:a", 0.0, 0.2)
+		tween.tween_callback(overlay.queue_free)
+
+	# ContentContainerをフェードインで表示
+	var content_tween = create_tween()
+	content_tween.tween_property(_content_container, "modulate:a", 1.0, 0.3)\
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+	# 初期フォーカス
+	_current_section = 0
+	_current_tile = 0
+	_on_view_all = false
+	call_deferred("_update_focus_visual")
+
+	# 遅延画像読み込みキューを構築
+	_build_image_load_queue()
+
+	# BottomBarの操作ヒント
+	if _bottom_bar:
+		_bottom_bar.set_hints([["Esc", "戻る"], ["Enter", "決定"]])
+
 func _exit_tree():
-	# バックグラウンドスレッドの終了を待つ
+	# バックグラウンドスレッドをキャンセルして終了を待つ
 	if _load_thread and _load_thread.is_started():
+		_load_mutex.lock()
+		_cancel_requested = true
+		_image_load_queue.clear()
+		_load_mutex.unlock()
 		_load_thread.wait_to_finish()
 	if _db_manager:
 		_db_manager.close()
@@ -975,7 +1066,7 @@ func _build_image_load_queue() -> void:
 func _load_images_in_thread() -> void:
 	while true:
 		_load_mutex.lock()
-		if _image_load_queue.is_empty():
+		if _cancel_requested or _image_load_queue.is_empty():
 			_load_mutex.unlock()
 			break
 		var item = _image_load_queue.pop_front()
@@ -984,6 +1075,9 @@ func _load_images_in_thread() -> void:
 		var image = Image.load_from_file(item["path"])
 		if image:
 			_load_mutex.lock()
+			if _cancel_requested:
+				_load_mutex.unlock()
+				break
 			_loaded_images.append({
 				"image": image,
 				"node_id": item["node_id"],
