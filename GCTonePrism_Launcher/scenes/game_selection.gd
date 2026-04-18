@@ -263,13 +263,24 @@ func _start_thumbnail_loading() -> void:
 	for item in queue:
 		_thumb_node_registry[item["node_id"]] = item["card"]
 		_thumb_load_queue.append({"node_id": item["node_id"], "path": item["path"]})
-	# LOADINGラベルにブリージングアニメーション
+	# LOADINGラベルにシマーエフェクト + 暗い背景（Clipper直下に配置）
 	for card in _carousel.card_nodes:
-		var label = card.get_node_or_null("Clipper/NoImageLabel")
+		var clipper = card.get_node_or_null("Clipper")
+		if not clipper:
+			continue
+		var label = clipper.get_node_or_null("NoImageLabel")
 		if label and label.visible and label.text == "LOADING":
-			var tween = label.create_tween().set_loops()
-			tween.tween_property(label, "modulate:a", 0.3, 0.6).set_trans(Tween.TRANS_SINE)
-			tween.tween_property(label, "modulate:a", 0.8, 0.6).set_trans(Tween.TRANS_SINE)
+			# 既存の DimBackground があれば重複追加しない
+			if not clipper.get_node_or_null("DimBackground"):
+				var dim = ColorRect.new()
+				dim.name = "DimBackground"
+				dim.color = Color(0.08, 0.08, 0.08, 1.0)
+				dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+				dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				clipper.add_child(dim)
+				# NoImageLabelの前に配置（テキストが前面に来るよう）
+				clipper.move_child(dim, label.get_index())
+			ShimmerHelper.apply_to_label(label)
 	_thumb_load_thread = Thread.new()
 	_thumb_load_thread.start(_thumb_load_images_in_thread)
 
@@ -321,6 +332,9 @@ func _apply_thumb_loaded_images() -> void:
 		var no_image_label = card.get_node_or_null("Clipper/NoImageLabel")
 		if no_image_label:
 			no_image_label.queue_free()
+		var dim_bg = card.get_node_or_null("Clipper/DimBackground")
+		if dim_bg:
+			dim_bg.queue_free()
 
 # --- 内部メソッド ---
 

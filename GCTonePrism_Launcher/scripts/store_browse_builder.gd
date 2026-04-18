@@ -94,9 +94,24 @@ static func _create_game_tile(game: GameInfo) -> Control:
 	return wrapper
 
 ## 遅延ロード中に表示する「LOADING」ラベルを生成
-static func _create_loading_label(font_size: int) -> Label:
+## 暗い背景 + LOADING テキストをまとめた Control を返す（名前は "LoadingLabel"）
+static func _create_loading_label(font_size: int) -> Control:
+	var wrapper = Control.new()
+	wrapper.name = "LoadingLabel"
+	wrapper.set_anchors_preset(Control.PRESET_FULL_RECT)
+	wrapper.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	# 暗い背景（アイコンの上にかぶせる）
+	var bg = ColorRect.new()
+	bg.name = "DimBackground"
+	bg.color = Color(0.08, 0.08, 0.08, 1.0)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wrapper.add_child(bg)
+
+	# LOADING テキスト
 	var label = Label.new()
-	label.name = "LoadingLabel"
+	label.name = "Text"
 	label.text = "LOADING"
 	label.add_theme_font_override("font", _get_font_bold())
 	label.add_theme_font_size_override("font_size", font_size)
@@ -104,10 +119,10 @@ static func _create_loading_label(font_size: int) -> Label:
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.set_anchors_preset(Control.PRESET_FULL_RECT)
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	label.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	return label
+	wrapper.add_child(label)
+
+	return wrapper
 
 ## 「すべてのゲーム」ボタンを構築（.tscn テンプレートを使用）
 static func build_all_games_button(viewport_width: float) -> Button:

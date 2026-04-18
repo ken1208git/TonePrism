@@ -42,7 +42,8 @@ var _section_ui: Array = []
 var _build_queue: Array = []
 var _build_complete: bool = false
 var _viewport_width: float = 0.0
-var _progress_bar: ProgressBar = null
+var _progress_bar: Control = null       # カスタムプログレスバー（背景+フィル）
+var _progress_fill: Panel = null        # フィル部分（シェーダー適用対象）
 var _progress_label: Label = null
 var _total_sections: int = 0
 
@@ -138,8 +139,7 @@ func _process(delta):
 			var count = mini(2, _build_queue.size())
 			for j in range(count):
 				_build_one_section(_build_queue.pop_front())
-			if _progress_bar:
-				_progress_bar.value = float(_total_sections - _build_queue.size()) / _total_sections * 100.0
+			_set_progress(float(_total_sections - _build_queue.size()) / _total_sections * 100.0)
 		return
 
 	# スレッドで読み込み済みの画像をメインスレッドで適用
@@ -307,24 +307,42 @@ func _create_progress_ui() -> void:
 	_progress_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(_progress_label)
 
-	_progress_bar = ProgressBar.new()
+	# カスタムプログレスバー（背景 + フィル分離）
+	_progress_bar = Control.new()
 	_progress_bar.custom_minimum_size = Vector2(400, 8)
-	_progress_bar.max_value = 100.0
-	_progress_bar.value = 0.0
-	_progress_bar.show_percentage = false
-	# スタイル（背景）
+
+	# 背景（暗いバー）
+	var bg := Panel.new()
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var bg_style := StyleBoxFlat.new()
 	bg_style.bg_color = Color(1, 1, 1, 0.1)
 	bg_style.set_corner_radius_all(4)
-	_progress_bar.add_theme_stylebox_override("background", bg_style)
-	# スタイル（フィル）
+	bg.add_theme_stylebox_override("panel", bg_style)
+	_progress_bar.add_child(bg)
+
+	# フィル（光る部分 — シェーダー適用）
+	_progress_fill = Panel.new()
+	_progress_fill.set_anchor(SIDE_TOP, 0.0)
+	_progress_fill.set_anchor(SIDE_BOTTOM, 1.0)
+	_progress_fill.offset_left = 0.0
+	_progress_fill.offset_top = 0.0
+	_progress_fill.offset_bottom = 0.0
+	_progress_fill.offset_right = 0.0  # 初期幅0
 	var fill_style := StyleBoxFlat.new()
-	fill_style.bg_color = Color(0.4, 0.6, 1.0, 0.9)
+	fill_style.bg_color = Color(1, 1, 1, 1.0)
 	fill_style.set_corner_radius_all(4)
-	_progress_bar.add_theme_stylebox_override("fill", fill_style)
+	_progress_fill.add_theme_stylebox_override("panel", fill_style)
+	ShimmerHelper.apply(_progress_fill)
+	_progress_bar.add_child(_progress_fill)
+
 	vbox.add_child(_progress_bar)
 
 	add_child(center)
+
+func _set_progress(percent: float) -> void:
+	if _progress_fill and _progress_bar:
+		var bar_width = _progress_bar.size.x
+		_progress_fill.offset_right = bar_width * (percent / 100.0)
 
 func _build_one_section(i: int) -> void:
 	var section = _sections[i]
@@ -1117,10 +1135,11 @@ func _apply_loaded_images() -> void:
 		if loading_label:
 			loading_label.queue_free()
 
-## LOADINGラベルにブリージングアニメーションを設定
-func _start_label_breathing(label: Label) -> void:
-	if not label:
+## LOADINGラベル（wrapper）にシマーエフェクトを設定
+## wrapper は Control で、内部の "Text" Label にシマーを適用する
+func _start_label_breathing(wrapper: Control) -> void:
+	if not wrapper:
 		return
-	var tween = label.create_tween().set_loops()
-	tween.tween_property(label, "modulate:a", 0.3, 0.6).set_trans(Tween.TRANS_SINE)
-	tween.tween_property(label, "modulate:a", 0.8, 0.6).set_trans(Tween.TRANS_SINE)
+	var text_label = wrapper.get_node_or_null("Text") as Label
+	if text_label:
+		ShimmerHelper.apply_to_label(text_label)
