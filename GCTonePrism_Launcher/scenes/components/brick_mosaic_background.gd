@@ -2,11 +2,14 @@
 ## ゲームの背景画像をレンガパターンに敷き詰め、行ごとに交互にスクロールする
 extends Control
 
+## アスペクト比のベース。height はビューポートに合わせて自動計算され、width はこの比率を保つ
 @export var tile_size: Vector2 = Vector2(360, 200)
-@export var row_count: int = 5
+@export var row_count: int = 4
 @export var row_gap: float = 4.0
 @export var scroll_speed: float = 25.0
 @export var tile_opacity: float = 0.15
+## true: row_count 行が画面高さいっぱいになるよう tile_size を自動拡縮。false: tile_size をそのまま使う
+@export var fit_height_to_viewport: bool = true
 
 var _strips: Array[Control] = []
 var _strip_width: float = 0.0
@@ -31,8 +34,17 @@ func setup(bg_paths: Array[String]) -> void:
 	_strips.clear()
 	_tile_rects.clear()
 
-	var viewport_w := 1920.0
-	var viewport_h := 1080.0
+	# 実際のビューポートサイズを取得（stretch/aspect=expand 環境で 16:10 等の場合に対応）
+	var viewport_size := get_viewport_rect().size
+	var viewport_w := viewport_size.x
+	var viewport_h := viewport_size.y
+
+	# row_count 行が画面高さいっぱいになるよう tile_size をリスケール（アスペクト比は保持）
+	if fit_height_to_viewport and row_count > 0 and tile_size.y > 0.0:
+		var aspect := tile_size.x / tile_size.y
+		var tile_h := (viewport_h - float(row_count - 1) * row_gap) / float(row_count)
+		tile_size = Vector2(tile_h * aspect, tile_h)
+
 	_tiles_per_row = ceili(viewport_w / (tile_size.x + row_gap)) + 2
 	_strip_width = _tiles_per_row * (tile_size.x + row_gap)
 

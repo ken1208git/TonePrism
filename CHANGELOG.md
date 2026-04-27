@@ -11,6 +11,19 @@
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.5.11] - 2026-04-27
+
+#### Added
+
+- **すりガラスシェーダー (`frosted_glass.gdshader`)**: `SCREEN_TEXTURE` を 49-tap でサンプリング（Vogel disk / 黄金角スパイラル分布で擬似一様配置）してぼかし、tint と合成するキャンバスアイテムシェーダー。`blur_radius` / `tint_color` / `tint_strength` を uniform として公開し、インスペクタから調整可能
+
+#### Changed
+
+- **ゲーム選択画面の InfoPanel をすりガラス風に変更**: 背景を単純な半透明黒（α=0.8）から、背景画像をぼかして見せるすりガラス効果へ置き換え。StyleBoxFlat の角丸 32px と縁ぼかし 12px は維持し、形状マスクとして利用
+- **スクリーンセーバーのレンガモザイク背景を実ビューポートサイズに追従**: `viewport_w` / `viewport_h` のハードコード（1920×1080）をやめ、`get_viewport_rect().size` で実サイズを取得。16:10 等のアスペクト比でも上下に偏らず画面全体に行き渡るよう修正
+- **モザイク行数のデフォルトを 5 → 4 に変更**: タイルがより大きく見える構成に
+- **モザイクタイルサイズを画面高さ自動フィットに変更**: 新規 `@export fit_height_to_viewport`（既定 true）で `row_count` 行がビューポート高さを埋めるよう tile_size を自動拡縮。アスペクト比は `tile_size` の x/y で指定（既定 1.8）。固定サイズで運用したい場合は false に
+
 ### [Launcher v0.5.10] - 2026-04-19
 
 #### Added

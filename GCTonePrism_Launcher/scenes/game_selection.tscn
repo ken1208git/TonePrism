@@ -1,4 +1,4 @@
-[gd_scene load_steps=24 format=3 uid="uid://bjoy2n8lqir0y"]
+[gd_scene load_steps=26 format=3 uid="uid://bjoy2n8lqir0y"]
 
 [ext_resource type="Script" uid="uid://dj0y4s0v4pp1c" path="res://scenes/game_selection.gd" id="1_game_selection"]
 [ext_resource type="FontFile" uid="uid://dolk7yphok5xu" path="res://fonts/NotoSansJP-Regular.ttf" id="2_font_regular"]
@@ -16,9 +16,16 @@
 [ext_resource type="Texture2D" path="res://images/clock.png" id="16_clock_icon"]
 [ext_resource type="Texture2D" path="res://images/controller.png" id="17_controller_icon"]
 [ext_resource type="Texture2D" path="res://images/network.png" id="18_network_icon"]
+[ext_resource type="Shader" path="res://shaders/frosted_glass.gdshader" id="19_frosted_shader"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_FrostedGlass"]
+shader = ExtResource("19_frosted_shader")
+shader_parameter/blur_radius = 24.0
+shader_parameter/tint_color = Color(0, 0, 0, 1)
+shader_parameter/tint_strength = 0.5
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_InfoPanel"]
-bg_color = Color(0, 0, 0, 0.8)
+bg_color = Color(0, 0, 0, 1)
 border_width_left = 12
 border_width_top = 12
 border_width_right = 12
@@ -316,6 +323,7 @@ mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_FocusBorder")
 
 [node name="InfoPanel" type="Panel" parent="."]
+material = SubResource("ShaderMaterial_FrostedGlass")
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0
