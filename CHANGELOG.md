@@ -11,6 +11,21 @@
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.5.12] - 2026-04-28
+
+#### Added
+
+- **トラックパッド向けフリースクロール対応**: `InputEventMouseButton.factor` を見て、マウスホイール（factor>=0.5）はディスクリート1ゲーム移動、トラックパッド（factor<0.5）はフリースクロール + 離したら最寄りゲームにスナップ、と入力デバイスに応じて挙動を分離。`InputHandler.free_scroll(delta_amount: float)` シグナル追加
+- **CarouselController に視覚オフセット引数を追加**: `update_cards(... free_offset: float ...)` で `current_scroll_index` の補間先に上乗せできるように。フリースクロール中は `new_active` を `selected_index` で固定してチラつきを防止
+
+#### Changed
+
+- **InfoPanel の縁ぼかしを除去**: 12px の透明ボーダー + `border_blend` + `expand_margin` を削除し、すりガラスのエッジをくっきりさせた。角丸 32px は維持
+
+#### Fixed
+
+- **トラックパッド2本指でカルーセルが爆速で流れる問題を解消**: 従来は1イベント=1移動だったため、Windows precision touchpad の高頻度イベントで暴走していた。factor 蓄積方式 + スナップ遅延でなめらかな操作感に
+
 ### [Launcher v0.5.11] - 2026-04-27
 
 #### Added

@@ -42,6 +42,12 @@ var _games: Array[GameInfo] = []
 var _selected_index: int = 0
 var _active_index: int = 0
 
+# --- トラックパッド・フリースクロール ---
+const TRACKPAD_SNAP_DELAY := 0.18       # 最後のトラックパッド入力からこの秒数経過したらスナップ
+const TRACKPAD_OFFSET_LIMIT := 6.0      # 視覚オフセットの最大絶対値（暴走防止）
+var _trackpad_offset: float = 0.0
+var _last_trackpad_time: float = 0.0
+
 # --- フォーカスモーフ用 ---
 var _focus_target_rect: Rect2 = Rect2()
 var _focus_target_radius: float = 24.0
@@ -132,6 +138,7 @@ func _ready():
 
 	# 入力ハンドラのシグナル接続
 	_input_handler.selection_moved.connect(_on_selection_moved)
+	_input_handler.free_scroll.connect(_on_free_scroll)
 	_input_handler.play_requested.connect(func(): if _play_button: _play_button.grab_focus())
 	_input_handler.exit_requested.connect(func(): _go_back())
 	_input_handler.focus_to_card_requested.connect(_update_focus_to_current_card)
@@ -201,9 +208,32 @@ func _process(delta):
 	if _games.is_empty():
 		return
 
+	# トラックパッド・フリースクロール: 視覚位置がゲーム1つ分進む度に _selected_index を更新
+	# こうすることで背景アニメーション・InfoPanel・フォーカスがリアルタイムに追従する
+	# 視覚位置の連続性は selected_index += step / _trackpad_offset -= step で保たれる
+	if absf(_trackpad_offset) >= 1.0:
+		var total_steps := int(_trackpad_offset)  # truncation: 1.5→1, -1.5→-1
+		var prev_index := _selected_index
+		_on_selection_moved(total_steps)
+		var actual_steps := _selected_index - prev_index
+		if actual_steps == total_steps:
+			_trackpad_offset -= float(actual_steps)
+		else:
+			# 端で動けなかった: 残オフセットをクリアして暴走を防ぐ
+			_trackpad_offset = 0.0
+
+	# 入力が止まって SNAP_DELAY 経過したら残りの分数オフセットをスナップ
+	if absf(_trackpad_offset) > 0.001:
+		var now := Time.get_ticks_msec() / 1000.0
+		if now - _last_trackpad_time > TRACKPAD_SNAP_DELAY:
+			var snap_delta := roundi(_trackpad_offset)
+			if snap_delta != 0:
+				_on_selection_moved(snap_delta)
+			_trackpad_offset = 0.0
+
 	# カルーセル更新
 	var container_center_x = _carousel_container.size.x / 2
-	var new_active = _carousel.update_cards(delta, _selected_index,
+	var new_active = _carousel.update_cards(delta, _selected_index, _trackpad_offset,
 		get_viewport_rect().size, container_center_x,
 		_input_handler.using_mouse, _static_focus_border, _game_launcher.is_running())
 
@@ -349,6 +379,14 @@ func _on_selection_moved(dir: int) -> void:
 	elif dir < 0 and _selected_index == 0 and _input_handler.back_button:
 		# カルーセル最上端で上入力 → 戻るボタンにフォーカス
 		_input_handler.back_button.grab_focus()
+
+## トラックパッドのフリースクロール: 視覚オフセットに蓄積するだけ。
+## スナップは _process 側で TRACKPAD_SNAP_DELAY 経過後にまとめて行う。
+func _on_free_scroll(delta_amount: float) -> void:
+	_trackpad_offset = clampf(_trackpad_offset + delta_amount,
+		-TRACKPAD_OFFSET_LIMIT, TRACKPAD_OFFSET_LIMIT)
+	_last_trackpad_time = Time.get_ticks_msec() / 1000.0
+	_idle_mgr.reset()
 
 func _update_info_display(index: int, slide_dir_y: int = 0) -> void:
 	_info_display.update_display(_games[index], slide_dir_y,

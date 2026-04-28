@@ -26,20 +26,10 @@ shader_parameter/tint_strength = 0.5
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_InfoPanel"]
 bg_color = Color(0, 0, 0, 1)
-border_width_left = 12
-border_width_top = 12
-border_width_right = 12
-border_width_bottom = 12
-border_color = Color(0, 0, 0, 0)
-border_blend = true
 corner_radius_top_left = 32
 corner_radius_top_right = 32
 corner_radius_bottom_right = 32
 corner_radius_bottom_left = 32
-expand_margin_left = 12.0
-expand_margin_top = 12.0
-expand_margin_right = 12.0
-expand_margin_bottom = 12.0
 
 [sub_resource type="Animation" id="Animation_transition_down"]
 resource_name = "transition_down"

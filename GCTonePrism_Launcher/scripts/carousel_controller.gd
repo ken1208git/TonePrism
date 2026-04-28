@@ -81,17 +81,22 @@ func get_image_load_queue() -> Array:
 	return queue
 
 ## 毎フレーム呼ばれる。カードの位置・スケール・透明度を更新する
-func update_cards(delta: float, selected_index: int, viewport_size: Vector2,
-		container_center_x: float, using_mouse: bool,
+## free_offset: トラックパッドのフリースクロール時の視覚オフセット（スナップ前の中間値）
+func update_cards(delta: float, selected_index: int, free_offset: float,
+		viewport_size: Vector2, container_center_x: float, using_mouse: bool,
 		static_focus_border: Panel, is_running: bool = false) -> int:
 	var viewport_center_y = viewport_size.y / 2
 
-	# スムーズスクロール
-	var target = float(selected_index)
+	# スムーズスクロール（フリースクロール時は視覚オフセットを target に上乗せ）
+	var target = float(selected_index) + free_offset
 	current_scroll_index = lerpf(current_scroll_index, target, SCROLL_SPEED * delta)
 
-	# アクティブインデックスの計算
-	var new_active = int(round(current_scroll_index))
+	# アクティブインデックスの計算（フリースクロール中は selected_index を維持してチラつき防止）
+	var new_active: int
+	if absf(free_offset) > 0.001:
+		new_active = selected_index
+	else:
+		new_active = int(round(current_scroll_index))
 	new_active = clampi(new_active, 0, card_nodes.size() - 1)
 
 	# 各カードの位置更新

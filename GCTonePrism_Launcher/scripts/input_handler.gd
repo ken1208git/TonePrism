@@ -7,10 +7,14 @@ const KEY_REPEAT_DELAY := 0.4
 const KEY_REPEAT_RATE := 0.06
 
 signal selection_moved(dir: int)
+signal free_scroll(delta_amount: float)
 signal play_requested()
 signal exit_requested()
 signal focus_to_card_requested()
 signal idle_reset_requested()
+
+# トラックパッド/マウスホイール判定: factor がこの値未満ならトラックパッド扱い
+const TRACKPAD_FACTOR_THRESHOLD := 0.5
 
 var using_mouse: bool = false
 var back_button: Button = null
@@ -155,19 +159,28 @@ func handle_input(event: InputEvent, viewport: Viewport,
 			viewport.set_input_as_handled()
 		exit_requested.emit()
 
-## _unhandled_input イベントを処理する（マウスホイール）
+## _unhandled_input イベントを処理する（マウスホイール / トラックパッド）
 func handle_unhandled_input(event: InputEvent, viewport: Viewport) -> void:
-	if event is InputEventMouseButton:
-		if event.is_pressed():
-			# 説明文エリア上ではカルーセルスクロールしない
-			if desc_scroll and desc_scroll.get_global_rect().has_point(event.global_position):
-				return
-			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-				selection_moved.emit(-1)
-				viewport.set_input_as_handled()
-			elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-				selection_moved.emit(1)
-				viewport.set_input_as_handled()
+	if not (event is InputEventMouseButton and event.is_pressed()):
+		return
+	# 説明文エリア上ではカルーセルスクロールしない
+	if desc_scroll and desc_scroll.get_global_rect().has_point(event.global_position):
+		return
+
+	var direction := 0
+	if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+		direction = -1
+	elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		direction = 1
+	else:
+		return
+
+	# factor で入力デバイスを判定: トラックパッドはフリースクロール、マウスホイールはディスクリート
+	if event.factor < TRACKPAD_FACTOR_THRESHOLD:
+		free_scroll.emit(float(direction) * event.factor)
+	else:
+		selection_moved.emit(direction)
+	viewport.set_input_as_handled()
 
 ## ドラムロール入力（長押しによる高速スクロール）を処理する
 func process_drum_roll(delta: float, play_button: Button, exit_button: Button,
