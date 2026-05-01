@@ -1,4 +1,4 @@
-[gd_scene load_steps=26 format=3 uid="uid://bjoy2n8lqir0y"]
+[gd_scene load_steps=27 format=3 uid="uid://bjoy2n8lqir0y"]
 
 [ext_resource type="Script" uid="uid://dj0y4s0v4pp1c" path="res://scenes/game_selection.gd" id="1_game_selection"]
 [ext_resource type="FontFile" uid="uid://dolk7yphok5xu" path="res://fonts/NotoSansJP-Regular.ttf" id="2_font_regular"]
@@ -17,6 +17,7 @@
 [ext_resource type="Texture2D" path="res://images/controller.png" id="17_controller_icon"]
 [ext_resource type="Texture2D" path="res://images/network.png" id="18_network_icon"]
 [ext_resource type="Shader" path="res://shaders/frosted_glass.gdshader" id="19_frosted_shader"]
+[ext_resource type="PackedScene" path="res://scenes/components/launching_overlay.tscn" id="20_launching_overlay"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_FrostedGlass"]
 shader = ExtResource("19_frosted_shader")
@@ -603,3 +604,5 @@ autowrap_mode = 2
 bar_height = 250.0
 
 [node name="BottomBar" parent="." instance=ExtResource("7_bottom_bar")]
+
+[node name="LaunchingOverlay" parent="." instance=ExtResource("20_launching_overlay")]

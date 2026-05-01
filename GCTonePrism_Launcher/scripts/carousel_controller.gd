@@ -116,10 +116,11 @@ func update_cards(delta: float, selected_index: int, free_offset: float,
 		var scale_factor = remap(dist_from_center_px, 0, 150, SCALE_ACTIVE, SCALE_INACTIVE)
 		scale_factor = clamp(scale_factor, SCALE_INACTIVE, SCALE_ACTIVE)
 
-		# 透明度（起動中(フェード中)は上書きしない）
+		# 透明度: 中心からの距離で連続補間（中心=1.0、1ゲーム分離れたら OPACITY_INACTIVE）
+		# 起動中(フェード中)は上書きしない
 		if not is_running:
-			var opacity = 1.0 if i == selected_index else OPACITY_INACTIVE
-			card.modulate.a = opacity
+			var dist = clampf(absf(diff), 0.0, 1.0)
+			card.modulate.a = lerpf(1.0, OPACITY_INACTIVE, dist)
 
 		# 反映
 		card.position = Vector2(container_center_x - (CARD_SIZE.x / 2), screen_y - (CARD_SIZE.y / 2))

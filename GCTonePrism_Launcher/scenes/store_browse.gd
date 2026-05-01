@@ -229,11 +229,15 @@ func _input(event):
 
 	# マウス移動検知
 	if event is InputEventMouseMotion:
-		_using_mouse = true
+		if not _using_mouse:
+			_using_mouse = true
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		return
 
 	if event is InputEventMouseButton:
-		_using_mouse = true
+		if not _using_mouse:
+			_using_mouse = true
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 			if _scroll_tween and _scroll_tween.is_valid(): _scroll_tween.kill()
 			if not _is_smooth_scrolling: _target_scroll_y = _scroll_container.scroll_vertical
@@ -259,6 +263,7 @@ func _input(event):
 	# キーボード/ゲームパッド入力
 	if event is InputEventKey or event is InputEventJoypadButton or event is InputEventJoypadMotion:
 		_using_mouse = false
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 
 	if not event.is_pressed():
 		return
@@ -401,7 +406,9 @@ func _build_one_section(i: int) -> void:
 			var sec_idx = i
 			view_all.pressed.connect(func(): _on_view_all_pressed(sec_idx))
 			view_all.mouse_entered.connect(func():
-				_using_mouse = true
+				if not _using_mouse:
+					_using_mouse = true
+					Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 				_current_section = sec_idx
 				_on_view_all = true
 				_update_focus_visual()
@@ -414,7 +421,9 @@ func _on_build_complete() -> void:
 	_all_games_button = StoreBrowseBuilder.build_all_games_button(_viewport_width)
 	_all_games_button.pressed.connect(_on_all_games_pressed)
 	_all_games_button.mouse_entered.connect(func():
-		_using_mouse = true
+		if not _using_mouse:
+			_using_mouse = true
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		_on_all_games = true
 		_on_view_all = false
 		_on_exit_button = false
@@ -973,7 +982,9 @@ func _connect_tile_signals(section_index: int, tiles: Array[Control]) -> void:
 				_on_select()
 		)
 		tile.mouse_entered.connect(func():
-			_using_mouse = true
+			if not _using_mouse:
+				_using_mouse = true
+				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 			_current_section = sec_idx
 			_current_tile = t_idx
 			_on_view_all = false

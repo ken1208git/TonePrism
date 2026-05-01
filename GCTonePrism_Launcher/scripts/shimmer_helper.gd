@@ -14,6 +14,22 @@ static func apply(control: Control) -> void:
 static func apply_to_label(control: Control) -> void:
 	_apply(control, 0.5)
 
+## 任意パラメータでシマーマテリアルを適用する（明るい背景に暗い字、等の用途向け）
+static func apply_with_params(control: Control, base: float, peak: float = 1.0,
+		width: float = 0.18, speed: float = 1.2) -> void:
+	if not control:
+		return
+	var mat := ShaderMaterial.new()
+	mat.shader = load(SHIMMER_SHADER_PATH)
+	mat.set_shader_parameter("base_brightness", base)
+	mat.set_shader_parameter("shimmer_peak", peak)
+	mat.set_shader_parameter("shimmer_width", width)
+	mat.set_shader_parameter("shimmer_speed", speed)
+	control.material = mat
+	_update_size_uniform(control)
+	if not control.resized.is_connected(_on_control_resized):
+		control.resized.connect(_on_control_resized.bind(control))
+
 static func _apply(control: Control, base_brightness: float) -> void:
 	if not control:
 		return

@@ -37,15 +37,17 @@ func handle_input(event: InputEvent, viewport: Viewport,
 		idle_reset_requested.emit()
 
 	# 入力デバイス判定（微小なマウス移動は無視 ― スクショ時等の誤検知防止）
+	# キーボード/コントローラー操作中はマウスカーソルを隠す
+	# シーン遷移時の状態リセットを避けるため、毎イベントで Input.mouse_mode を強制同期する
 	if event is InputEventKey or event is InputEventJoypadButton or event is InputEventJoypadMotion:
-		if using_mouse:
-			using_mouse = false
+		using_mouse = false
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 	elif event is InputEventMouseButton:
-		if not using_mouse:
-			using_mouse = true
+		using_mouse = true
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	elif event is InputEventMouseMotion and event.relative.length() > 1.0:
-		if not using_mouse:
-			using_mouse = true
+		using_mouse = true
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 	# マウス操作時はフォーカスを外す
 	if event is InputEventMouseMotion and event.relative.length() > 1.0:

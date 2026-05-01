@@ -177,8 +177,8 @@ func update_display(game: GameInfo, slide_dir_y: int,
 
 	desc_label.text = desc_text
 
-	# --- 背景画像更新 ---
-	_update_background(game, slide_dir_y, background_texture, background_old, owner_node)
+	# 背景画像は game_selection 側でカルーセル位置に応じて連続クロスフェードする方式に変更したため、
+	# ここでは何もしない（背景パラメータは互換性のため残置）。
 
 ## 背景画像のTweenアニメーション
 func _update_background(game: GameInfo, slide_dir_y: int,
@@ -206,24 +206,21 @@ func _update_background(game: GameInfo, slide_dir_y: int,
 			push_warning("[GameInfoDisplay] Background not found: %s" % bg_path)
 
 	# Tweenアニメーション
+	# bg_current の位置は game_selection._process が visual_displacement で連続駆動するので、
+	# ここでは modulate のフェードインのみ。bg_old は従来通り tween でスライドアウト + フェード。
 	_bg_tween = owner_node.create_tween()
 	_bg_tween.set_parallel(true)
 
-	if slide_dir_y == 0:
-		background_texture.position = Vector2.ZERO
-		background_texture.modulate = Color(1, 1, 1, 0)
-		_bg_tween.tween_property(background_texture, "modulate", Color(1, 1, 1, 1), 0.3)
-	else:
-		var offset_y = 50.0 * -slide_dir_y
-		background_texture.position = Vector2(0, offset_y)
-		background_texture.modulate = Color(1, 1, 1, 0)
+	background_texture.modulate = Color(1, 1, 1, 0)
+	_bg_tween.tween_property(background_texture, "modulate", Color(1, 1, 1, 1), 0.3)
 
-		_bg_tween.tween_property(background_texture, "position", Vector2.ZERO, 0.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-		_bg_tween.tween_property(background_texture, "modulate", Color(1, 1, 1, 1), 0.3)
-
+	if slide_dir_y != 0:
 		var old_target_y = background_old.position.y + (50 * slide_dir_y)
 		_bg_tween.tween_property(background_old, "position", Vector2(0, old_target_y), 0.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 		_bg_tween.tween_property(background_old, "modulate", Color(1, 1, 1, 0), 0.3)
+	else:
+		# 初回（slide_dir_y == 0）は old は表示しない
+		background_old.modulate = Color(1, 1, 1, 0)
 
 ## 値に応じたバッジ背景色をラベルに適用（1=緑, 2=黄, 3=赤）
 func _apply_badge_color(label: Label, value: int) -> void:
