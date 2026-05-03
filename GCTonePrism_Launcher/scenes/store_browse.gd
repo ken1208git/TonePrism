@@ -9,7 +9,6 @@ var _idle_mgr: IdleManager
 var _db_manager: DatabaseManager
 var _game_repo: GameRepository
 var _section_repo: StoreSectionRepository
-var _style_mgr: ButtonStyleManager
 var _sections: Array[StoreSectionInfo] = []
 
 # --- ナビゲーション状態 ---
@@ -35,10 +34,18 @@ var _section_ui: Array = []
 # --- ノード参照 ---
 @onready var _scroll_container: ScrollContainer = $ScrollArea
 @onready var _content_container: VBoxContainer = $ScrollArea/MarginContainer/ContentContainer
-@onready var _focus_border: Panel = $FocusBorder
-@onready var _clock_label: Label = $TopBar/MarginContainer/HBoxContainer/ClockLabel
-@onready var _exit_button: Button = $TopBar/MarginContainer/HBoxContainer/ExitButton
-@onready var _bottom_bar: Control = $BottomBar
+@onready var _focus_border: Panel = $FocusLayer/FocusBorder
+@onready var _top_bar: CanvasLayer = $TopBar
+@onready var _bottom_bar: CanvasLayer = $BottomBar
+
+# --- 段階的UI構築 ---
+var _build_queue: Array = []
+var _build_complete: bool = false
+var _viewport_width: float = 0.0
+var _progress_bar: Control = null       # カスタムプログレスバー（背景+フィル）
+var _progress_fill: Panel = null        # フィル部分（シェーダー適用対象）
+var _progress_label: Label = null
+var _total_sections: int = 0
 
 # --- 「すべてのゲーム」ボタン ---
 var _all_games_button: Button = null
@@ -55,6 +62,7 @@ var _focus_tweening: bool = false
 var _focus_prev_target: Control = null
 var _focus_prev_target_pos: Vector2 = Vector2.ZERO
 var _was_transitioning: bool = false
+var _exit_button: Button
 
 # --- スクロールTween ---
 var _scroll_tween: Tween = null
@@ -63,10 +71,17 @@ var _scroll_tween: Tween = null
 var _target_scroll_y: float = 0.0
 var _is_smooth_scrolling: bool = false
 
+# --- 遅延画像読み込み（バックグラウンドスレッド） ---
+var _image_load_queue: Array = []   # スレッドに渡すキュー [{path: String, node_id: int, target: String}]
+var _loaded_images: Array = []      # スレッドが読み込んだ結果 [{image: Image, node_id: int, target: String}]
+var _load_thread: Thread = null
+var _load_mutex: Mutex = Mutex.new()
+var _node_registry: Dictionary = {} # node_id -> Control（スレッドからノード参照できないため）
+var _cancel_requested: bool = false
+
 func _ready():
 	_idle_mgr = IdleManager.new()
 	_db_manager = DatabaseManager.new()
-	_style_mgr = ButtonStyleManager.new()
 
 	process_mode = Node.PROCESS_MODE_ALWAYS
 
@@ -96,103 +111,39 @@ func _ready():
 
 	print("[StoreBrowse] %d 件のセクションを読み込みました" % _sections.size())
 
-	# セクションUIを動的生成
-	var viewport_width = get_viewport_rect().size.x
-	for i in range(_sections.size()):
-		var section = _sections[i]
-		var container: Control
-		match section.section_type:
-			1:  # スライドショー
-				container = StoreBannerBuilder.build_slideshow_section(section, viewport_width)
-				_slideshow_timers[i] = 0.0
-				_slideshow_indices[i] = 0
-			2:  # タイルグリッド
-				container = StoreBannerBuilder.build_tile_grid_section(section, viewport_width)
-			_:  # 通常セクション行
-				container = StoreBrowseBuilder.build_normal_section(section, viewport_width)
+	# ExitButton設定（TopBarコンポーネントから取得）
+	_exit_button = _top_bar.get_exit_button()
+	_top_bar.exit_pressed.connect(_on_exit_button_pressed)
 
-		_content_container.add_child(container)
+	# ContentContainerを非表示にしておく（構築完了後にフェードイン）
+	_content_container.modulate = Color(1, 1, 1, 0)
 
-		# タイル一覧を収集
-		var tiles: Array[Control] = []
-		_collect_focusable_tiles(container, section.section_type, tiles)
+	# 段階的UI構築のキューを準備
+	_viewport_width = get_viewport_rect().size.x
+	_total_sections = _sections.size()
+	for i in range(_total_sections):
+		_build_queue.append(i)
 
-		_section_ui.append({
-			"section": section,
-			"container": container,
-			"tiles": tiles,
-			"type": section.section_type
-		})
-
-		# マウスクリック/ホバーのシグナル接続
-		_connect_tile_signals(i, tiles)
-
-		# スライドショーの左右ボタンにシグナル接続
-		if section.section_type == 1:
-			var prev_btn = container.get_node_or_null("SlideshowPrev")
-			var next_btn = container.get_node_or_null("SlideshowNext")
-			var sec_idx_ss = i
-			if prev_btn:
-				prev_btn.pressed.connect(func():
-					_switch_slide(sec_idx_ss, -1)
-					_slideshow_timers[sec_idx_ss] = 0.0
-				)
-			if next_btn:
-				next_btn.pressed.connect(func():
-					_switch_slide(sec_idx_ss, 1)
-					_slideshow_timers[sec_idx_ss] = 0.0
-				)
-
-		# type=0の「すべて見る」ボタンにシグナル接続
-		if section.section_type == 0:
-			var view_all = container.get_node_or_null("ViewAllButton")
-			if view_all == null:
-				# HBoxContainerの中にある可能性
-				for child in container.get_children():
-					if child is HBoxContainer:
-						view_all = child.get_node_or_null("ViewAllButton")
-						break
-			if view_all:
-				var sec_idx = i
-				view_all.pressed.connect(func(): _on_view_all_pressed(sec_idx))
-				view_all.mouse_entered.connect(func():
-					_using_mouse = true
-					_current_section = sec_idx
-					_on_view_all = true
-					_update_focus_visual()
-				)
-
-	# 「すべてのゲーム」ボタンをセクション末尾に追加
-	_all_games_button = StoreBrowseBuilder.build_all_games_button(viewport_width)
-	_all_games_button.pressed.connect(_on_all_games_pressed)
-	_all_games_button.mouse_entered.connect(func():
-		_using_mouse = true
-		_on_all_games = true
-		_on_view_all = false
-		_on_exit_button = false
-		_update_focus_visual()
-	)
-	_content_container.add_child(_all_games_button)
-
-	# ExitButton設定（カルーセルと同じスタイル）
-	if _exit_button:
-		_exit_button.pressed.connect(_on_exit_button_pressed)
-		_style_mgr.setup_exit_button(_exit_button)
-
-	# フォーカスボーダーのスタイルは .tscn で適用済み
-
-	# 初期フォーカス
-	_current_section = 0
-	_current_tile = 0
-	_on_view_all = false
-	call_deferred("_update_focus_visual")
+	# プログレスバーを画面中央に表示
+	_create_progress_ui()
 
 	set_process(true)
 	set_process_input(true)
 
 func _process(delta):
-	# 時計更新
-	GameInfoFormatter.update_clock(_clock_label)
+	# 段階的UI構築
+	if not _build_complete:
+		if _build_queue.is_empty():
+			_on_build_complete()
+		else:
+			var count = mini(2, _build_queue.size())
+			for j in range(count):
+				_build_one_section(_build_queue.pop_front())
+			_set_progress(float(_total_sections - _build_queue.size()) / _total_sections * 100.0)
+		return
+
+	# スレッドで読み込み済みの画像をメインスレッドで適用
+	_apply_loaded_images()
 
 	# アイドルタイマー
 	if _idle_mgr.update(delta, get_tree().paused):
@@ -265,10 +216,12 @@ func _process(delta):
 
 	# BottomBar表示切替
 	if _bottom_bar:
-		_bottom_bar.visible = not _using_mouse
+		_bottom_bar.get_panel().visible = not _using_mouse
 
 func _input(event):
 	if get_tree().paused:
+		return
+	if not _build_complete:
 		return
 
 	# アイドルリセット
@@ -276,11 +229,15 @@ func _input(event):
 
 	# マウス移動検知
 	if event is InputEventMouseMotion:
-		_using_mouse = true
+		if not _using_mouse:
+			_using_mouse = true
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		return
 
 	if event is InputEventMouseButton:
-		_using_mouse = true
+		if not _using_mouse:
+			_using_mouse = true
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 			if _scroll_tween and _scroll_tween.is_valid(): _scroll_tween.kill()
 			if not _is_smooth_scrolling: _target_scroll_y = _scroll_container.scroll_vertical
@@ -306,6 +263,7 @@ func _input(event):
 	# キーボード/ゲームパッド入力
 	if event is InputEventKey or event is InputEventJoypadButton or event is InputEventJoypadMotion:
 		_using_mouse = false
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 
 	if not event.is_pressed():
 		return
@@ -330,10 +288,182 @@ func _input(event):
 		_on_select()
 		viewport.set_input_as_handled()
 	elif event.is_action_pressed("ui_cancel"):
-		IdleManager.transition_to_screensaver(get_tree())
+		_on_exit_button_pressed()
 		viewport.set_input_as_handled()
 
+# --- 段階的UI構築 ---
+
+func _create_progress_ui() -> void:
+	var center := CenterContainer.new()
+	center.name = "LoadingOverlay"
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var vbox := VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 16)
+	center.add_child(vbox)
+
+	_progress_label = Label.new()
+	_progress_label.text = "読み込み中..."
+	_progress_label.add_theme_font_override("font", preload("res://fonts/NotoSansJP-Regular.ttf"))
+	_progress_label.add_theme_font_size_override("font_size", 28)
+	_progress_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.8))
+	_progress_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(_progress_label)
+
+	# カスタムプログレスバー（背景 + フィル分離）
+	_progress_bar = Control.new()
+	_progress_bar.custom_minimum_size = Vector2(400, 8)
+
+	# 背景（暗いバー）
+	var bg := Panel.new()
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var bg_style := StyleBoxFlat.new()
+	bg_style.bg_color = Color(1, 1, 1, 0.1)
+	bg_style.set_corner_radius_all(4)
+	bg.add_theme_stylebox_override("panel", bg_style)
+	_progress_bar.add_child(bg)
+
+	# フィル（光る部分 — シェーダー適用）
+	_progress_fill = Panel.new()
+	_progress_fill.set_anchor(SIDE_TOP, 0.0)
+	_progress_fill.set_anchor(SIDE_BOTTOM, 1.0)
+	_progress_fill.offset_left = 0.0
+	_progress_fill.offset_top = 0.0
+	_progress_fill.offset_bottom = 0.0
+	_progress_fill.offset_right = 0.0  # 初期幅0
+	var fill_style := StyleBoxFlat.new()
+	fill_style.bg_color = Color(1, 1, 1, 1.0)
+	fill_style.set_corner_radius_all(4)
+	_progress_fill.add_theme_stylebox_override("panel", fill_style)
+	ShimmerHelper.apply(_progress_fill)
+	_progress_bar.add_child(_progress_fill)
+
+	vbox.add_child(_progress_bar)
+
+	add_child(center)
+
+func _set_progress(percent: float) -> void:
+	if _progress_fill and _progress_bar:
+		var bar_width = _progress_bar.size.x
+		_progress_fill.offset_right = bar_width * (percent / 100.0)
+
+func _build_one_section(i: int) -> void:
+	var section = _sections[i]
+	var container: Control
+	match section.section_type:
+		1:  # スライドショー
+			container = StoreBannerBuilder.build_slideshow_section(section, _viewport_width)
+			_slideshow_timers[i] = 0.0
+			_slideshow_indices[i] = 0
+		2:  # タイルグリッド
+			container = StoreBannerBuilder.build_tile_grid_section(section, _viewport_width)
+		_:  # 通常セクション行
+			container = StoreBrowseBuilder.build_normal_section(section, _viewport_width)
+
+	_content_container.add_child(container)
+
+	# タイル一覧を収集
+	var tiles: Array[Control] = []
+	_collect_focusable_tiles(container, section.section_type, tiles)
+
+	_section_ui.append({
+		"section": section,
+		"container": container,
+		"tiles": tiles,
+		"type": section.section_type
+	})
+
+	# マウスクリック/ホバーのシグナル接続
+	_connect_tile_signals(i, tiles)
+
+	# スライドショーの左右ボタンにシグナル接続
+	if section.section_type == 1:
+		var prev_btn = container.get_node_or_null("SlideshowPrev")
+		var next_btn = container.get_node_or_null("SlideshowNext")
+		var sec_idx_ss = i
+		if prev_btn:
+			prev_btn.pressed.connect(func():
+				_switch_slide(sec_idx_ss, -1)
+				_slideshow_timers[sec_idx_ss] = 0.0
+			)
+		if next_btn:
+			next_btn.pressed.connect(func():
+				_switch_slide(sec_idx_ss, 1)
+				_slideshow_timers[sec_idx_ss] = 0.0
+			)
+
+	# type=0の「すべて見る」ボタンにシグナル接続
+	if section.section_type == 0:
+		var view_all = container.get_node_or_null("ViewAllButton")
+		if view_all == null:
+			for child in container.get_children():
+				if child is HBoxContainer:
+					view_all = child.get_node_or_null("ViewAllButton")
+					break
+		if view_all:
+			var sec_idx = i
+			view_all.pressed.connect(func(): _on_view_all_pressed(sec_idx))
+			view_all.mouse_entered.connect(func():
+				if not _using_mouse:
+					_using_mouse = true
+					Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+				_current_section = sec_idx
+				_on_view_all = true
+				_update_focus_visual()
+			)
+
+func _on_build_complete() -> void:
+	_build_complete = true
+
+	# 「すべてのゲーム」ボタンをセクション末尾に追加
+	_all_games_button = StoreBrowseBuilder.build_all_games_button(_viewport_width)
+	_all_games_button.pressed.connect(_on_all_games_pressed)
+	_all_games_button.mouse_entered.connect(func():
+		if not _using_mouse:
+			_using_mouse = true
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		_on_all_games = true
+		_on_view_all = false
+		_on_exit_button = false
+		_update_focus_visual()
+	)
+	_content_container.add_child(_all_games_button)
+
+	# プログレスバーをフェードアウトして削除
+	var overlay = get_node_or_null("LoadingOverlay")
+	if overlay:
+		var tween = create_tween()
+		tween.tween_property(overlay, "modulate:a", 0.0, 0.2)
+		tween.tween_callback(overlay.queue_free)
+
+	# ContentContainerをフェードインで表示
+	var content_tween = create_tween()
+	content_tween.tween_property(_content_container, "modulate:a", 1.0, 0.3)\
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+	# 初期フォーカス
+	_current_section = 0
+	_current_tile = 0
+	_on_view_all = false
+	call_deferred("_update_focus_visual")
+
+	# 遅延画像読み込みキューを構築
+	_build_image_load_queue()
+
+	# BottomBarの操作ヒント
+	if _bottom_bar:
+		_bottom_bar.set_hints([["Esc", "戻る"], ["Enter", "決定"]])
+
 func _exit_tree():
+	# バックグラウンドスレッドをキャンセルして終了を待つ
+	if _load_thread and _load_thread.is_started():
+		_load_mutex.lock()
+		_cancel_requested = true
+		_image_load_queue.clear()
+		_load_mutex.unlock()
+		_load_thread.wait_to_finish()
 	if _db_manager:
 		_db_manager.close()
 	if DialogManager and DialogManager.has_method("close_current_dialog"):
@@ -432,7 +562,7 @@ func _move_tile(dir: int) -> void:
 				var has_view_all = false
 				var sec_container = _section_ui[_current_section]["container"] as Control
 				for child in sec_container.get_children():
-					if child is HBoxContainer and child.get_node_or_null("ViewAllButton"):
+					if child is HBoxContainer and child.get_node_or_null("ViewAllButton") and child.get_node("ViewAllButton").visible:
 						has_view_all = true
 						break
 				if has_view_all:
@@ -852,7 +982,9 @@ func _connect_tile_signals(section_index: int, tiles: Array[Control]) -> void:
 				_on_select()
 		)
 		tile.mouse_entered.connect(func():
-			_using_mouse = true
+			if not _using_mouse:
+				_using_mouse = true
+				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 			_current_section = sec_idx
 			_current_tile = t_idx
 			_on_view_all = false
@@ -899,3 +1031,126 @@ func _on_exit_button_pressed() -> void:
 	DialogManager.show_message("確認", "退出しますか？\nタイトル画面に戻ります。",
 		["キャンセル", "退出する"], callback,
 		[Color(0.3, 0.3, 0.3), Color(0.8, 0.2, 0.2)])
+
+# --- 遅延画像読み込み ---
+
+## 全セクションのタイル/バナーから読み込みキューを構築し、バックグラウンドスレッドを開始
+func _build_image_load_queue() -> void:
+	for sec_data in _section_ui:
+		var section_type = sec_data["type"] as int
+		var container = sec_data["container"] as Control
+
+		match section_type:
+			0:  # 通常行: ThumbnailRow 内の Tile_* ラッパー
+				var thumb_row = container.get_node_or_null("ThumbnailRow")
+				if thumb_row:
+					for child in thumb_row.get_children():
+						if child.name.begins_with("Tile_") and child.has_meta("image_path"):
+							var nid = child.get_instance_id()
+							_node_registry[nid] = child
+							_image_load_queue.append({
+								"node_id": nid,
+								"path": child.get_meta("image_path"),
+								"target": "TilePanel/Thumbnail"
+							})
+							_start_label_breathing(child.get_node_or_null("TilePanel/LoadingLabel"))
+
+			1:  # スライドショー: BannerClip 内の Banner_*
+				var clip = container.get_node_or_null("BannerClip")
+				if clip:
+					var idx = 0
+					while true:
+						var banner = clip.get_node_or_null("Banner_%d" % idx)
+						if not banner:
+							break
+						if banner.has_meta("image_path"):
+							var nid = banner.get_instance_id()
+							_node_registry[nid] = banner
+							_image_load_queue.append({
+								"node_id": nid,
+								"path": banner.get_meta("image_path"),
+								"target": "BackgroundImage"
+							})
+							_start_label_breathing(banner.get_node_or_null("LoadingLabel"))
+						idx += 1
+
+			2:  # タイルグリッド: GridTile_*
+				for child in container.get_children():
+					if child is Panel and child.name.begins_with("GridTile_") and child.has_meta("image_path"):
+						var nid = child.get_instance_id()
+						_node_registry[nid] = child
+						_image_load_queue.append({
+							"node_id": nid,
+							"path": child.get_meta("image_path"),
+							"target": "BackgroundImage"
+						})
+						_start_label_breathing(child.get_node_or_null("LoadingLabel"))
+
+	# キューが空でなければバックグラウンドスレッドで画像読み込みを開始
+	if not _image_load_queue.is_empty():
+		_load_thread = Thread.new()
+		_load_thread.start(_load_images_in_thread)
+
+## バックグラウンドスレッド: キューからパスを取り出して Image を連続で読み込む
+func _load_images_in_thread() -> void:
+	while true:
+		_load_mutex.lock()
+		if _cancel_requested or _image_load_queue.is_empty():
+			_load_mutex.unlock()
+			break
+		var item = _image_load_queue.pop_front()
+		_load_mutex.unlock()
+
+		var image = Image.load_from_file(item["path"])
+		if image:
+			_load_mutex.lock()
+			if _cancel_requested:
+				_load_mutex.unlock()
+				break
+			_loaded_images.append({
+				"image": image,
+				"node_id": item["node_id"],
+				"target": item["target"]
+			})
+			_load_mutex.unlock()
+
+## メインスレッド（_process から呼ばれる）: 読み込み済み画像をテクスチャ化してノードに適用
+func _apply_loaded_images() -> void:
+	_load_mutex.lock()
+	if _loaded_images.is_empty():
+		_load_mutex.unlock()
+		return
+
+	# 1フレームあたり最大2枚適用（GPU テクスチャ作成の負荷を分散）
+	var apply_count = mini(2, _loaded_images.size())
+	var to_apply: Array = []
+	for i in range(apply_count):
+		to_apply.append(_loaded_images.pop_front())
+	_load_mutex.unlock()
+
+	for item in to_apply:
+		var node = _node_registry.get(item["node_id"]) as Control
+		if not node or not is_instance_valid(node):
+			continue
+		var tex = ImageTexture.create_from_image(item["image"])
+		var target = node.get_node_or_null(item["target"]) as TextureRect
+		if target:
+			target.texture = tex
+			target.modulate = Color(1, 1, 1, 0)
+			var tween = node.create_tween()
+			tween.tween_property(target, "modulate:a", 1.0, 0.2)
+		# LOADINGラベルを削除
+		var loading_label = node.get_node_or_null("LoadingLabel")
+		if not loading_label:
+			loading_label = node.get_node_or_null("TilePanel/LoadingLabel")
+		if loading_label:
+			loading_label.queue_free()
+
+## LOADINGラベル（wrapper）にシマーエフェクトを設定
+## wrapper は Control で、内部の "Text" Label にシマーを適用する
+func _start_label_breathing(wrapper: Control) -> void:
+	if not wrapper:
+		return
+	var text_label = wrapper.get_node_or_null("Text") as Label
+	if text_label:
+		ShimmerHelper.apply_to_label(text_label)

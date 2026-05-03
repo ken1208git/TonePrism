@@ -553,6 +553,64 @@
   - JSON設定ファイルをバックエンドとし、GUI設定画面からも編集可能
   - 設定項目: 通信方式（TCP/UDP or 共有フォルダ）、ポート番号/共有フォルダパス、通知音ON/OFF、通知音ファイルパス、ハートビート間隔（デフォルト5秒）、タイムアウト（デフォルト15秒）
 
+### 2.4 Tools（補助ユーティリティ群）
+
+Godot は Win32 API へのアクセスが弱いため、ウィンドウ検知・常駐オーバーレイ等の OS 機能が必要な処理を補助するための独立ユーティリティ群。Launcher / Manager / Monitor の3大コンポーネントを支える存在。
+
+#### 配置・技術スタック
+
+- **配置**: リポジトリルートの `GCTonePrism_Tools/`
+- **言語/環境**: C# / .NET Framework 4.8（Manager と同じ）
+- **ビルド管理**: 単一の `GCTonePrism.sln` で Manager / Tools / Monitor を統合管理（VS で一括ビルド・デバッグ可）
+- **配布**: ビルド成果物の `.exe` を Launcher と同じディレクトリに配置
+
+#### 構成方針
+
+```
+GCTonePrism_Tools/
+├── Common/                      共有 Win32 ヘルパー (DllImport 集約等)
+│   └── GCTonePrism.Tools.Common.csproj
+├── WindowProbe/                 単発クエリ系: 指定 PID の可視ウィンドウ存在確認
+│   └── GCTonePrism.Tools.WindowProbe.csproj
+└── PauseOverlay/                常駐 GUI 系: ゲーム中断メニュー（将来）
+    └── GCTonePrism.Tools.PauseOverlay.csproj
+```
+
+#### Launcher との通信規約
+
+- **呼び出し**: Godot 側から `OS.execute()`（単発）または `OS.create_process()`（常駐）
+- **戻り値**:
+  - 単発系: 標準出力 1 行 + 終了コード
+  - 常駐系: 標準出力 1 行 = 1 メッセージ (JSON 形式)、`{"event":"...","payload":{...}}` の構造で双方向通信
+- **エラー**: 終了コード非ゼロ + 標準エラー出力にメッセージ
+
+#### 各 Tool の機能
+
+##### Tool 1: WindowProbe（単発クエリ）
+
+- **説明**: 指定 PID のプロセスが可視ウィンドウを持っているかを検知する
+- **優先度**: 高
+- **用途**: Launcher の「ゲーム起動中 → プレイ中」遷移タイミングを正確化（現状は固定 1 秒待機 + プロセス spawn 直後で切替）
+- **入力**: コマンドライン引数 `<pid>`
+- **出力**:
+  - `visible`: 可視ウィンドウあり（ゲームウィンドウ表示済み）
+  - `not_visible`: プロセスは存在するが可視ウィンドウなし
+  - `not_found`: プロセス自体が存在しない
+- **使用 API**: `EnumWindows`, `GetWindowThreadProcessId`, `IsWindowVisible`
+
+##### Tool 2: PauseOverlay（常駐 GUI、将来実装）
+
+- **説明**: ゲーム実行中にグローバルホットキーで呼び出せる中断メニューを提供
+- **優先度**: 中（マイルストーン10〜13 範囲）
+- **用途**: フルスクリーンゲーム上に重ねて中断メニューを表示し、終了/再開等の操作を提供
+- **必要技術**: 透過 + 常時最前面ウィンドウ（WPF）、低レベルキーボードフック (`SetWindowsHookEx`)
+- **通信**: Launcher が `create_process` で起動、Launcher へは stdout/JSON で「閉じた / 終了選択された」等を通知
+
+#### 実装方針の検討事項
+
+- 各 Tool を独立 `.exe` にするか、単一 `.exe` + サブコマンド (`tools.exe probe <pid>` 等) にまとめるか
+- Common ライブラリの参照は静的リンクにするか動的にするか（配布物数に影響）
+
 ---
 
 ## 3. 非機能要件
@@ -2190,6 +2248,7 @@ GCTonePrism/
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
+| 2026-05-01 | 1.7.0 | Tools（補助ユーティリティ群）の仕様追加：2.4 セクション新設、`GCTonePrism_Tools/` 配置・C# / .NET Framework 4.8 採用・統合 .sln 構成、Launcher との通信規約（OS.execute / stdout JSON）、Tool 1: WindowProbe（ゲームウィンドウ可視化検知）と Tool 2: PauseOverlay（中断メニュー、将来）の仕様、独立 .exe vs サブコマンド方式の検討事項を記載 | Kenshiro Kuroga & Claude |
 | 2026-03-30 | 1.6.1 | Material Design 3関連の記述を削除：デザインシステムをMD3ベースからダークテーマベースのカスタムデザインに変更、デザインガイドラインからMD3固有の記述（タイポグラフィ・アイコン・コンポーネントのMD3準拠言及）を削除、参考資料からMD3セクションを削除、マイルストーン7のMD3言及を削除 | Kenshiro Kuroga & Claude |
 | 2026-03-28 | 1.6.0 | サービスモード機能（機能23）の仕様追加：診断・テスト7項目、ログ・情報3項目、設定・操作6項目、自動復帰タイマー。ログ基盤仕様（統一ログシステム、ファイル出力、メモリバッファ）追加。機能22を終了制御機能に変更（Alt+F4/×ボタン封印）。画面12（サービスモード画面）追加。マイルストーン10にサービスモード・ログ基盤を追加 | Kenshiro Kuroga & Claude |
 | 2026-03-28 | 1.5.1 | DBスキーマ定義を実装に合わせて更新：play_records（累計方式→イベントログ方式）、surveys（JSON→★評価+コメント）、settings（単一行→KVS方式）、developers（version_id追加）。新テーブル5つ追記（game_versions, game_genres, store_sections, store_section_games, launcher_surveys）。ER図・リレーション・データ概要を全テーブル反映に更新。games.difficultyのDB制約をCHECK(1-5)→CHECK(1-3)に修正 | Kenshiro Kuroga & Claude |

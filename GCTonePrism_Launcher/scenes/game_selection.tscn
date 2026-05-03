@@ -1,35 +1,36 @@
-[gd_scene load_steps=24 format=3 uid="uid://bjoy2n8lqir0y"]
+[gd_scene load_steps=27 format=3 uid="uid://bjoy2n8lqir0y"]
 
 [ext_resource type="Script" uid="uid://dj0y4s0v4pp1c" path="res://scenes/game_selection.gd" id="1_game_selection"]
 [ext_resource type="FontFile" uid="uid://dolk7yphok5xu" path="res://fonts/NotoSansJP-Regular.ttf" id="2_font_regular"]
 [ext_resource type="FontFile" uid="uid://xjqfmx60jtvo" path="res://fonts/NotoSansJP-Bold.ttf" id="3_font_bold"]
 [ext_resource type="Texture2D" uid="uid://j27gk8qemr4d" path="res://icon.svg" id="4_icon"]
 [ext_resource type="Script" path="res://scenes/components/auto_scroll_container.gd" id="5_auto_scroll"]
-[ext_resource type="StyleBoxFlat" path="res://resources/styles/exit_button_normal.tres" id="6_exit_normal"]
-[ext_resource type="StyleBoxFlat" path="res://resources/styles/exit_button_hover.tres" id="7_exit_hover"]
-[ext_resource type="StyleBoxFlat" path="res://resources/styles/exit_button_pressed.tres" id="8_exit_pressed"]
-[ext_resource type="StyleBoxFlat" path="res://resources/styles/exit_button_focus.tres" id="9_exit_focus"]
+[ext_resource type="PackedScene" path="res://scenes/components/top_bar.tscn" id="6_top_bar"]
+[ext_resource type="PackedScene" path="res://scenes/components/bottom_bar.tscn" id="7_bottom_bar"]
 [ext_resource type="StyleBoxFlat" path="res://resources/styles/play_button_normal.tres" id="10_play_normal"]
 [ext_resource type="StyleBoxFlat" path="res://resources/styles/play_button_hover.tres" id="11_play_hover"]
 [ext_resource type="StyleBoxFlat" path="res://resources/styles/play_button_pressed.tres" id="12_play_pressed"]
 [ext_resource type="StyleBoxFlat" path="res://resources/styles/play_button_focus.tres" id="13_play_focus"]
+[ext_resource type="Texture2D" path="res://images/players.png" id="14_players_icon"]
+[ext_resource type="Texture2D" path="res://images/fire.png" id="15_fire_icon"]
+[ext_resource type="Texture2D" path="res://images/clock.png" id="16_clock_icon"]
+[ext_resource type="Texture2D" path="res://images/controller.png" id="17_controller_icon"]
+[ext_resource type="Texture2D" path="res://images/network.png" id="18_network_icon"]
+[ext_resource type="Shader" path="res://shaders/frosted_glass.gdshader" id="19_frosted_shader"]
+[ext_resource type="PackedScene" path="res://scenes/components/launching_overlay.tscn" id="20_launching_overlay"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_FrostedGlass"]
+shader = ExtResource("19_frosted_shader")
+shader_parameter/blur_radius = 24.0
+shader_parameter/tint_color = Color(0, 0, 0, 1)
+shader_parameter/tint_strength = 0.5
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_InfoPanel"]
-bg_color = Color(0, 0, 0, 0.8)
-border_width_left = 12
-border_width_top = 12
-border_width_right = 12
-border_width_bottom = 12
-border_color = Color(0, 0, 0, 0)
-border_blend = true
+bg_color = Color(0, 0, 0, 1)
 corner_radius_top_left = 32
 corner_radius_top_right = 32
 corner_radius_bottom_right = 32
 corner_radius_bottom_left = 32
-expand_margin_left = 12.0
-expand_margin_top = 12.0
-expand_margin_right = 12.0
-expand_margin_bottom = 12.0
 
 [sub_resource type="Animation" id="Animation_transition_down"]
 resource_name = "transition_down"
@@ -183,22 +184,19 @@ expand_margin_top = 20.0
 expand_margin_right = 40.0
 expand_margin_bottom = 20.0
 
-[sub_resource type="Gradient" id="Gradient_TopBar"]
-colors = PackedColorArray(0, 0, 0, 0.8, 0, 0, 0, 0)
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_SpecBadge"]
+bg_color = Color(1, 1, 1, 0.15)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 10
+content_margin_right = 10
+content_margin_top = 2
+content_margin_bottom = 2
 
-[sub_resource type="GradientTexture2D" id="GradientTexture2D_TopBar"]
-gradient = SubResource("Gradient_TopBar")
-width = 1
-fill_to = Vector2(0, 1)
-
-[sub_resource type="Gradient" id="Gradient_BottomBar"]
-colors = PackedColorArray(0, 0, 0, 0, 0, 0, 0, 0.8)
-
-[sub_resource type="GradientTexture2D" id="GradientTexture2D_BottomBar"]
-gradient = SubResource("Gradient_BottomBar")
-width = 1
-height = 32
-fill_to = Vector2(0, 1)
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_DescLabel"]
+content_margin_bottom = 12.0
 
 [node name="GameSelection" type="Control"]
 layout_mode = 3
@@ -304,23 +302,19 @@ text = "NO IMAGE"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="StaticFocusBorder" type="Panel" parent="CarouselContainer"]
-layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
+[node name="FocusLayer" type="CanvasLayer" parent="CarouselContainer"]
+layer = 11
+
+[node name="StaticFocusBorder" type="Panel" parent="CarouselContainer/FocusLayer"]
 offset_left = -150.0
 offset_top = -210.0
 offset_right = 150.0
 offset_bottom = 210.0
-grow_horizontal = 2
-grow_vertical = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_FocusBorder")
 
 [node name="InfoPanel" type="Panel" parent="."]
+material = SubResource("ShaderMaterial_FrostedGlass")
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0
@@ -328,7 +322,7 @@ anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = -1000.0
-offset_top = -450.0
+offset_top = -500.0
 offset_right = -40.0
 offset_bottom = -60.0
 grow_horizontal = 0
@@ -385,12 +379,9 @@ custom_minimum_size = Vector2(0, 36)
 layout_mode = 2
 script = ExtResource("5_auto_scroll")
 
-[node name="CreatorLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/CreatorScrollWrapper"]
+[node name="CreatorTagsContainer" type="HBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/CreatorScrollWrapper"]
 layout_mode = 0
-theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 22
-text = "Creator Info"
-vertical_alignment = 1
+theme_override_constants/separation = 12
 
 [node name="SpecsContainer" type="HFlowContainer" parent="InfoPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
@@ -399,112 +390,205 @@ theme_override_constants/v_separation = 5
 
 [node name="PlayersContainer" type="HBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer"]
 layout_mode = 2
+theme_override_constants/separation = 6
 
-[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayersContainer"]
+[node name="IconGroup" type="VBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayersContainer"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+size_flags_vertical = 4
+theme_override_constants/separation = 0
+alignment = 1
+
+[node name="IconClip" type="Control" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayersContainer/IconGroup"]
+layout_mode = 2
+custom_minimum_size = Vector2(34, 28)
+size_flags_horizontal = 4
+clip_contents = true
+
+[node name="Icon" type="TextureRect" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayersContainer/IconGroup/IconClip"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -17.0
+offset_top = -17.0
+offset_right = 17.0
+offset_bottom = 17.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("14_players_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayersContainer/IconGroup"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.6, 0.6, 1)
 theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 20
-text = "プレイ人数: "
+theme_override_font_sizes/font_size = 11
+horizontal_alignment = 1
+text = "人数"
 
 [node name="PlayersValueLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayersContainer"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
 theme_override_fonts/font = ExtResource("3_font_bold")
 theme_override_font_sizes/font_size = 20
+theme_override_styles/normal = SubResource("StyleBoxFlat_SpecBadge")
 text = "1〜4人"
 
 [node name="DifficultyContainer" type="HBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer"]
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 6
 
-[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/DifficultyContainer"]
+[node name="IconGroup" type="VBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/DifficultyContainer"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_constants/separation = 0
+alignment = 1
+
+[node name="Icon" type="TextureRect" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/DifficultyContainer/IconGroup"]
+layout_mode = 2
+custom_minimum_size = Vector2(28, 28)
+size_flags_horizontal = 4
+texture = ExtResource("15_fire_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/DifficultyContainer/IconGroup"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.6, 0.6, 1)
 theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 20
-text = "難易度:"
-
-[node name="DifficultyBar" type="ProgressBar" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/DifficultyContainer"]
-custom_minimum_size = Vector2(100, 20)
-layout_mode = 2
-size_flags_vertical = 4
-max_value = 3.0
-step = 1.0
-value = 1.0
-show_percentage = false
+theme_override_font_sizes/font_size = 11
+horizontal_alignment = 1
+text = "難易度"
 
 [node name="DifficultyValueLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/DifficultyContainer"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
 theme_override_fonts/font = ExtResource("3_font_bold")
 theme_override_font_sizes/font_size = 20
+theme_override_styles/normal = SubResource("StyleBoxFlat_SpecBadge")
 text = "普通"
 
 [node name="PlayTimeContainer" type="HBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer"]
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 6
 
-[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayTimeContainer"]
+[node name="IconGroup" type="VBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayTimeContainer"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_constants/separation = 0
+alignment = 1
+
+[node name="Icon" type="TextureRect" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayTimeContainer/IconGroup"]
+layout_mode = 2
+custom_minimum_size = Vector2(28, 28)
+size_flags_horizontal = 4
+texture = ExtResource("16_clock_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayTimeContainer/IconGroup"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.6, 0.6, 1)
 theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 20
-text = "想定プレイ時間:"
-
-[node name="PlayTimeBar" type="ProgressBar" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayTimeContainer"]
-custom_minimum_size = Vector2(100, 20)
-layout_mode = 2
-size_flags_vertical = 4
-max_value = 3.0
-step = 1.0
-value = 1.0
-show_percentage = false
+theme_override_font_sizes/font_size = 11
+horizontal_alignment = 1
+text = "時間"
 
 [node name="PlayTimeValueLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/PlayTimeContainer"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
 theme_override_fonts/font = ExtResource("3_font_bold")
 theme_override_font_sizes/font_size = 20
+theme_override_styles/normal = SubResource("StyleBoxFlat_SpecBadge")
 text = "5分〜15分"
 
 [node name="ControllerContainer" type="HBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer"]
 layout_mode = 2
+theme_override_constants/separation = 6
 
-[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/ControllerContainer"]
+[node name="IconGroup" type="VBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/ControllerContainer"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+size_flags_vertical = 4
+theme_override_constants/separation = 0
+alignment = 1
+
+[node name="IconClip" type="Control" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/ControllerContainer/IconGroup"]
+layout_mode = 2
+custom_minimum_size = Vector2(34, 28)
+size_flags_horizontal = 4
+clip_contents = true
+
+[node name="Icon" type="TextureRect" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/ControllerContainer/IconGroup/IconClip"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -17.0
+offset_top = -17.0
+offset_right = 17.0
+offset_bottom = 17.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("17_controller_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/ControllerContainer/IconGroup"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.6, 0.6, 1)
 theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 20
-text = "コントローラー: "
+theme_override_font_sizes/font_size = 11
+horizontal_alignment = 1
+text = "ｺﾝﾄﾛｰﾗｰ"
 
 [node name="ControllerValueLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/ControllerContainer"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
 theme_override_fonts/font = ExtResource("3_font_bold")
 theme_override_font_sizes/font_size = 20
+theme_override_styles/normal = SubResource("StyleBoxFlat_SpecBadge")
 text = "対応"
 
 [node name="OnlineContainer" type="HBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer"]
 layout_mode = 2
+theme_override_constants/separation = 6
 
-[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/OnlineContainer"]
+[node name="IconGroup" type="VBoxContainer" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/OnlineContainer"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_constants/separation = 0
+alignment = 1
+
+[node name="Icon" type="TextureRect" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/OnlineContainer/IconGroup"]
+layout_mode = 2
+custom_minimum_size = Vector2(28, 28)
+size_flags_horizontal = 4
+texture = ExtResource("18_network_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/OnlineContainer/IconGroup"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.6, 0.6, 1)
 theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 20
-text = "通信プレイ: "
+theme_override_font_sizes/font_size = 11
+horizontal_alignment = 1
+text = "通信"
 
 [node name="OnlineValueLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/SpecsContainer/OnlineContainer"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
 theme_override_fonts/font = ExtResource("3_font_bold")
 theme_override_font_sizes/font_size = 20
+theme_override_styles/normal = SubResource("StyleBoxFlat_SpecBadge")
 text = "非対応"
 
 [node name="DescriptionScroll" type="ScrollContainer" parent="InfoPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
 size_flags_vertical = 3
+focus_mode = 2
 horizontal_scroll_mode = 0
 
 [node name="DescLabel" type="Label" parent="InfoPanel/MarginContainer/VBoxContainer/DescriptionScroll"]
@@ -512,100 +596,13 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_fonts/font = ExtResource("2_font_regular")
 theme_override_font_sizes/font_size = 24
+theme_override_styles/normal = SubResource("StyleBoxEmpty_DescLabel")
 text = "ゲームの説明文がここに入ります。"
 autowrap_mode = 2
 
-[node name="TopBar" type="Control" parent="."]
-layout_mode = 1
-anchors_preset = 10
-anchor_right = 1.0
-offset_bottom = 250.0
-grow_horizontal = 2
-z_index = 200
-mouse_filter = 2
+[node name="TopBar" parent="." instance=ExtResource("6_top_bar")]
+bar_height = 250.0
 
-[node name="Background" type="TextureRect" parent="TopBar"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-texture = SubResource("GradientTexture2D_TopBar")
-expand_mode = 1
+[node name="BottomBar" parent="." instance=ExtResource("7_bottom_bar")]
 
-[node name="MarginContainer" type="MarginContainer" parent="TopBar"]
-layout_mode = 1
-anchors_preset = 10
-anchor_right = 1.0
-offset_bottom = 80.0
-grow_horizontal = 2
-theme_override_constants/margin_left = 40
-theme_override_constants/margin_top = 20
-theme_override_constants/margin_right = 40
-theme_override_constants/margin_bottom = 20
-
-[node name="HBoxContainer" type="HBoxContainer" parent="TopBar/MarginContainer"]
-layout_mode = 2
-
-[node name="ClockLabel" type="Label" parent="TopBar/MarginContainer/HBoxContainer"]
-layout_mode = 2
-theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 32
-text = "00:00"
-
-[node name="Spacer" type="Control" parent="TopBar/MarginContainer/HBoxContainer"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="ExitButton" type="Button" parent="TopBar/MarginContainer/HBoxContainer"]
-custom_minimum_size = Vector2(60, 60)
-layout_mode = 2
-theme_override_styles/normal = ExtResource("6_exit_normal")
-theme_override_styles/hover = ExtResource("7_exit_hover")
-theme_override_styles/pressed = ExtResource("8_exit_pressed")
-theme_override_styles/focus = ExtResource("9_exit_focus")
-icon_alignment = 1
-expand_icon = true
-
-[node name="BottomBar" type="Control" parent="."]
-layout_mode = 1
-anchors_preset = 12
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_top = -100.0
-grow_horizontal = 2
-grow_vertical = 0
-mouse_filter = 2
-
-[node name="Background" type="TextureRect" parent="BottomBar"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-texture = SubResource("GradientTexture2D_BottomBar")
-expand_mode = 1
-
-[node name="LabelMargin" type="MarginContainer" parent="BottomBar"]
-layout_mode = 1
-anchors_preset = 12
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_top = -50.0
-grow_horizontal = 2
-grow_vertical = 0
-theme_override_constants/margin_right = 40
-
-[node name="GuideLabel" type="Label" parent="BottomBar/LabelMargin"]
-layout_mode = 2
-theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_fonts/font = ExtResource("2_font_regular")
-theme_override_font_sizes/font_size = 20
-text = "Enter: 決定"
-horizontal_alignment = 2
-vertical_alignment = 1
+[node name="LaunchingOverlay" parent="." instance=ExtResource("20_launching_overlay")]

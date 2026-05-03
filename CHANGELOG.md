@@ -11,6 +11,110 @@
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.5.14] - 2026-05-03
+
+#### Fixed
+
+- **ゲーム情報パネルの製作者欄が空になる問題を解消**: v0.5.8 で製作者クエリを `developers JOIN game_versions` の INNER JOIN 形式に変えたが、Manager の通常追加/更新フローでは `developers.version_id` を NULL のまま INSERT するため、全ゲームで製作者が表示されなくなっていた。`get_developers_by_game_id` を 2 段階クエリに変更し、現行バージョン (`games.version` ↔ `game_versions.version`) に紐付いた製作者があればそれを返し、無ければ `version_id IS NULL` の行にフォールバックする挙動に修正
+
+### [Launcher v0.5.13] - 2026-05-01
+
+#### Added
+
+- **ゲーム起動中・プレイ中オーバーレイ (`launching_overlay.tscn` / `.gd`)**: ゲーム起動から終了までの間、画面右側に状態表示を出すオーバーレイ
+  - 全画面うっすら白オーバーレイ（α=0.5）で背景を透けさせつつ "別モード" 感を演出
+  - 右側に「ゲーム起動中...」/「プレイ中」のステータス文字（呼吸アニメ付き）
+  - 細い区切り線の下にゲームタイトル（太字・大）。タイトルが幅を超えたら `auto_scroll_container` で自動スクロール
+- **状態切り替え API**: `LaunchingOverlay.set_state(LAUNCHING / PLAYING)` で文言とアニメ速度が切り替わる。ゲームウィンドウ起動前後で自動的に LAUNCHING → PLAYING へ遷移
+- **ゲーム起動・終了時の背景ズーム演出**: `_switch_to_running_view` / `_switch_to_normal_view` で背景画像を中心からほんのちょっと拡大（×1.05）/縮小して、フェードと同じ TRANS_QUINT で同期させた映画的な遷移に
+
+#### Changed
+
+- **GameLauncher のシグネチャを刷新**: 未使用だった `running_overlay: Control` パラメータを廃止し、新規 `launching_overlay: LaunchingOverlay` に置き換え。`_switch_to_running_view` / `_switch_to_normal_view` も同様に整理。背景ズーム用に `background_texture: TextureRect` パラメータも追加
+- **遷移イージングを TRANS_CUBIC → TRANS_QUINT に変更**: 起動中画面とのフェードを映画的なカーブに。所要時間も 0.4-0.5s → 0.55s に統一
+- **遷移は全要素 EASE_OUT で統一**: 起動時 / 終了時とも `TRANS_QUINT EASE_OUT` で「決定的に始まり、ゆっくり収まる」スナップ感のあるカーブに統一
+- **カルーセルカードの透明度を中心からの距離で連続補間**: 従来は「選択中=1.0/それ以外=0.6」の二値で、中央到達時にパッと変化していたのを、`diff` の絶対値で線形補間する形に。トラックパッド free scroll で半分だけ移動した時も両カードが半分の濃さになる
+- **背景画像をカルーセルの scroll_index に応じて連続クロスフェード + 上下スライド**: `BackgroundTexture` (前面) と `BackgroundTextureOld` (背面) に floor/ceil(scroll_index) のゲーム背景をそれぞれロードし、fract で前面の alpha を 1 から 0 に補間。さらに lower bg は上に、upper bg は下から上に、最大 ±50px スライドする視差効果を追加。スクロール途中で次のゲームの背景がだんだん表れ、中央到達時には完全に切り替わってる挙動に。`_update_background` の従来 tween 方式は廃止
+- **背景なしゲームとの切り替えで bg が突然現れる/消える問題を解消**: 各 bg の `texture != null` を見て alpha を計算。背景なし → ありの遷移では bg_b を `fract` で徐々にフェードイン、あり → なしでは bg_a を `1-fract` でフェードアウト
+- **キーボード/コントローラー操作中はマウスカーソルを自動的に隠す**: 入力イベント毎に `Input.mouse_mode` を `HIDDEN` / `VISIBLE` で同期切替。マウスを動かすと即座に再表示。`game_selection` / `store_browse` / `common_dialog` 各画面で対応。シーン遷移時には状態を持ち越し（`_ready` での強制リセットはしない）。pause 中のダイアログでも `process_mode = ALWAYS` の dialog 側 `_input` でカーソル状態を更新
+- **起動中/プレイ中ステータステキストにシマーシェーダー適用**: LOADING 表示と同じ `progress_shimmer.gdshader` を「ゲーム起動中...」「プレイ中」に流用し、暗いベース → 中間色 → 暗いベースの波が文字を流れる効果に。LAUNCHING は速め (speed=1.8)、PLAYING はゆっくり (speed=0.7) に切替。`ShimmerHelper.apply_with_params` を新設して任意のパラメータ指定を可能に
+
+#### Fixed
+
+- **起動中/プレイ中のカルーセル入力をブロック**: `game_selection._unhandled_input` で `_game_launcher.is_running()` 時に早期 return、`_process` 内で `_trackpad_offset = 0` 強制リセット。トラックパッド/ホイール経由でカルーセルが動いてしまう問題を解消
+
+### [Launcher v0.5.12] - 2026-04-28
+
+#### Added
+
+- **トラックパッド向けフリースクロール対応**: `InputEventMouseButton.factor` を見て、マウスホイール（factor>=0.5）はディスクリート1ゲーム移動、トラックパッド（factor<0.5）はフリースクロール + 離したら最寄りゲームにスナップ、と入力デバイスに応じて挙動を分離。`InputHandler.free_scroll(delta_amount: float)` シグナル追加
+- **CarouselController に視覚オフセット引数を追加**: `update_cards(... free_offset: float ...)` で `current_scroll_index` の補間先に上乗せできるように。フリースクロール中は `new_active` を `selected_index` で固定してチラつきを防止
+
+#### Changed
+
+- **InfoPanel の縁ぼかしを除去**: 12px の透明ボーダー + `border_blend` + `expand_margin` を削除し、すりガラスのエッジをくっきりさせた。角丸 32px は維持
+
+#### Fixed
+
+- **トラックパッド2本指でカルーセルが爆速で流れる問題を解消**: 従来は1イベント=1移動だったため、Windows precision touchpad の高頻度イベントで暴走していた。factor 蓄積方式 + スナップ遅延でなめらかな操作感に
+
+### [Launcher v0.5.11] - 2026-04-27
+
+#### Added
+
+- **すりガラスシェーダー (`frosted_glass.gdshader`)**: `SCREEN_TEXTURE` を 49-tap でサンプリング（Vogel disk / 黄金角スパイラル分布で擬似一様配置）してぼかし、tint と合成するキャンバスアイテムシェーダー。`blur_radius` / `tint_color` / `tint_strength` を uniform として公開し、インスペクタから調整可能
+
+#### Changed
+
+- **ゲーム選択画面の InfoPanel をすりガラス風に変更**: 背景を単純な半透明黒（α=0.8）から、背景画像をぼかして見せるすりガラス効果へ置き換え。StyleBoxFlat の角丸 32px と縁ぼかし 12px は維持し、形状マスクとして利用
+- **スクリーンセーバーのレンガモザイク背景を実ビューポートサイズに追従**: `viewport_w` / `viewport_h` のハードコード（1920×1080）をやめ、`get_viewport_rect().size` で実サイズを取得。16:10 等のアスペクト比でも上下に偏らず画面全体に行き渡るよう修正
+- **モザイク行数のデフォルトを 5 → 4 に変更**: タイルがより大きく見える構成に
+- **モザイクタイルサイズを画面高さ自動フィットに変更**: 新規 `@export fit_height_to_viewport`（既定 true）で `row_count` 行がビューポート高さを埋めるよう tile_size を自動拡縮。アスペクト比は `tile_size` の x/y で指定（既定 1.8）。固定サイズで運用したい場合は false に
+
+### [Launcher v0.5.10] - 2026-04-19
+
+#### Added
+
+- **シマーシェーダー (`progress_shimmer.gdshader`)**: 白い光の帯が左→右に流れるエフェクトをGPUで実装。プログレスバーと LOADING ラベルで共通利用
+- **ShimmerHelper**: シマーエフェクト適用を一元管理するヘルパースクリプト。プログレスバー用とラベル用で明るさのベース値を分けて提供
+- **LOADING 状態の暗背景（DimBackground）**: ストアブラウズのタイル/バナー、カルーセルカードで読み込み中に暗い背景を表示し、NO IMAGE 状態と差別化
+
+#### Changed
+
+- **ストアブラウズのプログレスバー刷新**: 標準 `ProgressBar` から背景パネル＋フィルを分離したカスタム構成に変更。フィル側にシマーシェーダーを適用し、角丸を維持
+- **LOADING ラベルのアニメーションをシェーダーに統合**: Tween ベースのブリージング（明滅）から、光の帯が横方向に流れるシマーエフェクトへ置き換え
+- **LoadingLabel の構造変更**: 単純な Label から「暗背景 + Text」を内包する Control wrapper 構造に変更し、読み込み中の視認性を向上
+
+### [Launcher v0.5.9] - 2026-04-14
+
+#### Changed
+
+- **ストアブラウズのUI構築を段階的に変更**: `_ready`での一括構築をやめ、`_process`で1フレーム1-2セクションずつ構築するローディングフェーズを導入（プログレスバー付き）
+- **カルーセルのサムネイル読み込みを非同期化**: 同期的に全カードのサムネイルを読み込んでいた処理をバックグラウンドスレッドに移行し、LOADING→フェードインで表示
+
+#### Fixed
+
+- **画面遷移時のプチフリーズを解消**: スクリーンセーバー/ストアブラウズ/カルーセルのバックグラウンド画像読み込みスレッドにキャンセルフラグを追加し、シーン遷移時の`wait_to_finish()`ブロックを最小化
+- **カルーセル画面でフォーカスがボタン等にあるときESCが効かない問題を修正**: 各フォーカスブロックに`ui_cancel`ハンドリングを追加
+
+### [Launcher v0.5.8] - 2026-04-13
+
+#### Added
+
+- **TopBar / BottomBar コンポーネント分離**: TopBar（時計＋退出ボタン）とBottomBar（操作ヒント）を CanvasLayer ベースの独立 tscn に分離し、トランジション演出の影響を受けないよう改善
+- **KeyHintBuilder**: BottomBar 用のキーキャップ風操作ヒントUI生成ヘルパーを追加
+- **BrickMosaicBackground**: ゲーム背景画像をレンガ状に敷き詰め、行ごとに交互スクロールする背景コンポーネントを追加（バックグラウンドスレッド読み込み対応）
+- **説明文スクロール対応**: ゲーム選択画面の説明文エリアをマウスホイール＆キーボードで滑らかにスクロール可能に
+- **ゲーム情報パネルにアイコン表示**: プレイ人数・難易度・プレイ時間・コントローラー・オンラインの各スペックにアイコン画像（PNG）を追加
+
+#### Changed
+
+- **AutoScrollContainer の汎用化**: Label 専用だったスクロールコンテナを任意の Control 子ノードに対応
+- **制作者表示をタグ形式に変更**: 単一ラベルから HBoxContainer ベースのタグ表示に変更
+- **スペック表示のデザイン刷新**: ProgressBar を廃止し、アイコン＋バッジ形式のコンパクトな表示に変更
+- **退出ボタン画像を exit.jpg → exit.png に差し替え**
+- **FocusLayer導入**: フォーカス枠を CanvasLayer (layer=11) に移動し、TopBar より前面に確実に表示
+
 ### [Launcher v0.5.7] - 2026-04-01
 
 #### Added

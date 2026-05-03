@@ -58,20 +58,36 @@ func get_game_by_id(game_id: String) -> GameInfo:
 	return null
 
 ## 指定したゲームIDの製作者情報を取得
+## 優先順位: ① 現行バージョン (games.version) に紐付いた製作者 → ② version_id IS NULL の製作者
+## Manager の通常追加/更新フローでは version_id 無しで保存されるため、
+## 「現行バージョン用に明示登録された製作者が無ければ NULL 行を使う」フォールバックを行う
 func get_developers_by_game_id(game_id: String) -> Array[DeveloperInfo]:
 	if not _db_manager.is_open():
 		if not _db_manager.open():
 			return []
 
-	var developers: Array[DeveloperInfo] = []
-	var query = """
+	var versioned_query = """
+		SELECT d.id, d.game_id, d.last_name, d.first_name, d.grade
+		FROM developers d
+		JOIN game_versions gv ON d.version_id = gv.id
+		JOIN games g ON g.game_id = gv.game_id AND g.version = gv.version
+		WHERE d.game_id = ?
+		ORDER BY d.id ASC
+	"""
+	var developers = _query_developers(versioned_query, [game_id], game_id)
+	if not developers.is_empty():
+		return developers
+
+	var fallback_query = """
 		SELECT id, game_id, last_name, first_name, grade
 		FROM developers
-		WHERE game_id = ?
+		WHERE game_id = ? AND version_id IS NULL
 		ORDER BY id ASC
 	"""
-	var bindings = [game_id]
+	return _query_developers(fallback_query, [game_id], game_id)
 
+func _query_developers(query: String, bindings: Array, game_id: String) -> Array[DeveloperInfo]:
+	var developers: Array[DeveloperInfo] = []
 	if _db_manager.db.query_with_bindings(query, bindings):
 		var result_array = _db_manager.db.get_query_result()
 		if result_array != null:
@@ -86,7 +102,6 @@ func get_developers_by_game_id(game_id: String) -> Array[DeveloperInfo]:
 					developers.append(developer)
 	else:
 		push_error("[GameRepository] 製作者情報の取得に失敗しました: " + game_id)
-
 	return developers
 
 ## データベースの行からGameInfoを作成

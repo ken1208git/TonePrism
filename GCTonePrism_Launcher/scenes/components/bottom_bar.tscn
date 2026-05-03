@@ -1,0 +1,55 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scenes/components/bottom_bar.gd" id="1_script"]
+
+[sub_resource type="Gradient" id="Gradient_BottomBar"]
+colors = PackedColorArray(0, 0, 0, 0, 0, 0, 0, 0.8)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_BottomBar"]
+gradient = SubResource("Gradient_BottomBar")
+width = 1
+height = 32
+fill_to = Vector2(0, 1)
+
+[node name="BottomBar" type="CanvasLayer"]
+layer = 10
+script = ExtResource("1_script")
+
+[node name="Panel" type="Control" parent="."]
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -100.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="Background" type="TextureRect" parent="Panel"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = SubResource("GradientTexture2D_BottomBar")
+expand_mode = 1
+
+[node name="LabelMargin" type="MarginContainer" parent="Panel"]
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -50.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+theme_override_constants/margin_right = 40
+
+[node name="HintContainer" type="HBoxContainer" parent="Panel/LabelMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+alignment = 2
+theme_override_constants/separation = 20
+mouse_filter = 2

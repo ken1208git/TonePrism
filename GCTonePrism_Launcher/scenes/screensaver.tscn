@@ -1,8 +1,9 @@
-[gd_scene load_steps=4 format=3 uid="uid://cypgubenrimd2"]
+[gd_scene load_steps=5 format=3 uid="uid://cypgubenrimd2"]
 
 [ext_resource type="Script" uid="uid://cchrcdf3nmrop" path="res://scenes/screensaver.gd" id="1_screensaver"]
 [ext_resource type="FontFile" uid="uid://dolk7yphok5xu" path="res://fonts/NotoSansJP-Regular.ttf" id="2_font_regular"]
 [ext_resource type="Texture2D" uid="uid://gi0aw8bbfm8n" path="res://images/GCToneLogo.png" id="4_logo_texture"]
+[ext_resource type="PackedScene" path="res://scenes/components/brick_mosaic_background.tscn" id="5_brick_mosaic"]
 
 [node name="Screensaver" type="Control"]
 layout_mode = 3
@@ -22,6 +23,15 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0.1, 0.1, 0.1, 1)
 
+[node name="BrickMosaicBackground" parent="." instance=ExtResource("5_brick_mosaic")]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
 [node name="CenterContainer" type="CenterContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
@@ -32,12 +42,18 @@ grow_vertical = 2
 
 [node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer"]
 layout_mode = 2
-theme_override_constants/separation = 40
+theme_override_constants/separation = 80
 alignment = 1
 
-[node name="Logo" type="TextureRect" parent="CenterContainer/VBoxContainer"]
-custom_minimum_size = Vector2(1200, 600)
+[node name="LogoClip" type="Control" parent="CenterContainer/VBoxContainer"]
 layout_mode = 2
+custom_minimum_size = Vector2(1600, 500)
+clip_contents = true
+
+[node name="Logo" type="TextureRect" parent="CenterContainer/VBoxContainer/LogoClip"]
+custom_minimum_size = Vector2(1600, 800)
+position = Vector2(0, -150)
+size = Vector2(1600, 800)
 texture = ExtResource("4_logo_texture")
 expand_mode = 1
 stretch_mode = 5

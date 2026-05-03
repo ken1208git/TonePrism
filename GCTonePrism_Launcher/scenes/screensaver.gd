@@ -13,28 +13,42 @@ var current_state: ScreenState = ScreenState.LOGO_DISPLAY
 var idle_timer: float = 0.0
 var idle_timeout: float = 30.0  # 30秒でスライドショーに遷移
 
+var _db_manager: DatabaseManager
+
 @onready var _start_message: Label = $CenterContainer/VBoxContainer/StartMessage
+@onready var _mosaic: Control = $BrickMosaicBackground
+@onready var _logo: TextureRect = $CenterContainer/VBoxContainer/LogoClip/Logo
+
+var _logo_base_y: float = 0.0
 
 func _ready():
 	# キー入力とコントローラー入力を有効化
 	set_process_input(true)
 	set_process(true)
-	
+
 	if _start_message:
 		_start_message.text = "PRESS ANY KEY"
+
+	if _logo:
+		_logo_base_y = _logo.position.y
+
+	_load_mosaic_backgrounds()
 
 func _process(delta):
 	# アイドルタイマーの更新
 	if current_state == ScreenState.LOGO_DISPLAY:
 		idle_timer += delta
 		
-		# PRESS ANY KEY のブリージングアニメーション
-		# 周期2秒程度 (3.0 rad/sec)
-		# alpha: 0.2 ~ 1.0 (少し広めに)
-		var scroll_alpha = 0.6 + 0.4 * sin(idle_timer * 3.0)
-		
+		# システム時刻ベース（複数PC間で同期）
+		var t := Time.get_unix_time_from_system()
+
+		# PRESS ANY KEY のブリージングアニメーション（周期2秒）
 		if _start_message:
-			_start_message.modulate.a = scroll_alpha
+			_start_message.modulate.a = 0.6 + 0.4 * sin(t * 3.0)
+
+		# ロゴのふわふわアニメーション（周期3秒、振幅10px）
+		if _logo:
+			_logo.position.y = _logo_base_y + sin(t * TAU / 3.0) * 10.0
 
 		if idle_timer >= idle_timeout:
 			# スライドショーに遷移（将来実装）
@@ -72,3 +86,27 @@ func _transition_to_logo_display():
 ## スライドショーに遷移（将来実装）
 func _transition_to_slideshow():
 	current_state = ScreenState.SLIDESHOW
+
+## DBからゲーム背景画像パスを収集してモザイク背景を構築
+func _load_mosaic_backgrounds() -> void:
+	_db_manager = DatabaseManager.new()
+	if not _db_manager.open():
+		return
+	var game_repo := GameRepository.new(_db_manager)
+	var games := game_repo.get_all_games()
+	_db_manager.close()
+
+	var bg_paths: Array[String] = []
+	for game in games:
+		if game.background_path.is_empty():
+			continue
+		var path := GamePathResolver.resolve_path(game.background_path, game.game_id)
+		if path.is_empty() or not FileAccess.file_exists(path):
+			continue
+		var ext := path.get_extension().to_lower()
+		if ext not in ["png", "jpg", "jpeg", "bmp", "webp", "tga"]:
+			continue
+		bg_paths.append(path)
+
+	if not bg_paths.is_empty():
+		_mosaic.setup(bg_paths)

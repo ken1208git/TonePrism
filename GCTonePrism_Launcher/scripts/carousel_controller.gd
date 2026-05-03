@@ -44,46 +44,59 @@ func create_cards(games: Array[GameInfo], card_template: Panel,
 		# サムネイル読み込み
 		_setup_card_thumbnail(card, game)
 
-## カードのサムネイルを設定する
+## カードのサムネイルを準備する（画像は後からバックグラウンドで読み込む）
 func _setup_card_thumbnail(card: Panel, game: GameInfo) -> void:
 	var icon_rect = card.get_node_or_null("Clipper/Icon")
 	var no_image_label = card.get_node_or_null("Clipper/NoImageLabel")
 
 	var thumb_path = GamePathResolver.resolve_path(game.thumbnail_path, game.game_id)
 
-	var tex_to_set = null
 	if not thumb_path.is_empty() and FileAccess.file_exists(thumb_path):
-		var img = Image.load_from_file(thumb_path)
-		tex_to_set = ImageTexture.create_from_image(img)
+		# パスを保持し、後でバックグラウンドスレッドから読み込む
+		card.set_meta("thumb_path", thumb_path)
+		if icon_rect:
+			icon_rect.visible = false
+		if no_image_label:
+			no_image_label.text = "LOADING"
+			no_image_label.visible = true
 	else:
 		if not game.thumbnail_path.is_empty():
 			push_warning("[CarouselController] ⚠️ Thumbnail NOT found for '%s' (ID: %s)\n  - DB Path: '%s'\n  - Check: '%s'" %
 				[game.title, game.game_id, game.thumbnail_path, thumb_path])
-
-	if tex_to_set:
-		if icon_rect:
-			icon_rect.texture = tex_to_set
-			icon_rect.visible = true
-		if no_image_label:
-			no_image_label.visible = false
-	else:
 		if icon_rect:
 			icon_rect.visible = false
 		if no_image_label:
 			no_image_label.visible = true
 
+## バックグラウンド読み込み用のキューを返す
+func get_image_load_queue() -> Array:
+	var queue: Array = []
+	for card in card_nodes:
+		if card.has_meta("thumb_path"):
+			queue.append({
+				"node_id": card.get_instance_id(),
+				"path": card.get_meta("thumb_path"),
+				"card": card
+			})
+	return queue
+
 ## 毎フレーム呼ばれる。カードの位置・スケール・透明度を更新する
-func update_cards(delta: float, selected_index: int, viewport_size: Vector2,
-		container_center_x: float, using_mouse: bool,
+## free_offset: トラックパッドのフリースクロール時の視覚オフセット（スナップ前の中間値）
+func update_cards(delta: float, selected_index: int, free_offset: float,
+		viewport_size: Vector2, container_center_x: float, using_mouse: bool,
 		static_focus_border: Panel, is_running: bool = false) -> int:
 	var viewport_center_y = viewport_size.y / 2
 
-	# スムーズスクロール
-	var target = float(selected_index)
+	# スムーズスクロール（フリースクロール時は視覚オフセットを target に上乗せ）
+	var target = float(selected_index) + free_offset
 	current_scroll_index = lerpf(current_scroll_index, target, SCROLL_SPEED * delta)
 
-	# アクティブインデックスの計算
-	var new_active = int(round(current_scroll_index))
+	# アクティブインデックスの計算（フリースクロール中は selected_index を維持してチラつき防止）
+	var new_active: int
+	if absf(free_offset) > 0.001:
+		new_active = selected_index
+	else:
+		new_active = int(round(current_scroll_index))
 	new_active = clampi(new_active, 0, card_nodes.size() - 1)
 
 	# 各カードの位置更新
@@ -103,10 +116,11 @@ func update_cards(delta: float, selected_index: int, viewport_size: Vector2,
 		var scale_factor = remap(dist_from_center_px, 0, 150, SCALE_ACTIVE, SCALE_INACTIVE)
 		scale_factor = clamp(scale_factor, SCALE_INACTIVE, SCALE_ACTIVE)
 
-		# 透明度（起動中(フェード中)は上書きしない）
+		# 透明度: 中心からの距離で連続補間（中心=1.0、1ゲーム分離れたら OPACITY_INACTIVE）
+		# 起動中(フェード中)は上書きしない
 		if not is_running:
-			var opacity = 1.0 if i == selected_index else OPACITY_INACTIVE
-			card.modulate.a = opacity
+			var dist = clampf(absf(diff), 0.0, 1.0)
+			card.modulate.a = lerpf(1.0, OPACITY_INACTIVE, dist)
 
 		# 反映
 		card.position = Vector2(container_center_x - (CARD_SIZE.x / 2), screen_y - (CARD_SIZE.y / 2))

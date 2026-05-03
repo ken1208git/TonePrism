@@ -96,8 +96,12 @@ func _process(delta):
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton or event is InputEventMouseMotion:
 		_mouse_mode = true
+		# ダイアログ中もマウス操作したらカーソル表示
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	elif event is InputEventKey or event is InputEventJoypadButton or event is InputEventJoypadMotion:
 		_mouse_mode = false
+		# キーボード/コントローラー操作ならカーソル非表示
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 
 func _ready():
 	_title_label.text = ""
