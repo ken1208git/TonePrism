@@ -11,6 +11,12 @@
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.5.14] - 2026-05-03
+
+#### Fixed
+
+- **ゲーム情報パネルの製作者欄が空になる問題を解消**: v0.5.8 で製作者クエリを `developers JOIN game_versions` の INNER JOIN 形式に変えたが、Manager の通常追加/更新フローでは `developers.version_id` を NULL のまま INSERT するため、全ゲームで製作者が表示されなくなっていた。`get_developers_by_game_id` を 2 段階クエリに変更し、現行バージョン (`games.version` ↔ `game_versions.version`) に紐付いた製作者があればそれを返し、無ければ `version_id IS NULL` の行にフォールバックする挙動に修正
+
 ### [Launcher v0.5.13] - 2026-05-01
 
 #### Added
