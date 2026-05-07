@@ -282,28 +282,49 @@ namespace GCTonePrism.Manager.Controls
                 $"ゲーム「{selectedGame.Title}」を削除しますか？\nこの操作は取り消せません。",
                 "削除確認", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
 
-            if (result == DialogResult.Yes)
+            if (result != DialogResult.Yes) return;
+
+            // CASCADE で developers / game_versions / game_genres / play_records /
+            // surveys / store_section_games が削除される。共有フォルダ越しでは
+            // 数秒かかるケースもあるので Marquee 進捗を表示する。
+            Exception caught = null;
+            using (var dialog = new ProcessingDialog((progress, token) =>
             {
                 try
                 {
+                    progress?.Report(new ProgressInfo(-1, "ゲームを削除中...",
+                        $"「{selectedGame.Title}」と関連レコードをデータベースから削除しています"));
                     _dbManager.DeleteGame(selectedGame.GameId);
-                    MessageBox.Show("ゲームを削除しました。", "成功",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    LoadGames();
-                }
-                catch (System.Data.SQLite.SQLiteException ex)
-                {
-                    MessageBox.Show(
-                        $"ゲームの削除に失敗しました。\n\n{DatabaseManager.GetUserFriendlyErrorMessage(ex)}",
-                        "データベースエラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(
-                        $"ゲームの削除に失敗しました。\n\n{ex.Message}",
-                        "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    caught = ex;
+                    throw;
+                }
+            })
+            {
+                Text = "ゲーム削除中",
+                MarqueeMode = true,
+                AllowCancel = false
+            })
+            {
+                var dr = dialog.ShowDialog(this.FindForm());
+                if (dr != DialogResult.OK)
+                {
+                    if (caught is System.Data.SQLite.SQLiteException sqEx)
+                    {
+                        MessageBox.Show(
+                            $"ゲームの削除に失敗しました。\n\n{DatabaseManager.GetUserFriendlyErrorMessage(sqEx)}",
+                            "データベースエラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                    // それ以外は ProcessingDialog 内で MessageBox 表示済み
+                    return;
                 }
             }
+
+            MessageBox.Show("ゲームを削除しました。", "成功",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            LoadGames();
         }
 
         private void btnRefresh_Click(object sender, EventArgs e)

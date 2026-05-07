@@ -18,6 +18,28 @@ namespace GCTonePrism.Manager
             _cts = new CancellationTokenSource();
         }
 
+        /// <summary>
+        /// 進捗が定量化できない処理向け。Marquee（流れる）スタイルにする。
+        /// </summary>
+        public bool MarqueeMode
+        {
+            get { return pbProgress.Style == ProgressBarStyle.Marquee; }
+            set
+            {
+                pbProgress.Style = value ? ProgressBarStyle.Marquee : ProgressBarStyle.Blocks;
+                if (value) pbProgress.MarqueeAnimationSpeed = 30;
+            }
+        }
+
+        /// <summary>
+        /// キャンセル可能かどうか。途中で中断できない処理（Directory.Move 等）では false に設定する。
+        /// </summary>
+        public bool AllowCancel
+        {
+            get { return btnCancel.Visible; }
+            set { btnCancel.Visible = value; }
+        }
+
         private async void ProcessingDialog_Shown(object sender, EventArgs e)
         {
             var progress = new Progress<ProgressInfo>(ReportProgress);

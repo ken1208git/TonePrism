@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Windows.Forms;
 using GCTonePrism.Manager.Models;
 using GCTonePrism.Manager.Services;
@@ -428,30 +429,64 @@ namespace GCTonePrism.Manager
                     string oldFolder = PathManager.GetGameFolder(oldGameId);
                     string newFolder = PathManager.GetGameFolder(newGameId);
 
-                    bool folderRenamed = false;
-                    if (System.IO.Directory.Exists(oldFolder))
+                    if (System.IO.Directory.Exists(oldFolder) && System.IO.Directory.Exists(newFolder))
                     {
-                        if (System.IO.Directory.Exists(newFolder))
-                        {
-                            throw new InvalidOperationException($"フォルダ「{newFolder}」が既に存在します。");
-                        }
-                        System.IO.Directory.Move(oldFolder, newFolder);
-                        folderRenamed = true;
+                        throw new InvalidOperationException($"フォルダ「{newFolder}」が既に存在します。");
                     }
 
-                    // フォルダリネーム成功後にDB側のID更新（重複チェック含む）
-                    try
+                    // ゲームフォルダのリネームは同一ボリュームでは一瞬だが、共有フォルダ越しや
+                    // クロスボリュームでは内部的にコピー＋削除になり時間がかかる。
+                    // ProcessingDialog で進捗を表示する。
+                    Exception caught = null;
+                    using (var dialog = new ProcessingDialog((IProgress<ProgressInfo> progress, CancellationToken token) =>
                     {
-                        dbManager.UpdateGameId(oldGameId, newGameId);
-                    }
-                    catch
-                    {
-                        // DB更新失敗時はフォルダを元に戻す
-                        if (folderRenamed)
+                        try
                         {
-                            System.IO.Directory.Move(newFolder, oldFolder);
+                            progress?.Report(new ProgressInfo(-1, "フォルダをリネーム中...", $"{oldFolder} → {newFolder}"));
+
+                            bool folderRenamed = false;
+                            if (System.IO.Directory.Exists(oldFolder))
+                            {
+                                System.IO.Directory.Move(oldFolder, newFolder);
+                                folderRenamed = true;
+                            }
+
+                            progress?.Report(new ProgressInfo(-1, "データベースを更新中...", $"ゲームID: {oldGameId} → {newGameId}"));
+
+                            try
+                            {
+                                dbManager.UpdateGameId(oldGameId, newGameId);
+                            }
+                            catch
+                            {
+                                // DB更新失敗時はフォルダを元に戻す
+                                if (folderRenamed)
+                                {
+                                    progress?.Report(new ProgressInfo(-1, "ロールバック中...", "フォルダを元の名前に戻しています"));
+                                    System.IO.Directory.Move(newFolder, oldFolder);
+                                }
+                                throw;
+                            }
                         }
-                        throw;
+                        catch (Exception ex)
+                        {
+                            caught = ex;
+                            throw;
+                        }
+                    })
+                    {
+                        Text = "ゲームIDを変更中",
+                        MarqueeMode = true,
+                        AllowCancel = false
+                    })
+                    {
+                        var dr = dialog.ShowDialog(this);
+                        if (dr != DialogResult.OK)
+                        {
+                            // ProcessingDialog 内で MessageBox 表示済みなのでここでは何もしない
+                            if (caught != null) throw caught;
+                            return;
+                        }
                     }
 
                     // gameFolderを更新（以降のパス処理で使用）

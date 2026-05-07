@@ -501,6 +501,42 @@
   - システム全体の設定変更
   - 必要に応じて追加される設定項目の管理
 
+#### バックアップ機能
+
+##### 機能12: データベースバックアップ・復元機能
+
+- **説明**: `prism.db` のスナップショットを取得・管理し、障害・破損・操作ミス発生時に過去の状態へ戻せるようにする機能
+- **優先度**: 高（特にプレイ記録・アンケート結果のような再現不可なデータの保全のため）
+- **対応リリース**: Manager v0.8.0
+- **詳細**:
+  - **専用タブ「バックアップ」**を MainForm に追加
+  - **手動バックアップ**: 「今すぐバックアップ」ボタンで即時実行
+  - **自動バックアップ**: Manager 起動時に「前回バックアップから設定間隔（デフォルト 24h）以上経過していたら走らせる」方式
+    - 設置現場の運用上、Manager は常時起動でなく時々開かれる前提のため、起動時チェック方式を採用（cron 型ではない）
+  - **バックアップ方式**: SQLite Online Backup API（`SQLiteConnection.BackupDatabase`）を使用
+    - Launcher が `prism.db` を開いている状態でもライブDBの整合性を保ったコピーが可能
+    - WAL モードのチェックポイント処理も内部で適切に行われる
+  - **マルチPC重複防止**: `settings.last_backup_at` を `BEGIN IMMEDIATE` トランザクションで更新する lease 方式
+    - 運用上は単一Manager前提だが、防衛的な仕組みとして実装
+  - **バックアップ履歴一覧**: `backup_log` テーブルを表示（日時 / 実行PC / トリガ / 状態 / サイズ / ファイルパス）
+  - **保存先設定**: デフォルトは `<DBファイルのフォルダ>/backups/`、設定で任意のフォルダに変更可能
+  - **ファイル名規則**: `prism_YYYYMMDD_HHmmss.db`
+  - **世代管理**: 設定値 `backup_retention_count`（デフォルト 30）を超える古いバックアップは自動削除
+  - **リストア機能**:
+    1. 履歴一覧から復元したいバックアップを選択
+    2. 警告ダイアログ表示（「全Launcher を停止してください」「現DBは退避されます」）
+    3. 4桁の確認コード入力による誤操作防止（`ResetDatabaseConfirmForm` と同じパターン）
+    4. 現在の `prism.db` を `safety_before_restore_HHmmss.db` として Online Backup API で退避
+    5. SQLite 接続プールをクリア
+    6. `prism.db` / `prism.db-wal` / `prism.db-shm` を削除
+    7. 選択されたバックアップを `prism.db` としてコピー
+    8. DB を再初期化、各パネルを再ロード
+- **設定値**（`settings` テーブルに保存）:
+  - `last_backup_at`（UNIX秒）: 最終バックアップ完了時刻、lease で使用
+  - `backup_destination_path`（TEXT）: 保存先フォルダ。空ならデフォルト
+  - `backup_auto_interval_hours`（INTEGER, デフォルト 24）: 自動バックアップ間隔
+  - `backup_retention_count`（INTEGER, デフォルト 30）: 保持する世代数
+
 ### 2.3 監視機能（Monitor - 先生PC向け）
 
 パソコン室内の先生PCで動作し、各展示PCの状態監視とスタッフ呼び出し通知の受信を行う監視ソフトウェア。
@@ -1472,9 +1508,20 @@ prism.db (SQLiteデータベースファイル)
   │    ├─ comment
   │    └─ created_at
 
-  └─ settingsテーブル (システム設定・KVS形式)
-       ├─ key (PRIMARY KEY)
-       └─ value
+  ├─ settingsテーブル (システム設定・KVS形式)
+  │    ├─ key (PRIMARY KEY)
+  │    └─ value
+
+  └─ backup_logテーブル (データベースバックアップ履歴 - v0.8.0で追加)
+       ├─ id (PRIMARY KEY, AUTOINCREMENT)
+       ├─ started_at (UNIX秒)
+       ├─ completed_at (UNIX秒、NULL=進行中)
+       ├─ pc_name
+       ├─ file_path
+       ├─ file_size_bytes
+       ├─ status ('in_progress' | 'success' | 'failed')
+       ├─ error_message
+       └─ trigger_type ('manual' | 'auto')
 ```
 
 ### 7.3 SQLiteデータベース設計
@@ -1645,6 +1692,33 @@ SQLiteデータベースのテーブル設計：
   | favorite_game_id | TEXT | FOREIGN KEY | お気に入りゲームID（games.game_idを参照、ON DELETE SET NULL） |
   | comment | TEXT | | コメント |
   | created_at | TEXT | DEFAULT CURRENT_TIMESTAMP | 回答日時 |
+
+#### テーブル11: backup_log
+
+- **テーブル名**: `backup_log`
+- **説明**: データベースバックアップの実行履歴を格納するテーブル（Manager v0.8.0 / DB スキーマ v9 で追加）
+- **カラム**:
+
+  | カラム名 | データ型 | 制約 | 説明 |
+  | --- | --- | --- | --- |
+  | id | INTEGER | PRIMARY KEY AUTOINCREMENT | 履歴ID |
+  | started_at | INTEGER | NOT NULL | 開始時刻（UNIX秒） |
+  | completed_at | INTEGER | | 完了時刻（UNIX秒、NULL=進行中） |
+  | pc_name | TEXT | NOT NULL | 実行PC名（`Environment.MachineName`） |
+  | file_path | TEXT | | バックアップファイルのフルパス（成功時のみ） |
+  | file_size_bytes | INTEGER | | バックアップファイルサイズ（成功時のみ） |
+  | status | TEXT | NOT NULL CHECK ('in_progress', 'success', 'failed') | 実行状態 |
+  | error_message | TEXT | | エラーメッセージ（失敗時のみ） |
+  | trigger_type | TEXT | NOT NULL CHECK ('manual', 'auto') | 実行トリガ種別 |
+
+  **関連 settings キー**（同テーブル内に保存）:
+
+  | キー | デフォルト | 説明 |
+  | --- | --- | --- |
+  | `last_backup_at` | 0 | 最終バックアップ完了時刻（UNIX秒）。マルチPC実行時の lease で使用 |
+  | `backup_destination_path` | （空文字列） | バックアップ保存先フォルダ。空ならデフォルト（`<DBフォルダ>/backups/`） |
+  | `backup_auto_interval_hours` | 24 | 自動バックアップの間隔（時間） |
+  | `backup_retention_count` | 30 | 保持する世代数（これを超えた古いバックアップは自動削除） |
 
 ### 7.4 リレーション
 
@@ -2128,15 +2202,18 @@ GCTonePrism/
   - ゲーム削除機能
   - データ閲覧・エクスポート機能（CSV、JSON形式）
   - 設定管理機能（カラーテーマ設定、フィルター条件管理など）
+  - **データベースバックアップ・復元機能**（Manager v0.8.0 で先行実装、機能12参照）
   - 管理ソフトUIの改善・完成
 - **達成条件**:
   - 管理ソフトからゲームの編集・削除が可能
   - プレイ記録やアンケート結果の閲覧・エクスポートが可能
   - 設定の変更がランチャーに反映される
+  - バックアップ・復元が手動・自動の両方で動作する
 - **技術的達成項目**:
   - データ編集機能の実装
   - データエクスポート機能の実装
   - 設定管理機能の実装
+  - データベースバックアップ機能の実装（SQLite Online Backup API）
 
 #### マイルストーン13: 完全版リリース
 
@@ -2248,6 +2325,7 @@ GCTonePrism/
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
+| 2026-05-07 | 1.8.0 | データベースバックアップ・復元機能（機能12）の仕様追加：2.2 管理機能に手動／自動バックアップ・履歴一覧・リストアの仕様を新設、7.3 SQLite データベース設計にテーブル11 `backup_log` を追加（status / trigger_type / pc_name / file_path 等）、`settings` キー4項目を明記（last_backup_at, backup_destination_path, backup_auto_interval_hours, backup_retention_count）、DB スキーマを v8 → v9 に更新、マイルストーン12 主要機能リストにバックアップ機能を追記。Manager v0.8.0 で先行実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-01 | 1.7.0 | Tools（補助ユーティリティ群）の仕様追加：2.4 セクション新設、`GCTonePrism_Tools/` 配置・C# / .NET Framework 4.8 採用・統合 .sln 構成、Launcher との通信規約（OS.execute / stdout JSON）、Tool 1: WindowProbe（ゲームウィンドウ可視化検知）と Tool 2: PauseOverlay（中断メニュー、将来）の仕様、独立 .exe vs サブコマンド方式の検討事項を記載 | Kenshiro Kuroga & Claude |
 | 2026-03-30 | 1.6.1 | Material Design 3関連の記述を削除：デザインシステムをMD3ベースからダークテーマベースのカスタムデザインに変更、デザインガイドラインからMD3固有の記述（タイポグラフィ・アイコン・コンポーネントのMD3準拠言及）を削除、参考資料からMD3セクションを削除、マイルストーン7のMD3言及を削除 | Kenshiro Kuroga & Claude |
 | 2026-03-28 | 1.6.0 | サービスモード機能（機能23）の仕様追加：診断・テスト7項目、ログ・情報3項目、設定・操作6項目、自動復帰タイマー。ログ基盤仕様（統一ログシステム、ファイル出力、メモリバッファ）追加。機能22を終了制御機能に変更（Alt+F4/×ボタン封印）。画面12（サービスモード画面）追加。マイルストーン10にサービスモード・ログ基盤を追加 | Kenshiro Kuroga & Claude |

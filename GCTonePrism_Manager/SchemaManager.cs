@@ -16,7 +16,7 @@ namespace GCTonePrism.Manager
 
         // 現在のデータベースバージョン
         // 構造変更があるたびにインクリメントする
-        private const int CurrentDbVersion = 8;
+        private const int CurrentDbVersion = 10;
 
         public SchemaManager(DatabaseConnection conn)
         {
@@ -296,6 +296,11 @@ namespace GCTonePrism.Manager
                 command.ExecuteNonQuery();
             }
 
+            // settings テーブルが古いスキーマ（id / color_theme / launcher_settings / filter_settings の単一行型）の場合、
+            // KVS スキーマへ移行する。SPECIFICATION 1.3.1 (2026-02-08) で KVS 化されたが、
+            // 既存DB向けマイグレーションが実装されていなかったため Manager v0.8.0 でフォローする。
+            EnsureSettingsTableIsKvsSchema(connection, transaction);
+
             // store_sectionsテーブル作成
             string createStoreSectionsTable = @"
                 CREATE TABLE IF NOT EXISTS store_sections (
@@ -329,6 +334,128 @@ namespace GCTonePrism.Manager
             using (var command = new SQLiteCommand(createStoreSectionGamesTable, connection, transaction))
             {
                 command.ExecuteNonQuery();
+            }
+
+            // backup_logテーブル作成（v9 で追加）
+            CreateBackupLogTable(connection, transaction);
+
+            // 新規DB向けにバックアップ関連の設定デフォルト値を投入
+            InsertBackupDefaults(connection, transaction);
+        }
+
+        /// <summary>
+        /// settings テーブルが古いスキーマの場合、KVS スキーマへ移行する。
+        /// 古いスキーマ（id / color_theme / launcher_settings / filter_settings 等）には
+        /// 実コードからの読み書きが存在しなかったため、データロスは発生しない。
+        /// 念のため `settings_legacy_v8_or_earlier` としてリネームしてから新規作成する。
+        /// </summary>
+        private void EnsureSettingsTableIsKvsSchema(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            // 1. settings テーブルが存在するか
+            bool settingsExists;
+            using (var cmd = new SQLiteCommand(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='settings'",
+                connection, transaction))
+            {
+                long count = (long)cmd.ExecuteScalar();
+                settingsExists = count > 0;
+            }
+            if (!settingsExists)
+            {
+                // 直前の CREATE TABLE IF NOT EXISTS で必ず作成されているはずだが、念のため。
+                return;
+            }
+
+            // 2. 'key' カラムがあるか
+            bool hasKeyColumn = false;
+            using (var cmd = new SQLiteCommand("PRAGMA table_info(settings)", connection, transaction))
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    if (reader["name"].ToString() == "key")
+                    {
+                        hasKeyColumn = true;
+                        break;
+                    }
+                }
+            }
+
+            if (hasKeyColumn) return;
+
+            // 3. 古いスキーマ → リネームして新規作成
+            Console.WriteLine("[DatabaseManager] settings テーブルが古いスキーマです。KVS方式に移行します。");
+
+            // 既に legacy テーブルが残っていたら削除（過去に失敗した移行の残骸を掃除）
+            using (var cmd = new SQLiteCommand(
+                "DROP TABLE IF EXISTS settings_legacy_v8_or_earlier", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            using (var cmd = new SQLiteCommand(
+                "ALTER TABLE settings RENAME TO settings_legacy_v8_or_earlier", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            using (var cmd = new SQLiteCommand(
+                "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            Console.WriteLine("[DatabaseManager] settings テーブルを KVS 方式で再作成しました。" +
+                              "旧データは settings_legacy_v8_or_earlier に保管されています。");
+        }
+
+        /// <summary>
+        /// backup_log テーブルを作成（IF NOT EXISTS で冪等）。
+        /// trigger_type は 'manual' / 'auto' / 'safety' の3種。
+        /// </summary>
+        private void CreateBackupLogTable(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            string sql = @"
+                CREATE TABLE IF NOT EXISTS backup_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    started_at INTEGER NOT NULL,
+                    completed_at INTEGER,
+                    pc_name TEXT NOT NULL,
+                    file_path TEXT,
+                    file_size_bytes INTEGER,
+                    status TEXT NOT NULL CHECK (status IN ('in_progress','success','failed')),
+                    error_message TEXT,
+                    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('manual','auto','safety'))
+                )";
+            using (var command = new SQLiteCommand(sql, connection, transaction))
+            {
+                command.ExecuteNonQuery();
+            }
+        }
+
+        /// <summary>
+        /// settings テーブルにバックアップ関連のデフォルトキーを INSERT OR IGNORE で投入
+        /// </summary>
+        private void InsertBackupDefaults(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            string[][] defaults = new[]
+            {
+                new[] { "last_backup_at", "0" },
+                new[] { "backup_destination_path", "" },
+                new[] { "backup_auto_interval_hours", "24" },
+                new[] { "backup_retention_count", "30" }
+            };
+
+            foreach (var kv in defaults)
+            {
+                using (var command = new SQLiteCommand(
+                    "INSERT OR IGNORE INTO settings (key, value) VALUES (@key, @value)",
+                    connection, transaction))
+                {
+                    command.Parameters.AddWithValue("@key", kv[0]);
+                    command.Parameters.AddWithValue("@value", kv[1]);
+                    command.ExecuteNonQuery();
+                }
             }
         }
 
@@ -527,6 +654,18 @@ namespace GCTonePrism.Manager
                     {
                         MigrateV7ToV8(connection, migTransaction);
                         currentVersion = 8;
+                    }
+
+                    if (currentVersion < 9)
+                    {
+                        MigrateV8ToV9(connection, migTransaction);
+                        currentVersion = 9;
+                    }
+
+                    if (currentVersion < 10)
+                    {
+                        MigrateV9ToV10(connection, migTransaction);
+                        currentVersion = 10;
                     }
 
                     SetDbVersion(connection, CurrentDbVersion, migTransaction);
@@ -913,6 +1052,67 @@ namespace GCTonePrism.Manager
                 // カラムが既に存在する場合はスキップ
                 Console.WriteLine($"[DatabaseManager] Warning adding display_text: {ex.Message}");
             }
+        }
+
+        private void MigrateV8ToV9(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            Console.WriteLine("[DatabaseManager] Executing migration V8 -> V9 (Adding backup_log table and backup-related settings)");
+
+            // backup_log テーブル作成（CreateTables 側でも IF NOT EXISTS で作成されるが、明示的に呼ぶ）
+            CreateBackupLogTable(connection, transaction);
+
+            // バックアップ関連の設定デフォルトを投入
+            InsertBackupDefaults(connection, transaction);
+
+            Console.WriteLine("[DatabaseManager] Migration V8 -> V9 completed.");
+        }
+
+        private void MigrateV9ToV10(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            Console.WriteLine("[DatabaseManager] Executing migration V9 -> V10 (Extending backup_log.trigger_type CHECK to allow 'safety')");
+
+            // SQLite の CHECK 制約は ALTER TABLE で変更できないため、テーブルを作り直す。
+            // 既存行は trigger_type が 'manual' / 'auto' のみなので新CHECKに違反しない。
+            string createNew = @"
+                CREATE TABLE backup_log_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    started_at INTEGER NOT NULL,
+                    completed_at INTEGER,
+                    pc_name TEXT NOT NULL,
+                    file_path TEXT,
+                    file_size_bytes INTEGER,
+                    status TEXT NOT NULL CHECK (status IN ('in_progress','success','failed')),
+                    error_message TEXT,
+                    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('manual','auto','safety'))
+                )";
+            using (var cmd = new SQLiteCommand(createNew, connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            // データを丸ごとコピー（id を維持するため列を明示）
+            using (var cmd = new SQLiteCommand(
+                "INSERT INTO backup_log_new (id, started_at, completed_at, pc_name, file_path, " +
+                "file_size_bytes, status, error_message, trigger_type) " +
+                "SELECT id, started_at, completed_at, pc_name, file_path, " +
+                "file_size_bytes, status, error_message, trigger_type FROM backup_log",
+                connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            using (var cmd = new SQLiteCommand("DROP TABLE backup_log", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            using (var cmd = new SQLiteCommand(
+                "ALTER TABLE backup_log_new RENAME TO backup_log", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            Console.WriteLine("[DatabaseManager] Migration V9 -> V10 completed.");
         }
 
         private void CopyDevelopersToVersion(SQLiteConnection connection, SQLiteTransaction transaction, string gameId, int versionId)
