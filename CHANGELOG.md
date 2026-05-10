@@ -32,8 +32,7 @@
 #### Changed
 
 - **`config/version` を `0.5.15` → `0.5.16` に更新、`version.gd` の `PATCH` も `14` → `16` に同期**
-
-### [Launcher v0.5.15] - 2026-05-10
+- **`scripts/database_manager.gd` の `CURRENT_DB_VERSION` を 8 → 12 に追従**: Manager 側 DB が v9 → v12 まで進んでいたが Launcher が 8 のまま放置されており、起動毎に「DBバージョン(12)が Launcher の対応バージョン(8)より新しい」警告が出ていた問題を本 PR の動作確認で発見。v9 / v10 / v12 は backup_log 関連で Launcher は触らない、v11 の surveys / play_records 新スキーマには Launcher のクエリが既に対応済 (`pr.start_time` 等を参照) のため、定数追従のみで安全に解消
 
 #### Changed
 
