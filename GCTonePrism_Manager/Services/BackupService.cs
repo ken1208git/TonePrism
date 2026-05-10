@@ -90,7 +90,13 @@ namespace GCTonePrism.Manager.Services
             string fileName = $"prism_{DateTime.Now:yyyyMMdd_HHmmss}.db";
             string destinationPath = Path.Combine(destinationDir, fileName);
 
-            long logId = _logRepo.InsertInProgress(pcName, triggerType, startedAt, destinationPath);
+            // プロジェクト移動耐性のため、prism.db のあるディレクトリからの相対パスも記録 (#126)
+            // dbDir 配下に無い destinationDir (ユーザー指定の絶対パス等) では null になり、
+            // 表示時は file_path にフォールバックされる。
+            string dbDir = Path.GetDirectoryName(_conn.DbPath);
+            string relativePath = BackupPathResolver.ToRelativeFromDbDir(destinationPath, dbDir);
+
+            long logId = _logRepo.InsertInProgress(pcName, triggerType, startedAt, destinationPath, relativePath);
 
             try
             {
@@ -142,7 +148,7 @@ namespace GCTonePrism.Manager.Services
                 }
 
                 long completedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                _logRepo.MarkSuccess(logId, destinationPath, fileSize, completedAt);
+                _logRepo.MarkSuccess(logId, destinationPath, fileSize, completedAt, relativePath);
 
                 // 手動の場合も last_backup_at を更新（自動バックアップが続けて走らないように）
                 if (!leaseAlreadyAcquired)

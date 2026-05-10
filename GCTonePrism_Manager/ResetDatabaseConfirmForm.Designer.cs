@@ -81,7 +81,7 @@ namespace GCTonePrism.Manager
             this.lblLauncherWarning.Location = new System.Drawing.Point(20, 95);
             this.lblLauncherWarning.Name = "lblLauncherWarning";
             this.lblLauncherWarning.TabIndex = 9;
-            this.lblLauncherWarning.Text = "⚠ 実行前に、すべての展示PCのLauncherを終了してください。\r\n　 (DBファイル・gamesフォルダがロックされ、リセットに失敗します)";
+            this.lblLauncherWarning.Text = "⚠ 実行前に、すべての展示PCのLauncherを終了してください。\r\n　 (データベースファイル・gamesフォルダがロックされ、リセットに失敗します)";
             //
             // lblConfirmationCode
             // 

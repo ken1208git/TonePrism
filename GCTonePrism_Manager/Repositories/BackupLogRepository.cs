@@ -19,11 +19,30 @@ namespace GCTonePrism.Manager.Repositories
         }
 
         /// <summary>
+        /// File.Exists 判定用にパスを解決する。relative_path があれば現在の prism.db ディレクトリと結合、
+        /// 無ければ file_path をそのまま返す。プロジェクト移動後でも relative_path 経由で実体を発見できる。
+        /// </summary>
+        private string ResolvePathForExistsCheck(string filePath, string relativePath)
+        {
+            if (!string.IsNullOrEmpty(relativePath))
+            {
+                try
+                {
+                    string dbDir = System.IO.Path.GetDirectoryName(_conn.DbPath);
+                    if (!string.IsNullOrEmpty(dbDir))
+                        return System.IO.Path.GetFullPath(System.IO.Path.Combine(dbDir, relativePath));
+                }
+                catch { /* fallthrough to file_path */ }
+            }
+            return filePath;
+        }
+
+        /// <summary>
         /// 進行中レコードを挿入し、生成された id を返す。
         /// 予定ファイルパスを最初から保存することで、後で「実ファイルが存在するか」で
         /// リコンサイル（成功/失敗の確定）が可能になる。
         /// </summary>
-        public long InsertInProgress(string pcName, string triggerType, long startedAtUnixSec, string plannedFilePath)
+        public long InsertInProgress(string pcName, string triggerType, long startedAtUnixSec, string plannedFilePath, string plannedRelativePath = null)
         {
             return _conn.ExecuteWithRetry(() =>
             {
@@ -31,13 +50,15 @@ namespace GCTonePrism.Manager.Repositories
                 {
                     _conn.OpenConnectionWithJournalMode(connection);
                     using (var cmd = new SQLiteCommand(
-                        "INSERT INTO backup_log (started_at, pc_name, status, trigger_type, file_path) " +
-                        "VALUES (@started_at, @pc_name, 'in_progress', @trigger_type, @file_path)", connection))
+                        "INSERT INTO backup_log (started_at, pc_name, status, trigger_type, file_path, relative_path) " +
+                        "VALUES (@started_at, @pc_name, 'in_progress', @trigger_type, @file_path, @relative_path)", connection))
                     {
                         cmd.Parameters.AddWithValue("@started_at", startedAtUnixSec);
                         cmd.Parameters.AddWithValue("@pc_name", pcName ?? "");
                         cmd.Parameters.AddWithValue("@trigger_type", triggerType);
                         cmd.Parameters.AddWithValue("@file_path", plannedFilePath ?? "");
+                        cmd.Parameters.AddWithValue("@relative_path",
+                            string.IsNullOrEmpty(plannedRelativePath) ? (object)DBNull.Value : plannedRelativePath);
                         cmd.ExecuteNonQuery();
                     }
                     return connection.LastInsertRowId;
@@ -45,7 +66,7 @@ namespace GCTonePrism.Manager.Repositories
             });
         }
 
-        public void MarkSuccess(long id, string filePath, long fileSizeBytes, long completedAtUnixSec)
+        public void MarkSuccess(long id, string filePath, long fileSizeBytes, long completedAtUnixSec, string relativePath = null)
         {
             _conn.ExecuteWithRetry(() =>
             {
@@ -53,10 +74,12 @@ namespace GCTonePrism.Manager.Repositories
                 {
                     _conn.OpenConnectionWithJournalMode(connection);
                     using (var cmd = new SQLiteCommand(
-                        "UPDATE backup_log SET status = 'success', file_path = @file_path, " +
+                        "UPDATE backup_log SET status = 'success', file_path = @file_path, relative_path = @relative_path, " +
                         "file_size_bytes = @file_size, completed_at = @completed_at WHERE id = @id", connection))
                     {
                         cmd.Parameters.AddWithValue("@file_path", filePath ?? "");
+                        cmd.Parameters.AddWithValue("@relative_path",
+                            string.IsNullOrEmpty(relativePath) ? (object)DBNull.Value : relativePath);
                         cmd.Parameters.AddWithValue("@file_size", fileSizeBytes);
                         cmd.Parameters.AddWithValue("@completed_at", completedAtUnixSec);
                         cmd.Parameters.AddWithValue("@id", id);
@@ -116,11 +139,11 @@ namespace GCTonePrism.Manager.Repositories
                 {
                     _conn.OpenConnectionWithJournalMode(connection);
 
-                    // 対象行を取得
-                    var inProgressTargets = new List<(long id, string filePath)>();
-                    var failedRecoverableTargets = new List<(long id, string filePath)>();
+                    // 対象行を取得 (#126: relative_path も取得して両方で存在チェックする)
+                    var inProgressTargets = new List<(long id, string filePath, string relativePath)>();
+                    var failedRecoverableTargets = new List<(long id, string filePath, string relativePath)>();
 
-                    string selectInProgressSql = "SELECT id, file_path FROM backup_log WHERE status = 'in_progress'";
+                    string selectInProgressSql = "SELECT id, file_path, relative_path FROM backup_log WHERE status = 'in_progress'";
                     if (thresholdSeconds.HasValue)
                     {
                         selectInProgressSql += " AND started_at < @cutoff";
@@ -137,35 +160,41 @@ namespace GCTonePrism.Manager.Repositories
                             {
                                 long id = Convert.ToInt64(reader["id"]);
                                 string fp = reader["file_path"] is DBNull ? "" : reader["file_path"].ToString();
-                                inProgressTargets.Add((id, fp));
+                                string rp = reader["relative_path"] is DBNull ? null : reader["relative_path"].ToString();
+                                inProgressTargets.Add((id, fp, rp));
                             }
                         }
                     }
 
                     if (recoverFailedWithExistingFile)
                     {
-                        // failed 行のうち file_path が指すファイルが実在するもの（auto-marked ゴースト救済）
+                        // failed 行のうちファイルが実在するもの（auto-marked ゴースト救済）
+                        // (#126: file_path だけでなく relative_path もチェック対象)
                         using (var cmd = new SQLiteCommand(
-                            "SELECT id, file_path FROM backup_log " +
-                            "WHERE status = 'failed' AND file_path IS NOT NULL AND file_path != ''", connection))
+                            "SELECT id, file_path, relative_path FROM backup_log " +
+                            "WHERE status = 'failed' AND " +
+                            "((file_path IS NOT NULL AND file_path != '') OR (relative_path IS NOT NULL AND relative_path != ''))",
+                            connection))
                         using (var reader = cmd.ExecuteReader())
                         {
                             while (reader.Read())
                             {
                                 long id = Convert.ToInt64(reader["id"]);
-                                string fp = reader["file_path"].ToString();
-                                failedRecoverableTargets.Add((id, fp));
+                                string fp = reader["file_path"] is DBNull ? "" : reader["file_path"].ToString();
+                                string rp = reader["relative_path"] is DBNull ? null : reader["relative_path"].ToString();
+                                failedRecoverableTargets.Add((id, fp, rp));
                             }
                         }
                     }
 
                     // in_progress 行のリコンサイル
-                    foreach (var (id, filePath) in inProgressTargets)
+                    foreach (var (id, filePath, relativePath) in inProgressTargets)
                     {
-                        bool fileExists = !string.IsNullOrEmpty(filePath) && System.IO.File.Exists(filePath);
+                        string resolvedPath = ResolvePathForExistsCheck(filePath, relativePath);
+                        bool fileExists = !string.IsNullOrEmpty(resolvedPath) && System.IO.File.Exists(resolvedPath);
                         if (fileExists)
                         {
-                            long size = new System.IO.FileInfo(filePath).Length;
+                            long size = new System.IO.FileInfo(resolvedPath).Length;
                             using (var cmd = new SQLiteCommand(
                                 "UPDATE backup_log SET status = 'success', file_size_bytes = @size, " +
                                 "completed_at = @now WHERE id = @id", connection))
@@ -193,10 +222,12 @@ namespace GCTonePrism.Manager.Repositories
                     }
 
                     // failed 行の救済リコンサイル（ファイル実在のもののみ）
-                    foreach (var (id, filePath) in failedRecoverableTargets)
+                    foreach (var (id, filePath, relativePath) in failedRecoverableTargets)
                     {
-                        if (!System.IO.File.Exists(filePath)) continue; // ファイルが無いなら本当の失敗、そのまま
-                        long size = new System.IO.FileInfo(filePath).Length;
+                        string resolvedPath = ResolvePathForExistsCheck(filePath, relativePath);
+                        if (string.IsNullOrEmpty(resolvedPath) || !System.IO.File.Exists(resolvedPath))
+                            continue; // ファイルが無いなら本当の失敗、そのまま
+                        long size = new System.IO.FileInfo(resolvedPath).Length;
                         using (var cmd = new SQLiteCommand(
                             "UPDATE backup_log SET status = 'success', file_size_bytes = @size, " +
                             "error_message = NULL WHERE id = @id", connection))
@@ -220,7 +251,7 @@ namespace GCTonePrism.Manager.Repositories
                 {
                     _conn.OpenConnectionWithJournalMode(connection);
                     using (var cmd = new SQLiteCommand(
-                        "SELECT id, started_at, completed_at, pc_name, file_path, file_size_bytes, " +
+                        "SELECT id, started_at, completed_at, pc_name, file_path, relative_path, file_size_bytes, " +
                         "status, error_message, trigger_type FROM backup_log " +
                         "WHERE status = 'success' ORDER BY started_at DESC LIMIT 1", connection))
                     using (var reader = cmd.ExecuteReader())
@@ -404,6 +435,54 @@ namespace GCTonePrism.Manager.Repositories
             });
         }
 
+        /// <summary>
+        /// 指定ステータスのレコードを全件取得 (#126: failed 自動掃除等で利用)
+        /// </summary>
+        public List<BackupLogEntry> GetByStatus(string status)
+        {
+            return _conn.ExecuteWithRetry(() =>
+            {
+                var list = new List<BackupLogEntry>();
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var cmd = new SQLiteCommand(
+                        "SELECT id, started_at, completed_at, pc_name, file_path, relative_path, file_size_bytes, " +
+                        "status, error_message, trigger_type FROM backup_log " +
+                        "WHERE status = @status ORDER BY started_at DESC", connection))
+                    {
+                        cmd.Parameters.AddWithValue("@status", status);
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                                list.Add(ReadEntry(reader));
+                        }
+                    }
+                }
+                return list;
+            });
+        }
+
+        /// <summary>
+        /// id 指定でレコードを削除 (#126: 個別削除 UI / failed 自動掃除で利用)
+        /// </summary>
+        public void DeleteById(long id)
+        {
+            _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var cmd = new SQLiteCommand(
+                        "DELETE FROM backup_log WHERE id = @id", connection))
+                    {
+                        cmd.Parameters.AddWithValue("@id", id);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+            });
+        }
+
         public List<BackupLogEntry> GetRecent(int limit)
         {
             return _conn.ExecuteWithRetry(() =>
@@ -413,7 +492,7 @@ namespace GCTonePrism.Manager.Repositories
                 {
                     _conn.OpenConnectionWithJournalMode(connection);
                     using (var cmd = new SQLiteCommand(
-                        "SELECT id, started_at, completed_at, pc_name, file_path, file_size_bytes, " +
+                        "SELECT id, started_at, completed_at, pc_name, file_path, relative_path, file_size_bytes, " +
                         "status, error_message, trigger_type FROM backup_log " +
                         "ORDER BY started_at DESC LIMIT @limit", connection))
                     {
@@ -438,6 +517,7 @@ namespace GCTonePrism.Manager.Repositories
                 CompletedAt = reader["completed_at"] is DBNull ? (long?)null : Convert.ToInt64(reader["completed_at"]),
                 PcName = reader["pc_name"] is DBNull ? "" : reader["pc_name"].ToString(),
                 FilePath = reader["file_path"] is DBNull ? "" : reader["file_path"].ToString(),
+                RelativePath = reader["relative_path"] is DBNull ? null : reader["relative_path"].ToString(),
                 FileSizeBytes = reader["file_size_bytes"] is DBNull ? (long?)null : Convert.ToInt64(reader["file_size_bytes"]),
                 Status = reader["status"].ToString(),
                 ErrorMessage = reader["error_message"] is DBNull ? "" : reader["error_message"].ToString(),

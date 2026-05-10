@@ -25,6 +25,7 @@ namespace GCTonePrism.Manager.Controls
             this.gridHistory = new System.Windows.Forms.DataGridView();
             this.grpControls = new System.Windows.Forms.GroupBox();
             this.btnRestore = new System.Windows.Forms.Button();
+            this.btnDelete = new System.Windows.Forms.Button();
             this.btnSettings = new System.Windows.Forms.Button();
             this.lblDestPath = new System.Windows.Forms.Label();
             this.grpActions.SuspendLayout();
@@ -118,6 +119,7 @@ namespace GCTonePrism.Manager.Controls
             | System.Windows.Forms.AnchorStyles.Right)));
             this.grpControls.Controls.Add(this.lblDestPath);
             this.grpControls.Controls.Add(this.btnRestore);
+            this.grpControls.Controls.Add(this.btnDelete);
             this.grpControls.Controls.Add(this.btnSettings);
             this.grpControls.Location = new System.Drawing.Point(20, 500);
             this.grpControls.Name = "grpControls";
@@ -139,13 +141,23 @@ namespace GCTonePrism.Manager.Controls
             this.btnRestore.UseVisualStyleBackColor = false;
             this.btnRestore.Click += new System.EventHandler(this.btnRestore_Click);
             //
+            // btnDelete
+            //
+            this.btnDelete.Location = new System.Drawing.Point(250, 25);
+            this.btnDelete.Name = "btnDelete";
+            this.btnDelete.Size = new System.Drawing.Size(140, 32);
+            this.btnDelete.TabIndex = 1;
+            this.btnDelete.Text = "選択した履歴を削除...";
+            this.btnDelete.UseVisualStyleBackColor = true;
+            this.btnDelete.Click += new System.EventHandler(this.btnDelete_Click);
+            //
             // btnSettings
             //
             this.btnSettings.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.btnSettings.Location = new System.Drawing.Point(940, 26);
             this.btnSettings.Name = "btnSettings";
             this.btnSettings.Size = new System.Drawing.Size(80, 30);
-            this.btnSettings.TabIndex = 1;
+            this.btnSettings.TabIndex = 2;
             this.btnSettings.Text = "設定...";
             this.btnSettings.UseVisualStyleBackColor = true;
             this.btnSettings.Click += new System.EventHandler(this.btnSettings_Click);
@@ -154,9 +166,9 @@ namespace GCTonePrism.Manager.Controls
             //
             this.lblDestPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) | System.Windows.Forms.AnchorStyles.Right)));
             this.lblDestPath.AutoEllipsis = true;
-            this.lblDestPath.Location = new System.Drawing.Point(260, 32);
+            this.lblDestPath.Location = new System.Drawing.Point(400, 32);
             this.lblDestPath.Name = "lblDestPath";
-            this.lblDestPath.Size = new System.Drawing.Size(670, 18);
+            this.lblDestPath.Size = new System.Drawing.Size(530, 18);
             this.lblDestPath.TabIndex = 2;
             this.lblDestPath.Text = "保存先: ";
             //
@@ -187,6 +199,7 @@ namespace GCTonePrism.Manager.Controls
         private System.Windows.Forms.DataGridView gridHistory;
         private System.Windows.Forms.GroupBox grpControls;
         private System.Windows.Forms.Button btnRestore;
+        private System.Windows.Forms.Button btnDelete;
         private System.Windows.Forms.Button btnSettings;
         private System.Windows.Forms.Label lblDestPath;
     }
