@@ -789,8 +789,19 @@ namespace GCTonePrism.Manager
 
                     if (currentVersion < 12)
                     {
-                        MigrateV11ToV12(connection, migTransaction);
-                        currentVersion = 12;
+                        // v11 マイグレーションが未完 (= currentVersion が 11 未満) の場合、
+                        // v12 へ進めると v10→v11 の再試行が永久に行われない。
+                        // (Codex P1 #127: v11 をスキップしたまま user_version が 12 に書き込まれ、
+                        //  次回以降「もう新しいバージョンに到達済み」と判定されて drift が温存される)
+                        if (currentVersion < 11)
+                        {
+                            Console.WriteLine("[DatabaseManager] v10→v11 が未完のため v11→v12 はスキップします（次回起動で再試行）");
+                        }
+                        else
+                        {
+                            MigrateV11ToV12(connection, migTransaction);
+                            currentVersion = 12;
+                        }
                     }
 
                     // 達成バージョン（CurrentDbVersion ではなく currentVersion）を書き込む。

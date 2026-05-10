@@ -337,6 +337,19 @@ namespace GCTonePrism.Manager.Controls
                 return;
             }
 
+            // 進行中の行は削除不可 (Codex P2 #127):
+            // 別 PC や他タスクで現在進行中のバックアップ行を消すと、後で MarkSuccess が
+            // 対象を見失って成功履歴が消える + 書き込み中のファイルが削除される
+            if (entry.Status == "in_progress")
+            {
+                MessageBox.Show(this,
+                    "このバックアップは現在実行中（または別 PC からの進行中）の可能性があるため削除できません。\n\n" +
+                    "更新ボタンで状態を再確認してから、成功または失敗が確定したものを削除してください。",
+                    "実行中のため削除不可",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             string resolvedPath = BackupPathResolver.ResolveAbsolutePath(entry, _dbManager.DatabasePath);
             string fileName = !string.IsNullOrEmpty(resolvedPath) ? Path.GetFileName(resolvedPath) : $"id={entry.Id}";
 
