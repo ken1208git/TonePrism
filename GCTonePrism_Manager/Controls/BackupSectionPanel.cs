@@ -54,7 +54,11 @@ namespace GCTonePrism.Manager.Controls
                 SQLiteConnection.ClearAllPools();
 
                 // 表示更新前にリコンサイル：
-                //   - in_progress 行 → ファイル実在で success/failed 判定（閾値なし=全件）
+                //   - in_progress 行 → 開始から 300 秒以上経過したものだけファイル実在で success/failed 判定
+                //     (#127 Codex P1: 閾値なしだと別PC/別タスクで進行中の正常バックアップを
+                //      誤って failed 化 → CleanupFailedEntries が DB レコード削除 → 後続の
+                //      MarkSuccess が 0 件更新で成功履歴が消失するため、現実的なバックアップ
+                //      所要時間より長い 300 秒を閾値にして進行中行を保護する)
                 //   - failed 行のうちファイルが見つかるもの → success に救済
                 //   - file_path が空の failed 行 → バックアップフォルダをスキャンして
                 //     started_at と一致するファイルがあれば success に復元（旧版ゴースト救済）
@@ -64,7 +68,7 @@ namespace GCTonePrism.Manager.Controls
                 {
                     var (recoveredSuccess, markedFailed) = _dbManager.BackupLogRepository.ReconcileInProgressEntries(
                         "バックアップファイルが見つかりませんでした",
-                        thresholdSeconds: null,
+                        thresholdSeconds: 300,
                         recoverFailedWithExistingFile: true);
                     int legacyRecovered = _dbManager.BackupLogRepository.RecoverLegacyFailedEntriesByFolderScan(
                         _dbManager.BackupService.GetEffectiveDestinationDirectory());
