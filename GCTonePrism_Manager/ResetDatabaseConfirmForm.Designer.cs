@@ -71,7 +71,7 @@ namespace GCTonePrism.Manager
             this.lblGamesFolderWarning.Name = "lblGamesFolderWarning";
             this.lblGamesFolderWarning.Size = new System.Drawing.Size(260, 12);
             this.lblGamesFolderWarning.TabIndex = 8;
-            this.lblGamesFolderWarning.Text = "・Manager に登録されている全ゲームのファイル（実行ファイル・サムネイル・背景画像など）\r\n　 ※ 部員の開発フォルダには影響しません。リセット前にバックアップ機能でスナップショット取得を推奨。";
+            this.lblGamesFolderWarning.Text = "・Manager に登録されている全ゲームのファイル（games フォルダ全体）\r\n　 ※ 部員の開発フォルダには影響しません。リセット前にバックアップ機能でスナップショット取得を推奨。";
             //
             // lblLauncherWarning
             //
