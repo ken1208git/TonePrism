@@ -58,15 +58,18 @@ namespace GCTonePrism.Manager.Controls
                 if (confirmForm.ShowDialog() != DialogResult.Yes) return;
             }
 
-            // ResetDatabase は DBファイル削除 + テーブル再作成 + マイグレーション再実行を行う。
-            // 共有フォルダ越しでは時間がかかる場合があるので進捗バーを表示する。
+            // ResetDatabase は DBファイル削除 + games フォルダ再構築 + テーブル再作成 +
+            // マイグレーション再実行を行う。共有フォルダ越しでは時間がかかるので進捗バー表示。
+            // 戻り値は退避フォルダ物理削除に失敗した場合の警告メッセージ (null なら完全成功)。
+            // 真に失敗した場合は例外が ProcessingDialog 内でハンドリングされ DialogResult.Abort になる。
             Exception caught = null;
+            string warning = null;
             using (var dialog = new ProcessingDialog((progress, token) =>
             {
                 try
                 {
                     progress?.Report(new ProgressInfo(-1, "データベースをリセット中...", "ファイル削除と再作成を実行しています"));
-                    _dbManager.ResetDatabase();
+                    warning = _dbManager.ResetDatabase();
                 }
                 catch (Exception ex)
                 {
@@ -87,12 +90,24 @@ namespace GCTonePrism.Manager.Controls
                 }
             }
 
-            MessageBox.Show(
-                "データベースのリセットが完了しました。",
-                "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
-
+            // ここまで来た = DB / games は再構築済み。UI リフレッシュは warning の有無に関わらず実行する
+            // (Codex P2 #121: 警告を例外で表現すると ProcessingDialog で Abort 扱いされて
+            //  リフレッシュフックがスキップされ、UI が古いまま「失敗」と誤報告されていたため)
             UpdateVersionInfo();
             DatabaseReset?.Invoke();
+
+            if (warning != null)
+            {
+                MessageBox.Show(this,
+                    "データベースのリセットは完了しましたが、警告があります:\n\n" + warning,
+                    "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            else
+            {
+                MessageBox.Show(this,
+                    "データベースのリセットが完了しました。",
+                    "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
         }
     }
 }

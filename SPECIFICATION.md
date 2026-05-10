@@ -395,6 +395,10 @@
   - **UI改善**:
     - **画像プレビュー**: 選択したサムネイル・背景画像をその場でプレビュー表示
     - **テスト起動**: 登録前に実行ファイルをテスト起動して動作確認が可能
+  - **gameId 重複検出**（Manager v0.8.4 で実装、#120）:
+    - 「保存」押下後、ファイルコピー処理の直前に `games/{gameId}/` フォルダの存在をチェック
+    - 残骸が残っていた場合は警告ダイアログで「同バージョン追加時にエラー / 別バージョン追加時に古いファイルが残る / 最悪 Launcher が古い実行ファイルを起動する可能性」を提示
+    - 自動削除はせず、データ保護のため手動退避を促す方針（OK で続行 = 古いフォルダはそのまま残る、キャンセル = 追加処理を中止）
 
 ##### 機能2: ゲーム削除機能
 
@@ -504,6 +508,20 @@
   - カラーテーマ設定（アクセントカラーの選択・設定）
   - システム全体の設定変更
   - 必要に応じて追加される設定項目の管理
+  - **データベースリセット機能**（Manager v0.8.4 で実装と整合化）:
+    - 設定タブの「データベースリセット」ボタンから起動
+    - 確認ダイアログ (`ResetDatabaseConfirmForm`) で「ボタンが逃げる」「確認コード入力」の二重安全機構を経て実行
+    - 削除実行は **`prism.db` + `games/` フォルダ配下のセット削除**（旧実装は DB のみ削除で確認画面と齟齬していたが #119 で修正）
+    - 実装は **rename rollback 方式**:
+      1. `games/` を `games.pending-delete-{guid}/` に rename で退避（同一ボリューム rename は事実上 atomic）
+      2. `prism.db` を削除
+      3. `games/` を再作成 + DB 再初期化
+      4. 退避フォルダを物理削除
+    - 失敗パターン別の挙動: (1) games rename 失敗 → 何も変わらず throw / (2) DB 削除失敗 → games を rename で復元 (ロールバック) してから throw / (3) games/ 再作成 or DB 再初期化失敗 → 部分作成された games/ と prism.db を削除 + 退避を games/ に戻して throw（DB だけ消えた状態でバックアップ #96 から復元可能） / (4) 退避フォルダ物理削除失敗 → 戻り値で警告メッセージを返す（DB / games 再構築済み + ゴミ退避フォルダだけ残る、Launcher が起動中ゲームの実行ファイルを掴んでいると起き得る）。**いずれの中間失敗でも Manager は再起動可能**
+    - **`ResetDatabase()` の戻り値**: 完全成功は `null`、退避フォルダ削除に失敗した場合は警告メッセージ文字列。呼び出し側 (`SettingsSectionPanel.btnResetDatabase_Click`) は warning の有無に関わらず `UpdateVersionInfo()` / `DatabaseReset?.Invoke()` を実行し、warning があれば情報 MessageBox で通知する。例外で表現すると ProcessingDialog 経由で「失敗」扱いされて UI リフレッシュフックがスキップされてしまうため、戻り値で「成功 + 警告」を表現する設計
+    - `backups/` 等の隣接フォルダは触らない（復元用に残す）
+    - 確認画面 (`ResetDatabaseConfirmForm`) に「すべての展示PCの Launcher を終了してから実行」警告を表示
+    - 実行前にバックアップ機能 (#96 / Manager v0.8.0) で `prism.db` のスナップショット取得を強く推奨
 
 #### バックアップ機能
 
@@ -2499,6 +2517,8 @@ GCTonePrism/
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
+| 2026-05-10 | 1.9.6 | PR #121 への Codex P1 追加指摘への対応：`SchemaManager.ResetDatabase()` を **rename rollback 方式** に変更し、DB 削除失敗時に games フォルダを復元する設計に。中間失敗時でも Manager は再起動可能な状態を保証 (broken partial-reset 状態を排除)。`ResetDatabaseConfirmForm` に「すべての展示PCの Launcher を終了してから実行」警告を追加、`DeleteGameConfirmForm` に「該当ゲームを起動中の Launcher があれば閉じて」ヒントを追加（フォルダ削除失敗の主原因予防）。Edit/Add/VersionUp は影響軽微 + Launcher 側 `ErrorDialog` で十分対応可能と判断しスコープ外。SPEC §2.2 機能11 のリセット項目を rename rollback 設計に書き直し。 | Kenshiro Kuroga & Claude |
+| 2026-05-10 | 1.9.5 | データベースリセット機能の確認画面と実装の整合化 (#119) と AddGameForm の gameId 重複検出 (#120)：§2.2 機能11「その他設定管理機能」配下に「データベースリセット機能」項目を新設し、削除実行 = `prism.db` + `games/` フォルダのセット削除（旧実装は DB のみで確認画面と齟齬していた）+ `backups/` 等の隣接フォルダは触らない方針 + 失敗時の挙動詰めは将来 Issue という整理を明記。§2.2 機能1「ゲーム追加機能」に「gameId 重複検出」項目を追加し、`games/{gameId}/` 残骸検出時は手動退避を促す警告 MessageBox を出す挙動を明記。フォルダ削除失敗時の UX 詰めは別 Issue として保留。Manager v0.8.4 で実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.4 | ゲーム削除機能（機能2）の挙動を「DB レコード + `games/{game_id}/` フォルダのセット削除」に統一 (#111)：従来は SPEC §2.2 に「DB のみ / DB + フォルダ削除」の 2 オプションが記載されていたが、運用要望としては削除実行 = 両方削除が常に望ましく、Manager は DB 削除しか実装していなかったため `games/{game_id}/` フォルダがディスクに残る運用上の問題があった。オプション分岐は廃止し、新規 `DeleteGameConfirmForm` で削除対象のフォルダパスを表示して何が消えるかを明示した上で、削除実行時に常に `Directory.Delete(folder, true)` を呼び出す設計に変更。フォルダ不在時は表示を切り替えて DB 削除のみ実行（無害）、ファイルロック / 権限エラー時は「DB 削除は成功・フォルダは手動削除を」の警告に切り替える非破壊運用。SPEC §2.2 機能2 の記述を実装に合わせて書き直し。Manager v0.8.3 で実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.3 | `prism.db` のジャーナルモードを WAL → DELETE へ移行し、`busy_timeout=10000` を追加（#103）：6.5 データの整合性を「DELETE モード + busy_timeout による同時アクセス対応」に書き換え、SMB 共有上で WAL モードが SQLite 公式により動作保証外である旨と DELETE モード採用の理由（`prism.db-shm` のメモリマップ整合性不全リスクの回避）、`busy_timeout=10000` を「書き込み待機列」として 10 秒待機させる挙動を明記。リトライ機構の記述を実装に合わせて「最大 3 回・固定 100ms 間隔」に修正（従来の「指数バックオフ 50/100/200ms」記載は実装と齟齬していた）。Manager v0.8.2 / Launcher v0.5.9 で実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.2 | PR #113 のレビュー段階で実施したスキーマ整合性 audit の結果を SPEC に反映：7.3 テーブル3 play_records とテーブル4 surveys を「現行スキーマ（Manager v0.8.1 / DB v11 時点）」と「drop-folder 設計（#35 実装時に v11 → v12 で移行予定）」の併記形式に変更（現行は SchemaManager.cs の `CreateTables()` と一致する 5/6 列、将来形は v1.9.0 で記載した 9 列構成を保持）。VerifySchema が比較する `ExpectedSchema` は現行スキーマと同期、drop-folder 設計は #35 実装時に v11 → v12 マイグレーションとして反映する流れを明記。テーブル10 launcher_surveys に「廃止までの暫定」として現行 5 列カラム表を追記。テーブル11 backup_log の `trigger_type` CHECK 制約に v10 で追加された `'safety'` を反映（§7.3 表 / §7.2 階層図）。 | Kenshiro Kuroga & Claude |

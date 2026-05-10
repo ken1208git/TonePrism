@@ -31,6 +31,7 @@ namespace GCTonePrism.Manager
             this.lblWarning = new System.Windows.Forms.Label();
             this.lblWarningDetail = new System.Windows.Forms.Label();
             this.lblGamesFolderWarning = new System.Windows.Forms.Label();
+            this.lblLauncherWarning = new System.Windows.Forms.Label();
             this.lblConfirmationCode = new System.Windows.Forms.Label();
             this.txtConfirmationCode = new System.Windows.Forms.TextBox();
             this.lblInstruction = new System.Windows.Forms.Label();
@@ -59,7 +60,7 @@ namespace GCTonePrism.Manager
             this.lblWarningDetail.Name = "lblWarningDetail";
             this.lblWarningDetail.Size = new System.Drawing.Size(450, 12);
             this.lblWarningDetail.TabIndex = 7;
-            this.lblWarningDetail.Text = "・データベース内のすべての情報（ゲーム情報、プレイ記録、アンケート、製作者情報）";
+            this.lblWarningDetail.Text = "・すべてのゲーム情報・プレイ記録・アンケート回答（製作者情報・バージョン情報も含む）";
             // 
             // lblGamesFolderWarning
             // 
@@ -70,13 +71,23 @@ namespace GCTonePrism.Manager
             this.lblGamesFolderWarning.Name = "lblGamesFolderWarning";
             this.lblGamesFolderWarning.Size = new System.Drawing.Size(260, 12);
             this.lblGamesFolderWarning.TabIndex = 8;
-            this.lblGamesFolderWarning.Text = "・gamesフォルダ内のすべてのファイルとフォルダ";
-            // 
+            this.lblGamesFolderWarning.Text = "・Manager に登録されている全ゲームのファイル（games フォルダ全体）\r\n　 ※ 部員の開発フォルダには影響しません。リセット前にバックアップ機能でスナップショット取得を推奨。";
+            //
+            // lblLauncherWarning
+            //
+            this.lblLauncherWarning.AutoSize = true;
+            this.lblLauncherWarning.Font = new System.Drawing.Font("MS UI Gothic", 9F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(128)));
+            this.lblLauncherWarning.ForeColor = System.Drawing.Color.Red;
+            this.lblLauncherWarning.Location = new System.Drawing.Point(20, 95);
+            this.lblLauncherWarning.Name = "lblLauncherWarning";
+            this.lblLauncherWarning.TabIndex = 9;
+            this.lblLauncherWarning.Text = "⚠ 実行前に、すべての展示PCのLauncherを終了してください。\r\n　 (DBファイル・gamesフォルダがロックされ、リセットに失敗します)";
+            //
             // lblConfirmationCode
             // 
             this.lblConfirmationCode.AutoSize = true;
             this.lblConfirmationCode.Font = new System.Drawing.Font("MS UI Gothic", 10F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(128)));
-            this.lblConfirmationCode.Location = new System.Drawing.Point(20, 85);
+            this.lblConfirmationCode.Location = new System.Drawing.Point(20, 135);
             this.lblConfirmationCode.Name = "lblConfirmationCode";
             this.lblConfirmationCode.Size = new System.Drawing.Size(125, 17);
             this.lblConfirmationCode.TabIndex = 1;
@@ -85,7 +96,7 @@ namespace GCTonePrism.Manager
             // txtConfirmationCode
             // 
             this.txtConfirmationCode.Font = new System.Drawing.Font("MS UI Gothic", 12F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(128)));
-            this.txtConfirmationCode.Location = new System.Drawing.Point(20, 110);
+            this.txtConfirmationCode.Location = new System.Drawing.Point(20, 160);
             this.txtConfirmationCode.MaxLength = 10;
             this.txtConfirmationCode.Name = "txtConfirmationCode";
             this.txtConfirmationCode.Size = new System.Drawing.Size(150, 27);
@@ -95,7 +106,7 @@ namespace GCTonePrism.Manager
             // lblInstruction
             // 
             this.lblInstruction.AutoSize = true;
-            this.lblInstruction.Location = new System.Drawing.Point(20, 145);
+            this.lblInstruction.Location = new System.Drawing.Point(20, 195);
             this.lblInstruction.Name = "lblInstruction";
             this.lblInstruction.Size = new System.Drawing.Size(550, 15);
             this.lblInstruction.TabIndex = 3;
@@ -106,7 +117,7 @@ namespace GCTonePrism.Manager
             this.lblButtonWarning.AutoSize = true;
             this.lblButtonWarning.Font = new System.Drawing.Font("MS UI Gothic", 9F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(128)));
             this.lblButtonWarning.ForeColor = System.Drawing.Color.OrangeRed;
-            this.lblButtonWarning.Location = new System.Drawing.Point(20, 165);
+            this.lblButtonWarning.Location = new System.Drawing.Point(20, 215);
             this.lblButtonWarning.Name = "lblButtonWarning";
             this.lblButtonWarning.Size = new System.Drawing.Size(350, 12);
             this.lblButtonWarning.TabIndex = 6;
@@ -118,7 +129,7 @@ namespace GCTonePrism.Manager
             this.btnConfirm.BackColor = System.Drawing.Color.Red;
             this.btnConfirm.Font = new System.Drawing.Font("MS UI Gothic", 10F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(128)));
             this.btnConfirm.ForeColor = System.Drawing.Color.White;
-            this.btnConfirm.Location = new System.Drawing.Point(340, 230);
+            this.btnConfirm.Location = new System.Drawing.Point(340, 280);
             this.btnConfirm.Name = "btnConfirm";
             this.btnConfirm.Size = new System.Drawing.Size(150, 40);
             this.btnConfirm.TabIndex = 4;
@@ -131,7 +142,7 @@ namespace GCTonePrism.Manager
             // 
             this.btnCancel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(500, 230);
+            this.btnCancel.Location = new System.Drawing.Point(500, 280);
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(100, 40);
             this.btnCancel.TabIndex = 5;
@@ -145,13 +156,14 @@ namespace GCTonePrism.Manager
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(650, 310);
+            this.ClientSize = new System.Drawing.Size(650, 360);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnConfirm);
             this.Controls.Add(this.lblButtonWarning);
             this.Controls.Add(this.lblInstruction);
             this.Controls.Add(this.txtConfirmationCode);
             this.Controls.Add(this.lblConfirmationCode);
+            this.Controls.Add(this.lblLauncherWarning);
             this.Controls.Add(this.lblGamesFolderWarning);
             this.Controls.Add(this.lblWarningDetail);
             this.Controls.Add(this.lblWarning);
@@ -172,6 +184,7 @@ namespace GCTonePrism.Manager
         private System.Windows.Forms.Label lblWarning;
         private System.Windows.Forms.Label lblWarningDetail;
         private System.Windows.Forms.Label lblGamesFolderWarning;
+        private System.Windows.Forms.Label lblLauncherWarning;
         private System.Windows.Forms.Label lblConfirmationCode;
         private System.Windows.Forms.TextBox txtConfirmationCode;
         private System.Windows.Forms.Label lblInstruction;

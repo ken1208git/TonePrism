@@ -27,10 +27,11 @@ namespace GCTonePrism.Manager
             // ランダムな確認コードを生成（4桁の英数字）
             confirmationCode = GenerateConfirmationCode();
             lblConfirmationCode.Text = $"確認コード: {confirmationCode}";
-            
-            // 初期位置を設定
-            btnConfirm.Location = new Point(300, 185);
-            
+
+            // btnConfirm の初期位置は Designer.cs の値を信頼する（過去にここで
+            // ハードコード上書きしていたが Designer 変更時に drift する原因に
+            // なったため除去した）
+
             // フォーム全体でマウスを監視
             this.MouseMove += ResetDatabaseConfirmForm_MouseMove;
         }
@@ -94,9 +95,11 @@ namespace GCTonePrism.Manager
         private void MoveButtonAway()
         {
             // ランダムな位置に移動（フォーム内に収まるように）
+            // minY はボタン行より上に行かない位置（警告文・確認コード入力欄を
+            // 隠さないため）。Designer の btnCancel.Location.Y を基準にする
             int minX = 20;
             int maxX = Math.Max(minX + 1, this.ClientSize.Width - btnConfirm.Width - 20);
-            int minY = 185;
+            int minY = btnCancel.Location.Y;
             int maxY = Math.Max(minY + 1, this.ClientSize.Height - btnConfirm.Height - 20);
             
             // 有効な範囲を確保できている場合のみ移動

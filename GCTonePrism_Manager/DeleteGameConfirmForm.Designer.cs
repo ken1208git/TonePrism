@@ -26,6 +26,7 @@ namespace GCTonePrism.Manager
             this.lblItem2Note1 = new System.Windows.Forms.Label();
             this.lblItem2Note2 = new System.Windows.Forms.Label();
             this.txtFolderPath = new System.Windows.Forms.TextBox();
+            this.lblLauncherHint = new System.Windows.Forms.Label();
             this.lblFinalWarning = new System.Windows.Forms.Label();
             this.btnDelete = new System.Windows.Forms.Button();
             this.btnCancel = new System.Windows.Forms.Button();
@@ -104,12 +105,21 @@ namespace GCTonePrism.Manager
             this.txtFolderPath.TabIndex = 8;
             this.txtFolderPath.BackColor = System.Drawing.SystemColors.Control;
             //
+            // lblLauncherHint
+            //
+            this.lblLauncherHint.AutoSize = true;
+            this.lblLauncherHint.ForeColor = System.Drawing.Color.DarkRed;
+            this.lblLauncherHint.Location = new System.Drawing.Point(20, 240);
+            this.lblLauncherHint.Name = "lblLauncherHint";
+            this.lblLauncherHint.TabIndex = 9;
+            this.lblLauncherHint.Text = "※ このゲームを起動中の Launcher があれば閉じてください（フォルダ削除に失敗する原因になります）";
+            //
             // lblFinalWarning
             //
             this.lblFinalWarning.AutoSize = true;
             this.lblFinalWarning.Font = new System.Drawing.Font("MS UI Gothic", 10F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(128)));
             this.lblFinalWarning.ForeColor = System.Drawing.Color.DarkRed;
-            this.lblFinalWarning.Location = new System.Drawing.Point(20, 250);
+            this.lblFinalWarning.Location = new System.Drawing.Point(20, 270);
             this.lblFinalWarning.Name = "lblFinalWarning";
             this.lblFinalWarning.TabIndex = 9;
             this.lblFinalWarning.Text = "この操作は取り消せません。";
@@ -120,7 +130,7 @@ namespace GCTonePrism.Manager
             this.btnDelete.BackColor = System.Drawing.Color.IndianRed;
             this.btnDelete.Font = new System.Drawing.Font("MS UI Gothic", 9.5F, System.Drawing.FontStyle.Bold);
             this.btnDelete.ForeColor = System.Drawing.Color.White;
-            this.btnDelete.Location = new System.Drawing.Point(360, 295);
+            this.btnDelete.Location = new System.Drawing.Point(360, 315);
             this.btnDelete.Name = "btnDelete";
             this.btnDelete.Size = new System.Drawing.Size(110, 35);
             this.btnDelete.TabIndex = 10;
@@ -132,7 +142,7 @@ namespace GCTonePrism.Manager
             //
             this.btnCancel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(480, 295);
+            this.btnCancel.Location = new System.Drawing.Point(480, 315);
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(100, 35);
             this.btnCancel.TabIndex = 11;
@@ -144,10 +154,11 @@ namespace GCTonePrism.Manager
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(610, 350);
+            this.ClientSize = new System.Drawing.Size(610, 370);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnDelete);
             this.Controls.Add(this.lblFinalWarning);
+            this.Controls.Add(this.lblLauncherHint);
             this.Controls.Add(this.txtFolderPath);
             this.Controls.Add(this.lblItem2Note2);
             this.Controls.Add(this.lblItem2Note1);
@@ -179,6 +190,7 @@ namespace GCTonePrism.Manager
         private System.Windows.Forms.Label lblItem2Note1;
         private System.Windows.Forms.Label lblItem2Note2;
         private System.Windows.Forms.TextBox txtFolderPath;
+        private System.Windows.Forms.Label lblLauncherHint;
         private System.Windows.Forms.Label lblFinalWarning;
         private System.Windows.Forms.Button btnDelete;
         private System.Windows.Forms.Button btnCancel;

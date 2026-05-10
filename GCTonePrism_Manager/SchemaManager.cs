@@ -99,23 +99,164 @@ namespace GCTonePrism.Manager
             });
         }
 
-        public void ResetDatabase()
+        /// <summary>
+        /// データベースを完全初期化する (rename rollback 方式)。
+        /// (1) games/ を pending-delete-{guid} に rename で退避、
+        /// (2) prism.db を削除、(3) 退避フォルダを物理削除、
+        /// (4) games/ を再作成 + DB 再構築。
+        /// 隣接する backups/ などには触らない（復元用に残す）。
+        /// 確認画面 (ResetDatabaseConfirmForm) と挙動を一致させるための実装 (#119)。
+        ///
+        /// 退避 rename を使う理由 (Codex P1 指摘 #121):
+        /// 「games 物理削除 → DB 削除」順だと、DB 削除でロック等で失敗した場合に
+        /// games が消えたまま DB に古いレコードが残る broken partial-reset 状態になる。
+        /// rename ならフォルダ実体は退避先に残っているので、DB 削除失敗時は rename を
+        /// 戻して「何も変わってない」状態にロールバックできる。同一ボリューム rename は
+        /// SMB 上でも事実上 atomic。ただし Launcher が games/ 内ファイルをロック中なら
+        /// rename 自体が失敗するが、その場合も DB は無傷のまま中止できる。
+        /// </summary>
+        /// <returns>
+        /// 完全成功時は null、退避フォルダ物理削除に失敗した場合は警告メッセージを返す。
+        /// 警告ありでも DB / games/ は再構築済みなので呼び出し側は UI 更新を実行すべき
+        /// (Codex P2 指摘 #121: 「成功 + 警告」を例外で表現すると ProcessingDialog 経由で
+        /// 失敗扱いされて UI リフレッシュフックがスキップされるため、戻り値で表現する)。
+        /// 真に失敗 (rename 失敗 / DB 削除失敗) した場合は IOException 等を throw する。
+        /// </returns>
+        public string ResetDatabase()
         {
             string dbPath = _conn.DbPath;
-            if (File.Exists(dbPath))
+            string gamesFolder = PathManager.GamesFolder;
+            string pendingDeleteFolder = gamesFolder + ".pending-delete-" + Guid.NewGuid().ToString("N");
+
+            // (1) games/ を pending-delete-{guid}/ に rename して退避
+            //     失敗 = Launcher 等がフォルダ内ファイルをロック中。DB は無事なので中止
+            bool gamesRenamed = false;
+            if (Directory.Exists(gamesFolder))
             {
                 try
                 {
-                    File.Delete(dbPath);
+                    Directory.Move(gamesFolder, pendingDeleteFolder);
+                    gamesRenamed = true;
                 }
-                catch (IOException)
+                catch (IOException ioEx)
                 {
-                    Thread.Sleep(500);
-                    File.Delete(dbPath);
+                    throw new IOException(
+                        $"games フォルダの退避（リネーム）に失敗しました。Launcher など他のプロセスがファイルを使用していないか確認してください。\n\n{ioEx.Message}",
+                        ioEx);
+                }
+                catch (UnauthorizedAccessException uaEx)
+                {
+                    throw new UnauthorizedAccessException(
+                        $"games フォルダへのアクセスが拒否されました。フォルダのアクセス権限を確認してください。\n\n{uaEx.Message}",
+                        uaEx);
                 }
             }
 
-            InitializeDatabase();
+            // (2) DB ファイル削除
+            //     失敗時は (1) でやった rename を戻して「何も変わってない」状態にロールバック
+            try
+            {
+                if (File.Exists(dbPath))
+                {
+                    try
+                    {
+                        File.Delete(dbPath);
+                    }
+                    catch (IOException)
+                    {
+                        Thread.Sleep(500);
+                        File.Delete(dbPath);
+                    }
+                }
+            }
+            catch (Exception dbEx)
+            {
+                // ロールバック: pending-delete を games/ に戻す
+                if (gamesRenamed && Directory.Exists(pendingDeleteFolder) && !Directory.Exists(gamesFolder))
+                {
+                    try
+                    {
+                        Directory.Move(pendingDeleteFolder, gamesFolder);
+                    }
+                    catch
+                    {
+                        // ロールバック自体が失敗するケースは極めて稀だが、握りつぶさず元の例外と一緒に通知
+                        throw new IOException(
+                            $"prism.db の削除に失敗し、games フォルダの復元（ロールバック）にも失敗しました。\n" +
+                            $"以下のフォルダを手動で確認してください:\n  退避先: {pendingDeleteFolder}\n  本来の場所: {gamesFolder}\n\n" +
+                            $"元のエラー: {dbEx.Message}", dbEx);
+                    }
+                }
+                throw new IOException(
+                    $"prism.db の削除に失敗しました。Launcher など他のプロセスが DB を使用していないか確認してください。games フォルダは元に戻されています。\n\n{dbEx.Message}",
+                    dbEx);
+            }
+
+            // (3) 新しい games/ を作成して DB 再初期化
+            //     ここで失敗 (権限・ディスクフル・SQLite エラー等) すると DB / games が
+            //     完全に壊れた状態になるため、可能な範囲でロールバックする
+            //     (Codex P1 #121 への 4 度目の対応)。退避フォルダはまだ手元にあるので戻せる
+            try
+            {
+                Directory.CreateDirectory(gamesFolder);
+                InitializeDatabase();
+            }
+            catch (Exception initEx)
+            {
+                // ロールバック: 部分作成された games/ を消す
+                if (Directory.Exists(gamesFolder))
+                {
+                    try { Directory.Delete(gamesFolder, true); } catch { /* best effort */ }
+                }
+                // ロールバック: 部分作成された prism.db を消す (壊れた DB を残さない)
+                if (File.Exists(dbPath))
+                {
+                    try { File.Delete(dbPath); } catch { /* best effort */ }
+                }
+                // ロールバック: 退避フォルダを games/ に戻す
+                string rollbackHint;
+                if (gamesRenamed && Directory.Exists(pendingDeleteFolder) && !Directory.Exists(gamesFolder))
+                {
+                    try
+                    {
+                        Directory.Move(pendingDeleteFolder, gamesFolder);
+                        rollbackHint = "古い games フォルダは元の場所に復元されました。バックアップ機能 (#96) から prism.db を復元してください。";
+                    }
+                    catch
+                    {
+                        rollbackHint = $"古い games フォルダの復元（ロールバック）にも失敗しました。手動で以下のフォルダを確認してください:\n  退避先: {pendingDeleteFolder}\n  本来の場所: {gamesFolder}";
+                    }
+                }
+                else
+                {
+                    rollbackHint = "(games フォルダは元々存在しなかったため、ロールバック対象なし)";
+                }
+
+                throw new IOException(
+                    $"games/ 再作成または DB 再初期化に失敗しました。\n\n{initEx.Message}\n\n{rollbackHint}",
+                    initEx);
+            }
+
+            // (4) 退避フォルダを物理削除を試みる（失敗しても DB / games は再構築済みなので
+            //     呼び出し側に警告を返すだけにする。Codex P2 #121: 例外でなく戻り値で表現）
+            //     rename はファイルロックを解除しないため、Launcher が起動中のゲームの
+            //     実行ファイルを掴んでいるとここで IOException が出る可能性がある。
+            string pendingDeleteWarning = null;
+            if (Directory.Exists(pendingDeleteFolder))
+            {
+                try
+                {
+                    Directory.Delete(pendingDeleteFolder, true);
+                }
+                catch (Exception ex)
+                {
+                    pendingDeleteWarning =
+                        $"DB と games/ は再構築されましたが、退避済みの旧 games フォルダの物理削除に失敗しました。\n" +
+                        $"Launcher などがファイルを掴んでいる可能性があります。後で手動削除してください:\n  {pendingDeleteFolder}\n\n{ex.Message}";
+                }
+            }
+
+            return pendingDeleteWarning;
         }
 
         private void CreateTables(SQLiteConnection connection, SQLiteTransaction transaction)
