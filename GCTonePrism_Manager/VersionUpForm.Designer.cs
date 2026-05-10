@@ -501,6 +501,7 @@ namespace GCTonePrism.Manager
             // 
             this.dgvDevelopers.AllowUserToAddRows = false;
             this.dgvDevelopers.AllowUserToDeleteRows = false;
+            this.dgvDevelopers.AllowUserToResizeRows = false;
             this.dgvDevelopers.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvDevelopers.Location = new System.Drawing.Point(90, 761);
             this.dgvDevelopers.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);

@@ -93,6 +93,7 @@ namespace GCTonePrism.Manager.Controls
             //
             this.dgvSections.AllowUserToAddRows = false;
             this.dgvSections.AllowUserToDeleteRows = false;
+            this.dgvSections.AllowUserToResizeRows = false;
             this.dgvSections.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvSections.EnableHeadersVisualStyles = false;
             this.dgvSections.ColumnHeadersDefaultCellStyle.SelectionBackColor = this.dgvSections.ColumnHeadersDefaultCellStyle.BackColor;

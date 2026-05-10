@@ -29,13 +29,15 @@ namespace GCTonePrism.Manager
             // 
             // dgvSections
             // 
-            this.dgvSections.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
-            | System.Windows.Forms.AnchorStyles.Left) 
+            this.dgvSections.AllowUserToResizeRows = false;
+            this.dgvSections.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
+            | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
             this.dgvSections.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvSections.Location = new System.Drawing.Point(10, 40);
             this.dgvSections.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
             this.dgvSections.Name = "dgvSections";
+            this.dgvSections.RowHeadersVisible = false;
             this.dgvSections.RowTemplate.Height = 25;
             this.dgvSections.Size = new System.Drawing.Size(574, 272);
             this.dgvSections.TabIndex = 0;

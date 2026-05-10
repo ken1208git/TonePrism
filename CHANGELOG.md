@@ -419,6 +419,16 @@
 
 ## Manager（管理ソフト）
 
+### [Manager v0.8.6] - 2026-05-10
+
+#### Fixed
+
+- **ノート PC で `EditGameForm` / `AddGameForm` が縦に見切れる問題を解消 (#123)**: フォーム高さ (1000px / 888px) がノート PC の表示領域を超えるケースで保存ボタンや製作者情報が画面外に隠れていた。Form に `AutoScroll = true` を設定し、表示領域を超える場合は縦スクロールバーが自動表示されるように
+- **`DataGridView` の行高をユーザーが変更できる問題を解消 (#123)**: ゲームタブ・ストアタブ等で行と行の境界をドラッグすると行高が変わってレイアウトが崩れる事故を防止。全 `DataGridView` に `AllowUserToResizeRows = false` を設定
+  - 対象: `dgvGames` (GameSectionPanel), `dgvSections` (StoreSectionPanel / StoreSectionListForm), `dgvDevelopers` × 3 (Add/Edit/VersionUp)
+  - `gridHistory` (BackupSectionPanel) は既に設定済みで対応不要
+- **`DataGridView` の行ヘッダーを非表示化 (#123)**: 行ヘッダー自体を消すことで境界ドラッグの誤操作余地を物理的に排除。新規追加対象は `dgvSections` (StoreSectionListForm), `dgvDevelopers` (Add/Edit) の 3 件 (他は既に設定済み)。製作者情報の `dgvDevelopers` も「追加」「編集」「削除」ボタン経由の操作なので新行マーク不要
+
 ### [Manager v0.8.5] - 2026-05-10
 
 #### Added

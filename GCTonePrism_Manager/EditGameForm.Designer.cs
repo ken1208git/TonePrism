@@ -521,11 +521,13 @@ namespace GCTonePrism.Manager
             this.lblDevelopers.Text = "製作者情報";
             // 
             // dgvDevelopers
-            // 
+            //
+            this.dgvDevelopers.AllowUserToResizeRows = false;
             this.dgvDevelopers.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvDevelopers.Location = new System.Drawing.Point(90, 725);
             this.dgvDevelopers.Margin = new System.Windows.Forms.Padding(2);
             this.dgvDevelopers.Name = "dgvDevelopers";
+            this.dgvDevelopers.RowHeadersVisible = false;
             this.dgvDevelopers.RowHeadersWidth = 51;
             this.dgvDevelopers.Size = new System.Drawing.Size(320, 96);
             this.dgvDevelopers.TabIndex = 35;
@@ -687,6 +689,7 @@ namespace GCTonePrism.Manager
             this.AcceptButton = this.btnOK;
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.AutoScroll = true;
             this.CancelButton = this.btnCancel;
             this.ClientSize = new System.Drawing.Size(480, 1000);
             this.Controls.Add(this.txtVersionName);
