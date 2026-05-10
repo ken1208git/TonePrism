@@ -247,11 +247,39 @@ namespace GCTonePrism.Manager
 
             string gameId = txtGameId.Text.Trim();
 
+            // gameId が既存フォルダと衝突している場合の警告 (#120)
+            // 何らかの原因で games/{gameId}/ が残っていると、同 gameId 追加で:
+            //  - 同バージョン追加時にエラー
+            //  - 別バージョン追加時に古いファイルがゴミとして残る
+            //  - 最悪、Launcher が古い実行ファイルを起動する silent failure
+            // 自動削除はせず手動退避を促す方針 (失いたくないデータ保護のため)
+            string existingFolder = PathManager.GetGameFolder(gameId);
+            if (Directory.Exists(existingFolder))
+            {
+                var dr = MessageBox.Show(this,
+                    "古いゲームデータが残っています。\n\n" +
+                    $"ゲームID '{gameId}' のフォルダが既に存在します:\n  {existingFolder}\n\n" +
+                    "このまま続行すると、以下の挙動になります:\n" +
+                    "  ・同じバージョンを追加しようとした場合 → エラーになります\n" +
+                    "  ・別のバージョンを追加した場合 → 古いファイルがフォルダに残ります\n" +
+                    "  ・最悪、Launcher が古い実行ファイルを起動する可能性があります\n\n" +
+                    "失いたくないデータがある場合は、いったん上記のフォルダの中身を別の場所に\n" +
+                    "退避してから「キャンセル」を押してフォルダを手動で削除し、\n" +
+                    "再度ゲーム追加を試みてください。\n\n" +
+                    "退避不要であれば「OK」を押してください。\n" +
+                    "※ 古いフォルダの中身は自動削除されません。",
+                    "古いゲームデータの確認",
+                    MessageBoxButtons.OKCancel,
+                    MessageBoxIcon.Warning);
+
+                if (dr != DialogResult.OK) return;
+            }
+
             try
             {
                 // 初期バージョン番号
                 string version = txtVersion.Text.Trim();
-                
+
                 // ProcessingDialog を使用して非同期コピー
                 var processingDialog = new ProcessingDialog((IProgress<ProgressInfo> progress, CancellationToken token) =>
                 {

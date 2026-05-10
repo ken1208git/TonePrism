@@ -99,8 +99,16 @@ namespace GCTonePrism.Manager
             });
         }
 
+        /// <summary>
+        /// データベースを完全初期化する。
+        /// (1) prism.db を削除、(2) games/ フォルダ配下を全削除（フォルダ自体は再作成）、
+        /// (3) 空 DB を再構築。
+        /// 隣接する backups/ などには触らない（復元用に残す）。
+        /// 確認画面 (ResetDatabaseConfirmForm) と挙動を一致させるための実装 (#119)。
+        /// </summary>
         public void ResetDatabase()
         {
+            // (1) DB ファイルを削除
             string dbPath = _conn.DbPath;
             if (File.Exists(dbPath))
             {
@@ -115,6 +123,31 @@ namespace GCTonePrism.Manager
                 }
             }
 
+            // (2) games/ フォルダを丸ごと削除して再作成
+            string gamesFolder = PathManager.GamesFolder;
+            if (Directory.Exists(gamesFolder))
+            {
+                try
+                {
+                    Directory.Delete(gamesFolder, true);
+                }
+                catch (IOException ioEx)
+                {
+                    // Launcher 等がロック中の可能性。詳細は #119 (Group C) で UX を詰める予定
+                    throw new IOException(
+                        $"games フォルダの削除に失敗しました。Launcher など他のプロセスがファイルを使用していないか確認してください。\n\n{ioEx.Message}",
+                        ioEx);
+                }
+                catch (UnauthorizedAccessException uaEx)
+                {
+                    throw new UnauthorizedAccessException(
+                        $"games フォルダへのアクセスが拒否されました。フォルダのアクセス権限を確認してください。\n\n{uaEx.Message}",
+                        uaEx);
+                }
+            }
+            Directory.CreateDirectory(gamesFolder);
+
+            // (3) DB を再初期化
             InitializeDatabase();
         }
 
