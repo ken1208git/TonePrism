@@ -196,6 +196,9 @@
     <EmbeddedResource Include="ResetDatabaseConfirmForm.resx">
       <DependentUpon>ResetDatabaseConfirmForm.cs</DependentUpon>
     </EmbeddedResource>
+    <EmbeddedResource Include="DeleteGameConfirmForm.resx">
+      <DependentUpon>DeleteGameConfirmForm.cs</DependentUpon>
+    </EmbeddedResource>
     <EmbeddedResource Include="EditGameForm.resx">
       <DependentUpon>EditGameForm.cs</DependentUpon>
     </EmbeddedResource>

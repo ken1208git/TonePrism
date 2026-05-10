@@ -8,7 +8,8 @@ namespace GCTonePrism.Manager
     /// ゲーム削除確認フォーム。
     /// 削除実行時は常に「DB レコード + games/{gameId}/ フォルダ」をセットで削除する設計。
     /// フォルダが存在しない場合（手動削除済み等）は DB のみ削除する。
-    /// 削除は不可逆操作のため、フォルダパスを表示して何が消えるかを明示する。
+    /// 部員が見ても何が消えるか（特に「自分の開発フォルダは無事か」）を判断できるよう、
+    /// 専門用語を避けて 1.〜 2. のリスト形式で明示する。
     /// </summary>
     public partial class DeleteGameConfirmForm : Form
     {
@@ -34,35 +35,43 @@ namespace GCTonePrism.Manager
         private void DeleteGameConfirmForm_Load(object sender, EventArgs e)
         {
             lblTitle.Text = $"ゲーム「{_gameTitle}」を削除しますか？";
-            lblGameId.Text = $"Game ID: {_gameId}";
+            lblGameId.Text = $"ゲームID: {_gameId}";
 
             txtFolderPath.Text = _gameFolderPath;
 
+            // 1 番目（DB 側）の文言は状態によらず固定
+            lblItem1Title.Text = "1. ゲーム情報・プレイ記録・アンケート回答";
+            lblItem1Detail.Text = "    (製作者情報・バージョン情報も含む)";
+
             if (_folderExists)
             {
-                lblFolderHeader.Text = "次のゲームフォルダもディスクから物理的に削除されます:";
-                lblFolderHeader.ForeColor = System.Drawing.Color.DarkRed;
-                lblFolderStatus.Text = "（この操作は取り消せません）";
-                lblFolderStatus.ForeColor = System.Drawing.Color.DarkRed;
+                lblHeader.Text = "以下の 2 つが削除されます:";
+                lblHeader.ForeColor = System.Drawing.Color.DarkRed;
+
+                lblItem2Title.Text = "2. ゲームファイル (実行ファイル・サムネイル・背景画像など)";
+                lblItem2Title.ForeColor = System.Drawing.Color.DarkRed;
+
+                lblItem2Note1.Visible = true;
+                lblItem2Note2.Visible = true;
+                lblItem2Note1.Text = "    ※ Manager にゲームを追加した際にコピーされたものです。";
+                lblItem2Note2.Text = "       部員の開発フォルダには影響しません。";
             }
             else
             {
-                lblFolderHeader.Text = "ゲームフォルダの想定パス:";
-                lblFolderHeader.ForeColor = System.Drawing.Color.DimGray;
-                lblFolderStatus.Text = "（フォルダが見つからないため、DB のみ削除します）";
-                lblFolderStatus.ForeColor = System.Drawing.Color.Gray;
+                lblHeader.Text = "削除されるもの:";
+                lblHeader.ForeColor = System.Drawing.Color.DimGray;
+
+                lblItem2Title.Text = "2. ゲームファイル — 既に手動削除済み (DB のみ削除します)";
+                lblItem2Title.ForeColor = System.Drawing.Color.DimGray;
+
+                lblItem2Note1.Visible = false;
+                lblItem2Note2.Visible = false;
             }
         }
 
         private void btnDelete_Click(object sender, EventArgs e)
         {
             DialogResult = DialogResult.Yes;
-            Close();
-        }
-
-        private void btnCancel_Click(object sender, EventArgs e)
-        {
-            DialogResult = DialogResult.Cancel;
             Close();
         }
     }

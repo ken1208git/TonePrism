@@ -278,6 +278,15 @@ namespace GCTonePrism.Manager.Controls
             var selectedGame = dgvGames.SelectedRows[0].DataBoundItem as GameInfo;
             if (selectedGame == null) return;
 
+            // GameId が空だと PathManager.GetGameFolder("") が GamesFolder 自体を返し、
+            // Directory.Delete(folder, true) で全ゲームフォルダが消える致命バグになる。防御。
+            if (string.IsNullOrWhiteSpace(selectedGame.GameId))
+            {
+                MessageBox.Show(this.FindForm(), "ゲームIDが不正です。削除できません。",
+                    "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
             string gameFolder = PathManager.GetGameFolder(selectedGame.GameId);
 
             bool deleteFolder;
@@ -354,12 +363,12 @@ namespace GCTonePrism.Manager.Controls
 
             if (folderWarning != null)
             {
-                MessageBox.Show(folderWarning, "ゲームフォルダ削除の警告",
+                MessageBox.Show(this.FindForm(), folderWarning, "ゲームフォルダ削除の警告",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             else
             {
-                MessageBox.Show(
+                MessageBox.Show(this.FindForm(),
                     deleteFolder ? "ゲームと関連フォルダを削除しました。" : "ゲームを削除しました。",
                     "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
