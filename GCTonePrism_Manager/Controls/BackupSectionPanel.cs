@@ -222,27 +222,38 @@ namespace GCTonePrism.Manager.Controls
             }
 
             string safetyPath = null;
-            Exception caught = null;
+            DialogResult dr;
             using (var dialog = new ProcessingDialog((progress, token) =>
             {
                 safetyPath = _dbManager.RestoreService.Restore(entry.FilePath, progress, token);
             }))
             {
                 dialog.Text = "復元中";
-                var dr = dialog.ShowDialog(this);
-                if (dr == DialogResult.Abort)
-                {
-                    caught = new Exception("復元中にエラーが発生しました（詳細はログを確認）");
-                }
+                dr = dialog.ShowDialog(this);
             }
 
-            if (caught != null)
+            // ProcessingDialog は OperationCanceledException を Cancel、
+            // それ以外の例外を Abort として返す（成功時は OK）。
+            // Cancel を OK と区別せず成功扱いにすると、キャンセル後も
+            // DatabaseChanged が走って中途半端な状態の DB をリロードしてしまう。
+            // （Codex P1 指摘 "Handle restore cancellation before reporting success" 対応）
+            if (dr == DialogResult.Cancel)
             {
-                MessageBox.Show($"復元に失敗しました。\n\n{caught.Message}", "エラー",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(
+                    "復元はキャンセルされました。\n\nデータベースは変更されていません。",
+                    "キャンセル", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
+            if (dr == DialogResult.Abort)
+            {
+                MessageBox.Show(
+                    "復元中にエラーが発生しました（詳細はログを確認）",
+                    "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            // dr == DialogResult.OK: 復元成功
             MessageBox.Show(
                 $"復元が完了しました。\n\n復元前のDBは退避されました:\n{safetyPath}\n\nManager のデータを再読み込みします。",
                 "復元成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
