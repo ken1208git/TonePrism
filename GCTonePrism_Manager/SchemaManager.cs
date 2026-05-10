@@ -185,7 +185,13 @@ namespace GCTonePrism.Manager
                     dbEx);
             }
 
-            // (3) 退避フォルダを物理削除（DB 削除に成功した時点でロールバック不要）
+            // (3) 退避フォルダを物理削除を試みる（失敗しても (4) は必ず走らせる）
+            //     rename はファイルロックを解除しないため、Launcher が起動中のゲームの
+            //     実行ファイルを掴んでいるとここで IOException が出る可能性がある。
+            //     失敗しても DB と games/ の再構築は走らせて Manager が起動できる状態に
+            //     することを優先 (Codex P1 #121 への対応)。退避フォルダはユーザーに
+            //     手動削除を促す。
+            string pendingDeleteWarning = null;
             if (Directory.Exists(pendingDeleteFolder))
             {
                 try
@@ -194,17 +200,21 @@ namespace GCTonePrism.Manager
                 }
                 catch (Exception ex)
                 {
-                    // ここまで来たら DB は消えているのでロールバック不能。退避先のゴミだけ残す
-                    // ユーザーに警告して終了（Manager は再起動可能、退避先を後で手動削除すればよい）
-                    throw new IOException(
-                        $"DB は削除されましたが、退避済みの旧 games フォルダの物理削除に失敗しました。\n" +
-                        $"以下のフォルダを手動で削除してください:\n  {pendingDeleteFolder}\n\n{ex.Message}", ex);
+                    pendingDeleteWarning =
+                        $"DB と games/ は再構築されましたが、退避済みの旧 games フォルダの物理削除に失敗しました。\n" +
+                        $"Launcher などがファイルを掴んでいる可能性があります。後で手動削除してください:\n  {pendingDeleteFolder}\n\n{ex.Message}";
                 }
             }
 
-            // (4) 新しい games/ を作成して DB 再初期化
+            // (4) 新しい games/ を作成して DB 再初期化（(3) 失敗時も必ず実行）
             Directory.CreateDirectory(gamesFolder);
             InitializeDatabase();
+
+            // (5) (3) で失敗していた場合はここで通知 (DB / games は再構築済み)
+            if (pendingDeleteWarning != null)
+            {
+                throw new IOException(pendingDeleteWarning);
+            }
         }
 
         private void CreateTables(SQLiteConnection connection, SQLiteTransaction transaction)
