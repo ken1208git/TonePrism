@@ -512,8 +512,9 @@
     - 設定タブの「データベースリセット」ボタンから起動
     - 確認ダイアログ (`ResetDatabaseConfirmForm`) で「ボタンが逃げる」「確認コード入力」の二重安全機構を経て実行
     - 削除実行は **`prism.db` + `games/` フォルダ配下のセット削除**（旧実装は DB のみ削除で確認画面と齟齬していたが #119 で修正）
+    - 削除順序は **「(1) `games/` 削除 → (2) `prism.db` 削除 → (3) `games/` 再作成 + DB 再構築」** の順。先に DB を消すとフォルダ削除失敗時に「DB は消えたが games の一部が残り再初期化も走っていない」二次障害になり Manager 自体が壊れるため、games を先に処理して失敗したら DB を温存する設計
     - `backups/` 等の隣接フォルダは触らない（復元用に残す）
-    - フォルダ削除失敗時 (`IOException` / `UnauthorizedAccessException`) はユーザー向けメッセージに変換して例外を投げ、`SettingsSectionPanel.btnResetDatabase_Click` の `caught` 経由で MessageBox 表示。中途半端な状態（DB 削除済みだが games フォルダの一部が残る）になった場合の UX は将来詰める予定（別 Issue 候補）
+    - フォルダ削除失敗時 (`IOException` / `UnauthorizedAccessException`) はユーザー向けメッセージに変換して例外を投げ、`SettingsSectionPanel.btnResetDatabase_Click` の `caught` 経由で MessageBox 表示。**この時点で DB は無事なので Manager は普通に再起動でき、ユーザーは Launcher を閉じてから再試行できる**
     - 実行前にバックアップ機能 (#96 / Manager v0.8.0) で `prism.db` のスナップショット取得を強く推奨
 
 #### バックアップ機能

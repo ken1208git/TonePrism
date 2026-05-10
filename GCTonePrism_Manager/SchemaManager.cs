@@ -101,15 +101,43 @@ namespace GCTonePrism.Manager
 
         /// <summary>
         /// データベースを完全初期化する。
-        /// (1) prism.db を削除、(2) games/ フォルダ配下を全削除（フォルダ自体は再作成）、
-        /// (3) 空 DB を再構築。
+        /// (1) games/ フォルダ配下を先に全削除、(2) prism.db を削除、(3) 空 DB を再構築 + games/ 再作成。
         /// 隣接する backups/ などには触らない（復元用に残す）。
         /// 確認画面 (ResetDatabaseConfirmForm) と挙動を一致させるための実装 (#119)。
+        ///
+        /// 順序が「games → DB」なのは、games 削除失敗時に DB を消さずに済むよう
+        /// するため (Codex P1 指摘 on PR #121)。先に DB を消すと、フォルダ削除失敗時に
+        /// 「DB は消えたが games の一部が残っていて InitializeDatabase も走っていない」
+        /// という二次障害状態になり、Manager 自体が壊れる。
         /// </summary>
         public void ResetDatabase()
         {
-            // (1) DB ファイルを削除
             string dbPath = _conn.DbPath;
+            string gamesFolder = PathManager.GamesFolder;
+
+            // (1) games/ フォルダを先に全削除（失敗したら DB は消さずに throw）
+            if (Directory.Exists(gamesFolder))
+            {
+                try
+                {
+                    Directory.Delete(gamesFolder, true);
+                }
+                catch (IOException ioEx)
+                {
+                    // Launcher 等がロック中の可能性。DB は無事なのでこのまま中止できる
+                    throw new IOException(
+                        $"games フォルダの削除に失敗しました。Launcher など他のプロセスがファイルを使用していないか確認してください。\n\n{ioEx.Message}",
+                        ioEx);
+                }
+                catch (UnauthorizedAccessException uaEx)
+                {
+                    throw new UnauthorizedAccessException(
+                        $"games フォルダへのアクセスが拒否されました。フォルダのアクセス権限を確認してください。\n\n{uaEx.Message}",
+                        uaEx);
+                }
+            }
+
+            // (2) DB ファイルを削除
             if (File.Exists(dbPath))
             {
                 try
@@ -123,31 +151,8 @@ namespace GCTonePrism.Manager
                 }
             }
 
-            // (2) games/ フォルダを丸ごと削除して再作成
-            string gamesFolder = PathManager.GamesFolder;
-            if (Directory.Exists(gamesFolder))
-            {
-                try
-                {
-                    Directory.Delete(gamesFolder, true);
-                }
-                catch (IOException ioEx)
-                {
-                    // Launcher 等がロック中の可能性。詳細は #119 (Group C) で UX を詰める予定
-                    throw new IOException(
-                        $"games フォルダの削除に失敗しました。Launcher など他のプロセスがファイルを使用していないか確認してください。\n\n{ioEx.Message}",
-                        ioEx);
-                }
-                catch (UnauthorizedAccessException uaEx)
-                {
-                    throw new UnauthorizedAccessException(
-                        $"games フォルダへのアクセスが拒否されました。フォルダのアクセス権限を確認してください。\n\n{uaEx.Message}",
-                        uaEx);
-                }
-            }
+            // (3) games/ を再作成して DB を再初期化
             Directory.CreateDirectory(gamesFolder);
-
-            // (3) DB を再初期化
             InitializeDatabase();
         }
 
