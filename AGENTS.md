@@ -51,3 +51,27 @@
 ## Launcher Implementation
 - ユーザーが調整しやすいよう、UIやレイアウトはなるべく `.tscn`（シーンファイル）で実装すること。
 - 変数はなるべく `@export` で定義し、エディタから調整可能にすること。
+
+## Cross-component Standards
+新規クライアントコンポーネント（Launcher / Manager / Monitor / 将来 Tools 等）を追加・改修する際は、
+以下のベースラインを必ず満たすこと。これは「ファイルログが無いと運用上の事故調査が不可能」(#116) という
+過去の教訓を踏まえた **横断的な共通要件** である。
+
+- **ファイルログ**: 共有プロジェクトルート（prism.db のあるディレクトリ）の `logs/{component}/` 配下に出力
+  - 例: `<project_root>/logs/manager/manager_<PCname>_<YYYY-MM-DD_HHmmss>.log`
+  - 例: `<project_root>/logs/launcher/launcher_<PCname>_<YYYY-MM-DD_HHmmss>.log`
+- **1 起動セッション = 1 ファイル**（日跨ぎでもローテートしない）
+  - 複数 PC が同じファイルに書き込まないので、書き込み競合・行間 interleaving が発生しない
+  - PC 名と起動時刻でファイル名がユニークになる（同秒衝突は連番サフィックスで回避）
+- **レベル**: 最低 INFO / WARN / ERROR の 3 段階（将来 #85 で DEBUG 追加予定）
+- **フォーマット**: `[YYYY-MM-DD HH:mm:ss] [LEVEL] [Module] message` で統一
+- **保持期間**: 30 日。古いファイルは起動時に自動削除（mtime 基準、現セッションのアクティブファイルは保護）
+- **既存出力との統合**: 既存の `Console.WriteLine` (.NET) / `print()` (GDScript) 等は、
+  Console.SetOut / OS.add_logger の自動キャプチャで **コード変更ゼロ** でファイルにも流すこと。
+  新規コードでは `Logger.Info/Warn/Error` 等で明示的にレベル指定
+- **起動・終了イベント**: 必ず INFO で記録（事故調査で「いつ落ちたか」が分かるように）
+- **Logger 自体の障害は握り潰す**: ログ機構の例外でアプリ起動を止めない・無限ループを起こさない
+  （Logger 内部の例外は **ログにも書かない** こと。書くと再帰してハング）
+
+参照実装: `GCTonePrism_Manager/Services/Logger.cs`, `GCTonePrism_Launcher/scripts/logger.gd`
+（クライアント追加時は SPECIFICATION.md §3.6 の仕様も合わせて参照）
