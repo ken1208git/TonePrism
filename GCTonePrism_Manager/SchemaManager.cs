@@ -17,7 +17,7 @@ namespace GCTonePrism.Manager
         // 現在のデータベースバージョン
         // 構造変更があるたびにインクリメントする
         // v11: SPEC v1.5.1 (2026-03-28) で変更された surveys / play_records スキーマの drift 修正（v0.8.1）
-        private const int CurrentDbVersion = 11;
+        private const int CurrentDbVersion = 12;
 
         public SchemaManager(DatabaseConnection conn)
         {
@@ -529,6 +529,7 @@ namespace GCTonePrism.Manager
                     completed_at INTEGER,
                     pc_name TEXT NOT NULL,
                     file_path TEXT,
+                    relative_path TEXT,
                     file_size_bytes INTEGER,
                     status TEXT NOT NULL CHECK (status IN ('in_progress','success','failed')),
                     error_message TEXT,
@@ -784,6 +785,12 @@ namespace GCTonePrism.Manager
                         // 失敗（データ残存でスキップ）時は currentVersion = 10 のまま。
                         // SetDbVersion で実際に達成した currentVersion を書き込むため
                         // user_version は 10 のまま保持され、次回起動時に再試行される。
+                    }
+
+                    if (currentVersion < 12)
+                    {
+                        MigrateV11ToV12(connection, migTransaction);
+                        currentVersion = 12;
                     }
 
                     // 達成バージョン（CurrentDbVersion ではなく currentVersion）を書き込む。
@@ -1353,6 +1360,45 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
+        /// v11 → v12: backup_log テーブルに relative_path 列を追加 (#126)
+        /// プロジェクト場所の移動に追従できるよう、prism.db からの相対パスを記録する。
+        /// 既存レコードの relative_path は NULL のまま（呼び出し側で file_path にフォールバック）。
+        /// </summary>
+        private void MigrateV11ToV12(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            // backup_log に relative_path 列が既に存在する場合はスキップ（手動先行追加対応）
+            bool alreadyExists = false;
+            using (var cmd = new SQLiteCommand("PRAGMA table_info(backup_log)", connection, transaction))
+            {
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        string colName = reader["name"].ToString();
+                        if (colName == "relative_path")
+                        {
+                            alreadyExists = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (alreadyExists)
+            {
+                Console.WriteLine("[DatabaseManager] backup_log.relative_path は既に存在 → MigrateV11ToV12 をスキップ");
+                return;
+            }
+
+            using (var cmd = new SQLiteCommand(
+                "ALTER TABLE backup_log ADD COLUMN relative_path TEXT", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+            Console.WriteLine("[DatabaseManager] backup_log に relative_path 列を追加しました (v11 → v12)");
+        }
+
+        /// <summary>
         /// surveys テーブル作成（CreateTables / MigrateV10ToV11 共通）
         /// </summary>
         private static void CreateSurveysTable(SQLiteConnection connection, SQLiteTransaction transaction)
@@ -1453,7 +1499,7 @@ namespace GCTonePrism.Manager
             { "settings", new[] { "key", "value" } },
             { "store_sections", new[] { "section_id", "title", "section_type", "section_source", "display_order", "max_display_count", "is_visible" } },
             { "store_section_games", new[] { "id", "section_id", "game_id", "display_order", "display_text" } },
-            { "backup_log", new[] { "id", "started_at", "completed_at", "pc_name", "file_path", "file_size_bytes", "status", "error_message", "trigger_type" } },
+            { "backup_log", new[] { "id", "started_at", "completed_at", "pc_name", "file_path", "relative_path", "file_size_bytes", "status", "error_message", "trigger_type" } },
         };
 
         /// <summary>

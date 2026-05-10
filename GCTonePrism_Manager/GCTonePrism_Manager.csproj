@@ -189,6 +189,7 @@
     <Compile Include="PathManager.cs" />
     <Compile Include="Services\BackupService.cs" />
     <Compile Include="Services\DeveloperListManager.cs" />
+    <Compile Include="Services\BackupPathResolver.cs" />
     <Compile Include="Services\FileOperationService.cs" />
     <Compile Include="Services\FolderDeletionService.cs" />
     <Compile Include="Services\GameFormHelper.cs" />

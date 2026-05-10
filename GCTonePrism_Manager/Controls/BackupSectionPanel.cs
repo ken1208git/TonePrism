@@ -59,6 +59,7 @@ namespace GCTonePrism.Manager.Controls
                 //   - file_path が空の failed 行 → バックアップフォルダをスキャンして
                 //     started_at と一致するファイルがあれば success に復元（旧版ゴースト救済）
                 //   - backups/safety/ の未登録ファイルを backup_log に登録
+                //   - 残った failed 行 → 物理ファイル + DB から自動掃除 (#126)
                 try
                 {
                     var (recoveredSuccess, markedFailed) = _dbManager.BackupLogRepository.ReconcileInProgressEntries(
@@ -70,9 +71,10 @@ namespace GCTonePrism.Manager.Controls
                     int safetyAdded = _dbManager.BackupLogRepository.RegisterUnknownSafetyFiles(
                         _dbManager.BackupService.GetSafetyDirectory(),
                         Environment.MachineName);
-                    if (recoveredSuccess > 0 || markedFailed > 0 || legacyRecovered > 0 || safetyAdded > 0)
+                    int failedCleaned = CleanupFailedEntries();
+                    if (recoveredSuccess > 0 || markedFailed > 0 || legacyRecovered > 0 || safetyAdded > 0 || failedCleaned > 0)
                     {
-                        Console.WriteLine($"[BackupSectionPanel] 更新時リコンサイル: 成功化 {recoveredSuccess} / 失敗化 {markedFailed} / 旧版救済 {legacyRecovered} / 退避新規 {safetyAdded}");
+                        Console.WriteLine($"[BackupSectionPanel] 更新時リコンサイル: 成功化 {recoveredSuccess} / 失敗化 {markedFailed} / 旧版救済 {legacyRecovered} / 退避新規 {safetyAdded} / 失敗自動掃除 {failedCleaned}");
                     }
                 }
                 catch (Exception reconcileEx)
@@ -94,12 +96,23 @@ namespace GCTonePrism.Manager.Controls
 
                 lblDestPath.Text = $"保存先: {_dbManager.BackupService.GetEffectiveDestinationDirectory()}";
 
-                // 履歴
+                // 履歴 (#126: パス解決 + 実在チェックして不在は非表示)
                 var entries = _dbManager.BackupLogRepository.GetRecent(100);
                 long nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                string dbPath = _dbManager.DatabasePath;
                 gridHistory.Rows.Clear();
                 foreach (var entry in entries)
                 {
+                    // パス解決 (relative_path 優先、無ければ file_path)
+                    string resolvedPath = BackupPathResolver.ResolveAbsolutePath(entry, dbPath);
+
+                    // 実在チェック: 不在なら表示しない (in_progress は実行直後で File.Exists 前のことがあるため例外)
+                    if (entry.Status != "in_progress" &&
+                        (string.IsNullOrEmpty(resolvedPath) || !File.Exists(resolvedPath)))
+                    {
+                        continue;
+                    }
+
                     string status = GetStatusDisplay(entry, nowUnix);
                     string statusTooltip = GetStatusTooltip(entry, nowUnix);
                     string trigger;
@@ -121,7 +134,7 @@ namespace GCTonePrism.Manager.Controls
                         trigger,
                         status,
                         size,
-                        entry.FilePath ?? "");
+                        resolvedPath);
                     // 行のTagに元データを保存（Restore で取り出す）
                     gridHistory.Rows[rowIndex].Tag = entry;
                     // 状態セルにツールチップと色を適用
@@ -203,15 +216,17 @@ namespace GCTonePrism.Manager.Controls
 
             var row = gridHistory.SelectedRows[0];
             var entry = row.Tag as BackupLogEntry;
-            if (entry == null || string.IsNullOrEmpty(entry.FilePath))
+            // パス解決 (#126: relative_path 優先、無ければ file_path)
+            string resolvedPath = BackupPathResolver.ResolveAbsolutePath(entry, _dbManager.DatabasePath);
+            if (entry == null || string.IsNullOrEmpty(resolvedPath))
             {
                 MessageBox.Show("選択したエントリにはファイルパス情報がありません。", "情報なし",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            if (!File.Exists(entry.FilePath))
+            if (!File.Exists(resolvedPath))
             {
-                MessageBox.Show($"バックアップファイルが見つかりません:\n{entry.FilePath}", "ファイルなし",
+                MessageBox.Show($"バックアップファイルが見つかりません:\n{resolvedPath}", "ファイルなし",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -225,7 +240,7 @@ namespace GCTonePrism.Manager.Controls
             DialogResult dr;
             using (var dialog = new ProcessingDialog((progress, token) =>
             {
-                safetyPath = _dbManager.RestoreService.Restore(entry.FilePath, progress, token);
+                safetyPath = _dbManager.RestoreService.Restore(resolvedPath, progress, token);
             }))
             {
                 dialog.Text = "復元中";
@@ -259,6 +274,91 @@ namespace GCTonePrism.Manager.Controls
                 "復元成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
             DatabaseChanged?.Invoke();
+            RefreshDisplay();
+        }
+
+        /// <summary>
+        /// failed 状態のレコードを物理ファイル + DB から自動削除する (#126)。
+        /// 失敗したバックアップの履歴は残してもユーザーには情報価値が無く、
+        /// 古いプロジェクトパスのゴミがそのまま残り続ける主因にもなるため。
+        /// </summary>
+        /// <returns>削除した件数</returns>
+        private int CleanupFailedEntries()
+        {
+            int cleaned = 0;
+            string dbPath = _dbManager.DatabasePath;
+            var failedEntries = _dbManager.BackupLogRepository.GetByStatus("failed");
+            foreach (var entry in failedEntries)
+            {
+                string path = BackupPathResolver.ResolveAbsolutePath(entry, dbPath);
+                if (!string.IsNullOrEmpty(path) && File.Exists(path))
+                {
+                    try
+                    {
+                        File.Delete(path);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[BackupSectionPanel] failed entry のファイル削除失敗 (id={entry.Id}, path={path}): {ex.Message}");
+                    }
+                }
+                _dbManager.BackupLogRepository.DeleteById(entry.Id);
+                cleaned++;
+            }
+            return cleaned;
+        }
+
+        /// <summary>
+        /// 「削除」ボタン: 選択行のバックアップを物理ファイル + DB レコード両方削除 (#126)
+        /// </summary>
+        private void btnDelete_Click(object sender, EventArgs e)
+        {
+            if (_dbManager == null) return;
+            if (gridHistory.SelectedRows.Count == 0)
+            {
+                MessageBox.Show("削除したいバックアップを履歴一覧から選択してください。", "未選択",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var row = gridHistory.SelectedRows[0];
+            var entry = row.Tag as BackupLogEntry;
+            if (entry == null)
+            {
+                MessageBox.Show("選択したエントリの情報が取得できませんでした。", "エラー",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string resolvedPath = BackupPathResolver.ResolveAbsolutePath(entry, _dbManager.DatabasePath);
+            string fileName = !string.IsNullOrEmpty(resolvedPath) ? Path.GetFileName(resolvedPath) : $"id={entry.Id}";
+
+            var dr = MessageBox.Show(this,
+                $"バックアップ「{fileName}」を削除します。\n\n" +
+                $"この操作は取り消せません。よろしいですか？",
+                "バックアップの削除確認",
+                MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
+
+            if (dr != DialogResult.OK) return;
+
+            // 物理ファイル削除 (失敗しても DB レコードは消す)
+            if (!string.IsNullOrEmpty(resolvedPath) && File.Exists(resolvedPath))
+            {
+                try
+                {
+                    File.Delete(resolvedPath);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this,
+                        $"バックアップファイルの削除に失敗しましたが、履歴レコードは削除します。\n\n{ex.Message}",
+                        "ファイル削除失敗", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+
+            // DB レコード削除
+            _dbManager.BackupLogRepository.DeleteById(entry.Id);
+
             RefreshDisplay();
         }
 

@@ -45,6 +45,10 @@ namespace GCTonePrism.Manager
         public SettingsRepository SettingsRepository { get { return _settingsRepo; } }
 
         // --- 接続・スキーマ ---
+        /// <summary>
+        /// 現在の prism.db のフルパス (BackupPathResolver 等から参照)
+        /// </summary>
+        public string DatabasePath => _conn.DbPath;
         public bool DatabaseExists() => _conn.DatabaseExists();
         public bool TablesExist() => _schema.TablesExist();
         public int GetTargetDatabaseVersion() => _schema.GetTargetDatabaseVersion();

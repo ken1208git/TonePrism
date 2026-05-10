@@ -419,6 +419,26 @@
 
 ## Manager（管理ソフト）
 
+### [Manager v0.8.7] - 2026-05-10
+
+#### Added
+
+- **バックアップ履歴の相対パス保存 (#126)**: `backup_log` テーブルに `relative_path` カラムを追加 (DB v11 → v12 マイグレーション)。バックアップ作成時に `prism.db` のあるディレクトリからの相対パスを記録し、表示・復元時に動的にパスを再構築することで **プロジェクト場所の移動に追従** できるように
+  - 新規 `Services/BackupPathResolver.cs`: `relative_path` を優先し、無ければ `file_path` にフォールバックする共通ヘルパー
+  - 既存レコード (relative_path NULL) はそのまま絶対パスで動作（後方互換性）
+  - dbDir 配下にない destinationDir (ユーザーが絶対パスで設定) は relative_path NULL のまま
+- **failed 履歴の自動掃除 (#126)**: Manager 起動時 (`RefreshDisplay`) のリコンサイル処理で、`status='failed'` のレコードを **物理ファイル + DB レコード両方** から自動削除。失敗履歴は復元には使えないため、ユーザーに表示する価値が無い + 古いプロジェクトパスのゴミが残り続ける主因にもなっていたため
+- **個別削除 UI (#126)**: 「バックアップ」タブの操作セクションに「選択した履歴を削除...」ボタンを追加。確認ダイアログを経て、選択行のバックアップファイル + DB レコード両方を削除
+- **不在ファイル非表示 (#126)**: 履歴表示時にパス解決後の `File.Exists` チェックを行い、ファイルが見つからないレコードは履歴一覧に表示しない (DB レコードは保護のため残す)
+- **`DatabaseManager.DatabasePath` プロパティ**: `_conn.DbPath` を公開する読み取り専用プロパティ。BackupPathResolver 等から参照
+
+#### Database
+
+- DB バージョン: 11 → 12
+- `backup_log` テーブルに `relative_path TEXT NULL` カラムを追加
+- `MigrateV11ToV12` を新設（既に列がある場合はスキップ、ALTER TABLE で追加）
+- `ExpectedSchema` の `backup_log` 列リストにも `relative_path` を追加
+
 ### [Manager v0.8.6] - 2026-05-10
 
 #### Changed
