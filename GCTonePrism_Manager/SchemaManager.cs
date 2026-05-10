@@ -789,18 +789,25 @@ namespace GCTonePrism.Manager
 
                     if (currentVersion < 12)
                     {
-                        // v11 マイグレーションが未完 (= currentVersion が 11 未満) の場合、
-                        // v12 へ進めると v10→v11 の再試行が永久に行われない。
-                        // (Codex P1 #127: v11 をスキップしたまま user_version が 12 に書き込まれ、
-                        //  次回以降「もう新しいバージョンに到達済み」と判定されて drift が温存される)
-                        if (currentVersion < 11)
+                        // v11 (surveys/play_records ドリフト修正) と v12 (backup_log への列追加) は
+                        // 本来独立。v11 がデータ残存でスキップされた場合でも、v12 の純粋な
+                        // ALTER TABLE ADD COLUMN は無害なので必ず実行する。
+                        // (Codex P1 #127: 実行しないと InsertInProgress が "no such column:
+                        //  relative_path" で常時失敗し、バックアップが取れなくなる)
+                        // MigrateV11ToV12 は idempotent なので、列が既にあればスキップされる。
+                        MigrateV11ToV12(connection, migTransaction);
+
+                        // user_version の更新は v11 が完了している時だけ。v11 が未完なら
+                        // currentVersion を 10 のまま据え置き、SetDbVersion(10) で書き込んで
+                        // 次回起動時に v10→v11 を再試行させる（v12 ALTER は idempotent
+                        // なので再度走っても無害）。
+                        if (currentVersion >= 11)
                         {
-                            Console.WriteLine("[DatabaseManager] v10→v11 が未完のため v11→v12 はスキップします（次回起動で再試行）");
+                            currentVersion = 12;
                         }
                         else
                         {
-                            MigrateV11ToV12(connection, migTransaction);
-                            currentVersion = 12;
+                            Console.WriteLine("[DatabaseManager] v10→v11 が未完のため user_version は 10 のまま据え置き（v12 物理変更のみ先行適用）");
                         }
                     }
 
