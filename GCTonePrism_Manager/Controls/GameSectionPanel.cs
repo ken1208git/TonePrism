@@ -297,17 +297,60 @@ namespace GCTonePrism.Manager.Controls
                 deleteFolder = confirm.DeleteFolder;
             }
 
-            // CASCADE で developers / game_versions / game_genres / play_records /
-            // surveys / store_section_games が削除される。共有フォルダ越しでは
-            // 数秒かかるケースもあるので Marquee 進捗を表示する。
-            // 削除実行は DB レコード + games/{game_id}/ フォルダのセット (#111)。
-            // フォルダ削除は ProcessingDialog の外で行い、失敗時は再試行 UI を出す (#122)。
+            // 削除順序: フォルダ削除 → DB 削除 (#122 順序見直し)
+            // 旧: DB 削除 → フォルダ削除 だと、フォルダ削除を「諦める」した時に
+            //     「DB から消えたのにファイルだけ残る」中途半端状態になっていた。
+            // 新: フォルダを先に消して、失敗時は DB を温存 (リセットの rename rollback と同じ思想)。
+            //     フォルダ削除成功 (or 元から不在) なら DB を削除する。
+
+            // フェーズ 1: フォルダ削除 (失敗時は再試行ループ、諦めたら全体中止)
+            if (deleteFolder && Directory.Exists(gameFolder))
+            {
+                while (true)
+                {
+                    FolderDeletionService.Result result = null;
+                    using (var dialog = new ProcessingDialog((progress, token) =>
+                    {
+                        progress?.Report(new ProgressInfo(-1, "ゲームフォルダを削除中...", gameFolder));
+                        result = FolderDeletionService.TryDelete(gameFolder);
+                    })
+                    {
+                        Text = "ゲーム削除中",
+                        MarqueeMode = true,
+                        AllowCancel = false
+                    })
+                    {
+                        dialog.ShowDialog(this.FindForm());
+                    }
+
+                    if (result != null && result.Success) break;
+
+                    using (var failDialog = new FolderDeletionFailureDialog(gameFolder, result?.LastError))
+                    {
+                        var dr = failDialog.ShowDialog(this.FindForm());
+                        if (dr != DialogResult.Retry)
+                        {
+                            // 諦めた → DB は触らずに中止 (フォルダもそのまま残る)
+                            MessageBox.Show(this.FindForm(),
+                                "フォルダを削除できなかったため、ゲーム削除を中止しました。\n" +
+                                "Launcher を閉じてから再度「削除」をお試しください。",
+                                "中止", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            return;
+                        }
+                        // Retry の場合はループ継続
+                    }
+                }
+            }
+
+            // フェーズ 2: DB 削除 (CASCADE で developers / game_versions / game_genres /
+            //   play_records / surveys / store_section_games も削除される)
+            //   ここまで来た = フォルダ削除成功 (または元から不在)、DB を消すフェーズ
             Exception caught = null;
             using (var dialog = new ProcessingDialog((progress, token) =>
             {
                 try
                 {
-                    progress?.Report(new ProgressInfo(-1, "ゲームを削除中...",
+                    progress?.Report(new ProgressInfo(-1, "データベースから削除中...",
                         $"「{selectedGame.Title}」と関連レコードをデータベースから削除しています"));
                     _dbManager.DeleteGame(selectedGame.GameId);
                 }
@@ -326,53 +369,24 @@ namespace GCTonePrism.Manager.Controls
                 var dr = dialog.ShowDialog(this.FindForm());
                 if (dr != DialogResult.OK)
                 {
+                    // フォルダは既に消えてしまっているがロールバック不能。
+                    // ユーザーに「DB 削除失敗、再度削除ボタンで DB だけ消えます」と通知
                     if (caught is System.Data.SQLite.SQLiteException sqEx)
                     {
                         MessageBox.Show(this.FindForm(),
-                            $"ゲームの削除に失敗しました。\n\n{DatabaseManager.GetUserFriendlyErrorMessage(sqEx)}",
+                            $"ゲームフォルダは削除されましたが、データベース削除に失敗しました。\n" +
+                            $"再度「削除」を実行するとデータベースから消えます。\n\n" +
+                            $"{DatabaseManager.GetUserFriendlyErrorMessage(sqEx)}",
                             "データベースエラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     }
-                    // それ以外は ProcessingDialog 内で MessageBox 表示済み
+                    LoadGames();
                     return;
                 }
             }
 
-            // ここまで来た = DB 削除は成功。フォルダ削除を再試行ループで実行 (#122)
-            // 失敗時は FolderDeletionFailureDialog を出してユーザーに「再試行」or「諦める」を選ばせる
-            bool folderGivenUp = false;
-            if (deleteFolder && Directory.Exists(gameFolder))
-            {
-                while (true)
-                {
-                    var result = FolderDeletionService.TryDelete(gameFolder);
-                    if (result.Success) break;
-
-                    using (var failDialog = new FolderDeletionFailureDialog(gameFolder, result.LastError))
-                    {
-                        var dr = failDialog.ShowDialog(this.FindForm());
-                        if (dr != DialogResult.Retry)
-                        {
-                            folderGivenUp = true;
-                            break;
-                        }
-                        // Retry の場合はループ継続 (再度 TryDelete を試す)
-                    }
-                }
-            }
-
-            if (folderGivenUp)
-            {
-                MessageBox.Show(this.FindForm(),
-                    "ゲームのデータベース削除は完了しましたが、フォルダの削除を諦めました。\n" +
-                    "後で手動削除してください:\n  " + gameFolder,
-                    "ゲームフォルダ削除の警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-            else
-            {
-                MessageBox.Show(this.FindForm(),
-                    deleteFolder ? "ゲームと関連フォルダを削除しました。" : "ゲームを削除しました。",
-                    "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
+            MessageBox.Show(this.FindForm(),
+                deleteFolder ? "ゲームと関連フォルダを削除しました。" : "ゲームを削除しました。",
+                "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
             LoadGames();
         }
 

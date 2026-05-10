@@ -101,11 +101,11 @@ namespace GCTonePrism.Manager
             // btnGiveUp
             //
             this.btnGiveUp.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnGiveUp.Location = new System.Drawing.Point(440, 305);
+            this.btnGiveUp.Location = new System.Drawing.Point(480, 305);
             this.btnGiveUp.Name = "btnGiveUp";
-            this.btnGiveUp.Size = new System.Drawing.Size(140, 35);
+            this.btnGiveUp.Size = new System.Drawing.Size(100, 35);
             this.btnGiveUp.TabIndex = 7;
-            this.btnGiveUp.Text = "諦める (手動削除)";
+            this.btnGiveUp.Text = "諦める";
             this.btnGiveUp.UseVisualStyleBackColor = true;
             this.btnGiveUp.Click += new System.EventHandler(this.btnGiveUp_Click);
             //

@@ -423,7 +423,7 @@
 
 #### Added
 
-- **フォルダ削除失敗時の再試行 UI を追加 (#122)**: ゲーム削除や DB リセットでフォルダ削除に失敗した場合、従来は「警告 MessageBox 表示 → ユーザーが手動でなんとかする」だったが、専用ダイアログ `FolderDeletionFailureDialog` で「再試行」「諦める (手動削除)」を選べるように改善
+- **フォルダ削除失敗時の再試行 UI を追加 (#122)**: ゲーム削除や DB リセットでフォルダ削除に失敗した場合、従来は「警告 MessageBox 表示 → ユーザーが手動でなんとかする」だったが、専用ダイアログ `FolderDeletionFailureDialog` で「再試行」「諦める」を選べるように改善
   - 主因は **Launcher が起動中ゲームの実行ファイルを掴んでいる** ケース。ユーザーが Launcher を閉じてから「再試行」を押すだけで解消する
   - ダイアログには対象フォルダパス、エラー詳細 (Exception.Message)、対処手順 (Launcher を閉じてから再試行) を表示
   - `AcceptButton = btnRetry` で Enter で再試行 (再試行は何度押しても安全)、`CancelButton = btnGiveUp` で ESC で諦める
@@ -436,6 +436,7 @@
 - **`DatabaseManager.ResetDatabase()` の wrapper signature 更新**: 同様に `Result` を返す形に
 - **`SettingsSectionPanel.btnResetDatabase_Click`**: 退避フォルダ削除失敗時に `FolderDeletionFailureDialog` を表示する再試行ループに変更。「諦める」を選んだ場合のみ警告 MessageBox を表示 (#122)
 - **`GameSectionPanel.btnDeleteGame_Click`**: フォルダ削除を `ProcessingDialog` の外に出して再試行ループ化。`folderWarning` 文字列方式を廃止し、失敗時は `FolderDeletionFailureDialog` で対応 (#122)
+- **削除順序を「フォルダ → DB」に入れ替え**: 旧実装は「DB 削除 → フォルダ削除 (失敗時警告)」だったため、フォルダ削除を諦めると「DB から消えたのにファイルだけ残る」中途半端状態になっていた。新実装はリセットの rename rollback と同じ思想で、フォルダ削除を先にやって失敗時は DB を温存する。「諦める」を選んだ場合はゲーム削除全体を中止し、ユーザーに「Launcher を閉じてから再度削除」を案内する
 
 #### Scope out (将来 Issue 候補)
 
