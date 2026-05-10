@@ -342,7 +342,10 @@ namespace GCTonePrism.Manager.Controls
             // フェーズ 2: DB 削除 (CASCADE で developers / game_versions / game_genres /
             //   play_records / surveys / store_section_games も削除される)
             //   失敗時は (1) で退避したフォルダを games/{gameId}/ に戻して全体ロールバック
+            //   ロールバック失敗 (権限変更・他プロセスが games/{gameId}/ を再作成した等) は
+            //   rollbackError に記録し、後段で正確に通知する (Codex P2 #122)
             Exception caught = null;
+            Exception rollbackError = null;
             DialogResult dbDr;
             using (var dialog = new ProcessingDialog((progress, token) =>
             {
@@ -358,7 +361,15 @@ namespace GCTonePrism.Manager.Controls
                     // ロールバック: 退避フォルダを games/{gameId}/ に戻す
                     if (gamesRenamed && Directory.Exists(pendingDeleteFolder) && !Directory.Exists(gameFolder))
                     {
-                        try { Directory.Move(pendingDeleteFolder, gameFolder); } catch { /* best effort */ }
+                        try { Directory.Move(pendingDeleteFolder, gameFolder); }
+                        catch (Exception rbEx) { rollbackError = rbEx; }
+                    }
+                    else if (gamesRenamed && Directory.Exists(gameFolder))
+                    {
+                        // 何らかの理由で games/{gameId}/ が既に存在する (例: 別プロセスが再作成) →
+                        // 安全にロールバックできない
+                        rollbackError = new IOException(
+                            $"ロールバック先 '{gameFolder}' が既に存在するためロールバックできません。");
                     }
                     throw;
                 }
@@ -374,13 +385,39 @@ namespace GCTonePrism.Manager.Controls
 
             if (dbDr != DialogResult.OK)
             {
+                string baseMsg;
                 if (caught is System.Data.SQLite.SQLiteException sqEx)
                 {
-                    MessageBox.Show(this.FindForm(),
-                        $"データベースからの削除に失敗しました。フォルダは元に戻されています。\n\n{DatabaseManager.GetUserFriendlyErrorMessage(sqEx)}",
-                        "データベースエラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    baseMsg = $"データベースからの削除に失敗しました。\n\n{DatabaseManager.GetUserFriendlyErrorMessage(sqEx)}";
                 }
-                // それ以外は ProcessingDialog 内で MessageBox 表示済み
+                else
+                {
+                    baseMsg = "データベースからの削除に失敗しました。" +
+                        (caught != null ? $"\n\n{caught.Message}" : "");
+                }
+
+                string rollbackMsg;
+                if (!gamesRenamed)
+                {
+                    rollbackMsg = ""; // 元々 rename していないので戻す対象なし
+                }
+                else if (rollbackError != null)
+                {
+                    // ロールバック失敗 → 嘘をつかず正確に通知
+                    rollbackMsg = "\n\n【さらに重要】退避フォルダの復元にも失敗しました。\n" +
+                        $"  退避先: {pendingDeleteFolder}\n" +
+                        $"  本来の場所: {gameFolder}\n" +
+                        $"手動で退避先を本来の場所に戻してください。\n\n復元失敗の詳細: {rollbackError.Message}";
+                }
+                else
+                {
+                    rollbackMsg = "\n\nフォルダは元に戻されています。";
+                }
+
+                MessageBox.Show(this.FindForm(),
+                    baseMsg + rollbackMsg,
+                    "データベースエラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
                 LoadGames();
                 return;
             }
