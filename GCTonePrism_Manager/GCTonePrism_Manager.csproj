@@ -90,6 +90,12 @@
     <Compile Include="DeleteGameConfirmForm.Designer.cs">
       <DependentUpon>DeleteGameConfirmForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="FolderDeletionFailureDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="FolderDeletionFailureDialog.Designer.cs">
+      <DependentUpon>FolderDeletionFailureDialog.cs</DependentUpon>
+    </Compile>
     <Compile Include="EditGameForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -184,6 +190,7 @@
     <Compile Include="Services\BackupService.cs" />
     <Compile Include="Services\DeveloperListManager.cs" />
     <Compile Include="Services\FileOperationService.cs" />
+    <Compile Include="Services\FolderDeletionService.cs" />
     <Compile Include="Services\GameFormHelper.cs" />
     <Compile Include="Services\ImagePreviewHelper.cs" />
     <Compile Include="Services\PathConversionHelper.cs" />
@@ -198,6 +205,9 @@
     </EmbeddedResource>
     <EmbeddedResource Include="DeleteGameConfirmForm.resx">
       <DependentUpon>DeleteGameConfirmForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="FolderDeletionFailureDialog.resx">
+      <DependentUpon>FolderDeletionFailureDialog.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="EditGameForm.resx">
       <DependentUpon>EditGameForm.cs</DependentUpon>

@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using System.Windows.Forms;
+using GCTonePrism.Manager.Services;
 
 namespace GCTonePrism.Manager.Controls
 {
@@ -60,16 +61,17 @@ namespace GCTonePrism.Manager.Controls
 
             // ResetDatabase は DBファイル削除 + games フォルダ再構築 + テーブル再作成 +
             // マイグレーション再実行を行う。共有フォルダ越しでは時間がかかるので進捗バー表示。
-            // 戻り値は退避フォルダ物理削除に失敗した場合の警告メッセージ (null なら完全成功)。
+            // 戻り値は退避フォルダ物理削除の Result。Success=false なら DB / games は再構築済みだが
+            // 退避フォルダだけ残る状態なので、再試行 UI で対処する (#122 Group C)。
             // 真に失敗した場合は例外が ProcessingDialog 内でハンドリングされ DialogResult.Abort になる。
             Exception caught = null;
-            string warning = null;
+            FolderDeletionService.Result resetResult = null;
             using (var dialog = new ProcessingDialog((progress, token) =>
             {
                 try
                 {
                     progress?.Report(new ProgressInfo(-1, "データベースをリセット中...", "ファイル削除と再作成を実行しています"));
-                    warning = _dbManager.ResetDatabase();
+                    resetResult = _dbManager.ResetDatabase();
                 }
                 catch (Exception ex)
                 {
@@ -90,24 +92,38 @@ namespace GCTonePrism.Manager.Controls
                 }
             }
 
-            // ここまで来た = DB / games は再構築済み。UI リフレッシュは warning の有無に関わらず実行する
+            // ここまで来た = DB / games は再構築済み。UI リフレッシュは結果に関わらず実行する
             // (Codex P2 #121: 警告を例外で表現すると ProcessingDialog で Abort 扱いされて
             //  リフレッシュフックがスキップされ、UI が古いまま「失敗」と誤報告されていたため)
             UpdateVersionInfo();
             DatabaseReset?.Invoke();
 
-            if (warning != null)
+            // 退避フォルダ削除に失敗した場合は再試行 UI を出す (#122)
+            // ユーザーが Launcher を閉じてから「再試行」を押せばロックが解放されて削除成功する想定
+            while (resetResult != null && !resetResult.Success)
             {
-                MessageBox.Show(this,
-                    "データベースのリセットは完了しましたが、警告があります:\n\n" + warning,
-                    "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                using (var failDialog = new FolderDeletionFailureDialog(resetResult.Path, resetResult.LastError))
+                {
+                    var dr = failDialog.ShowDialog(this);
+                    if (dr == DialogResult.Retry)
+                    {
+                        resetResult = FolderDeletionService.TryDelete(resetResult.Path);
+                    }
+                    else
+                    {
+                        // 諦めた場合は警告 MessageBox を出して終了 (退避フォルダはゴミとして残る)
+                        MessageBox.Show(this,
+                            "データベースのリセットは完了しましたが、退避済みの旧 games フォルダの削除を諦めました。\n" +
+                            "後で手動削除してください:\n  " + resetResult.Path,
+                            "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                }
             }
-            else
-            {
-                MessageBox.Show(this,
-                    "データベースのリセットが完了しました。",
-                    "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
+
+            MessageBox.Show(this,
+                "データベースのリセットが完了しました。",
+                "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
     }
 }
