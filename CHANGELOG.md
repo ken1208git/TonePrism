@@ -436,7 +436,11 @@
 - **`DatabaseManager.ResetDatabase()` の wrapper signature 更新**: 同様に `Result` を返す形に
 - **`SettingsSectionPanel.btnResetDatabase_Click`**: 退避フォルダ削除失敗時に `FolderDeletionFailureDialog` を表示する再試行ループに変更。「諦める」を選んだ場合のみ警告 MessageBox を表示 (#122)
 - **`GameSectionPanel.btnDeleteGame_Click`**: フォルダ削除を `ProcessingDialog` の外に出して再試行ループ化。`folderWarning` 文字列方式を廃止し、失敗時は `FolderDeletionFailureDialog` で対応 (#122)
-- **削除順序を「フォルダ → DB」に入れ替え**: 旧実装は「DB 削除 → フォルダ削除 (失敗時警告)」だったため、フォルダ削除を諦めると「DB から消えたのにファイルだけ残る」中途半端状態になっていた。新実装はリセットの rename rollback と同じ思想で、フォルダ削除を先にやって失敗時は DB を温存する。「諦める」を選んだ場合はゲーム削除全体を中止し、ユーザーに「Launcher を閉じてから再度削除」を案内する
+- **ゲーム削除を rename rollback パターンに刷新**: リセットと同じ 3 フェーズ「(1) `games/{gameId}/` を `.pending-delete-{guid}/` に rename で退避 → (2) DB 削除 → (3) 退避フォルダ物理削除」に統一 (Codex P1 #122 への対応)。これにより:
+  - フォルダ物理削除前に DB 削除が走るので、DB 削除失敗時 (SQLiteException 等) はフォルダを rename で戻して**何も変わらない状態にロールバック**でき、永続的データロストを排除
+  - (1) 失敗時 (Launcher ロック中など) は再試行 UI、諦めたら全体中止で DB 無事
+  - (3) 失敗時は DB 削除済みなのでゴミ退避フォルダだけ残るパターン (リセットと同じ)
+- 旧実装の「フォルダ物理削除 → DB 削除」順は、DB 失敗時にフォルダだけ消えて戻せない問題があった (PR #117 以来の負債)。本変更で完全解消
 
 #### Scope out (将来 Issue 候補)
 

@@ -411,8 +411,13 @@
   - 削除前の確認ダイアログ（`DeleteGameConfirmForm`）に削除対象のフォルダパスを表示し、ディスクから物理的に消える旨を警告色で明示
   - `Enter` キー誤操作を防ぐため `AcceptButton` はキャンセルに割り当て
   - フォルダが存在しない場合（手動削除済み等）は表示を「フォルダが見つかりません。DB のみ削除します」に切り替えて DB 削除のみ実行（無害）
-  - 削除順序は **「(1) フォルダ削除 → (2) DB 削除」** (Manager v0.8.5 / #122)。フォルダ削除に失敗して「諦める」を選んだ場合はゲーム削除全体を中止 (DB / フォルダ両方とも触らない、Launcher を閉じてから再度削除を促す)。リセットの rename rollback と同じ「失敗時は何も変えない」思想に揃えた
-  - フォルダ削除中に `IOException`（Launcher など他プロセスがフォルダ内のファイルをロック中）や `UnauthorizedAccessException` が発生した場合は、再試行 UI (`FolderDeletionFailureDialog`) を表示。ユーザーは Launcher を閉じてから「再試行」を押せば削除成功、「諦める」を選べば DB は触らずに削除全体を中止
+  - 削除フローは **rename rollback パターン** (リセットと同じ 3 フェーズ、Manager v0.8.5 / #122):
+    1. `games/{gameId}/` を `games/{gameId}.pending-delete-{guid}/` に rename で退避
+    2. DB 削除 (CASCADE で関連レコードも削除)
+    3. 退避フォルダを物理削除
+  - 失敗パターン別の挙動: (1) rename 失敗 → 再試行 UI、諦めたら全体中止 (何も変わらない) / (2) DB 削除失敗 → 退避を rename で戻してロールバック → throw / (3) 退避物理削除失敗 → 再試行 UI、諦めたらゴミ退避フォルダだけ残る (DB / games は確定状態)
+  - フォルダ物理削除前に DB 削除が走るので、DB 削除失敗時にフォルダだけ消える永続データロストを排除 (Codex P1 #122)
+  - フォルダ削除中に `IOException`（Launcher など他プロセスがフォルダ内のファイルをロック中）や `UnauthorizedAccessException` が発生した場合は、再試行 UI (`FolderDeletionFailureDialog`) を表示
   - フォルダ削除のリトライ機構は `Services.FolderDeletionService.TryDelete` (5 回 × 200ms) を共通化して使用 (Manager v0.8.5 / #122)
 
 ##### 機能3: ゲーム情報編集機能
@@ -2520,6 +2525,7 @@ GCTonePrism/
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
+| 2026-05-10 | 1.9.9 | ゲーム削除を rename rollback パターンに刷新 (Codex P1 #122)：旧実装は「フォルダ物理削除 → DB 削除」順だったため、DB 削除失敗時 (SQLiteException 等) にフォルダだけ消えて戻せない問題があった。新実装はリセットと同じ 3 フェーズ「(1) rename で退避 → (2) DB 削除 → (3) 退避物理削除」に統一し、(2) 失敗時は (1) を rename で戻してロールバックする。永続的データロストを排除。SPEC §2.2 機能2 を新フローで書き直し。Manager v0.8.5 で実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.8 | ゲーム削除の順序を「フォルダ → DB」に入れ替え (#122 Group C のレビュー反映)：旧実装は「DB 削除 → フォルダ削除 (失敗時警告)」で、フォルダ削除を諦めると「DB から消えたのにファイルだけ残る」中途半端状態だった。新実装ではフォルダ削除を先にやって失敗時は DB を温存 (リセットの rename rollback と同じ思想)。「諦める」を選ぶとゲーム削除全体を中止し、ユーザーに「Launcher を閉じてから再度削除」を案内。SPEC §2.2 機能2 を新挙動で書き直し。Manager v0.8.5 で実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.7 | フォルダ削除失敗時の再試行 UI を追加 (#122 Group C)：ゲーム削除や DB リセットでフォルダ削除に失敗した場合、新規 `FolderDeletionFailureDialog` で「再試行」「諦める」を選べる UX に。主因の Launcher ロックは「Launcher を閉じてから再試行」で解消する想定。リトライ機構は新規 `Services/FolderDeletionService.TryDelete` (5 回 × 200ms) を `RestoreService.DeleteWithRetry` パターンを参考に共通化。`SchemaManager.ResetDatabase` の戻り値を `string` から `FolderDeletionService.Result` に構造化し、呼び出し側で再試行ループを実装可能に。SPEC §2.2 機能2 (削除) と機能11 (リセット) に再試行 UI を追記。「フォルダをエクスプローラで開く」ボタンはロック中はエクスプローラからも消せないため本質的解決にならず削除。ロックプロセス特定 (Restart Manager API) と Manager ファイルログ (#116) は別 Issue として保留。Manager v0.8.5 で実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.6 | PR #121 への Codex P1 追加指摘への対応：`SchemaManager.ResetDatabase()` を **rename rollback 方式** に変更し、DB 削除失敗時に games フォルダを復元する設計に。中間失敗時でも Manager は再起動可能な状態を保証 (broken partial-reset 状態を排除)。`ResetDatabaseConfirmForm` に「すべての展示PCの Launcher を終了してから実行」警告を追加、`DeleteGameConfirmForm` に「該当ゲームを起動中の Launcher があれば閉じて」ヒントを追加（フォルダ削除失敗の主原因予防）。Edit/Add/VersionUp は影響軽微 + Launcher 側 `ErrorDialog` で十分対応可能と判断しスコープ外。SPEC §2.2 機能11 のリセット項目を rename rollback 設計に書き直し。 | Kenshiro Kuroga & Claude |
