@@ -55,27 +55,44 @@ namespace GCTonePrism.Manager.Controls
         {
             using (var confirmForm = new ResetDatabaseConfirmForm())
             {
-                if (confirmForm.ShowDialog() == DialogResult.Yes)
+                if (confirmForm.ShowDialog() != DialogResult.Yes) return;
+            }
+
+            // ResetDatabase は DBファイル削除 + テーブル再作成 + マイグレーション再実行を行う。
+            // 共有フォルダ越しでは時間がかかる場合があるので進捗バーを表示する。
+            Exception caught = null;
+            using (var dialog = new ProcessingDialog((progress, token) =>
+            {
+                try
                 {
-                    try
-                    {
-                        _dbManager.ResetDatabase();
-
-                        MessageBox.Show(
-                            "データベースのリセットが完了しました。",
-                            "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
-
-                        UpdateVersionInfo();
-                        DatabaseReset?.Invoke();
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show(
-                            $"データベースのリセットに失敗しました。\n\n{ex.Message}",
-                            "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
+                    progress?.Report(new ProgressInfo(-1, "データベースをリセット中...", "ファイル削除と再作成を実行しています"));
+                    _dbManager.ResetDatabase();
+                }
+                catch (Exception ex)
+                {
+                    caught = ex;
+                    throw;
+                }
+            })
+            {
+                Text = "データベースリセット中",
+                MarqueeMode = true,
+                AllowCancel = false
+            })
+            {
+                var dr = dialog.ShowDialog(this);
+                if (dr != DialogResult.OK)
+                {
+                    return;
                 }
             }
+
+            MessageBox.Show(
+                "データベースのリセットが完了しました。",
+                "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+            UpdateVersionInfo();
+            DatabaseReset?.Invoke();
         }
     }
 }

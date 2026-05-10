@@ -410,6 +410,79 @@
 
 ## Manager（管理ソフト）
 
+### [Manager v0.8.0] - 2026-05-07
+
+#### Added
+
+- **データベースバックアップ機能 (#96)**: `prism.db` のスナップショットを Manager から取得・管理できる機能を新設
+  - **新規タブ「バックアップ」**: MainForm に4タブ目を追加し、専用UIを設置
+  - **手動バックアップ**: 「今すぐバックアップ」ボタンで即時実行。SQLite Online Backup API (`SQLiteConnection.BackupDatabase`) を使用するため、Launcher が `prism.db` を開いている状態でも整合性を保ったコピーが可能
+  - **自動バックアップ**: Manager 起動時に「前回バックアップから設定間隔（デフォルト 24h）以上経過していたら走らせる」方式。バックグラウンドタスクで起動をブロックしない
+  - **マルチPC重複防止**: `settings.last_backup_at` を `BEGIN IMMEDIATE` (System.Data.SQLite における `IsolationLevel.Serializable`) で更新する lease 方式。複数のManagerが同時起動した場合でも片方のみが自動バックアップを走らせる
+  - **バックアップ履歴一覧**: DataGridView で過去 100 件までを表示（開始日時 / 完了日時 / 実行PC / トリガ / 状態 / サイズ / ファイルパス）
+  - **世代管理**: 設定値 `backup_retention_count`（デフォルト 30）を超える古いバックアップは自動削除
+  - **保存先設定**: デフォルトは `<DBフォルダ>/backups/`、`BackupSettingsForm` から任意のフォルダに変更可能（FolderBrowserDialog 経由）
+  - **リストア機能**: 履歴から選択 → 警告（「全Launcher を停止してください」「現DBは退避されます」）+ 4桁確認コード入力（`ResetDatabaseConfirmForm` の安全パターンを踏襲）→ 現DBを `safety_before_restore_HHmmss.db` として Online Backup API で退避 → SQLite 接続プールクリア → `prism.db` / `prism.db-wal` / `prism.db-shm` 削除 → バックアップを `prism.db` としてコピー → DB再初期化
+- **新規ファイル**:
+  - `Models/BackupLogEntry.cs` — `backup_log` テーブルのモデル（UNIX秒 → `DateTime` 変換ヘルパー付き）
+  - `Repositories/BackupLogRepository.cs` — `backup_log` の CRUD（in_progress → success/failed の状態遷移）
+  - `Repositories/SettingsRepository.cs` — `settings` テーブルへの汎用アクセサ + バックアップ lease 取得 (`TryAcquireBackupLease`)
+  - `Services/BackupService.cs` — バックアップのドメインロジック、Online Backup API 呼び出し、リテンション処理、`BackupResult` 結果モデル
+  - `Services/RestoreService.cs` — 退避 + 接続プールクリア + 上書きの安全な復元手順
+  - `Controls/BackupSectionPanel.cs` (.Designer.cs) — バックアップタブのUserControl
+  - `BackupSettingsForm.cs` (.Designer.cs) — 設定ダイアログ
+  - `RestoreConfirmForm.cs` (.Designer.cs) — 復元確認ダイアログ
+
+#### Changed
+
+- **DBスキーマ v8 → v9**: additive migration（既存テーブル変更なし、Launcher 互換性に影響なし）
+  - `backup_log` テーブル新設（id, started_at, completed_at, pc_name, file_path, file_size_bytes, status, error_message, trigger_type）
+  - `settings` テーブルに 4 キー追加（`last_backup_at`, `backup_destination_path`, `backup_auto_interval_hours`, `backup_retention_count`）
+  - 自動マイグレーション（`SchemaManager.MigrateV8ToV9`）が起動時に実行される
+- **`settings` テーブルの KVS スキーマ整合化**: SPECIFICATION 1.3.1 (2026-02-08) で「単一行 → KVS方式」に変更されていたが、既存DB向けマイグレーションが実装されていなかったため、それより前に作られたDBは古いスキーマのままだった。Manager v0.8.0 では起動時に `settings` テーブルの `key` カラム有無を検査し、無ければ古いテーブルを `settings_legacy_v8_or_earlier` にリネームしてから KVS 方式の新テーブルを作成する移行処理を追加（`EnsureSettingsTableIsKvsSchema`）。旧データに実コードからの参照は無かったためデータロスは発生しないが、念のため legacy テーブルとして退避
+- **`DatabaseManager` ファサードを拡張**: 新規プロパティ `BackupService`, `RestoreService`, `BackupLogRepository`, `SettingsRepository` を追加
+- **`ProcessingDialog` を拡張 (#99 関連)**: `MarqueeMode` プロパティ（進捗が定量化できない処理向けの流れるバー）と `AllowCancel` プロパティ（中断不可な処理向けにキャンセルボタン非表示化）を追加
+- **進捗バーが付いていなかった重め操作にプログレス表示を追加 (#99)**:
+  - **EditGameForm**: ゲームID変更時の `Directory.Move(oldFolder, newFolder)` + `UpdateGameId` をマーキー進捗で表示。失敗時のロールバック（フォルダを元に戻す）処理にも進捗メッセージ。共有フォルダ越し・クロスボリューム時の体感速度を改善
+  - **SettingsSectionPanel**: 「データベースリセット」操作（DBファイル削除 + テーブル再作成 + マイグレーション再実行）をマーキー進捗で表示
+  - **GameSectionPanel**: 「ゲーム削除」操作（CASCADE で developers / game_versions / game_genres / play_records / surveys / store_section_games の関連レコード削除）をマーキー進捗で表示
+
+#### Fixed
+
+- **`backup_log` の自己参照スナップショット問題**: 「今すぐバックアップ」中の `backup_log` には `in_progress` 行が既に書き込まれているため、SQLite Online Backup API でコピーした .db ファイルにも自分自身の `in_progress` 行が含まれてしまう。後でその .db から復元すると、履歴一覧に「進行中のままのゴースト行」が現れる挙動だった
+  - **`InsertInProgress` 時点で予定ファイルパスを記録するよう変更**: 旧実装ではバックアップ完了後にファイルパスを書き込んでいたため、自己参照スナップショットには空の `file_path` が入っていた。最初から書き込むことで「実ファイルが存在するか」での判別が可能になった
+  - **`BackupLogRepository.ReconcileInProgressEntries(reasonIfMissing, thresholdSeconds)` を新設**: 各 `in_progress` 行について実ファイルの有無を確認し、存在すれば `success`（実ファイルサイズで `file_size_bytes` 更新）、存在しなければ `failed` に更新する。閾値秒数を null にすると全件対象、指定すると古い行のみ対象（実行中のバックアップに干渉しない）
+  - **`MainForm` 起動時**: 閾値 600 秒で呼ぶ（Manager クラッシュ等で取り残された古い行のみリコンサイル）
+  - **`MainForm.OnDatabaseRestored`**: 閾値なしで呼ぶ（復元直後はスナップショットの状態なので、参照されているファイルが実在すれば正しく `success` として復元される）
+  - これにより「**バックアップ実体ファイルは存在しているのに失敗扱いになる**」という不自然なUXが解消され、復元に使ったまさにそのファイルが「成功」表示で履歴に残る
+- **更新ボタンが新しいエントリを反映しないことがある問題の改善**: System.Data.SQLite の接続プールが古いスナップショットを保持して新しいコミットを見せないケースに対応。`BackupSectionPanel.RefreshDisplay()` 内で `SQLiteConnection.ClearAllPools()` を呼んで強制的にプールを掃除してから読み直すように変更
+- **更新ボタンに包括リコンサイル機能を追加**: `BackupSectionPanel.RefreshDisplay()` で表示更新前に以下を実行：
+  - `ReconcileInProgressEntries` を `recoverFailedWithExistingFile=true` で実行 — `failed` 行のうち `file_path` が指すファイルが実在するものを `success` に救済
+  - `RecoverLegacyFailedEntriesByFolderScan` を実行 — `file_path` が空のまま残っている `failed` 行について、バックアップフォルダ内の `prism_yyyyMMdd_HHmmss.db` 形式のファイル名と `started_at` を ±1 秒範囲で照合し、一致すれば `success` として復元（旧バージョン Manager 由来のゴースト救済）
+  - 「ファイルが本当に無い `failed` 行」（実際のディスク満杯エラー等）はそのまま保持されるので、誤って成功扱いに戻すことはない
+
+#### Changed (UI)
+
+- **バックアップ履歴の状態表示を視覚的に改善**: 表示は **成功 / 失敗 / 実行中** の3状態に統一しつつ、状態セルに **背景色**（淡緑 / 淡赤 / 淡青）と **ツールチップ** を追加。技術的な詳細（クラッシュ残骸 vs 実行直後の通常ケースなど）はツールチップに押し込んで本体表示はシンプルに：
+  - **成功** → 「バックアップは完了済みです。この行から復元できます。」
+  - **失敗** → `error_message` の内容（「中断理由: ◯◯」）。空なら「実ファイルが存在しないため復元には使えません。」
+  - **実行中（30秒以内）** → 「現在実行中です（経過: X 秒）」
+  - **実行中（30秒以上）** → 「前回 Manager 異常終了の残骸の可能性があります（経過: X 分）。更新ボタンを押すと実ファイルの有無で 成功/失敗 が確定します。」
+  - 選択中も色味が保たれるよう `SelectionBackColor` も状態に合わせて設定
+
+#### Changed (Safety Backup の取り扱い改善)
+
+- **DBスキーマ v9 → v10**: `backup_log.trigger_type` の CHECK 制約を `('manual', 'auto')` から `('manual', 'auto', 'safety')` に拡張。SQLite では CHECK 制約を ALTER できないため、`backup_log_new` を作成してデータを移し替える方式で実施
+- **退避ファイルの保存先を整理**: 旧 `<DBフォルダ>/safety_before_restore_yyyyMMdd_HHmmss.db`（プロジェクトルート直下）から、`<DBフォルダ>/backups/safety/safety_yyyyMMdd_HHmmss.db` に変更
+  - `RestoreService.Restore` 内で退避先を構築・作成
+  - Manager 起動時に旧形式のファイルを `backups/safety/` へ自動移動（`BackupService.MigrateLegacySafetyFilesToSafetyFolder`、idempotent）
+- **退避ファイルの世代管理**: `backups/safety/` 内のファイルを最新10件まで保持し、超過分は古いものから自動削除（`RestoreService.ApplySafetyRetention`）
+- **退避ファイルを履歴UIに統合**: `BackupLogRepository.RegisterUnknownSafetyFiles` で `backups/safety/` をスキャンし、`backup_log` に未登録の退避ファイルを `trigger_type='safety'`, `status='success'` で自動登録。`started_at` はファイル名のタイムスタンプから復元
+  - Manager 起動時 / バックアップ復元後 / 更新ボタン押下時の各タイミングで実行
+  - 履歴グリッドで「退避」とラベル表示（「手動」「自動」と並ぶ第3のトリガ種別）
+  - 退避ファイルから直接「選択したバックアップから復元」も可能（誤った復元のロールバック手段）
+- **`.gitignore` 修正**: `backups/`（通常バックアップ＋退避フォルダ）と旧形式の `safety_before_restore_*.db` を git 管理から除外。これまで `git add .` でうっかりコミットされる危険があった
+
 ### [Manager v0.7.6] - 2026-03-29
 
 #### Changed

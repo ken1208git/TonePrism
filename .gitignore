@@ -44,5 +44,10 @@ prism.db
 *.db-journal
 *.db-wal
 
+# データベースバックアップ（Manager のバックアップ機能で生成される）
+backups/
+# 旧版 Manager 由来でプロジェクトルート直下に作られた退避ファイル
+safety_before_restore_*.db
+
 # ゲームファイル（容量が大きいため除外）
 games/

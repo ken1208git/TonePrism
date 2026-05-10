@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data.SQLite;
 using GCTonePrism.Manager.Models;
 using GCTonePrism.Manager.Repositories;
+using GCTonePrism.Manager.Services;
 
 namespace GCTonePrism.Manager
 {
@@ -18,6 +19,10 @@ namespace GCTonePrism.Manager
         private readonly VersionRepository _versionRepo;
         private readonly DeveloperRepository _devRepo;
         private readonly StoreSectionRepository _sectionRepo;
+        private readonly SettingsRepository _settingsRepo;
+        private readonly BackupLogRepository _backupLogRepo;
+        private readonly BackupService _backupService;
+        private readonly RestoreService _restoreService;
 
         public DatabaseManager()
         {
@@ -27,7 +32,17 @@ namespace GCTonePrism.Manager
             _gameRepo = new GameRepository(_conn, _devRepo);
             _versionRepo = new VersionRepository(_conn, _devRepo);
             _sectionRepo = new StoreSectionRepository(_conn);
+            _settingsRepo = new SettingsRepository(_conn);
+            _backupLogRepo = new BackupLogRepository(_conn);
+            _backupService = new BackupService(_conn, _backupLogRepo, _settingsRepo);
+            _restoreService = new RestoreService(_conn);
         }
+
+        // --- バックアップ機能アクセサ ---
+        public BackupService BackupService { get { return _backupService; } }
+        public RestoreService RestoreService { get { return _restoreService; } }
+        public BackupLogRepository BackupLogRepository { get { return _backupLogRepo; } }
+        public SettingsRepository SettingsRepository { get { return _settingsRepo; } }
 
         // --- 接続・スキーマ ---
         public bool DatabaseExists() => _conn.DatabaseExists();

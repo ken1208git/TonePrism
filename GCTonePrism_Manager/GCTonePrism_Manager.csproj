@@ -126,11 +126,31 @@
     <Compile Include="Controls\SettingsSectionPanel.Designer.cs">
       <DependentUpon>SettingsSectionPanel.cs</DependentUpon>
     </Compile>
+    <Compile Include="Controls\BackupSectionPanel.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Controls\BackupSectionPanel.Designer.cs">
+      <DependentUpon>BackupSectionPanel.cs</DependentUpon>
+    </Compile>
+    <Compile Include="BackupSettingsForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="BackupSettingsForm.Designer.cs">
+      <DependentUpon>BackupSettingsForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="RestoreConfirmForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="RestoreConfirmForm.Designer.cs">
+      <DependentUpon>RestoreConfirmForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="DatabaseConnection.cs" />
     <Compile Include="DatabaseManager.cs" />
     <Compile Include="SchemaManager.cs" />
+    <Compile Include="Repositories\BackupLogRepository.cs" />
     <Compile Include="Repositories\DeveloperRepository.cs" />
     <Compile Include="Repositories\GameRepository.cs" />
+    <Compile Include="Repositories\SettingsRepository.cs" />
     <Compile Include="Repositories\StoreSectionRepository.cs" />
     <Compile Include="Repositories\VersionRepository.cs" />
     <Compile Include="MainForm.cs">
@@ -146,6 +166,7 @@
       <DependentUpon>ProcessingDialog.cs</DependentUpon>
     </Compile>
     <Compile Include="ProgressInfo.cs" />
+    <Compile Include="Models\BackupLogEntry.cs" />
     <Compile Include="Models\DeveloperInfo.cs" />
     <Compile Include="Models\GameInfo.cs" />
     <Compile Include="Models\PlayRecord.cs" />
@@ -154,11 +175,13 @@
     <Compile Include="Models\Survey.cs" />
     <Compile Include="GenreList.cs" />
     <Compile Include="PathManager.cs" />
+    <Compile Include="Services\BackupService.cs" />
     <Compile Include="Services\DeveloperListManager.cs" />
     <Compile Include="Services\FileOperationService.cs" />
     <Compile Include="Services\GameFormHelper.cs" />
     <Compile Include="Services\ImagePreviewHelper.cs" />
     <Compile Include="Services\PathConversionHelper.cs" />
+    <Compile Include="Services\RestoreService.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="AddGameForm.resx">
