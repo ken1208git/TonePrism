@@ -19,6 +19,25 @@ namespace GCTonePrism.Manager.Repositories
         }
 
         /// <summary>
+        /// File.Exists 判定用にパスを解決する。relative_path があれば現在の prism.db ディレクトリと結合、
+        /// 無ければ file_path をそのまま返す。プロジェクト移動後でも relative_path 経由で実体を発見できる。
+        /// </summary>
+        private string ResolvePathForExistsCheck(string filePath, string relativePath)
+        {
+            if (!string.IsNullOrEmpty(relativePath))
+            {
+                try
+                {
+                    string dbDir = System.IO.Path.GetDirectoryName(_conn.DbPath);
+                    if (!string.IsNullOrEmpty(dbDir))
+                        return System.IO.Path.GetFullPath(System.IO.Path.Combine(dbDir, relativePath));
+                }
+                catch { /* fallthrough to file_path */ }
+            }
+            return filePath;
+        }
+
+        /// <summary>
         /// 進行中レコードを挿入し、生成された id を返す。
         /// 予定ファイルパスを最初から保存することで、後で「実ファイルが存在するか」で
         /// リコンサイル（成功/失敗の確定）が可能になる。
@@ -120,11 +139,11 @@ namespace GCTonePrism.Manager.Repositories
                 {
                     _conn.OpenConnectionWithJournalMode(connection);
 
-                    // 対象行を取得
-                    var inProgressTargets = new List<(long id, string filePath)>();
-                    var failedRecoverableTargets = new List<(long id, string filePath)>();
+                    // 対象行を取得 (#126: relative_path も取得して両方で存在チェックする)
+                    var inProgressTargets = new List<(long id, string filePath, string relativePath)>();
+                    var failedRecoverableTargets = new List<(long id, string filePath, string relativePath)>();
 
-                    string selectInProgressSql = "SELECT id, file_path FROM backup_log WHERE status = 'in_progress'";
+                    string selectInProgressSql = "SELECT id, file_path, relative_path FROM backup_log WHERE status = 'in_progress'";
                     if (thresholdSeconds.HasValue)
                     {
                         selectInProgressSql += " AND started_at < @cutoff";
@@ -141,35 +160,41 @@ namespace GCTonePrism.Manager.Repositories
                             {
                                 long id = Convert.ToInt64(reader["id"]);
                                 string fp = reader["file_path"] is DBNull ? "" : reader["file_path"].ToString();
-                                inProgressTargets.Add((id, fp));
+                                string rp = reader["relative_path"] is DBNull ? null : reader["relative_path"].ToString();
+                                inProgressTargets.Add((id, fp, rp));
                             }
                         }
                     }
 
                     if (recoverFailedWithExistingFile)
                     {
-                        // failed 行のうち file_path が指すファイルが実在するもの（auto-marked ゴースト救済）
+                        // failed 行のうちファイルが実在するもの（auto-marked ゴースト救済）
+                        // (#126: file_path だけでなく relative_path もチェック対象)
                         using (var cmd = new SQLiteCommand(
-                            "SELECT id, file_path FROM backup_log " +
-                            "WHERE status = 'failed' AND file_path IS NOT NULL AND file_path != ''", connection))
+                            "SELECT id, file_path, relative_path FROM backup_log " +
+                            "WHERE status = 'failed' AND " +
+                            "((file_path IS NOT NULL AND file_path != '') OR (relative_path IS NOT NULL AND relative_path != ''))",
+                            connection))
                         using (var reader = cmd.ExecuteReader())
                         {
                             while (reader.Read())
                             {
                                 long id = Convert.ToInt64(reader["id"]);
-                                string fp = reader["file_path"].ToString();
-                                failedRecoverableTargets.Add((id, fp));
+                                string fp = reader["file_path"] is DBNull ? "" : reader["file_path"].ToString();
+                                string rp = reader["relative_path"] is DBNull ? null : reader["relative_path"].ToString();
+                                failedRecoverableTargets.Add((id, fp, rp));
                             }
                         }
                     }
 
                     // in_progress 行のリコンサイル
-                    foreach (var (id, filePath) in inProgressTargets)
+                    foreach (var (id, filePath, relativePath) in inProgressTargets)
                     {
-                        bool fileExists = !string.IsNullOrEmpty(filePath) && System.IO.File.Exists(filePath);
+                        string resolvedPath = ResolvePathForExistsCheck(filePath, relativePath);
+                        bool fileExists = !string.IsNullOrEmpty(resolvedPath) && System.IO.File.Exists(resolvedPath);
                         if (fileExists)
                         {
-                            long size = new System.IO.FileInfo(filePath).Length;
+                            long size = new System.IO.FileInfo(resolvedPath).Length;
                             using (var cmd = new SQLiteCommand(
                                 "UPDATE backup_log SET status = 'success', file_size_bytes = @size, " +
                                 "completed_at = @now WHERE id = @id", connection))
@@ -197,10 +222,12 @@ namespace GCTonePrism.Manager.Repositories
                     }
 
                     // failed 行の救済リコンサイル（ファイル実在のもののみ）
-                    foreach (var (id, filePath) in failedRecoverableTargets)
+                    foreach (var (id, filePath, relativePath) in failedRecoverableTargets)
                     {
-                        if (!System.IO.File.Exists(filePath)) continue; // ファイルが無いなら本当の失敗、そのまま
-                        long size = new System.IO.FileInfo(filePath).Length;
+                        string resolvedPath = ResolvePathForExistsCheck(filePath, relativePath);
+                        if (string.IsNullOrEmpty(resolvedPath) || !System.IO.File.Exists(resolvedPath))
+                            continue; // ファイルが無いなら本当の失敗、そのまま
+                        long size = new System.IO.FileInfo(resolvedPath).Length;
                         using (var cmd = new SQLiteCommand(
                             "UPDATE backup_log SET status = 'success', file_size_bytes = @size, " +
                             "error_message = NULL WHERE id = @id", connection))

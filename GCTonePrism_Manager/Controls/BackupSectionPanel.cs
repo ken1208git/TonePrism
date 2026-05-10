@@ -281,6 +281,10 @@ namespace GCTonePrism.Manager.Controls
         /// failed 状態のレコードを物理ファイル + DB から自動削除する (#126)。
         /// 失敗したバックアップの履歴は残してもユーザーには情報価値が無く、
         /// 古いプロジェクトパスのゴミがそのまま残り続ける主因にもなるため。
+        ///
+        /// 二重防御 (#127 Codex P1): Reconcile が誤って failed 化した行で実ファイルが
+        /// 残っているケースを掃除で物理削除しないよう、BackupPathResolver で解決した
+        /// パスにファイルが実在する場合は DB レコードもファイルも触らない（安全側）。
         /// </summary>
         /// <returns>削除した件数</returns>
         private int CleanupFailedEntries()
@@ -291,17 +295,16 @@ namespace GCTonePrism.Manager.Controls
             foreach (var entry in failedEntries)
             {
                 string path = BackupPathResolver.ResolveAbsolutePath(entry, dbPath);
+
+                // セーフティ: failed なのに実ファイルが残っている場合は触らない
+                // （Reconcile の取りこぼしで誤分類された可能性があり、ユーザーの貴重な
+                // バックアップを誤って削除しないため）
                 if (!string.IsNullOrEmpty(path) && File.Exists(path))
                 {
-                    try
-                    {
-                        File.Delete(path);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[BackupSectionPanel] failed entry のファイル削除失敗 (id={entry.Id}, path={path}): {ex.Message}");
-                    }
+                    Console.WriteLine($"[BackupSectionPanel] failed だがファイル実在のため掃除スキップ (id={entry.Id}, path={path})");
+                    continue;
                 }
+
                 _dbManager.BackupLogRepository.DeleteById(entry.Id);
                 cleaned++;
             }
