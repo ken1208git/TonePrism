@@ -1552,7 +1552,9 @@ prism.db (SQLiteデータベースファイル)
        ├─ display_order
        ├─ is_visible
        ├─ controls (JSON形式)
-       └─ key_mapping (JSON形式)
+       ├─ key_mapping (JSON形式)
+       ├─ arguments
+       └─ version
 
   ├─ developersテーブル (製作者情報)
   │    ├─ id (PRIMARY KEY, AUTOINCREMENT)
@@ -1631,6 +1633,8 @@ SQLiteデータベースのテーブル設計：
   | is_visible | INTEGER | DEFAULT 1 | 表示/非表示（0=false=非表示、1=true=表示） |
   | controls | TEXT | | 操作説明（JSON形式） |
   | key_mapping | TEXT | | キーマッピング設定（JSON形式、NULL可） |
+  | arguments | TEXT | | ゲーム実行ファイルへの起動引数（任意） |
+  | version | TEXT | | 現行バージョン文字列（`game_versions.version` を参照する代表値、NULL 可） |
 
 #### テーブル2: developers
 
@@ -1773,7 +1777,7 @@ SQLiteデータベースのテーブル設計：
 #### テーブル11: backup_log
 
 - **テーブル名**: `backup_log`
-- **説明**: データベースバックアップの実行履歴を格納するテーブル（Manager v0.8.0 / DB スキーマ v9 で追加）
+- **説明**: データベースバックアップの実行履歴を格納するテーブル（Manager v0.8.0 / DB スキーマ v9 で追加。v10 で `trigger_type` の CHECK 制約に `'safety'` を追加）
 - **カラム**:
 
   | カラム名 | データ型 | 制約 | 説明 |
@@ -1837,6 +1841,7 @@ erDiagram
         TEXT controls
         TEXT key_mapping
         TEXT arguments
+        TEXT version
     }
     game_versions {
         INTEGER id PK
@@ -2452,6 +2457,7 @@ GCTonePrism/
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
+| 2026-05-10 | 1.9.1 | スキーマ drift 修正・検出機構を Manager v0.8.1 として実装した内容を SPEC に反映：7.3 テーブル1 games の定義に既存の `arguments` / `version` 列が抜けていたため追記（実 DB と SPEC の整合性回復）、7.3 階層図 / ER 図にも反映、テーブル11 backup_log の説明に v9 → v10（`trigger_type` への `'safety'` 追加）の経緯を補足。マイグレーション機構について、`SchemaManager.cs` の `CreateTables()` を変更したら必ず対応する `MigrateVxToVy` を書くべきこと、`tools/sqlite3/` を使ったマイグレーション前後検証を行うことを `AGENTS.md` に明文化（同 PR で追記）。CurrentDbVersion を v10 → v11 に更新し、SPEC v1.5.1 (2026-03-28) で変更されたが対応マイグレーション未実装だった `surveys` / `play_records` の drift を修正（空テーブルのみ DROP & CREATE 対応）。Manager 起動時の `VerifySchema()` で全テーブルのスキーマ整合性を自動検証する仕組みを追加。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.0 | アンケート・プレイ記録の保存方式を drop-folder 方式に変更し、運用補助ツールを同梱：6.4 データアクセスパターンに Launcher が SQLite を直接書き込まない方針を明記、6.5 データの整合性に「Launcher 書き込みの drop-folder 方式」サブセクションを新設（atomic write / 3-state folder 構成 pending・imported・failed / 2-phase 取り込み（取り込みフェーズ + バックアップフェーズ）/ トリガ別動作マトリクス / 重複 INSERT 防止のための source_uuid + INSERT OR IGNORE / 任意フィールドの NULL 扱い等）、7.3 SQLite データベース設計でテーブル4 surveys を「ゲーム個別+ランチャー全体」を `trigger` 列で統合する形にスキーマ刷新（source_uuid / trigger / source_pc / imported_at 追加、created_at を INTEGER UNIX秒に変更）、テーブル3 play_records も同方式採用＋ INTEGER 化（source_uuid / source_pc / imported_at 追加）、テーブル10 launcher_surveys を廃止予定として記載。7.5.3 として `responses/` フォルダの 3-state 構成を追記、7.5.4 として `tools/sqlite3/` 開発・運用補助ツール（sqlite3.exe 等の SQLite CLI）の同梱を追記（#109 closes）。機能10 アンケート機能・機能11 プレイ記録機能の記述を保存方式変更に合わせて更新。新規追加テーブルのタイムスタンプは INTEGER (UNIX秒) で統一する方針を明文化（既存テーブルは段階的移行）。スキーマ実装は #35 の実装時に v10 → v11 マイグレーションとして対応予定。 | Kenshiro Kuroga & Claude |
 | 2026-05-07 | 1.8.0 | データベースバックアップ・復元機能（機能12）の仕様追加：2.2 管理機能に手動／自動バックアップ・履歴一覧・リストアの仕様を新設、7.3 SQLite データベース設計にテーブル11 `backup_log` を追加（status / trigger_type / pc_name / file_path 等）、`settings` キー4項目を明記（last_backup_at, backup_destination_path, backup_auto_interval_hours, backup_retention_count）、DB スキーマを v8 → v9 に更新、マイルストーン12 主要機能リストにバックアップ機能を追記。Manager v0.8.0 で先行実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-01 | 1.7.0 | Tools（補助ユーティリティ群）の仕様追加：2.4 セクション新設、`GCTonePrism_Tools/` 配置・C# / .NET Framework 4.8 採用・統合 .sln 構成、Launcher との通信規約（OS.execute / stdout JSON）、Tool 1: WindowProbe（ゲームウィンドウ可視化検知）と Tool 2: PauseOverlay（中断メニュー、将来）の仕様、独立 .exe vs サブコマンド方式の検討事項を記載 | Kenshiro Kuroga & Claude |
