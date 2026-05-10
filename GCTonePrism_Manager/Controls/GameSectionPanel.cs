@@ -284,13 +284,14 @@ namespace GCTonePrism.Manager.Controls
             using (var confirm = new DeleteGameConfirmForm(selectedGame.Title, selectedGame.GameId, gameFolder))
             {
                 if (confirm.ShowDialog(this.FindForm()) != DialogResult.Yes) return;
+                // フォルダが存在すれば常に削除、不在ならスキップ (#111)
                 deleteFolder = confirm.DeleteFolder;
             }
 
             // CASCADE で developers / game_versions / game_genres / play_records /
             // surveys / store_section_games が削除される。共有フォルダ越しでは
             // 数秒かかるケースもあるので Marquee 進捗を表示する。
-            // チェックされていれば DB 削除後に games/{game_id}/ も削除する (#111)。
+            // 削除実行は DB レコード + games/{game_id}/ フォルダのセット (#111)。
             Exception caught = null;
             string folderWarning = null;
             using (var dialog = new ProcessingDialog((progress, token) =>

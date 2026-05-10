@@ -6,8 +6,9 @@ namespace GCTonePrism.Manager
 {
     /// <summary>
     /// ゲーム削除確認フォーム。
-    /// DB 削除のみ / DB + games/{gameId}/ フォルダ削除 を選択させる。
-    /// チェックボックスはデフォルト OFF（誤操作で物理削除しないため）。
+    /// 削除実行時は常に「DB レコード + games/{gameId}/ フォルダ」をセットで削除する設計。
+    /// フォルダが存在しない場合（手動削除済み等）は DB のみ削除する。
+    /// 削除は不可逆操作のため、フォルダパスを表示して何が消えるかを明示する。
     /// </summary>
     public partial class DeleteGameConfirmForm : Form
     {
@@ -16,7 +17,10 @@ namespace GCTonePrism.Manager
         private readonly string _gameFolderPath;
         private readonly bool _folderExists;
 
-        public bool DeleteFolder { get; private set; }
+        /// <summary>
+        /// 呼び出し側がフォルダ削除を実行すべきか。フォルダ存在時は true、不在時は false。
+        /// </summary>
+        public bool DeleteFolder => _folderExists;
 
         public DeleteGameConfirmForm(string gameTitle, string gameId, string gameFolderPath)
         {
@@ -32,38 +36,26 @@ namespace GCTonePrism.Manager
             lblTitle.Text = $"ゲーム「{_gameTitle}」を削除しますか？";
             lblGameId.Text = $"Game ID: {_gameId}";
 
-            chkDeleteFolder.Checked = false;
             txtFolderPath.Text = _gameFolderPath;
 
             if (_folderExists)
             {
-                chkDeleteFolder.Enabled = true;
-                lblFolderStatus.Text = "（このフォルダ内のファイルがディスクから物理的に削除されます）";
+                lblFolderHeader.Text = "次のゲームフォルダもディスクから物理的に削除されます:";
+                lblFolderHeader.ForeColor = System.Drawing.Color.DarkRed;
+                lblFolderStatus.Text = "（この操作は取り消せません）";
                 lblFolderStatus.ForeColor = System.Drawing.Color.DarkRed;
             }
             else
             {
-                chkDeleteFolder.Enabled = false;
-                lblFolderStatus.Text = "（フォルダが見つかりません。DB のみ削除します）";
+                lblFolderHeader.Text = "ゲームフォルダの想定パス:";
+                lblFolderHeader.ForeColor = System.Drawing.Color.DimGray;
+                lblFolderStatus.Text = "（フォルダが見つからないため、DB のみ削除します）";
                 lblFolderStatus.ForeColor = System.Drawing.Color.Gray;
             }
         }
 
         private void btnDelete_Click(object sender, EventArgs e)
         {
-            DeleteFolder = _folderExists && chkDeleteFolder.Checked;
-
-            if (DeleteFolder)
-            {
-                var result = MessageBox.Show(
-                    $"ゲームフォルダ\n  {_gameFolderPath}\nをディスクから完全に削除します。\n\nこの操作は取り消せません。本当に実行してよろしいですか？",
-                    "最終確認", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
-                if (result != DialogResult.Yes)
-                {
-                    return;
-                }
-            }
-
             DialogResult = DialogResult.Yes;
             Close();
         }

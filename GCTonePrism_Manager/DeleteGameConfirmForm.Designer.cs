@@ -20,7 +20,7 @@ namespace GCTonePrism.Manager
             this.lblTitle = new System.Windows.Forms.Label();
             this.lblGameId = new System.Windows.Forms.Label();
             this.lblWarning = new System.Windows.Forms.Label();
-            this.chkDeleteFolder = new System.Windows.Forms.CheckBox();
+            this.lblFolderHeader = new System.Windows.Forms.Label();
             this.txtFolderPath = new System.Windows.Forms.TextBox();
             this.lblFolderStatus = new System.Windows.Forms.Label();
             this.btnDelete = new System.Windows.Forms.Button();
@@ -53,32 +53,30 @@ namespace GCTonePrism.Manager
             this.lblWarning.Name = "lblWarning";
             this.lblWarning.Size = new System.Drawing.Size(289, 15);
             this.lblWarning.TabIndex = 2;
-            this.lblWarning.Text = "DB からゲーム情報・関連レコードが削除されます。この操作は取り消せません。";
+            this.lblWarning.Text = "DB からゲーム情報・関連レコードが削除されます。";
             //
-            // chkDeleteFolder
+            // lblFolderHeader
             //
-            this.chkDeleteFolder.AutoSize = true;
-            this.chkDeleteFolder.Location = new System.Drawing.Point(20, 115);
-            this.chkDeleteFolder.Name = "chkDeleteFolder";
-            this.chkDeleteFolder.Size = new System.Drawing.Size(225, 19);
-            this.chkDeleteFolder.TabIndex = 3;
-            this.chkDeleteFolder.Text = "ゲームフォルダ（games/{game_id}/）も一緒に削除する";
-            this.chkDeleteFolder.UseVisualStyleBackColor = true;
+            this.lblFolderHeader.AutoSize = true;
+            this.lblFolderHeader.Location = new System.Drawing.Point(20, 110);
+            this.lblFolderHeader.Name = "lblFolderHeader";
+            this.lblFolderHeader.Size = new System.Drawing.Size(0, 15);
+            this.lblFolderHeader.TabIndex = 3;
             //
             // txtFolderPath
             //
             this.txtFolderPath.Font = new System.Drawing.Font("Consolas", 9F);
-            this.txtFolderPath.Location = new System.Drawing.Point(40, 140);
+            this.txtFolderPath.Location = new System.Drawing.Point(20, 132);
             this.txtFolderPath.Name = "txtFolderPath";
             this.txtFolderPath.ReadOnly = true;
-            this.txtFolderPath.Size = new System.Drawing.Size(540, 22);
+            this.txtFolderPath.Size = new System.Drawing.Size(560, 22);
             this.txtFolderPath.TabIndex = 4;
             this.txtFolderPath.BackColor = System.Drawing.SystemColors.Control;
             //
             // lblFolderStatus
             //
             this.lblFolderStatus.AutoSize = true;
-            this.lblFolderStatus.Location = new System.Drawing.Point(40, 168);
+            this.lblFolderStatus.Location = new System.Drawing.Point(20, 160);
             this.lblFolderStatus.Name = "lblFolderStatus";
             this.lblFolderStatus.Size = new System.Drawing.Size(0, 15);
             this.lblFolderStatus.TabIndex = 5;
@@ -89,7 +87,7 @@ namespace GCTonePrism.Manager
             this.btnDelete.BackColor = System.Drawing.Color.IndianRed;
             this.btnDelete.Font = new System.Drawing.Font("MS UI Gothic", 9.5F, System.Drawing.FontStyle.Bold);
             this.btnDelete.ForeColor = System.Drawing.Color.White;
-            this.btnDelete.Location = new System.Drawing.Point(360, 210);
+            this.btnDelete.Location = new System.Drawing.Point(360, 200);
             this.btnDelete.Name = "btnDelete";
             this.btnDelete.Size = new System.Drawing.Size(110, 35);
             this.btnDelete.TabIndex = 6;
@@ -101,7 +99,7 @@ namespace GCTonePrism.Manager
             //
             this.btnCancel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(480, 210);
+            this.btnCancel.Location = new System.Drawing.Point(480, 200);
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(100, 35);
             this.btnCancel.TabIndex = 7;
@@ -115,12 +113,12 @@ namespace GCTonePrism.Manager
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(610, 265);
+            this.ClientSize = new System.Drawing.Size(610, 255);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnDelete);
             this.Controls.Add(this.lblFolderStatus);
             this.Controls.Add(this.txtFolderPath);
-            this.Controls.Add(this.chkDeleteFolder);
+            this.Controls.Add(this.lblFolderHeader);
             this.Controls.Add(this.lblWarning);
             this.Controls.Add(this.lblGameId);
             this.Controls.Add(this.lblTitle);
@@ -140,7 +138,7 @@ namespace GCTonePrism.Manager
         private System.Windows.Forms.Label lblTitle;
         private System.Windows.Forms.Label lblGameId;
         private System.Windows.Forms.Label lblWarning;
-        private System.Windows.Forms.CheckBox chkDeleteFolder;
+        private System.Windows.Forms.Label lblFolderHeader;
         private System.Windows.Forms.TextBox txtFolderPath;
         private System.Windows.Forms.Label lblFolderStatus;
         private System.Windows.Forms.Button btnDelete;
