@@ -410,6 +410,29 @@
 
 ## Manager（管理ソフト）
 
+### [Manager v0.8.1] - 2026-05-10
+
+#### Fixed
+
+- **surveys / play_records スキーマ drift を修正 (`MigrateV10ToV11`)**: SPEC v1.5.1 (2026-03-28) で `surveys`（JSON 形式 → ★評価+コメント）、`play_records`（累計方式 → イベントログ方式）に変更されたが、対応するマイグレーションが書かれていなかったため、`CREATE TABLE IF NOT EXISTS` の仕様により旧スキーマのテーブルが温存されていた。本マイグレーションで修正
+  - 旧スキーマ判定: `surveys` は `submitted_at` 列、`play_records` は `play_count` 列の存在で検出
+  - 行数 0 の場合のみ DROP & CREATE で新スキーマへ置換（データ保護）
+  - 行数あり時は警告ログを出して bool false を返し、`MigrateV10ToV11` が呼び出し側に伝播。`CheckAndMigrateDatabase` は成功した migration のみ `currentVersion` を bump し、`SetDbVersion` には実際に達成した `currentVersion` を書き込むため `user_version` は 10 のまま保持される。これにより次回起動でも migration が再試行されつつ、Manager 自体は正常起動する（Codex P1 指摘 "Avoid marking DB v11 when drift migration is skipped" + "Avoid hard-failing startup on non-empty drift tables" の両方に対応）
+- **`games.version` 列を `CreateTables()` に追加**: 既存 DB では `MigrateGamesTable` の ALTER TABLE で後付けされていたが、`CreateTables()` 側に定義が無く、新規 DB と既存 DB でスキーマ定義が分散していた。`VerifySchema` 初回起動で検出し、本 PR 内で修正（`MigrateGamesTable` の ALTER は古い DB 向けのフォールバックとして残す）
+
+#### Added
+
+- **`VerifySchema()` 起動時スキーマ整合性検証**: `InitializeDatabase` 末尾に組み込み、全 11 テーブルの列名一覧と `ExpectedSchema` 定義を `PRAGMA table_info` 経由で比較。不一致があれば警告ログを出す（drift があってもアプリ動作はそのまま継続）
+- **`MigrateV10ToV11` マイグレーション**: 上記 surveys / play_records drift 修正を担当
+- **マイグレーション機構の helper メソッド**: `CreateSurveysTable` / `CreatePlayRecordsTable`（`CreateTables` と migration の両方から呼ぶ）、`TableHasColumn`、`GetTableRowCount` を追加
+- **`AGENTS.md` に "Database Schema Management" セクションを追加**: スキーマ変更時に必ず対応するマイグレーションを書くこと、`tools/sqlite3/sqlite3.exe` で前後検証することを明文化
+
+#### Technical
+
+- `CurrentDbVersion`: `10` → `11`
+- `CreateTables()` の `surveys` / `play_records` 作成を helper メソッド化（マイグレーションでも再利用するため）
+- `ExpectedSchema` 静的辞書で全テーブルの期待列リストを定義（スキーマ変更時はここも同時更新する規約）
+
 ### [Manager v0.8.0] - 2026-05-07
 
 #### Added

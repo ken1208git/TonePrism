@@ -1552,7 +1552,9 @@ prism.db (SQLiteデータベースファイル)
        ├─ display_order
        ├─ is_visible
        ├─ controls (JSON形式)
-       └─ key_mapping (JSON形式)
+       ├─ key_mapping (JSON形式)
+       ├─ arguments
+       └─ version
 
   ├─ developersテーブル (製作者情報)
   │    ├─ id (PRIMARY KEY, AUTOINCREMENT)
@@ -1598,7 +1600,7 @@ prism.db (SQLiteデータベースファイル)
        ├─ file_size_bytes
        ├─ status ('in_progress' | 'success' | 'failed')
        ├─ error_message
-       └─ trigger_type ('manual' | 'auto')
+       └─ trigger_type ('manual' | 'auto' | 'safety')
 ```
 
 ### 7.3 SQLiteデータベース設計
@@ -1631,6 +1633,8 @@ SQLiteデータベースのテーブル設計：
   | is_visible | INTEGER | DEFAULT 1 | 表示/非表示（0=false=非表示、1=true=表示） |
   | controls | TEXT | | 操作説明（JSON形式） |
   | key_mapping | TEXT | | キーマッピング設定（JSON形式、NULL可） |
+  | arguments | TEXT | | ゲーム実行ファイルへの起動引数（任意） |
+  | version | TEXT | | 現行バージョン文字列（`game_versions.version` を参照する代表値、NULL 可） |
 
 #### テーブル2: developers
 
@@ -1650,8 +1654,24 @@ SQLiteデータベースのテーブル設計：
 #### テーブル3: play_records
 
 - **テーブル名**: `play_records`
-- **説明**: プレイ記録を格納するテーブル（イベントログ方式：プレイごとに1行記録）。Launcher が JSON として `responses/` フォルダに出力 → Manager が取り込む（drop-folder 方式 / §6.5 参照）
-- **カラム**:
+- **説明**: プレイ記録を格納するテーブル（イベントログ方式：プレイごとに1行記録）
+
+##### 現行スキーマ（Manager v0.8.1 / DB v11 時点）
+
+`MigrateV10ToV11` で SPEC v1.5.1 (2026-03-28) 由来の旧累計方式 drift を修正済み。Launcher は現状 SELECT のみ（書き込みは未実装）。
+
+  | カラム名 | データ型 | 制約 | 説明 |
+  | --- | --- | --- | --- |
+  | id | INTEGER | PRIMARY KEY AUTOINCREMENT | レコードID |
+  | game_id | TEXT | FOREIGN KEY | ゲームID（games.game_idを参照、ON DELETE CASCADE） |
+  | start_time | TEXT | | プレイ開始日時（ISO8601 文字列） |
+  | end_time | TEXT | | プレイ終了日時（ISO8601 文字列） |
+  | play_duration | INTEGER | | プレイ時間（秒） |
+  | player_count | INTEGER | | プレイヤー数 |
+
+##### drop-folder 設計（#35 実装時に v11 → v12 で移行予定）
+
+Launcher が JSON として `responses/` フォルダに出力 → Manager が取り込む方式（§6.5 参照）。現行スキーマからの主な変更点: タイムスタンプを INTEGER (UNIX秒) に統一、`source_uuid` で重複 INSERT 防止、`source_pc` / `imported_at` で取り込みメタデータを保持。
 
   | カラム名 | データ型 | 制約 | 説明 |
   | --- | --- | --- | --- |
@@ -1668,8 +1688,23 @@ SQLiteデータベースのテーブル設計：
 #### テーブル4: surveys
 
 - **テーブル名**: `surveys`
-- **説明**: アンケート結果を格納するテーブル（★評価+コメント形式）。ゲーム個別アンケートとランチャー全体アンケートを `trigger` 列で区別する統合テーブル。Launcher が JSON として `responses/` フォルダに出力 → Manager が取り込む（drop-folder 方式 / §6.5 参照）
-- **カラム**:
+- **説明**: アンケート結果を格納するテーブル（★評価+コメント形式）
+
+##### 現行スキーマ（Manager v0.8.1 / DB v11 時点）
+
+`MigrateV10ToV11` で SPEC v1.5.1 (2026-03-28) 由来の旧 JSON 形式 drift を修正済み。ゲーム個別アンケート用のシンプルな構造。Launcher は書き込み未実装（現状ゼロ件）。
+
+  | カラム名 | データ型 | 制約 | 説明 |
+  | --- | --- | --- | --- |
+  | id | INTEGER | PRIMARY KEY AUTOINCREMENT | アンケートID |
+  | game_id | TEXT | FOREIGN KEY | ゲームID（games.game_idを参照、ON DELETE CASCADE） |
+  | rating | INTEGER | CHECK(rating BETWEEN 1 AND 5) | ★評価（1〜5段階） |
+  | comment | TEXT | | コメント |
+  | created_at | TEXT | DEFAULT CURRENT_TIMESTAMP | 回答日時 |
+
+##### drop-folder 設計（#35 実装時に v11 → v12 で移行予定）
+
+ゲーム個別アンケートとランチャー全体アンケートを `trigger` 列で区別する統合テーブルへ。Launcher が JSON として `responses/` フォルダに出力 → Manager が取り込む（§6.5 参照）。`launcher_surveys` テーブルはこの設計移行時に廃止される。
 
   | カラム名 | データ型 | 制約 | 説明 |
   | --- | --- | --- | --- |
@@ -1766,14 +1801,24 @@ SQLiteデータベースのテーブル設計：
 #### テーブル10: launcher_surveys（**廃止予定**）
 
 - **テーブル名**: `launcher_surveys`
-- **状態**: **#35 アンケート機能の実装と同時に廃止予定**
+- **状態**: **#35 アンケート機能の実装（drop-folder 設計移行）と同時に廃止予定**
+- **現行スキーマ（Manager v0.8.1 / DB v11 時点、廃止までの暫定）**:
+
+  | カラム名 | データ型 | 制約 | 説明 |
+  | --- | --- | --- | --- |
+  | id | INTEGER | PRIMARY KEY AUTOINCREMENT | アンケートID |
+  | rating | INTEGER | CHECK(rating BETWEEN 1 AND 5) | ★評価（1〜5段階） |
+  | favorite_game_id | TEXT | FOREIGN KEY | お気に入りゲームID（games.game_idを参照、ON DELETE SET NULL） |
+  | comment | TEXT | | コメント |
+  | created_at | TEXT | DEFAULT CURRENT_TIMESTAMP | 回答日時 |
+
 - **廃止理由**: ランチャー全体アンケートを `surveys` テーブルに統合し、`trigger` 列（`'launcher_end'`）で区別する設計に変更したため。「最も気に入ったゲーム」（旧 `favorite_game_id`）は、ゲーム個別アンケート（`trigger='game_end'`）の評価平均から算出可能なため不要と判断
 - **マイグレーション**: 既存データが存在する場合は、`surveys` テーブルへ移行（`trigger='launcher_end'`, `game_id=NULL`, `rating`/`comment`/`created_at` を移送、`favorite_game_id` は破棄）してからテーブルを DROP する
 
 #### テーブル11: backup_log
 
 - **テーブル名**: `backup_log`
-- **説明**: データベースバックアップの実行履歴を格納するテーブル（Manager v0.8.0 / DB スキーマ v9 で追加）
+- **説明**: データベースバックアップの実行履歴を格納するテーブル（Manager v0.8.0 / DB スキーマ v9 で追加。v10 で `trigger_type` の CHECK 制約に `'safety'` を追加）
 - **カラム**:
 
   | カラム名 | データ型 | 制約 | 説明 |
@@ -1786,7 +1831,7 @@ SQLiteデータベースのテーブル設計：
   | file_size_bytes | INTEGER | | バックアップファイルサイズ（成功時のみ） |
   | status | TEXT | NOT NULL CHECK ('in_progress', 'success', 'failed') | 実行状態 |
   | error_message | TEXT | | エラーメッセージ（失敗時のみ） |
-  | trigger_type | TEXT | NOT NULL CHECK ('manual', 'auto') | 実行トリガ種別 |
+  | trigger_type | TEXT | NOT NULL CHECK ('manual', 'auto', 'safety') | 実行トリガ種別（v10 で 'safety' を追加。リストア前の自動退避） |
 
   **関連 settings キー**（同テーブル内に保存）:
 
@@ -1837,6 +1882,7 @@ erDiagram
         TEXT controls
         TEXT key_mapping
         TEXT arguments
+        TEXT version
     }
     game_versions {
         INTEGER id PK
@@ -2452,6 +2498,8 @@ GCTonePrism/
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
+| 2026-05-10 | 1.9.2 | PR #113 のレビュー段階で実施したスキーマ整合性 audit の結果を SPEC に反映：7.3 テーブル3 play_records とテーブル4 surveys を「現行スキーマ（Manager v0.8.1 / DB v11 時点）」と「drop-folder 設計（#35 実装時に v11 → v12 で移行予定）」の併記形式に変更（現行は SchemaManager.cs の `CreateTables()` と一致する 5/6 列、将来形は v1.9.0 で記載した 9 列構成を保持）。VerifySchema が比較する `ExpectedSchema` は現行スキーマと同期、drop-folder 設計は #35 実装時に v11 → v12 マイグレーションとして反映する流れを明記。テーブル10 launcher_surveys に「廃止までの暫定」として現行 5 列カラム表を追記。テーブル11 backup_log の `trigger_type` CHECK 制約に v10 で追加された `'safety'` を反映（§7.3 表 / §7.2 階層図）。 | Kenshiro Kuroga & Claude |
+| 2026-05-10 | 1.9.1 | スキーマ drift 修正・検出機構を Manager v0.8.1 として実装した内容を SPEC に反映：7.3 テーブル1 games の定義に既存の `arguments` / `version` 列が抜けていたため追記（実 DB と SPEC の整合性回復）、7.3 階層図 / ER 図にも反映、テーブル11 backup_log の説明に v9 → v10（`trigger_type` への `'safety'` 追加）の経緯を補足。マイグレーション機構について、`SchemaManager.cs` の `CreateTables()` を変更したら必ず対応する `MigrateVxToVy` を書くべきこと、`tools/sqlite3/` を使ったマイグレーション前後検証を行うことを `AGENTS.md` に明文化（同 PR で追記）。CurrentDbVersion を v10 → v11 に更新し、SPEC v1.5.1 (2026-03-28) で変更されたが対応マイグレーション未実装だった `surveys` / `play_records` の drift を修正（空テーブルのみ DROP & CREATE 対応）。Manager 起動時の `VerifySchema()` で全テーブルのスキーマ整合性を自動検証する仕組みを追加。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.0 | アンケート・プレイ記録の保存方式を drop-folder 方式に変更し、運用補助ツールを同梱：6.4 データアクセスパターンに Launcher が SQLite を直接書き込まない方針を明記、6.5 データの整合性に「Launcher 書き込みの drop-folder 方式」サブセクションを新設（atomic write / 3-state folder 構成 pending・imported・failed / 2-phase 取り込み（取り込みフェーズ + バックアップフェーズ）/ トリガ別動作マトリクス / 重複 INSERT 防止のための source_uuid + INSERT OR IGNORE / 任意フィールドの NULL 扱い等）、7.3 SQLite データベース設計でテーブル4 surveys を「ゲーム個別+ランチャー全体」を `trigger` 列で統合する形にスキーマ刷新（source_uuid / trigger / source_pc / imported_at 追加、created_at を INTEGER UNIX秒に変更）、テーブル3 play_records も同方式採用＋ INTEGER 化（source_uuid / source_pc / imported_at 追加）、テーブル10 launcher_surveys を廃止予定として記載。7.5.3 として `responses/` フォルダの 3-state 構成を追記、7.5.4 として `tools/sqlite3/` 開発・運用補助ツール（sqlite3.exe 等の SQLite CLI）の同梱を追記（#109 closes）。機能10 アンケート機能・機能11 プレイ記録機能の記述を保存方式変更に合わせて更新。新規追加テーブルのタイムスタンプは INTEGER (UNIX秒) で統一する方針を明文化（既存テーブルは段階的移行）。スキーマ実装は #35 の実装時に v10 → v11 マイグレーションとして対応予定。 | Kenshiro Kuroga & Claude |
 | 2026-05-07 | 1.8.0 | データベースバックアップ・復元機能（機能12）の仕様追加：2.2 管理機能に手動／自動バックアップ・履歴一覧・リストアの仕様を新設、7.3 SQLite データベース設計にテーブル11 `backup_log` を追加（status / trigger_type / pc_name / file_path 等）、`settings` キー4項目を明記（last_backup_at, backup_destination_path, backup_auto_interval_hours, backup_retention_count）、DB スキーマを v8 → v9 に更新、マイルストーン12 主要機能リストにバックアップ機能を追記。Manager v0.8.0 で先行実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-01 | 1.7.0 | Tools（補助ユーティリティ群）の仕様追加：2.4 セクション新設、`GCTonePrism_Tools/` 配置・C# / .NET Framework 4.8 採用・統合 .sln 構成、Launcher との通信規約（OS.execute / stdout JSON）、Tool 1: WindowProbe（ゲームウィンドウ可視化検知）と Tool 2: PauseOverlay（中断メニュー、将来）の仕様、独立 .exe vs サブコマンド方式の検討事項を記載 | Kenshiro Kuroga & Claude |

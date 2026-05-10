@@ -16,7 +16,8 @@ namespace GCTonePrism.Manager
 
         // 現在のデータベースバージョン
         // 構造変更があるたびにインクリメントする
-        private const int CurrentDbVersion = 10;
+        // v11: SPEC v1.5.1 (2026-03-28) で変更された surveys / play_records スキーマの drift 修正（v0.8.1）
+        private const int CurrentDbVersion = 11;
 
         public SchemaManager(DatabaseConnection conn)
         {
@@ -81,6 +82,11 @@ namespace GCTonePrism.Manager
                             MigrateGameVersionsTable(connection, transaction);
                             CheckAndMigrateDatabase(connection, transaction);
 
+                            // 全マイグレーション完了後にスキーマ整合性を検証する。
+                            // drift があった場合でも例外は投げず警告ログのみ。
+                            // （AGENTS.md "Database Schema Management" 参照）
+                            VerifySchema(connection, transaction);
+
                             transaction.Commit();
                         }
                         catch (Exception)
@@ -135,7 +141,8 @@ namespace GCTonePrism.Manager
                     is_visible INTEGER DEFAULT 1,
                     controls TEXT,
                     key_mapping TEXT,
-                    arguments TEXT
+                    arguments TEXT,
+                    version TEXT
                 )";
 
             using (var command = new SQLiteCommand(createGamesTable, connection, transaction))
@@ -235,38 +242,11 @@ namespace GCTonePrism.Manager
                 command.ExecuteNonQuery();
             }
 
-            // play_recordsテーブル作成
-            string createPlayRecordsTable = @"
-                CREATE TABLE IF NOT EXISTS play_records (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    game_id TEXT,
-                    start_time TEXT,
-                    end_time TEXT,
-                    play_duration INTEGER,
-                    player_count INTEGER,
-                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE
-                )";
+            // play_recordsテーブル作成（MigrateV10ToV11 でも再利用するため helper メソッド化）
+            CreatePlayRecordsTable(connection, transaction);
 
-            using (var command = new SQLiteCommand(createPlayRecordsTable, connection, transaction))
-            {
-                command.ExecuteNonQuery();
-            }
-
-            // surveysテーブル作成
-            string createSurveysTable = @"
-                CREATE TABLE IF NOT EXISTS surveys (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    game_id TEXT,
-                    rating INTEGER CHECK(rating BETWEEN 1 AND 5),
-                    comment TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE
-                )";
-
-            using (var command = new SQLiteCommand(createSurveysTable, connection, transaction))
-            {
-                command.ExecuteNonQuery();
-            }
+            // surveysテーブル作成（MigrateV10ToV11 でも再利用するため helper メソッド化）
+            CreateSurveysTable(connection, transaction);
 
             // launcher_surveysテーブル作成
             string createLauncherSurveysTable = @"
@@ -668,7 +648,21 @@ namespace GCTonePrism.Manager
                         currentVersion = 10;
                     }
 
-                    SetDbVersion(connection, CurrentDbVersion, migTransaction);
+                    if (currentVersion < 11)
+                    {
+                        if (MigrateV10ToV11(connection, migTransaction))
+                        {
+                            currentVersion = 11;
+                        }
+                        // 失敗（データ残存でスキップ）時は currentVersion = 10 のまま。
+                        // SetDbVersion で実際に達成した currentVersion を書き込むため
+                        // user_version は 10 のまま保持され、次回起動時に再試行される。
+                    }
+
+                    // 達成バージョン（CurrentDbVersion ではなく currentVersion）を書き込む。
+                    // 全 migration が成功していれば currentVersion == CurrentDbVersion。
+                    // 部分的にスキップされた場合は、達成した最大バージョンが書き込まれる。
+                    SetDbVersion(connection, currentVersion, migTransaction);
 
                     if (localTransaction)
                     {
@@ -1115,6 +1109,190 @@ namespace GCTonePrism.Manager
             Console.WriteLine("[DatabaseManager] Migration V9 -> V10 completed.");
         }
 
+        /// <summary>
+        /// V10 -> V11: surveys / play_records スキーマ drift 修正
+        /// SPEC v1.5.1 (2026-03-28) で surveys（JSON 形式 → ★評価+コメント）、
+        /// play_records（累計方式 → イベントログ方式）に変更されたが、対応する
+        /// マイグレーションが書かれていなかったため、CREATE TABLE IF NOT EXISTS の
+        /// 仕様により旧スキーマのテーブルが温存されていた。本マイグレーションで修正。
+        ///
+        /// データがあるテーブルは破壊しないため、空テーブルのみ DROP & CREATE する。
+        /// データがある場合は警告ログを出して false を返し、`user_version` を 10 のまま
+        /// 保持することで次回起動時に再試行する（Manager 自体は正常起動を継続）。
+        /// </summary>
+        /// <returns>全 drift fix が成功（または不要）なら true、データ残存でスキップしたら false</returns>
+        private bool MigrateV10ToV11(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            Console.WriteLine("[DatabaseManager] Executing migration V10 -> V11 (Fix surveys/play_records schema drift from SPEC v1.5.1)");
+
+            bool surveysOk = FixSurveysSchemaDrift(connection, transaction);
+            bool playRecordsOk = FixPlayRecordsSchemaDrift(connection, transaction);
+
+            bool allOk = surveysOk && playRecordsOk;
+            if (allOk)
+            {
+                Console.WriteLine("[DatabaseManager] Migration V10 -> V11 completed.");
+            }
+            else
+            {
+                Console.WriteLine("[DatabaseManager] WARNING: Migration V10 -> V11 partially skipped (data exists in legacy-schema tables). user_version stays at 10. Next startup will retry.");
+            }
+            return allOk;
+        }
+
+        /// <summary>
+        /// surveys テーブルが旧 JSON 形式スキーマ（submitted_at / responses 列を持つ）の場合、
+        /// 新スキーマ（rating / comment / created_at）へ修正する。
+        /// データが残存している場合は警告ログを出して false を返す（Manager 起動は継続）。
+        /// （Codex P1 指摘 "Avoid marking DB v11 when drift migration is skipped" +
+        /// "Avoid hard-failing startup on non-empty drift tables" 対応）
+        /// </summary>
+        /// <returns>新スキーマ／drift fix 成功なら true、データ残存でスキップなら false</returns>
+        private bool FixSurveysSchemaDrift(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            // 旧スキーマ判定: 'submitted_at' 列が存在するか
+            bool isOldSchema = TableHasColumn(connection, transaction, "surveys", "submitted_at");
+
+            if (!isOldSchema)
+            {
+                Console.WriteLine("[DatabaseManager] surveys は新スキーマです。マイグレーション不要。");
+                return true;
+            }
+
+            long rowCount = GetTableRowCount(connection, transaction, "surveys");
+            Console.WriteLine($"[DatabaseManager] surveys に旧スキーマを検出 (行数: {rowCount})");
+
+            if (rowCount > 0)
+            {
+                // 旧 JSON 形式 → 新 ★評価+コメント形式の自動変換は responses JSON のスキーマが
+                // 不定でリスクが高いため未実装。Manager 起動は継続させ、警告ログで手動対応を促す。
+                // 呼び出し側の MigrateV10ToV11 が false を伝播し、user_version は 10 のまま維持される。
+                // 次回起動時にこの migration が再試行されるため、手動でデータを退避すれば次回 fix される。
+                Console.WriteLine(
+                    $"[DatabaseManager] WARNING: surveys に {rowCount} 行のデータが残存。自動マイグレーションをスキップします。" +
+                    "tools/sqlite3/sqlite3.exe で旧データ（responses 列の JSON）を確認・退避してから手動で新スキーマへ移行してください。");
+                return false;
+            }
+
+            using (var cmd = new SQLiteCommand("DROP TABLE surveys", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+            CreateSurveysTable(connection, transaction);
+            Console.WriteLine("[DatabaseManager] surveys を新スキーマで再作成しました。");
+            return true;
+        }
+
+        /// <summary>
+        /// play_records テーブルが旧累計方式スキーマ（play_count / total_play_time 列を持つ）の場合、
+        /// 新イベントログ方式スキーマ（start_time / end_time / play_duration / player_count）へ修正する。
+        /// データが残存している場合は警告ログを出して false を返す（Manager 起動は継続）。
+        /// （Codex P1 指摘 "Avoid marking DB v11 when drift migration is skipped" +
+        /// "Avoid hard-failing startup on non-empty drift tables" 対応）
+        /// </summary>
+        /// <returns>新スキーマ／drift fix 成功なら true、データ残存でスキップなら false</returns>
+        private bool FixPlayRecordsSchemaDrift(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            // 旧スキーマ判定: 'play_count' 列が存在するか
+            bool isOldSchema = TableHasColumn(connection, transaction, "play_records", "play_count");
+
+            if (!isOldSchema)
+            {
+                Console.WriteLine("[DatabaseManager] play_records は新スキーマです。マイグレーション不要。");
+                return true;
+            }
+
+            long rowCount = GetTableRowCount(connection, transaction, "play_records");
+            Console.WriteLine($"[DatabaseManager] play_records に旧スキーマを検出 (行数: {rowCount})");
+
+            if (rowCount > 0)
+            {
+                // 旧累計方式 → 新イベントログ方式の自動変換は元情報が失われているため不可能。
+                // Manager 起動は継続させ、警告ログで手動対応を促す。
+                // 呼び出し側の MigrateV10ToV11 が false を伝播し、user_version は 10 のまま維持される。
+                Console.WriteLine(
+                    $"[DatabaseManager] WARNING: play_records に {rowCount} 行のデータが残存。自動マイグレーションをスキップします。" +
+                    "tools/sqlite3/sqlite3.exe で累計値（play_count / total_play_time）を退避してから手動で新スキーマへ移行してください。");
+                return false;
+            }
+
+            using (var cmd = new SQLiteCommand("DROP TABLE play_records", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+            CreatePlayRecordsTable(connection, transaction);
+            Console.WriteLine("[DatabaseManager] play_records を新スキーマで再作成しました。");
+            return true;
+        }
+
+        /// <summary>
+        /// surveys テーブル作成（CreateTables / MigrateV10ToV11 共通）
+        /// </summary>
+        private static void CreateSurveysTable(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            string sql = @"
+                CREATE TABLE IF NOT EXISTS surveys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_id TEXT,
+                    rating INTEGER CHECK(rating BETWEEN 1 AND 5),
+                    comment TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE
+                )";
+            using (var cmd = new SQLiteCommand(sql, connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        /// <summary>
+        /// play_records テーブル作成（CreateTables / MigrateV10ToV11 共通）
+        /// </summary>
+        private static void CreatePlayRecordsTable(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            string sql = @"
+                CREATE TABLE IF NOT EXISTS play_records (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_id TEXT,
+                    start_time TEXT,
+                    end_time TEXT,
+                    play_duration INTEGER,
+                    player_count INTEGER,
+                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE
+                )";
+            using (var cmd = new SQLiteCommand(sql, connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        /// <summary>
+        /// 指定テーブルに指定列が存在するかチェック（PRAGMA table_info 経由）
+        /// </summary>
+        private static bool TableHasColumn(SQLiteConnection connection, SQLiteTransaction transaction, string tableName, string columnName)
+        {
+            using (var cmd = new SQLiteCommand($"PRAGMA table_info({tableName})", connection, transaction))
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    if (reader["name"].ToString() == columnName) return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 指定テーブルの行数を取得（COUNT(*)）
+        /// </summary>
+        private static long GetTableRowCount(SQLiteConnection connection, SQLiteTransaction transaction, string tableName)
+        {
+            using (var cmd = new SQLiteCommand($"SELECT COUNT(*) FROM {tableName}", connection, transaction))
+            {
+                return Convert.ToInt64(cmd.ExecuteScalar());
+            }
+        }
+
         private void CopyDevelopersToVersion(SQLiteConnection connection, SQLiteTransaction transaction, string gameId, int versionId)
         {
             string insertSql = @"
@@ -1129,6 +1307,104 @@ namespace GCTonePrism.Manager
                 command.Parameters.AddWithValue("@versionId", versionId);
                 command.ExecuteNonQuery();
             }
+        }
+
+        /// <summary>
+        /// 各テーブルが持つべき列名一覧（VerifySchema で使用）。
+        /// SchemaManager.CreateTables() および各 MigrateVxToVy で作る最終形と一致させること。
+        /// スキーマ変更時はこの定義も同時に更新する（AGENTS.md "Database Schema Management" 参照）。
+        /// </summary>
+        private static readonly Dictionary<string, string[]> ExpectedSchema = new Dictionary<string, string[]>
+        {
+            { "games", new[] { "game_id", "title", "description", "release_year", "genre", "min_players", "max_players", "difficulty", "play_time", "controller_support", "supported_connection", "thumbnail_path", "background_path", "executable_path", "display_order", "is_visible", "controls", "key_mapping", "arguments", "version" } },
+            { "game_versions", new[] { "id", "game_id", "version", "executable_path", "arguments", "description", "title", "genre", "min_players", "max_players", "difficulty", "play_time", "controller_support", "supported_connection", "thumbnail_path", "background_path", "update_note", "registered_at" } },
+            { "developers", new[] { "id", "game_id", "last_name", "first_name", "grade", "version_id" } },
+            { "game_genres", new[] { "id", "game_id", "genre" } },
+            { "play_records", new[] { "id", "game_id", "start_time", "end_time", "play_duration", "player_count" } },
+            { "surveys", new[] { "id", "game_id", "rating", "comment", "created_at" } },
+            { "launcher_surveys", new[] { "id", "rating", "favorite_game_id", "comment", "created_at" } },
+            { "settings", new[] { "key", "value" } },
+            { "store_sections", new[] { "section_id", "title", "section_type", "section_source", "display_order", "max_display_count", "is_visible" } },
+            { "store_section_games", new[] { "id", "section_id", "game_id", "display_order", "display_text" } },
+            { "backup_log", new[] { "id", "started_at", "completed_at", "pc_name", "file_path", "file_size_bytes", "status", "error_message", "trigger_type" } },
+        };
+
+        /// <summary>
+        /// 全テーブルのスキーマが ExpectedSchema と一致するか検証し、不一致があればログ出力する。
+        /// CreateTables() / マイグレーション完了後に呼び出すことを想定（InitializeDatabase 末尾）。
+        /// drift があった場合でも例外は投げず、警告ログのみ。アプリ動作はそのまま継続する。
+        /// </summary>
+        /// <returns>すべてのテーブルが期待通り = true、1 つでも drift があれば false</returns>
+        private bool VerifySchema(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            int driftCount = 0;
+            foreach (var pair in ExpectedSchema)
+            {
+                if (!VerifyTableColumns(connection, transaction, pair.Key, pair.Value))
+                {
+                    driftCount++;
+                }
+            }
+
+            if (driftCount > 0)
+            {
+                Console.WriteLine($"[VerifySchema] {driftCount} 個のテーブルでスキーマ drift を検出しました。AGENTS.md の Database Schema Management セクションを参照して対応してください。");
+                return false;
+            }
+
+            Console.WriteLine($"[VerifySchema] 全 {ExpectedSchema.Count} テーブルのスキーマ整合性 OK");
+            return true;
+        }
+
+        /// <summary>
+        /// 指定テーブルの列名一覧が期待値と一致するか検証する。
+        /// 不足列・余分列があればログ出力する。
+        /// </summary>
+        private static bool VerifyTableColumns(SQLiteConnection connection, SQLiteTransaction transaction, string tableName, string[] expectedColumns)
+        {
+            var actualColumns = new HashSet<string>();
+            using (var cmd = new SQLiteCommand($"PRAGMA table_info({tableName})", connection, transaction))
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    actualColumns.Add(reader["name"].ToString());
+                }
+            }
+
+            if (actualColumns.Count == 0)
+            {
+                Console.WriteLine($"[VerifySchema] WARNING: テーブル '{tableName}' が存在しません。");
+                return false;
+            }
+
+            var expectedSet = new HashSet<string>(expectedColumns);
+            var missing = new List<string>();
+            foreach (var col in expectedColumns)
+            {
+                if (!actualColumns.Contains(col)) missing.Add(col);
+            }
+            var extra = new List<string>();
+            foreach (var col in actualColumns)
+            {
+                if (!expectedSet.Contains(col)) extra.Add(col);
+            }
+
+            if (missing.Count == 0 && extra.Count == 0)
+            {
+                return true;
+            }
+
+            Console.WriteLine($"[VerifySchema] WARNING: テーブル '{tableName}' のスキーマが期待値と一致しません");
+            if (missing.Count > 0)
+            {
+                Console.WriteLine($"  期待されるが存在しない列: {string.Join(", ", missing)}");
+            }
+            if (extra.Count > 0)
+            {
+                Console.WriteLine($"  期待されない余分な列: {string.Join(", ", extra)}");
+            }
+            return false;
         }
     }
 }
