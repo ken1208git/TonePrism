@@ -512,9 +512,14 @@
     - 設定タブの「データベースリセット」ボタンから起動
     - 確認ダイアログ (`ResetDatabaseConfirmForm`) で「ボタンが逃げる」「確認コード入力」の二重安全機構を経て実行
     - 削除実行は **`prism.db` + `games/` フォルダ配下のセット削除**（旧実装は DB のみ削除で確認画面と齟齬していたが #119 で修正）
-    - 削除順序は **「(1) `games/` 削除 → (2) `prism.db` 削除 → (3) `games/` 再作成 + DB 再構築」** の順。先に DB を消すとフォルダ削除失敗時に「DB は消えたが games の一部が残り再初期化も走っていない」二次障害になり Manager 自体が壊れるため、games を先に処理して失敗したら DB を温存する設計
+    - 実装は **rename rollback 方式**:
+      1. `games/` を `games.pending-delete-{guid}/` に rename で退避（同一ボリューム rename は事実上 atomic）
+      2. `prism.db` を削除
+      3. 退避フォルダを物理削除
+      4. `games/` を再作成 + DB 再構築
+    - 失敗パターン別の挙動: games rename 失敗 → 何も変わらず throw / DB 削除失敗 → games を rename で復元 (ロールバック) してから throw / 退避フォルダ物理削除失敗 → DB は再構築済 + ゴミフォルダだけ残るのでユーザーに手動削除を通知。**いずれの中間失敗でも Manager は再起動可能**
     - `backups/` 等の隣接フォルダは触らない（復元用に残す）
-    - フォルダ削除失敗時 (`IOException` / `UnauthorizedAccessException`) はユーザー向けメッセージに変換して例外を投げ、`SettingsSectionPanel.btnResetDatabase_Click` の `caught` 経由で MessageBox 表示。**この時点で DB は無事なので Manager は普通に再起動でき、ユーザーは Launcher を閉じてから再試行できる**
+    - 確認画面 (`ResetDatabaseConfirmForm`) に「すべての展示PCの Launcher を終了してから実行」警告を表示
     - 実行前にバックアップ機能 (#96 / Manager v0.8.0) で `prism.db` のスナップショット取得を強く推奨
 
 #### バックアップ機能
@@ -2511,6 +2516,7 @@ GCTonePrism/
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
+| 2026-05-10 | 1.9.6 | PR #121 への Codex P1 追加指摘への対応：`SchemaManager.ResetDatabase()` を **rename rollback 方式** に変更し、DB 削除失敗時に games フォルダを復元する設計に。中間失敗時でも Manager は再起動可能な状態を保証 (broken partial-reset 状態を排除)。`ResetDatabaseConfirmForm` に「すべての展示PCの Launcher を終了してから実行」警告を追加、`DeleteGameConfirmForm` に「該当ゲームを起動中の Launcher があれば閉じて」ヒントを追加（フォルダ削除失敗の主原因予防）。Edit/Add/VersionUp は影響軽微 + Launcher 側 `ErrorDialog` で十分対応可能と判断しスコープ外。SPEC §2.2 機能11 のリセット項目を rename rollback 設計に書き直し。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.5 | データベースリセット機能の確認画面と実装の整合化 (#119) と AddGameForm の gameId 重複検出 (#120)：§2.2 機能11「その他設定管理機能」配下に「データベースリセット機能」項目を新設し、削除実行 = `prism.db` + `games/` フォルダのセット削除（旧実装は DB のみで確認画面と齟齬していた）+ `backups/` 等の隣接フォルダは触らない方針 + 失敗時の挙動詰めは将来 Issue という整理を明記。§2.2 機能1「ゲーム追加機能」に「gameId 重複検出」項目を追加し、`games/{gameId}/` 残骸検出時は手動退避を促す警告 MessageBox を出す挙動を明記。フォルダ削除失敗時の UX 詰めは別 Issue として保留。Manager v0.8.4 で実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.4 | ゲーム削除機能（機能2）の挙動を「DB レコード + `games/{game_id}/` フォルダのセット削除」に統一 (#111)：従来は SPEC §2.2 に「DB のみ / DB + フォルダ削除」の 2 オプションが記載されていたが、運用要望としては削除実行 = 両方削除が常に望ましく、Manager は DB 削除しか実装していなかったため `games/{game_id}/` フォルダがディスクに残る運用上の問題があった。オプション分岐は廃止し、新規 `DeleteGameConfirmForm` で削除対象のフォルダパスを表示して何が消えるかを明示した上で、削除実行時に常に `Directory.Delete(folder, true)` を呼び出す設計に変更。フォルダ不在時は表示を切り替えて DB 削除のみ実行（無害）、ファイルロック / 権限エラー時は「DB 削除は成功・フォルダは手動削除を」の警告に切り替える非破壊運用。SPEC §2.2 機能2 の記述を実装に合わせて書き直し。Manager v0.8.3 で実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.3 | `prism.db` のジャーナルモードを WAL → DELETE へ移行し、`busy_timeout=10000` を追加（#103）：6.5 データの整合性を「DELETE モード + busy_timeout による同時アクセス対応」に書き換え、SMB 共有上で WAL モードが SQLite 公式により動作保証外である旨と DELETE モード採用の理由（`prism.db-shm` のメモリマップ整合性不全リスクの回避）、`busy_timeout=10000` を「書き込み待機列」として 10 秒待機させる挙動を明記。リトライ機構の記述を実装に合わせて「最大 3 回・固定 100ms 間隔」に修正（従来の「指数バックオフ 50/100/200ms」記載は実装と齟齬していた）。Manager v0.8.2 / Launcher v0.5.9 で実装。 | Kenshiro Kuroga & Claude |

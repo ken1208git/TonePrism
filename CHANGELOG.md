@@ -424,10 +424,19 @@
 #### Fixed
 
 - **データベースリセット時に `games/` フォルダも削除するよう実装を修正 (#119)**: `ResetDatabaseConfirmForm` の確認画面で「・gamesフォルダ内のすべてのファイルとフォルダ」を削除すると告知していたが、実装 (`SchemaManager.ResetDatabase()`) は `prism.db` 1 ファイルしか削除しておらず、確認画面と挙動が一致していなかった
-  - `SchemaManager.ResetDatabase()` を「(1) `PathManager.GamesFolder` 配下削除 → (2) DB 削除 → (3) games/ 再作成 + DB 再構築」の順に修正
-  - **順序が「games → DB」なのは意図的**: games 削除失敗時に DB を消さずに済むため。先に DB を消すと、フォルダ削除失敗時に「DB は消えたが games の一部が残り `InitializeDatabase()` も走っていない」二次障害状態になり Manager 自体が壊れる (Codex P1 指摘)
+  - `SchemaManager.ResetDatabase()` を **rename rollback 方式** で実装:
+    1. `games/` を `games.pending-delete-{guid}/` に rename して退避（同一ボリューム rename は事実上 atomic）
+    2. `prism.db` を削除
+    3. 退避フォルダを物理削除
+    4. `games/` を再作成 + DB 再構築
+  - **rename rollback の意図** (Codex P1 指摘 #121 への対応): 物理削除順 (games → DB) でも、DB 削除でロック等で失敗した場合に「games 消えたまま + DB 古いレコード」という broken partial-reset 状態になる。rename ならフォルダ実体は退避先に残るので、DB 削除失敗時は rename を戻して「何も変わってない」状態にロールバックできる
   - `backups/` 等の隣接フォルダは触らない（復元用に残す）
-  - `Directory.Delete(folder, true)` の `IOException` / `UnauthorizedAccessException` を捕捉し、Launcher ロック中などのケースでユーザー向けメッセージに変換して投げ直す（呼び出し側で MessageBox 表示）。失敗時 DB は無事なので Manager は普通に再起動できる
+  - `IOException` / `UnauthorizedAccessException` を捕捉してユーザー向けメッセージに変換。**失敗パターン別の状態**:
+    - games rename 失敗 → 何も変わらず throw（DB / games 共に無事）
+    - DB 削除失敗 → games を rename で復元してから throw（DB / games 共に無事）
+    - 退避フォルダの物理削除失敗 → DB は再構築済 + 退避フォルダのゴミだけ残る → ユーザーに「手動削除を」と通知
+- **`ResetDatabaseConfirmForm` に「すべての展示PCの Launcher を終了してから実行」警告を追加**: DB ファイル + games フォルダ全部に対するロック競合を予防
+- **`DeleteGameConfirmForm` に「該当ゲームを起動中の Launcher があれば閉じて」ヒントを追加**: フォルダ削除失敗の主原因を予防
 - **`ResetDatabaseConfirmForm` の文言を部員向けに刷新 (#119)**: 「データベース内のすべての情報」「gamesフォルダ内のすべてのファイルとフォルダ」という技術用語ベースの表現を、PR #118 の `DeleteGameConfirmForm` と同じトーンで「すべてのゲーム情報・プレイ記録・アンケート回答」「Manager に登録されている全ゲームのファイル」に書き換え + 「部員の開発フォルダには影響しません。リセット前にバックアップ機能でスナップショット取得を推奨。」の補足を追加
 
 #### Added
