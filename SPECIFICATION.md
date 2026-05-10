@@ -2106,6 +2106,44 @@ GCTonePrism/
 
 ---
 
+### 7.6 スキーマ管理ワークフロー
+
+`prism.db` のスキーマを変更する際は、以下のワークフローを必ず守ること。
+本節は v1.5.1 (2026-03-28) で `surveys` / `play_records` のスキーマ定義を更新したものの
+マイグレーション未実装で実 DB と SPEC が drift していた事故（Manager v0.8.1 の
+`MigrateV10ToV11` で事後修正）の再発防止として設けられた運用規約。
+
+#### 7.6.1 マイグレーション実装の必須化
+
+- `GCTonePrism_Manager/SchemaManager.cs` の `CreateTables()` 内のスキーマ定義を変更したら：
+  1. 対応する `MigrateVxToVy()` 関数を追加する
+  2. `CurrentDbVersion` をインクリメントする
+- **`CREATE TABLE IF NOT EXISTS` は新規 DB 用**。既存 DB ではテーブルが存在する場合に何もしないため、
+  既存運用 DB に変更を反映するには ALTER TABLE / DROP+CREATE+データ移行 を伴う
+  明示的なマイグレーション関数が必要。
+
+#### 7.6.2 検証
+
+- マイグレーション実装後は `tools/sqlite3/sqlite3.exe` で
+  変更前後の `PRAGMA table_info(<tableName>);` を実行し、想定スキーマと一致するか手動検証する。
+- Manager 起動時の `VerifySchema()` でも `ExpectedSchema` 辞書との自動比較が走るが、
+  手動検証も併用する（自動チェックは `ExpectedSchema` との比較のみで、本書 §7.3 とは比較しない）。
+
+#### 7.6.3 ExpectedSchema ↔ SPEC §7.3 同期義務
+
+- `SchemaManager.cs` 末尾の `ExpectedSchema` 辞書を更新したら、本書 §7.3 のテーブル定義表
+  （およびできれば §7.2 階層図 / §7.4 ER 図）も同時に更新すること。
+- `VerifySchema()` は `ExpectedSchema` との比較しか行わず、SPEC は読まないため、
+  SPEC 側の drift は人間が見つける必要がある。
+
+#### 7.6.4 過去事例
+
+- **SPEC v1.5.1 (2026-03-28)**: `surveys` / `play_records` のスキーマを変更したが
+  マイグレーション未実装のため drift が温存。Manager v0.8.1 の `MigrateV10ToV11` で修正。
+- 詳細は §変更履歴 v1.9.1 / v1.9.2 を参照。
+
+---
+
 ## 8. 開発計画
 
 ### 8.1 フェーズ
@@ -2521,7 +2559,7 @@ GCTonePrism/
     - アプリ起動時に古いDBバージョンを検知した場合、自動的に構造変更（ALTER TABLEなど）を行い、データを保持したまま最新バージョンへ更新する
   - **整合性維持**:
     - LauncherとManagerの両方で同じバージョン定数を持ち、バージョン不一致によるデータ破損を防ぐ
-
+- **実装ワークフロー**: §7.6「スキーマ管理ワークフロー」を参照。
 
 詳細なバージョン管理戦略については、`.cursorrules`の「バージョン管理戦略」セクションを参照してください。
 
@@ -2561,6 +2599,7 @@ GCTonePrism/
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
+| 2026-05-11 | 1.10.2 | §7.6「スキーマ管理ワークフロー」を新設 (#131)：マイグレーション実装の必須化（`CreateTables()` 変更 → `MigrateVxToVy()` 追加 → `CurrentDbVersion` 増分）、`tools/sqlite3/sqlite3.exe` での手動検証、`ExpectedSchema` ↔ §7.3 同期義務、v1.5.1 drift 事故の再発防止規約を SPEC 側に正式収録。これまで `AGENTS.md` にしか存在しなかった運用規約を SPEC 側に格上げし、`AGENTS.md` は「ルールのみ」に絞ってコンテキストロード時のサイズを削減（78 行 → 約 40 行）。§3.6 のログ基盤要件と合わせて、`AGENTS.md` からはリンクで参照する構造に統一。§8.2 #5 Database Schema Version から §7.6 への参照リンクも追加。 | Kenshiro Kuroga & Claude |
 | 2026-05-11 | 1.10.1 | Manager にログビューア UI を追加 (#129)：v1.10.0 で導入したファイルログ基盤の実用化。新規「ログ」タブで `<project_root>/logs/{manager,launcher}/` 両方のセッションログを横割りレイアウト（上=ファイル一覧 / 下=本文）で閲覧可能に。ツールバーは INFO/WARN/ERROR レベルフィルタ + Manager/Launcher コンポーネントフィルタ + 全文検索窓。**ハイライトモード**を採用：フィルタや検索で他の行が消えるのではなく、マッチ行は通常表示+レベル別背景色、非マッチ行は薄い灰色文字でディム表示するため文脈を失わず追跡可能。検索ヒット substring には追加で黄色ハイライト。本文は WordWrap 有効で横スクロール無し。Logger が書き込み中のファイルも `FileShare.ReadWrite` でロックなし閲覧可能。Manager v0.8.9 で実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-11 | 1.10.0 | ファイルログ基盤を全コンポーネント横断要件として §3.6 に新設 (#116 / #85 の土台)：Manager (v0.8.8) は新規 `Services/Logger.cs` で `Console.SetOut` フックにより既存 109 件の `Console.WriteLine($"[X] msg")` を **コード変更ゼロ** でファイルにも自動転送、INFO/WARN/ERROR の 3 段階を提供。Launcher (v0.5.16) は新規 autoload `scripts/logger.gd` が `OS.add_logger` (Godot 4.5+) で `print` / `printerr` / `push_warning` / `push_error` をすべて捕捉し、レベル振り分けして出力。**保存先は `<project_root>/logs/{manager,launcher}/<component>_<PCname>_<YYYY-MM-DD_HHmmss>.log`** に集約配置：(a) prism.db と同じ共有先に置くことで Manager の将来的なログビューア UI で複数 PC のログを 1 箇所閲覧可能、(b) **1 起動セッション = 1 ファイル** のため複数 PC が同時に書いても競合・interleaving が起きない、(c) PC 名 + 起動時刻でファイル名がユニーク（同秒衝突は連番サフィックスで回避）。30 日 retention（起動時に mtime 基準で古いファイル自動削除、現セッションは保護）。AGENTS.md に「Cross-component Standards」セクション追加して将来の Monitor / Tools 等の追加時にも同じベースラインが適用されるよう保証。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.11 | バックアップ履歴の改善 (#126)：`backup_log` テーブルに `relative_path` 列を追加 (DB v11 → v12)。バックアップ作成時に `prism.db` のあるディレクトリからの相対パスも記録し、表示・復元時は新規 `BackupPathResolver` で動的にパスを再構築することでプロジェクト場所の移動に追従できるように（ユーザーが「Documents 配下 → C 直下」のように頻繁にプロジェクトを移動するため）。`failed` 状態のレコードは Manager 起動時に物理ファイル + DB レコード両方を自動掃除（表示価値が無く、古いプロジェクトパスのゴミの主因）。履歴一覧に「選択した履歴を削除...」ボタンを追加し、ユーザーが個別にバックアップを片付けられるように。表示時は `File.Exists` チェックで不在ファイルを非表示（DB レコードは保護のため残す）。Manager v0.8.7 で実装。 | Kenshiro Kuroga & Claude |
