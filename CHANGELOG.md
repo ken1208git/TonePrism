@@ -421,9 +421,16 @@
 
 ### [Manager v0.8.6] - 2026-05-10
 
+#### Changed
+
+- **`EditGameForm` / `AddGameForm` / `VersionUpForm` を 2 列レイアウトに刷新 (#123)**: 縦長 (480 × 888〜1000px) だった入力フォームを 2 列構成 (950 × 570〜645px) に再設計。ノート PC でも縦スクロールなしで全項目が見渡せるようになった
+  - **左列**: 基本情報 (ゲームID/タイトル/説明文/ジャンル/プレイヤー数/難易度/プレイ時間/フラグ/通信プレイ対応 など)
+  - **右列**: アセット & 設定 (サムネイル/背景画像 + プレビュー/実行ファイル/テスト起動/起動オプション/製作者情報 + EditGameForm はバージョン管理、VersionUpForm は更新内容)
+  - 入力フィールドの幅を広げ、ジャンル選択 (CheckedListBox) や説明文入力欄も従来より広く
+
 #### Fixed
 
-- **ノート PC で `EditGameForm` / `AddGameForm` が縦に見切れる問題を解消 (#123)**: フォーム高さ (1000px / 888px) がノート PC の表示領域を超えるケースで保存ボタンや製作者情報が画面外に隠れていた。Form に `AutoScroll = true` を設定し、表示領域を超える場合は縦スクロールバーが自動表示されるように
+- **ノート PC で `EditGameForm` / `AddGameForm` が縦に見切れる問題を解消 (#123)**: 上記 2 列化で根本解消。念のため Form に `AutoScroll = true` も設定し、それでも入りきらない環境では縦スクロールバーが出るように
 - **`DataGridView` の行高をユーザーが変更できる問題を解消 (#123)**: ゲームタブ・ストアタブ等で行と行の境界をドラッグすると行高が変わってレイアウトが崩れる事故を防止。全 `DataGridView` に `AllowUserToResizeRows = false` を設定
   - 対象: `dgvGames` (GameSectionPanel), `dgvSections` (StoreSectionPanel / StoreSectionListForm), `dgvDevelopers` × 3 (Add/Edit/VersionUp)
   - `gridHistory` (BackupSectionPanel) は既に設定済みで対応不要
