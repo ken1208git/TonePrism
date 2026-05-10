@@ -67,7 +67,7 @@ namespace GCTonePrism.Manager
             this.lblDestHint.Name = "lblDestHint";
             this.lblDestHint.Size = new System.Drawing.Size(420, 15);
             this.lblDestHint.TabIndex = 3;
-            this.lblDestHint.Text = "空欄にするとデフォルト（DBファイルの隣の backups/ フォルダ）が使われます";
+            this.lblDestHint.Text = "空欄にするとデフォルト（データベースファイルの隣の backups/ フォルダ）が使われます";
             //
             // lblInterval
             //
