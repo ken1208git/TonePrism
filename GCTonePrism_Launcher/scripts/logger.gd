@@ -269,10 +269,17 @@ func _cleanup_old_logs() -> void:
 
 
 func _notification(what: int) -> void:
-	# 通常終了 (× ボタン) と autoload 破棄時の両方で終了ログ
-	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
+	# Codex P1 #128: ファイル close は本物のプロセス終了 (PREDELETE) でのみ実施。
+	# WM_CLOSE_REQUEST は AppManager.set_auto_accept_quit(false) でインターセプトされて
+	# キャンセルされうるため、ここで _file を閉じてしまうと「キャンセルされた Alt+F4」
+	# 1 回でセッション残り全部のログが消失する。WM_CLOSE_REQUEST 時点では何もしない。
+	#
+	# また project.godot の application/run/flush_stdout_on_print=true により
+	# Godot は print() 毎に stdout を即 flush する → PREDELETE 時点で godot.log に
+	# 全 print 内容が揃っているので _sync_godot_log() で取りこぼし無し。
+	if what == NOTIFICATION_PREDELETE:
 		if _initialized:
-			# 終了直前に最後の Godot ログ分も同期
+			# 終了直前に最後の Godot ログ分も同期 (バッファ済みの print も拾う)
 			_sync_godot_log()
 			_write_safely("INFO", "[Logger] Launcher 終了")
 			if _file != null:
