@@ -115,7 +115,14 @@ namespace GCTonePrism.Manager
         /// SMB 上でも事実上 atomic。ただし Launcher が games/ 内ファイルをロック中なら
         /// rename 自体が失敗するが、その場合も DB は無傷のまま中止できる。
         /// </summary>
-        public void ResetDatabase()
+        /// <returns>
+        /// 完全成功時は null、退避フォルダ物理削除に失敗した場合は警告メッセージを返す。
+        /// 警告ありでも DB / games/ は再構築済みなので呼び出し側は UI 更新を実行すべき
+        /// (Codex P2 指摘 #121: 「成功 + 警告」を例外で表現すると ProcessingDialog 経由で
+        /// 失敗扱いされて UI リフレッシュフックがスキップされるため、戻り値で表現する)。
+        /// 真に失敗 (rename 失敗 / DB 削除失敗) した場合は IOException 等を throw する。
+        /// </returns>
+        public string ResetDatabase()
         {
             string dbPath = _conn.DbPath;
             string gamesFolder = PathManager.GamesFolder;
@@ -210,11 +217,8 @@ namespace GCTonePrism.Manager
             Directory.CreateDirectory(gamesFolder);
             InitializeDatabase();
 
-            // (5) (3) で失敗していた場合はここで通知 (DB / games は再構築済み)
-            if (pendingDeleteWarning != null)
-            {
-                throw new IOException(pendingDeleteWarning);
-            }
+            // (5) (3) で失敗していた場合は警告を返す (例外でなく戻り値で「成功 + 警告」を表現)
+            return pendingDeleteWarning;
         }
 
         private void CreateTables(SQLiteConnection connection, SQLiteTransaction transaction)

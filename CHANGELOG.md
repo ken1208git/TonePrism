@@ -434,7 +434,8 @@
   - `IOException` / `UnauthorizedAccessException` を捕捉してユーザー向けメッセージに変換。**失敗パターン別の状態**:
     - games rename 失敗 → 何も変わらず throw（DB / games 共に無事）
     - DB 削除失敗 → games を rename で復元してから throw（DB / games 共に無事）
-    - 退避フォルダの物理削除失敗 → **(4) games/ 再作成 + DB 再初期化を必ず実行してから** 警告 throw（DB / games は再構築済み + ゴミ退避フォルダだけ残る → ユーザーに「手動削除を」と通知）。rename はファイルロックを解除しないため、Launcher が起動中のゲームの実行ファイルを掴んでいると (3) で失敗するレアケースがあるが、Manager は再起動できる状態を保証 (Codex P1 #121 への 3 度目の対応)
+    - 退避フォルダの物理削除失敗 → **(4) games/ 再作成 + DB 再初期化を必ず実行してから戻り値で警告メッセージを返す**（DB / games は再構築済み + ゴミ退避フォルダだけ残る → ユーザーに「手動削除を」と通知）。rename はファイルロックを解除しないため、Launcher が起動中のゲームの実行ファイルを掴んでいると (3) で失敗するレアケースがあるが、Manager は再起動できる状態を保証 (Codex P1 #121 への 3 度目の対応)
+  - **`ResetDatabase()` の戻り値を `void` → `string` に変更** (Codex P2 #121): 上記 (3) 失敗時の警告を例外で投げると `ProcessingDialog` が `DialogResult.Abort` を返し、`SettingsSectionPanel.btnResetDatabase_Click` が non-OK で early return → `UpdateVersionInfo()` / `DatabaseReset?.Invoke()` がスキップされて UI が古いまま「失敗」と誤報告されていた。完全成功は null、警告ありは文字列を戻り値で返すよう変更し、呼び出し側は warning の有無に関わらず UI リフレッシュを実行 + warning があれば情報 MessageBox を出す形に
 - **`ResetDatabaseConfirmForm` に「すべての展示PCの Launcher を終了してから実行」警告を追加**: DB ファイル + games フォルダ全部に対するロック競合を予防
 - **`DeleteGameConfirmForm` に「該当ゲームを起動中の Launcher があれば閉じて」ヒントを追加**: フォルダ削除失敗の主原因を予防
 - **`ResetDatabaseConfirmForm` の文言を部員向けに刷新 (#119)**: 「データベース内のすべての情報」「gamesフォルダ内のすべてのファイルとフォルダ」という技術用語ベースの表現を、PR #118 の `DeleteGameConfirmForm` と同じトーンで「すべてのゲーム情報・プレイ記録・アンケート回答」「Manager に登録されている全ゲームのファイル（games フォルダ全体）」に書き換え + 「部員の開発フォルダには影響しません。リセット前にバックアップ機能でスナップショット取得を推奨。」の補足を追加。**「games フォルダ全体」の括弧を残しているのは、未登録の手動配置ファイル（部員の実験フォルダ等）も削除対象であることを明示するため (Codex P2 #121)**

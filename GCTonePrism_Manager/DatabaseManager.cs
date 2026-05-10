@@ -50,7 +50,7 @@ namespace GCTonePrism.Manager
         public int GetTargetDatabaseVersion() => _schema.GetTargetDatabaseVersion();
         public int GetActualDatabaseVersion() => _schema.GetActualDatabaseVersion();
         public void InitializeDatabase() => _schema.InitializeDatabase();
-        public void ResetDatabase() => _schema.ResetDatabase();
+        public string ResetDatabase() => _schema.ResetDatabase();
 
         // --- ゲーム ---
         public List<GameInfo> GetAllGames() => _gameRepo.GetAll();
