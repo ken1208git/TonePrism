@@ -515,9 +515,9 @@
     - 実装は **rename rollback 方式**:
       1. `games/` を `games.pending-delete-{guid}/` に rename で退避（同一ボリューム rename は事実上 atomic）
       2. `prism.db` を削除
-      3. 退避フォルダを物理削除
-      4. `games/` を再作成 + DB 再構築
-    - 失敗パターン別の挙動: games rename 失敗 → 何も変わらず throw / DB 削除失敗 → games を rename で復元 (ロールバック) してから throw / 退避フォルダ物理削除失敗 → **(4) games/ 再作成 + DB 再初期化を必ず実行してから戻り値で警告メッセージを返す**（rename はファイルロックを解除しないので Launcher 起動中のゲーム実行ファイルが掴まれていると (3) で失敗し得るが、DB / games は再構築済みでゴミ退避フォルダだけ残る形にする）。**いずれの中間失敗でも Manager は再起動可能**
+      3. `games/` を再作成 + DB 再初期化
+      4. 退避フォルダを物理削除
+    - 失敗パターン別の挙動: (1) games rename 失敗 → 何も変わらず throw / (2) DB 削除失敗 → games を rename で復元 (ロールバック) してから throw / (3) games/ 再作成 or DB 再初期化失敗 → 部分作成された games/ と prism.db を削除 + 退避を games/ に戻して throw（DB だけ消えた状態でバックアップ #96 から復元可能） / (4) 退避フォルダ物理削除失敗 → 戻り値で警告メッセージを返す（DB / games 再構築済み + ゴミ退避フォルダだけ残る、Launcher が起動中ゲームの実行ファイルを掴んでいると起き得る）。**いずれの中間失敗でも Manager は再起動可能**
     - **`ResetDatabase()` の戻り値**: 完全成功は `null`、退避フォルダ削除に失敗した場合は警告メッセージ文字列。呼び出し側 (`SettingsSectionPanel.btnResetDatabase_Click`) は warning の有無に関わらず `UpdateVersionInfo()` / `DatabaseReset?.Invoke()` を実行し、warning があれば情報 MessageBox で通知する。例外で表現すると ProcessingDialog 経由で「失敗」扱いされて UI リフレッシュフックがスキップされてしまうため、戻り値で「成功 + 警告」を表現する設計
     - `backups/` 等の隣接フォルダは触らない（復元用に残す）
     - 確認画面 (`ResetDatabaseConfirmForm`) に「すべての展示PCの Launcher を終了してから実行」警告を表示
