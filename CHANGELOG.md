@@ -419,6 +419,18 @@
 
 ## Manager（管理ソフト）
 
+### [Manager v0.8.3] - 2026-05-10
+
+#### Changed
+
+- **ゲーム削除時に DB レコードに加えて `games/{game_id}/` フォルダも常に削除するよう変更 (#111)**: 従来は DB 削除のみだったため `games/{game_id}/` フォルダがディスクに残り続けていた。SPEC §2.2 にあった「DB のみ / DB + フォルダ」のオプション分岐は廃止し、削除実行 = DB + フォルダのセット削除に統一
+  - 新規 `DeleteGameConfirmForm` を追加。何が消えるかを明確化するため、フォルダパスをダイアログ内に表示（`Consolas` モノスペース、ReadOnly）し、警告色で「ディスクから物理的に削除されます」と明示
+  - フォルダが存在しない場合（手動削除済み等）は表示を「フォルダが見つかりません。DB のみ削除します」に切り替えて DB 削除のみ実行（無害）
+  - `Enter` キーで誤って削除が走らないよう `AcceptButton` をキャンセルに割り当て
+  - 削除処理は既存の `ProcessingDialog` (Marquee モード) 内で DB 削除に続けて `Directory.Delete(folder, true)` を実行
+  - `IOException` (Launcher など他プロセスがロック中)・`UnauthorizedAccessException` を個別捕捉し、DB 削除は成功した上で「フォルダ削除に失敗、手動削除してください」の警告に切り替える非破壊運用
+  - 関連実装: `Controls/GameSectionPanel.cs` の `btnDeleteGame_Click`、`PathManager.GetGameFolder(gameId)` を再利用
+
 ### [Manager v0.8.2] - 2026-05-10
 
 #### Changed
