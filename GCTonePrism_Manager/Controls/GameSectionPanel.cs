@@ -321,6 +321,14 @@ namespace GCTonePrism.Manager.Controls
                         gamesRenamed = true;
                         break;
                     }
+                    catch (DirectoryNotFoundException)
+                    {
+                        // 初期 Directory.Exists チェック後に他プロセスがフォルダを削除した
+                        // race condition。既にフォルダは無く削除目的は達成しているので
+                        // 「rename してない」扱いで次のフェーズ (DB 削除) に進む (Codex P2 #122)
+                        gamesRenamed = false;
+                        break;
+                    }
                     catch (IOException ex) { renameError = ex; }
                     catch (UnauthorizedAccessException ex) { renameError = ex; }
 
