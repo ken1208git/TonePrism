@@ -301,8 +301,8 @@ namespace GCTonePrism.Manager.Controls
             // surveys / store_section_games が削除される。共有フォルダ越しでは
             // 数秒かかるケースもあるので Marquee 進捗を表示する。
             // 削除実行は DB レコード + games/{game_id}/ フォルダのセット (#111)。
+            // フォルダ削除は ProcessingDialog の外で行い、失敗時は再試行 UI を出す (#122)。
             Exception caught = null;
-            string folderWarning = null;
             using (var dialog = new ProcessingDialog((progress, token) =>
             {
                 try
@@ -310,30 +310,6 @@ namespace GCTonePrism.Manager.Controls
                     progress?.Report(new ProgressInfo(-1, "ゲームを削除中...",
                         $"「{selectedGame.Title}」と関連レコードをデータベースから削除しています"));
                     _dbManager.DeleteGame(selectedGame.GameId);
-
-                    if (deleteFolder && Directory.Exists(gameFolder))
-                    {
-                        progress?.Report(new ProgressInfo(-1, "ゲームフォルダを削除中...",
-                            gameFolder));
-                        try
-                        {
-                            Directory.Delete(gameFolder, true);
-                        }
-                        catch (IOException ioEx)
-                        {
-                            // ファイルがロックされている (Launcher 起動中など) / 一部削除済み等
-                            folderWarning = $"ゲームフォルダの削除中に問題が発生しました。\n\n" +
-                                $"{ioEx.Message}\n\n" +
-                                $"Launcher など他のプロセスがファイルを使用していないか確認し、" +
-                                $"必要に応じて手動で削除してください:\n  {gameFolder}";
-                        }
-                        catch (UnauthorizedAccessException uaEx)
-                        {
-                            folderWarning = $"ゲームフォルダへのアクセスが拒否されました。\n\n" +
-                                $"{uaEx.Message}\n\n" +
-                                $"フォルダのアクセス権限を確認してください:\n  {gameFolder}";
-                        }
-                    }
                 }
                 catch (Exception ex)
                 {
@@ -352,7 +328,7 @@ namespace GCTonePrism.Manager.Controls
                 {
                     if (caught is System.Data.SQLite.SQLiteException sqEx)
                     {
-                        MessageBox.Show(
+                        MessageBox.Show(this.FindForm(),
                             $"ゲームの削除に失敗しました。\n\n{DatabaseManager.GetUserFriendlyErrorMessage(sqEx)}",
                             "データベースエラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     }
@@ -361,10 +337,35 @@ namespace GCTonePrism.Manager.Controls
                 }
             }
 
-            if (folderWarning != null)
+            // ここまで来た = DB 削除は成功。フォルダ削除を再試行ループで実行 (#122)
+            // 失敗時は FolderDeletionFailureDialog を出してユーザーに「再試行」or「諦める」を選ばせる
+            bool folderGivenUp = false;
+            if (deleteFolder && Directory.Exists(gameFolder))
             {
-                MessageBox.Show(this.FindForm(), folderWarning, "ゲームフォルダ削除の警告",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                while (true)
+                {
+                    var result = FolderDeletionService.TryDelete(gameFolder);
+                    if (result.Success) break;
+
+                    using (var failDialog = new FolderDeletionFailureDialog(gameFolder, result.LastError))
+                    {
+                        var dr = failDialog.ShowDialog(this.FindForm());
+                        if (dr != DialogResult.Retry)
+                        {
+                            folderGivenUp = true;
+                            break;
+                        }
+                        // Retry の場合はループ継続 (再度 TryDelete を試す)
+                    }
+                }
+            }
+
+            if (folderGivenUp)
+            {
+                MessageBox.Show(this.FindForm(),
+                    "ゲームのデータベース削除は完了しましたが、フォルダの削除を諦めました。\n" +
+                    "後で手動削除してください:\n  " + gameFolder,
+                    "ゲームフォルダ削除の警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             else
             {

@@ -419,6 +419,30 @@
 
 ## Manager（管理ソフト）
 
+### [Manager v0.8.5] - 2026-05-10
+
+#### Added
+
+- **フォルダ削除失敗時の再試行 UI を追加 (#122)**: ゲーム削除や DB リセットでフォルダ削除に失敗した場合、従来は「警告 MessageBox 表示 → ユーザーが手動でなんとかする」だったが、専用ダイアログ `FolderDeletionFailureDialog` で「再試行」「諦める (手動削除)」を選べるように改善
+  - 主因は **Launcher が起動中ゲームの実行ファイルを掴んでいる** ケース。ユーザーが Launcher を閉じてから「再試行」を押すだけで解消する
+  - ダイアログには対象フォルダパス、エラー詳細 (Exception.Message)、対処手順 (Launcher を閉じてから再試行) を表示
+  - `AcceptButton = btnRetry` で Enter で再試行 (再試行は何度押しても安全)、`CancelButton = btnGiveUp` で ESC で諦める
+- **新規 `Services/FolderDeletionService.cs`**: フォルダ削除のリトライ機構を共通化 (5 回 × 200ms、`RestoreService.DeleteWithRetry` と同じパターン)。`IOException` / `UnauthorizedAccessException` のみリトライ対象、それ以外は throw
+- **新規 `FolderDeletionFailureDialog.cs` + `.Designer.cs` + `.resx`**: 上記再試行 UI のカスタム Form
+
+#### Changed
+
+- **`SchemaManager.ResetDatabase()` の戻り値を `string` → `FolderDeletionService.Result` に変更**: 退避フォルダ削除の Path / Exception を呼び出し側に渡せるようにし、再試行時に同じ path を使えるように構造化 (#122)
+- **`DatabaseManager.ResetDatabase()` の wrapper signature 更新**: 同様に `Result` を返す形に
+- **`SettingsSectionPanel.btnResetDatabase_Click`**: 退避フォルダ削除失敗時に `FolderDeletionFailureDialog` を表示する再試行ループに変更。「諦める」を選んだ場合のみ警告 MessageBox を表示 (#122)
+- **`GameSectionPanel.btnDeleteGame_Click`**: フォルダ削除を `ProcessingDialog` の外に出して再試行ループ化。`folderWarning` 文字列方式を廃止し、失敗時は `FolderDeletionFailureDialog` で対応 (#122)
+
+#### Scope out (将来 Issue 候補)
+
+- **ロックしてるプロセス特定 UI** (Restart Manager API 利用): 大規模で P/Invoke 必要、別 Issue として検討
+- **ファイルログ機構**: Issue [#116](https://github.com/ken1208git/GCTonePrism/issues/116) に依存
+- **「フォルダをエクスプローラで開く」ボタン**: ロック中はエクスプローラから消そうとしても同じく失敗するため、本質的解決にならず削除
+
 ### [Manager v0.8.4] - 2026-05-10
 
 #### Fixed

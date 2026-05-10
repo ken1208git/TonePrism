@@ -116,13 +116,13 @@ namespace GCTonePrism.Manager
         /// rename 自体が失敗するが、その場合も DB は無傷のまま中止できる。
         /// </summary>
         /// <returns>
-        /// 完全成功時は null、退避フォルダ物理削除に失敗した場合は警告メッセージを返す。
-        /// 警告ありでも DB / games/ は再構築済みなので呼び出し側は UI 更新を実行すべき
-        /// (Codex P2 指摘 #121: 「成功 + 警告」を例外で表現すると ProcessingDialog 経由で
-        /// 失敗扱いされて UI リフレッシュフックがスキップされるため、戻り値で表現する)。
-        /// 真に失敗 (rename 失敗 / DB 削除失敗) した場合は IOException 等を throw する。
+        /// 退避フォルダ物理削除の結果。Success=true なら完全成功 (退避フォルダも消えた)。
+        /// Success=false なら DB / games/ は再構築済みだが退避フォルダだけ残っている状態
+        /// (LastError と Path に詳細あり)。呼び出し側は Result を見て再試行 UI を出すか
+        /// 警告だけ表示するかを判断する (#122 Group C)。
+        /// 真に失敗 (rename 失敗 / DB 削除失敗 / 再初期化失敗) した場合は IOException 等を throw する。
         /// </returns>
-        public string ResetDatabase()
+        public Services.FolderDeletionService.Result ResetDatabase()
         {
             string dbPath = _conn.DbPath;
             string gamesFolder = PathManager.GamesFolder;
@@ -238,25 +238,11 @@ namespace GCTonePrism.Manager
             }
 
             // (4) 退避フォルダを物理削除を試みる（失敗しても DB / games は再構築済みなので
-            //     呼び出し側に警告を返すだけにする。Codex P2 #121: 例外でなく戻り値で表現）
+            //     呼び出し側に Result を返すだけにする。Codex P2 #121: 例外でなく戻り値で表現）
             //     rename はファイルロックを解除しないため、Launcher が起動中のゲームの
             //     実行ファイルを掴んでいるとここで IOException が出る可能性がある。
-            string pendingDeleteWarning = null;
-            if (Directory.Exists(pendingDeleteFolder))
-            {
-                try
-                {
-                    Directory.Delete(pendingDeleteFolder, true);
-                }
-                catch (Exception ex)
-                {
-                    pendingDeleteWarning =
-                        $"DB と games/ は再構築されましたが、退避済みの旧 games フォルダの物理削除に失敗しました。\n" +
-                        $"Launcher などがファイルを掴んでいる可能性があります。後で手動削除してください:\n  {pendingDeleteFolder}\n\n{ex.Message}";
-                }
-            }
-
-            return pendingDeleteWarning;
+            //     FolderDeletionService が内部で 5 × 200ms リトライしてから結果を返す (#122)
+            return Services.FolderDeletionService.TryDelete(pendingDeleteFolder);
         }
 
         private void CreateTables(SQLiteConnection connection, SQLiteTransaction transaction)
