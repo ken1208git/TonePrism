@@ -25,7 +25,7 @@ namespace GCTonePrism.Manager.Repositories
 
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     string query = @"
                         SELECT section_id, title, section_type, section_source,
@@ -55,7 +55,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     string query = @"
                         SELECT section_id, title, section_type, section_source,
@@ -89,7 +89,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     using (var transaction = connection.BeginTransaction())
                     {
@@ -132,7 +132,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     using (var transaction = connection.BeginTransaction())
                     {
@@ -186,7 +186,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     string deleteSql = "DELETE FROM store_sections WHERE section_id = @sectionId";
                     using (var command = new SQLiteCommand(deleteSql, connection))
@@ -204,7 +204,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     string query = "SELECT COALESCE(MAX(display_order), -1) FROM store_sections";
                     using (var command = new SQLiteCommand(query, connection))

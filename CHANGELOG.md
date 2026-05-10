@@ -11,6 +11,15 @@
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.5.15] - 2026-05-10
+
+#### Changed
+
+- **`prism.db` のジャーナルモードを WAL → DELETE へ移行 + `busy_timeout=10000` (#103)**: 学校 SMB ファイルサーバー上で `prism.db` を共有する運用形態において、SQLite 公式が WAL モードの動作を保証外と明言しているため、Manager v0.8.2 と歩調を合わせて `PRAGMA journal_mode=DELETE` に変更
+  - 続けて `PRAGMA busy_timeout=10000` を発行し、書き込み競合時に即時 SQLITE_BUSY を返さず最大 10 秒待機する挙動に
+  - Launcher は実質 Read-Only（アンケート/プレイ記録は drop-folder 経由）のため運用上の体感影響は無い見込み
+- **`config/version` を `0.5.8` → `0.5.15` に同期**: `project.godot` の `config/version` が v0.5.9〜v0.5.14 のリリース時に更新されていなかった drift を本リリースで解消
+
 ### [Launcher v0.5.14] - 2026-05-03
 
 #### Fixed
@@ -409,6 +418,23 @@
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.8.2] - 2026-05-10
+
+#### Changed
+
+- **`prism.db` のジャーナルモードを WAL → DELETE へ移行 (#103)**: 学校 SMB ファイルサーバー上で `prism.db` を共有する運用形態において、SQLite 公式が WAL モードの動作を保証外と明言している（`prism.db-shm` のメモリマップトファイルが SMB で整合性を保証されない）リスクを回避するため、`PRAGMA journal_mode=DELETE` に切り替え
+  - `DatabaseConnection.OpenConnectionWithWalMode` を `OpenConnectionWithJournalMode` にリネームし、呼び出し側 7 ファイル（`SchemaManager.cs` + 6 リポジトリ）を更新
+  - 接続文字列に `Busy Timeout=10000` を追加（System.Data.SQLite ライブラリ側のフォールバック）
+  - 接続オープン時に `PRAGMA busy_timeout=10000` を実行し、書き込み競合時は SQLite 内部で最大 10 秒待機する「書き込み待機列」として動作させる
+
+#### Operations
+
+- **既存環境の移行手順（一度きり）**:
+  1. 全 PC で Launcher / Manager を停止
+  2. CLI で `tools\sqlite3\sqlite3.exe <prism.db のパス> "PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode=DELETE;"`
+  3. `prism.db-wal` / `prism.db-shm` が削除されたことを確認
+  4. v0.8.2 の Manager と v0.5.15 以降の Launcher を全 PC に配布
 
 ### [Manager v0.8.1] - 2026-05-10
 

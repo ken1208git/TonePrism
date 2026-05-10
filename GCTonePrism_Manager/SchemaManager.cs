@@ -35,7 +35,7 @@ namespace GCTonePrism.Manager
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
                     return GetDbVersion(connection);
                 }
             });
@@ -49,7 +49,7 @@ namespace GCTonePrism.Manager
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     using (var command = new SQLiteCommand(
                         "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='games'",
@@ -68,7 +68,7 @@ namespace GCTonePrism.Manager
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     using (var transaction = connection.BeginTransaction())
                     {

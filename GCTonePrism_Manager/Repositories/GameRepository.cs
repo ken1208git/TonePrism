@@ -28,7 +28,7 @@ namespace GCTonePrism.Manager.Repositories
 
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     string query = @"
                         SELECT
@@ -64,7 +64,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     string query = @"
                         SELECT
@@ -100,7 +100,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
                     using (var command = new SQLiteCommand("SELECT MIN(display_order) FROM games", connection))
                     {
                         var result = command.ExecuteScalar();
@@ -116,7 +116,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     using (var transaction = connection.BeginTransaction())
                     {
@@ -161,7 +161,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     using (var transaction = connection.BeginTransaction())
                     {
@@ -225,7 +225,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     string deleteGame = "DELETE FROM games WHERE game_id = @gameId";
 
@@ -244,7 +244,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     // 重複チェック（トランザクション前）
                     using (var cmd = new SQLiteCommand("SELECT COUNT(*) FROM games WHERE game_id = @newId", connection))

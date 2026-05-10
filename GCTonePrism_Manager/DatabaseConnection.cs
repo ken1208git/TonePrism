@@ -19,7 +19,9 @@ namespace GCTonePrism.Manager
         public DatabaseConnection()
         {
             dbPath = PathManager.DatabasePath;
-            connectionString = $"Data Source={dbPath};Version=3;";
+            // SMB ネットワーク共有上での運用安全性のため journal_mode=DELETE を使用 (#103)
+            // Busy Timeout はライブラリ側にもフォールバックとして指定する
+            connectionString = $"Data Source={dbPath};Version=3;Busy Timeout=10000;";
         }
 
         public bool DatabaseExists()
@@ -28,13 +30,19 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
-        /// WALモードを有効にして接続を開く
+        /// ジャーナルモードと PRAGMA を設定して接続を開く
+        /// SMB 共有上では WAL モードが動作保証外のため DELETE モードを使用 (#103)
         /// </summary>
-        public void OpenConnectionWithWalMode(SQLiteConnection connection)
+        public void OpenConnectionWithJournalMode(SQLiteConnection connection)
         {
             connection.Open();
 
-            using (var command = new SQLiteCommand("PRAGMA journal_mode=WAL;", connection))
+            using (var command = new SQLiteCommand("PRAGMA journal_mode=DELETE;", connection))
+            {
+                command.ExecuteNonQuery();
+            }
+
+            using (var command = new SQLiteCommand("PRAGMA busy_timeout=10000;", connection))
             {
                 command.ExecuteNonQuery();
             }

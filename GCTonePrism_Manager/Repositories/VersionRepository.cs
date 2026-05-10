@@ -26,7 +26,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     string query = @"
                         INSERT INTO game_versions (
@@ -75,7 +75,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     using (var transaction = connection.BeginTransaction())
                     {
@@ -140,7 +140,7 @@ namespace GCTonePrism.Manager.Repositories
 
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     string query = @"
                         SELECT *

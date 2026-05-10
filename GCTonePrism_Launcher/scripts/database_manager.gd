@@ -40,8 +40,10 @@ func open() -> bool:
 
 	print("[DatabaseManager] データベースを開きました: ", db_path)
 
-	# WALモードを有効化（同時書き込み対策）
-	db.query("PRAGMA journal_mode=WAL;")
+	# SMB ネットワーク共有上での運用安全性のため DELETE モードを使用 (#103)
+	# busy_timeout で書き込み競合時の待機列を確保（10000ms）
+	db.query("PRAGMA journal_mode=DELETE;")
+	db.query("PRAGMA busy_timeout=10000;")
 
 	# データベースのバージョンチェックとマイグレーション
 	_check_and_migrate_db()
