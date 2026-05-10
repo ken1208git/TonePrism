@@ -22,6 +22,7 @@
 - **スキーマ変更には必ずマイグレーションを書く**: `GCTonePrism_Manager/SchemaManager.cs` の `CreateTables()` 内のスキーマ定義を変更したら、対応する `MigrateVxToVy` 関数を追加し、`CurrentDbVersion` をインクリメントすること。
 - **`CREATE TABLE IF NOT EXISTS` は新規 DB 用**: 既存テーブルが存在する場合は何もしないため、スキーマ変更には ALTER TABLE / DROP+CREATE+データ移行 を伴う明示的なマイグレーションが必要。
 - **マイグレーション実装後は `tools/sqlite3/sqlite3.exe` で検証**: 変更前後で `PRAGMA table_info(<tableName>);` を実行し、想定通りのスキーマになっているか確認すること。Manager 起動時の `VerifySchema()` でも自動チェックされるが、手動検証も併用する。
+- **`ExpectedSchema` 辞書 ↔ SPEC §7.3 の同期**: `SchemaManager.cs` 末尾の `ExpectedSchema` 辞書を更新したら、`SPECIFICATION.md` §7.3 のテーブル定義表（およびできれば §7.2 階層図 / §7.4 ER 図）も同時に更新すること。VerifySchema は ExpectedSchema との比較のみで SPEC は読まないため、SPEC 側の drift は人間が見つける必要がある。
 - **過去事例**: SPEC v1.5.1 (2026-03-28) で `surveys` / `play_records` のスキーマを変更したが、マイグレーション未実装のため drift が温存されていた（Manager v0.8.1 の `MigrateV10ToV11` で修正）。
 
 ## Branch Strategy

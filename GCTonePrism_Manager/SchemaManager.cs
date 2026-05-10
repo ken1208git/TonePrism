@@ -650,11 +650,19 @@ namespace GCTonePrism.Manager
 
                     if (currentVersion < 11)
                     {
-                        MigrateV10ToV11(connection, migTransaction);
-                        currentVersion = 11;
+                        if (MigrateV10ToV11(connection, migTransaction))
+                        {
+                            currentVersion = 11;
+                        }
+                        // 失敗（データ残存でスキップ）時は currentVersion = 10 のまま。
+                        // SetDbVersion で実際に達成した currentVersion を書き込むため
+                        // user_version は 10 のまま保持され、次回起動時に再試行される。
                     }
 
-                    SetDbVersion(connection, CurrentDbVersion, migTransaction);
+                    // 達成バージョン（CurrentDbVersion ではなく currentVersion）を書き込む。
+                    // 全 migration が成功していれば currentVersion == CurrentDbVersion。
+                    // 部分的にスキップされた場合は、達成した最大バージョンが書き込まれる。
+                    SetDbVersion(connection, currentVersion, migTransaction);
 
                     if (localTransaction)
                     {
@@ -1109,25 +1117,38 @@ namespace GCTonePrism.Manager
         /// 仕様により旧スキーマのテーブルが温存されていた。本マイグレーションで修正。
         ///
         /// データがあるテーブルは破壊しないため、空テーブルのみ DROP & CREATE する。
-        /// データがある場合は警告ログのみ出して手動対応に委ねる（本プロジェクトの
-        /// 実環境では空テーブルのみ確認済み）。
+        /// データがある場合は警告ログを出して false を返し、`user_version` を 10 のまま
+        /// 保持することで次回起動時に再試行する（Manager 自体は正常起動を継続）。
         /// </summary>
-        private void MigrateV10ToV11(SQLiteConnection connection, SQLiteTransaction transaction)
+        /// <returns>全 drift fix が成功（または不要）なら true、データ残存でスキップしたら false</returns>
+        private bool MigrateV10ToV11(SQLiteConnection connection, SQLiteTransaction transaction)
         {
             Console.WriteLine("[DatabaseManager] Executing migration V10 -> V11 (Fix surveys/play_records schema drift from SPEC v1.5.1)");
 
-            FixSurveysSchemaDrift(connection, transaction);
-            FixPlayRecordsSchemaDrift(connection, transaction);
+            bool surveysOk = FixSurveysSchemaDrift(connection, transaction);
+            bool playRecordsOk = FixPlayRecordsSchemaDrift(connection, transaction);
 
-            Console.WriteLine("[DatabaseManager] Migration V10 -> V11 completed.");
+            bool allOk = surveysOk && playRecordsOk;
+            if (allOk)
+            {
+                Console.WriteLine("[DatabaseManager] Migration V10 -> V11 completed.");
+            }
+            else
+            {
+                Console.WriteLine("[DatabaseManager] WARNING: Migration V10 -> V11 partially skipped (data exists in legacy-schema tables). user_version stays at 10. Next startup will retry.");
+            }
+            return allOk;
         }
 
         /// <summary>
         /// surveys テーブルが旧 JSON 形式スキーマ（submitted_at / responses 列を持つ）の場合、
         /// 新スキーマ（rating / comment / created_at）へ修正する。
-        /// データが残存している場合は例外を投げる（Codex P1 指摘 "Avoid marking DB v11 when drift migration is skipped" 対応）。
+        /// データが残存している場合は警告ログを出して false を返す（Manager 起動は継続）。
+        /// （Codex P1 指摘 "Avoid marking DB v11 when drift migration is skipped" +
+        /// "Avoid hard-failing startup on non-empty drift tables" 対応）
         /// </summary>
-        private void FixSurveysSchemaDrift(SQLiteConnection connection, SQLiteTransaction transaction)
+        /// <returns>新スキーマ／drift fix 成功なら true、データ残存でスキップなら false</returns>
+        private bool FixSurveysSchemaDrift(SQLiteConnection connection, SQLiteTransaction transaction)
         {
             // 旧スキーマ判定: 'submitted_at' 列が存在するか
             bool isOldSchema = TableHasColumn(connection, transaction, "surveys", "submitted_at");
@@ -1135,7 +1156,7 @@ namespace GCTonePrism.Manager
             if (!isOldSchema)
             {
                 Console.WriteLine("[DatabaseManager] surveys は新スキーマです。マイグレーション不要。");
-                return;
+                return true;
             }
 
             long rowCount = GetTableRowCount(connection, transaction, "surveys");
@@ -1143,16 +1164,14 @@ namespace GCTonePrism.Manager
 
             if (rowCount > 0)
             {
-                // データを失わずに旧 JSON 形式 → 新 ★評価+コメント形式 へ自動変換するロジックは
-                // 未実装（旧 responses JSON のスキーマが不定でリスクが高いため）。
-                // 例外を投げてマイグレーション全体を rollback し、user_version を 10 のまま保持する。
-                // これにより次回起動時にも migration が再試行される。
-                // ユーザーは tools/sqlite3/sqlite3.exe で旧データを確認・退避してから手動移行すること。
-                throw new InvalidOperationException(
-                    $"surveys テーブルに旧スキーマ（{rowCount} 行のデータ）が残存しています。" +
-                    "データ損失防止のため自動マイグレーションを中止しました。" +
-                    "tools/sqlite3/sqlite3.exe で旧データを確認・退避してから手動で新スキーマへ移行してください。" +
-                    "user_version は 10 のまま保持されるため、対応後の再起動でマイグレーションが再試行されます。");
+                // 旧 JSON 形式 → 新 ★評価+コメント形式の自動変換は responses JSON のスキーマが
+                // 不定でリスクが高いため未実装。Manager 起動は継続させ、警告ログで手動対応を促す。
+                // 呼び出し側の MigrateV10ToV11 が false を伝播し、user_version は 10 のまま維持される。
+                // 次回起動時にこの migration が再試行されるため、手動でデータを退避すれば次回 fix される。
+                Console.WriteLine(
+                    $"[DatabaseManager] WARNING: surveys に {rowCount} 行のデータが残存。自動マイグレーションをスキップします。" +
+                    "tools/sqlite3/sqlite3.exe で旧データ（responses 列の JSON）を確認・退避してから手動で新スキーマへ移行してください。");
+                return false;
             }
 
             using (var cmd = new SQLiteCommand("DROP TABLE surveys", connection, transaction))
@@ -1161,14 +1180,18 @@ namespace GCTonePrism.Manager
             }
             CreateSurveysTable(connection, transaction);
             Console.WriteLine("[DatabaseManager] surveys を新スキーマで再作成しました。");
+            return true;
         }
 
         /// <summary>
         /// play_records テーブルが旧累計方式スキーマ（play_count / total_play_time 列を持つ）の場合、
         /// 新イベントログ方式スキーマ（start_time / end_time / play_duration / player_count）へ修正する。
-        /// データが残存している場合は例外を投げる（Codex P1 指摘 "Avoid marking DB v11 when drift migration is skipped" 対応）。
+        /// データが残存している場合は警告ログを出して false を返す（Manager 起動は継続）。
+        /// （Codex P1 指摘 "Avoid marking DB v11 when drift migration is skipped" +
+        /// "Avoid hard-failing startup on non-empty drift tables" 対応）
         /// </summary>
-        private void FixPlayRecordsSchemaDrift(SQLiteConnection connection, SQLiteTransaction transaction)
+        /// <returns>新スキーマ／drift fix 成功なら true、データ残存でスキップなら false</returns>
+        private bool FixPlayRecordsSchemaDrift(SQLiteConnection connection, SQLiteTransaction transaction)
         {
             // 旧スキーマ判定: 'play_count' 列が存在するか
             bool isOldSchema = TableHasColumn(connection, transaction, "play_records", "play_count");
@@ -1176,7 +1199,7 @@ namespace GCTonePrism.Manager
             if (!isOldSchema)
             {
                 Console.WriteLine("[DatabaseManager] play_records は新スキーマです。マイグレーション不要。");
-                return;
+                return true;
             }
 
             long rowCount = GetTableRowCount(connection, transaction, "play_records");
@@ -1184,17 +1207,13 @@ namespace GCTonePrism.Manager
 
             if (rowCount > 0)
             {
-                // 旧累計方式（1ゲーム1行で play_count / total_play_time を累計）→
-                // 新イベントログ方式（1プレイ1行で start_time / end_time / play_duration）の
-                // 自動変換は元情報が失われているため不可能（累計値から個別プレイの時刻は復元できない）。
-                // 例外を投げてマイグレーション全体を rollback し、user_version を 10 のまま保持する。
-                // これにより次回起動時にも migration が再試行される。
-                // ユーザーは tools/sqlite3/sqlite3.exe で累計値を退避してから手動移行すること。
-                throw new InvalidOperationException(
-                    $"play_records テーブルに旧累計方式スキーマ（{rowCount} 行のデータ）が残存しています。" +
-                    "累計値から個別プレイ記録は復元できないため自動マイグレーションを中止しました。" +
-                    "tools/sqlite3/sqlite3.exe で累計値を退避してから手動で新スキーマへ移行してください。" +
-                    "user_version は 10 のまま保持されるため、対応後の再起動でマイグレーションが再試行されます。");
+                // 旧累計方式 → 新イベントログ方式の自動変換は元情報が失われているため不可能。
+                // Manager 起動は継続させ、警告ログで手動対応を促す。
+                // 呼び出し側の MigrateV10ToV11 が false を伝播し、user_version は 10 のまま維持される。
+                Console.WriteLine(
+                    $"[DatabaseManager] WARNING: play_records に {rowCount} 行のデータが残存。自動マイグレーションをスキップします。" +
+                    "tools/sqlite3/sqlite3.exe で累計値（play_count / total_play_time）を退避してから手動で新スキーマへ移行してください。");
+                return false;
             }
 
             using (var cmd = new SQLiteCommand("DROP TABLE play_records", connection, transaction))
@@ -1203,6 +1222,7 @@ namespace GCTonePrism.Manager
             }
             CreatePlayRecordsTable(connection, transaction);
             Console.WriteLine("[DatabaseManager] play_records を新スキーマで再作成しました。");
+            return true;
         }
 
         /// <summary>
