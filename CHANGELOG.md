@@ -417,7 +417,7 @@
 - **surveys / play_records スキーマ drift を修正 (`MigrateV10ToV11`)**: SPEC v1.5.1 (2026-03-28) で `surveys`（JSON 形式 → ★評価+コメント）、`play_records`（累計方式 → イベントログ方式）に変更されたが、対応するマイグレーションが書かれていなかったため、`CREATE TABLE IF NOT EXISTS` の仕様により旧スキーマのテーブルが温存されていた。本マイグレーションで修正
   - 旧スキーマ判定: `surveys` は `submitted_at` 列、`play_records` は `play_count` 列の存在で検出
   - 行数 0 の場合のみ DROP & CREATE で新スキーマへ置換（データ保護）
-  - 行数あり時は警告ログのみで自動マイグレーションをスキップ（手動対応に委ねる）
+  - 行数あり時は例外を投げて migration 全体を rollback し `user_version` を 10 のまま保持（Codex P1 指摘 "Avoid marking DB v11 when drift migration is skipped" 対応）。これにより次回起動でも migration が再試行され、データを失わないまま手動対応を促せる
 - **`games.version` 列を `CreateTables()` に追加**: 既存 DB では `MigrateGamesTable` の ALTER TABLE で後付けされていたが、`CreateTables()` 側に定義が無く、新規 DB と既存 DB でスキーマ定義が分散していた。`VerifySchema` 初回起動で検出し、本 PR 内で修正（`MigrateGamesTable` の ALTER は古い DB 向けのフォールバックとして残す）
 
 #### Added

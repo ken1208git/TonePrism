@@ -1125,6 +1125,7 @@ namespace GCTonePrism.Manager
         /// <summary>
         /// surveys テーブルが旧 JSON 形式スキーマ（submitted_at / responses 列を持つ）の場合、
         /// 新スキーマ（rating / comment / created_at）へ修正する。
+        /// データが残存している場合は例外を投げる（Codex P1 指摘 "Avoid marking DB v11 when drift migration is skipped" 対応）。
         /// </summary>
         private void FixSurveysSchemaDrift(SQLiteConnection connection, SQLiteTransaction transaction)
         {
@@ -1142,8 +1143,16 @@ namespace GCTonePrism.Manager
 
             if (rowCount > 0)
             {
-                Console.WriteLine($"[DatabaseManager] WARNING: surveys に {rowCount} 行のデータが存在するため自動マイグレーションをスキップします。手動対応してください。");
-                return;
+                // データを失わずに旧 JSON 形式 → 新 ★評価+コメント形式 へ自動変換するロジックは
+                // 未実装（旧 responses JSON のスキーマが不定でリスクが高いため）。
+                // 例外を投げてマイグレーション全体を rollback し、user_version を 10 のまま保持する。
+                // これにより次回起動時にも migration が再試行される。
+                // ユーザーは tools/sqlite3/sqlite3.exe で旧データを確認・退避してから手動移行すること。
+                throw new InvalidOperationException(
+                    $"surveys テーブルに旧スキーマ（{rowCount} 行のデータ）が残存しています。" +
+                    "データ損失防止のため自動マイグレーションを中止しました。" +
+                    "tools/sqlite3/sqlite3.exe で旧データを確認・退避してから手動で新スキーマへ移行してください。" +
+                    "user_version は 10 のまま保持されるため、対応後の再起動でマイグレーションが再試行されます。");
             }
 
             using (var cmd = new SQLiteCommand("DROP TABLE surveys", connection, transaction))
@@ -1157,6 +1166,7 @@ namespace GCTonePrism.Manager
         /// <summary>
         /// play_records テーブルが旧累計方式スキーマ（play_count / total_play_time 列を持つ）の場合、
         /// 新イベントログ方式スキーマ（start_time / end_time / play_duration / player_count）へ修正する。
+        /// データが残存している場合は例外を投げる（Codex P1 指摘 "Avoid marking DB v11 when drift migration is skipped" 対応）。
         /// </summary>
         private void FixPlayRecordsSchemaDrift(SQLiteConnection connection, SQLiteTransaction transaction)
         {
@@ -1174,8 +1184,17 @@ namespace GCTonePrism.Manager
 
             if (rowCount > 0)
             {
-                Console.WriteLine($"[DatabaseManager] WARNING: play_records に {rowCount} 行のデータが存在するため自動マイグレーションをスキップします。手動対応してください。");
-                return;
+                // 旧累計方式（1ゲーム1行で play_count / total_play_time を累計）→
+                // 新イベントログ方式（1プレイ1行で start_time / end_time / play_duration）の
+                // 自動変換は元情報が失われているため不可能（累計値から個別プレイの時刻は復元できない）。
+                // 例外を投げてマイグレーション全体を rollback し、user_version を 10 のまま保持する。
+                // これにより次回起動時にも migration が再試行される。
+                // ユーザーは tools/sqlite3/sqlite3.exe で累計値を退避してから手動移行すること。
+                throw new InvalidOperationException(
+                    $"play_records テーブルに旧累計方式スキーマ（{rowCount} 行のデータ）が残存しています。" +
+                    "累計値から個別プレイ記録は復元できないため自動マイグレーションを中止しました。" +
+                    "tools/sqlite3/sqlite3.exe で累計値を退避してから手動で新スキーマへ移行してください。" +
+                    "user_version は 10 のまま保持されるため、対応後の再起動でマイグレーションが再試行されます。");
             }
 
             using (var cmd = new SQLiteCommand("DROP TABLE play_records", connection, transaction))
