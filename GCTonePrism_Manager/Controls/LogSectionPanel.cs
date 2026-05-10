@@ -1,0 +1,396 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Windows.Forms;
+using GCTonePrism.Manager.Services;
+
+namespace GCTonePrism.Manager.Controls
+{
+    /// <summary>
+    /// ログビューア (#129)。
+    /// `<project_root>/logs/manager/` と `<project_root>/logs/launcher/` をスキャンし、
+    /// セッション単位のログファイルを一覧表示 + 内容を行レベル別に色分けして表示。
+    /// レベルフィルタ・全文検索を組み合わせ、現在のフィルタで「内容なし」になるファイルは
+    /// 一覧で灰色化して「開いても何も出ない」と一目で分かるようにする。
+    /// </summary>
+    public partial class LogSectionPanel : UserControl
+    {
+        // ファイル名の規約: `{component}_{PCname}_{YYYY-MM-DD}_{HHmmss}.log`
+        // 同秒衝突時は `_2`, `_3` が末尾に付くため正規表現は末尾オプショナルで吸収する
+        private static readonly Regex FileNameRegex = new Regex(
+            @"^(?<component>manager|launcher)_(?<pc>.+)_(?<date>\d{4}-\d{2}-\d{2})_(?<time>\d{6})(?:_(?<seq>\d+))?\.log$",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // 行頭フォーマット: `[YYYY-MM-DD HH:mm:ss] [LEVEL] ...`
+        private static readonly Regex LineRegex = new Regex(
+            @"^\[(?<ts>[^\]]+)\] \[(?<level>INFO|WARN|ERROR)\] (?<rest>.*)$",
+            RegexOptions.Compiled);
+
+        private string _logsRoot;
+        private List<LogFileEntry> _allEntries = new List<LogFileEntry>();
+        private LogFileEntry _currentEntry; // 現在描画中のエントリ (フィルタ変更時の再描画用)
+
+        public LogSectionPanel()
+        {
+            InitializeComponent();
+            ConfigureGrid();
+        }
+
+        public void Initialize(string projectRoot)
+        {
+            _logsRoot = Path.Combine(projectRoot ?? "", "logs");
+            RefreshDisplay();
+        }
+
+        private void ConfigureGrid()
+        {
+            gridFiles.AutoGenerateColumns = false;
+            gridFiles.Columns.Clear();
+            gridFiles.Columns.Add(new DataGridViewTextBoxColumn { Name = "component", HeaderText = "アプリ", Width = 80 });
+            gridFiles.Columns.Add(new DataGridViewTextBoxColumn { Name = "pc", HeaderText = "PC", Width = 150 });
+            gridFiles.Columns.Add(new DataGridViewTextBoxColumn { Name = "started", HeaderText = "開始日時", Width = 170 });
+            gridFiles.Columns.Add(new DataGridViewTextBoxColumn { Name = "lastWrite", HeaderText = "最終更新", Width = 150 });
+            gridFiles.Columns.Add(new DataGridViewTextBoxColumn { Name = "size", HeaderText = "サイズ", Width = 90 });
+            // ファイルパス列で残り幅を埋める (Fill モード)
+            gridFiles.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "path",
+                HeaderText = "ファイルパス",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill
+            });
+        }
+
+        public void RefreshDisplay()
+        {
+            if (string.IsNullOrEmpty(_logsRoot)) return;
+
+            try
+            {
+                _allEntries = ScanLogFiles(_logsRoot)
+                    .OrderByDescending(e => e.StartedAt)
+                    .ToList();
+
+                gridFiles.Rows.Clear();
+                foreach (var e in _allEntries)
+                {
+                    int row = gridFiles.Rows.Add(
+                        e.Component,
+                        e.PcName,
+                        e.StartedAt.ToString("yyyy/MM/dd HH:mm:ss"),
+                        e.LastWriteTime.ToString("yyyy/MM/dd HH:mm:ss"),
+                        FormatBytes(e.SizeBytes),
+                        e.FilePath);
+                    gridFiles.Rows[row].Tag = e;
+                }
+
+                // フィルタを適用して灰色化
+                UpdateRowGreyout();
+                UpdateFileCountLabel();
+
+                // 本文クリア + 先頭を選択
+                txtContent.Clear();
+                _currentEntry = null;
+                if (gridFiles.Rows.Count > 0)
+                {
+                    gridFiles.Rows[0].Selected = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"ログファイルの読み込みに失敗しました: {ex.Message}", "エラー",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private static IEnumerable<LogFileEntry> ScanLogFiles(string logsRoot)
+        {
+            foreach (var subdir in new[] { "manager", "launcher" })
+            {
+                string dir = Path.Combine(logsRoot, subdir);
+                if (!Directory.Exists(dir)) continue;
+                foreach (string path in Directory.EnumerateFiles(dir, "*.log"))
+                {
+                    var entry = TryParseFileName(path);
+                    if (entry != null)
+                    {
+                        LoadAndParseContent(entry);
+                        yield return entry;
+                    }
+                }
+            }
+        }
+
+        private static LogFileEntry TryParseFileName(string path)
+        {
+            string name = Path.GetFileName(path);
+            var m = FileNameRegex.Match(name);
+            if (!m.Success) return null;
+
+            string dateStr = m.Groups["date"].Value;
+            string timeStr = m.Groups["time"].Value;
+            if (!DateTime.TryParseExact(
+                    $"{dateStr}_{timeStr}",
+                    "yyyy-MM-dd_HHmmss",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeLocal,
+                    out DateTime started))
+            {
+                return null;
+            }
+
+            var fi = new FileInfo(path);
+            return new LogFileEntry
+            {
+                FilePath = path,
+                Component = m.Groups["component"].Value.ToLowerInvariant() == "manager" ? "Manager" : "Launcher",
+                PcName = m.Groups["pc"].Value,
+                StartedAt = started,
+                LastWriteTime = fi.LastWriteTime,
+                SizeBytes = fi.Length
+            };
+        }
+
+        /// <summary>
+        /// ファイルを読んで生テキスト + 行レベル付きパース結果をエントリに格納する。
+        /// Logger が書き込み中のファイルもロックしないよう FileShare.ReadWrite で開く。
+        /// </summary>
+        private static void LoadAndParseContent(LogFileEntry entry)
+        {
+            try
+            {
+                using (var fs = new FileStream(entry.FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var sr = new StreamReader(fs, System.Text.Encoding.UTF8))
+                {
+                    entry.RawContent = sr.ReadToEnd();
+                }
+            }
+            catch (Exception ex)
+            {
+                entry.RawContent = $"[読み込み失敗] {ex.Message}";
+            }
+
+            entry.Lines = new List<ParsedLine>();
+            string lastLevel = "INFO";
+            foreach (string line in entry.RawContent.Split('\n'))
+            {
+                string l = line.TrimEnd('\r');
+                if (l.Length == 0) continue;
+                var m = LineRegex.Match(l);
+                string level = m.Success ? m.Groups["level"].Value : lastLevel;
+                entry.Lines.Add(new ParsedLine { Level = level, Text = l });
+                lastLevel = level;
+            }
+        }
+
+        private void gridFiles_SelectionChanged(object sender, EventArgs e)
+        {
+            if (gridFiles.SelectedRows.Count == 0) return;
+            var entry = gridFiles.SelectedRows[0].Tag as LogFileEntry;
+            if (entry == null) return;
+            _currentEntry = entry;
+            RenderContent();
+        }
+
+        private void RenderContent()
+        {
+            if (_currentEntry == null)
+            {
+                txtContent.Clear();
+                return;
+            }
+
+            txtContent.SuspendLayout();
+            try
+            {
+                txtContent.Clear();
+                bool[] levelOn = { chkInfo.Checked, chkWarn.Checked, chkError.Checked };
+                string search = txtSearch.Text ?? "";
+
+                Color dimText = Color.FromArgb(180, 180, 180);
+                Color normalText = SystemColors.ControlText;
+                Color searchHighlight = Color.FromArgb(255, 240, 130); // 黄
+
+                // 全行表示。マッチしない行は薄い灰色でディム、マッチ行はレベル別の背景色 + 黒文字。
+                // 検索ヒットがあれば該当 substring に追加で黄色ハイライト。
+                foreach (var pl in _currentEntry.Lines)
+                {
+                    bool matchesLevel = IsLevelOn(pl.Level, levelOn);
+                    bool matchesSearch = ContainsSearch(pl.Text, search);
+                    bool isMatch = matchesLevel && matchesSearch;
+
+                    int start = txtContent.TextLength;
+                    txtContent.AppendText(pl.Text + Environment.NewLine);
+                    int end = txtContent.TextLength;
+
+                    txtContent.Select(start, end - start);
+                    txtContent.SelectionBackColor = isMatch ? GetLevelColor(pl.Level) : Color.White;
+                    txtContent.SelectionColor = isMatch ? normalText : dimText;
+
+                    // マッチ行内の検索 substring を追加でハイライト (大文字小文字無視)
+                    if (isMatch && !string.IsNullOrEmpty(search))
+                    {
+                        int idx = 0;
+                        while (idx <= pl.Text.Length - search.Length)
+                        {
+                            int found = pl.Text.IndexOf(search, idx, StringComparison.OrdinalIgnoreCase);
+                            if (found < 0) break;
+                            txtContent.Select(start + found, search.Length);
+                            txtContent.SelectionBackColor = searchHighlight;
+                            idx = found + search.Length;
+                        }
+                    }
+                }
+                txtContent.Select(0, 0);
+                txtContent.ScrollToCaret();
+            }
+            finally
+            {
+                txtContent.ResumeLayout();
+            }
+        }
+
+        /// <summary>
+        /// 全ファイル行を走査し、現在のフィルタで「表示するものがゼロ」なファイルを灰色化する。
+        /// コンポーネントフィルタ (Manager / Launcher) はファイル単位で適用、
+        /// レベル + 検索フィルタはファイル内行レベルで適用。
+        /// </summary>
+        private void UpdateRowGreyout()
+        {
+            bool[] componentOn = { chkManager.Checked, chkLauncher.Checked };
+            bool[] levelOn = { chkInfo.Checked, chkWarn.Checked, chkError.Checked };
+            string search = txtSearch.Text ?? "";
+
+            foreach (DataGridViewRow row in gridFiles.Rows)
+            {
+                var entry = row.Tag as LogFileEntry;
+                if (entry == null) continue;
+                bool hasMatch = HasAnyMatchingLine(entry, componentOn, levelOn, search);
+                ApplyRowAppearance(row, hasMatch);
+            }
+        }
+
+        private void UpdateFileCountLabel()
+        {
+            bool[] componentOn = { chkManager.Checked, chkLauncher.Checked };
+            bool[] levelOn = { chkInfo.Checked, chkWarn.Checked, chkError.Checked };
+            string search = txtSearch.Text ?? "";
+            int visible = _allEntries.Count(e => HasAnyMatchingLine(e, componentOn, levelOn, search));
+            lblFileCount.Text = $"ログファイル: {visible} 件";
+        }
+
+        private static bool HasAnyMatchingLine(LogFileEntry entry, bool[] componentOn, bool[] levelOn, string search)
+        {
+            // ファイル単位のコンポーネントフィルタ (cheap, やる前に弾く)
+            if (!IsComponentOn(entry.Component, componentOn)) return false;
+
+            if (entry.Lines == null) return true; // 安全側: 不明なら表示扱い
+            foreach (var pl in entry.Lines)
+            {
+                if (IsLevelOn(pl.Level, levelOn) && ContainsSearch(pl.Text, search))
+                    return true;
+            }
+            return false;
+        }
+
+        private static bool IsComponentOn(string component, bool[] componentOn)
+        {
+            switch (component)
+            {
+                case "Manager": return componentOn[0];
+                case "Launcher": return componentOn[1];
+                default: return true;
+            }
+        }
+
+        private static bool IsLevelOn(string level, bool[] levelOn)
+        {
+            switch (level)
+            {
+                case "INFO": return levelOn[0];
+                case "WARN": return levelOn[1];
+                case "ERROR": return levelOn[2];
+                default: return levelOn[0]; // 未分類は INFO 扱い
+            }
+        }
+
+        private static bool ContainsSearch(string text, string search)
+        {
+            if (string.IsNullOrEmpty(search)) return true;
+            return text.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static void ApplyRowAppearance(DataGridViewRow row, bool hasMatch)
+        {
+            if (hasMatch)
+            {
+                row.DefaultCellStyle.ForeColor = SystemColors.ControlText;
+                row.DefaultCellStyle.BackColor = SystemColors.Window;
+            }
+            else
+            {
+                // 「開いても何も出ない」状態を視覚化: 灰色の文字 + 薄い灰色背景
+                row.DefaultCellStyle.ForeColor = Color.Gray;
+                row.DefaultCellStyle.BackColor = Color.FromArgb(245, 245, 245);
+            }
+        }
+
+        private static Color GetLevelColor(string level)
+        {
+            switch (level)
+            {
+                case "WARN": return Color.FromArgb(255, 250, 220);
+                case "ERROR": return Color.FromArgb(255, 220, 220);
+                default: return Color.White;
+            }
+        }
+
+        private void chkLevelFilter_Changed(object sender, EventArgs e)
+        {
+            UpdateRowGreyout();
+            UpdateFileCountLabel();
+            RenderContent();
+        }
+
+        private void txtSearch_TextChanged(object sender, EventArgs e)
+        {
+            UpdateRowGreyout();
+            UpdateFileCountLabel();
+            RenderContent();
+        }
+
+        private void btnRefresh_Click(object sender, EventArgs e)
+        {
+            RefreshDisplay();
+        }
+
+        private static string FormatBytes(long bytes)
+        {
+            if (bytes < 1024) return $"{bytes} B";
+            double kb = bytes / 1024.0;
+            if (kb < 1024) return $"{kb:F1} KB";
+            double mb = kb / 1024.0;
+            return $"{mb:F2} MB";
+        }
+
+        private class LogFileEntry
+        {
+            public string FilePath;
+            public string Component;     // "Manager" / "Launcher"
+            public string PcName;
+            public DateTime StartedAt;
+            public DateTime LastWriteTime;
+            public long SizeBytes;
+            public string RawContent;    // ファイル全文 (検索高速化のため事前ロード)
+            public List<ParsedLine> Lines;
+        }
+
+        private class ParsedLine
+        {
+            public string Level; // INFO / WARN / ERROR (継続行は直前の Level を継承)
+            public string Text;
+        }
+    }
+}

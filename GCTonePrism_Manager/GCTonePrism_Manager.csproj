@@ -144,6 +144,12 @@
     <Compile Include="Controls\BackupSectionPanel.Designer.cs">
       <DependentUpon>BackupSectionPanel.cs</DependentUpon>
     </Compile>
+    <Compile Include="Controls\LogSectionPanel.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Controls\LogSectionPanel.Designer.cs">
+      <DependentUpon>LogSectionPanel.cs</DependentUpon>
+    </Compile>
     <Compile Include="BackupSettingsForm.cs">
       <SubType>Form</SubType>
     </Compile>
