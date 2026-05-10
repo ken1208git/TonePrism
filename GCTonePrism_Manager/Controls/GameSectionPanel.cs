@@ -278,16 +278,21 @@ namespace GCTonePrism.Manager.Controls
             var selectedGame = dgvGames.SelectedRows[0].DataBoundItem as GameInfo;
             if (selectedGame == null) return;
 
-            var result = MessageBox.Show(
-                $"ゲーム「{selectedGame.Title}」を削除しますか？\nこの操作は取り消せません。",
-                "削除確認", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            string gameFolder = PathManager.GetGameFolder(selectedGame.GameId);
 
-            if (result != DialogResult.Yes) return;
+            bool deleteFolder;
+            using (var confirm = new DeleteGameConfirmForm(selectedGame.Title, selectedGame.GameId, gameFolder))
+            {
+                if (confirm.ShowDialog(this.FindForm()) != DialogResult.Yes) return;
+                deleteFolder = confirm.DeleteFolder;
+            }
 
             // CASCADE で developers / game_versions / game_genres / play_records /
             // surveys / store_section_games が削除される。共有フォルダ越しでは
             // 数秒かかるケースもあるので Marquee 進捗を表示する。
+            // チェックされていれば DB 削除後に games/{game_id}/ も削除する (#111)。
             Exception caught = null;
+            string folderWarning = null;
             using (var dialog = new ProcessingDialog((progress, token) =>
             {
                 try
@@ -295,6 +300,30 @@ namespace GCTonePrism.Manager.Controls
                     progress?.Report(new ProgressInfo(-1, "ゲームを削除中...",
                         $"「{selectedGame.Title}」と関連レコードをデータベースから削除しています"));
                     _dbManager.DeleteGame(selectedGame.GameId);
+
+                    if (deleteFolder && Directory.Exists(gameFolder))
+                    {
+                        progress?.Report(new ProgressInfo(-1, "ゲームフォルダを削除中...",
+                            gameFolder));
+                        try
+                        {
+                            Directory.Delete(gameFolder, true);
+                        }
+                        catch (IOException ioEx)
+                        {
+                            // ファイルがロックされている (Launcher 起動中など) / 一部削除済み等
+                            folderWarning = $"ゲームフォルダの削除中に問題が発生しました。\n\n" +
+                                $"{ioEx.Message}\n\n" +
+                                $"Launcher など他のプロセスがファイルを使用していないか確認し、" +
+                                $"必要に応じて手動で削除してください:\n  {gameFolder}";
+                        }
+                        catch (UnauthorizedAccessException uaEx)
+                        {
+                            folderWarning = $"ゲームフォルダへのアクセスが拒否されました。\n\n" +
+                                $"{uaEx.Message}\n\n" +
+                                $"フォルダのアクセス権限を確認してください:\n  {gameFolder}";
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -322,8 +351,17 @@ namespace GCTonePrism.Manager.Controls
                 }
             }
 
-            MessageBox.Show("ゲームを削除しました。", "成功",
-                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (folderWarning != null)
+            {
+                MessageBox.Show(folderWarning, "ゲームフォルダ削除の警告",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            else
+            {
+                MessageBox.Show(
+                    deleteFolder ? "ゲームと関連フォルダを削除しました。" : "ゲームを削除しました。",
+                    "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
             LoadGames();
         }
 

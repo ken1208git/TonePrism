@@ -84,6 +84,12 @@
     <Compile Include="ResetDatabaseConfirmForm.Designer.cs">
       <DependentUpon>ResetDatabaseConfirmForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="DeleteGameConfirmForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="DeleteGameConfirmForm.Designer.cs">
+      <DependentUpon>DeleteGameConfirmForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="EditGameForm.cs">
       <SubType>Form</SubType>
     </Compile>

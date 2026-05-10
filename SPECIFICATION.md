@@ -402,11 +402,14 @@
 - **優先度**: 高
 - **詳細**:
   - ゲームの削除
-  - **削除オプション**:
-    - データベースからの削除のみ
-    - データベースとゲームフォルダの両方を削除
-  - 削除前の確認ダイアログを表示
-  - 関連データ（プレイ記録、アンケート結果など）の削除オプション
+  - **削除オプション**（Manager v0.8.3 で実装、`DeleteGameConfirmForm`）:
+    - **データベースからの削除のみ**（デフォルト）: `games` 行と CASCADE で削除される関連レコード（developers / game_versions / game_genres / play_records / surveys / store_section_games）のみ削除。`games/{game_id}/` フォルダはディスクに残る
+    - **データベースとゲームフォルダの両方を削除**: 上記 DB 削除に加えて `games/{game_id}/` フォルダを `Directory.Delete(folder, true)` で物理削除
+  - 削除前の確認ダイアログを表示。「ゲームフォルダも一緒に削除する」チェックボックスは **デフォルト OFF**（誤操作で物理削除しないため）
+  - チェックされている場合は最終確認 MessageBox を追加表示してから削除実行
+  - フォルダが存在しない場合（手動削除済み等）はチェックボックスを disable し、「フォルダが見つかりません」と表示して DB 削除のみ実行
+  - 削除中に `IOException`（Launcher など他プロセスがフォルダ内のファイルをロック中）や `UnauthorizedAccessException` が発生した場合は、DB 削除は成功した上で「フォルダ削除に失敗、手動削除してください」の警告に切り替える非破壊運用
+  - 関連データ（プレイ記録、アンケート結果など）は CASCADE 制約により DB 削除と同時に削除される
 
 ##### 機能3: ゲーム情報編集機能
 
@@ -2498,6 +2501,7 @@ GCTonePrism/
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
+| 2026-05-10 | 1.9.4 | ゲーム削除機能（機能2）に「ゲームフォルダも一緒に削除」オプションを実装 (#111)：従来は SPEC §2.2 に「DB のみ / DB + フォルダ削除」の 2 オプションが記載されていたが Manager は DB 削除しか実装しておらず、`games/{game_id}/` フォルダがディスクに残る運用上の問題があった。新規 `DeleteGameConfirmForm` でチェックボックス（デフォルト OFF）を提示し、ON 時は最終確認 MessageBox を経て `Directory.Delete(folder, true)` を実行。フォルダ不在時はチェックボックス disable、ファイルロック / 権限エラー時は「DB 削除は成功・フォルダは手動削除を」の警告に切り替える非破壊運用。SPEC §2.2 機能2 の記述を実装に合わせて詳細化。Manager v0.8.3 で実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.3 | `prism.db` のジャーナルモードを WAL → DELETE へ移行し、`busy_timeout=10000` を追加（#103）：6.5 データの整合性を「DELETE モード + busy_timeout による同時アクセス対応」に書き換え、SMB 共有上で WAL モードが SQLite 公式により動作保証外である旨と DELETE モード採用の理由（`prism.db-shm` のメモリマップ整合性不全リスクの回避）、`busy_timeout=10000` を「書き込み待機列」として 10 秒待機させる挙動を明記。リトライ機構の記述を実装に合わせて「最大 3 回・固定 100ms 間隔」に修正（従来の「指数バックオフ 50/100/200ms」記載は実装と齟齬していた）。Manager v0.8.2 / Launcher v0.5.9 で実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.2 | PR #113 のレビュー段階で実施したスキーマ整合性 audit の結果を SPEC に反映：7.3 テーブル3 play_records とテーブル4 surveys を「現行スキーマ（Manager v0.8.1 / DB v11 時点）」と「drop-folder 設計（#35 実装時に v11 → v12 で移行予定）」の併記形式に変更（現行は SchemaManager.cs の `CreateTables()` と一致する 5/6 列、将来形は v1.9.0 で記載した 9 列構成を保持）。VerifySchema が比較する `ExpectedSchema` は現行スキーマと同期、drop-folder 設計は #35 実装時に v11 → v12 マイグレーションとして反映する流れを明記。テーブル10 launcher_surveys に「廃止までの暫定」として現行 5 列カラム表を追記。テーブル11 backup_log の `trigger_type` CHECK 制約に v10 で追加された `'safety'` を反映（§7.3 表 / §7.2 階層図）。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.1 | スキーマ drift 修正・検出機構を Manager v0.8.1 として実装した内容を SPEC に反映：7.3 テーブル1 games の定義に既存の `arguments` / `version` 列が抜けていたため追記（実 DB と SPEC の整合性回復）、7.3 階層図 / ER 図にも反映、テーブル11 backup_log の説明に v9 → v10（`trigger_type` への `'safety'` 追加）の経緯を補足。マイグレーション機構について、`SchemaManager.cs` の `CreateTables()` を変更したら必ず対応する `MigrateVxToVy` を書くべきこと、`tools/sqlite3/` を使ったマイグレーション前後検証を行うことを `AGENTS.md` に明文化（同 PR で追記）。CurrentDbVersion を v10 → v11 に更新し、SPEC v1.5.1 (2026-03-28) で変更されたが対応マイグレーション未実装だった `surveys` / `play_records` の drift を修正（空テーブルのみ DROP & CREATE 対応）。Manager 起動時の `VerifySchema()` で全テーブルのスキーマ整合性を自動検証する仕組みを追加。 | Kenshiro Kuroga & Claude |
