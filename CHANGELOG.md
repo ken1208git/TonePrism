@@ -11,6 +11,28 @@
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.5.16] - 2026-05-11
+
+#### Added
+
+- **ファイルログ基盤 (#116, #85 の土台先行)**: 新規 autoload `scripts/logger.gd` を追加し、`<project_root>/logs/launcher/launcher_<PCname>_<YYYY-MM-DD_HHmmss>.log` に **1 起動セッション = 1 ファイル** でログ出力。INFO / WARN / ERROR の 3 段階、`[YYYY-MM-DD HH:mm:ss] [LEVEL] [Module] msg` 形式（Manager と統一）
+  - **既存 print 系を Godot 標準ログのテールで自動キャプチャ**: 既存 41 件 / 6 ファイルの `print()` および `printerr()` / `push_warning` / `push_error` がすべて自動的にファイルにも流れる仕組み（コード変更ゼロ）。実装は Godot 標準ファイルログ (`user://logs/godot.log`) を 0.5 秒間隔でテール → 新規追加分を本セッションファイルに `[Godot]` プレフィックス付きで転送
+    - 行頭の `WARNING:` / `USER WARNING:` → WARN、`ERROR:` / `SCRIPT ERROR:` / `USER ERROR:` → ERROR、それ以外 (print 等) → INFO で自動振り分け
+    - **設計の経緯**: 当初は `OS.add_logger` (Godot 4.5+) で `Logger` クラスを継承したカスタムロガーを登録する方針だったが、Godot 4.6 の GDScript パーサーが script 継承の `Logger` 型変換を蹴る (inner class / class_name / preload + as Logger キャストすべて NG) ため、Godot 標準ログのテール方式に切替。0.5 秒の polling 遅延が出るが、Godot 内部エラーまで含めて全部キャプチャできるメリットあり
+  - **明示 API**: 新規コードからは `Logger.info(msg)` / `Logger.warn(msg)` / `Logger.error(msg)` でレベル指定可能
+  - **保存先**: prism.db と同じ共有先 `<project_root>/logs/launcher/` に集約。Manager 側 `<project_root>/logs/manager/` と並列配置で、将来 Manager のログビューア UI から複数 PC の Launcher ログも 1 箇所で閲覧可能に
+  - **1 セッション 1 ファイル設計**: PC 名 + 起動時刻でファイル名がユニークになるため、複数展示 PC の Launcher が同時に同じ共有先へ書き込んでも書き込み競合・行間 interleaving が一切起きない。同秒衝突は連番サフィックスで回避
+  - **30 日 retention**: 起動時に `logs/launcher/launcher_*.log` をスキャンし、`get_modified_time` が 30 日より古いものを削除。現セッションのアクティブファイルは保護
+  - **prism.db 自動検出 + フォールバック**: PathManager と同じく exe ベースで上に prism.db を 10 階層まで探す軽量ロジックを Logger 内部に持つ（PathManager の起動 print も Logger でキャプチャしたいため、依存を持たせず重複実装）。見つからなければ exe 隣（エディタ実行時は `res://`）にフォールバック
+  - **起動・終了イベント記録**: `_init()` で「Launcher 起動 (PC=...)」、`NOTIFICATION_WM_CLOSE_REQUEST` / `NOTIFICATION_PREDELETE` で「Launcher 終了」を必ず INFO 出力
+  - **`Logger` autoload を最先頭に登録**: `project.godot` の `[autoload]` 先頭に追加して、他の autoload (`ErrorManager` / `AppManager` 等) の `_init/_ready` の出力も確実にキャプチャ
+  - **既存 `user://logs/` (Godot 標準) との関係**: %APPDATA% 配下の Godot デフォルトログは引き続き残るが、本基盤の `<project_root>/logs/launcher/` が事故調査時の正規場所。本番展示 PC のリカバリで揮発しない
+  - **横断要件として SPEC §3.6 / AGENTS.md "Cross-component Standards" に格上げ**: 同じベースラインを Monitor 等の将来コンポーネントでも適用する仕組みを文書化
+
+#### Changed
+
+- **`config/version` を `0.5.15` → `0.5.16` に更新、`version.gd` の `PATCH` も `14` → `16` に同期**
+
 ### [Launcher v0.5.15] - 2026-05-10
 
 #### Changed
@@ -418,6 +440,21 @@
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.8.8] - 2026-05-11
+
+#### Added
+
+- **ファイルログ基盤 (#116)**: 新規 `Services/Logger.cs` を追加し、`<project_root>/logs/manager/manager_<PCname>_<YYYY-MM-DD_HHmmss>.log` に **1 起動セッション = 1 ファイル** でログを出力。INFO / WARN / ERROR の 3 段階、`[YYYY-MM-DD HH:mm:ss] [LEVEL] [Module] msg` 形式。これまで Manager はエラーが出ても後追いで原因調査ができなかった (#115 の WAL 起因エラー診断時に判明) 問題を根本解決
+  - **既存 `Console.WriteLine` を `Console.SetOut` で自動キャプチャ**: 既存 109 件 / 11 ファイルの `Console.WriteLine($"[Module] msg")` 呼び出しが **コード変更ゼロ** で自動的にログファイルにも書かれるよう、カスタム `TextWriter` (内部 `ConsoleHookWriter`) を `Program.cs` の `Logger.Initialize()` で `Console.SetOut(...)` 経由で差し替え。INFO 扱いで記録
+  - **明示 API**: 新規コードからは `Logger.Info / Warn / Error / Error(msg, ex)` でレベル指定可能。`Error(msg, ex)` は `Exception.ToString()` を改行付きで追記
+  - **保存先の判断**: 当初 Issue #116 提案の `%APPDATA%\GCTonePrism_Manager\logs\` ではなく **`<project_root>/logs/manager/`**（prism.db と同じ共有先）に変更。理由は (1) Manager の将来的なログビューア UI で複数 PC のログを 1 箇所で閲覧可能、(2) 本番展示 PC のリカバリ・OS 再構築で揮発しない、(3) クラブメンバーがエクスプローラから直感的に発見できる、(4) Launcher と対称な設計（Launcher も同じ `<project_root>/logs/launcher/` に出力）
+  - **1 セッション 1 ファイル設計**: PC 名 + 起動時刻でファイル名がユニークになるため、複数 PC が同時に同じ共有先へ書き込んでも書き込み競合・行間 interleaving が一切起きない。同秒衝突は連番サフィックスで回避
+  - **30 日 retention**: 起動時に `logs/manager/manager_*.log` をスキャンし、`LastWriteTime` が 30 日より古いものを削除。現セッションのアクティブファイルは `_currentLogPath` 一致チェックで明示的に保護
+  - **障害耐性**: `Logger.Initialize()` 失敗時は MessageBox 警告のみで Manager 起動は継続。`Write` の例外は握り潰し、Logger 自身の例外は **絶対にログに書かない**（無限ループ防止）
+  - **プロジェクトルート検出は Logger 内部で重複実装**: PathManager の起動 `Console.WriteLine` も Logger でキャプチャしたいため、Logger は PathManager に依存せず自前で exe → 上に prism.db を 10 階層まで探す軽量ロジックを持つ。見つからなければ exe 隣にフォールバック
+  - **起動・終了イベント記録**: `Program.cs` を `try-finally` で囲み、`finally` で `Logger.Shutdown()` を呼んで終了ログを必ず出す。事故調査で「いつ落ちたか」を追跡可能に
+  - **横断要件として SPEC §3.6 / AGENTS.md "Cross-component Standards" に格上げ**: 同じベースラインを Monitor 等の将来コンポーネントにも適用する仕組みを明文化
 
 ### [Manager v0.8.7] - 2026-05-10
 

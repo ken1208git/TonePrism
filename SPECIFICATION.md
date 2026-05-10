@@ -740,6 +740,36 @@ GCTonePrism_Tools/
   - 学校PCの仕様に合わせる必要があるため、顧問の先生と要相談
   - 現在想定している環境: Core i3 11世代、メモリ8GB程度
 
+### 3.6 ログ基盤（全コンポーネント横断要件）
+
+すべてのクライアントコンポーネント（Launcher / Manager / Monitor / 将来追加される Tools 等）は
+本節の最低要件を満たすファイルログ機構を実装すること。本節は #116 で導入された土台仕様であり、
+将来の §2.1「ログ基盤仕様」(#85) でフル仕様（DEBUG・リングバッファ・エラーコード・サービスモード連携）に拡張される。
+
+- **保存先**: プロジェクトルート（`prism.db` のあるディレクトリ）の `logs/{component}/` 配下
+  - 例: `<project_root>/logs/manager/manager_<PCname>_<YYYY-MM-DD_HHmmss>.log`
+  - 例: `<project_root>/logs/launcher/launcher_<PCname>_<YYYY-MM-DD_HHmmss>.log`
+  - 配置の理由: 共有上の prism.db と同じ場所に集約することで Manager の将来的なログビューア UI から複数 PC の Launcher / Manager ログを 1 箇所で閲覧可能になる
+  - 検出方法: exe 隣から最大 10 階層遡って `prism.db` を探す。見つからなければ exe 隣にフォールバック（PathManager と同じ思想だが Logger 専用に重複実装することで PathManager 起動ログのキャプチャ漏れを防ぐ）
+- **1 起動セッション = 1 ファイル**: 日跨ぎでもローテートしない。PC 名 + 起動時刻でファイル名がユニーク
+  - 利点: 複数 PC が同じファイルに書き込まないので、書き込み競合・行間 interleaving が発生しない
+  - 同秒衝突対策: 連番サフィックス (`_2`, `_3` ...) でリトライ
+- **レベル**: INFO / WARN / ERROR の 3 段階（#85 で DEBUG が追加される予定）
+- **フォーマット**: `[YYYY-MM-DD HH:mm:ss] [LEVEL] [Module] message` 形式（PC 名はファイル名で表現するので行に含めない）
+- **保持期間**: 30 日。起動時に古いファイル (mtime 基準) を自動削除。現セッションのアクティブファイルは明示的に保護
+- **既存出力の自動取込**:
+  - .NET (Manager 等): `Console.SetOut(...)` で `Console.WriteLine($"[Module] msg")` をフックし、INFO としてファイルにも書く
+  - Godot (Launcher 等): Godot 標準ファイルログ (`user://logs/godot.log`) を 0.5 秒間隔でテールし、新規追加分を `[Godot]` プレフィックス付きでセッションファイルに転送。行頭の `WARNING:` / `ERROR:` 等を解析してレベル振り分け（`OS.add_logger` で Logger 継承する案は GDScript パーサが script 継承の Logger 型変換を蹴るため断念）
+- **明示 API**: 新規コードは `Logger.Info / Warn / Error` 等で **レベルを明示指定** することを推奨
+- **起動・終了イベント**: 必ず INFO で記録
+- **障害耐性**: ログ機構自身の例外は握り潰し、アプリ起動を止めない・無限ループを起こさない
+  - Logger 内部の例外は **絶対にログに書かない**（書くと再帰してハング）
+  - 初期化失敗時は警告ダイアログを出してアプリは継続
+
+参照実装:
+- `GCTonePrism_Manager/Services/Logger.cs`（Manager v0.8.8 で導入）
+- `GCTonePrism_Launcher/scripts/logger.gd`（Launcher v0.5.16 で導入）
+
 ---
 
 ## 4. UI/UX設計
@@ -2531,6 +2561,7 @@ GCTonePrism/
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
+| 2026-05-11 | 1.10.0 | ファイルログ基盤を全コンポーネント横断要件として §3.6 に新設 (#116 / #85 の土台)：Manager (v0.8.8) は新規 `Services/Logger.cs` で `Console.SetOut` フックにより既存 109 件の `Console.WriteLine($"[X] msg")` を **コード変更ゼロ** でファイルにも自動転送、INFO/WARN/ERROR の 3 段階を提供。Launcher (v0.5.16) は新規 autoload `scripts/logger.gd` が `OS.add_logger` (Godot 4.5+) で `print` / `printerr` / `push_warning` / `push_error` をすべて捕捉し、レベル振り分けして出力。**保存先は `<project_root>/logs/{manager,launcher}/<component>_<PCname>_<YYYY-MM-DD_HHmmss>.log`** に集約配置：(a) prism.db と同じ共有先に置くことで Manager の将来的なログビューア UI で複数 PC のログを 1 箇所閲覧可能、(b) **1 起動セッション = 1 ファイル** のため複数 PC が同時に書いても競合・interleaving が起きない、(c) PC 名 + 起動時刻でファイル名がユニーク（同秒衝突は連番サフィックスで回避）。30 日 retention（起動時に mtime 基準で古いファイル自動削除、現セッションは保護）。AGENTS.md に「Cross-component Standards」セクション追加して将来の Monitor / Tools 等の追加時にも同じベースラインが適用されるよう保証。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.11 | バックアップ履歴の改善 (#126)：`backup_log` テーブルに `relative_path` 列を追加 (DB v11 → v12)。バックアップ作成時に `prism.db` のあるディレクトリからの相対パスも記録し、表示・復元時は新規 `BackupPathResolver` で動的にパスを再構築することでプロジェクト場所の移動に追従できるように（ユーザーが「Documents 配下 → C 直下」のように頻繁にプロジェクトを移動するため）。`failed` 状態のレコードは Manager 起動時に物理ファイル + DB レコード両方を自動掃除（表示価値が無く、古いプロジェクトパスのゴミの主因）。履歴一覧に「選択した履歴を削除...」ボタンを追加し、ユーザーが個別にバックアップを片付けられるように。表示時は `File.Exists` チェックで不在ファイルを非表示（DB レコードは保護のため残す）。Manager v0.8.7 で実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.10 | Manager UI 改善 (#123)：`EditGameForm` / `AddGameForm` / `VersionUpForm` を縦長 (480 × 888〜1000px) から 2 列レイアウト (950 × 570〜645px) に再設計し、ノート PC でも縦スクロールなしで全項目が見渡せるように (左列=基本情報、右列=アセット&設定)。フォーム自体には `AutoScroll = true` を併設し、それでも入りきらない環境では縦スクロールバーが出る fallback を確保。全 `DataGridView` に `AllowUserToResizeRows = false` を設定し、行と行の境界ドラッグで行高が変わる UX バグを排除。`StoreSectionListForm` の `dgvSections` と Add/Edit の `dgvDevelopers` には `RowHeadersVisible = false` も追加して行ヘッダー自体を消し、誤操作余地を物理的に排除。Manager v0.8.6 で実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.9 | ゲーム削除を rename rollback パターンに刷新 (Codex P1 #122)：旧実装は「フォルダ物理削除 → DB 削除」順だったため、DB 削除失敗時 (SQLiteException 等) にフォルダだけ消えて戻せない問題があった。新実装はリセットと同じ 3 フェーズ「(1) rename で退避 → (2) DB 削除 → (3) 退避物理削除」に統一し、(2) 失敗時は (1) を rename で戻してロールバックする。永続的データロストを排除。SPEC §2.2 機能2 を新フローで書き直し。Manager v0.8.5 で実装。 | Kenshiro Kuroga & Claude |
