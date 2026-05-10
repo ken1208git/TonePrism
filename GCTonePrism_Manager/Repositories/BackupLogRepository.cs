@@ -29,7 +29,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
                     using (var cmd = new SQLiteCommand(
                         "INSERT INTO backup_log (started_at, pc_name, status, trigger_type, file_path) " +
                         "VALUES (@started_at, @pc_name, 'in_progress', @trigger_type, @file_path)", connection))
@@ -51,7 +51,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
                     using (var cmd = new SQLiteCommand(
                         "UPDATE backup_log SET status = 'success', file_path = @file_path, " +
                         "file_size_bytes = @file_size, completed_at = @completed_at WHERE id = @id", connection))
@@ -72,7 +72,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
                     using (var cmd = new SQLiteCommand(
                         "UPDATE backup_log SET status = 'failed', error_message = @err, " +
                         "completed_at = @completed_at WHERE id = @id", connection))
@@ -114,7 +114,7 @@ namespace GCTonePrism.Manager.Repositories
 
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     // 対象行を取得
                     var inProgressTargets = new List<(long id, string filePath)>();
@@ -218,7 +218,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
                     using (var cmd = new SQLiteCommand(
                         "SELECT id, started_at, completed_at, pc_name, file_path, file_size_bytes, " +
                         "status, error_message, trigger_type FROM backup_log " +
@@ -273,7 +273,7 @@ namespace GCTonePrism.Manager.Repositories
                 int recovered = 0;
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     // file_path が空の failed 行を取得
                     var targets = new List<(long id, long startedAt)>();
@@ -336,7 +336,7 @@ namespace GCTonePrism.Manager.Repositories
                 int added = 0;
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     // 既に登録済みの safety 行の file_path をセットに集める
                     var existingPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -411,7 +411,7 @@ namespace GCTonePrism.Manager.Repositories
                 var list = new List<BackupLogEntry>();
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
                     using (var cmd = new SQLiteCommand(
                         "SELECT id, started_at, completed_at, pc_name, file_path, file_size_bytes, " +
                         "status, error_message, trigger_type FROM backup_log " +

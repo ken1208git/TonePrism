@@ -1408,16 +1408,16 @@ graph TB
 
 ### 6.5 データの整合性
 
-- **WALモードによる同時アクセス対応**:
-  - SQLiteのWAL（Write-Ahead Logging）モードを使用して、ランチャーと管理ソフトの同時アクセスを可能にする
-  - ランチャー起動中でも管理ソフトでデータベース操作（ゲーム追加・編集・削除など）が可能
-  - 接続時に自動的にWALモードを有効化し、既存データベースにも適用される
-  - 接続文字列に`Journal Mode=WAL`と`Busy Timeout=5000`を設定
+- **DELETE モード + busy_timeout による同時アクセス対応** (#103):
+  - `prism.db` は学校 SMB ファイルサーバー上で共有運用するため、SQLite 公式が動作保証外と明言している WAL モード（`prism.db-shm` のメモリマップトファイルが SMB で整合性を保証されない）を避け、**`journal_mode=DELETE`** を採用する
+  - 接続時に `PRAGMA journal_mode=DELETE` / `PRAGMA busy_timeout=10000` / `PRAGMA synchronous=NORMAL` / `PRAGMA foreign_keys=ON` を実行し、既存データベースにも適用される
+  - 接続文字列にも `Busy Timeout=10000` を併設（System.Data.SQLite ライブラリ側のフォールバック）
+  - `busy_timeout=10000` により書き込み競合時は SQLite 内部で最大 10 秒待機する「書き込み待機列」として動作し、即時 SQLITE_BUSY を返さない。学校 SMB の遅延を考慮した値
+  - 書き込み中は他プロセスからの読み取りもブロックされるが、Manager は時々の操作・Launcher は実質 Read-Only（アンケート/プレイ記録は drop-folder 経由）のため運用上問題ない
 
 - **リトライ機構**:
-  - ネットワークドライブ経由での一時的なロックエラーに対して自動リトライ機能を実装
-  - 最大3回リトライ、指数バックオフ（50ms, 100ms, 200ms）で待機
-  - 学校サーバー経由での使用に最適化
+  - busy_timeout を超える本物のデッドロック対策として、Manager `DatabaseConnection.ExecuteWithRetry` が `Busy/Locked` 例外を**最大 3 回・固定 100ms 間隔**で再試行する
+  - 学校サーバー経由での使用に最適化（busy_timeout が主防衛線、ExecuteWithRetry が二重防衛層）
 
 - **エラーハンドリング**:
   - SQLiteExceptionを具体的に処理し、ユーザーに分かりやすいエラーメッセージを表示
@@ -2498,6 +2498,7 @@ GCTonePrism/
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
+| 2026-05-10 | 1.9.3 | `prism.db` のジャーナルモードを WAL → DELETE へ移行し、`busy_timeout=10000` を追加（#103）：6.5 データの整合性を「DELETE モード + busy_timeout による同時アクセス対応」に書き換え、SMB 共有上で WAL モードが SQLite 公式により動作保証外である旨と DELETE モード採用の理由（`prism.db-shm` のメモリマップ整合性不全リスクの回避）、`busy_timeout=10000` を「書き込み待機列」として 10 秒待機させる挙動を明記。リトライ機構の記述を実装に合わせて「最大 3 回・固定 100ms 間隔」に修正（従来の「指数バックオフ 50/100/200ms」記載は実装と齟齬していた）。Manager v0.8.2 / Launcher v0.5.9 で実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.2 | PR #113 のレビュー段階で実施したスキーマ整合性 audit の結果を SPEC に反映：7.3 テーブル3 play_records とテーブル4 surveys を「現行スキーマ（Manager v0.8.1 / DB v11 時点）」と「drop-folder 設計（#35 実装時に v11 → v12 で移行予定）」の併記形式に変更（現行は SchemaManager.cs の `CreateTables()` と一致する 5/6 列、将来形は v1.9.0 で記載した 9 列構成を保持）。VerifySchema が比較する `ExpectedSchema` は現行スキーマと同期、drop-folder 設計は #35 実装時に v11 → v12 マイグレーションとして反映する流れを明記。テーブル10 launcher_surveys に「廃止までの暫定」として現行 5 列カラム表を追記。テーブル11 backup_log の `trigger_type` CHECK 制約に v10 で追加された `'safety'` を反映（§7.3 表 / §7.2 階層図）。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.1 | スキーマ drift 修正・検出機構を Manager v0.8.1 として実装した内容を SPEC に反映：7.3 テーブル1 games の定義に既存の `arguments` / `version` 列が抜けていたため追記（実 DB と SPEC の整合性回復）、7.3 階層図 / ER 図にも反映、テーブル11 backup_log の説明に v9 → v10（`trigger_type` への `'safety'` 追加）の経緯を補足。マイグレーション機構について、`SchemaManager.cs` の `CreateTables()` を変更したら必ず対応する `MigrateVxToVy` を書くべきこと、`tools/sqlite3/` を使ったマイグレーション前後検証を行うことを `AGENTS.md` に明文化（同 PR で追記）。CurrentDbVersion を v10 → v11 に更新し、SPEC v1.5.1 (2026-03-28) で変更されたが対応マイグレーション未実装だった `surveys` / `play_records` の drift を修正（空テーブルのみ DROP & CREATE 対応）。Manager 起動時の `VerifySchema()` で全テーブルのスキーマ整合性を自動検証する仕組みを追加。 | Kenshiro Kuroga & Claude |
 | 2026-05-10 | 1.9.0 | アンケート・プレイ記録の保存方式を drop-folder 方式に変更し、運用補助ツールを同梱：6.4 データアクセスパターンに Launcher が SQLite を直接書き込まない方針を明記、6.5 データの整合性に「Launcher 書き込みの drop-folder 方式」サブセクションを新設（atomic write / 3-state folder 構成 pending・imported・failed / 2-phase 取り込み（取り込みフェーズ + バックアップフェーズ）/ トリガ別動作マトリクス / 重複 INSERT 防止のための source_uuid + INSERT OR IGNORE / 任意フィールドの NULL 扱い等）、7.3 SQLite データベース設計でテーブル4 surveys を「ゲーム個別+ランチャー全体」を `trigger` 列で統合する形にスキーマ刷新（source_uuid / trigger / source_pc / imported_at 追加、created_at を INTEGER UNIX秒に変更）、テーブル3 play_records も同方式採用＋ INTEGER 化（source_uuid / source_pc / imported_at 追加）、テーブル10 launcher_surveys を廃止予定として記載。7.5.3 として `responses/` フォルダの 3-state 構成を追記、7.5.4 として `tools/sqlite3/` 開発・運用補助ツール（sqlite3.exe 等の SQLite CLI）の同梱を追記（#109 closes）。機能10 アンケート機能・機能11 プレイ記録機能の記述を保存方式変更に合わせて更新。新規追加テーブルのタイムスタンプは INTEGER (UNIX秒) で統一する方針を明文化（既存テーブルは段階的移行）。スキーマ実装は #35 の実装時に v10 → v11 マイグレーションとして対応予定。 | Kenshiro Kuroga & Claude |

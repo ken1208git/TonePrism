@@ -25,7 +25,7 @@ namespace GCTonePrism.Manager.Repositories
 
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
 
                     string query = "SELECT id, game_id, last_name, first_name, grade FROM developers WHERE game_id = @gameId AND version_id IS NULL ORDER BY id ASC";
 

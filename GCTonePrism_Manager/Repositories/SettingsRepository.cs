@@ -22,7 +22,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
                     using (var cmd = new SQLiteCommand("SELECT value FROM settings WHERE key = @key", connection))
                     {
                         cmd.Parameters.AddWithValue("@key", key);
@@ -40,7 +40,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
                     using (var cmd = new SQLiteCommand(
                         "INSERT INTO settings (key, value) VALUES (@key, @value) " +
                         "ON CONFLICT(key) DO UPDATE SET value = @value", connection))
@@ -88,7 +88,7 @@ namespace GCTonePrism.Manager.Repositories
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    _conn.OpenConnectionWithWalMode(connection);
+                    _conn.OpenConnectionWithJournalMode(connection);
                     // System.Data.SQLite では IsolationLevel.Serializable が BEGIN IMMEDIATE に対応
                     using (var tx = connection.BeginTransaction(IsolationLevel.Serializable))
                     {
