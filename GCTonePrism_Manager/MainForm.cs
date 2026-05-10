@@ -18,6 +18,7 @@ namespace GCTonePrism.Manager
         private StoreSectionPanel _storeSectionPanel;
         private SettingsSectionPanel _settingsSectionPanel;
         private BackupSectionPanel _backupSectionPanel;
+        private LogSectionPanel _logSectionPanel;
 
         public MainForm()
         {
@@ -28,6 +29,7 @@ namespace GCTonePrism.Manager
             _storeSectionPanel = new StoreSectionPanel { Dock = DockStyle.Fill };
             _settingsSectionPanel = new SettingsSectionPanel { Dock = DockStyle.Fill };
             _backupSectionPanel = new BackupSectionPanel { Dock = DockStyle.Fill };
+            _logSectionPanel = new LogSectionPanel { Dock = DockStyle.Fill };
 
             _gameSectionPanel.StatusChanged += (msg) => UpdateStatusBar(msg);
             _settingsSectionPanel.DatabaseReset += OnDatabaseReset;
@@ -36,6 +38,7 @@ namespace GCTonePrism.Manager
             tabGame.Controls.Add(_gameSectionPanel);
             tabStore.Controls.Add(_storeSectionPanel);
             tabBackup.Controls.Add(_backupSectionPanel);
+            tabLog.Controls.Add(_logSectionPanel);
             tabSettings.Controls.Add(_settingsSectionPanel);
         }
 
@@ -116,6 +119,7 @@ namespace GCTonePrism.Manager
             CleanupStaleBackupEntries();
 
             _backupSectionPanel.Initialize(dbManager);
+            _logSectionPanel.Initialize(PathManager.BaseDirectory);
 
             _gameSectionPanel.LoadGames();
             UpdateStatusBar();
