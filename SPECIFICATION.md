@@ -185,9 +185,11 @@
 - **説明**: ゲーム終了後およびランチャー終了時にアンケートを実施し、プレイヤーのフィードバックを収集する機能
 - **優先度**: 中
 - **詳細**:
-  - **ゲーム個別アンケート**: ゲーム終了時に表示。面白さ(1-5)、コメントを収集。
-  - **全体アンケート**: ランチャー終了時（退出時）に表示。全体の満足度(1-5)、最も気に入ったゲーム（任意）、コメントを収集。
-  - アンケート結果をデータベースに保存
+  - **ゲーム個別アンケート**: ゲーム終了時に表示。面白さ(1-5)、コメント（自由記述、上限 200 字）を収集。
+  - **全体アンケート**: ランチャー終了時（退出時）に表示。全体の満足度(1-5)、コメントを収集。
+  - **スキップ可能**: 強制すると評価品質が下がるため、両アンケートとも明示的にスキップ可能とする。スキップ時はデータを保存しない
+  - **保存方式**: Launcher は SQLite に直接書き込まず、JSON として `responses/` フォルダに出力 → Manager が取り込む（drop-folder 方式 / §6.5 参照）
+  - **テーブル統合**: ゲーム個別と全体アンケートは `surveys` テーブルに統合し、`trigger` 列（`'game_end'` / `'launcher_end'`）で区別する。`launcher_surveys` テーブルは廃止
   - フィードバック収集の仕組み
 
 ##### 機能11: プレイ記録機能
@@ -198,6 +200,7 @@
   - ゲームごとのプレイ回数を記録
   - ゲームごとのプレイ時間を記録
   - 記録データの保存・集計
+  - **保存方式**: Launcher は SQLite に直接書き込まず、JSON として `responses/` フォルダに出力 → Manager が取り込む（drop-folder 方式 / §6.5 参照）
 
 ##### 機能12: 人気ランキング表示機能
 
@@ -1395,13 +1398,13 @@ graph TB
 
 #### ランチャーのデータアクセス
 
-- **読み取り**: ゲーム一覧、設定の読み込み
-- **書き込み**: プレイ記録の更新、アンケート結果の保存
+- **読み取り**: ゲーム一覧、設定の読み込み（SQLite に直接アクセス）
+- **書き込み**: **SQLite に直接書き込まない**。プレイ記録・アンケート結果は JSON ファイルとして `responses/` フォルダに出力し、Manager 側で取り込む（drop-folder 方式 / §6.5 参照）
 
 #### 管理ソフトのデータアクセス
 
 - **読み取り**: 全てのデータの読み込み
-- **書き込み**: ゲーム情報の追加・編集・削除、設定の変更
+- **書き込み**: ゲーム情報の追加・編集・削除、設定の変更、`responses/` フォルダからのアンケート・プレイ記録取り込み
 
 ### 6.5 データの整合性
 
@@ -1419,6 +1422,78 @@ graph TB
 - **エラーハンドリング**:
   - SQLiteExceptionを具体的に処理し、ユーザーに分かりやすいエラーメッセージを表示
   - データベースロック時、破損時、読み取り専用時など、エラー種別に応じた適切なメッセージを表示
+
+#### Launcher 書き込みの drop-folder 方式
+
+ネットワーク共有上で複数 Launcher PC が同時に SQLite へ書き込むと、ロック競合・データ破損のリスクがある。これを根本的に避けるため、Launcher は SQLite に直接書き込まず、JSON ファイルを drop フォルダに出力する方式を採用する:
+
+- **書き込み（Launcher 側）**:
+  - プレイ記録・アンケートは 1 件 1 ファイルの JSON として `responses/` フォルダ（パスはユーザー決定の placeholder）に出力
+  - 書き込みは「仮ファイル名で書く → 完了後に最終ファイル名へリネーム」の atomic 方式（途中状態の JSON を Manager に読まれないため）
+  - JSON には `type`（`survey` / `play_record`）、`source_pc`（`COMPUTERNAME` 環境変数）、`created_at`（UNIX秒）等を含める
+  - 1 度書いたら追記しない（書き込み中の読み取り対策）
+
+- **取り込み（Manager 側）**: 3-state folder + 2-phase 方式
+
+  drop フォルダは 3 つの状態を持つフォルダ構造で管理する:
+
+  ```
+  responses/
+  ├─ *.json        ← pending: Launcher が atomic 書き込み
+  ├─ imported/     ← Manager が INSERT 成功時にここへ移動（バックアップ前の保全用）
+  └─ failed/       ← INSERT / パース失敗時の隔離先（無限リトライ防止）
+  ```
+
+  処理は **取り込みフェーズ**（軽量・高頻度）と **バックアップフェーズ**（startup / 手動 / 定期）に分離:
+
+  - **取り込みフェーズ** — タブ切り替え時など軽量にしたい場面で実行
+    1. `responses/` 直下の `*.json` をスナップショット（以降ループ中に追加されたファイルは触らない）
+    2. 1 件ずつ SQLite に INSERT
+    3. 成功 → `imported/` へ **移動**（削除しない）
+    4. 失敗 → `failed/` へ移動 + ログ警告
+    - SQLite バックアップは走らない。タブ切り替えがキビキビ動く
+
+  - **バックアップフェーズ** — 既存の v0.8.0 バックアップ機能と統合
+    1. **取り込みフェーズを再実行**（取りこぼし防止）
+    2. SQLite Online Backup API で `prism.db` のスナップショット取得
+    3. バックアップ成功後、`imported/` の中身を全削除（クリーンアップ）
+
+  - **トリガ別動作**:
+
+    | トリガ | 取り込み | バックアップ | `imported/` 削除 |
+    | --- | :---: | :---: | :---: |
+    | Manager 起動（auto-backup 条件成立時） | ✅ | ✅ | ✅ |
+    | Manager 起動（auto-backup 条件不成立） | ✅ | × | × |
+    | アンケート/プレイ記録タブ切り替え | ✅ | × | × |
+    | 「更新」ボタン押下 | ✅ | × | × |
+    | 「今すぐバックアップ」ボタン | ✅ | ✅ | ✅ |
+    | 定期バックアップ（将来実装） | ✅ | ✅ | ✅ |
+
+  - **重複 INSERT 対策**（クラッシュ耐性）:
+    - JSON ファイル名にランダム UUID を含める（例: `survey_1715379600_PC-A_a3f2b8.json`）
+    - DB 側に `source_uuid TEXT UNIQUE` 列を追加し、`INSERT OR IGNORE` で重複時はスキップ
+    - これで「INSERT 成功 → ファイル移動失敗」のような中途半端な状態でも、再実行時に重複行が増えない
+
+  - **障害時の挙動**:
+    - 取り込みフェーズ中に Manager クラッシュ → `imported/` のファイルは DB に既に入ってるので問題なし。次回起動で残りを処理
+    - バックアップフェーズ中に失敗 → `imported/` 残存 → 次回バックアップで救済
+    - Launcher がクラッシュして JSON が部分書き込み → atomic write（`.tmp` → rename）で防止
+
+- **タイムスタンプの粒度**:
+  - SMB のディレクトリ一覧キャッシュ（既定 ~10 秒）の影響で、PC-A の書き込みが直後に PC-B から見えない場合がある
+  - 実害は「次回取り込み時に処理される」だけなので、リアルタイム性を要求しない仕様として割り切る
+
+- **想定規模（年間）**:
+  - アンケート: ~100 件（任意回答）
+  - プレイ記録: 数千件（毎プレイ自動記録）
+  - 運用上、Manager が長期間起動されないと drop フォルダが肥大化するため、展示日は毎朝 Manager を起動して取り込みを行う運用とする
+
+- **任意フィールドの NULL 扱い**:
+  - `surveys.comment` 等の任意入力フィールドは **NULLABLE**（NOT NULL 制約を付けない）
+  - JSON に該当フィールドが無い or `null` → DB は `NULL` で INSERT
+  - JSON に空文字 `""` → DB は `''` で INSERT
+  - 「ユーザーが書かなかった (NULL)」と「空欄を送信した (`''`)」を区別できるように設計
+  - 集計時は用途に応じて `WHERE comment IS NOT NULL AND comment != ''` などで実コメントのみ抽出
 
 ---
 
@@ -1486,27 +1561,29 @@ prism.db (SQLiteデータベースファイル)
   │    ├─ first_name
   │    └─ grade
 
-  ├─ play_recordsテーブル (プレイ記録・イベントログ方式)
+  ├─ play_recordsテーブル (プレイ記録・イベントログ方式 / drop-folder 方式で取り込み)
   │    ├─ id (PRIMARY KEY, AUTOINCREMENT)
+  │    ├─ source_uuid (UNIQUE, 重複INSERT防止)
   │    ├─ game_id (FOREIGN KEY → games.game_id)
-  │    ├─ start_time
-  │    ├─ end_time
+  │    ├─ start_time (UNIX秒)
+  │    ├─ end_time (UNIX秒)
   │    ├─ play_duration
-  │    └─ player_count
+  │    ├─ player_count
+  │    ├─ source_pc
+  │    └─ imported_at (UNIX秒)
 
-  ├─ surveysテーブル (ゲーム別アンケート)
+  ├─ surveysテーブル (アンケート統合・drop-folder 方式で取り込み)
   │    ├─ id (PRIMARY KEY, AUTOINCREMENT)
-  │    ├─ game_id (FOREIGN KEY → games.game_id)
+  │    ├─ source_uuid (UNIQUE, 重複INSERT防止)
+  │    ├─ trigger ('game_end' | 'launcher_end')
+  │    ├─ game_id (FOREIGN KEY → games.game_id, trigger='launcher_end' のとき NULL)
   │    ├─ rating (1-5)
   │    ├─ comment
-  │    └─ created_at
+  │    ├─ created_at (UNIX秒)
+  │    ├─ source_pc
+  │    └─ imported_at (UNIX秒)
 
-  ├─ launcher_surveysテーブル (ランチャー全体アンケート)
-  │    ├─ id (PRIMARY KEY, AUTOINCREMENT)
-  │    ├─ rating (1-5)
-  │    ├─ favorite_game_id (FOREIGN KEY → games.game_id)
-  │    ├─ comment
-  │    └─ created_at
+  # launcher_surveysテーブルは #35 実装時に廃止予定（surveys テーブルへ統合）
 
   ├─ settingsテーブル (システム設定・KVS形式)
   │    ├─ key (PRIMARY KEY)
@@ -1573,31 +1650,38 @@ SQLiteデータベースのテーブル設計：
 #### テーブル3: play_records
 
 - **テーブル名**: `play_records`
-- **説明**: プレイ記録を格納するテーブル（イベントログ方式：プレイごとに1行記録）
+- **説明**: プレイ記録を格納するテーブル（イベントログ方式：プレイごとに1行記録）。Launcher が JSON として `responses/` フォルダに出力 → Manager が取り込む（drop-folder 方式 / §6.5 参照）
 - **カラム**:
 
   | カラム名 | データ型 | 制約 | 説明 |
   | --- | --- | --- | --- |
   | id | INTEGER | PRIMARY KEY AUTOINCREMENT | レコードID |
+  | source_uuid | TEXT | UNIQUE NOT NULL | 重複 INSERT 防止用のランダム UUID（Launcher が JSON 生成時に付与） |
   | game_id | TEXT | FOREIGN KEY | ゲームID（games.game_idを参照） |
-  | start_time | TEXT | | プレイ開始日時（ISO8601形式） |
-  | end_time | TEXT | | プレイ終了日時（ISO8601形式） |
-  | play_duration | INTEGER | | プレイ時間（秒） |
+  | start_time | INTEGER | NOT NULL | プレイ開始時刻（UNIX秒） |
+  | end_time | INTEGER | NOT NULL | プレイ終了時刻（UNIX秒） |
+  | play_duration | INTEGER | | プレイ時間（秒、`end_time - start_time` と同義） |
   | player_count | INTEGER | | プレイヤー数 |
+  | source_pc | TEXT | | 記録元 PC 名（Windows `COMPUTERNAME` 環境変数の値） |
+  | imported_at | INTEGER | NOT NULL | Manager が SQLite に取り込んだ時刻（UNIX秒） |
 
 #### テーブル4: surveys
 
 - **テーブル名**: `surveys`
-- **説明**: ゲーム別アンケート結果を格納するテーブル（★評価+コメント形式）
+- **説明**: アンケート結果を格納するテーブル（★評価+コメント形式）。ゲーム個別アンケートとランチャー全体アンケートを `trigger` 列で区別する統合テーブル。Launcher が JSON として `responses/` フォルダに出力 → Manager が取り込む（drop-folder 方式 / §6.5 参照）
 - **カラム**:
 
   | カラム名 | データ型 | 制約 | 説明 |
   | --- | --- | --- | --- |
   | id | INTEGER | PRIMARY KEY AUTOINCREMENT | アンケートID |
-  | game_id | TEXT | FOREIGN KEY | ゲームID（games.game_idを参照） |
-  | rating | INTEGER | CHECK(rating BETWEEN 1 AND 5) | ★評価（1〜5段階） |
-  | comment | TEXT | | コメント |
-  | created_at | TEXT | DEFAULT CURRENT_TIMESTAMP | 回答日時 |
+  | source_uuid | TEXT | UNIQUE NOT NULL | 重複 INSERT 防止用のランダム UUID（Launcher が JSON 生成時に付与） |
+  | trigger | TEXT | NOT NULL CHECK(trigger IN ('game_end', 'launcher_end')) | アンケートのトリガ種別 |
+  | game_id | TEXT | FOREIGN KEY | ゲームID（games.game_idを参照）。`trigger='game_end'` のとき必須、`'launcher_end'` のとき NULL |
+  | rating | INTEGER | NOT NULL CHECK(rating BETWEEN 1 AND 5) | ★評価（1〜5段階） |
+  | comment | TEXT | | 自由記述コメント（NULL 可、UI 上限 200 字） |
+  | created_at | INTEGER | NOT NULL | アンケート提出時刻（UNIX秒、Launcher 側で記録） |
+  | source_pc | TEXT | | 記録元 PC 名（Windows `COMPUTERNAME` 環境変数の値） |
+  | imported_at | INTEGER | NOT NULL | Manager が SQLite に取り込んだ時刻（UNIX秒） |
 
 #### テーブル5: settings
 
@@ -1679,19 +1763,12 @@ SQLiteデータベースのテーブル設計：
   | display_order | INTEGER | DEFAULT 0 | セクション内の表示順序 |
   | display_text | TEXT | DEFAULT '' | 表示テキスト |
 
-#### テーブル10: launcher_surveys
+#### テーブル10: launcher_surveys（**廃止予定**）
 
 - **テーブル名**: `launcher_surveys`
-- **説明**: ランチャー全体アンケート結果を格納するテーブル（★評価+お気に入りゲーム+コメント）
-- **カラム**:
-
-  | カラム名 | データ型 | 制約 | 説明 |
-  | --- | --- | --- | --- |
-  | id | INTEGER | PRIMARY KEY AUTOINCREMENT | アンケートID |
-  | rating | INTEGER | CHECK(rating BETWEEN 1 AND 5) | ★評価（1〜5段階） |
-  | favorite_game_id | TEXT | FOREIGN KEY | お気に入りゲームID（games.game_idを参照、ON DELETE SET NULL） |
-  | comment | TEXT | | コメント |
-  | created_at | TEXT | DEFAULT CURRENT_TIMESTAMP | 回答日時 |
+- **状態**: **#35 アンケート機能の実装と同時に廃止予定**
+- **廃止理由**: ランチャー全体アンケートを `surveys` テーブルに統合し、`trigger` 列（`'launcher_end'`）で区別する設計に変更したため。「最も気に入ったゲーム」（旧 `favorite_game_id`）は、ゲーム個別アンケート（`trigger='game_end'`）の評価平均から算出可能なため不要と判断
+- **マイグレーション**: 既存データが存在する場合は、`surveys` テーブルへ移行（`trigger='launcher_end'`, `game_id=NULL`, `rating`/`comment`/`created_at` を移送、`favorite_game_id` は破棄）してからテーブルを DROP する
 
 #### テーブル11: backup_log
 
@@ -1728,8 +1805,7 @@ SQLiteデータベースの場合のリレーション：
 - `game_versions.game_id` → `games.game_id` (多対1)
 - `game_genres.game_id` → `games.game_id` (多対1)
 - `play_records.game_id` → `games.game_id` (多対1)
-- `surveys.game_id` → `games.game_id` (多対1)
-- `launcher_surveys.favorite_game_id` → `games.game_id` (多対1, ON DELETE SET NULL)
+- `surveys.game_id` → `games.game_id` (多対1, `trigger='launcher_end'` のとき NULL)
 - `store_section_games.section_id` → `store_sections.section_id` (多対1)
 - `store_section_games.game_id` → `games.game_id` (多対1)
 
@@ -1743,7 +1819,6 @@ erDiagram
     games ||--o{ play_records : "has"
     games ||--o{ surveys : "has"
     games ||--o{ store_section_games : "belongs to"
-    games ||--o{ launcher_surveys : "favorite"
     store_sections ||--o{ store_section_games : "contains"
     games {
         TEXT game_id PK
@@ -1790,18 +1865,25 @@ erDiagram
     }
     play_records {
         INTEGER id PK
+        TEXT source_uuid UK
         TEXT game_id FK
-        TEXT start_time
-        TEXT end_time
+        INTEGER start_time
+        INTEGER end_time
         INTEGER play_duration
         INTEGER player_count
+        TEXT source_pc
+        INTEGER imported_at
     }
     surveys {
         INTEGER id PK
+        TEXT source_uuid UK
+        TEXT trigger
         TEXT game_id FK
         INTEGER rating
         TEXT comment
-        TEXT created_at
+        INTEGER created_at
+        TEXT source_pc
+        INTEGER imported_at
     }
     settings {
         TEXT key PK
@@ -1823,13 +1905,7 @@ erDiagram
         INTEGER display_order
         TEXT display_text
     }
-    launcher_surveys {
-        INTEGER id PK
-        INTEGER rating
-        TEXT favorite_game_id FK "REFERENCES games(game_id)"
-        TEXT comment
-        TEXT created_at
-    }
+    %% launcher_surveys テーブルは #35 実装時に廃止予定（surveys テーブルへ統合）
 ```
 
 ### 7.5 ファイル/フォルダ構成
@@ -1867,6 +1943,57 @@ GCTonePrism/
 - **配置場所**: プロジェクトルート直下
 - **形式**: SQLite 3
 - **バージョン管理**: `Pragma user_version` を使用してスキーマバージョンを管理
+
+#### 7.5.3 アンケート・プレイ記録 drop フォルダ
+
+- **フォルダ名**: `responses/`（フォルダ名は実装時に確定）
+- **配置場所**: プロジェクトルート直下（`prism.db` と同じ階層）
+- **目的**: Launcher が出力した JSON ファイルを Manager が取り込むまでの一時保管場所（drop-folder 方式 / §6.5 参照）
+- **3-state フォルダ構成**:
+
+  ```
+  responses/
+  ├─ *.json        ← pending: Launcher が atomic 書き込みする場所
+  ├─ imported/     ← Manager が INSERT 成功時に移動する場所（バックアップ前の保全用）
+  └─ failed/       ← INSERT/パース失敗時の隔離先（無限リトライ防止）
+  ```
+
+- **ファイル命名規則**: 衝突と重複 INSERT を避けるため `{type}_{unix_ts}_{source_pc}_{random_uuid}.json` 形式（命名は実装時に確定）
+- **書き込み手順**（Launcher）:
+  - 仮ファイル名（例: `xxx.json.tmp`）に書き出す
+  - 書き込み完了後に最終ファイル名へリネーム（atomic）
+- **取り込み済みファイルの扱い**:
+  - 取り込みフェーズで `imported/` へ移動
+  - バックアップフェーズで SQLite バックアップ成功確認後にまとめて削除
+- **取り込み失敗ファイルの扱い**: `failed/` フォルダに移動 + Manager ログに警告（手動確認用に保持）
+
+#### 7.5.4 開発・運用補助ツール（`tools/` フォルダ）
+
+- **フォルダ名**: `tools/`
+- **配置場所**: プロジェクトルート直下
+- **目的**: SPEC やマイグレーション検証、運用時の DB 状態確認に使うコマンドラインツールを同梱（インストール不要）
+- **構成**:
+
+  ```
+  tools/
+  └─ sqlite3/
+     ├─ sqlite3.exe          ← メインの SQLite CLI
+     ├─ sqldiff.exe          ← 2つの DB ファイルの差分検出
+     ├─ sqlite3_analyzer.exe ← DB の容量・統計分析
+     ├─ sqlite3_rsync.exe    ← rsync 風 DB 同期
+     └─ VERSION.txt          ← 同梱バージョンと使い方の案内
+  ```
+
+- **ライセンス**: SQLite はパブリックドメイン
+- **典型的な使い方**（プロジェクトルートから）:
+
+  ```powershell
+  .\tools\sqlite3\sqlite3.exe prism.db "PRAGMA integrity_check;"
+  .\tools\sqlite3\sqlite3.exe prism.db "PRAGMA journal_mode;"
+  .\tools\sqlite3\sqlite3.exe prism.db "PRAGMA table_info(surveys);"
+  ```
+
+- **更新手順**: `tools/sqlite3/VERSION.txt` を参照
 
 ---
 
@@ -2325,6 +2452,7 @@ GCTonePrism/
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
+| 2026-05-10 | 1.9.0 | アンケート・プレイ記録の保存方式を drop-folder 方式に変更し、運用補助ツールを同梱：6.4 データアクセスパターンに Launcher が SQLite を直接書き込まない方針を明記、6.5 データの整合性に「Launcher 書き込みの drop-folder 方式」サブセクションを新設（atomic write / 3-state folder 構成 pending・imported・failed / 2-phase 取り込み（取り込みフェーズ + バックアップフェーズ）/ トリガ別動作マトリクス / 重複 INSERT 防止のための source_uuid + INSERT OR IGNORE / 任意フィールドの NULL 扱い等）、7.3 SQLite データベース設計でテーブル4 surveys を「ゲーム個別+ランチャー全体」を `trigger` 列で統合する形にスキーマ刷新（source_uuid / trigger / source_pc / imported_at 追加、created_at を INTEGER UNIX秒に変更）、テーブル3 play_records も同方式採用＋ INTEGER 化（source_uuid / source_pc / imported_at 追加）、テーブル10 launcher_surveys を廃止予定として記載。7.5.3 として `responses/` フォルダの 3-state 構成を追記、7.5.4 として `tools/sqlite3/` 開発・運用補助ツール（sqlite3.exe 等の SQLite CLI）の同梱を追記（#109 closes）。機能10 アンケート機能・機能11 プレイ記録機能の記述を保存方式変更に合わせて更新。新規追加テーブルのタイムスタンプは INTEGER (UNIX秒) で統一する方針を明文化（既存テーブルは段階的移行）。スキーマ実装は #35 の実装時に v10 → v11 マイグレーションとして対応予定。 | Kenshiro Kuroga & Claude |
 | 2026-05-07 | 1.8.0 | データベースバックアップ・復元機能（機能12）の仕様追加：2.2 管理機能に手動／自動バックアップ・履歴一覧・リストアの仕様を新設、7.3 SQLite データベース設計にテーブル11 `backup_log` を追加（status / trigger_type / pc_name / file_path 等）、`settings` キー4項目を明記（last_backup_at, backup_destination_path, backup_auto_interval_hours, backup_retention_count）、DB スキーマを v8 → v9 に更新、マイルストーン12 主要機能リストにバックアップ機能を追記。Manager v0.8.0 で先行実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-01 | 1.7.0 | Tools（補助ユーティリティ群）の仕様追加：2.4 セクション新設、`GCTonePrism_Tools/` 配置・C# / .NET Framework 4.8 採用・統合 .sln 構成、Launcher との通信規約（OS.execute / stdout JSON）、Tool 1: WindowProbe（ゲームウィンドウ可視化検知）と Tool 2: PauseOverlay（中断メニュー、将来）の仕様、独立 .exe vs サブコマンド方式の検討事項を記載 | Kenshiro Kuroga & Claude |
 | 2026-03-30 | 1.6.1 | Material Design 3関連の記述を削除：デザインシステムをMD3ベースからダークテーマベースのカスタムデザインに変更、デザインガイドラインからMD3固有の記述（タイポグラフィ・アイコン・コンポーネントのMD3準拠言及）を削除、参考資料からMD3セクションを削除、マイルストーン7のMD3言及を削除 | Kenshiro Kuroga & Claude |

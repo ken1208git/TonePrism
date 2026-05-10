@@ -1,0 +1,24 @@
+SQLite Tools (Windows x64)
+
+Version:      3.53.1
+Release date: 2026-05-05
+Source:       https://www.sqlite.org/download.html
+Archive:      sqlite-tools-win-x64-3530100.zip
+
+Bundled tools:
+- sqlite3.exe          : Main CLI (use for PRAGMA / SQL queries)
+- sqldiff.exe          : Database diff tool (compare two .db files)
+- sqlite3_analyzer.exe : Database storage statistics analyzer
+- sqlite3_rsync.exe    : Database sync tool (rarely used)
+
+License: SQLite is in the public domain. Free to bundle and redistribute.
+
+Usage example (from project root):
+  .\tools\sqlite3\sqlite3.exe prism.db "PRAGMA integrity_check;"
+  .\tools\sqlite3\sqlite3.exe prism.db "PRAGMA journal_mode;"
+  .\tools\sqlite3\sqlite3.exe prism.db "PRAGMA table_info(surveys);"
+
+Update procedure:
+  1. Download the latest sqlite-tools-win-x64-*.zip from sqlite.org
+  2. Replace the .exe files in this folder
+  3. Update the version info above
