@@ -832,6 +832,14 @@ function Build-Manager {
         }
     }
 
+    # bin/Release/ を事前に削除 (前回ビルドの runtime ゴミ
+    # = 開発者が Manager を直接起動した時に発生する db / logs / backups 等を
+    # release zip に紛れ込ませないため)
+    if (Test-Path $binRelease) {
+        Write-Info "bin/Release/ を削除して clean build"
+        Remove-Item -Recurse -Force $binRelease
+    }
+
     # msbuild
     Write-Info "msbuild /p:Configuration=Release"
     $exitCode = Invoke-ExternalProcess -FilePath $script:ResolvedMsBuild -Arguments @(

@@ -29,6 +29,13 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
+### [Release Tooling v1.0.2] - 2026-05-11
+
+#### Fixed
+
+- **`export_presets.cfg` が gitignore で除外されてクリーン clone で Release.ps1 が即 fail する問題を修正 (Codex P1 #137)**: Godot のデフォルト `.gitignore` テンプレが `export_presets.cfg` を除外する慣習で、本プロジェクトの初期 `.gitignore` もそれを踏襲していた。しかし Release.ps1 の `Set-ManifestVersions` が `application/file_version` を書き換えるため必須ファイルになっており、別開発者の clean clone では `ReadAllText` の段階で fail していた。`.gitignore` から `export_presets.cfg` を除外し tracked 化、初期の Godot エディタ生成版を repo に含める形に変更
+- **`bin\Release\` 再帰コピーで前回ビルド時の runtime ゴミが zip に混入し得る問題を修正 (Codex P1 #137)**: 開発者が Manager を直接 `bin\Release\` から起動した場合、log / db / backups 等の runtime ファイルが `bin\Release\` に発生する。`Get-ChildItem -Recurse -File | Where Extension -ne '.pdb'` で拾ってると、これら不要ファイルが release zip に紛れ込む可能性があった。`Build-Manager` の msbuild 直前に `bin\Release\` を `Remove-Item -Recurse -Force` で完全削除し、毎回クリーンビルドする形に変更。これで bin\Release/ には msbuild が生成した正規の output のみが残り、コピー対象の予期せぬ追加が起きない
+
 ### [Release Tooling v1.0.1] - 2026-05-11
 
 #### Changed
