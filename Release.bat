@@ -3,7 +3,7 @@ REM ============================================================================
 REM Release.bat - Release.ps1 のラッパー (ダブルクリック / 短縮コマンド用)
 REM
 REM ファイル形式: UTF-8 BOM + CRLF 改行 (Windows cmd.exe 要件)
-REM   - cmd.exe は LF only の bat をパース失敗するため CRLF 必須
+REM   - cmd.exe は LF only の bat を正しくパースできず、無音で実行が止まる
 REM   - .gitattributes で *.bat eol=crlf を指定して checkout 時に CRLF を強制
 REM   - 日本語 echo の文字化け防止のため chcp 65001 で UTF-8 codepage に切替
 REM
@@ -21,9 +21,11 @@ REM ============================================================================
 
 setlocal enabledelayedexpansion
 
-REM UTF-8 codepage 強制 (日本語 echo / REM コメントの文字化け防止、Win 10 旧版互換)
-REM 元の codepage を保存して exit 時に復元
-for /f "tokens=2 delims=:." %%a in ('chcp') do set _ORIG_CP=%%a
+REM UTF-8 codepage 強制 (日本語 echo / REM コメントの文字化け防止、念のための保険)
+REM chcp 出力: "Active code page: 932" / "現在のコード ページ: 932" → ":" 後の値を取得
+REM ":" 後はスペース付き " 932" になるため、変数置換でスペースを除去してから保存
+for /f "tokens=2 delims=:" %%a in ('chcp') do set ORIG_CP=%%a
+if defined ORIG_CP set ORIG_CP=%ORIG_CP: =%
 chcp 65001 >nul
 
 set SCRIPT_DIR=%~dp0
@@ -63,5 +65,5 @@ if %NO_PAUSE% EQU 0 (
     pause
 )
 REM codepage を元に戻す (pause より後で、ユーザーが pause 中も日本語 echo を見られるように)
-if defined _ORIG_CP chcp %_ORIG_CP% >nul
+if defined ORIG_CP chcp %ORIG_CP% >nul
 exit /b %EXIT_CODE%

@@ -36,7 +36,7 @@
 - **`Release.bat` ダブルクリック / ターミナル実行で何も出力されない問題を修正**: リポジトリの `.gitattributes` に `* text=auto eol=lf` がデフォルト設定されており、checkout 時に `Release.bat` も LF 改行に強制されていた。**cmd.exe は LF only の bat を正しくパースできない**ため、ダブルクリックしても無音で fail していた (process は起動するが何も実行されない)
   - `.gitattributes` に `*.bat text eol=crlf` / `*.cmd text eol=crlf` 例外を追加し、`.bat` / `.cmd` ファイルは checkout 時に CRLF 改行に強制
   - `Release.bat` 自体も UTF-8 BOM + CRLF に書き換え (旧 SJIS 形式は VS Code 等のモダンエディタで開くと文字化けして編集体験が悪い、新形式は cmd.exe / エディタ両方で正しく扱える)
-  - `Release.bat` 冒頭で `chcp 65001 >nul` を発行して UTF-8 codepage を強制 (Win 10 旧版で UTF-8 BOM 認識が不完全な場合の互換性確保)。exit 時には元の codepage を復元
+  - `Release.bat` 冒頭で `chcp 65001 >nul` を発行して UTF-8 codepage を強制 (念のための保険、cmd.exe の UTF-8 BOM 認識挙動が環境依存のため)。exit 時には元の codepage を復元
   - `Release.bat` の docstring に CRLF 必須の経緯を追記
 
 ### [Release Tooling v1.0.4] - 2026-05-11
