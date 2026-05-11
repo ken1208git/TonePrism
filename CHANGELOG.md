@@ -33,12 +33,19 @@
 
 #### Fixed
 
-- **`Release.bat` を UTF-8 (no BOM) + ASCII プレフィックスに変更**: 実機で BOM (`EF BB BF`) が CP932 として解釈され `@echo off` が機能しない問題を解消。`chcp 65001` 以降の領域は引き続き日本語可。v1.0.5 で導入した日本語併記 `[WARN]` echo は chcp 切替前 + no-BOM の整合性確保のため削除 (撤回が意図的であることを明示)
-- **PS 5.1 + `$ErrorActionPreference='Stop'` 下での `2>&1` native command stderr trap を全 3 箇所で潰し、Release.ps1 冒頭に集約コメントを設置**:
-  - `gh release view` (タグ衝突チェック): `2>$null | Out-Null` + exit code 判定で、release 存在時の JSON 大量出力も同時に抑止
-  - `gh auth status` (Test-Preflight): 旧実装は `2>&1` が NativeCommandError 化、新実装は変数代入 + `Out-String` で診断情報を文字列として捕捉。失敗時に `gh auth login` 以外の原因 (network / proxy / token expiry) も Fail メッセージに出して切り分け可能に
-  - `git status --porcelain` (Assert-WorkingTreeClean): redirect 削除 + 明示的 `$LASTEXITCODE` チェック + Fail 追加。redirect 単純削除では git 失敗時に `else` 分岐へ落ちて "clean" 誤報告する **silent pass regression を踏むため、exit code check を必須で組み合わせる** (このリポジトリの bad release を防ぐ preflight 安全網の中枢部分なので明示的に Fail で止める)
-- **Release.bat の codepage 復元コメントを 4 行 → 2 行に簡素化** (詳細は冒頭 docstring に集約済みのため二重記述解消)
+#### Fixed
+
+- **`Release.bat` ダブルクリック / ターミナル実行で実質動作しない問題**: cmd.exe が UTF-8 BOM (`EF BB BF`) を CP932 として解釈、1 行目の `@echo off` が機能せず、全 REM 行を echo on で splay + cp932-mojibake で表示する状態だった。UTF-8 (no BOM) + ASCII プレフィックス (`chcp 65001` 以前は ASCII 限定) に変更して解消
+- **`gh release view` が release 不在時に script を terminating error で止める問題**: preflight タグ衝突チェックの `2>&1` が PS 5.1 + `$ErrorActionPreference='Stop'` 下で NativeCommandError 化、本来「衝突なし続行」のはずの正常系で fail していた問題。`2>$null | Out-Null` パターンに変更
+- **同 anti-pattern が `gh auth status` と `git status --porcelain` にも残っていた問題**: シニアレビューで指摘され全 3 箇所を統一
+  - `gh auth status`: `& cmd 2>&1 | Out-String` パターンで診断情報を文字列として保持。失敗時に `gh auth login` 以外の原因 (network / proxy / token expiry / install 破損) も Fail メッセージに出して切り分け可能に
+  - `git status --porcelain`: redirect 削除 + 明示的 `$LASTEXITCODE` チェック + Fail 追加。redirect 単純削除では git 失敗時に "clean" 誤報告の **silent pass regression** を踏むため exit code check 必須
+
+#### Changed
+
+- **v1.0.5 で導入した `[WARN]` メッセージの日本語併記行を削除**: chcp 取得失敗パスは codepage 未切替 + ファイル no-BOM のため日本語 echo の文字化けが確定的、ASCII-only ルールに整合させる形で意図的に撤回
+- **`2>&1` trap 関連の per-site コメント 3 箇所を集約 + 参照形式に整理**: Release.ps1 冒頭の `Set-StrictMode` 直後に集約コメントを設置 (GOOD-1 / GOOD-2 / GOOD-3 / BAD-a / BAD-b の早見表)、各 call site は集約参照 + 1-2 行に絞り込んで重複削減
+- **Release.bat の docstring に「BOM 復活禁止」の明示注記** + chcp 65001 境界の banner-style 区切り強化、editor が BOM を自動付与しようとする誘惑への防御
 
 ### [Release Tooling v1.0.5] - 2026-05-11
 

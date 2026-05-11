@@ -92,6 +92,39 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# ============================================================================
+# Native command の `2>&1` trap (PS 5.1 + $ErrorActionPreference='Stop' 環境)
+# ============================================================================
+# このスクリプトでは git / gh / msbuild / nuget 等の native command を呼び出すが、
+# `2>&1` で stderr を success stream に merge すると PS 5.1 + Stop モードでは
+# native command の stderr 出力が NativeCommandError の terminating error として
+# 扱われ、本来「正常系」のはずの path で script が止まる。
+#
+# パターン早見表:
+#   # GOOD-1: 出力を捨てたい場合 (preflight の存在確認系)
+#   & native-cmd 2>$null | Out-Null    # stderr 捨て、stdout 捨て、exit code 判定
+#
+#   # GOOD-2: 出力を診断情報として保持したい場合 (失敗時に表示したい)
+#   $output = & native-cmd 2>&1 | Out-String
+#   # ↑ Out-String が pipeline 中で ErrorRecord を文字列化するため Stop は飛ばない
+#   #   (PS 5.1 で実機確認済み)
+#
+#   # GOOD-3: 出力使わない / 単純に native-cmd 実行 (stderr は console 直書きに任せる)
+#   & native-cmd                       # redirect なし、$LASTEXITCODE で異常を catch
+#   # ↑ stderr は親 console に直行、PS 側で ErrorRecord 化されないので Stop しない
+#   # ↑ ただし $LASTEXITCODE を必ずチェックして silent pass regression を防ぐこと
+#
+#   # BAD-a: 単独 pipeline 末尾の 2>&1 (Stop モードで terminating error)
+#   & native-cmd 2>&1
+#
+#   # BAD-b: 変数代入のみ (Out-String なし)
+#   $var = & native-cmd 2>&1           # PS バージョン依存で不安定
+#
+# 例外:
+#   - 実 release 操作 (Invoke-GhRelease 内の gh release create / delete) は
+#     redirect せず、出力をユーザーに見せる (GOOD-3 と同じ形だが exit code 必須)
+# ============================================================================
+
 # -Offline / -DryRun は upload を行わないので、preflight の gh 関連チェックも
 # skip するため -SkipUpload を強制 ON とみなす（Codex P2 #137 ×2）
 # - -Offline: そもそも network 不可なので gh API 呼び出し不可
@@ -165,32 +198,6 @@ $script:GodotPatchUsed      = $null  # 解決された Godot patch (例: "4.6.2"
 $script:LauncherVersion     = $null
 $script:ManagerVersion      = $null
 $script:DeleteExistingRelease = $false
-
-# ============================================================================
-# Native command の `2>&1` trap (PS 5.1 + $ErrorActionPreference='Stop' 環境)
-# ============================================================================
-# このスクリプトでは git / gh / msbuild / nuget 等の native command を呼び出すが、
-# `2>&1` で stderr を success stream に merge すると PS 5.1 + Stop モードでは
-# native command の stderr 出力が NativeCommandError の terminating error として
-# 扱われ、本来「正常系」のはずの path で script が止まる。
-#
-# 採用パターン:
-#   1. 出力を捨てたい場合 (preflight の存在確認系):
-#      & native-cmd 2>$null | Out-Null    # stderr 捨て、stdout 捨て、exit code 判定
-#   2. 出力を診断情報として保持したい場合 (失敗時に表示したい):
-#      $output = & native-cmd 2>&1 | Out-String
-#      ↑ Out-String が pipeline 中で ErrorRecord を文字列化するため Stop は飛ばない (PS 5.1 で実機確認済み)
-#
-# 採用しないパターン:
-#   & native-cmd 2>&1                  # 単独 pipeline 末尾だと NativeCommandError 飛ぶ
-#   $var = & native-cmd 2>&1           # 変数代入のみ (Out-String なし) は PS バージョン依存で不安定
-#
-# 例外:
-#   - 実 release 操作 (Invoke-GhRelease 内の gh release create / delete) は redirect
-#     せず、出力をユーザーに見せる
-#   - `git -C ... status --porcelain` は stderr に出ない前提で redirect 省略、ただし
-#     $LASTEXITCODE は明示的にチェック (regression 防止)
-# ============================================================================
 
 # ============================================================================
 # 出力ユーティリティ
@@ -554,13 +561,10 @@ function Resolve-Nuget {
 
 function Assert-WorkingTreeClean {
     param([string]$Context)
-    # 2>&1 native command stderr trap については Release.ps1 冒頭の集約コメントを参照。
-    # ここでは redirect なしで stderr をコンソールに直書きさせ、exit code で異常系を catch。
+    # native command redirection: GOOD-3 (冒頭集約コメント参照)
+    # silent pass regression 防止のため $LASTEXITCODE を必ずチェックする。
     $gitStatus = & git -C $RepoRoot status --porcelain
     if ($LASTEXITCODE -ne 0) {
-        # git status 自体が失敗 (壊れた repo / 不正なパス / 権限問題 等)。
-        # stderr が直前にコンソールに出ているはずだが、それだけだと preflight が
-        # silent pass する regression を踏むので Fail で明示的に止める。
         Fail "git status の実行に失敗しました (exit code: $LASTEXITCODE, context: $Context)"
     }
     if ($gitStatus) {
@@ -622,10 +626,8 @@ function Test-Preflight {
             Fail "gh (GitHub CLI) が見つかりません。`n        https://cli.github.com/ からインストールするか、-SkipUpload で upload を抑止してください。"
         }
         Write-Ok "gh: $gh"
-        # 2>&1 native command stderr trap については冒頭集約コメントを参照。
-        # gh auth status は正常系でも stderr に認証情報を書く gh 仕様。
-        # 診断情報を活かすため Out-String 経由で文字列化して捕捉 (PS 5.1 では
-        # 変数代入 + Out-String パターンは ErrorRecord を文字列化するため Stop しない)。
+        # native command redirection: GOOD-2 (冒頭集約コメント参照)
+        # gh auth status は正常系でも stderr に書く gh 仕様、診断情報として保持。
         $authResult = & gh auth status 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
             Fail "gh 認証に失敗しました (`gh auth login` を実行 / network / proxy / token expiry 等を確認)。`n$authResult"
@@ -658,10 +660,9 @@ function Test-Preflight {
 
     # 既存リリースとのタグ衝突
     if (-not $SkipUpload) {
-        # 2>&1 native command stderr trap については冒頭集約コメントを参照。
-        # gh release view は release 不在時 stderr へ + 非ゼロ exit。
-        # stdout も Out-Null で捨てるのは、release 存在時 gh が JSON / 詳細を
-        # stdout に dump して preflight コンソールが汚れるのを防ぐため。
+        # native command redirection: GOOD-1 (冒頭集約コメント参照)
+        # stdout も Out-Null で捨てるのは、release 存在時 gh が JSON を dump して
+        # preflight コンソールが汚れるのを防ぐため。
         & gh release view "v$Version" 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) {
             if ($Force) {

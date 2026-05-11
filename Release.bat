@@ -5,9 +5,13 @@ REM
 REM File format: UTF-8 (no BOM) + CRLF line endings.
 REM   - cmd.exe parses LF-only bat files incorrectly (silent fail). CRLF is
 REM     required; .gitattributes enforces this via `*.bat eol=crlf`.
-REM   - UTF-8 BOM is NOT used: some older cmd.exe builds (Win 10 < 1809) fail
-REM     to recognize the BOM and dump mojibake before `chcp 65001` can fire.
-REM     Keeping the top ASCII-only avoids this trap entirely.
+REM   - UTF-8 BOM is NOT used: on cmd.exe builds that do not recognize the
+REM     BOM (observed on some Windows installations), the BOM bytes
+REM     (EF BB BF) are interpreted as CP932 text on the first line. This
+REM     breaks `@echo off` (the script then visibly runs with echo enabled,
+REM     splaying every REM line + cp932-mojibake to the console), and
+REM     subsequent commands fail with "not recognized as ... command" errors.
+REM     Do NOT re-introduce a BOM here even if a modern editor suggests it.
 REM   - Comments / echo above the `chcp 65001` line MUST stay ASCII because
 REM     they are parsed under the console codepage (cp932 on JP locale).
 REM   - Below `chcp 65001 >nul`, Japanese is safe (UTF-8 console).
@@ -15,7 +19,7 @@ REM
 REM Usage:
 REM   .\Release.bat                  : full release using CHANGELOG.md head Bundle entry
 REM   .\Release.bat -SkipUpload      : build zip only, skip GitHub upload
-REM   .\Release.bat -DryRun -SkipUpload : build verification only
+REM   .\Release.bat -DryRun          : build verification only (auto-implies -SkipUpload)
 REM   .\Release.bat -Force           : allow uncommitted changes
 REM   .\Release.bat -NoPause         : skip pause on exit (for CI / automation)
 REM
@@ -40,7 +44,8 @@ REM       (only if we successfully captured the original codepage; see below).
 REM       Otherwise the caller's cmd window keeps codepage 65001 after exit.
 REM
 REM Expected chcp output structure (this REM block must stay ASCII because it
-REM runs before `chcp 65001`, so don't paste the actual localized strings here):
+REM runs before `chcp 65001`; the JP localized label is intentionally NOT
+REM pasted here, see CHANGELOG [Release Tooling v1.0.5] for the literal):
 REM   English locale (cp437/cp1252): "Active code page: 932"
 REM   Japanese locale (cp932):       label is the localized version (non-ASCII),
 REM                                  same "label: number" layout with colon
@@ -59,7 +64,10 @@ if defined ORIGINAL_CODEPAGE (
     echo [WARN] Skipping UTF-8 codepage switch ^(Japanese output may be garbled^).
 )
 
-REM ---- 以下、chcp 65001 後は日本語 OK ----
+REM ====================================================================
+REM Above this line: ASCII-only required (cmd.exe parses under cp932).
+REM Below this line: Japanese OK (UTF-8 console after chcp 65001).
+REM ====================================================================
 
 set SCRIPT_DIR=%~dp0
 
