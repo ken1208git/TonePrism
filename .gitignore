@@ -27,9 +27,10 @@ draft_*.md
 .godot/
 .import/
 *.import
-export_presets.cfg
 .mono/
 data_*/
+# 注: export_presets.cfg は Release.ps1 が読み取って書き換えるため tracked。
+# Godot のデフォルト .gitignore では除外されるがこのプロジェクトでは管理対象
 
 # C# / .NET (Manager用)
 bin/
@@ -51,3 +52,10 @@ safety_before_restore_*.db
 
 # ゲームファイル（容量が大きいため除外）
 games/
+
+# リリース成果物（自動生成、git 追跡しない）
+release/
+
+# Release.ps1 が自動ダウンロードするツールチェーン
+tools/godot/
+tools/nuget-*.exe

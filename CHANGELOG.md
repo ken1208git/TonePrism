@@ -9,6 +9,76 @@
 
 ---
 
+## Bundle（リリース全体 / `RELEASE_VERSION`）
+
+リリース zip 全体に付与する独立バージョン。GitHub Releases の本文として `Release.ps1` がこのセクションを抜き出して使う。エンドユーザー（来場スタッフ / 顧問の先生 / 部員）向けの **summary** を書く。技術詳細は `## Launcher` / `## Manager` / `## Release Tooling` 等の別セクションを参照。詳細仕様は [SPECIFICATION.md §3.7.7](SPECIFICATION.md) を参照。
+
+### [Bundle v0.1.0] - 2026-05-11
+
+初回 Bundle リリース。`Release.bat` 1 発でビルド + zip + GitHub Releases アップロードまで自動化する配布インフラを導入 (#108 Phase 1)。
+
+- Launcher: 変更なし (v0.5.16 同梱)
+- Manager: 変更なし (v0.8.9 同梱)
+- Release Tooling: `Release.ps1` / `Release.bat` を新規追加 → 詳細は `## Release Tooling` セクションを参照
+
+**Notes**: 本リリースは `Install.bat` 未同梱のため本番運用不可、Release.ps1 の動作確認用テストリリース扱い。Phase 2 以降で `Install.bat` / `Updater` / Manager UI アップデートタブ / Launcher 通知バナーを順次実装予定。
+
+---
+
+## Release Tooling（配布インフラ）
+
+`Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
+
+### [Release Tooling v1.0.4] - 2026-05-11
+
+#### Fixed
+
+- **`-DryRun` モードでも GitHub preflight が走る問題を修正 (Codex P2 #137)**: 旧実装は `-DryRun` 時も `-SkipUpload` がなければ `gh auth status` / `gh release view` を呼び出していた。`-DryRun` は zip 化と upload を skip するモードのため、preflight だけ network 必須にする意味は無い。gh 認証なし環境やオフライン環境で `-DryRun` 単体実行が fail していた問題を解消。v1.0.3 で導入した `-Offline → -SkipUpload promote` ロジックを拡張し、`if (($Offline -or $DryRun) -and -not $SkipUpload) { $SkipUpload = $true }` の形に統合。docstring も `-DryRun` の説明を更新
+
+### [Release Tooling v1.0.3] - 2026-05-11
+
+#### Fixed
+
+- **manifest sync 後の working tree 再検証を追加 (Codex P1 #137)**: `Test-Preflight` で working tree clean を要求した後、`Set-ManifestVersions` が `project.godot` / `export_presets.cfg` を書き換えると tree が dirty になり、その状態で packaging + tag 付けが進むと **source ↔ artifact traceability が崩れる** 問題を解消。新規 `Assert-WorkingTreeClean` 共通関数を切り出し、preflight と sync 後の 2 タイミングで呼ぶように変更。sync 後の dirty 検出時は「`Set-ManifestVersions` が書き換えた差分をコミットしてから再実行」という具体的なメッセージで fail (`Set-ManifestVersions` は idempotent なので 2 回目以降は no-op)
+- **`-Offline` モードで GitHub preflight が走る問題を修正 (Codex P2 #137)**: 旧実装は `-Offline` 時も `-SkipUpload` がなければ `gh auth status` / `gh release view` を呼び出していた。オフライン環境ではこれらが必ず fail するため `-Offline` フラグが advertise 通り機能していなかった。`param` block 直後で `if ($Offline -and -not $SkipUpload) { $SkipUpload = $true }` の自動 promote を追加し、`-Offline` 指定時は upload 関連の preflight + 実 upload を全て skip する形に統一。docstring も `-Offline` の説明を更新
+
+### [Release Tooling v1.0.2] - 2026-05-11
+
+#### Fixed
+
+- **`export_presets.cfg` が gitignore で除外されてクリーン clone で Release.ps1 が即 fail する問題を修正 (Codex P1 #137)**: Godot のデフォルト `.gitignore` テンプレが `export_presets.cfg` を除外する慣習で、本プロジェクトの初期 `.gitignore` もそれを踏襲していた。しかし Release.ps1 の `Set-ManifestVersions` が `application/file_version` を書き換えるため必須ファイルになっており、別開発者の clean clone では `ReadAllText` の段階で fail していた。`.gitignore` から `export_presets.cfg` を除外し tracked 化、初期の Godot エディタ生成版を repo に含める形に変更
+- **`bin\Release\` 再帰コピーで前回ビルド時の runtime ゴミが zip に混入し得る問題を修正 (Codex P1 #137)**: 開発者が Manager を直接 `bin\Release\` から起動した場合、log / db / backups 等の runtime ファイルが `bin\Release\` に発生する。`Get-ChildItem -Recurse -File | Where Extension -ne '.pdb'` で拾ってると、これら不要ファイルが release zip に紛れ込む可能性があった。`Build-Manager` の msbuild 直前に `bin\Release\` を `Remove-Item -Recurse -Force` で完全削除し、毎回クリーンビルドする形に変更。これで bin\Release/ には msbuild が生成した正規の output のみが残り、コピー対象の予期せぬ追加が起きない
+
+### [Release Tooling v1.0.1] - 2026-05-11
+
+#### Changed
+
+- **`RELEASE_VERSION` ファイル廃止、`CHANGELOG.md` を Bundle version の SoT に統合 (#108 Phase 1)**: 旧設計では `RELEASE_VERSION` ファイル (リポジトリルート) と `CHANGELOG.md` の `### [Bundle vX.Y.Z]` エントリの 2 箇所にバージョン情報を持つ二重管理だったが、整合性チェックが必要になり煩雑だったため、CHANGELOG 1 本に集約
+  - `Release.ps1` の `-Version` 引数を optional に変更、省略時は `CHANGELOG.md` の最上段 (最新) の `### [Bundle vX.Y.Z]` エントリから自動取得
+  - `-Version` を明示指定した場合は CHANGELOG の最新版数と一致するか検証し、不一致なら fail
+  - `Release.bat` から `RELEASE_VERSION` ファイル読み取り処理を削除、引数を Release.ps1 にそのまま forward する形に簡素化
+  - SPEC §3.7.7 / AGENTS.md "Release and Versioning" / §3.7.8 チェックリストも同方式に対応する形に更新
+
+### [Release Tooling v1.0.0] - 2026-05-11
+
+#### Added
+
+- **`Release.ps1` を repo root に新設 (#108 Phase 1)**: Launcher (Godot CLI export) + Manager (msbuild Release ビルド) を一括ビルドし、`release/v<version>/files/` に staging、`release/GCTonePrism_v<version>.zip` を生成、`gh release create` でアップロードする PowerShell スクリプト
+  - **Bundle version 制度**: `CHANGELOG.md` の最新 `### [Bundle vX.Y.Z]` エントリで Bundle 版数を管理。zip タグは `v<X.Y.Z>` 形式で既存の `Launcher_v*` / `Manager_v*` tag との命名衝突を回避
+  - **Godot エディタ + export templates の自動 DL**: `project.godot` の `config/features` から major.minor を読み取り、`$GodotPatchTable` で patch をピン留めして `tools/godot/<patch>/` と `%APPDATA%/Godot/export_templates/<patch>.stable/` にキャッシュ。SHA256 検証 + 3 回 retry + キャッシュ命中時 skip + 古い version は最大 2 件まで自動削除 (AppData 側は `.gctone_managed` マーカー方式で外部管理 templates を保護)
+  - **DL 進捗表示**: PS 5.1 標準の `Invoke-WebRequest` はプログレスバー描画バグで DL が極端に遅くなるため、`System.Net.Http.HttpClient` でチャンク読み出し + 50MB / 5 秒ごとに `MB / MB (MB/s)` を表示
+  - **NuGet 自動 DL**: `tools/nuget-<version>.exe` にバージョンピン留めでキャッシュ。`$NugetPinnedVersion = '6.10.0'`
+  - **MSBuild 自動検出**: `vswhere` → PATH の順で VS / Build Tools を検出。Manager コードは C# 7+ (ValueTuple / string interpolation 等) を使うため Roslyn を含む MSBuild 14+ が必須で、Windows 同梱 .NET Framework MSBuild は不使用。MSBuild 未検出時は VS Build Tools のインストール手順 (https://aka.ms/vs/17/release/vs_BuildTools.exe、~1-2GB) を案内する詳細エラーで fail
+  - **`nuget restore` の x64/x86 漏れ修正**: `Stub.System.Data.SQLite.Core.NetFramework` の packages.config 形式 restore で `build/net46/x64/SQLite.Interop.dll` と `x86/` が展開されない既知問題を、nupkg を直接 `System.IO.Compression.ZipFile` で開いて欠損ファイルだけ抽出する形で防御
+  - **Process.Start ベースの外部プロセス呼び出し**: PowerShell 標準 `&` (call operator) は大量の stdout で非同期 return することがあり、`Start-Process -ArgumentList` は配列要素にスペースを含むと argument 分割するため、`ProcessStartInfo.Arguments` を自前で quoting する形を採用 (`Invoke-ExternalProcess` ヘルパー)
+  - **`-DryRun` / `-SkipUpload` / `-Force` / `-Offline` / `-GodotExe` / `-GodotPatch` / `-MsBuildExe` / `-NugetExe` 引数**: 開発・運用シナリオに合わせて部分実行可能
+  - **export_presets.cfg / project.godot の version 自動同期**: `version.gd` の MAJOR/MINOR/PATCH を SoT として `application/file_version`、`application/product_version`、`config/version` を Release.ps1 が機械的に書き換え (`Write-FileUtf8NoBom` で BOM なし UTF-8 で書き出し、Godot ConfigFile パーサと互換)
+  - **release_notes は CHANGELOG.md から自動抽出**: 該当 Bundle セクション (`### [Bundle v<X.Y.Z>]`) をパースして `gh release create --notes` に渡す。`release_notes/` ディレクトリは持たない（CHANGELOG が SoT、重複記述なし）
+- **`Release.bat` を repo root に新設**: `Release.ps1` のラッパーバッチ。`RELEASE_VERSION` ファイルを読んで `-Version` を自動補完するため、本番運用は `.\Release.bat` 1 発で完結（ダブルクリック実行も可能）。引数を Release.ps1 にそのまま forward する仕組みのため `.\Release.bat -DryRun -SkipUpload` 等の組み合わせも可能。`-NoPause` 引数で CI / 自動化用の pause 抑止にも対応 (Shift-JIS + CRLF で保存、cmd.exe の日本語環境互換)
+- **`.gitignore` 拡張**: `release/` (Release.ps1 生成物) / `tools/godot/` / `tools/nuget-*.exe` (auto-DL) を git 追跡対象から除外
+
+---
+
 ## Launcher（ランチャー本体）
 
 ### [Launcher v0.5.16] - 2026-05-11
