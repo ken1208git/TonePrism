@@ -100,35 +100,44 @@ $ErrorActionPreference = 'Stop'
 # native command の stderr 出力が NativeCommandError の terminating error として
 # 扱われ、本来「正常系」のはずの path で script が止まる。
 #
-# パターン早見表:
-#   # GOOD-1: 出力を捨てたい場合 (preflight の存在確認系)
-#   & native-cmd 2>$null | Out-Null    # stderr 捨て、stdout 捨て、exit code 判定
+# 機構: $ErrorActionPreference='Stop' は success stream に流れる ErrorRecord を
+# terminating error として扱う。`2>&1` は stderr の string output を ErrorRecord
+# として success stream に流すため Stop の判定対象になる。一方 Out-String を経由
+# すると ErrorRecord が string 化されるため、success stream には string のみが
+# 流れ Stop の判定対象から外れる。(PS 5.1 で確認。PS 7.x は stream 処理仕様が
+# 異なるため要再検証)
 #
-#   # GOOD-2: 出力を診断情報として保持したい場合 (失敗時に表示したい)
+# パターン早見表 (call site では「pattern: 名前」で参照する):
+#
+#   # pattern: SUPPRESS_BOTH (stderr / stdout 両方破棄、exit code のみ判定)
+#   & native-cmd 2>$null | Out-Null
+#
+#   # pattern: CAPTURE_DIAGNOSTIC (失敗時に表示するため文字列化保持)
 #   $output = & native-cmd 2>&1 | Out-String
-#   # ↑ Out-String が pipeline 中で ErrorRecord を文字列化するため Stop は飛ばない
-#   #   (PS 5.1 で実機確認済み)
 #
-#   # GOOD-3: 出力使わない / 単純に native-cmd 実行 (stderr は console 直書きに任せる)
-#   & native-cmd                       # redirect なし、$LASTEXITCODE で異常を catch
+#   # pattern: CAPTURE_STDOUT (stdout は変数に、stderr は破棄)
+#   $output = & native-cmd 2>$null
+#
+#   # pattern: PASS_THROUGH (console 直書き、exit code チェック必須)
+#   & native-cmd
 #   # ↑ stderr は親 console に直行、PS 側で ErrorRecord 化されないので Stop しない
-#   # ↑ ただし $LASTEXITCODE を必ずチェックして silent pass regression を防ぐこと
+#   # ↑ ただし $LASTEXITCODE を必ずチェック (redirect 削除だけだと出力が空でも
+#   #   $LASTEXITCODE 非ゼロのまま「正常」誤判定する経路ができる)
 #
-#   # BAD-a: 単独 pipeline 末尾の 2>&1 (Stop モードで terminating error)
+#   # ANTI-PATTERN: STOP_TRAP (Stop モードで確実に terminating error 飛ぶ)
 #   & native-cmd 2>&1
 #
-#   # BAD-b: 変数代入のみ (Out-String なし)
-#   $var = & native-cmd 2>&1           # PS バージョン依存で不安定
+#   # ANTI-PATTERN: STREAM_TO_VAR (Out-String なし、PS バージョンと
+#   # $ErrorActionPreference の組合せで挙動が変わる。5.1+Stop では確実に fail)
+#   $var = & native-cmd 2>&1
 #
 # 例外:
 #   - 実 release 操作 (Invoke-GhRelease 内の gh release create / delete) は
-#     redirect せず、出力をユーザーに見せる (GOOD-3 と同じ形だが exit code 必須)
+#     redirect せず、出力をユーザーに見せる (PASS_THROUGH の派生)
 # ============================================================================
 
-# -Offline / -DryRun は upload を行わないので、preflight の gh 関連チェックも
-# skip するため -SkipUpload を強制 ON とみなす（Codex P2 #137 ×2）
-# - -Offline: そもそも network 不可なので gh API 呼び出し不可
-# - -DryRun: zip 化と upload を skip するモード、preflight だけ network 必須にする意味なし
+# -Offline / -DryRun は upload を行わないので preflight の gh 関連チェックも
+# skip するため -SkipUpload を auto-promote する (Codex P2 #137 ×2)
 if (($Offline -or $DryRun) -and -not $SkipUpload) {
     $SkipUpload = $true
 }
@@ -561,8 +570,9 @@ function Resolve-Nuget {
 
 function Assert-WorkingTreeClean {
     param([string]$Context)
-    # native command redirection: GOOD-3 (冒頭集約コメント参照)
-    # silent pass regression 防止のため $LASTEXITCODE を必ずチェックする。
+    # pattern: PASS_THROUGH (冒頭集約コメント参照)
+    # redirect を外しただけだと git 失敗時に $gitStatus が空文字になり「working
+    # tree clean」と誤判定されるため、exit code チェックが必須
     $gitStatus = & git -C $RepoRoot status --porcelain
     if ($LASTEXITCODE -ne 0) {
         Fail "git status の実行に失敗しました (exit code: $LASTEXITCODE, context: $Context)"
@@ -610,7 +620,9 @@ $script:ReleaseNotesText = ''
 # Phase 0: Preflight
 # ============================================================================
 
-function Test-Preflight {
+function Assert-Preflight {
+    # Test-* verb は [bool] 返却が PowerShell 規約だが、preflight は違反時に Fail
+    # (exit 1) する性質なので Assert-* に揃える (同ファイル内の Assert-WorkingTreeClean と統一)
     Write-Step "Preflight: 環境とパラメータを検証"
 
     # Version 形式 (CHANGELOG から取った時点で確定済みだが念のため)
@@ -626,11 +638,12 @@ function Test-Preflight {
             Fail "gh (GitHub CLI) が見つかりません。`n        https://cli.github.com/ からインストールするか、-SkipUpload で upload を抑止してください。"
         }
         Write-Ok "gh: $gh"
-        # native command redirection: GOOD-2 (冒頭集約コメント参照)
-        # gh auth status は正常系でも stderr に書く gh 仕様、診断情報として保持。
-        $authResult = & gh auth status 2>&1 | Out-String
+        # pattern: CAPTURE_DIAGNOSTIC (冒頭集約コメント参照)
+        # gh auth status は失敗原因が多様 (未認証 / token expiry / network / proxy /
+        # gh 自体の install 破損)、Fail メッセージに stderr ダンプを含めて切り分け可能にする
+        $authStatusOutput = & gh auth status 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
-            Fail "gh 認証に失敗しました (`gh auth login` を実行 / network / proxy / token expiry 等を確認)。`n$authResult"
+            Fail "gh 認証に失敗しました (`gh auth login` を実行 / network / proxy / token expiry 等を確認)。`n$authStatusOutput"
         }
         Write-Ok "gh 認証 OK"
     }
@@ -660,9 +673,14 @@ function Test-Preflight {
 
     # 既存リリースとのタグ衝突
     if (-not $SkipUpload) {
-        # native command redirection: GOOD-1 (冒頭集約コメント参照)
+        # pattern: SUPPRESS_BOTH (冒頭集約コメント参照)
         # stdout も Out-Null で捨てるのは、release 存在時 gh が JSON を dump して
         # preflight コンソールが汚れるのを防ぐため。
+        #
+        # 注: gh の exit code 契約に依存している。過去に gh は release 不在以外
+        #     (auth / network 等) でも非ゼロ exit する仕様変更があり、将来また
+        #     変わる可能性がある。より堅くしたい場合は --json id 等で structured
+        #     output を取って parse 結果で判定する。
         & gh release view "v$Version" 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) {
             if ($Force) {
@@ -1117,7 +1135,7 @@ if ($SkipUpload) { Write-Host "Mode: SKIP-UPLOAD" -ForegroundColor Yellow }
 if ($Force)      { Write-Host "Mode: FORCE" -ForegroundColor Yellow }
 if ($Offline)    { Write-Host "Mode: OFFLINE" -ForegroundColor Yellow }
 
-Test-Preflight
+Assert-Preflight
 Read-ComponentVersions
 Resolve-Godot
 Resolve-MsBuild

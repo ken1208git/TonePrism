@@ -7,10 +7,11 @@ REM   - cmd.exe parses LF-only bat files incorrectly (silent fail). CRLF is
 REM     required; .gitattributes enforces this via `*.bat eol=crlf`.
 REM   - UTF-8 BOM is NOT used: on cmd.exe builds that do not recognize the
 REM     BOM (observed on some Windows installations), the BOM bytes
-REM     (EF BB BF) are interpreted as CP932 text on the first line. This
-REM     breaks `@echo off` (the script then visibly runs with echo enabled,
-REM     splaying every REM line + cp932-mojibake to the console), and
-REM     subsequent commands fail with "not recognized as ... command" errors.
+REM     (EF BB BF) are interpreted as CP932 text and concatenated with the
+REM     first command. The very first line becomes something like
+REM     "'_@echo' is not recognized as ... command", which means `@echo off`
+REM     ITSELF fails. From that point on the script runs with echo enabled,
+REM     splaying every REM line + cp932-mojibake to the console.
 REM     Do NOT re-introduce a BOM here even if a modern editor suggests it.
 REM   - Comments / echo above the `chcp 65001` line MUST stay ASCII because
 REM     they are parsed under the console codepage (cp932 on JP locale).
@@ -53,6 +54,13 @@ REM   Other locales also follow "label: number" pattern, so `delims=:` works.
 for /f "tokens=2 delims=:" %%a in ('chcp') do set ORIGINAL_CODEPAGE=%%a
 REM `%VAR: =%` strips ALL spaces in VAR (chcp output is " 932" with leading space).
 if defined ORIGINAL_CODEPAGE set ORIGINAL_CODEPAGE=%ORIGINAL_CODEPAGE: =%
+REM Validate that the captured value is a pure decimal number. If parsing
+REM produced anything else (unknown locale format, unicode digit, etc.),
+REM treat as "capture failed" by clearing the variable. This protects the
+REM exit-time `chcp %ORIGINAL_CODEPAGE%` from receiving garbage.
+if defined ORIGINAL_CODEPAGE (
+    echo %ORIGINAL_CODEPAGE%| findstr /R "^[0-9][0-9]*$" >nul || set ORIGINAL_CODEPAGE=
+)
 
 REM If ORIGINAL_CODEPAGE failed to parse (unknown locale format, redirection
 REM filtering, etc.), skip the chcp 65001 switch entirely to avoid leaking
@@ -64,10 +72,7 @@ if defined ORIGINAL_CODEPAGE (
     echo [WARN] Skipping UTF-8 codepage switch ^(Japanese output may be garbled^).
 )
 
-REM ====================================================================
-REM Above this line: ASCII-only required (cmd.exe parses under cp932).
-REM Below this line: Japanese OK (UTF-8 console after chcp 65001).
-REM ====================================================================
+REM ==== ASCII boundary (chcp 65001 above, UTF-8 console below) ====
 
 set SCRIPT_DIR=%~dp0
 
@@ -82,7 +87,12 @@ if /i "%~1"=="-NoPause" (
     goto :parseargs
 )
 REM 引数にスペースが含まれる場合 (パス等) のためダブルクォートで保護
-set FORWARDED_ARGS=!FORWARDED_ARGS! "%~1"
+REM 初回 append 時は leading space を付けないため if defined で分岐
+if defined FORWARDED_ARGS (
+    set FORWARDED_ARGS=!FORWARDED_ARGS! "%~1"
+) else (
+    set FORWARDED_ARGS="%~1"
+)
 shift
 goto :parseargs
 

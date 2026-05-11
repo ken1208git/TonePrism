@@ -33,8 +33,6 @@
 
 #### Fixed
 
-#### Fixed
-
 - **`Release.bat` ダブルクリック / ターミナル実行で実質動作しない問題**: cmd.exe が UTF-8 BOM (`EF BB BF`) を CP932 として解釈、1 行目の `@echo off` が機能せず、全 REM 行を echo on で splay + cp932-mojibake で表示する状態だった。UTF-8 (no BOM) + ASCII プレフィックス (`chcp 65001` 以前は ASCII 限定) に変更して解消
 - **`gh release view` が release 不在時に script を terminating error で止める問題**: preflight タグ衝突チェックの `2>&1` が PS 5.1 + `$ErrorActionPreference='Stop'` 下で NativeCommandError 化、本来「衝突なし続行」のはずの正常系で fail していた問題。`2>$null | Out-Null` パターンに変更
 - **同 anti-pattern が `gh auth status` と `git status --porcelain` にも残っていた問題**: シニアレビューで指摘され全 3 箇所を統一
@@ -44,8 +42,12 @@
 #### Changed
 
 - **v1.0.5 で導入した `[WARN]` メッセージの日本語併記行を削除**: chcp 取得失敗パスは codepage 未切替 + ファイル no-BOM のため日本語 echo の文字化けが確定的、ASCII-only ルールに整合させる形で意図的に撤回
-- **`2>&1` trap 関連の per-site コメント 3 箇所を集約 + 参照形式に整理**: Release.ps1 冒頭の `Set-StrictMode` 直後に集約コメントを設置 (GOOD-1 / GOOD-2 / GOOD-3 / BAD-a / BAD-b の早見表)、各 call site は集約参照 + 1-2 行に絞り込んで重複削減
-- **Release.bat の docstring に「BOM 復活禁止」の明示注記** + chcp 65001 境界の banner-style 区切り強化、editor が BOM を自動付与しようとする誘惑への防御
+- **`2>&1` trap 関連の per-site コメント 3 箇所を集約 + 参照形式に整理**: Release.ps1 冒頭の `Set-StrictMode` 直後に集約コメントを設置、各 call site は集約参照 + 1-2 行の理由のみ。集約ラベルは self-documenting な名前 (`SUPPRESS_BOTH` / `CAPTURE_DIAGNOSTIC` / `CAPTURE_STDOUT` / `PASS_THROUGH` / `STOP_TRAP` / `STREAM_TO_VAR`) で索引参照型コメントの欠点 (表まで戻る往復) を解消。集約コメント内に「機構」セクションを追加して PS 7.x 等への移植時の調査起点を明示
+- **`Test-Preflight` → `Assert-Preflight` リネーム**: PowerShell 規約で `Test-*` は `[bool]` 返却用 (`Test-Path` / `Test-Connection` 等)。preflight は違反時 `Fail` (= `exit 1`) する性質なので `Assert-*` 系に揃え、同ファイル内の `Assert-WorkingTreeClean` と命名一貫性を取る
+- **`Release.bat` の防御性向上**:
+  - `ORIGINAL_CODEPAGE` の数値 validation (`findstr /R "^[0-9][0-9]*$"`) を追加。chcp 出力が想定外フォーマット (unicode digit / 想定外 locale 等) の場合に exit 時の `chcp %ORIGINAL_CODEPAGE%` が garbage を渡して cmd 窓が壊れるレアケースを防御
+  - `FORWARDED_ARGS` 連結ロジックを `if defined` 分岐で書き換え、初回 append 時の leading space を解消 (echo 出力の見た目改善)
+- **Release.bat の docstring 整理**: BOM 失敗症状の記述を「最初の 1 行目で `@echo off` ITSELF が fail する」に厳密化 (旧記述 "subsequent commands fail" は誤り)、chcp 65001 境界 banner を 4 行 → 1 行 marker に簡素化 (詳細は docstring と一元化)
 
 ### [Release Tooling v1.0.5] - 2026-05-11
 
