@@ -31,6 +31,13 @@ REM ============================================================================
 
 REM enabledelayedexpansion is required for `!FORWARDED_ARGS!` concatenation in
 REM the parseargs loop below. Removing it breaks argument forwarding.
+REM
+REM Side effect: with delayed expansion enabled, `!` in argument values is
+REM consumed as the delayed-expansion token. e.g. `.\Release.bat -Tag "alpha!"`
+REM loses the `!`. PowerShell switches (-DryRun, -Force, -NoPause, -Version)
+REM never contain `!`, and `-Version` only takes M.m.p[-suffix] strings, so
+REM this is a non-issue in practice. Documented here in case someone adds a
+REM new pass-through arg that accepts arbitrary text.
 setlocal enabledelayedexpansion
 
 REM ---- UTF-8 codepage switch + restore-on-exit setup ----
@@ -63,8 +70,12 @@ REM `%VAR: =%` strips ALL spaces in VAR (chcp output is " 932" with leading spac
 if defined ORIGINAL_CODEPAGE set ORIGINAL_CODEPAGE=%ORIGINAL_CODEPAGE: =%
 REM Validate that the captured value is a pure decimal number. If parsing
 REM produced anything else (unknown locale format, unicode digit, etc.),
-REM treat as "capture failed" by clearing the variable. This protects the
-REM exit-time `chcp %ORIGINAL_CODEPAGE%` from receiving garbage.
+REM OR if `findstr` itself fails to launch (minimal WinPE, broken PATH),
+REM the `||` branch fires and we treat as "capture failed" by clearing
+REM the variable. We can't distinguish "non-numeric" from "findstr missing"
+REM here, so both fall into the same skip path below. That's intentional:
+REM if we can't verify the captured value, refuse the codepage switch and
+REM leak garbage to the caller's cmd window on exit.
 if defined ORIGINAL_CODEPAGE (
     echo %ORIGINAL_CODEPAGE%| findstr /R "^[0-9][0-9]*$" >nul || set ORIGINAL_CODEPAGE=
 )
@@ -104,6 +115,13 @@ shift
 goto :parseargs
 
 :runps
+REM Below uses Japanese echo. If the chcp 65001 skip path was taken above
+REM (no `[WARN]` line, codepage still the original cp932/cp437 etc.), the
+REM Japanese here will be garbled. We emit one more ASCII line to make that
+REM context explicit instead of silently relying on the line 89-90 warning.
+if not defined ORIGINAL_CODEPAGE (
+    echo [WARN] Codepage switch was skipped; the following Japanese output may be garbled.
+)
 echo Release.bat: 引数 = %FORWARDED_ARGS%
 echo Release.bat: NoPause = %NO_PAUSE%
 echo.

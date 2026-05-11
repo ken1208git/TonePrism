@@ -107,6 +107,18 @@ $ErrorActionPreference = 'Stop'
 # 流れ Stop の判定対象から外れる。(PS 5.1 で確認。PS 7.x は stream 処理仕様が
 # 異なるため要再検証)
 #
+# PS 7.3+ 移行時の追加注意 (現状未対応):
+#   PS 7.3 以降は $PSNativeCommandUseErrorActionPreference (default $true) が
+#   追加され、`& native-cmd` の非ゼロ exit code 自体が ErrorActionPreference に
+#   従って terminating error 化する。本スクリプトの「2>&1 を外して $LASTEXITCODE で
+#   判定」というイディオム (例: Assert-WorkingTreeClean の git status, vswhere の
+#   失敗パス等) は、PS 7.3+ では `if ($LASTEXITCODE -ne 0)` に到達せず、エラー
+#   メッセージや context 情報を出す前に script 自体が abort する経路に変わる。
+#   将来 PS 7 移行する場合は以下のいずれか必須:
+#     (a) script 冒頭で $PSNativeCommandUseErrorActionPreference = $false に固定
+#     (b) 各 $LASTEXITCODE チェックを try/catch でラップ
+#   現状は PS 5.1 を前提とした実装。
+#
 # パターン早見表 (call site では「pattern: 名前」で参照する):
 #
 #   # pattern: SUPPRESS_BOTH (stderr / stdout 両方破棄、exit code のみ判定)
@@ -134,6 +146,10 @@ $ErrorActionPreference = 'Stop'
 #   $var = & native-cmd 2>&1         # 変数 capture あり版
 #   # ↑ どちらも同じ罠。本質は `2>&1` 自体: stderr が ErrorRecord として success
 #   #   stream に流れ、$ErrorActionPreference='Stop' の判定対象になる
+#   # ↑ 「変数 capture なし版」は通常書く理由がないが、副作用 only の native
+#   #   call で stderr も console に出したい意図で `2>&1` をつけてしまう typo
+#   #   として頻発するため anti-pattern として明示。redirect なしの PASS_THROUGH
+#   #   が正解 (stderr は自動で console 直行する)
 #   # ↑ 回避策は (a) Out-String を挟む = CAPTURE_DIAGNOSTIC、または
 #   #   (b) 2>&1 をやめる = SUPPRESS_BOTH / CAPTURE_STDOUT / *_PASS_STDERR 系
 #
@@ -488,6 +504,7 @@ function Resolve-MsBuild {
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
     if (-not (Test-Path $vswhere)) { $vswhere = "$env:ProgramFiles\Microsoft Visual Studio\Installer\vswhere.exe" }
     if (Test-Path $vswhere) {
+        # pattern: CAPTURE_STDOUT (冒頭集約コメント参照)
         $vsInstall = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath 2>$null
         if ($vsInstall) {
             $vsCands = @(
@@ -617,10 +634,12 @@ function Get-BundleReleaseNotes {
     }
     $content = [System.IO.File]::ReadAllText($ChangelogPath, [System.Text.Encoding]::UTF8)
     # `### [Bundle v0.1.0] - YYYY-MM-DD` から次の `### ` / `---` / `## ` / EOF まで
-    # `\Z` は対象 Bundle entry が CHANGELOG.md 末尾 (後続セクションマーカーなし)
-    # の場合の保険。現状は Bundle 配下に Launcher / Manager 等が必ず続くため発火
-    # しないが、将来セクション順を変えた時や Bundle 単独の最小 CHANGELOG だった
-    # 場合に空文字列を返してしまう regression を防ぐ
+    # `\Z` は「対象 Bundle entry の直後に終端マーカー (### / --- / ##) が一切
+    # 存在しない」極端なケースの保険。AGENTS.md ルールで新 Bundle entry は最上段
+    # 追加なので「最新 = 末尾」になるのは初回 Bundle release で他 Bundle / 後続
+    # Launcher/Manager セクションが未追加の極初期状態のみ。現状の CHANGELOG では
+    # 発火しないが、将来この regex の前提が崩れる方向 (構造変更 / CHANGELOG 縮小)
+    # に動いた時の防御。`\Z` の追加コストはほぼゼロなので入れておく
     $pattern = '(?ms)^### \[Bundle v' + [regex]::Escape($Version) + '\][^\r\n]*\r?\n(.*?)(?=^### |^---|^## |\Z)'
     $m = [regex]::Match($content, $pattern)
     if (-not $m.Success) { return '' }
@@ -662,8 +681,15 @@ function Assert-Preflight {
         # gh は exit 0 でも stderr に early warning を出すことがある:
         #   - token scope 不足の予兆 (release upload に必要な scope が削られた場合)
         #   - token expiry が近い旨の通知
-        # 失敗してないので Fail はしないが、リリース担当に気付かせる
-        if ($authStatusOutput -match '(?im)warning|expir') {
+        # 失敗してないので Fail はしないが、リリース担当に気付かせる。
+        #
+        # regex は特異性高めに絞り込み (旧 `warning|expir` は `expiration` や
+        # `experimental` 等の通常 success 文言にも hit する false positive 多数)。
+        # gh の出力フォーマットは version で変動するので「!= 100% 検出」前提:
+        # 真の early-warning 検出は本格的には別 issue (#141 系) で structured
+        # JSON parse に寄せる方が確実。
+        $warningPattern = '(?im)(token has expired|token expir(es|ed|ing) in \d+\s*(day|hour)|missing.*scope|insufficient.*scope|^warning:)'
+        if ($authStatusOutput -match $warningPattern) {
             Write-Warn "gh auth status からの警告 (release 実行自体は継続):`n$authStatusOutput"
         }
     }

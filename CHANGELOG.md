@@ -53,7 +53,17 @@
 - **Release.bat の docstring 整理**: BOM 失敗症状の記述を「最初の 1 行目で `@echo off` ITSELF が fail する」に厳密化 (旧記述 "subsequent commands fail" は誤り)、chcp 65001 境界 banner を 4 行 → 1 行 marker に簡素化 (詳細は docstring と一元化)
 - **Release.bat に codepage 切替の Flow ダイアグラム追加**: `for /f` + 3 if 文の状態遷移 (`captured + numeric` / `captured + invalid` / `not captured`) を docstring 冒頭の Flow セクションで明示。3 つの独立 if を逐次読まなくても判断できる
 - **`Get-BundleReleaseNotes` の正規表現に `\Z` 追加**: 旧 lookahead `(?=^### |^---|^## )` は必ず後続セクションマーカーを要求し、Bundle entry が CHANGELOG 末尾 (後続なし) だと空文字列を返す regression。現状の CHANGELOG 構造 (Bundle 配下に Launcher / Manager / Release Tooling が続く) では発火しないが、将来セクション順を入れ替えた場合や最小 CHANGELOG での誤動作を防ぐ保険
-- **`gh auth status` の success 時 warning を抽出して `Write-Warn`**: `gh` は exit 0 でも stderr に token scope 不足 / token expiry 近接の warning を出すことがある。失敗ではないが早期の気付きをリリース担当に届けるため、stdout 中の `warning|expir` を検出して警告表示 (release 自体は継続)
+- **`gh auth status` の success 時 warning を抽出して `Write-Warn`**: `gh` は exit 0 でも stderr に token scope 不足 / token expiry 近接の warning を出すことがある。失敗ではないが早期の気付きをリリース担当に届けるため、出力中の特定パターンを検出して警告表示 (release 自体は継続)
+  - **シニアレビュー round 8 (M1) 反映**: 初版の `warning|expir` regex は `expiration` / `experimental` / 通常 success 時の `Token expires:` 等にも hit する false positive 多数。特異性高めの `(token has expired\|token expir(es\|ed\|ing) in \d+\s*(day\|hour)\|missing.*scope\|insufficient.*scope\|^warning:)` に厳密化
+- **シニアレビュー round 8 反映**:
+  - **H1**: `Release.bat` の `findstr` validation コメントに「`findstr` 自体の起動失敗 (minimal WinPE / PATH 破損) も同じ skip path に落ちる」旨を追記。区別不可なので同一扱いは意図的だが、コメントが反映していなかった
+  - **M2**: catalog ⇔ call site 整合性の最終 sweep。`Resolve-MsBuild` の vswhere call site (CAPTURE_STDOUT 該当) に label が欠落していたため追加。これで全 6 件の native `&` call site にパターンマーカー揃った
+  - **M3**: PS 7.3+ の `$PSNativeCommandUseErrorActionPreference` (default `$true`) が `& cmd` の非ゼロ exit code を terminating error 化する仕様を集約コメントに追記。本スクリプトの「2>&1 を外して `$LASTEXITCODE` で判定」イディオムが PS 7 で silent regression する可能性 + 回避策 (`$false` 固定 or try/catch) を記録
+  - **L1**: `Release.bat` の `setlocal enabledelayedexpansion` で引数中の `!` が消費される副作用を docstring に明記
+  - **L2**: anti-pattern の「変数 capture なし版」が現実に書かれる経緯 (副作用 only call で stderr も console に出したい意図の typo) を 1 行追加
+  - **L4**: chcp 65001 skip path で日本語 echo が文字化けする旨を ASCII 1 行で改めて警告 (line 89-90 の `[WARN]` だけでは見落とされる可能性に対する保険)
+  - **L5**: `Get-BundleReleaseNotes` の `\Z` コメントを精度向上。現実の発火条件は「初回 Bundle release + 後続セクション未追加の極初期状態」のみで、汎用的な「セクション順変更時」は誤誘導
+  - **H2 → 別 issue 化 (#141)**: `gh release view` の exit code 単独依存による silent false-negative。zip ビルド完了後に fail する path が残るが、本 PR スコープ外で `--json id` への移行を別 issue として trackable 化
 
 ### [Release Tooling v1.0.5] - 2026-05-11
 
