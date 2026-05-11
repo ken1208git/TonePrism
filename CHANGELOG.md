@@ -40,6 +40,10 @@
   - 影響範囲は preflight の 1 call site のみ。zip / upload ロジックには変更なし
 - **#141 (元シニアレビュー round 8 H2) を本 fix で close**: 当時「別 issue で `--json id` への移行」と切り出した内容を、本番踏み抜きを機にインラインで本格対応
 
+#### Known follow-up (本 PR スコープ外、別ブランチで対処予定)
+
+- **`gh auth status` の call site は本 PR の catalog 制約に未追従**: `Release.ps1` の `Assert-Preflight` 内 `$authStatusOutput = & gh auth status 2>&1 | Out-String` (CAPTURE_DIAGNOSTIC) は、本 PR で新設した制約 (「失敗 path で stderr を出すコマンドには TRY_CATCH_NATIVE 必須」) に該当する。`gh auth status` は未認証時 exit 1 + stderr 出力なので、`gh auth login` 未実行の dev clone / token 期限切れ / `GH_TOKEN` 消失 等のシナリオで NativeCommandError 例外で abort し、本来表示するはずの `Fail "gh 認証に失敗しました ..."` メッセージが届かない。本 PR のスコープは `gh release view` の 1 call site に絞ったため未対応、改善ブランチでまとめて TRY_CATCH_NATIVE に移行予定。シニアレビュー round 11 で同 PR 内対応 or CHANGELOG note のどちらかが許容ラインとされたため、後者を選択
+
 ### [Release Tooling v1.0.6] - 2026-05-11
 
 #### Fixed
