@@ -139,7 +139,7 @@ $ErrorActionPreference = 'Stop'
 #   # pattern: PASS_THROUGH (console 直書き、変数 capture なし)
 #   & native-cmd
 #   # ↑ stdout/stderr 両方とも親 console に直行
-#   # ↑ exit code チェック必須 (CAPTURE_STDOUT_PASS_STDERR と同じ理由)
+#   # ↑ exit code チェック必須 (成否を判定する唯一の信号が exit code のみのため)
 #
 #   # ANTI-PATTERN: STOP_TRAP (Stop モードで terminating error が飛ぶ)
 #   & native-cmd 2>&1                # 変数 capture なし版
@@ -627,9 +627,9 @@ function Assert-WorkingTreeClean {
 # ============================================================================
 
 function Get-BundleReleaseNotes {
-    param([switch]$SilentMissing)
+    param([switch]$AllowMissing)
     if (-not (Test-Path $ChangelogPath)) {
-        if ($SilentMissing) { return '' }
+        if ($AllowMissing) { return '' }
         Fail "CHANGELOG.md が見つかりません: $ChangelogPath"
     }
     $content = [System.IO.File]::ReadAllText($ChangelogPath, [System.Text.Encoding]::UTF8)
@@ -694,7 +694,7 @@ function Assert-Preflight {
         $script:ReleaseNotesText = $notes
         Write-Ok "CHANGELOG から Bundle v$Version セクションを抽出 ($($notes.Length) 文字)"
     } else {
-        $notes = Get-BundleReleaseNotes -SilentMissing
+        $notes = Get-BundleReleaseNotes -AllowMissing
         if ($notes) {
             $script:ReleaseNotesText = $notes
             Write-Info "CHANGELOG Bundle セクション検出: $($notes.Length) 文字 (-SkipUpload のため未使用)"

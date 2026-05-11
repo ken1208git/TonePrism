@@ -55,6 +55,13 @@
 - **`Get-BundleReleaseNotes` の正規表現に `\Z` 追加**: 旧 lookahead `(?=^### |^---|^## )` は必ず後続セクションマーカーを要求し、Bundle entry が CHANGELOG 末尾 (後続なし) だと空文字列を返す regression。現状の CHANGELOG 構造 (Bundle 配下に Launcher / Manager / Release Tooling が続く) では発火しないが、将来セクション順を入れ替えた場合や最小 CHANGELOG での誤動作を防ぐ保険
 - **`gh auth status` の success 時 warning を抽出して `Write-Warn`**: `gh` は exit 0 でも stderr に token scope 不足 / token expiry 近接の warning を出すことがある。失敗ではないが早期の気付きをリリース担当に届けるため、出力中の特定パターンを検出して警告表示 (release 自体は継続)
   - **シニアレビュー round 8 (M1) 反映**: 初版の `warning|expir` regex は `expiration` / `experimental` / 通常 success 時の `Token expires:` 等にも hit する false positive 多数。特異性高めの `(token has expired\|token expir(es\|ed\|ing) in \d+\s*(day\|hour)\|missing.*scope\|insufficient.*scope\|^warning:)` に厳密化
+- **シニアレビュー round 10 反映**:
+  - **L4**: catalog `PASS_THROUGH` の「exit code チェック必須」理由を cross-reference から自己完結型に修正。旧コメントは「CAPTURE_STDOUT_PASS_STDERR と同じ理由」と参照していたが、後者の理由は「出力空でも `$LASTEXITCODE` 非ゼロ誤判定防止」で変数 capture が前提。`PASS_THROUGH` は変数 capture なしで構造的に該当しない。`PASS_THROUGH` の真の理由「成否判定の信号が exit code のみのため」に書き換え
+  - **L5**: `Get-BundleReleaseNotes` の `-SilentMissing` switch を `-AllowMissing` にリネーム。旧名は「CHANGELOG.md が見つからない時」のみを silent にする読みだが、実体は「Bundle セクションが見つからなかった時」も含めて empty 返却する semantics。`AllowMissing` の方が実態に近い
+- **別 issue 化**:
+  - **M1 (#144)**: `Read-LauncherVersion` / `Read-ManagerVersion` / `Read-ComponentVersions` の命名規約 sweep — `Read-*` は PowerShell では対話的入力 (`Read-Host` 等) を意味、ファイル読み出しは `Get-*` 系が原則。さらに `Fail` する性質を踏まえると round 6/9 の `Test-*` → `Assert-*` sweep の対象範囲外として漏れていた
+  - **M2 (#145)**: catalog `CAPTURE_DIAGNOSTIC` ラベル説明 (「失敗時に表示するため」) が実態より狭い。実装では success 時の `^warning:` 検出にも再利用しているため、「両 stream 文字列化キャプチャ」相当に拡張すべき
+  - **M3 (#146)**: `Assert-WorkingTreeClean` の `$Context -like '*sync 後*'` 文字列マッチを `[switch]$PostSync` パラメータに構造化 — call site の文字列を変えると特例メッセージが silent に失われる脆さを解消
 - **シニアレビュー round 9 反映**:
   - **H1**: `Test-ExpectedFiles` → `Assert-ExpectedFiles` リネーム。round 6 で `Test-Preflight` → `Assert-Preflight` した時と完全に同じ条件 (`Fail` (exit 1) する関数で PowerShell の `Test-*` = `[bool]` 規約に違反) に該当していた漏れを解消、命名規約の対象範囲を完結させる
   - **M2**: `gh auth status` warning 検出 regex を `^warning:` (gh 公式の warning prefix) のみに簡素化。round 8 の特殊形式 (`token expir(es|ed|ing) in \d+...` 等) は false negative リスク (「Token will expire soon」「tomorrow」等の日数表記なし形式の取りこぼし) があり、かつ gh 出力フォーマット変更に脆弱。本格的な structured 検出は別 issue (#141 系) で JSON parse に寄せる方針なので、ここでは過信を生む特殊形式を持たない方向に倒した
