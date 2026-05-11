@@ -25,7 +25,7 @@
 - 重要： `CreateTables()` を編集したら必ず `MigrateVxToVy` を書く。スキーマ drift の温床。
 
 ## Cross-component Standards (ファイルログ)
-- 新規クライアントコンポーネント（Launcher / Manager / Monitor / Tools 等）を追加・改修する際は、ファイルログ基盤を必ず実装する。仕様詳細は **SPECIFICATION.md §3.6** を参照。
+- 新規クライアントコンポーネント（Launcher / Manager / Monitor 等）を追加・改修する際は、ファイルログ基盤を必ず実装する。仕様詳細は **SPECIFICATION.md §3.6** を参照。
 - 参照実装: [`GCTonePrism_Manager/Services/Logger.cs`](GCTonePrism_Manager/Services/Logger.cs), [`GCTonePrism_Launcher/scripts/logger.gd`](GCTonePrism_Launcher/scripts/logger.gd)
 - Logger 自体の障害は握り潰す（再帰ハング回避のため、Logger 内部例外はログにも書かない）。
 
