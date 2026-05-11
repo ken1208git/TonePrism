@@ -4,10 +4,10 @@
 
 .DESCRIPTION
     Phase 1 (#108): Launcher + Manager のビルドと zip 化のみ。
-        - RELEASE_VERSION ファイル = Bundle version の SoT
+        - CHANGELOG.md の最新 `### [Bundle v<X.Y.Z>]` エントリが Bundle version + release_notes 両方の SoT
         - version.gd = Launcher version の SoT、AssemblyInfo.cs = Manager version の SoT
         - Bundle version は zip タグに使う（例: v0.1.0）
-        - GitHub Releases の本文は CHANGELOG.md の `### [Bundle v<X.Y.Z>]` セクションから自動抽出（release_notes/ ディレクトリは持たない、CHANGELOG が SoT）
+        - GitHub Releases の本文は CHANGELOG.md の該当 Bundle セクションから自動抽出
         - Godot エディタとエクスポートテンプレートは tools/godot/ + %APPDATA%/Godot/export_templates/ に自動ダウンロード（バージョンピン留め + SHA256 検証 + キャッシュ + 3 回 retry）
         - Manager のビルドは Visual Studio 同梱の MSBuild (Roslyn) + 自動ダウンロード nuget.exe を使用
           - Manager コードが C# 7+ (ValueTuple / string interpolation 等) を使うため、Roslyn を含む MSBuild 14+ が必須
@@ -36,7 +36,8 @@
         - 開発者は別途 Godot 4.6 をインストールして開発（Release.ps1 は CLI export のみ自動化）
 
 .PARAMETER Version
-    リリースバージョン (Bundle version)。RELEASE_VERSION ファイルと一致する必要がある。
+    リリースバージョン (Bundle version)。省略時は CHANGELOG.md の最新 Bundle エントリから自動取得。
+    指定する場合は CHANGELOG.md の最新 Bundle エントリと一致する必要がある。
     SemVer 形式（M.m.p または M.m.p-suffix）。
 
 .PARAMETER GodotExe
@@ -75,7 +76,7 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][string]$Version,
+    [string]$Version = "",
     [string]$GodotExe = "",
     [string]$MsBuildExe = "",
     [string]$NugetExe = "",
@@ -88,6 +89,30 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# ----------------------------------------------------------------------------
+# CHANGELOG.md から最新 Bundle エントリの version を取得して $Version に反映
+# (RELEASE_VERSION ファイルは持たない、CHANGELOG が SoT)
+# ----------------------------------------------------------------------------
+$_changelogPathEarly = Join-Path $PSScriptRoot 'CHANGELOG.md'
+if (-not (Test-Path $_changelogPathEarly)) {
+    Write-Host "[FAIL] CHANGELOG.md が見つかりません: $_changelogPathEarly" -ForegroundColor Red
+    exit 1
+}
+$_changelogContent = [System.IO.File]::ReadAllText($_changelogPathEarly, [System.Text.Encoding]::UTF8)
+$_latestBundleMatch = [regex]::Match($_changelogContent, '(?m)^### \[Bundle v(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?)\]')
+if (-not $_latestBundleMatch.Success) {
+    Write-Host "[FAIL] CHANGELOG.md に '### [Bundle vX.Y.Z]' エントリが見つかりません" -ForegroundColor Red
+    exit 1
+}
+$_latestBundleVersion = $_latestBundleMatch.Groups[1].Value
+if ($Version -eq "") {
+    $Version = $_latestBundleVersion
+} elseif ($Version -ne $_latestBundleVersion) {
+    Write-Host "[FAIL] -Version 引数 ($Version) と CHANGELOG.md の最新 Bundle ($_latestBundleVersion) が一致しません" -ForegroundColor Red
+    Write-Host "       CHANGELOG.md の最新 Bundle エントリを先頭に追加するか、-Version を省略してください" -ForegroundColor Red
+    exit 1
+}
 
 # ============================================================================
 # 定数: ツールチェイン pin（バージョン上げる時はこのセクションを書き換える）
@@ -122,7 +147,6 @@ $StagingDir   = Join-Path $StagingRoot "v$Version"
 $FilesDir     = Join-Path $StagingDir 'files'
 $ZipPath      = Join-Path $StagingRoot "GCTonePrism_v$Version.zip"
 $ChangelogPath = Join-Path $RepoRoot 'CHANGELOG.md'
-$ReleaseVerFile = Join-Path $RepoRoot 'RELEASE_VERSION'
 
 $script:ResolvedGodot       = $null
 $script:ResolvedMsBuild     = $null
@@ -513,22 +537,11 @@ $script:ReleaseNotesText = ''
 function Test-Preflight {
     Write-Step "Preflight: 環境とパラメータを検証"
 
-    # Version 形式
+    # Version 形式 (CHANGELOG から取った時点で確定済みだが念のため)
     if ($Version -notmatch '^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?$') {
         Fail "Version 形式が不正です（期待: M.m.p または M.m.p-suffix）: $Version"
     }
-    Write-Ok "Version 形式 OK: $Version"
-
-    # RELEASE_VERSION との一致
-    if (-not (Test-Path $ReleaseVerFile)) {
-        Fail "RELEASE_VERSION ファイルが見つかりません: $ReleaseVerFile"
-    }
-    $bundleVer = (Get-Content $ReleaseVerFile -Raw).Trim()
-    $versionBase = ($Version -split '-')[0]
-    if ($bundleVer -ne $versionBase) {
-        Fail "RELEASE_VERSION ($bundleVer) と -Version の base ($versionBase) が一致しません。`n        bundle 版数を bump する場合は RELEASE_VERSION ファイルを書き換えてからコミットしてください。"
-    }
-    Write-Ok "Bundle version: $bundleVer"
+    Write-Ok "Bundle version (CHANGELOG 由来): $Version"
 
     # gh CLI
     if (-not $SkipUpload) {

@@ -3,13 +3,14 @@ REM ============================================================================
 REM Release.bat ? Release.ps1 のラッパー (ダブルクリック / 短縮コマンド用)
 REM
 REM 使い方:
-REM   .\Release.bat                  : RELEASE_VERSION の値で本番リリース
+REM   .\Release.bat                  : CHANGELOG.md の最新 Bundle エントリで本番リリース
 REM   .\Release.bat -SkipUpload      : zip 生成のみ、アップロードしない
 REM   .\Release.bat -DryRun -SkipUpload : ビルド確認のみ
 REM   .\Release.bat -Force           : uncommitted change 許容
 REM   .\Release.bat -NoPause         : 完了時に pause しない（CI / 自動化用）
 REM
 REM `-NoPause` 以外の引数はすべて Release.ps1 にそのまま渡す。
+REM Bundle version は Release.ps1 が CHANGELOG.md から自動取得 (-Version 省略可)。
 REM 詳細は Release.ps1 のヘルプ (Get-Help .\Release.ps1 -Detailed) を参照。
 REM ============================================================================
 
@@ -21,7 +22,7 @@ REM 引数を解析: -NoPause は剥がす、それ以外はそのまま PS に渡す
 set NO_PAUSE=0
 set FORWARDED_ARGS=
 :parseargs
-if "%~1"=="" goto :readversion
+if "%~1"=="" goto :runps
 if /i "%~1"=="-NoPause" (
     set NO_PAUSE=1
     shift
@@ -32,32 +33,12 @@ set FORWARDED_ARGS=!FORWARDED_ARGS! "%~1"
 shift
 goto :parseargs
 
-:readversion
-REM RELEASE_VERSION ファイルから Bundle version を読み取り
-if not exist "%SCRIPT_DIR%RELEASE_VERSION" (
-    echo [FAIL] RELEASE_VERSION ファイルが見つかりません: %SCRIPT_DIR%RELEASE_VERSION
-    if %NO_PAUSE% EQU 0 pause
-    exit /b 1
-)
-
-set REL_VERSION=
-for /f "usebackq delims=" %%v in ("%SCRIPT_DIR%RELEASE_VERSION") do (
-    if not defined REL_VERSION set REL_VERSION=%%v
-)
-set REL_VERSION=%REL_VERSION: =%
-
-if not defined REL_VERSION (
-    echo [FAIL] RELEASE_VERSION ファイルが空です
-    if %NO_PAUSE% EQU 0 pause
-    exit /b 1
-)
-
-echo Release.bat: RELEASE_VERSION = %REL_VERSION%
+:runps
 echo Release.bat: 引数 = %FORWARDED_ARGS%
 echo Release.bat: NoPause = %NO_PAUSE%
 echo.
 
-powershell.exe -ExecutionPolicy Bypass -File "%SCRIPT_DIR%Release.ps1" -Version %REL_VERSION% %FORWARDED_ARGS%
+powershell.exe -ExecutionPolicy Bypass -File "%SCRIPT_DIR%Release.ps1" %FORWARDED_ARGS%
 
 set EXIT_CODE=%ERRORLEVEL%
 echo.

@@ -29,12 +29,22 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
+### [Release Tooling v1.0.1] - 2026-05-11
+
+#### Changed
+
+- **`RELEASE_VERSION` ファイル廃止、`CHANGELOG.md` を Bundle version の SoT に統合 (#108 Phase 1)**: 旧設計では `RELEASE_VERSION` ファイル (リポジトリルート) と `CHANGELOG.md` の `### [Bundle vX.Y.Z]` エントリの 2 箇所にバージョン情報を持つ二重管理だったが、整合性チェックが必要になり煩雑だったため、CHANGELOG 1 本に集約
+  - `Release.ps1` の `-Version` 引数を optional に変更、省略時は `CHANGELOG.md` の最上段 (最新) の `### [Bundle vX.Y.Z]` エントリから自動取得
+  - `-Version` を明示指定した場合は CHANGELOG の最新版数と一致するか検証し、不一致なら fail
+  - `Release.bat` から `RELEASE_VERSION` ファイル読み取り処理を削除、引数を Release.ps1 にそのまま forward する形に簡素化
+  - SPEC §3.7.7 / AGENTS.md "Release and Versioning" / §3.7.8 チェックリストも同方式に対応する形に更新
+
 ### [Release Tooling v1.0.0] - 2026-05-11
 
 #### Added
 
 - **`Release.ps1` を repo root に新設 (#108 Phase 1)**: Launcher (Godot CLI export) + Manager (msbuild Release ビルド) を一括ビルドし、`release/v<version>/files/` に staging、`release/GCTonePrism_v<version>.zip` を生成、`gh release create` でアップロードする PowerShell スクリプト
-  - **Bundle version 制度**: `RELEASE_VERSION` ファイル (repo root) で Bundle 版数を管理。zip タグは `v<X.Y.Z>` 形式で既存の `Launcher_v*` / `Manager_v*` tag との命名衝突を回避
+  - **Bundle version 制度**: `CHANGELOG.md` の最新 `### [Bundle vX.Y.Z]` エントリで Bundle 版数を管理。zip タグは `v<X.Y.Z>` 形式で既存の `Launcher_v*` / `Manager_v*` tag との命名衝突を回避
   - **Godot エディタ + export templates の自動 DL**: `project.godot` の `config/features` から major.minor を読み取り、`$GodotPatchTable` で patch をピン留めして `tools/godot/<patch>/` と `%APPDATA%/Godot/export_templates/<patch>.stable/` にキャッシュ。SHA256 検証 + 3 回 retry + キャッシュ命中時 skip + 古い version は最大 2 件まで自動削除 (AppData 側は `.gctone_managed` マーカー方式で外部管理 templates を保護)
   - **DL 進捗表示**: PS 5.1 標準の `Invoke-WebRequest` はプログレスバー描画バグで DL が極端に遅くなるため、`System.Net.Http.HttpClient` でチャンク読み出し + 50MB / 5 秒ごとに `MB / MB (MB/s)` を表示
   - **NuGet 自動 DL**: `tools/nuget-<version>.exe` にバージョンピン留めでキャッシュ。`$NugetPinnedVersion = '6.10.0'`
