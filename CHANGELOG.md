@@ -41,6 +41,14 @@
   - `Invoke-NativeWithCapture` に `-ShowProgress` / `-ProgressMessage` パラメータを追加 (500ms 間隔で経過秒数を `\r` 上書き表示)
   - `Invoke-GhRelease` (gh release delete / create) を PASS_THROUGH → helper + ShowProgress に移行、zip サイズも表示 (`アップロード中 (zip 59 MB)... 12s 経過`)
   - 完了後は progress 行を消して、gh が stdout に出す release URL を `Write-Info` で再表示
+- **Wave 2 シニアレビュー反映 (M1-M3 + L1-L4)**:
+  - **M1**: catalog の PS 7.3+ 移行注意コメントから vswhere を削除 (Wave 1 で helper 化済みのため stale)、残る `&` イディオムは `Assert-WorkingTreeClean` の `git status --porcelain` のみと正確化
+  - **M2**: `Invoke-NativeWithCapture` docstring に「`$LASTEXITCODE` は更新されない、`.ExitCode` を使え」を明記。Process 直叩きの構造上 `&` の自動変数を avoid、caller が古い値を読む silent failure を防ぐ
+  - **M3**: ShowProgress の clear-line 幅を 70 ハードコード → `[Console]::WindowWidth - 1` で動的算出 (fallback 120)、ProgressMessage / 日本語 cell 幅 / elapsed 桁数に依存しない消去を実現
+  - **L1**: gh release create 成功時の URL 表示が gh の stdout フォーマット依存である旨をコメントに明記 (silent path だが exit code で成否は確実、URL は fatal ではないので allowed)
+  - **L2**: encoding pin コメントの「特に msbuild」断定を「Godot CLI / msbuild / nuget 等、`RedirectStandardOutput=$false` でコンソールハンドル継承するもの」に緩和。v0.1.0 で観察された発火例は msbuild 後だが、原因として等価候補
+  - **L3**: `$delResult.StdOut.Trim() ... $delResult.StdOut.TrimEnd()` の二重 trim を `-match '\S'` + 一時変数化で 1 回に
+  - **L4**: `Combined` の separator 判定コメントを 4 case 網羅 (stdout 空 / 末尾 `\n` あり / なし / stderr 空) に書き換え
 
 #### Changed
 

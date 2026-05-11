@@ -95,9 +95,12 @@ $ErrorActionPreference = 'Stop'
 # ============================================================================
 # Console output encoding を UTF-8 (no BOM) にピン留め
 # ============================================================================
-# PS 5.1 + chcp 65001 環境では、子プロセス (特に msbuild) がコンソールハンドル
-# を継承して走った後、後続の Write-Host で日本語が doubled rendering される
-# 既知バグがある (症状例: `完了` → `完完了了`、ASCII は影響なし)。
+# PS 5.1 + chcp 65001 環境では、子プロセス (Invoke-ExternalProcess 経由の
+# Godot CLI / msbuild / nuget 等、RedirectStandardOutput=$false でコンソール
+# ハンドルを継承するもの) が走った後、後続の Write-Host で日本語が doubled
+# rendering される既知バグがある (症状例: `完了` → `完完了了`、ASCII は影響なし)。
+# 観察例として本番 v0.1.0 release では msbuild 後に発火を確認、ただし原因として
+# Godot / nuget も同じ条件を満たすので等価候補。
 # `[Console]::OutputEncoding` を UTF-8 (no BOM) で明示ピン留めしておく + 各
 # Invoke-ExternalProcess 呼び出し後に再ピン留めすることで発火を防ぐ。
 # `$OutputEncoding` は PS pipeline → native command への送信時の encoding。
@@ -168,12 +171,14 @@ $OutputEncoding           = [System.Text.UTF8Encoding]::new($false)
 # PS 7.3+ 移行時の注意 (現状未対応):
 #   PS 7.3 以降は $PSNativeCommandUseErrorActionPreference (default $true) が
 #   追加され、`& native-cmd` の非ゼロ exit code 自体が ErrorActionPreference に
-#   従って terminating error 化する。本スクリプトの「`&` + $LASTEXITCODE 判定」
-#   イディオム (Assert-WorkingTreeClean の git status, vswhere の失敗パス等) は
-#   PS 7.3+ では `if ($LASTEXITCODE -ne 0)` に到達せず abort する。
-#   移行時には以下のいずれかが必須:
+#   従って terminating error 化する。本スクリプトで残る `&` イディオムは
+#   Assert-WorkingTreeClean の `git status --porcelain` のみ。これは PS 7.3+ で
+#   `if ($LASTEXITCODE -ne 0)` に到達せず abort する。
+#   (Invoke-NativeWithCapture / Invoke-ExternalProcess は Process 直叩きのため
+#    $PSNativeCommandUseErrorActionPreference の影響を受けず、移行後も安全)
+#   PS 7 移行時には以下のいずれかが必須:
 #     (a) script 冒頭で $PSNativeCommandUseErrorActionPreference = $false に固定
-#     (b) すべての `&` 系を Invoke-NativeWithCapture (Process 直叩き) に移行
+#     (b) 残った `&` 系 (git status) も Invoke-NativeWithCapture に移行
 #   現状は PS 5.1 を前提とした実装。
 # ============================================================================
 
@@ -294,9 +299,13 @@ function Invoke-NativeWithCapture {
           ExitCode - プロセスの終了コード (int)
           Combined - StdOut + "`n" + StdErr 連結 (検索用、stdout 末尾の改行有無で
                      joining 境界がぶれないよう明示 separator)
-        注: 子プロセス側が UTF-8 で書く前提。`gh` は UTF-8 だが、`vswhere` は ASCII
+        注 1: 子プロセス側が UTF-8 で書く前提。`gh` は UTF-8 だが、`vswhere` は ASCII
         中心、msbuild / nuget は OEM 系 codepage を出す可能性あり (本 helper は現状
         gh / vswhere のみで使用)。
+        注 2: 本関数は System.Diagnostics.Process 直叩きのため、PS 自動変数の
+        `$LASTEXITCODE` は **更新されない**。caller は必ず返り値の `.ExitCode` を
+        参照すること。helper 呼び出し直後に `if ($LASTEXITCODE -ne 0)` と書くと、
+        その前の `&` 呼び出しの古い値を読む silent failure path になるため厳禁。
     #>
     param(
         [Parameter(Mandatory)][string]$FilePath,
@@ -342,15 +351,21 @@ function Invoke-NativeWithCapture {
         if ($ShowProgress) {
             # 進捗描画なしコマンド (gh release create 等) のための擬似 progress。
             # 500ms 間隔で経過秒数を `\r` 上書き表示 (CR で行頭戻り、新しい数字で上書き)
+            # clear 幅は console window 幅から動的算出: ProgressMessage 長 / Japanese
+            # 文字 cell 幅 / elapsed 桁数によらず消し残しが出ない。WindowWidth 取得
+            # 失敗時 (ISE 等の非 console host) は 120 で fallback (cmd.exe / Windows
+            # Terminal の典型幅 80 を超える safe margin)
+            $clearWidth = try { [Console]::WindowWidth - 1 } catch { 120 }
+            if ($clearWidth -lt 30) { $clearWidth = 120 }
+            $clearLine = ' ' * $clearWidth
             $start = Get-Date
             while (-not $proc.HasExited) {
                 $elapsed = [int]((Get-Date) - $start).TotalSeconds
-                # 末尾 spaces は前回より短くなった場合の残骸を消すための padding
-                Write-Host -NoNewline "`r    $ProgressMessage ${elapsed}s 経過          "
+                Write-Host -NoNewline "`r    $ProgressMessage ${elapsed}s 経過"
                 Start-Sleep -Milliseconds 500
             }
             # progress 行を完全に消して cursor を行頭へ (後続の出力が綺麗に流れる)
-            Write-Host -NoNewline "`r$(' ' * 70)`r"
+            Write-Host -NoNewline "`r$clearLine`r"
         } else {
             $proc.WaitForExit()
         }
@@ -364,8 +379,12 @@ function Invoke-NativeWithCapture {
             throw "Invoke-NativeWithCapture: '$FilePath' の出力読み取りに失敗しました: $($_.Exception.Message)"
         }
 
-        # Combined の separator: stdout 末尾改行の有無に関わらず確実に行境界を
-        # 入れて、^pattern 系 regex が join 境界で取りこぼさないようにする
+        # Combined の separator 判定 (4 case 網羅):
+        #   stdout 空                          → $stderr そのまま (separator 不要、
+        #                                        Combined 先頭が stderr なので `^` regex は effective)
+        #   stdout 有 + 末尾 \n あり           → 単純連結 (改行はすでに含まれる)
+        #   stdout 有 + 末尾 \n なし + stderr → `\n` を明示挟む (^pattern 取りこぼし防止)
+        #   stderr 空                          → 上記いずれかで stdout のみ
         if ($stdout -and -not $stdout.EndsWith("`n")) {
             $combined = $stdout + "`n" + $stderr
         } else {
@@ -1013,9 +1032,10 @@ function Invoke-ExternalProcess {
         $exitCode = $proc.ExitCode
     } finally {
         if ($null -ne $proc) { $proc.Dispose() }
-        # msbuild など子プロセスが OutputEncoding を OEM に戻して去ると、後続の
-        # Write-Host で日本語が doubled rendering される PS 5.1 バグの予防的再ピン留め
-        # (script 冒頭の pin と二重防御)
+        # Invoke-ExternalProcess 経由の子プロセス (Godot CLI / msbuild / nuget) が
+        # コンソール encoding を OEM 系に戻して去ると、後続 Write-Host で日本語が
+        # doubled rendering される PS 5.1 バグの予防的再ピン留め (script 冒頭の
+        # pin と二重防御)
         [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
     }
     return $exitCode
@@ -1253,7 +1273,8 @@ function Invoke-GhRelease {
         if ($delResult.ExitCode -ne 0) {
             Fail "既存 release の削除に失敗しました:`n$($delResult.Combined.TrimEnd())"
         }
-        if ($delResult.StdOut.Trim()) { Write-Info $delResult.StdOut.TrimEnd() }
+        $delOut = $delResult.StdOut.TrimEnd()
+        if ($delOut -match '\S') { Write-Info $delOut }
     }
 
     # CHANGELOG から抽出した Bundle セクション本文を --notes に渡す
@@ -1268,8 +1289,14 @@ function Invoke-GhRelease {
         if ($uploadResult.ExitCode -ne 0) {
             Fail "gh release create に失敗しました:`n$($uploadResult.Combined.TrimEnd())"
         }
-        # 成功時、gh は release URL を stdout に dump するのでユーザーに表示
-        if ($uploadResult.StdOut.Trim()) { Write-Info $uploadResult.StdOut.TrimEnd() }
+        # 成功時、gh は release URL を stdout に dump するのでユーザーに表示。
+        # 注: gh の将来 version で stdout フォーマットが変わると URL が表示されない
+        # silent path になるが、成功は exit code で確実に取れているため fatal で
+        # はない (`Write-Ok "公開完了"` は出る、URL は手動で confirm 可能)。
+        # 同型の脆弱性は gh release view の "release not found" stderr マッチ側でも
+        # 抱えており、本格的な structured 検出は別 issue 系で対処予定。
+        $uploadOut = $uploadResult.StdOut.TrimEnd()
+        if ($uploadOut -match '\S') { Write-Info $uploadOut }
     } finally {
         Remove-Item $tmpNotes.FullName -Force -ErrorAction SilentlyContinue
     }
