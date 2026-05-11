@@ -29,6 +29,19 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
+### [Release Tooling v1.0.6] - 2026-05-11
+
+#### Fixed
+
+- **`Release.bat` を UTF-8 (no BOM) に変更してダブルクリック起動時の BOM 認識失敗を解消**: 実機で `.\Release.bat` 実行すると `'・ｿ@echo' は内部コマンドまたは外部コマンドとして認識されていません` のエラーで `@echo off` が機能せず、すべての REM 行がエコー出力 + Japanese 文字化けする問題が発生。原因は cmd.exe が UTF-8 BOM (`EF BB BF`) を CP932 として解釈して 1 行目を破壊していたこと
+  - BOM を外して UTF-8 (no BOM) + CRLF に書き直し、`chcp 65001` より前の REM / echo を全部 ASCII (英語) に統一
+  - `chcp 65001 >nul` 以降の REM / echo は引き続き日本語可
+  - docstring 冒頭にも「`chcp 65001` 行より上は ASCII-only 必須」のルールを明記、将来編集者の事故防止
+  - PR #138 で UTF-8 BOM 採用してた M2 想定の脱出経路をついに本採用 (Win 10 1809 以前と思しき cmd.exe 環境で BOM 認識が動かなかったため)
+- **`gh release view` が release 不在時に script を terminating error で止める問題を修正 (タグ衝突チェック)**: preflight でタグ衝突を確認する `& gh release view "v$Version" 2>&1` の `2>&1` が `$ErrorActionPreference='Stop'` 下で native command stderr を `NativeCommandError` の terminating error として扱い、本来「衝突なし、続行」のはずの正常系で script が止まっていた
+  - `2>&1` を `2>$null` に変更して stderr を捨て、`$LASTEXITCODE` だけで判定する形に修正
+  - 結果も使わないので出力を `Out-Null` に流す
+
 ### [Release Tooling v1.0.5] - 2026-05-11
 
 #### Fixed

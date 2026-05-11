@@ -620,7 +620,11 @@ function Test-Preflight {
 
     # 既存リリースとのタグ衝突
     if (-not $SkipUpload) {
-        $existingRelease = & gh release view "v$Version" 2>&1
+        # gh release view は release 不在時 stderr に "release not found" を出して
+        # 非ゼロで exit する。$ErrorActionPreference='Stop' 下で `2>&1` を使うと
+        # native command stderr が ErrorRecord として terminating error 扱いになり
+        # script が止まるため、stderr は $null に捨てて exit code だけで判定する。
+        & gh release view "v$Version" 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) {
             if ($Force) {
                 Write-Warn "タグ v$Version は既存だが -Force のため後で削除して作り直す"
