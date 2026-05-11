@@ -51,3 +51,10 @@ safety_before_restore_*.db
 
 # ゲームファイル（容量が大きいため除外）
 games/
+
+# リリース成果物（自動生成、git 追跡しない）
+release/
+
+# Release.ps1 が自動ダウンロードするツールチェーン
+tools/godot/
+tools/nuget-*.exe

@@ -13,10 +13,21 @@
 - 既存ファイルへの関数追加時、ファイルの責務と合わなければ別ファイルにする。
 
 ## Release and Versioning
-- コミット直前に Launcher / Manager / Monitor のバージョン番号を上げるべきかを必ず提案する。
+- コミット直前に Launcher / Manager / Monitor / Updater / Companions の各バージョン番号を上げるべきかを必ず提案する。
+- **Bundle version (`RELEASE_VERSION`) の bump はリリース実行時のみ**。`Release.bat` を押す直前にまとめて bump する。開発中の component bump とは別タイミング。
+- Bundle bump ルール:
+  - **Major**: いずれかの component に breaking change（DB schema 変更含む）
+  - **Minor**: いずれかの component で機能追加
+  - **Patch**: bugfix のみ
 - バージョンを上げる場合は `CHANGELOG.md` に変更内容を記載する。
-- タグ/Release を作成した場合は `CHANGELOG.md` 末尾のリンク定義を追記・更新する。
+- Bundle version の詳細仕様は **SPECIFICATION.md §3.7.7** を参照。
 - 新規クライアントコンポーネント追加時の更新チェックリストは **SPECIFICATION.md §3.7.8** を参照。
+
+## CHANGELOG Section Roles
+- `## Bundle` セクション: リリース単位の **summary**。Release.ps1 がここを抜き出して GitHub Releases の本文に流すため、エンドユーザー (来場スタッフ / 顧問の先生 / 部員) が読んで意味が分かる粒度で書く（1-3 行 + 影響を受けるコンポーネント版数の言及）
+- `## Launcher` / `## Manager` / 将来の `## Monitor` 等のコンポーネント別セクション: 開発者向けの **詳細履歴**。技術判断、PR / issue 番号、設計の経緯等を書く
+- `## Release Tooling` セクション: `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。リリース当日のエンドユーザーは見ないが、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す
+- 1 件の変更は **どれか 1 セクション** にのみ詳細を書き、他セクションからは「Manager v0.8.10 を参照」のような形で参照する。重複記述は避ける
 
 ## Specification Management
 - `SPECIFICATION.md` の議論・追記・修正が一段落したら、変更履歴セクションへの追記（日付・バージョン・変更内容・変更者）を必ず提案する。バージョン番号は既存最新からインクリメント。

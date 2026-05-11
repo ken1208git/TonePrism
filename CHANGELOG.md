@@ -9,6 +9,46 @@
 
 ---
 
+## Bundle（リリース全体 / `RELEASE_VERSION`）
+
+リリース zip 全体に付与する独立バージョン。GitHub Releases の本文として `Release.ps1` がこのセクションを抜き出して使う。エンドユーザー（来場スタッフ / 顧問の先生 / 部員）向けの **summary** を書く。技術詳細は `## Launcher` / `## Manager` / `## Release Tooling` 等の別セクションを参照。詳細仕様は [SPECIFICATION.md §3.7.7](SPECIFICATION.md) を参照。
+
+### [Bundle v0.1.0] - 2026-05-11
+
+初回 Bundle リリース。`Release.bat` 1 発でビルド + zip + GitHub Releases アップロードまで自動化する配布インフラを導入 (#108 Phase 1)。
+
+- Launcher: 変更なし (v0.5.16 同梱)
+- Manager: 変更なし (v0.8.9 同梱)
+- Release Tooling: `Release.ps1` / `Release.bat` を新規追加 → 詳細は `## Release Tooling` セクションを参照
+
+**Notes**: 本リリースは `Install.bat` 未同梱のため本番運用不可、Release.ps1 の動作確認用テストリリース扱い。Phase 2 以降で `Install.bat` / `Updater` / Manager UI アップデートタブ / Launcher 通知バナーを順次実装予定。
+
+---
+
+## Release Tooling（配布インフラ）
+
+`Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
+
+### [Release Tooling v1.0.0] - 2026-05-11
+
+#### Added
+
+- **`Release.ps1` を repo root に新設 (#108 Phase 1)**: Launcher (Godot CLI export) + Manager (msbuild Release ビルド) を一括ビルドし、`release/v<version>/files/` に staging、`release/GCTonePrism_v<version>.zip` を生成、`gh release create` でアップロードする PowerShell スクリプト
+  - **Bundle version 制度**: `RELEASE_VERSION` ファイル (repo root) で Bundle 版数を管理。zip タグは `v<X.Y.Z>` 形式で既存の `Launcher_v*` / `Manager_v*` tag との命名衝突を回避
+  - **Godot エディタ + export templates の自動 DL**: `project.godot` の `config/features` から major.minor を読み取り、`$GodotPatchTable` で patch をピン留めして `tools/godot/<patch>/` と `%APPDATA%/Godot/export_templates/<patch>.stable/` にキャッシュ。SHA256 検証 + 3 回 retry + キャッシュ命中時 skip + 古い version は最大 2 件まで自動削除 (AppData 側は `.gctone_managed` マーカー方式で外部管理 templates を保護)
+  - **DL 進捗表示**: PS 5.1 標準の `Invoke-WebRequest` はプログレスバー描画バグで DL が極端に遅くなるため、`System.Net.Http.HttpClient` でチャンク読み出し + 50MB / 5 秒ごとに `MB / MB (MB/s)` を表示
+  - **NuGet 自動 DL**: `tools/nuget-<version>.exe` にバージョンピン留めでキャッシュ。`$NugetPinnedVersion = '6.10.0'`
+  - **MSBuild 自動検出**: `vswhere` → PATH の順で VS / Build Tools を検出。Manager コードは C# 7+ (ValueTuple / string interpolation 等) を使うため Roslyn を含む MSBuild 14+ が必須で、Windows 同梱 .NET Framework MSBuild は不使用。MSBuild 未検出時は VS Build Tools のインストール手順 (https://aka.ms/vs/17/release/vs_BuildTools.exe、~1-2GB) を案内する詳細エラーで fail
+  - **`nuget restore` の x64/x86 漏れ修正**: `Stub.System.Data.SQLite.Core.NetFramework` の packages.config 形式 restore で `build/net46/x64/SQLite.Interop.dll` と `x86/` が展開されない既知問題を、nupkg を直接 `System.IO.Compression.ZipFile` で開いて欠損ファイルだけ抽出する形で防御
+  - **Process.Start ベースの外部プロセス呼び出し**: PowerShell 標準 `&` (call operator) は大量の stdout で非同期 return することがあり、`Start-Process -ArgumentList` は配列要素にスペースを含むと argument 分割するため、`ProcessStartInfo.Arguments` を自前で quoting する形を採用 (`Invoke-ExternalProcess` ヘルパー)
+  - **`-DryRun` / `-SkipUpload` / `-Force` / `-Offline` / `-GodotExe` / `-GodotPatch` / `-MsBuildExe` / `-NugetExe` 引数**: 開発・運用シナリオに合わせて部分実行可能
+  - **export_presets.cfg / project.godot の version 自動同期**: `version.gd` の MAJOR/MINOR/PATCH を SoT として `application/file_version`、`application/product_version`、`config/version` を Release.ps1 が機械的に書き換え (`Write-FileUtf8NoBom` で BOM なし UTF-8 で書き出し、Godot ConfigFile パーサと互換)
+  - **release_notes は CHANGELOG.md から自動抽出**: 該当 Bundle セクション (`### [Bundle v<X.Y.Z>]`) をパースして `gh release create --notes` に渡す。`release_notes/` ディレクトリは持たない（CHANGELOG が SoT、重複記述なし）
+- **`Release.bat` を repo root に新設**: `Release.ps1` のラッパーバッチ。`RELEASE_VERSION` ファイルを読んで `-Version` を自動補完するため、本番運用は `.\Release.bat` 1 発で完結（ダブルクリック実行も可能）。引数を Release.ps1 にそのまま forward する仕組みのため `.\Release.bat -DryRun -SkipUpload` 等の組み合わせも可能。`-NoPause` 引数で CI / 自動化用の pause 抑止にも対応 (Shift-JIS + CRLF で保存、cmd.exe の日本語環境互換)
+- **`.gitignore` 拡張**: `release/` (Release.ps1 生成物) / `tools/godot/` / `tools/nuget-*.exe` (auto-DL) を git 追跡対象から除外
+
+---
+
 ## Launcher（ランチャー本体）
 
 ### [Launcher v0.5.16] - 2026-05-11
