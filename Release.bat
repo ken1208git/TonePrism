@@ -44,6 +44,13 @@ REM       so an explicit `chcp %ORIGINAL_CODEPAGE%` at the end is required
 REM       (only if we successfully captured the original codepage; see below).
 REM       Otherwise the caller's cmd window keeps codepage 65001 after exit.
 REM
+REM Flow (this `for /f` + 3 if blocks below implement the following 3-way branch):
+REM   chcp output captured + numeric  -> chcp 65001, restore original on exit
+REM   chcp output captured + invalid  -> SKIP chcp 65001 (corrupted format)
+REM   chcp output not captured        -> SKIP chcp 65001 (redirect filter, etc.)
+REM Skipping the switch is the safe default: leaks codepage 65001 to the
+REM caller's cmd window can only happen if we entered the switch successfully.
+REM
 REM Expected chcp output structure (this REM block must stay ASCII because it
 REM runs before `chcp 65001`; the JP localized label is intentionally NOT
 REM pasted here, see CHANGELOG [Release Tooling v1.0.5] for the literal):

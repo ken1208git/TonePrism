@@ -118,22 +118,29 @@ $ErrorActionPreference = 'Stop'
 #   # pattern: CAPTURE_STDOUT (stdout は変数に、stderr は破棄)
 #   $output = & native-cmd 2>$null
 #
-#   # pattern: PASS_THROUGH (console 直書き、exit code チェック必須)
+#   # pattern: CAPTURE_STDOUT_PASS_STDERR (stdout は変数、stderr は console 直書き)
+#   $output = & native-cmd
+#   # ↑ stderr は親 console に直行 (ErrorRecord 化されないので Stop しない)
+#   # ↑ stdout は通常の string array として変数に capture される
+#   # ↑ exit code チェック必須 (出力が空でも $LASTEXITCODE 非ゼロのまま誤判定防止)
+#
+#   # pattern: PASS_THROUGH (console 直書き、変数 capture なし)
 #   & native-cmd
-#   # ↑ stderr は親 console に直行、PS 側で ErrorRecord 化されないので Stop しない
-#   # ↑ ただし $LASTEXITCODE を必ずチェック (redirect 削除だけだと出力が空でも
-#   #   $LASTEXITCODE 非ゼロのまま「正常」誤判定する経路ができる)
+#   # ↑ stdout/stderr 両方とも親 console に直行
+#   # ↑ exit code チェック必須 (CAPTURE_STDOUT_PASS_STDERR と同じ理由)
 #
-#   # ANTI-PATTERN: STOP_TRAP (Stop モードで確実に terminating error 飛ぶ)
-#   & native-cmd 2>&1
-#
-#   # ANTI-PATTERN: STREAM_TO_VAR (Out-String なし、PS バージョンと
-#   # $ErrorActionPreference の組合せで挙動が変わる。5.1+Stop では確実に fail)
-#   $var = & native-cmd 2>&1
+#   # ANTI-PATTERN: STOP_TRAP (Stop モードで terminating error が飛ぶ)
+#   & native-cmd 2>&1                # 変数 capture なし版
+#   $var = & native-cmd 2>&1         # 変数 capture あり版
+#   # ↑ どちらも同じ罠。本質は `2>&1` 自体: stderr が ErrorRecord として success
+#   #   stream に流れ、$ErrorActionPreference='Stop' の判定対象になる
+#   # ↑ 回避策は (a) Out-String を挟む = CAPTURE_DIAGNOSTIC、または
+#   #   (b) 2>&1 をやめる = SUPPRESS_BOTH / CAPTURE_STDOUT / *_PASS_STDERR 系
 #
 # 例外:
 #   - 実 release 操作 (Invoke-GhRelease 内の gh release create / delete) は
-#     redirect せず、出力をユーザーに見せる (PASS_THROUGH の派生)
+#     PASS_THROUGH を採用する。出力をユーザーに見せて何が起きているか追える
+#     ようにするのが目的 (preflight 中の SUPPRESS_BOTH とは方針が逆)
 # ============================================================================
 
 # -Offline / -DryRun は upload を行わないので preflight の gh 関連チェックも
@@ -570,7 +577,9 @@ function Resolve-Nuget {
 
 function Assert-WorkingTreeClean {
     param([string]$Context)
-    # pattern: PASS_THROUGH (冒頭集約コメント参照)
+    # pattern: CAPTURE_STDOUT_PASS_STDERR (冒頭集約コメント参照)
+    # stdout (--porcelain の差分行) は変数に capture、stderr (git の通常 error
+    # メッセージ) は console 直書きでユーザーに見せる
     # redirect を外しただけだと git 失敗時に $gitStatus が空文字になり「working
     # tree clean」と誤判定されるため、exit code チェックが必須
     $gitStatus = & git -C $RepoRoot status --porcelain
@@ -607,8 +616,12 @@ function Get-BundleReleaseNotes {
         Fail "CHANGELOG.md が見つかりません: $ChangelogPath"
     }
     $content = [System.IO.File]::ReadAllText($ChangelogPath, [System.Text.Encoding]::UTF8)
-    # `### [Bundle v0.1.0] - YYYY-MM-DD` から次の `### ` または `---` または `## ` まで
-    $pattern = '(?ms)^### \[Bundle v' + [regex]::Escape($Version) + '\][^\r\n]*\r?\n(.*?)(?=^### |^---|^## )'
+    # `### [Bundle v0.1.0] - YYYY-MM-DD` から次の `### ` / `---` / `## ` / EOF まで
+    # `\Z` は対象 Bundle entry が CHANGELOG.md 末尾 (後続セクションマーカーなし)
+    # の場合の保険。現状は Bundle 配下に Launcher / Manager 等が必ず続くため発火
+    # しないが、将来セクション順を変えた時や Bundle 単独の最小 CHANGELOG だった
+    # 場合に空文字列を返してしまう regression を防ぐ
+    $pattern = '(?ms)^### \[Bundle v' + [regex]::Escape($Version) + '\][^\r\n]*\r?\n(.*?)(?=^### |^---|^## |\Z)'
     $m = [regex]::Match($content, $pattern)
     if (-not $m.Success) { return '' }
     return $m.Groups[1].Value.Trim()
@@ -646,6 +659,13 @@ function Assert-Preflight {
             Fail "gh 認証に失敗しました (`gh auth login` を実行 / network / proxy / token expiry 等を確認)。`n$authStatusOutput"
         }
         Write-Ok "gh 認証 OK"
+        # gh は exit 0 でも stderr に early warning を出すことがある:
+        #   - token scope 不足の予兆 (release upload に必要な scope が削られた場合)
+        #   - token expiry が近い旨の通知
+        # 失敗してないので Fail はしないが、リリース担当に気付かせる
+        if ($authStatusOutput -match '(?im)warning|expir') {
+            Write-Warn "gh auth status からの警告 (release 実行自体は継続):`n$authStatusOutput"
+        }
     }
 
     # CHANGELOG から Bundle セクションを抽出できるか確認
@@ -1054,6 +1074,8 @@ function Invoke-GhRelease {
 
     if ($script:DeleteExistingRelease) {
         Write-Info "既存タグ v$Version を削除"
+        # pattern: PASS_THROUGH (例外節 - 冒頭集約コメント参照)
+        # 実 release 操作中の gh 出力はユーザーに見せる方針
         & gh release delete "v$Version" --yes --cleanup-tag
         if ($LASTEXITCODE -ne 0) { Fail "既存 release の削除に失敗しました" }
     }
@@ -1063,6 +1085,8 @@ function Invoke-GhRelease {
     $tmpNotes = New-TemporaryFile
     try {
         [System.IO.File]::WriteAllText($tmpNotes.FullName, $script:ReleaseNotesText, [System.Text.UTF8Encoding]::new($false))
+        # pattern: PASS_THROUGH (例外節 - 冒頭集約コメント参照)
+        # upload 進捗等を見せたいので redirect しない
         & gh release create "v$Version" $ZipPath --notes-file $tmpNotes.FullName --title "v$Version"
         if ($LASTEXITCODE -ne 0) { Fail "gh release create に失敗しました" }
     } finally {
