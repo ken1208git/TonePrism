@@ -807,13 +807,20 @@ csproj 命名規則は `GCTonePrism_<Companion 名>` で Manager (`GCTonePrism_M
 
 #### 3.7.1 配布形態
 
-- **配布物**: 1 つの zip ファイルにすべてのコンポーネントを同梱
-  - Launcher（Godot エクスポート成果物 + プラグイン DLL）
-  - Manager（`dotnet publish` 成果物）
-  - Companions（`dotnet publish` 成果物、§2.4 参照）
-  - Updater（`dotnet publish` 成果物、§3.7.4 参照）
-  - `Install.bat`（初回インストール用バッチスクリプト）
-  - `INSTALL_README.txt`（部員向けインストール手順書）
+- **配布物**: 1 つの zip ファイルにインストーラと全コンポーネントを同梱
+- **zip 内の正規構造**: zip ルートに `Install.bat` / `INSTALL_README.txt` を直置きし、`files/` wrapper の中に component フォルダ群を置く。Install.bat はこの `files/` をインストール先にコピーする規約のため、本構造は厳守する（§3.7.2 / §3.7.6 と整合）。
+
+  ```
+  GCTonePrism_v<version>.zip
+  ├── Install.bat                            # 初回インストール用バッチ
+  ├── INSTALL_README.txt                     # 部員向けインストール手順書
+  └── files/                                 # 配布物本体（中身が <インストール先>/GCTonePrism/ にコピーされる）
+      ├── GCTonePrism_Launcher/              # Launcher（Godot エクスポート成果物 + プラグイン DLL）
+      │   └── Companions/                    # Companions の実行ファイル群（§2.4）
+      ├── GCTonePrism_Manager/               # Manager（dotnet publish 成果物）
+      └── GCTonePrism_Updater/               # Updater（dotnet publish 成果物、§3.7.4）
+  ```
+
 - **配布チャネル**: GitHub Releases
   - 公開リポジトリのため学校 LAN 外からもアクセス可能（家での個人テスト等に対応）
   - リリースノートは Markdown で記述、Manager UI のアップデートタブにも表示される
@@ -861,7 +868,8 @@ Launcher / Manager / Companions / Updater は常に 1 つの zip に同梱され
       ↓
 [7] Manager: Updater.exe を spawn → 自身を終了
       ↓
-[8] Updater: Manager / Launcher の完全終了を待機
+[8] Updater: 該当 PC で稼働している全アップデート対象コンポーネント
+            （Manager / Launcher / 常駐 Companions / 将来 Monitor 等）の完全終了を待機
       ↓
 [9] Updater: 既存ファイルを置換（prism.db / games/ / backups/ / responses/ / logs/ は保護）
       ↓
@@ -882,7 +890,11 @@ Launcher / Manager / Companions / Updater は常に 1 つの zip に同梱され
 - **言語/環境**: C# / .NET Framework 4.8（Manager と同じ）
 - **ビルド管理**: `GCTonePrism.sln` で Manager / Companions / Monitor / Updater 自身を統合管理
 - **責務**:
-  - 対象プロセス（Manager / Launcher）の完全終了確認
+  - 該当 PC で稼働しているアップデート対象コンポーネントの完全終了確認
+    - 現行対象: Manager / Launcher / 常駐 Companions（PauseOverlay 等の常時稼働プロセス）
+    - 常駐 Companion が Launcher 終了に追従しない場合は明示的に停止（Windows ファイルロックで `GCTonePrism_Launcher/Companions/` 配下の置換が失敗するのを防ぐため）
+    - 新規コンポーネント追加時（Monitor 本格実装等）は本リストにも追加する（§3.7.8 のチェックリスト「Updater のプロセス終了待機ロジック追加」を参照）
+    - 「該当 PC で稼働している」と限定しているため、Monitor が動いていない展示 PC では Monitor の待機は不要、Monitor が動いている先生 PC ではこの限りでない、という運用差に自然対応する
   - staging エリアからの実ファイル置換
   - ユーザーデータ（`prism.db` / `games/` / `backups/` / `responses/` / `logs/`）の保護
   - 置換完了後の新 Manager.exe 起動
