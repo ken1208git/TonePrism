@@ -16,6 +16,7 @@
 - コミット直前に Launcher / Manager / Monitor のバージョン番号を上げるべきかを必ず提案する。
 - バージョンを上げる場合は `CHANGELOG.md` に変更内容を記載する。
 - タグ/Release を作成した場合は `CHANGELOG.md` 末尾のリンク定義を追記・更新する。
+- 新規クライアントコンポーネント追加時の更新チェックリストは **SPECIFICATION.md §3.7.8** を参照。
 
 ## Specification Management
 - `SPECIFICATION.md` の議論・追記・修正が一段落したら、変更履歴セクションへの追記（日付・バージョン・変更内容・変更者）を必ず提案する。バージョン番号は既存最新からインクリメント。
