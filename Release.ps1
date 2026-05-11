@@ -122,24 +122,32 @@ $ErrorActionPreference = 'Stop'
 #      # exit code チェック必須 (成否を判定する唯一の信号が exit code のみ)
 #      # 例: gh release create / delete (出力をユーザーに見せたい時)
 #
-#   4. pattern: CAPTURE_STDOUT (success exit が確証できるコマンド限定)
-#      $output = & native-cmd 2>$null
-#      # 失敗 path で stderr を出すコマンドでは Stop trap、Invoke-NativeWithCapture を使う
-#      # 例: vswhere -property installationPath (検索 hit なしは exit 0)
-#
-# ANTI-PATTERNS (使用禁止):
+# ANTI-PATTERNS (使用禁止) — いずれも踏み抜き履歴と deprecation 時点を 2 値で記録:
 #
 #   X. STOP_TRAP — & cmd 2>&1 / $var = & cmd 2>&1
 #      stderr が ErrorRecord として success stream に流れ Stop trap 発火。
+#      初回 deprecate from v1.0.0 (script 新設時点)。
 #      回避: Invoke-NativeWithCapture へ移行。
 #
-#   X. SUPPRESS_BOTH — & cmd 2>$null | Out-Null (v1.0.6 で踏み抜き廃止)
-#   X. CAPTURE_DIAGNOSTIC — $out = & cmd 2>&1 | Out-String (v1.0.8 で廃止)
-#      どちらも「失敗 path で stderr を出すコマンド」で同じ trap を踏む。
-#      Invoke-NativeWithCapture へ移行。
+#   X. SUPPRESS_BOTH — & cmd 2>$null | Out-Null
+#      踏み抜き: v1.0.6 (本番 release で gh release view が trap 発火)
+#      deprecation: v1.0.8 (anti-pattern として正式格下げ)
+#      「2>$null で stderr を捨てれば trap 防げる」前提が誤りだった
 #
-#   X. TRY_CATCH_NATIVE (v1.0.7 のみ存在、v1.0.8 で廃止)
-#      Invoke-NativeWithCapture が同じ目的を関数化したため不要。
+#   X. CAPTURE_DIAGNOSTIC — $out = & cmd 2>&1 | Out-String
+#      踏み抜き: v1.0.7 (gh release view の "release not found" stderr で trap)
+#      deprecation: v1.0.8 (anti-pattern として正式格下げ)
+#      「Out-String を経由すれば Stop の判定対象外」前提が誤りだった
+#
+#   X. CAPTURE_STDOUT — $out = & cmd 2>$null
+#      踏み抜き履歴なし、deprecation: v1.0.8
+#      SUPPRESS_BOTH と同じ構造 (2>$null) を持つため同じ trap 形状。
+#      本 script では vswhere で使用していたが v1.0.8 で helper に移行、
+#      残存 call site ゼロのため anti-pattern 化
+#
+#   X. TRY_CATCH_NATIVE — try { & cmd 2>&1 | Out-String } catch { ... }
+#      導入: v1.0.7 (CAPTURE_DIAGNOSTIC の trap 回避策として)
+#      deprecation: v1.0.8 (Invoke-NativeWithCapture が同目的を関数化したため不要)
 #
 # PS 7.3+ 移行時の注意 (現状未対応):
 #   PS 7.3 以降は $PSNativeCommandUseErrorActionPreference (default $true) が
@@ -265,16 +273,22 @@ function Invoke-NativeWithCapture {
         チェックは本関数を使うこと。
     .OUTPUTS
         PSCustomObject:
-          StdOut   - 標準出力 (string、UTF-8 でデコード)
-          StdErr   - 標準エラー (string、UTF-8 でデコード)
+          StdOut   - 標準出力 (string、UTF-8 として decode)
+          StdErr   - 標準エラー (string、UTF-8 として decode)
           ExitCode - プロセスの終了コード (int)
-          Combined - StdOut + StdErr 連結 (検索用)
+          Combined - StdOut + "`n" + StdErr 連結 (検索用、stdout 末尾の改行有無で
+                     joining 境界がぶれないよう明示 separator)
+        注: 子プロセス側が UTF-8 で書く前提。`gh` は UTF-8 だが、`vswhere` は ASCII
+        中心、msbuild / nuget は OEM 系 codepage を出す可能性あり (本 helper は現状
+        gh / vswhere のみで使用)。
     #>
     param(
         [Parameter(Mandatory)][string]$FilePath,
         [string[]]$Arguments = @()
     )
-    # 引数 quoting は Invoke-ExternalProcess と同じ規則 (DRY 化候補だが現状は単純なので duplicate)
+    # 引数 quoting は Invoke-ExternalProcess と同じ規則
+    # TODO (post v1.0.8): 共通化候補。MSVC argv 規則の特殊ケース (\ を引用直前) で
+    #                     2 箇所が silent に divergence する危険がある
     $quoted = $Arguments | ForEach-Object {
         if ($_ -match '\s|"') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
     }
@@ -287,19 +301,53 @@ function Invoke-NativeWithCapture {
     $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
     $psi.StandardErrorEncoding  = [System.Text.Encoding]::UTF8
 
-    $proc = [System.Diagnostics.Process]::Start($psi)
-    # 両 stream を async で読みデッドロック回避 (片方のバッファが満杯になると child が block する)
-    $outTask = $proc.StandardOutput.ReadToEndAsync()
-    $errTask = $proc.StandardError.ReadToEndAsync()
-    $proc.WaitForExit()
-    $stdout = $outTask.Result
-    $stderr = $errTask.Result
+    $proc = $null
+    try {
+        # Process.Start 自体が Win32Exception を出す path (file not found / 権限不足)。
+        # caller は Get-ToolPath で事前 check しているが、helper 単体としても
+        # 例外メッセージに何を実行しようとしたか含める
+        try {
+            $proc = [System.Diagnostics.Process]::Start($psi)
+        } catch {
+            throw "Invoke-NativeWithCapture: '$FilePath' の起動に失敗しました: $($_.Exception.Message)"
+        }
 
-    return [PSCustomObject]@{
-        StdOut   = $stdout
-        StdErr   = $stderr
-        ExitCode = $proc.ExitCode
-        Combined = $stdout + $stderr
+        # 両 stream を async で読みデッドロック回避 (片方のバッファが満杯になると
+        # child が block する)。WaitForExit() は timeout なし → network hang する
+        # コマンド (gh API 呼び出し) では preflight が無限待機する path が残る
+        # → TODO (post v1.0.8): -TimeoutSeconds 引数 + WaitForExit($ms) への移行
+        $outTask = $proc.StandardOutput.ReadToEndAsync()
+        $errTask = $proc.StandardError.ReadToEndAsync()
+        $proc.WaitForExit()
+
+        # AggregateException (faulted task) は明示メッセージで rethrow し、何が
+        # 失敗したか caller に伝える
+        try {
+            $stdout = $outTask.Result
+            $stderr = $errTask.Result
+        } catch {
+            throw "Invoke-NativeWithCapture: '$FilePath' の出力読み取りに失敗しました: $($_.Exception.Message)"
+        }
+
+        # Combined の separator: stdout 末尾改行の有無に関わらず確実に行境界を
+        # 入れて、^pattern 系 regex が join 境界で取りこぼさないようにする
+        if ($stdout -and -not $stdout.EndsWith("`n")) {
+            $combined = $stdout + "`n" + $stderr
+        } else {
+            $combined = $stdout + $stderr
+        }
+
+        return [PSCustomObject]@{
+            StdOut   = $stdout
+            StdErr   = $stderr
+            ExitCode = $proc.ExitCode
+            Combined = $combined
+        }
+    } finally {
+        # Process オブジェクトは Dispose 必須 (handle leak 防止)
+        if ($null -ne $proc) {
+            $proc.Dispose()
+        }
     }
 }
 
@@ -732,8 +780,10 @@ function Assert-Preflight {
         # 予兆 / token expiry 近接通知 等)。Fail はしないが、リリース担当に気付かせる。
         # 検出は `^warning:` (gh 公式の warning prefix) のみに絞る (token expiry 特殊形式
         # まで網羅する regex は false positive 多 + gh 出力フォーマット変更に脆弱)。
-        if ($authResult.Combined -match '(?im)^warning:') {
-            Write-Warn "gh auth status からの警告 (release 実行自体は継続):`n$($authResult.Combined.TrimEnd())"
+        # warning は実態として stderr 出力なので StdErr を直接見る (Combined だと
+        # stdout 末尾改行有無で行境界がブレうる)
+        if ($authResult.StdErr -match '(?im)^warning:') {
+            Write-Warn "gh auth status からの警告 (release 実行自体は継続):`n$($authResult.StdErr.TrimEnd())"
         }
     }
 

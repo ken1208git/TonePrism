@@ -43,8 +43,9 @@
 
 #### Known follow-up (post-v1.0.8 で対処予定)
 
-- **mojibake 完完了了**: msbuild 終了後の Write-Host で日本語が doubled rendering する PS 5.1 + chcp 65001 既知バグ。`[Console]::OutputEncoding` ピン留めで対処予定 (Wave 2)
+- **msbuild 後の日本語 doubled rendering**: 症状例 `完了` → `完完了了`。msbuild 終了後の `Write-Host` で日本語が二重描画される PS 5.1 + chcp 65001 既知バグ。`[Console]::OutputEncoding` ピン留めで対処予定 (Wave 2)
 - **upload progress**: `gh release create` が TTY 検出で進捗描画を OFF にするため、経過秒数表示で代替予定 (Wave 2)
+- **`Invoke-NativeWithCapture` 内 TODO**: (a) 引数 quoting helper 切り出し (`Invoke-ExternalProcess` と duplicate)、(b) `-TimeoutSeconds` 引数で network hang ガード — いずれも post v1.0.8 で対処
 - **既存 issue #142 / #143 / #144 / #146**: catalog 重複は本 v1.0.8 で大幅解消、`Release.bat` docstring 分離 / `Read-*` 命名 sweep / `$Context → $PostSync` は別途
 - **#145 (CAPTURE_DIAGNOSTIC ラベル拡張) を本 v1.0.8 で close**: パターン自体を anti-pattern に格下げしたため拡張議論不要に
 
