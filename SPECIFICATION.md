@@ -656,7 +656,7 @@ Godot は Win32 API へのアクセスが弱いため、ウィンドウ検知・
 - **配置**: `GCTonePrism_Launcher/Companions/`（Launcher プロジェクト配下）
 - **言語/環境**: C# / .NET Framework 4.8（Manager と同じ）
 - **ビルド管理**: リポジトリルートの `GCTonePrism.sln` で Manager / Companions / Monitor を統合管理（VS で一括ビルド・デバッグ可）
-- **配布**: ビルド成果物の `.exe` を Launcher 本体と同じディレクトリに配置（Launcher と一体としてリリース）
+- **配布**: ビルド成果物を `GCTonePrism_Launcher/Companions/<Companion 名>/` 配下にコピーして Launcher と一体としてリリース（dev-time の配置と同じ階層構造を runtime でも維持。詳細は §7.5.1 / §3.7.1 参照）
 
 #### 構成方針
 
@@ -863,7 +863,7 @@ Launcher / Manager / Companions / Updater は常に 1 つの zip に同梱され
       ↓
 [8] Updater: Manager / Launcher の完全終了を待機
       ↓
-[9] Updater: 既存ファイルを置換（prism.db / games/ / backups/ / responses/ は保護）
+[9] Updater: 既存ファイルを置換（prism.db / games/ / backups/ / responses/ / logs/ は保護）
       ↓
 [10] Updater: 新 Manager.exe を起動 → Updater 自身を終了
 ```
@@ -880,7 +880,7 @@ Launcher / Manager / Companions / Updater は常に 1 つの zip に同梱され
   - **トップレベル独立配置**: Manager / Launcher / Companions のいずれの subordinate でもない
   - アップデート対象（Manager / Launcher / Companions）が置換される間に生存し続ける必要があるため、置換対象外の領域に置く設計
 - **言語/環境**: C# / .NET Framework 4.8（Manager と同じ）
-- **ビルド管理**: `GCTonePrism.sln` で Manager / Companions / Monitor と統合管理
+- **ビルド管理**: `GCTonePrism.sln` で Manager / Companions / Monitor / Updater 自身を統合管理
 - **責務**:
   - 対象プロセス（Manager / Launcher）の完全終了確認
   - staging エリアからの実ファイル置換
