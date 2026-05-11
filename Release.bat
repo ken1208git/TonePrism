@@ -1,8 +1,11 @@
 ﻿@echo off
 REM ============================================================================
 REM Release.bat - Release.ps1 のラッパー (ダブルクリック / 短縮コマンド用)
-REM Windows cmd.exe は CRLF 改行を要求する (LF only だとパース失敗)。
-REM .gitattributes で *.bat eol=crlf を指定して checkout 時に CRLF を強制。
+REM
+REM ファイル形式: UTF-8 BOM + CRLF 改行 (Windows cmd.exe 要件)
+REM   - cmd.exe は LF only の bat をパース失敗するため CRLF 必須
+REM   - .gitattributes で *.bat eol=crlf を指定して checkout 時に CRLF を強制
+REM   - 日本語 echo の文字化け防止のため chcp 65001 で UTF-8 codepage に切替
 REM
 REM 使い方:
 REM   .\Release.bat                  : CHANGELOG.md の最新 Bundle エントリで本番リリース
@@ -17,6 +20,11 @@ REM 詳細は Release.ps1 のヘルプ (Get-Help .\Release.ps1 -Detailed) を参
 REM ============================================================================
 
 setlocal enabledelayedexpansion
+
+REM UTF-8 codepage 強制 (日本語 echo / REM コメントの文字化け防止、Win 10 旧版互換)
+REM 元の codepage を保存して exit 時に復元
+for /f "tokens=2 delims=:." %%a in ('chcp') do set _ORIG_CP=%%a
+chcp 65001 >nul
 
 set SCRIPT_DIR=%~dp0
 
@@ -54,4 +62,6 @@ if %NO_PAUSE% EQU 0 (
     echo.
     pause
 )
+REM codepage を元に戻す (pause より後で、ユーザーが pause 中も日本語 echo を見られるように)
+if defined _ORIG_CP chcp %_ORIG_CP% >nul
 exit /b %EXIT_CODE%
