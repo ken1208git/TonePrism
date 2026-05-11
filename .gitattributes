@@ -1,5 +1,9 @@
-# 改行コードをLFに統一
+# 改行コードを LF に統一 (デフォルト)
 * text=auto eol=lf
+
+# Windows 専用スクリプトは CRLF が必須 (cmd.exe は LF だと正しくパースしない)
+*.bat text eol=crlf
+*.cmd text eol=crlf
 
 # バイナリファイルとして扱う
 *.png binary

@@ -29,6 +29,15 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
+### [Release Tooling v1.0.5] - 2026-05-11
+
+#### Fixed
+
+- **`Release.bat` ダブルクリック / ターミナル実行で何も出力されない問題を修正**: リポジトリの `.gitattributes` に `* text=auto eol=lf` がデフォルト設定されており、checkout 時に `Release.bat` も LF 改行に強制されていた。**cmd.exe は LF only の bat を正しくパースできない**ため、ダブルクリックしても無音で fail していた (process は起動するが何も実行されない)
+  - `.gitattributes` に `*.bat text eol=crlf` / `*.cmd text eol=crlf` 例外を追加し、`.bat` / `.cmd` ファイルは checkout 時に CRLF 改行に強制
+  - `Release.bat` 自体も UTF-8 BOM + CRLF に書き換え (旧 SJIS 形式は VS Code 等のモダンエディタで開くと文字化けして編集体験が悪い、新形式は cmd.exe / エディタ両方で正しく扱える)
+  - `Release.bat` の docstring に CRLF 必須の経緯を追記
+
 ### [Release Tooling v1.0.4] - 2026-05-11
 
 #### Fixed
