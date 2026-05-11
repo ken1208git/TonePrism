@@ -528,7 +528,11 @@ function Resolve-Nuget {
 
 function Assert-WorkingTreeClean {
     param([string]$Context)
-    $gitStatus = & git -C $RepoRoot status --porcelain 2>&1
+    # 2>&1 を使わない: $ErrorActionPreference='Stop' 下で native command stderr が
+    # NativeCommandError として terminating error 扱いになる PS 5.1 の挙動を避けるため。
+    # `git status --porcelain` は正常系で stderr に出さないのでこのままで OK。
+    # (stderr に出る場合 = repo 不整合等のエラー、その時はコンソールに直接出して問題ない)
+    $gitStatus = & git -C $RepoRoot status --porcelain
     if ($LASTEXITCODE -eq 0 -and $gitStatus) {
         if ($Force) {
             Write-Warn "uncommitted change がありますが -Force のため続行 ($Context)"
@@ -588,9 +592,14 @@ function Test-Preflight {
             Fail "gh (GitHub CLI) が見つかりません。`n        https://cli.github.com/ からインストールするか、-SkipUpload で upload を抑止してください。"
         }
         Write-Ok "gh: $gh"
-        $authResult = & gh auth status 2>&1
+        # gh auth status は 正常系でも stderr に認証情報を書く (gh の設計仕様) ため
+        # `2>&1` を使うと $ErrorActionPreference='Stop' 下で NativeCommandError として
+        # terminating error 扱いになる。stderr を捨てて exit code だけで判定する。
+        # 失敗時のメッセージは「gh auth login を実行してください」だけで十分自明なので、
+        # 認証情報の詳細をユーザーに見せる必要はない。
+        & gh auth status 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) {
-            Fail "gh への認証ができていません。`gh auth login` を実行してください。`n$authResult"
+            Fail "gh への認証ができていません。`gh auth login` を実行してください。"
         }
         Write-Ok "gh 認証 OK"
     }
@@ -622,8 +631,12 @@ function Test-Preflight {
     if (-not $SkipUpload) {
         # gh release view は release 不在時 stderr に "release not found" を出して
         # 非ゼロで exit する。$ErrorActionPreference='Stop' 下で `2>&1` を使うと
-        # native command stderr が ErrorRecord として terminating error 扱いになり
-        # script が止まるため、stderr は $null に捨てて exit code だけで判定する。
+        # native command stderr が ErrorRecord として terminating error 扱いになる
+        # PS 5.1 の挙動を避けるため、stderr は $null に捨てて exit code だけで判定する。
+        #
+        # 加えて、release 存在時は gh が stdout に release の JSON / 詳細を dump する
+        # ため、preflight 中にコンソールに大量出力されるのを抑止する目的で
+        # `| Out-Null` で stdout も握り潰す。
         & gh release view "v$Version" 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) {
             if ($Force) {

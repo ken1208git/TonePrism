@@ -35,13 +35,16 @@ REM bat file character parsing. The file is no-BOM UTF-8, so the top of this
 REM script (above this point) is intentionally ASCII-only.
 REM
 REM Note: `chcp` is console-wide state and is NOT scoped by setlocal/endlocal,
-REM       so an explicit `chcp %ORIGINAL_CODEPAGE%` at the end is required.
-REM       (Otherwise the caller's cmd window keeps codepage 65001 after exit.)
+REM       so an explicit `chcp %ORIGINAL_CODEPAGE%` at the end is required
+REM       (only if we successfully captured the original codepage; see below).
+REM       Otherwise the caller's cmd window keeps codepage 65001 after exit.
 REM
-REM Expected chcp output formats:
-REM   English:  "Active code page: 932"
-REM   Japanese: "Current code page: 932" (translated, same colon layout)
-REM   Other locales also follow "label: number" pattern, so delims=: works.
+REM Expected chcp output structure (this REM block must stay ASCII because it
+REM runs before `chcp 65001`, so don't paste the actual localized strings here):
+REM   English locale (cp437/cp1252): "Active code page: 932"
+REM   Japanese locale (cp932):       label is the localized version (non-ASCII),
+REM                                  same "label: number" layout with colon
+REM   Other locales also follow "label: number" pattern, so `delims=:` works.
 for /f "tokens=2 delims=:" %%a in ('chcp') do set ORIGINAL_CODEPAGE=%%a
 REM `%VAR: =%` strips ALL spaces in VAR (chcp output is " 932" with leading space).
 if defined ORIGINAL_CODEPAGE set ORIGINAL_CODEPAGE=%ORIGINAL_CODEPAGE: =%

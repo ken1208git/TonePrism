@@ -37,10 +37,14 @@
   - BOM を外して UTF-8 (no BOM) + CRLF に書き直し、`chcp 65001` より前の REM / echo を全部 ASCII (英語) に統一
   - `chcp 65001 >nul` 以降の REM / echo は引き続き日本語可
   - docstring 冒頭にも「`chcp 65001` 行より上は ASCII-only 必須」のルールを明記、将来編集者の事故防止
-  - PR #138 で UTF-8 BOM 採用してた M2 想定の脱出経路をついに本採用 (Win 10 1809 以前と思しき cmd.exe 環境で BOM 認識が動かなかったため)
+  - PR #138 v1.0.5 docstring に書いていた「BOM 認識不能環境での脱出方法 (Win 10 1809 以前の cmd.exe build 等)」(同 PR でレビュアーが "M2" として指摘していた将来想定) をついに本採用
+  - 副作用として v1.0.5 で導入していた **`[WARN]` メッセージの日本語併記行を削除**。これは chcp 取得失敗時にのみ実行される警告だが、その時点で codepage は切り替わっておらず + ファイルが UTF-8 no-BOM になったため日本語 echo がコンソールで文字化けすることが確定的なため、ASCII-only ルールに整合させる形で撤回
 - **`gh release view` が release 不在時に script を terminating error で止める問題を修正 (タグ衝突チェック)**: preflight でタグ衝突を確認する `& gh release view "v$Version" 2>&1` の `2>&1` が `$ErrorActionPreference='Stop'` 下で native command stderr を `NativeCommandError` の terminating error として扱い、本来「衝突なし、続行」のはずの正常系で script が止まっていた
   - `2>&1` を `2>$null` に変更して stderr を捨て、`$LASTEXITCODE` だけで判定する形に修正
-  - 結果も使わないので出力を `Out-Null` に流す
+  - `| Out-Null` で stdout も握り潰し: release 存在時は gh が release の JSON / 詳細を stdout に dump するため、preflight 中にコンソールが汚れるのを抑止
+- **同種の `2>&1` 罠が他 2 箇所残っていたため一括修正**: 上記 1 箇所修正したシニアレビューで「同じ anti-pattern が他にもある」と指摘 → 全箇所統一
+  - `& gh auth status 2>&1` (`Test-Preflight`): gh auth status は **正常系でも stderr に認証情報を書く** (gh の設計仕様) ため、`2>&1` 経由で NativeCommandError 化する bomb。`2>$null | Out-Null` + exit code 判定の形に修正。失敗時メッセージは「`gh auth login` を実行してください」だけで十分自明なため、認証情報詳細の表示はやめた
+  - `& git -C $RepoRoot status --porcelain 2>&1` (`Assert-WorkingTreeClean`): git status は正常系で stderr を出さないため発火しないが、対称性のため `2>&1` を削除して native exit code だけで判定する形に統一
 
 ### [Release Tooling v1.0.5] - 2026-05-11
 
