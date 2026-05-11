@@ -33,11 +33,11 @@ REM enabledelayedexpansion is required for `!FORWARDED_ARGS!` concatenation in
 REM the parseargs loop below. Removing it breaks argument forwarding.
 REM
 REM Side effect: with delayed expansion enabled, `!` in argument values is
-REM consumed as the delayed-expansion token. e.g. `.\Release.bat -Tag "alpha!"`
-REM loses the `!`. PowerShell switches (-DryRun, -Force, -NoPause, -Version)
-REM never contain `!`, and `-Version` only takes M.m.p[-suffix] strings, so
-REM this is a non-issue in practice. Documented here in case someone adds a
-REM new pass-through arg that accepts arbitrary text.
+REM consumed as the delayed-expansion token. The current pass-through args
+REM (-DryRun / -Force / -NoPause / -Version / -SkipUpload / -Offline /
+REM -GodotExe / -GodotPatch / -MsBuildExe / -NugetExe) never contain `!`,
+REM so this is a non-issue today. Documented here in case a future
+REM pass-through arg accepts arbitrary text containing `!`.
 setlocal enabledelayedexpansion
 
 REM ---- UTF-8 codepage switch + restore-on-exit setup ----

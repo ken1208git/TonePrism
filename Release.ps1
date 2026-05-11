@@ -634,12 +634,7 @@ function Get-BundleReleaseNotes {
     }
     $content = [System.IO.File]::ReadAllText($ChangelogPath, [System.Text.Encoding]::UTF8)
     # `### [Bundle v0.1.0] - YYYY-MM-DD` から次の `### ` / `---` / `## ` / EOF まで
-    # `\Z` は「対象 Bundle entry の直後に終端マーカー (### / --- / ##) が一切
-    # 存在しない」極端なケースの保険。AGENTS.md ルールで新 Bundle entry は最上段
-    # 追加なので「最新 = 末尾」になるのは初回 Bundle release で他 Bundle / 後続
-    # Launcher/Manager セクションが未追加の極初期状態のみ。現状の CHANGELOG では
-    # 発火しないが、将来この regex の前提が崩れる方向 (構造変更 / CHANGELOG 縮小)
-    # に動いた時の防御。`\Z` の追加コストはほぼゼロなので入れておく
+    # `\Z`: 後続セクション無しの初回 Bundle release だけが該当する保険
     $pattern = '(?ms)^### \[Bundle v' + [regex]::Escape($Version) + '\][^\r\n]*\r?\n(.*?)(?=^### |^---|^## |\Z)'
     $m = [regex]::Match($content, $pattern)
     if (-not $m.Success) { return '' }
@@ -653,8 +648,6 @@ $script:ReleaseNotesText = ''
 # ============================================================================
 
 function Assert-Preflight {
-    # Test-* verb は [bool] 返却が PowerShell 規約だが、preflight は違反時に Fail
-    # (exit 1) する性質なので Assert-* に揃える (同ファイル内の Assert-WorkingTreeClean と統一)
     Write-Step "Preflight: 環境とパラメータを検証"
 
     # Version 形式 (CHANGELOG から取った時点で確定済みだが念のため)
@@ -678,18 +671,15 @@ function Assert-Preflight {
             Fail "gh 認証に失敗しました (`gh auth login` を実行 / network / proxy / token expiry 等を確認)。`n$authStatusOutput"
         }
         Write-Ok "gh 認証 OK"
-        # gh は exit 0 でも stderr に early warning を出すことがある:
-        #   - token scope 不足の予兆 (release upload に必要な scope が削られた場合)
-        #   - token expiry が近い旨の通知
-        # 失敗してないので Fail はしないが、リリース担当に気付かせる。
+        # gh は exit 0 でも stderr に early warning を出すことがある (token scope
+        # 不足の予兆 / token expiry 近接通知 等)。失敗してないので Fail はしないが、
+        # リリース担当に気付かせる。
         #
-        # regex は特異性高めに絞り込み (旧 `warning|expir` は `expiration` や
-        # `experimental` 等の通常 success 文言にも hit する false positive 多数)。
-        # gh の出力フォーマットは version で変動するので「!= 100% 検出」前提:
-        # 真の early-warning 検出は本格的には別 issue (#141 系) で structured
-        # JSON parse に寄せる方が確実。
-        $warningPattern = '(?im)(token has expired|token expir(es|ed|ing) in \d+\s*(day|hour)|missing.*scope|insufficient.*scope|^warning:)'
-        if ($authStatusOutput -match $warningPattern) {
+        # 検出は `^warning:` (gh の公式 warning prefix) のみに絞る。token expiry の
+        # 特殊形式までカバーする regex は false positive を増やし、かつ gh の出力
+        # フォーマット変更に脆弱。本格的な structured 検出は別 issue (#141 系) で
+        # JSON parse に寄せる方針なので、ここでは過信を生む特殊形式を持たない。
+        if ($authStatusOutput -match '(?im)^warning:') {
             Write-Warn "gh auth status からの警告 (release 実行自体は継続):`n$authStatusOutput"
         }
     }
@@ -1042,7 +1032,7 @@ function Copy-Templates {
 # Phase 7: ExpectedFiles 検証
 # ============================================================================
 
-function Test-ExpectedFiles {
+function Assert-ExpectedFiles {
     Write-Step "ExpectedFiles 検証"
 
     # 期待ファイル一覧
@@ -1196,7 +1186,7 @@ Clear-Staging
 Build-Launcher
 Build-Manager
 Copy-Templates
-Test-ExpectedFiles
+Assert-ExpectedFiles
 Clear-OldGodot
 
 if ($DryRun) {

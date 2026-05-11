@@ -55,6 +55,15 @@
 - **`Get-BundleReleaseNotes` の正規表現に `\Z` 追加**: 旧 lookahead `(?=^### |^---|^## )` は必ず後続セクションマーカーを要求し、Bundle entry が CHANGELOG 末尾 (後続なし) だと空文字列を返す regression。現状の CHANGELOG 構造 (Bundle 配下に Launcher / Manager / Release Tooling が続く) では発火しないが、将来セクション順を入れ替えた場合や最小 CHANGELOG での誤動作を防ぐ保険
 - **`gh auth status` の success 時 warning を抽出して `Write-Warn`**: `gh` は exit 0 でも stderr に token scope 不足 / token expiry 近接の warning を出すことがある。失敗ではないが早期の気付きをリリース担当に届けるため、出力中の特定パターンを検出して警告表示 (release 自体は継続)
   - **シニアレビュー round 8 (M1) 反映**: 初版の `warning|expir` regex は `expiration` / `experimental` / 通常 success 時の `Token expires:` 等にも hit する false positive 多数。特異性高めの `(token has expired\|token expir(es\|ed\|ing) in \d+\s*(day\|hour)\|missing.*scope\|insufficient.*scope\|^warning:)` に厳密化
+- **シニアレビュー round 9 反映**:
+  - **H1**: `Test-ExpectedFiles` → `Assert-ExpectedFiles` リネーム。round 6 で `Test-Preflight` → `Assert-Preflight` した時と完全に同じ条件 (`Fail` (exit 1) する関数で PowerShell の `Test-*` = `[bool]` 規約に違反) に該当していた漏れを解消、命名規約の対象範囲を完結させる
+  - **M2**: `gh auth status` warning 検出 regex を `^warning:` (gh 公式の warning prefix) のみに簡素化。round 8 の特殊形式 (`token expir(es|ed|ing) in \d+...` 等) は false negative リスク (「Token will expire soon」「tomorrow」等の日数表記なし形式の取りこぼし) があり、かつ gh 出力フォーマット変更に脆弱。本格的な structured 検出は別 issue (#141 系) で JSON parse に寄せる方針なので、ここでは過信を生む特殊形式を持たない方向に倒した
+  - **L2**: `Get-BundleReleaseNotes` の `\Z` コメントを 6 行 → 1 行に圧縮。発火確率の低さに対しコメント長が不釣り合いだった
+  - **L4**: `Assert-Preflight` 関数内のリネーム言い訳コメント (2 行) を削除。リネーム判断の justification は CHANGELOG / PR 説明に書く内容で、関数定義に残すと半年後の reader が「なぜここに?」となる
+  - **L5**: `Release.bat` の `enabledelayedexpansion` 副作用例から架空引数 `-Tag` を削除、現存 pass-through 引数の列挙 + 「新規 pass-through 引数追加時の注意」framing に変更
+- **別 issue 化**:
+  - **M1 (#142)**: catalog vs per-site コメントの方針統一 — ラベル参照 + 詳細説明の二重化がメンテナンスコストを生む構造に逆戻りしていた問題。本 PR スコープ外で trackable 化
+  - **M3 (#143)**: `Release.bat` の docstring 経緯を `SPECIFICATION.md` に分離 — 100/150 行が REM の状態を整理する separate PR 候補
 - **シニアレビュー round 8 反映**:
   - **H1**: `Release.bat` の `findstr` validation コメントに「`findstr` 自体の起動失敗 (minimal WinPE / PATH 破損) も同じ skip path に落ちる」旨を追記。区別不可なので同一扱いは意図的だが、コメントが反映していなかった
   - **M2**: catalog ⇔ call site 整合性の最終 sweep。`Resolve-MsBuild` の vswhere call site (CAPTURE_STDOUT 該当) に label が欠落していたため追加。これで全 6 件の native `&` call site にパターンマーカー揃った
