@@ -58,6 +58,7 @@
 
 .PARAMETER DryRun
     ビルドのみ実施。zip 化と upload を skip。Godot/Manager 出力の確認用。
+    -SkipUpload を自動で ON にする (upload しないため gh preflight も不要)。
 
 .PARAMETER Force
     既存タグ衝突時に gh release delete してから作り直す。
@@ -91,9 +92,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# -Offline は upload と GitHub API 呼び出しを全部 skip する意味なので、
-# 同時に -SkipUpload も強制 ON とみなす（Codex P2 #137）
-if ($Offline -and -not $SkipUpload) {
+# -Offline / -DryRun は upload を行わないので、preflight の gh 関連チェックも
+# skip するため -SkipUpload を強制 ON とみなす（Codex P2 #137 ×2）
+# - -Offline: そもそも network 不可なので gh API 呼び出し不可
+# - -DryRun: zip 化と upload を skip するモード、preflight だけ network 必須にする意味なし
+if (($Offline -or $DryRun) -and -not $SkipUpload) {
     $SkipUpload = $true
 }
 
