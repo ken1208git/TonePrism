@@ -167,6 +167,32 @@ $script:ManagerVersion      = $null
 $script:DeleteExistingRelease = $false
 
 # ============================================================================
+# Native command の `2>&1` trap (PS 5.1 + $ErrorActionPreference='Stop' 環境)
+# ============================================================================
+# このスクリプトでは git / gh / msbuild / nuget 等の native command を呼び出すが、
+# `2>&1` で stderr を success stream に merge すると PS 5.1 + Stop モードでは
+# native command の stderr 出力が NativeCommandError の terminating error として
+# 扱われ、本来「正常系」のはずの path で script が止まる。
+#
+# 採用パターン:
+#   1. 出力を捨てたい場合 (preflight の存在確認系):
+#      & native-cmd 2>$null | Out-Null    # stderr 捨て、stdout 捨て、exit code 判定
+#   2. 出力を診断情報として保持したい場合 (失敗時に表示したい):
+#      $output = & native-cmd 2>&1 | Out-String
+#      ↑ Out-String が pipeline 中で ErrorRecord を文字列化するため Stop は飛ばない (PS 5.1 で実機確認済み)
+#
+# 採用しないパターン:
+#   & native-cmd 2>&1                  # 単独 pipeline 末尾だと NativeCommandError 飛ぶ
+#   $var = & native-cmd 2>&1           # 変数代入のみ (Out-String なし) は PS バージョン依存で不安定
+#
+# 例外:
+#   - 実 release 操作 (Invoke-GhRelease 内の gh release create / delete) は redirect
+#     せず、出力をユーザーに見せる
+#   - `git -C ... status --porcelain` は stderr に出ない前提で redirect 省略、ただし
+#     $LASTEXITCODE は明示的にチェック (regression 防止)
+# ============================================================================
+
+# ============================================================================
 # 出力ユーティリティ
 # ============================================================================
 
@@ -528,12 +554,16 @@ function Resolve-Nuget {
 
 function Assert-WorkingTreeClean {
     param([string]$Context)
-    # 2>&1 を使わない: $ErrorActionPreference='Stop' 下で native command stderr が
-    # NativeCommandError として terminating error 扱いになる PS 5.1 の挙動を避けるため。
-    # `git status --porcelain` は正常系で stderr に出さないのでこのままで OK。
-    # (stderr に出る場合 = repo 不整合等のエラー、その時はコンソールに直接出して問題ない)
+    # 2>&1 native command stderr trap については Release.ps1 冒頭の集約コメントを参照。
+    # ここでは redirect なしで stderr をコンソールに直書きさせ、exit code で異常系を catch。
     $gitStatus = & git -C $RepoRoot status --porcelain
-    if ($LASTEXITCODE -eq 0 -and $gitStatus) {
+    if ($LASTEXITCODE -ne 0) {
+        # git status 自体が失敗 (壊れた repo / 不正なパス / 権限問題 等)。
+        # stderr が直前にコンソールに出ているはずだが、それだけだと preflight が
+        # silent pass する regression を踏むので Fail で明示的に止める。
+        Fail "git status の実行に失敗しました (exit code: $LASTEXITCODE, context: $Context)"
+    }
+    if ($gitStatus) {
         if ($Force) {
             Write-Warn "uncommitted change がありますが -Force のため続行 ($Context)"
             ($gitStatus -split "`n") | ForEach-Object { Write-Info "    $_" }
@@ -592,14 +622,13 @@ function Test-Preflight {
             Fail "gh (GitHub CLI) が見つかりません。`n        https://cli.github.com/ からインストールするか、-SkipUpload で upload を抑止してください。"
         }
         Write-Ok "gh: $gh"
-        # gh auth status は 正常系でも stderr に認証情報を書く (gh の設計仕様) ため
-        # `2>&1` を使うと $ErrorActionPreference='Stop' 下で NativeCommandError として
-        # terminating error 扱いになる。stderr を捨てて exit code だけで判定する。
-        # 失敗時のメッセージは「gh auth login を実行してください」だけで十分自明なので、
-        # 認証情報の詳細をユーザーに見せる必要はない。
-        & gh auth status 2>$null | Out-Null
+        # 2>&1 native command stderr trap については冒頭集約コメントを参照。
+        # gh auth status は正常系でも stderr に認証情報を書く gh 仕様。
+        # 診断情報を活かすため Out-String 経由で文字列化して捕捉 (PS 5.1 では
+        # 変数代入 + Out-String パターンは ErrorRecord を文字列化するため Stop しない)。
+        $authResult = & gh auth status 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
-            Fail "gh への認証ができていません。`gh auth login` を実行してください。"
+            Fail "gh 認証に失敗しました (`gh auth login` を実行 / network / proxy / token expiry 等を確認)。`n$authResult"
         }
         Write-Ok "gh 認証 OK"
     }
@@ -629,14 +658,10 @@ function Test-Preflight {
 
     # 既存リリースとのタグ衝突
     if (-not $SkipUpload) {
-        # gh release view は release 不在時 stderr に "release not found" を出して
-        # 非ゼロで exit する。$ErrorActionPreference='Stop' 下で `2>&1` を使うと
-        # native command stderr が ErrorRecord として terminating error 扱いになる
-        # PS 5.1 の挙動を避けるため、stderr は $null に捨てて exit code だけで判定する。
-        #
-        # 加えて、release 存在時は gh が stdout に release の JSON / 詳細を dump する
-        # ため、preflight 中にコンソールに大量出力されるのを抑止する目的で
-        # `| Out-Null` で stdout も握り潰す。
+        # 2>&1 native command stderr trap については冒頭集約コメントを参照。
+        # gh release view は release 不在時 stderr へ + 非ゼロ exit。
+        # stdout も Out-Null で捨てるのは、release 存在時 gh が JSON / 詳細を
+        # stdout に dump して preflight コンソールが汚れるのを防ぐため。
         & gh release view "v$Version" 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) {
             if ($Force) {

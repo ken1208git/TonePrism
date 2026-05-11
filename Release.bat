@@ -97,9 +97,7 @@ if %NO_PAUSE% EQU 0 (
     echo.
     pause
 )
-REM codepage を元に戻す (chcp は console-wide で setlocal の endlocal 対象外、
-REM 明示復元が必須。ここを削ると呼び出し元 cmd 窓の codepage に副作用が残る)
-REM pause より後にしてあるのは、直前の echo メッセージ ([FAIL] / 正常終了 等) を
-REM ユーザーが pause 中も正しく表示し続けるため (chcp 復元すると過去出力の見え方が崩れうる)
+REM 呼出元 cmd の codepage を復元 (詳細経緯は冒頭 docstring 参照)。
+REM pause より後にしているのは、直前 echo を pause 中も正しく表示し続けるため。
 if defined ORIGINAL_CODEPAGE chcp %ORIGINAL_CODEPAGE% >nul
 exit /b %EXIT_CODE%
