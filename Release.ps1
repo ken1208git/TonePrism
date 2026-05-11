@@ -93,99 +93,64 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # ============================================================================
-# Native command の `2>&1` trap (PS 5.1 + $ErrorActionPreference='Stop' 環境)
+# Native command 呼び出しの方針 (v1.0.8 で再整理)
 # ============================================================================
-# このスクリプトでは git / gh / msbuild / nuget 等の native command を呼び出すが、
-# `2>&1` で stderr を success stream に merge すると PS 5.1 + Stop モードでは
-# native command の stderr 出力が NativeCommandError の terminating error として
-# 扱われ、本来「正常系」のはずの path で script が止まる。
+# 経緯: PS 5.1 + $ErrorActionPreference='Stop' 下では、`&` 演算子 + native
+# command の組み合わせで「exit 非ゼロ + stderr 出力」を返すコマンドが
+# NativeCommandError の terminating error を発生させる。
+# v1.0.6 までは `2>$null` / `2>&1 | Out-String` 系で回避できると考えていたが、
+# v1.0.7 で実証された通り PS の error stream への ErrorRecord 化が redirect
+# よりも先に発火するため redirect は防御にならない。v1.0.8 で
+# `Invoke-NativeWithCapture` ヘルパー (System.Diagnostics.Process 直叩き) に
+# 一本化、`&` 系の patterns は「success exit が確証できる場合のみ」に格下げ。
 #
-# 機構: $ErrorActionPreference='Stop' は success stream に流れる ErrorRecord を
-# terminating error として扱う。`2>&1` は stderr の string output を ErrorRecord
-# として success stream に流すため Stop の判定対象になる。一方 Out-String を経由
-# すると ErrorRecord が string 化される。(PS 5.1 で確認。PS 7.x は stream 処理
-# 仕様が異なるため要再検証)
+# 採用ガイドライン (call site では「pattern: 名前」で参照):
 #
-# !! 重要な制約 (v1.0.7 で訂正): !!
-#   Out-String 経由でも、native command が **exit 非ゼロ + stderr 出力** という
-#   組み合わせを返した場合は Stop の trap が飛ぶ。これは PS が native command 用
-#   に別途生成する NativeCommandError ErrorRecord が Out-String の pipeline 化
-#   よりも先 (exit code 確定時点) に作られるため。
-#   - success path で stderr を出すコマンド (例: gh auth status exit 0): OK
-#   - 失敗 path で stderr を出すコマンド (例: gh release view exit 1): NG
-#   後者には TRY_CATCH_NATIVE を使う必要がある。
+#   1. Invoke-NativeWithCapture (RECOMMENDED for any failable command)
+#      $result = Invoke-NativeWithCapture -FilePath 'gh' -Arguments @('release','view','v1.0','--json','id')
+#      # → $result.StdOut / $result.StdErr / $result.ExitCode / $result.Combined
+#      # System.Diagnostics.Process で PS error stream を経由しないため罠なし。
+#      # 失敗 path で stderr を出すコマンドは必ずこれ (gh release view / gh auth status 等)。
 #
-# PS 7.3+ 移行時の追加注意 (現状未対応):
+#   2. pattern: CAPTURE_STDOUT_PASS_STDERR
+#      $output = & native-cmd        # stdout は変数 capture、stderr は console 直書き
+#      # exit code チェック必須 ($output が空でも非ゼロ exit を見落とさないため)
+#      # 例: git status --porcelain (Assert-WorkingTreeClean)
+#
+#   3. pattern: PASS_THROUGH
+#      & native-cmd                  # stdout/stderr 両方 console 直書き、変数 capture なし
+#      # exit code チェック必須 (成否を判定する唯一の信号が exit code のみ)
+#      # 例: gh release create / delete (出力をユーザーに見せたい時)
+#
+#   4. pattern: CAPTURE_STDOUT (success exit が確証できるコマンド限定)
+#      $output = & native-cmd 2>$null
+#      # 失敗 path で stderr を出すコマンドでは Stop trap、Invoke-NativeWithCapture を使う
+#      # 例: vswhere -property installationPath (検索 hit なしは exit 0)
+#
+# ANTI-PATTERNS (使用禁止):
+#
+#   X. STOP_TRAP — & cmd 2>&1 / $var = & cmd 2>&1
+#      stderr が ErrorRecord として success stream に流れ Stop trap 発火。
+#      回避: Invoke-NativeWithCapture へ移行。
+#
+#   X. SUPPRESS_BOTH — & cmd 2>$null | Out-Null (v1.0.6 で踏み抜き廃止)
+#   X. CAPTURE_DIAGNOSTIC — $out = & cmd 2>&1 | Out-String (v1.0.8 で廃止)
+#      どちらも「失敗 path で stderr を出すコマンド」で同じ trap を踏む。
+#      Invoke-NativeWithCapture へ移行。
+#
+#   X. TRY_CATCH_NATIVE (v1.0.7 のみ存在、v1.0.8 で廃止)
+#      Invoke-NativeWithCapture が同じ目的を関数化したため不要。
+#
+# PS 7.3+ 移行時の注意 (現状未対応):
 #   PS 7.3 以降は $PSNativeCommandUseErrorActionPreference (default $true) が
 #   追加され、`& native-cmd` の非ゼロ exit code 自体が ErrorActionPreference に
-#   従って terminating error 化する。本スクリプトの「2>&1 を外して $LASTEXITCODE で
-#   判定」というイディオム (例: Assert-WorkingTreeClean の git status, vswhere の
-#   失敗パス等) は、PS 7.3+ では `if ($LASTEXITCODE -ne 0)` に到達せず、エラー
-#   メッセージや context 情報を出す前に script 自体が abort する経路に変わる。
-#   将来 PS 7 移行する場合は以下のいずれか必須:
+#   従って terminating error 化する。本スクリプトの「`&` + $LASTEXITCODE 判定」
+#   イディオム (Assert-WorkingTreeClean の git status, vswhere の失敗パス等) は
+#   PS 7.3+ では `if ($LASTEXITCODE -ne 0)` に到達せず abort する。
+#   移行時には以下のいずれかが必須:
 #     (a) script 冒頭で $PSNativeCommandUseErrorActionPreference = $false に固定
-#     (b) 各 $LASTEXITCODE チェックを try/catch でラップ
+#     (b) すべての `&` 系を Invoke-NativeWithCapture (Process 直叩き) に移行
 #   現状は PS 5.1 を前提とした実装。
-#
-# パターン早見表 (call site では「pattern: 名前」で参照する):
-#
-#   # pattern: SUPPRESS_BOTH (stderr / stdout 両方破棄、exit code のみ判定)
-#   & native-cmd 2>$null | Out-Null
-#   # ↑ 「success path で stderr を出さない」コマンド限定 (例: vswhere)
-#   # ↑ 失敗 path で stderr を出すコマンドは NativeCommandError trap が飛ぶ
-#   #   (v1.0.6 の gh release view で本番踏み → v1.0.7 で TRY_CATCH_NATIVE 化)
-#
-#   # pattern: CAPTURE_DIAGNOSTIC (success exit + stderr 出力を文字列化保持)
-#   $output = & native-cmd 2>&1 | Out-String
-#   # ↑ success path で stderr を出すコマンド限定 (例: gh auth status exit 0)
-#   # ↑ 失敗 path で stderr を出すと Stop trap 発火、TRY_CATCH_NATIVE 必須
-#
-#   # pattern: TRY_CATCH_NATIVE (失敗 exit + stderr 出力を安全に捕捉)
-#   $output = ''; $exit = 0
-#   try {
-#       $output = & native-cmd 2>&1 | Out-String
-#       $exit   = $LASTEXITCODE
-#   } catch {
-#       $output = $_.Exception.Message
-#       $exit   = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
-#   }
-#   # ↑ 失敗 path で stderr を出すコマンド用 (例: gh release view 不在時 exit 1)
-#   # ↑ catch 内で $LASTEXITCODE が 0 に戻る環境があるため明示 fallback
-#
-#   # pattern: CAPTURE_STDOUT (stdout は変数に、stderr は破棄)
-#   $output = & native-cmd 2>$null
-#   # ↑ 「success path で stderr を出さない」コマンド限定 (例: vswhere)
-#   # ↑ SUPPRESS_BOTH と同じ制約: 失敗 path で stderr を出すと Stop trap が飛ぶ
-#
-#   # pattern: CAPTURE_STDOUT_PASS_STDERR (stdout は変数、stderr は console 直書き)
-#   $output = & native-cmd
-#   # ↑ stderr は親 console に直行 (ErrorRecord 化されないので Stop しない)
-#   # ↑ stdout は通常の string array として変数に capture される
-#   # ↑ exit code チェック必須 (出力が空でも $LASTEXITCODE 非ゼロのまま誤判定防止)
-#
-#   # pattern: PASS_THROUGH (console 直書き、変数 capture なし)
-#   & native-cmd
-#   # ↑ stdout/stderr 両方とも親 console に直行
-#   # ↑ exit code チェック必須 (成否を判定する唯一の信号が exit code のみのため)
-#
-#   # ANTI-PATTERN: STOP_TRAP (Stop モードで terminating error が飛ぶ)
-#   & native-cmd 2>&1                # 変数 capture なし版
-#   $var = & native-cmd 2>&1         # 変数 capture あり版
-#   # ↑ どちらも同じ罠。本質は `2>&1` 自体: stderr が ErrorRecord として success
-#   #   stream に流れ、$ErrorActionPreference='Stop' の判定対象になる
-#   # ↑ 「変数 capture なし版」は通常書く理由がないが、副作用 only の native
-#   #   call で stderr も console に出したい意図で `2>&1` をつけてしまう typo
-#   #   として頻発するため anti-pattern として明示。redirect なしの PASS_THROUGH
-#   #   が正解 (stderr は自動で console 直行する)
-#   # ↑ 回避策: (a) success exit が前提なら Out-String 挟む = CAPTURE_DIAGNOSTIC
-#   #          (b) 失敗 exit があり得るなら try/catch で囲む = TRY_CATCH_NATIVE
-#   #          (c) 2>&1 自体をやめる = SUPPRESS_BOTH / CAPTURE_STDOUT / *_PASS_STDERR 系
-#   #          (a) は exit 0 限定なので、失敗を扱うなら (b) が正解
-#
-# 例外:
-#   - 実 release 操作 (Invoke-GhRelease 内の gh release create / delete) は
-#     PASS_THROUGH を採用する。出力をユーザーに見せて何が起きているか追える
-#     ようにするのが目的 (preflight 中の SUPPRESS_BOTH とは方針が逆)
 # ============================================================================
 
 # -Offline / -DryRun は upload を行わないので preflight の gh 関連チェックも
@@ -277,6 +242,65 @@ function Fail       { param([string]$Message)
 function Get-ToolPath { param([string]$Name)
     $cmd = Get-Command $Name -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source } else { return $null }
+}
+
+# ============================================================================
+# Native command の罠なし呼び出し (冒頭の `2>&1` trap セクション参照)
+# ============================================================================
+
+function Invoke-NativeWithCapture {
+    <#
+    .SYNOPSIS
+        Native command を実行し、stdout / stderr / exit code を罠なく取得する。
+    .DESCRIPTION
+        PowerShell の call operator `&` は「exit 非ゼロ + stderr 出力」の native
+        command で NativeCommandError を生成し、$ErrorActionPreference='Stop' 下で
+        terminating error として throw する。`2>&1 | Out-String` も同じ罠を踏む
+        (Out-String が処理する前に PS の error stream で trap が発火)。本関数は
+        System.Diagnostics.Process で stdout/stderr を直接捕捉し、PS の error
+        pipeline を経由しないため罠を完全に回避できる。
+
+        失敗 path で stderr を出すコマンド (例: gh release view 不在時 exit 1 +
+        "release not found"、gh auth status 未認証時 exit 1) の preflight 系
+        チェックは本関数を使うこと。
+    .OUTPUTS
+        PSCustomObject:
+          StdOut   - 標準出力 (string、UTF-8 でデコード)
+          StdErr   - 標準エラー (string、UTF-8 でデコード)
+          ExitCode - プロセスの終了コード (int)
+          Combined - StdOut + StdErr 連結 (検索用)
+    #>
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [string[]]$Arguments = @()
+    )
+    # 引数 quoting は Invoke-ExternalProcess と同じ規則 (DRY 化候補だが現状は単純なので duplicate)
+    $quoted = $Arguments | ForEach-Object {
+        if ($_ -match '\s|"') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+    }
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName               = $FilePath
+    $psi.Arguments              = $quoted -join ' '
+    $psi.UseShellExecute        = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError  = $true
+    $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+    $psi.StandardErrorEncoding  = [System.Text.Encoding]::UTF8
+
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    # 両 stream を async で読みデッドロック回避 (片方のバッファが満杯になると child が block する)
+    $outTask = $proc.StandardOutput.ReadToEndAsync()
+    $errTask = $proc.StandardError.ReadToEndAsync()
+    $proc.WaitForExit()
+    $stdout = $outTask.Result
+    $stderr = $errTask.Result
+
+    return [PSCustomObject]@{
+        StdOut   = $stdout
+        StdErr   = $stderr
+        ExitCode = $proc.ExitCode
+        Combined = $stdout + $stderr
+    }
 }
 
 # ============================================================================
@@ -533,8 +557,12 @@ function Resolve-MsBuild {
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
     if (-not (Test-Path $vswhere)) { $vswhere = "$env:ProgramFiles\Microsoft Visual Studio\Installer\vswhere.exe" }
     if (Test-Path $vswhere) {
-        # pattern: CAPTURE_STDOUT (冒頭集約コメント参照)
-        $vsInstall = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath 2>$null
+        # vswhere は検索 hit なし時に exit 0 + 空 stdout を返すが、実行環境破損
+        # (権限 / インストーラ破損 等) で stderr 出力する可能性もあるため
+        # Invoke-NativeWithCapture で罠なく capture
+        $vswhereResult = Invoke-NativeWithCapture -FilePath $vswhere `
+            -Arguments @('-latest', '-products', '*', '-requires', 'Microsoft.Component.MSBuild', '-property', 'installationPath')
+        $vsInstall = $vswhereResult.StdOut.Trim()
         if ($vsInstall) {
             $vsCands = @(
                 (Join-Path $vsInstall 'MSBuild\Current\Bin\MSBuild.exe'),
@@ -692,24 +720,20 @@ function Assert-Preflight {
             Fail "gh (GitHub CLI) が見つかりません。`n        https://cli.github.com/ からインストールするか、-SkipUpload で upload を抑止してください。"
         }
         Write-Ok "gh: $gh"
-        # pattern: CAPTURE_DIAGNOSTIC (冒頭集約コメント参照)
-        # gh auth status は失敗原因が多様 (未認証 / token expiry / network / proxy /
-        # gh 自体の install 破損)、Fail メッセージに stderr ダンプを含めて切り分け可能にする
-        $authStatusOutput = & gh auth status 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0) {
-            Fail "gh 認証に失敗しました (`gh auth login` を実行 / network / proxy / token expiry 等を確認)。`n$authStatusOutput"
+        # gh auth status は未認証時 exit 1 + stderr 出力 → Invoke-NativeWithCapture で
+        # 罠なく捕捉。失敗原因は多様 (未認証 / token expiry / network / proxy /
+        # gh install 破損)、Combined を Fail メッセージに含めて切り分け可能にする
+        $authResult = Invoke-NativeWithCapture -FilePath 'gh' -Arguments @('auth', 'status')
+        if ($authResult.ExitCode -ne 0) {
+            Fail "gh 認証に失敗しました (`gh auth login` を実行 / network / proxy / token expiry 等を確認)。`n$($authResult.Combined.TrimEnd())"
         }
         Write-Ok "gh 認証 OK"
-        # gh は exit 0 でも stderr に early warning を出すことがある (token scope
-        # 不足の予兆 / token expiry 近接通知 等)。失敗してないので Fail はしないが、
-        # リリース担当に気付かせる。
-        #
-        # 検出は `^warning:` (gh の公式 warning prefix) のみに絞る。token expiry の
-        # 特殊形式までカバーする regex は false positive を増やし、かつ gh の出力
-        # フォーマット変更に脆弱。本格的な structured 検出は別 issue (#141 系) で
-        # JSON parse に寄せる方針なので、ここでは過信を生む特殊形式を持たない。
-        if ($authStatusOutput -match '(?im)^warning:') {
-            Write-Warn "gh auth status からの警告 (release 実行自体は継続):`n$authStatusOutput"
+        # gh は exit 0 でも stderr に early warning を出すことがある (token scope 不足の
+        # 予兆 / token expiry 近接通知 等)。Fail はしないが、リリース担当に気付かせる。
+        # 検出は `^warning:` (gh 公式の warning prefix) のみに絞る (token expiry 特殊形式
+        # まで網羅する regex は false positive 多 + gh 出力フォーマット変更に脆弱)。
+        if ($authResult.Combined -match '(?im)^warning:') {
+            Write-Warn "gh auth status からの警告 (release 実行自体は継続):`n$($authResult.Combined.TrimEnd())"
         }
     }
 
@@ -738,40 +762,34 @@ function Assert-Preflight {
 
     # 既存リリースとのタグ衝突
     if (-not $SkipUpload) {
-        # pattern: TRY_CATCH_NATIVE (冒頭集約コメント参照)
-        # gh release view は release 不在時に exit 1 + stderr "release not found"
-        # を出す。PS 5.1 + Stop 環境では `2>$null` も `2>&1 | Out-String` も
-        # native command stderr の NativeCommandError 化 (Stop trap) を防げない
-        # ため、try/catch で受ける + 出力中の "release not found" 文字列で
-        # 「存在しない」を確証する形にする。これで gh の auth / network 等
-        # 別種の失敗 (exit 非ゼロ + 別 stderr) を「タグ衝突なし」と誤判定する
-        # H2 silent false-negative も同時に解消 (#141 のインライン解決)。
-        $releaseViewOutput = ''
-        $releaseViewExit   = 0
-        try {
-            # --json id: 存在時の JSON dump を最小化 (preflight console を汚さない)
-            $releaseViewOutput = & gh release view "v$Version" --json id 2>&1 | Out-String
-            $releaseViewExit   = $LASTEXITCODE
-        } catch {
-            $releaseViewOutput = $_.Exception.Message
-            $releaseViewExit   = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
-        }
+        # gh release view は release 不在時に exit 1 + stderr "release not found" を出す。
+        # Invoke-NativeWithCapture で stdout/stderr/exit を罠なく分離捕捉。
+        # `--json id`: 存在時の stdout を最小化 (capture 文字列が小さくなる、parse はしない)。
+        # 存在判定は exit code を一次軸、stderr 文字列マッチは「不在 vs 別種失敗」の識別のみ。
+        $releaseResult = Invoke-NativeWithCapture -FilePath 'gh' `
+            -Arguments @('release', 'view', "v$Version", '--json', 'id')
 
-        if ($releaseViewExit -eq 0) {
+        if ($releaseResult.ExitCode -eq 0) {
+            # 既存 release あり
             if ($Force) {
                 Write-Warn "タグ v$Version は既存だが -Force のため後で削除して作り直す"
                 $script:DeleteExistingRelease = $true
             } else {
                 Fail "GitHub Releases に v$Version が既存です。-Force で削除して作り直すか、別バージョンで実行してください。"
             }
-        } elseif ($releaseViewOutput -match 'release not found') {
-            Write-Ok "タグ衝突なし: v$Version"
-            $script:DeleteExistingRelease = $false
         } else {
-            # 別種の失敗 (auth / network / API rate limit / gh install 破損 等)
-            # zip ビルド完了後の `gh release create` で fail するより、preflight で
-            # 早期 fail させて時間 / 計算資源を浪費しない
-            Fail "gh release view が予期せず失敗しました (exit $releaseViewExit):`n$releaseViewOutput"
+            # exit 非ゼロ → 不在 or 別種失敗。stderr の英文字列で識別
+            # (注: gh の i18n / 文言変更で取りこぼし可能性あり、その時は再 trapping。
+            #  本格的な structured 検出は --json + ConvertFrom-Json + HTTP 404 判定 etc.)
+            if ($releaseResult.StdErr -match 'release not found') {
+                Write-Ok "タグ衝突なし: v$Version"
+                $script:DeleteExistingRelease = $false
+            } else {
+                # 別種の失敗 (auth / network / API rate limit / gh install 破損 等)
+                # zip ビルド完了後の gh release create で fail するより、preflight で
+                # 早期 fail させて時間 / 計算資源を浪費しない
+                Fail "gh release view が予期せず失敗しました (exit $($releaseResult.ExitCode)):`n$($releaseResult.Combined.TrimEnd())"
+            }
         }
     }
 }
@@ -1134,7 +1152,7 @@ function Invoke-GhRelease {
 
     if ($script:DeleteExistingRelease) {
         Write-Info "既存タグ v$Version を削除"
-        # pattern: PASS_THROUGH (例外節 - 冒頭集約コメント参照)
+        # pattern: PASS_THROUGH (冒頭集約コメント参照)
         # 実 release 操作中の gh 出力はユーザーに見せる方針
         & gh release delete "v$Version" --yes --cleanup-tag
         if ($LASTEXITCODE -ne 0) { Fail "既存 release の削除に失敗しました" }
@@ -1145,7 +1163,7 @@ function Invoke-GhRelease {
     $tmpNotes = New-TemporaryFile
     try {
         [System.IO.File]::WriteAllText($tmpNotes.FullName, $script:ReleaseNotesText, [System.Text.UTF8Encoding]::new($false))
-        # pattern: PASS_THROUGH (例外節 - 冒頭集約コメント参照)
+        # pattern: PASS_THROUGH (冒頭集約コメント参照)
         # upload 進捗等を見せたいので redirect しない
         & gh release create "v$Version" $ZipPath --notes-file $tmpNotes.FullName --title "v$Version"
         if ($LASTEXITCODE -ne 0) { Fail "gh release create に失敗しました" }
