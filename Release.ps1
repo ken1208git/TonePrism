@@ -103,9 +103,17 @@ $ErrorActionPreference = 'Stop'
 # 機構: $ErrorActionPreference='Stop' は success stream に流れる ErrorRecord を
 # terminating error として扱う。`2>&1` は stderr の string output を ErrorRecord
 # として success stream に流すため Stop の判定対象になる。一方 Out-String を経由
-# すると ErrorRecord が string 化されるため、success stream には string のみが
-# 流れ Stop の判定対象から外れる。(PS 5.1 で確認。PS 7.x は stream 処理仕様が
-# 異なるため要再検証)
+# すると ErrorRecord が string 化される。(PS 5.1 で確認。PS 7.x は stream 処理
+# 仕様が異なるため要再検証)
+#
+# !! 重要な制約 (v1.0.7 で訂正): !!
+#   Out-String 経由でも、native command が **exit 非ゼロ + stderr 出力** という
+#   組み合わせを返した場合は Stop の trap が飛ぶ。これは PS が native command 用
+#   に別途生成する NativeCommandError ErrorRecord が Out-String の pipeline 化
+#   よりも先 (exit code 確定時点) に作られるため。
+#   - success path で stderr を出すコマンド (例: gh auth status exit 0): OK
+#   - 失敗 path で stderr を出すコマンド (例: gh release view exit 1): NG
+#   後者には TRY_CATCH_NATIVE を使う必要がある。
 #
 # PS 7.3+ 移行時の追加注意 (現状未対応):
 #   PS 7.3 以降は $PSNativeCommandUseErrorActionPreference (default $true) が
@@ -123,12 +131,31 @@ $ErrorActionPreference = 'Stop'
 #
 #   # pattern: SUPPRESS_BOTH (stderr / stdout 両方破棄、exit code のみ判定)
 #   & native-cmd 2>$null | Out-Null
+#   # ↑ 「success path で stderr を出さない」コマンド限定 (例: vswhere)
+#   # ↑ 失敗 path で stderr を出すコマンドは NativeCommandError trap が飛ぶ
+#   #   (v1.0.6 の gh release view で本番踏み → v1.0.7 で TRY_CATCH_NATIVE 化)
 #
-#   # pattern: CAPTURE_DIAGNOSTIC (失敗時に表示するため文字列化保持)
+#   # pattern: CAPTURE_DIAGNOSTIC (success exit + stderr 出力を文字列化保持)
 #   $output = & native-cmd 2>&1 | Out-String
+#   # ↑ success path で stderr を出すコマンド限定 (例: gh auth status exit 0)
+#   # ↑ 失敗 path で stderr を出すと Stop trap 発火、TRY_CATCH_NATIVE 必須
+#
+#   # pattern: TRY_CATCH_NATIVE (失敗 exit + stderr 出力を安全に捕捉)
+#   $output = ''; $exit = 0
+#   try {
+#       $output = & native-cmd 2>&1 | Out-String
+#       $exit   = $LASTEXITCODE
+#   } catch {
+#       $output = $_.Exception.Message
+#       $exit   = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
+#   }
+#   # ↑ 失敗 path で stderr を出すコマンド用 (例: gh release view 不在時 exit 1)
+#   # ↑ catch 内で $LASTEXITCODE が 0 に戻る環境があるため明示 fallback
 #
 #   # pattern: CAPTURE_STDOUT (stdout は変数に、stderr は破棄)
 #   $output = & native-cmd 2>$null
+#   # ↑ 「success path で stderr を出さない」コマンド限定 (例: vswhere)
+#   # ↑ SUPPRESS_BOTH と同じ制約: 失敗 path で stderr を出すと Stop trap が飛ぶ
 #
 #   # pattern: CAPTURE_STDOUT_PASS_STDERR (stdout は変数、stderr は console 直書き)
 #   $output = & native-cmd
@@ -150,8 +177,10 @@ $ErrorActionPreference = 'Stop'
 #   #   call で stderr も console に出したい意図で `2>&1` をつけてしまう typo
 #   #   として頻発するため anti-pattern として明示。redirect なしの PASS_THROUGH
 #   #   が正解 (stderr は自動で console 直行する)
-#   # ↑ 回避策は (a) Out-String を挟む = CAPTURE_DIAGNOSTIC、または
-#   #   (b) 2>&1 をやめる = SUPPRESS_BOTH / CAPTURE_STDOUT / *_PASS_STDERR 系
+#   # ↑ 回避策: (a) success exit が前提なら Out-String 挟む = CAPTURE_DIAGNOSTIC
+#   #          (b) 失敗 exit があり得るなら try/catch で囲む = TRY_CATCH_NATIVE
+#   #          (c) 2>&1 自体をやめる = SUPPRESS_BOTH / CAPTURE_STDOUT / *_PASS_STDERR 系
+#   #          (a) は exit 0 限定なので、失敗を扱うなら (b) が正解
 #
 # 例外:
 #   - 実 release 操作 (Invoke-GhRelease 内の gh release create / delete) は
@@ -709,25 +738,40 @@ function Assert-Preflight {
 
     # 既存リリースとのタグ衝突
     if (-not $SkipUpload) {
-        # pattern: SUPPRESS_BOTH (冒頭集約コメント参照)
-        # stdout も Out-Null で捨てるのは、release 存在時 gh が JSON を dump して
-        # preflight コンソールが汚れるのを防ぐため。
-        #
-        # 注: gh の exit code 契約に依存している。過去に gh は release 不在以外
-        #     (auth / network 等) でも非ゼロ exit する仕様変更があり、将来また
-        #     変わる可能性がある。より堅くしたい場合は --json id 等で structured
-        #     output を取って parse 結果で判定する。
-        & gh release view "v$Version" 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) {
+        # pattern: TRY_CATCH_NATIVE (冒頭集約コメント参照)
+        # gh release view は release 不在時に exit 1 + stderr "release not found"
+        # を出す。PS 5.1 + Stop 環境では `2>$null` も `2>&1 | Out-String` も
+        # native command stderr の NativeCommandError 化 (Stop trap) を防げない
+        # ため、try/catch で受ける + 出力中の "release not found" 文字列で
+        # 「存在しない」を確証する形にする。これで gh の auth / network 等
+        # 別種の失敗 (exit 非ゼロ + 別 stderr) を「タグ衝突なし」と誤判定する
+        # H2 silent false-negative も同時に解消 (#141 のインライン解決)。
+        $releaseViewOutput = ''
+        $releaseViewExit   = 0
+        try {
+            # --json id: 存在時の JSON dump を最小化 (preflight console を汚さない)
+            $releaseViewOutput = & gh release view "v$Version" --json id 2>&1 | Out-String
+            $releaseViewExit   = $LASTEXITCODE
+        } catch {
+            $releaseViewOutput = $_.Exception.Message
+            $releaseViewExit   = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
+        }
+
+        if ($releaseViewExit -eq 0) {
             if ($Force) {
                 Write-Warn "タグ v$Version は既存だが -Force のため後で削除して作り直す"
                 $script:DeleteExistingRelease = $true
             } else {
                 Fail "GitHub Releases に v$Version が既存です。-Force で削除して作り直すか、別バージョンで実行してください。"
             }
-        } else {
+        } elseif ($releaseViewOutput -match 'release not found') {
             Write-Ok "タグ衝突なし: v$Version"
             $script:DeleteExistingRelease = $false
+        } else {
+            # 別種の失敗 (auth / network / API rate limit / gh install 破損 等)
+            # zip ビルド完了後の `gh release create` で fail するより、preflight で
+            # 早期 fail させて時間 / 計算資源を浪費しない
+            Fail "gh release view が予期せず失敗しました (exit $releaseViewExit):`n$releaseViewOutput"
         }
     }
 }
