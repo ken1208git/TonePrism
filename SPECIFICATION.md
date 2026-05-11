@@ -286,18 +286,18 @@
   - 緊急時やトラブルシューティング時に来客がスタッフを簡単に呼べるようにする
   - わかりやすいUI/UX
 
-##### 機能21: 自動アップデート通知機能
+##### 機能21: 新バージョン通知バナー
 
-- **説明**: 新しいバージョンが利用可能な場合にユーザーに通知する機能
-- **優先度**: 低
+- **説明**: Launcher 上で新バージョン利用可能をユーザーに通知し、Manager 経由での更新を誘導する
+- **優先度**: 中
 - **詳細**:
-  - 起動時に自動でバージョンチェック
-  - GitHub Releasesから最新バージョン情報を取得
-  - 新バージョンがある場合、通知ダイアログを表示
-  - ダウンロードページへのリンクを提供
-  - スキップ機能（次回起動時に再度通知）
-  - バックグラウンドでチェック（起動を遅延させない）
-  - Launcher/Manager両方で実装
+  - 起動時に GitHub Releases API で最新バージョンを確認（バックグラウンド、起動を遅延させない）
+  - 新バージョンあり時：スクリーンセーバー画面または設定画面に小さな通知バナーを表示
+  - 文言例: 「新バージョンが利用可能です。Manager から更新してください。」
+  - Launcher 自身はアップデート操作を持たない（権限分離：来場者が触る画面で操作不可、スタッフが Manager 経由で操作）
+  - バックグラウンドチェックは N 時間に 1 回（過剰な API リクエスト回避）
+- **実現方式**: §3.7 リリース・配布アーキテクチャを参照
+- **関連**: 機能13 アップデート機能（Manager 側、§2.2）
 
 ##### 機能22: 終了制御機能（Exit Control）
 
@@ -572,6 +572,29 @@
   - `backup_auto_interval_hours`（INTEGER, デフォルト 24）: 自動バックアップ間隔
   - `backup_retention_count`（INTEGER, デフォルト 30）: 保持する世代数
 
+#### アップデート機能
+
+##### 機能13: アップデート機能（Manager UI）
+
+- **説明**: Manager UI 上の「アップデート」タブから、新バージョンの検知・確認・適用までを一元管理する
+- **優先度**: 高（部員のインストール作業負担軽減のため早期実装、#41 関連）
+- **詳細**:
+  - 起動時に GitHub Releases API で最新バージョンをバックグラウンド確認
+  - 「アップデート」タブの表示内容：
+    - 現在のバージョン情報一覧（Launcher / Manager / Companions / Updater / DB schema）
+    - 新バージョンあり時：バージョン番号、リリース日、リリースノート（Markdown レンダリング）
+    - 操作ボタン：「今すぐアップデート」「あとで」「このバージョンをスキップ」
+  - 「今すぐアップデート」押下時のフロー：
+    1. Launcher 起動中なら閉じるよう案内（必要なら kill 確認ダイアログ）
+    2. GitHub Releases から zip をダウンロード（プログレスバー表示）
+    3. staging エリアに展開して必須ファイル全揃いを検証
+    4. Updater.exe を spawn → Manager 自身を終了 → Updater が実ファイル置換 → 新 Manager 起動
+  - 「このバージョンをスキップ」を選んだバージョンは `settings` テーブルに記録、再通知しない
+  - 失敗時：エラー詳細をダイアログ表示 + 「再試行」または「リリースページを手動で開く」を選択可能
+- **保護されるユーザーデータ**: `prism.db` / `games/` / `backups/` / `responses/` / `logs/` は置換対象外
+- **実現方式**: §3.7 リリース・配布アーキテクチャを参照
+- **関連**: 機能21 新バージョン通知バナー（Launcher 側、§2.1）
+
 ### 2.3 監視機能（Monitor - 先生PC向け）
 
 パソコン室内の先生PCで動作し、各展示PCの状態監視とスタッフ呼び出し通知の受信を行う監視ソフトウェア。
@@ -775,6 +798,132 @@ csproj 命名規則は `GCTonePrism_<Companion 名>` で Manager (`GCTonePrism_M
 参照実装:
 - `GCTonePrism_Manager/Services/Logger.cs`（Manager v0.8.8 で導入）
 - `GCTonePrism_Launcher/scripts/logger.gd`（Launcher v0.5.16 で導入）
+
+---
+
+### 3.7 リリース・配布アーキテクチャ
+
+本節は GCTonePrism の各コンポーネントを開発環境から本番環境（学校 LAN 上の展示用 PC または個人テスト用 PC）へ届けるための、リリース・配布・アップデートの仕組みを定義する。エンドユーザーは部員（非エンジニア寄り）であることを前提とし、操作の単純さと事故防止を重視する。
+
+#### 3.7.1 配布形態
+
+- **配布物**: 1 つの zip ファイルにすべてのコンポーネントを同梱
+  - Launcher（Godot エクスポート成果物 + プラグイン DLL）
+  - Manager（`dotnet publish` 成果物）
+  - Companions（`dotnet publish` 成果物、§2.4 参照）
+  - Updater（`dotnet publish` 成果物、§3.7.4 参照）
+  - `Install.bat`（初回インストール用バッチスクリプト）
+  - `INSTALL_README.txt`（部員向けインストール手順書）
+- **配布チャネル**: GitHub Releases
+  - 公開リポジトリのため学校 LAN 外からもアクセス可能（家での個人テスト等に対応）
+  - リリースノートは Markdown で記述、Manager UI のアップデートタブにも表示される
+- **リリース命名**:
+  - タグ名: `v<Launcher version>`（例: `v0.6.0`、運用上の単純化のため Launcher 版数に揃える）
+  - zip ファイル名: `GCTonePrism_v<version>.zip`
+
+#### 3.7.2 初回インストール
+
+`Install.bat`（zip 同梱）を使用：
+
+1. ユーザーが zip をダウンロードして任意の場所に展開
+2. 展開したフォルダ内の `Install.bat` をダブルクリック
+3. 「親フォルダのパス」を入力（例: `\\学校サーバー\PCクラブ`）
+   - 親フォルダ配下に `GCTonePrism/` サブフォルダが自動作成される
+   - 入れ子防止: 親パス自体が既存インストール先と思しき場合（`GCTonePrism_Manager` 配下が存在する、または末尾が `GCTonePrism` で終わる）は警告を出してデフォルト中止
+4. zip 内の `files/` 配下を新規 `GCTonePrism/` にコピー
+5. Manager を自動起動して `prism.db` の初期化を促す
+
+詳細手順は zip 同梱の `INSTALL_README.txt`、実装は `Install.bat` 自体を参照。
+
+#### 3.7.3 アップデートアーキテクチャ
+
+**設計原則: バンドル更新方式**
+
+Launcher / Manager / Companions / Updater は常に 1 つの zip に同梱され、1 回のアップデート操作で一括更新する。個別更新は許容しない。
+
+- 理由: Launcher / Manager は同じ DB スキーマバージョン定数を共有する（§8.2 #5）。個別更新を許すと「Manager は v1.2 想定の v13 スキーマで動くが、Launcher は v12 想定」のような整合性破綻が起こり得る。バンドル更新により構造的に回避する。
+- 副次的利点: ユーザー操作が単純化（「アップデート」アクション 1 個で完結）。
+
+**フロー（Manager UI 主導、Updater 実行）**
+
+```
+[1] Manager 起動 → 起動時に GitHub Releases API で最新バージョン確認
+      ↓
+[2] 新バージョンあり → Manager「アップデート」タブにバナー表示
+      ↓
+[3] ユーザーが「今すぐアップデート」を押下
+      ↓
+[4] Manager: 確認ダイアログ（Launcher 起動中なら閉じるよう案内）
+      ↓
+[5] Manager: GitHub Releases から zip をダウンロード（プログレス表示）
+      ↓
+[6] Manager: staging エリアに展開 + 内容検証（必須ファイル全揃い確認）
+      ↓
+[7] Manager: Updater.exe を spawn → 自身を終了
+      ↓
+[8] Updater: Manager / Launcher の完全終了を待機
+      ↓
+[9] Updater: 既存ファイルを置換（prism.db / games/ / backups/ / responses/ は保護）
+      ↓
+[10] Updater: 新 Manager.exe を起動 → Updater 自身を終了
+```
+
+**保護されるユーザーデータ**: `prism.db`, `games/`, `backups/`, `responses/`, `logs/` は置換対象外。これらはユーザー固有の運用データであり、アップデートで失われてはならない。
+
+**失敗時のロールバック**: ファイル置換中の失敗時は staging エリアと既存版を両方保持し、手動復旧可能な状態を維持する（atomic 性の確保）。
+
+#### 3.7.4 Updater コンポーネント
+
+「実行中のプロセスは自分自身を含むファイルを置き換えられない」という Windows のファイルロック制約を解決するための独立小ユーティリティ。
+
+- **配置**: `GCTonePrism/GCTonePrism_Updater/GCTonePrism_Updater.exe`
+  - **トップレベル独立配置**: Manager / Launcher / Companions のいずれの subordinate でもない
+  - アップデート対象（Manager / Launcher / Companions）が置換される間に生存し続ける必要があるため、置換対象外の領域に置く設計
+- **言語/環境**: C# / .NET Framework 4.8（Manager と同じ）
+- **ビルド管理**: `GCTonePrism.sln` で Manager / Companions / Monitor と統合管理
+- **責務**:
+  - 対象プロセス（Manager / Launcher）の完全終了確認
+  - staging エリアからの実ファイル置換
+  - ユーザーデータ（`prism.db` / `games/` / `backups/` / `responses/` / `logs/`）の保護
+  - 置換完了後の新 Manager.exe 起動
+  - 失敗時の状態維持（部分書き換えを許さない atomic 性）
+- **通信**: Manager → Updater 起動時に CLI 引数で渡す
+  - staging エリアのパス
+  - インストール先パス
+  - 起動すべき新 Manager.exe のパス
+- **Updater 自身の更新**: 通常は変更しない設計だが、変更時は次回のバンドル更新で同伴更新される（Updater が走っている瞬間は対象から除外、置換完了後に旧 Updater を新 Updater で書き換える特例ロジックを持つ）
+
+#### 3.7.5 Launcher 側の役割
+
+Launcher はアップデート操作の主体ではない。これは「ゲーム来場者が普通に触る画面でアップデート操作可能になっているのは好ましくない」という権限分離の発想による。
+
+- 起動時に GitHub Releases API で新バージョン有無を確認（バックグラウンド、起動を遅延させない）
+- 新バージョンあり時はスクリーンセーバー画面または設定画面に小さな通知バナーを表示
+  - 文言例: 「新バージョンが利用可能です。Manager から更新してください。」
+- アップデート操作はせず、誘導のみ
+- 詳細仕様: §2.1 機能21
+
+#### 3.7.6 ビルド・リリース自動化
+
+`Release.ps1`（リポジトリルート）で以下を自動化：
+
+1. Launcher の Godot エクスポート（`GCTonePrism_Launcher/bin/` に出力）
+2. Manager / Companions / Updater の `dotnet publish`（各プロジェクトの `bin/Release/...`）
+3. release staging エリアへの全成果物コピー
+4. `Install.bat` / `INSTALL_README.txt` の同梱
+5. zip 化
+6. リリースノート（`release_notes/v<version>.md`）を読み込み
+7. `gh release create` で GitHub Releases にアップロード
+8. 期待ファイル全揃いの検証（漏れがあれば失敗、リリース未投稿で停止）
+
+実装詳細は `Release.ps1` 自体および関連 issue（#108）を参照。
+
+#### 3.7.7 バージョン管理との関係
+
+- 各コンポーネントは独立したバージョン番号を持つ（§8.2）
+- リリース全体のバージョン（zip のタグ）は **Launcher のバージョンに揃える**（運用上の単純化）
+- リリースには各コンポーネントの個別バージョンも `release_notes/v<version>.md` に明記する
+- DB スキーマバージョン整合性は §3.7.3 のバンドル更新方式により自動保証される（§8.2 #5 参照）
 
 ---
 
@@ -2027,24 +2176,57 @@ erDiagram
 
 #### 7.5.1 全体構成
 
+開発リポジトリ構成（dev-time）と本番インストール構成（runtime、§3.7 で詳述）の両方を以下に示す。
+
+##### 開発リポジトリ構成（dev-time）
+
 ```
-GCTonePrism/
-├── GCTonePrism_Launcher/   #ランチャー本体（Godotプロジェクト）
-├── GCTonePrism_Manager/    #管理ソフト（C# WinFormsプロジェクト）
-├── GCTonePrism_Monitor/    #監視ソフト（C# WinFormsプロジェクト）
-├── games/                  #ゲームデータ格納フォルダ（データベースと連携）
-│   ├── {game_id}/          #各ゲームのルートフォルダ
-│   │   ├── v1.0.0/         #バージョンごとのフォルダ（vPrefix必須）
-│   │   │   ├── game.exe    #実行ファイル
-│   │   │   └── ...         #その他のゲームファイル
-│   │   ├── v1.1.0/
+GCTonePrism/                  # 開発リポジトリのルート
+├── GCTonePrism_Launcher/     # ランチャー本体（Godot プロジェクト）
+│   ├── bin/                  # ← Godot エクスポート成果物（gitignored、§3.7.6 で生成）
+│   ├── Companions/           # 補助ユーティリティ群（§2.4 参照）
+│   └── (各種 .tscn / .gd / addons/ など)
+├── GCTonePrism_Manager/      # 管理ソフト（C# WinForms プロジェクト）
+│   └── bin/                  # ← .NET 標準のビルド成果物（gitignored）
+├── GCTonePrism_Monitor/      # 監視ソフト（C# WinForms プロジェクト、未着手）
+├── GCTonePrism_Updater/      # アップデーター（§3.7.4 参照）
+│   └── bin/                  # ← .NET 標準のビルド成果物（gitignored）
+├── GCTonePrism.sln           # Manager / Companions / Monitor / Updater の統合ソリューション
+├── Release.ps1               # ビルド + 配布 zip 作成 + GitHub Releases アップロード（§3.7.6）
+├── release_notes/            # リリースノート Markdown 置き場（vX.Y.Z.md）
+├── templates/                # Install.bat / INSTALL_README.txt の元データ
+├── tools/sqlite3/            # 開発・運用補助（§7.5.4）
+└── (SPECIFICATION.md / CHANGELOG.md / AGENTS.md など)
+```
+
+##### 本番インストール構成（runtime）
+
+Install.bat により以下の構造で展開される：
+
+```
+<親フォルダ>/GCTonePrism/      # インストールのルート（§3.7.2 で自動作成）
+├── GCTonePrism_Launcher/     # Launcher 実行ファイル一式（.exe / .pck / プラグイン DLL）
+│   └── Companions/           # Companions の実行ファイル群
+├── GCTonePrism_Manager/      # Manager 実行ファイル一式
+├── GCTonePrism_Updater/      # Updater（独立配置、§3.7.4）
+├── games/                    # ゲームデータ格納フォルダ
+│   ├── {game_id}/
+│   │   ├── v1.0.0/
+│   │   │   ├── game.exe
 │   │   │   └── ...
-│   │   ├── thumbnail.png   #サムネイル画像（バージョン共通）
-│   │   └── background.mp4  #背景動画（バージョン共通）
+│   │   ├── thumbnail.png
+│   │   └── background.mp4
 │   └── ...
-├── prism.db                #SQLiteデータベースファイル
-└── ...
+├── responses/                # アンケート/プレイ記録 drop フォルダ（§7.5.3）
+├── backups/                  # DB バックアップ（機能12）
+├── logs/                     # ファイルログ（§3.6）
+│   ├── manager/
+│   └── launcher/
+├── prism.db                  # SQLite データベース
+└── (Install.bat / INSTALL_README.txt はインストール時に消費して残らない or 残してもよい)
 ```
+
+`prism.db` / `games/` / `backups/` / `responses/` / `logs/` はアップデート時に保護される（§3.7.3）。
 
 **バージョンフォルダの命名規則:**
 - `v` + `メジャー.マイナー.パッチ` 形式（例: `v1.0.0`, `v2.1.5`）
@@ -2505,8 +2687,8 @@ GCTonePrism/
   - ローカルキャッシュ機能（サーバーからのゲームダウンロード・キャッシュ）
   - 予測キャッシュ機能（人気ゲームの事前ダウンロード）
   - スコアボード機能（ゲームごとの記録を自動集計・表示）
-  - 自動アップデート通知機能（バージョンチェック・通知）
   - パフォーマンス最適化
+  - ※ 自動アップデート通知機能（旧マイルストーン13）は §2.1 機能21 / §2.2 機能13 / §3.7 へ再定義し、本マイルストーンより前倒しで実装（#41）
 - **達成条件**:
   - 全ての主要機能が実装完了
   - パフォーマンステストをクリア
@@ -2566,6 +2748,7 @@ GCTonePrism/
   - **整合性維持**:
     - LauncherとManagerの両方で同じバージョン定数を持ち、バージョン不一致によるデータ破損を防ぐ
 - **実装ワークフロー**: §7.6「スキーマ管理ワークフロー」を参照。
+- **配布での整合性保証**: §3.7 リリース・配布アーキテクチャで定めた「バンドル更新方式」により、Launcher と Manager は常に同じリリース zip に含まれる版で更新される。これによりスキーマバージョン定数の不一致が構造的に発生しない（個別更新を許さない設計の主な動機）。
 
 詳細なバージョン管理戦略については、`.cursorrules`の「バージョン管理戦略」セクションを参照してください。
 
@@ -2605,6 +2788,7 @@ GCTonePrism/
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
+| 2026-05-11 | 1.10.4 | リリース・配布アーキテクチャを §3.7 に新設し、機能21 を Manager UI 主導のバンドル更新フローに再定義 (#108 / #41 / #106 関連)：部員のインストール作業が複雑すぎる実運用課題への対処として、配布形態（GitHub Releases に同梱 zip）・初回インストール（`Install.bat` + 親フォルダ指定 + `GCTonePrism/` 自動作成 + 入れ子防止検知）・アップデートフロー（Manager UI → Updater.exe による全コンポーネント一括置換）・バンドル更新方式の根拠（DB スキーマ整合性の自動保証）・`Release.ps1` によるビルド自動化の概要を SPEC 側に正式収録。Updater コンポーネントを §3.7.4 に新規定義（トップレベル独立配置 `GCTonePrism/GCTonePrism_Updater/`、Manager / Launcher / Companions のいずれの subordinate でもなく、置換対象外領域から実ファイル置換を実行する独立小ユーティリティ）。§2.1 機能21 を「Launcher 上の通知バナーのみ（権限分離）」に再定義、§2.2 機能13「アップデート機能（Manager UI）」を新設してアップデート操作主体を Manager に集約。§7.5.1 全体構成を「開発リポジトリ構成 (dev-time)」と「本番インストール構成 (runtime)」の併記形式に拡張、Launcher の `bin/` 規約（Godot エクスポート出力先を `.NET bin/` の慣習に揃える）と `GCTonePrism_Updater/` を追加。§8.2 #5 にバンドル更新方式による DB スキーマ整合性自動保証を追記。マイルストーン13 から「自動アップデート通知機能」を外し、現フェーズでの早期実装方針を明記（#41 のマイルストーン再割当）。実装は #108 / #106 / #41 で進める。 | Kenshiro Kuroga & Claude |
 | 2026-05-11 | 1.10.3 | §2.4「Tools（補助ユーティリティ群）」を「Companions（Launcher 補助ユーティリティ群）」に再定義 (#30 関連)：配置を `GCTonePrism_Tools/`（リポジトリルート）から `GCTonePrism_Launcher/Companions/` に変更し、「Launcher の Win32 API 弱さを補う Launcher 専用サブコンポーネント」という性質を dev-time の階層に明示。csproj 命名規則を Manager 準拠（`GCTonePrism_<Name>` / フォルダ名 = csproj 名）に統一し、`GCTonePrism_WindowProbe` / `GCTonePrism_PauseOverlay` / `GCTonePrism_CompanionsCommon` の構成に。`GCTonePrism.sln` での Manager / Companions / Monitor 統合管理は維持。配布は Launcher と一体（既存の「.exe を Launcher と同じディレクトリに配置」方針は変わらず）。Companion 2 PauseOverlay の節に on-game overlay 方式（透過 WPF + クリックスルー）、XInput Guide ボタン検知（`xinput1_4.dll` ordinal #100）、ボーダーレス前提と `overlay_supported` フラグ fallback の言及を追加（詳細は #30）。§3.6 と AGENTS.md の「Tools 等」記述も Companions 化に伴い整理（Companions は Launcher subordinate のため独立コンポーネントとして列挙不要、ログは Launcher 経由で取り込み）。#101 / #30 の実装着手前なのでコード移動コストゼロ。 | Kenshiro Kuroga & Claude |
 | 2026-05-11 | 1.10.2 | §7.6「スキーマ管理ワークフロー」を新設 (#131)：マイグレーション実装の必須化（`CreateTables()` 変更 → `MigrateVxToVy()` 追加 → `CurrentDbVersion` 増分）、`tools/sqlite3/sqlite3.exe` での手動検証、`ExpectedSchema` ↔ §7.3 同期義務、v1.5.1 drift 事故の再発防止規約を SPEC 側に正式収録。これまで `AGENTS.md` にしか存在しなかった運用規約を SPEC 側に格上げし、`AGENTS.md` は「ルールのみ」に絞ってコンテキストロード時のサイズを削減（78 行 → 約 40 行）。§3.6 のログ基盤要件と合わせて、`AGENTS.md` からはリンクで参照する構造に統一。§8.2 #5 Database Schema Version から §7.6 への参照リンクも追加。 | Kenshiro Kuroga & Claude |
 | 2026-05-11 | 1.10.1 | Manager にログビューア UI を追加 (#129)：v1.10.0 で導入したファイルログ基盤の実用化。新規「ログ」タブで `<project_root>/logs/{manager,launcher}/` 両方のセッションログを横割りレイアウト（上=ファイル一覧 / 下=本文）で閲覧可能に。ツールバーは INFO/WARN/ERROR レベルフィルタ + Manager/Launcher コンポーネントフィルタ + 全文検索窓。**ハイライトモード**を採用：フィルタや検索で他の行が消えるのではなく、マッチ行は通常表示+レベル別背景色、非マッチ行は薄い灰色文字でディム表示するため文脈を失わず追跡可能。検索ヒット substring には追加で黄色ハイライト。本文は WordWrap 有効で横スクロール無し。Logger が書き込み中のファイルも `FileShare.ReadWrite` でロックなし閲覧可能。Manager v0.8.9 で実装。 | Kenshiro Kuroga & Claude |
