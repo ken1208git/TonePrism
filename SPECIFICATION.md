@@ -624,28 +624,31 @@
   - JSON設定ファイルをバックエンドとし、GUI設定画面からも編集可能
   - 設定項目: 通信方式（TCP/UDP or 共有フォルダ）、ポート番号/共有フォルダパス、通知音ON/OFF、通知音ファイルパス、ハートビート間隔（デフォルト5秒）、タイムアウト（デフォルト15秒）
 
-### 2.4 Tools（補助ユーティリティ群）
+### 2.4 Companions（Launcher 補助ユーティリティ群）
 
-Godot は Win32 API へのアクセスが弱いため、ウィンドウ検知・常駐オーバーレイ等の OS 機能が必要な処理を補助するための独立ユーティリティ群。Launcher / Manager / Monitor の3大コンポーネントを支える存在。
+Godot は Win32 API へのアクセスが弱いため、ウィンドウ検知・常駐オーバーレイ等の OS 機能が必要な処理を補助するため、Launcher と同伴して動く独立ユーティリティ群。Launcher の機能を拡張する Launcher 専用のサブコンポーネントであり、Launcher と一体としてリリース・配布される。
 
 #### 配置・技術スタック
 
-- **配置**: リポジトリルートの `GCTonePrism_Tools/`
+- **配置**: `GCTonePrism_Launcher/Companions/`（Launcher プロジェクト配下）
 - **言語/環境**: C# / .NET Framework 4.8（Manager と同じ）
-- **ビルド管理**: 単一の `GCTonePrism.sln` で Manager / Tools / Monitor を統合管理（VS で一括ビルド・デバッグ可）
-- **配布**: ビルド成果物の `.exe` を Launcher と同じディレクトリに配置
+- **ビルド管理**: リポジトリルートの `GCTonePrism.sln` で Manager / Companions / Monitor を統合管理（VS で一括ビルド・デバッグ可）
+- **配布**: ビルド成果物の `.exe` を Launcher 本体と同じディレクトリに配置（Launcher と一体としてリリース）
 
 #### 構成方針
 
 ```
-GCTonePrism_Tools/
-├── Common/                      共有 Win32 ヘルパー (DllImport 集約等)
-│   └── GCTonePrism.Tools.Common.csproj
-├── WindowProbe/                 単発クエリ系: 指定 PID の可視ウィンドウ存在確認
-│   └── GCTonePrism.Tools.WindowProbe.csproj
-└── PauseOverlay/                常駐 GUI 系: ゲーム中断メニュー（将来）
-    └── GCTonePrism.Tools.PauseOverlay.csproj
+GCTonePrism_Launcher/
+└── Companions/
+    ├── GCTonePrism_CompanionsCommon/       共有 Win32 ヘルパー (DllImport 集約等)
+    │   └── GCTonePrism_CompanionsCommon.csproj
+    ├── GCTonePrism_WindowProbe/            単発クエリ系: 指定 PID の可視ウィンドウ存在確認
+    │   └── GCTonePrism_WindowProbe.csproj
+    └── GCTonePrism_PauseOverlay/           常駐 GUI 系: ゲーム中断メニュー（将来）
+        └── GCTonePrism_PauseOverlay.csproj
 ```
+
+csproj 命名規則は `GCTonePrism_<Companion 名>` で Manager (`GCTonePrism_Manager`) と統一。フォルダ名と csproj 名を一致させる規則も Manager に準拠。
 
 #### Launcher との通信規約
 
@@ -655,9 +658,9 @@ GCTonePrism_Tools/
   - 常駐系: 標準出力 1 行 = 1 メッセージ (JSON 形式)、`{"event":"...","payload":{...}}` の構造で双方向通信
 - **エラー**: 終了コード非ゼロ + 標準エラー出力にメッセージ
 
-#### 各 Tool の機能
+#### 各 Companion の機能
 
-##### Tool 1: WindowProbe（単発クエリ）
+##### Companion 1: WindowProbe（単発クエリ）
 
 - **説明**: 指定 PID のプロセスが可視ウィンドウを持っているかを検知する
 - **優先度**: 高
@@ -669,17 +672,19 @@ GCTonePrism_Tools/
   - `not_found`: プロセス自体が存在しない
 - **使用 API**: `EnumWindows`, `GetWindowThreadProcessId`, `IsWindowVisible`
 
-##### Tool 2: PauseOverlay（常駐 GUI、将来実装）
+##### Companion 2: PauseOverlay（常駐 GUI、将来実装）
 
-- **説明**: ゲーム実行中にグローバルホットキーで呼び出せる中断メニューを提供
+- **説明**: ゲーム実行中にグローバルホットキーで呼び出せる中断メニューを提供（on-game overlay 方式：透過 WPF 常駐 + 常時最前面 + クリックスルー）
 - **優先度**: 中（マイルストーン10〜13 範囲）
-- **用途**: フルスクリーンゲーム上に重ねて中断メニューを表示し、終了/再開等の操作を提供
-- **必要技術**: 透過 + 常時最前面ウィンドウ（WPF）、低レベルキーボードフック (`SetWindowsHookEx`)
-- **通信**: Launcher が `create_process` で起動、Launcher へは stdout/JSON で「閉じた / 終了選択された」等を通知
+- **用途**: ボーダーレスウィンドウゲームの上に重ねて中断メニューを表示し、終了/Monitor 呼び出し/音量調整/再開等の操作を提供
+- **必要技術**: WPF 透過 + 常時最前面ウィンドウ、低レベルキーボードフック (`SetWindowsHookEx`)、XInput Guide ボタン検知 (`xinput1_4.dll` ordinal #100 = `XInputGetStateEx`)
+- **通信**: Launcher が `create_process` で起動、Launcher へは stdout/JSON で「閉じた / 終了選択された / Monitor 呼び出された」等を通知
+- **前提**: ゲームがボーダーレスウィンドウモードで起動していること（排他フルスクリーンゲームでは on-game overlay 不可。`overlay_supported = false` フラグ + fallback ジェスチャー対応）
+- **詳細**: 設計詳細は #30 を参照
 
 #### 実装方針の検討事項
 
-- 各 Tool を独立 `.exe` にするか、単一 `.exe` + サブコマンド (`tools.exe probe <pid>` 等) にまとめるか
+- 各 Companion を独立 `.exe` にするか、単一 `.exe` + サブコマンド (`companions.exe probe <pid>` 等) にまとめるか
 - Common ライブラリの参照は静的リンクにするか動的にするか（配布物数に影響）
 
 ---
@@ -742,8 +747,9 @@ GCTonePrism_Tools/
 
 ### 3.6 ログ基盤（全コンポーネント横断要件）
 
-すべてのクライアントコンポーネント（Launcher / Manager / Monitor / 将来追加される Tools 等）は
-本節の最低要件を満たすファイルログ機構を実装すること。本節は #116 で導入された土台仕様であり、
+すべてのクライアントコンポーネント（Launcher / Manager / Monitor 等）は
+本節の最低要件を満たすファイルログ機構を実装すること。
+（Launcher の Companions（§2.4）は Launcher の log に統合される想定。独立 log dir は不要）本節は #116 で導入された土台仕様であり、
 将来の §2.1「ログ基盤仕様」(#85) でフル仕様（DEBUG・リングバッファ・エラーコード・サービスモード連携）に拡張される。
 
 - **保存先**: プロジェクトルート（`prism.db` のあるディレクトリ）の `logs/{component}/` 配下
@@ -2599,6 +2605,7 @@ GCTonePrism/
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
+| 2026-05-11 | 1.10.3 | §2.4「Tools（補助ユーティリティ群）」を「Companions（Launcher 補助ユーティリティ群）」に再定義 (#30 関連)：配置を `GCTonePrism_Tools/`（リポジトリルート）から `GCTonePrism_Launcher/Companions/` に変更し、「Launcher の Win32 API 弱さを補う Launcher 専用サブコンポーネント」という性質を dev-time の階層に明示。csproj 命名規則を Manager 準拠（`GCTonePrism_<Name>` / フォルダ名 = csproj 名）に統一し、`GCTonePrism_WindowProbe` / `GCTonePrism_PauseOverlay` / `GCTonePrism_CompanionsCommon` の構成に。`GCTonePrism.sln` での Manager / Companions / Monitor 統合管理は維持。配布は Launcher と一体（既存の「.exe を Launcher と同じディレクトリに配置」方針は変わらず）。Companion 2 PauseOverlay の節に on-game overlay 方式（透過 WPF + クリックスルー）、XInput Guide ボタン検知（`xinput1_4.dll` ordinal #100）、ボーダーレス前提と `overlay_supported` フラグ fallback の言及を追加（詳細は #30）。§3.6 と AGENTS.md の「Tools 等」記述も Companions 化に伴い整理（Companions は Launcher subordinate のため独立コンポーネントとして列挙不要、ログは Launcher 経由で取り込み）。#101 / #30 の実装着手前なのでコード移動コストゼロ。 | Kenshiro Kuroga & Claude |
 | 2026-05-11 | 1.10.2 | §7.6「スキーマ管理ワークフロー」を新設 (#131)：マイグレーション実装の必須化（`CreateTables()` 変更 → `MigrateVxToVy()` 追加 → `CurrentDbVersion` 増分）、`tools/sqlite3/sqlite3.exe` での手動検証、`ExpectedSchema` ↔ §7.3 同期義務、v1.5.1 drift 事故の再発防止規約を SPEC 側に正式収録。これまで `AGENTS.md` にしか存在しなかった運用規約を SPEC 側に格上げし、`AGENTS.md` は「ルールのみ」に絞ってコンテキストロード時のサイズを削減（78 行 → 約 40 行）。§3.6 のログ基盤要件と合わせて、`AGENTS.md` からはリンクで参照する構造に統一。§8.2 #5 Database Schema Version から §7.6 への参照リンクも追加。 | Kenshiro Kuroga & Claude |
 | 2026-05-11 | 1.10.1 | Manager にログビューア UI を追加 (#129)：v1.10.0 で導入したファイルログ基盤の実用化。新規「ログ」タブで `<project_root>/logs/{manager,launcher}/` 両方のセッションログを横割りレイアウト（上=ファイル一覧 / 下=本文）で閲覧可能に。ツールバーは INFO/WARN/ERROR レベルフィルタ + Manager/Launcher コンポーネントフィルタ + 全文検索窓。**ハイライトモード**を採用：フィルタや検索で他の行が消えるのではなく、マッチ行は通常表示+レベル別背景色、非マッチ行は薄い灰色文字でディム表示するため文脈を失わず追跡可能。検索ヒット substring には追加で黄色ハイライト。本文は WordWrap 有効で横スクロール無し。Logger が書き込み中のファイルも `FileShare.ReadWrite` でロックなし閲覧可能。Manager v0.8.9 で実装。 | Kenshiro Kuroga & Claude |
 | 2026-05-11 | 1.10.0 | ファイルログ基盤を全コンポーネント横断要件として §3.6 に新設 (#116 / #85 の土台)：Manager (v0.8.8) は新規 `Services/Logger.cs` で `Console.SetOut` フックにより既存 109 件の `Console.WriteLine($"[X] msg")` を **コード変更ゼロ** でファイルにも自動転送、INFO/WARN/ERROR の 3 段階を提供。Launcher (v0.5.16) は新規 autoload `scripts/logger.gd` が `OS.add_logger` (Godot 4.5+) で `print` / `printerr` / `push_warning` / `push_error` をすべて捕捉し、レベル振り分けして出力。**保存先は `<project_root>/logs/{manager,launcher}/<component>_<PCname>_<YYYY-MM-DD_HHmmss>.log`** に集約配置：(a) prism.db と同じ共有先に置くことで Manager の将来的なログビューア UI で複数 PC のログを 1 箇所閲覧可能、(b) **1 起動セッション = 1 ファイル** のため複数 PC が同時に書いても競合・interleaving が起きない、(c) PC 名 + 起動時刻でファイル名がユニーク（同秒衝突は連番サフィックスで回避）。30 日 retention（起動時に mtime 基準で古いファイル自動削除、現セッションは保護）。AGENTS.md に「Cross-component Standards」セクション追加して将来の Monitor / Tools 等の追加時にも同じベースラインが適用されるよう保証。 | Kenshiro Kuroga & Claude |
