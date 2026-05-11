@@ -29,6 +29,58 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
+### [Release Tooling v1.0.6] - 2026-05-11
+
+#### Fixed
+
+- **`Release.bat` ダブルクリック / ターミナル実行で実質動作しない問題**: cmd.exe が UTF-8 BOM (`EF BB BF`) を CP932 として解釈、1 行目の `@echo off` が機能せず、全 REM 行を echo on で splay + cp932-mojibake で表示する状態だった。UTF-8 (no BOM) + ASCII プレフィックス (`chcp 65001` 以前は ASCII 限定) に変更して解消
+- **`gh release view` が release 不在時に script を terminating error で止める問題**: preflight タグ衝突チェックの `2>&1` が PS 5.1 + `$ErrorActionPreference='Stop'` 下で NativeCommandError 化、本来「衝突なし続行」のはずの正常系で fail していた問題。`2>$null | Out-Null` パターンに変更
+- **同 anti-pattern が `gh auth status` と `git status --porcelain` にも残っていた問題**: シニアレビューで指摘され全 3 箇所を統一
+  - `gh auth status`: `& cmd 2>&1 | Out-String` パターンで診断情報を文字列として保持。失敗時に `gh auth login` 以外の原因 (network / proxy / token expiry / install 破損) も Fail メッセージに出して切り分け可能に
+  - `git status --porcelain`: redirect 削除 + 明示的 `$LASTEXITCODE` チェック + Fail 追加。redirect 単純削除では git 失敗時に "clean" 誤報告の **silent pass regression** を踏むため exit code check 必須
+
+#### Changed
+
+- **v1.0.5 で導入した `[WARN]` メッセージの日本語併記行を削除**: chcp 取得失敗パスは codepage 未切替 + ファイル no-BOM のため日本語 echo の文字化けが確定的、ASCII-only ルールに整合させる形で意図的に撤回
+- **`2>&1` trap 関連の per-site コメント 3 箇所を集約 + 参照形式に整理**: Release.ps1 冒頭の `Set-StrictMode` 直後に集約コメントを設置、各 call site は集約参照 + 1-2 行の理由のみ。集約ラベルは self-documenting な名前 (`SUPPRESS_BOTH` / `CAPTURE_DIAGNOSTIC` / `CAPTURE_STDOUT` / `CAPTURE_STDOUT_PASS_STDERR` / `PASS_THROUGH` / `STOP_TRAP`) で索引参照型コメントの欠点 (表まで戻る往復) を解消。集約コメント内に「機構」セクションを追加して PS 7.x 等への移植時の調査起点を明示
+  - **シニアレビュー round 7 反映**: `Assert-WorkingTreeClean` の git status call site は stdout を変数 capture / stderr を console 直書きする hybrid なので、PASS_THROUGH (console 直書き、変数 capture なし) では実態と乖離していた。`CAPTURE_STDOUT_PASS_STDERR` パターンを新設して移行。call site のパターンマーカーと catalog 定義の整合性を保つことが「self-documenting パターン名」アプローチの前提
+  - **`STREAM_TO_VAR` の独立記載を廃止**: `STOP_TRAP` と本質的に同じ罠 (`2>&1` 自体が原因) で、変数 capture 有無は表面の違い。「PS バージョンで挙動が変わる」表現が誤読を招くため統合し、両形式を `STOP_TRAP` 配下にまとめて回避策を 2 つ並記
+  - **`Invoke-GhRelease` の gh release create / delete に pattern マーカー追加**: 集約 catalog の「例外」節に書いてあるが call site にマーカーがなく「対象外」と読まれる余地があった。`# pattern: PASS_THROUGH (例外節)` を 2 箇所に追加
+- **`Test-Preflight` → `Assert-Preflight` リネーム**: PowerShell 規約で `Test-*` は `[bool]` 返却用 (`Test-Path` / `Test-Connection` 等)。preflight は違反時 `Fail` (= `exit 1`) する性質なので `Assert-*` 系に揃え、同ファイル内の `Assert-WorkingTreeClean` と命名一貫性を取る
+- **`Release.bat` の防御性向上**:
+  - `ORIGINAL_CODEPAGE` の数値 validation (`findstr /R "^[0-9][0-9]*$"`) を追加。chcp 出力が想定外フォーマット (unicode digit / 想定外 locale 等) の場合に exit 時の `chcp %ORIGINAL_CODEPAGE%` が garbage を渡して cmd 窓が壊れるレアケースを防御
+  - `FORWARDED_ARGS` 連結ロジックを `if defined` 分岐で書き換え、初回 append 時の leading space を解消 (echo 出力の見た目改善)
+- **Release.bat の docstring 整理**: BOM 失敗症状の記述を「最初の 1 行目で `@echo off` ITSELF が fail する」に厳密化 (旧記述 "subsequent commands fail" は誤り)、chcp 65001 境界 banner を 4 行 → 1 行 marker に簡素化 (詳細は docstring と一元化)
+- **Release.bat に codepage 切替の Flow ダイアグラム追加**: `for /f` + 3 if 文の状態遷移 (`captured + numeric` / `captured + invalid` / `not captured`) を docstring 冒頭の Flow セクションで明示。3 つの独立 if を逐次読まなくても判断できる
+- **`Get-BundleReleaseNotes` の正規表現に `\Z` 追加**: 旧 lookahead `(?=^### |^---|^## )` は必ず後続セクションマーカーを要求し、Bundle entry が CHANGELOG 末尾 (後続なし) だと空文字列を返す regression。現状の CHANGELOG 構造 (Bundle 配下に Launcher / Manager / Release Tooling が続く) では発火しないが、将来セクション順を入れ替えた場合や最小 CHANGELOG での誤動作を防ぐ保険
+- **`gh auth status` の success 時 warning を抽出して `Write-Warn`**: `gh` は exit 0 でも stderr に token scope 不足 / token expiry 近接の warning を出すことがある。失敗ではないが早期の気付きをリリース担当に届けるため、出力中の特定パターンを検出して警告表示 (release 自体は継続)
+  - **シニアレビュー round 8 (M1) 反映**: 初版の `warning|expir` regex は `expiration` / `experimental` / 通常 success 時の `Token expires:` 等にも hit する false positive 多数。特異性高めの `(token has expired\|token expir(es\|ed\|ing) in \d+\s*(day\|hour)\|missing.*scope\|insufficient.*scope\|^warning:)` に厳密化
+- **シニアレビュー round 10 反映**:
+  - **L4**: catalog `PASS_THROUGH` の「exit code チェック必須」理由を cross-reference から自己完結型に修正。旧コメントは「CAPTURE_STDOUT_PASS_STDERR と同じ理由」と参照していたが、後者の理由は「出力空でも `$LASTEXITCODE` 非ゼロ誤判定防止」で変数 capture が前提。`PASS_THROUGH` は変数 capture なしで構造的に該当しない。`PASS_THROUGH` の真の理由「成否判定の信号が exit code のみのため」に書き換え
+  - **L5**: `Get-BundleReleaseNotes` の `-SilentMissing` switch を `-AllowMissing` にリネーム。旧名は「CHANGELOG.md が見つからない時」のみを silent にする読みだが、実体は「Bundle セクションが見つからなかった時」も含めて empty 返却する semantics。`AllowMissing` の方が実態に近い
+- **別 issue 化**:
+  - **M1 (#144)**: `Read-LauncherVersion` / `Read-ManagerVersion` / `Read-ComponentVersions` の命名規約 sweep — `Read-*` は PowerShell では対話的入力 (`Read-Host` 等) を意味、ファイル読み出しは `Get-*` 系が原則。さらに `Fail` する性質を踏まえると round 6/9 の `Test-*` → `Assert-*` sweep の対象範囲外として漏れていた
+  - **M2 (#145)**: catalog `CAPTURE_DIAGNOSTIC` ラベル説明 (「失敗時に表示するため」) が実態より狭い。実装では success 時の `^warning:` 検出にも再利用しているため、「両 stream 文字列化キャプチャ」相当に拡張すべき
+  - **M3 (#146)**: `Assert-WorkingTreeClean` の `$Context -like '*sync 後*'` 文字列マッチを `[switch]$PostSync` パラメータに構造化 — call site の文字列を変えると特例メッセージが silent に失われる脆さを解消
+- **シニアレビュー round 9 反映**:
+  - **H1**: `Test-ExpectedFiles` → `Assert-ExpectedFiles` リネーム。round 6 で `Test-Preflight` → `Assert-Preflight` した時と完全に同じ条件 (`Fail` (exit 1) する関数で PowerShell の `Test-*` = `[bool]` 規約に違反) に該当していた漏れを解消、命名規約の対象範囲を完結させる
+  - **M2**: `gh auth status` warning 検出 regex を `^warning:` (gh 公式の warning prefix) のみに簡素化。round 8 の特殊形式 (`token expir(es|ed|ing) in \d+...` 等) は false negative リスク (「Token will expire soon」「tomorrow」等の日数表記なし形式の取りこぼし) があり、かつ gh 出力フォーマット変更に脆弱。本格的な structured 検出は別 issue (#141 系) で JSON parse に寄せる方針なので、ここでは過信を生む特殊形式を持たない方向に倒した
+  - **L2**: `Get-BundleReleaseNotes` の `\Z` コメントを 6 行 → 1 行に圧縮。発火確率の低さに対しコメント長が不釣り合いだった
+  - **L4**: `Assert-Preflight` 関数内のリネーム言い訳コメント (2 行) を削除。リネーム判断の justification は CHANGELOG / PR 説明に書く内容で、関数定義に残すと半年後の reader が「なぜここに?」となる
+  - **L5**: `Release.bat` の `enabledelayedexpansion` 副作用例から架空引数 `-Tag` を削除、現存 pass-through 引数の列挙 + 「新規 pass-through 引数追加時の注意」framing に変更
+- **別 issue 化**:
+  - **M1 (#142)**: catalog vs per-site コメントの方針統一 — ラベル参照 + 詳細説明の二重化がメンテナンスコストを生む構造に逆戻りしていた問題。本 PR スコープ外で trackable 化
+  - **M3 (#143)**: `Release.bat` の docstring 経緯を `SPECIFICATION.md` に分離 — 100/150 行が REM の状態を整理する separate PR 候補
+- **シニアレビュー round 8 反映**:
+  - **H1**: `Release.bat` の `findstr` validation コメントに「`findstr` 自体の起動失敗 (minimal WinPE / PATH 破損) も同じ skip path に落ちる」旨を追記。区別不可なので同一扱いは意図的だが、コメントが反映していなかった
+  - **M2**: catalog ⇔ call site 整合性の最終 sweep。`Resolve-MsBuild` の vswhere call site (CAPTURE_STDOUT 該当) に label が欠落していたため追加。これで全 6 件の native `&` call site にパターンマーカー揃った
+  - **M3**: PS 7.3+ の `$PSNativeCommandUseErrorActionPreference` (default `$true`) が `& cmd` の非ゼロ exit code を terminating error 化する仕様を集約コメントに追記。本スクリプトの「2>&1 を外して `$LASTEXITCODE` で判定」イディオムが PS 7 で silent regression する可能性 + 回避策 (`$false` 固定 or try/catch) を記録
+  - **L1**: `Release.bat` の `setlocal enabledelayedexpansion` で引数中の `!` が消費される副作用を docstring に明記
+  - **L2**: anti-pattern の「変数 capture なし版」が現実に書かれる経緯 (副作用 only call で stderr も console に出したい意図の typo) を 1 行追加
+  - **L4**: chcp 65001 skip path で日本語 echo が文字化けする旨を ASCII 1 行で改めて警告 (line 89-90 の `[WARN]` だけでは見落とされる可能性に対する保険)
+  - **L5**: `Get-BundleReleaseNotes` の `\Z` コメントを精度向上。現実の発火条件は「初回 Bundle release + 後続セクション未追加の極初期状態」のみで、汎用的な「セクション順変更時」は誤誘導
+  - **H2 → 別 issue 化 (#141)**: `gh release view` の exit code 単独依存による silent false-negative。zip ビルド完了後に fail する path が残るが、本 PR スコープ外で `--json id` への移行を別 issue として trackable 化
+
 ### [Release Tooling v1.0.5] - 2026-05-11
 
 #### Fixed

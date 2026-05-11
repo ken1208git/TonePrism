@@ -92,10 +92,75 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# -Offline / -DryRun は upload を行わないので、preflight の gh 関連チェックも
-# skip するため -SkipUpload を強制 ON とみなす（Codex P2 #137 ×2）
-# - -Offline: そもそも network 不可なので gh API 呼び出し不可
-# - -DryRun: zip 化と upload を skip するモード、preflight だけ network 必須にする意味なし
+# ============================================================================
+# Native command の `2>&1` trap (PS 5.1 + $ErrorActionPreference='Stop' 環境)
+# ============================================================================
+# このスクリプトでは git / gh / msbuild / nuget 等の native command を呼び出すが、
+# `2>&1` で stderr を success stream に merge すると PS 5.1 + Stop モードでは
+# native command の stderr 出力が NativeCommandError の terminating error として
+# 扱われ、本来「正常系」のはずの path で script が止まる。
+#
+# 機構: $ErrorActionPreference='Stop' は success stream に流れる ErrorRecord を
+# terminating error として扱う。`2>&1` は stderr の string output を ErrorRecord
+# として success stream に流すため Stop の判定対象になる。一方 Out-String を経由
+# すると ErrorRecord が string 化されるため、success stream には string のみが
+# 流れ Stop の判定対象から外れる。(PS 5.1 で確認。PS 7.x は stream 処理仕様が
+# 異なるため要再検証)
+#
+# PS 7.3+ 移行時の追加注意 (現状未対応):
+#   PS 7.3 以降は $PSNativeCommandUseErrorActionPreference (default $true) が
+#   追加され、`& native-cmd` の非ゼロ exit code 自体が ErrorActionPreference に
+#   従って terminating error 化する。本スクリプトの「2>&1 を外して $LASTEXITCODE で
+#   判定」というイディオム (例: Assert-WorkingTreeClean の git status, vswhere の
+#   失敗パス等) は、PS 7.3+ では `if ($LASTEXITCODE -ne 0)` に到達せず、エラー
+#   メッセージや context 情報を出す前に script 自体が abort する経路に変わる。
+#   将来 PS 7 移行する場合は以下のいずれか必須:
+#     (a) script 冒頭で $PSNativeCommandUseErrorActionPreference = $false に固定
+#     (b) 各 $LASTEXITCODE チェックを try/catch でラップ
+#   現状は PS 5.1 を前提とした実装。
+#
+# パターン早見表 (call site では「pattern: 名前」で参照する):
+#
+#   # pattern: SUPPRESS_BOTH (stderr / stdout 両方破棄、exit code のみ判定)
+#   & native-cmd 2>$null | Out-Null
+#
+#   # pattern: CAPTURE_DIAGNOSTIC (失敗時に表示するため文字列化保持)
+#   $output = & native-cmd 2>&1 | Out-String
+#
+#   # pattern: CAPTURE_STDOUT (stdout は変数に、stderr は破棄)
+#   $output = & native-cmd 2>$null
+#
+#   # pattern: CAPTURE_STDOUT_PASS_STDERR (stdout は変数、stderr は console 直書き)
+#   $output = & native-cmd
+#   # ↑ stderr は親 console に直行 (ErrorRecord 化されないので Stop しない)
+#   # ↑ stdout は通常の string array として変数に capture される
+#   # ↑ exit code チェック必須 (出力が空でも $LASTEXITCODE 非ゼロのまま誤判定防止)
+#
+#   # pattern: PASS_THROUGH (console 直書き、変数 capture なし)
+#   & native-cmd
+#   # ↑ stdout/stderr 両方とも親 console に直行
+#   # ↑ exit code チェック必須 (成否を判定する唯一の信号が exit code のみのため)
+#
+#   # ANTI-PATTERN: STOP_TRAP (Stop モードで terminating error が飛ぶ)
+#   & native-cmd 2>&1                # 変数 capture なし版
+#   $var = & native-cmd 2>&1         # 変数 capture あり版
+#   # ↑ どちらも同じ罠。本質は `2>&1` 自体: stderr が ErrorRecord として success
+#   #   stream に流れ、$ErrorActionPreference='Stop' の判定対象になる
+#   # ↑ 「変数 capture なし版」は通常書く理由がないが、副作用 only の native
+#   #   call で stderr も console に出したい意図で `2>&1` をつけてしまう typo
+#   #   として頻発するため anti-pattern として明示。redirect なしの PASS_THROUGH
+#   #   が正解 (stderr は自動で console 直行する)
+#   # ↑ 回避策は (a) Out-String を挟む = CAPTURE_DIAGNOSTIC、または
+#   #   (b) 2>&1 をやめる = SUPPRESS_BOTH / CAPTURE_STDOUT / *_PASS_STDERR 系
+#
+# 例外:
+#   - 実 release 操作 (Invoke-GhRelease 内の gh release create / delete) は
+#     PASS_THROUGH を採用する。出力をユーザーに見せて何が起きているか追える
+#     ようにするのが目的 (preflight 中の SUPPRESS_BOTH とは方針が逆)
+# ============================================================================
+
+# -Offline / -DryRun は upload を行わないので preflight の gh 関連チェックも
+# skip するため -SkipUpload を auto-promote する (Codex P2 #137 ×2)
 if (($Offline -or $DryRun) -and -not $SkipUpload) {
     $SkipUpload = $true
 }
@@ -439,6 +504,7 @@ function Resolve-MsBuild {
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
     if (-not (Test-Path $vswhere)) { $vswhere = "$env:ProgramFiles\Microsoft Visual Studio\Installer\vswhere.exe" }
     if (Test-Path $vswhere) {
+        # pattern: CAPTURE_STDOUT (冒頭集約コメント参照)
         $vsInstall = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath 2>$null
         if ($vsInstall) {
             $vsCands = @(
@@ -528,8 +594,16 @@ function Resolve-Nuget {
 
 function Assert-WorkingTreeClean {
     param([string]$Context)
-    $gitStatus = & git -C $RepoRoot status --porcelain 2>&1
-    if ($LASTEXITCODE -eq 0 -and $gitStatus) {
+    # pattern: CAPTURE_STDOUT_PASS_STDERR (冒頭集約コメント参照)
+    # stdout (--porcelain の差分行) は変数に capture、stderr (git の通常 error
+    # メッセージ) は console 直書きでユーザーに見せる
+    # redirect を外しただけだと git 失敗時に $gitStatus が空文字になり「working
+    # tree clean」と誤判定されるため、exit code チェックが必須
+    $gitStatus = & git -C $RepoRoot status --porcelain
+    if ($LASTEXITCODE -ne 0) {
+        Fail "git status の実行に失敗しました (exit code: $LASTEXITCODE, context: $Context)"
+    }
+    if ($gitStatus) {
         if ($Force) {
             Write-Warn "uncommitted change がありますが -Force のため続行 ($Context)"
             ($gitStatus -split "`n") | ForEach-Object { Write-Info "    $_" }
@@ -553,14 +627,15 @@ function Assert-WorkingTreeClean {
 # ============================================================================
 
 function Get-BundleReleaseNotes {
-    param([switch]$SilentMissing)
+    param([switch]$AllowMissing)
     if (-not (Test-Path $ChangelogPath)) {
-        if ($SilentMissing) { return '' }
+        if ($AllowMissing) { return '' }
         Fail "CHANGELOG.md が見つかりません: $ChangelogPath"
     }
     $content = [System.IO.File]::ReadAllText($ChangelogPath, [System.Text.Encoding]::UTF8)
-    # `### [Bundle v0.1.0] - YYYY-MM-DD` から次の `### ` または `---` または `## ` まで
-    $pattern = '(?ms)^### \[Bundle v' + [regex]::Escape($Version) + '\][^\r\n]*\r?\n(.*?)(?=^### |^---|^## )'
+    # `### [Bundle v0.1.0] - YYYY-MM-DD` から次の `### ` / `---` / `## ` / EOF まで
+    # `\Z`: 後続セクション無しの初回 Bundle release だけが該当する保険
+    $pattern = '(?ms)^### \[Bundle v' + [regex]::Escape($Version) + '\][^\r\n]*\r?\n(.*?)(?=^### |^---|^## |\Z)'
     $m = [regex]::Match($content, $pattern)
     if (-not $m.Success) { return '' }
     return $m.Groups[1].Value.Trim()
@@ -572,7 +647,7 @@ $script:ReleaseNotesText = ''
 # Phase 0: Preflight
 # ============================================================================
 
-function Test-Preflight {
+function Assert-Preflight {
     Write-Step "Preflight: 環境とパラメータを検証"
 
     # Version 形式 (CHANGELOG から取った時点で確定済みだが念のため)
@@ -588,11 +663,25 @@ function Test-Preflight {
             Fail "gh (GitHub CLI) が見つかりません。`n        https://cli.github.com/ からインストールするか、-SkipUpload で upload を抑止してください。"
         }
         Write-Ok "gh: $gh"
-        $authResult = & gh auth status 2>&1
+        # pattern: CAPTURE_DIAGNOSTIC (冒頭集約コメント参照)
+        # gh auth status は失敗原因が多様 (未認証 / token expiry / network / proxy /
+        # gh 自体の install 破損)、Fail メッセージに stderr ダンプを含めて切り分け可能にする
+        $authStatusOutput = & gh auth status 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
-            Fail "gh への認証ができていません。`gh auth login` を実行してください。`n$authResult"
+            Fail "gh 認証に失敗しました (`gh auth login` を実行 / network / proxy / token expiry 等を確認)。`n$authStatusOutput"
         }
         Write-Ok "gh 認証 OK"
+        # gh は exit 0 でも stderr に early warning を出すことがある (token scope
+        # 不足の予兆 / token expiry 近接通知 等)。失敗してないので Fail はしないが、
+        # リリース担当に気付かせる。
+        #
+        # 検出は `^warning:` (gh の公式 warning prefix) のみに絞る。token expiry の
+        # 特殊形式までカバーする regex は false positive を増やし、かつ gh の出力
+        # フォーマット変更に脆弱。本格的な structured 検出は別 issue (#141 系) で
+        # JSON parse に寄せる方針なので、ここでは過信を生む特殊形式を持たない。
+        if ($authStatusOutput -match '(?im)^warning:') {
+            Write-Warn "gh auth status からの警告 (release 実行自体は継続):`n$authStatusOutput"
+        }
     }
 
     # CHANGELOG から Bundle セクションを抽出できるか確認
@@ -605,7 +694,7 @@ function Test-Preflight {
         $script:ReleaseNotesText = $notes
         Write-Ok "CHANGELOG から Bundle v$Version セクションを抽出 ($($notes.Length) 文字)"
     } else {
-        $notes = Get-BundleReleaseNotes -SilentMissing
+        $notes = Get-BundleReleaseNotes -AllowMissing
         if ($notes) {
             $script:ReleaseNotesText = $notes
             Write-Info "CHANGELOG Bundle セクション検出: $($notes.Length) 文字 (-SkipUpload のため未使用)"
@@ -620,7 +709,15 @@ function Test-Preflight {
 
     # 既存リリースとのタグ衝突
     if (-not $SkipUpload) {
-        $existingRelease = & gh release view "v$Version" 2>&1
+        # pattern: SUPPRESS_BOTH (冒頭集約コメント参照)
+        # stdout も Out-Null で捨てるのは、release 存在時 gh が JSON を dump して
+        # preflight コンソールが汚れるのを防ぐため。
+        #
+        # 注: gh の exit code 契約に依存している。過去に gh は release 不在以外
+        #     (auth / network 等) でも非ゼロ exit する仕様変更があり、将来また
+        #     変わる可能性がある。より堅くしたい場合は --json id 等で structured
+        #     output を取って parse 結果で判定する。
+        & gh release view "v$Version" 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) {
             if ($Force) {
                 Write-Warn "タグ v$Version は既存だが -Force のため後で削除して作り直す"
@@ -935,7 +1032,7 @@ function Copy-Templates {
 # Phase 7: ExpectedFiles 検証
 # ============================================================================
 
-function Test-ExpectedFiles {
+function Assert-ExpectedFiles {
     Write-Step "ExpectedFiles 検証"
 
     # 期待ファイル一覧
@@ -993,6 +1090,8 @@ function Invoke-GhRelease {
 
     if ($script:DeleteExistingRelease) {
         Write-Info "既存タグ v$Version を削除"
+        # pattern: PASS_THROUGH (例外節 - 冒頭集約コメント参照)
+        # 実 release 操作中の gh 出力はユーザーに見せる方針
         & gh release delete "v$Version" --yes --cleanup-tag
         if ($LASTEXITCODE -ne 0) { Fail "既存 release の削除に失敗しました" }
     }
@@ -1002,6 +1101,8 @@ function Invoke-GhRelease {
     $tmpNotes = New-TemporaryFile
     try {
         [System.IO.File]::WriteAllText($tmpNotes.FullName, $script:ReleaseNotesText, [System.Text.UTF8Encoding]::new($false))
+        # pattern: PASS_THROUGH (例外節 - 冒頭集約コメント参照)
+        # upload 進捗等を見せたいので redirect しない
         & gh release create "v$Version" $ZipPath --notes-file $tmpNotes.FullName --title "v$Version"
         if ($LASTEXITCODE -ne 0) { Fail "gh release create に失敗しました" }
     } finally {
@@ -1074,7 +1175,7 @@ if ($SkipUpload) { Write-Host "Mode: SKIP-UPLOAD" -ForegroundColor Yellow }
 if ($Force)      { Write-Host "Mode: FORCE" -ForegroundColor Yellow }
 if ($Offline)    { Write-Host "Mode: OFFLINE" -ForegroundColor Yellow }
 
-Test-Preflight
+Assert-Preflight
 Read-ComponentVersions
 Resolve-Godot
 Resolve-MsBuild
@@ -1085,7 +1186,7 @@ Clear-Staging
 Build-Launcher
 Build-Manager
 Copy-Templates
-Test-ExpectedFiles
+Assert-ExpectedFiles
 Clear-OldGodot
 
 if ($DryRun) {
