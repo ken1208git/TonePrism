@@ -66,6 +66,7 @@
 .PARAMETER Offline
     外部ネットワーク呼び出しを skip。キャッシュにある version で実行。
     Godot DL / nuget DL / GitHub API 呼び出しを行わない。
+    -SkipUpload を自動で ON にする (upload は network 必須のため)。
 
 .EXAMPLE
     pwsh -ExecutionPolicy Bypass -File .\Release.ps1 -Version 0.1.0 -SkipUpload
@@ -89,6 +90,12 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# -Offline は upload と GitHub API 呼び出しを全部 skip する意味なので、
+# 同時に -SkipUpload も強制 ON とみなす（Codex P2 #137）
+if ($Offline -and -not $SkipUpload) {
+    $SkipUpload = $true
+}
 
 # ----------------------------------------------------------------------------
 # CHANGELOG.md から最新 Bundle エントリの version を取得して $Version に反映
@@ -511,6 +518,34 @@ function Resolve-Nuget {
 }
 
 # ============================================================================
+# git working tree が clean か検証 (Codex P1 #137 への対応)
+# Set-ManifestVersions が project.godot / export_presets.cfg を書き換えうるため、
+# preflight と sync 後の 2 回呼ぶ
+# ============================================================================
+
+function Assert-WorkingTreeClean {
+    param([string]$Context)
+    $gitStatus = & git -C $RepoRoot status --porcelain 2>&1
+    if ($LASTEXITCODE -eq 0 -and $gitStatus) {
+        if ($Force) {
+            Write-Warn "uncommitted change がありますが -Force のため続行 ($Context)"
+            ($gitStatus -split "`n") | ForEach-Object { Write-Info "    $_" }
+        } else {
+            Write-Host ""
+            Write-Host "    uncommitted change が検出されました ($Context):" -ForegroundColor Yellow
+            ($gitStatus -split "`n") | ForEach-Object { Write-Host "        $_" -ForegroundColor Yellow }
+            if ($Context -like '*sync 後*') {
+                Fail "Set-ManifestVersions が tracked files を書き換えました。差分をコミットしてから再実行してください (一度書き換えれば idempotent なので次回 sync は no-op)。-Force でバイパス可能。"
+            } else {
+                Fail "コミットしてから再実行するか、-Force で続行してください。"
+            }
+        }
+    } else {
+        Write-Ok "git working tree clean ($Context)"
+    }
+}
+
+# ============================================================================
 # CHANGELOG.md から [Bundle v<Version>] セクションを抽出
 # ============================================================================
 
@@ -578,19 +613,7 @@ function Test-Preflight {
     }
 
     # uncommitted change
-    $gitStatus = & git -C $RepoRoot status --porcelain 2>&1
-    if ($LASTEXITCODE -eq 0 -and $gitStatus) {
-        if ($Force) {
-            Write-Warn "uncommitted change がありますが -Force のため続行"
-        } else {
-            Write-Host ""
-            Write-Host "    uncommitted change が検出されました:" -ForegroundColor Yellow
-            ($gitStatus -split "`n") | ForEach-Object { Write-Host "        $_" -ForegroundColor Yellow }
-            Fail "コミットしてから再実行するか、-Force で続行してください。"
-        }
-    } else {
-        Write-Ok "git working tree clean"
-    }
+    Assert-WorkingTreeClean -Context "preflight"
 
     # 既存リリースとのタグ衝突
     if (-not $SkipUpload) {
@@ -1054,6 +1077,7 @@ Resolve-Godot
 Resolve-MsBuild
 Resolve-Nuget
 Set-ManifestVersions
+Assert-WorkingTreeClean -Context "manifest sync 後"
 Clear-Staging
 Build-Launcher
 Build-Manager
