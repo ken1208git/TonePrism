@@ -31,6 +31,17 @@
 
 ### [Release Tooling v1.0.8] - 2026-05-12
 
+#### Fixed
+
+- **msbuild 後の日本語 doubled rendering (Wave 2)**: 症状例 `完了` → `完完了了`、ASCII は影響なし、複数 Write-Host が 1 行に collapse。PS 5.1 + chcp 65001 環境で子プロセス (msbuild) がコンソールハンドル継承後にコンソール encoding を OEM 系に戻して去ることが原因の既知バグ。修正:
+  - script 冒頭で `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)` + `$OutputEncoding` を明示ピン留め
+  - `Invoke-ExternalProcess` の finally ブロックで再ピン留め (二重防御、msbuild 等の毎呼び出し後)
+  - 同じ try/finally で Process オブジェクトの Dispose() も追加 (handle leak 防止)
+- **upload progress が表示されない問題 (Wave 2)**: `gh release create` は TTY 検出で進捗描画を OFF にするため、PS から呼ぶと upload 中ずっと無音 → ハング懸念。修正:
+  - `Invoke-NativeWithCapture` に `-ShowProgress` / `-ProgressMessage` パラメータを追加 (500ms 間隔で経過秒数を `\r` 上書き表示)
+  - `Invoke-GhRelease` (gh release delete / create) を PASS_THROUGH → helper + ShowProgress に移行、zip サイズも表示 (`アップロード中 (zip 59 MB)... 12s 経過`)
+  - 完了後は progress 行を消して、gh が stdout に出す release URL を `Write-Info` で再表示
+
 #### Changed
 
 - **Native command 呼び出しを `Invoke-NativeWithCapture` helper に一本化 (Wave 1: trap pattern 整理)**: `gh release view` (v1.0.7) / `gh auth status` (Round 11 Critical #1) / `vswhere` (Round 11 Low) を Process 直叩きベースの helper に移行。catalog から「失敗 path で stderr を出すコマンドでは罠を踏む」パターン (`SUPPRESS_BOTH` / `CAPTURE_DIAGNOSTIC` / `TRY_CATCH_NATIVE`) を anti-pattern に格下げ
@@ -43,8 +54,6 @@
 
 #### Known follow-up (post-v1.0.8 で対処予定)
 
-- **msbuild 後の日本語 doubled rendering**: 症状例 `完了` → `完完了了`。msbuild 終了後の `Write-Host` で日本語が二重描画される PS 5.1 + chcp 65001 既知バグ。`[Console]::OutputEncoding` ピン留めで対処予定 (Wave 2)
-- **upload progress**: `gh release create` が TTY 検出で進捗描画を OFF にするため、経過秒数表示で代替予定 (Wave 2)
 - **`Invoke-NativeWithCapture` 内 TODO**: (a) 引数 quoting helper 切り出し (`Invoke-ExternalProcess` と duplicate)、(b) `-TimeoutSeconds` 引数で network hang ガード — いずれも post v1.0.8 で対処
 - **既存 issue #142 / #143 / #144 / #146**: catalog 重複は本 v1.0.8 で大幅解消、`Release.bat` docstring 分離 / `Read-*` 命名 sweep / `$Context → $PostSync` は別途
 - **#145 (CAPTURE_DIAGNOSTIC ラベル拡張) を本 v1.0.8 で close**: パターン自体を anti-pattern に格下げしたため拡張議論不要に

@@ -93,6 +93,18 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # ============================================================================
+# Console output encoding を UTF-8 (no BOM) にピン留め
+# ============================================================================
+# PS 5.1 + chcp 65001 環境では、子プロセス (特に msbuild) がコンソールハンドル
+# を継承して走った後、後続の Write-Host で日本語が doubled rendering される
+# 既知バグがある (症状例: `完了` → `完完了了`、ASCII は影響なし)。
+# `[Console]::OutputEncoding` を UTF-8 (no BOM) で明示ピン留めしておく + 各
+# Invoke-ExternalProcess 呼び出し後に再ピン留めすることで発火を防ぐ。
+# `$OutputEncoding` は PS pipeline → native command への送信時の encoding。
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$OutputEncoding           = [System.Text.UTF8Encoding]::new($false)
+
+# ============================================================================
 # Native command 呼び出しの方針 (v1.0.8 で再整理)
 # ============================================================================
 # 経緯: PS 5.1 + $ErrorActionPreference='Stop' 下では、`&` 演算子 + native
@@ -120,7 +132,11 @@ $ErrorActionPreference = 'Stop'
 #   3. pattern: PASS_THROUGH
 #      & native-cmd                  # stdout/stderr 両方 console 直書き、変数 capture なし
 #      # exit code チェック必須 (成否を判定する唯一の信号が exit code のみ)
-#      # 例: gh release create / delete (出力をユーザーに見せたい時)
+#      # 例: Invoke-ExternalProcess 経由 (Godot CLI export / msbuild / nuget restore)。
+#      #     大量の verbose 出力をリアルタイムで見せたい長時間処理向け。
+#      # 注: gh release create/delete は v1.0.7 まで PASS_THROUGH だったが、TTY 検出で
+#      #     進捗 OFF + 完了まで無音になる UX 問題のため v1.0.8 で
+#      #     Invoke-NativeWithCapture -ShowProgress に移行
 #
 # ANTI-PATTERNS (使用禁止) — いずれも踏み抜き履歴と deprecation 時点を 2 値で記録:
 #
@@ -284,7 +300,11 @@ function Invoke-NativeWithCapture {
     #>
     param(
         [Parameter(Mandatory)][string]$FilePath,
-        [string[]]$Arguments = @()
+        [string[]]$Arguments = @(),
+        # gh release create のように TTY 検出で進捗描画を OFF にするコマンド向け。
+        # ハングしてないことを示す経過秒数を `\r` 上書きで表示。
+        [switch]$ShowProgress,
+        [string]$ProgressMessage = "実行中..."
     )
     # 引数 quoting は Invoke-ExternalProcess と同じ規則
     # TODO (post v1.0.8): 共通化候補。MSVC argv 規則の特殊ケース (\ を引用直前) で
@@ -318,7 +338,22 @@ function Invoke-NativeWithCapture {
         # → TODO (post v1.0.8): -TimeoutSeconds 引数 + WaitForExit($ms) への移行
         $outTask = $proc.StandardOutput.ReadToEndAsync()
         $errTask = $proc.StandardError.ReadToEndAsync()
-        $proc.WaitForExit()
+
+        if ($ShowProgress) {
+            # 進捗描画なしコマンド (gh release create 等) のための擬似 progress。
+            # 500ms 間隔で経過秒数を `\r` 上書き表示 (CR で行頭戻り、新しい数字で上書き)
+            $start = Get-Date
+            while (-not $proc.HasExited) {
+                $elapsed = [int]((Get-Date) - $start).TotalSeconds
+                # 末尾 spaces は前回より短くなった場合の残骸を消すための padding
+                Write-Host -NoNewline "`r    $ProgressMessage ${elapsed}s 経過          "
+                Start-Sleep -Milliseconds 500
+            }
+            # progress 行を完全に消して cursor を行頭へ (後続の出力が綺麗に流れる)
+            Write-Host -NoNewline "`r$(' ' * 70)`r"
+        } else {
+            $proc.WaitForExit()
+        }
 
         # AggregateException (faulted task) は明示メッセージで rethrow し、何が
         # 失敗したか caller に伝える
@@ -971,9 +1006,19 @@ function Invoke-ExternalProcess {
     $psi.RedirectStandardOutput = $false  # コンソールに直接出力
     $psi.RedirectStandardError = $false
 
-    $proc = [System.Diagnostics.Process]::Start($psi)
-    $proc.WaitForExit()
-    return $proc.ExitCode
+    $proc = $null
+    try {
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $proc.WaitForExit()
+        $exitCode = $proc.ExitCode
+    } finally {
+        if ($null -ne $proc) { $proc.Dispose() }
+        # msbuild など子プロセスが OutputEncoding を OEM に戻して去ると、後続の
+        # Write-Host で日本語が doubled rendering される PS 5.1 バグの予防的再ピン留め
+        # (script 冒頭の pin と二重防御)
+        [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    }
+    return $exitCode
 }
 
 function Build-Launcher {
@@ -1202,10 +1247,13 @@ function Invoke-GhRelease {
 
     if ($script:DeleteExistingRelease) {
         Write-Info "既存タグ v$Version を削除"
-        # pattern: PASS_THROUGH (冒頭集約コメント参照)
-        # 実 release 操作中の gh 出力はユーザーに見せる方針
-        & gh release delete "v$Version" --yes --cleanup-tag
-        if ($LASTEXITCODE -ne 0) { Fail "既存 release の削除に失敗しました" }
+        $delResult = Invoke-NativeWithCapture -FilePath 'gh' `
+            -Arguments @('release', 'delete', "v$Version", '--yes', '--cleanup-tag') `
+            -ShowProgress -ProgressMessage "既存 release を削除中..."
+        if ($delResult.ExitCode -ne 0) {
+            Fail "既存 release の削除に失敗しました:`n$($delResult.Combined.TrimEnd())"
+        }
+        if ($delResult.StdOut.Trim()) { Write-Info $delResult.StdOut.TrimEnd() }
     }
 
     # CHANGELOG から抽出した Bundle セクション本文を --notes に渡す
@@ -1213,10 +1261,15 @@ function Invoke-GhRelease {
     $tmpNotes = New-TemporaryFile
     try {
         [System.IO.File]::WriteAllText($tmpNotes.FullName, $script:ReleaseNotesText, [System.Text.UTF8Encoding]::new($false))
-        # pattern: PASS_THROUGH (冒頭集約コメント参照)
-        # upload 進捗等を見せたいので redirect しない
-        & gh release create "v$Version" $ZipPath --notes-file $tmpNotes.FullName --title "v$Version"
-        if ($LASTEXITCODE -ne 0) { Fail "gh release create に失敗しました" }
+        $zipSizeMb = [int]((Get-Item $ZipPath).Length / 1MB)
+        $uploadResult = Invoke-NativeWithCapture -FilePath 'gh' `
+            -Arguments @('release', 'create', "v$Version", $ZipPath, '--notes-file', $tmpNotes.FullName, '--title', "v$Version") `
+            -ShowProgress -ProgressMessage "アップロード中 (zip $zipSizeMb MB)..."
+        if ($uploadResult.ExitCode -ne 0) {
+            Fail "gh release create に失敗しました:`n$($uploadResult.Combined.TrimEnd())"
+        }
+        # 成功時、gh は release URL を stdout に dump するのでユーザーに表示
+        if ($uploadResult.StdOut.Trim()) { Write-Info $uploadResult.StdOut.TrimEnd() }
     } finally {
         Remove-Item $tmpNotes.FullName -Force -ErrorAction SilentlyContinue
     }
