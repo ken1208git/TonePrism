@@ -11,12 +11,17 @@ REM     cp932 mojibake)。REM は @echo off 環境で表示されないため日
 REM   - chcp 65001 以降は echo も日本語可
 REM   - BOM は NG (一部 cmd.exe build で `@echo off` が壊れる、PR #140 経緯)
 REM
-REM 重要な構造規約: 日本語 echo は (...) ブロック内に置かない (top-level goto
-REM パターンで実装)。cmd は `if cond (echo 日本語... goto :fail)` のような
-REM ブロックを parse-time に展開する際、ブロック内の日本語 byte 列を mis-tokenize
-REM して fragment を command 扱いする ('em.Windows.Forms' is not recognized 等の
-REM 連発エラー) 動作が観測された。回避: `if not cond goto :label / [...日本語 echo...] /
-REM goto :fail / :label / [...continue...]` の linear flow に統一。
+REM 重要な構造規約:
+REM   (1) 日本語 echo は (...) ブロック内に置かない (top-level goto パターンで実装)。
+REM       cmd は `if cond (echo 日本語... goto :fail)` を parse-time 展開する際に
+REM       ブロック内日本語 byte 列を mis-tokenize する動作が観測された。回避:
+REM       `if not cond goto :label / [...日本語 echo...] / goto :fail / :label`
+REM       の linear flow に統一。
+REM   (2) **echo 引数中の `(` `)` は `^(` `^)` で必ず escape する**。top-level
+REM       であっても cmd は `echo (foo)` の `(` を block 開始として解釈する
+REM       場合があり、後続の echo / set / etc. が壊れて 'em.Windows.Forms' is not
+REM       recognized 等の連鎖エラーになる。escape は top-level / ブロック内
+REM       問わず必須。
 REM
 REM Usage (zip ルートから):
 REM   Install.bat                ダブルクリック実行 (来場スタッフ / 部員向け)
@@ -72,7 +77,7 @@ echo  GCTonePrism インストーラ
 echo ============================================================================
 echo.
 echo インストール先の「親フォルダ」を選択してください。
-echo  (選んだフォルダの下に GCTonePrism\ が作成されます)
+echo  ^(選んだフォルダの下に GCTonePrism\ が作成されます^)
 echo.
 echo 例: D:\Games を選ぶ → D:\Games\GCTonePrism\ にインストール
 echo.
@@ -98,7 +103,7 @@ set /p INSTALL_PARENT=<"%TEMP_DIALOG_OUT%"
 del "%TEMP_DIALOG_OUT%" 2>nul
 if defined INSTALL_PARENT goto :dialog_done
 echo.
-echo [FAIL] PowerShell が exit 0 を返しましたが選択パスが取得できませんでした (想定外)。
+echo [FAIL] PowerShell が exit 0 を返しましたが選択パスが取得できませんでした ^(想定外^)。
 echo        本シナリオが再現する場合は GitHub issue で報告してください。
 goto :fail
 
@@ -110,7 +115,7 @@ goto :end
 
 :dialog_fail
 echo.
-echo [FAIL] PowerShell の起動 / 実行に失敗しました (exit %DIALOG_EXIT%)。
+echo [FAIL] PowerShell の起動 / 実行に失敗しました ^(exit %DIALOG_EXIT%^)。
 echo        PowerShell が利用可能か、Execution Policy を確認してください:
 echo          powershell.exe -NoProfile -Command "Get-ExecutionPolicy -List"
 if not exist "%TEMP_DIALOG_OUT%" goto :dialog_fail_cleanup
@@ -135,7 +140,7 @@ echo.
 echo [FAIL] 選択されたフォルダ自体が GCTonePrism です:
 echo        %INSTALL_PARENT%
 echo.
-echo        「親フォルダ」を選んでください (その下に GCTonePrism\ が作成されます)。
+echo        「親フォルダ」を選んでください ^(その下に GCTonePrism\ が作成されます^)。
 echo        例: D:\Games\GCTonePrism\ にインストールしたい場合は D:\Games を選択。
 goto :fail
 :not_nested
@@ -155,15 +160,15 @@ echo  [警告] 既存インストールを検出しました
 echo ============================================================================
 echo.
 echo  通常、アップデートは Manager UI から行うのを推奨します
-echo  (Phase 4 実装後、現在は未実装)。
+echo  ^(Phase 4 実装後、現在は未実装^)。
 echo.
 echo  Manager が壊れて起動できない / クリーンインストールしたい場合のみ Y を押してください。
 echo  Y を押した場合でも以下のゲームデータは維持されます:
-echo    - prism.db (ゲーム情報 DB)
-echo    - games\        (ゲーム実体)
-echo    - backups\      (バックアップ)
-echo    - responses\    (アンケート回答)
-echo    - logs\         (ログ)
+echo    - prism.db ^(ゲーム情報 DB^)
+echo    - games\        ^(ゲーム実体^)
+echo    - backups\      ^(バックアップ^)
+echo    - responses\    ^(アンケート回答^)
+echo    - logs\         ^(ログ^)
 echo.
 REM set /p は空 Enter で変数を更新しない仕様、事前初期化で「前回値保持」事故を防ぐ
 set "OVERWRITE_CONFIRM="
@@ -206,7 +211,7 @@ robocopy "%FILES_DIR%" "%INSTALL_TARGET%" /E /XF prism.db /XD games backups resp
 REM robocopy の終了コードは bit field、< 8 が成功 (1=コピーあり, 0=変更なし, 等)
 if not errorlevel 8 goto :install_done
 echo.
-echo [FAIL] ファイルコピーに失敗しました (robocopy exit %ERRORLEVEL%)。
+echo [FAIL] ファイルコピーに失敗しました ^(robocopy exit %ERRORLEVEL%^)。
 goto :fail
 
 :new_install
@@ -221,7 +226,7 @@ goto :fail
 robocopy "%FILES_DIR%" "%INSTALL_TARGET%" /E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1
 if not errorlevel 8 goto :install_done
 echo.
-echo [FAIL] ファイルコピーに失敗しました (robocopy exit %ERRORLEVEL%)。
+echo [FAIL] ファイルコピーに失敗しました ^(robocopy exit %ERRORLEVEL%^)。
 goto :fail
 
 :install_done
@@ -232,8 +237,8 @@ echo  インストール完了: %INSTALL_TARGET%
 echo ============================================================================
 echo.
 echo  日常使い:
-echo    %INSTALL_TARGET%\Launcher.bat   (来場者用 Launcher 起動)
-echo    %INSTALL_TARGET%\Manager.bat    (運営用 Manager 起動)
+echo    %INSTALL_TARGET%\Launcher.bat   ^(来場者用 Launcher 起動^)
+echo    %INSTALL_TARGET%\Manager.bat    ^(運営用 Manager 起動^)
 echo.
 
 REM ---- Manager 起動 Y/N (top-level、ブロック内に日本語 echo 置かない) ----
