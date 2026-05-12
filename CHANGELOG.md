@@ -29,7 +29,11 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
-### [Release Tooling v1.0.9] - 2026-05-12
+### [Release Tooling v0.1.9] - 2026-05-12
+
+#### Changed (versioning scheme)
+
+- **Release Tooling の version numbering を v1.0.x → v0.1.x に renumber**: 初版 (Phase 1) 時に v1.0.0 開始としたが、他コンポーネント (Launcher v0.5.x / Manager v0.8.x / Bundle v0.1.0) が全て pre-1.0 dev mode の中で Release Tooling だけ v1.x になっていた。さらに毎 PR で構造変更を繰り返している現実 (本 entry までに 9 patch、結構な breaking 含む) と SemVer v1.0 = stable の意味が乖離していた。v1.0.x には git tag / GitHub Release が一切存在せず外部参照ゼロのため、CHANGELOG / Release.ps1 inline コメント / AGENTS.md の歴史言及をすべて v0.1.x に retroactive rename。今後の patch も v0.1.10, v0.1.11 ... と続く。Bundle が 1.0 に到達した時点で各 component と合わせて Release Tooling も v1.0 を検討する想定
 
 #### Added
 
@@ -61,7 +65,7 @@
   - §3.7.2 を Approach C 仕様に再定義 (FolderBrowserDialog / 既存検知 Y/N / Manager UI 推奨 / 保護データ温存 / Manager 起動 Y/N)、旧仕様の自動起動 + `GCTonePrism_Manager` 配下チェックを廃止
   - §3.7.5 Launcher 側の役割に「日常起動は `GCTonePrism/Launcher.bat` から」の規約を明記
 
-### [Release Tooling v1.0.8] - 2026-05-12
+### [Release Tooling v0.1.8] - 2026-05-12
 
 #### Fixed
 
@@ -85,7 +89,7 @@
   - **[R16 #3] `clearLine` 全角 cell 幅の注意書きを正確化**: 旧コメント「Japanese 文字 cell 幅によらず消し残しが出ない」は実装より強い保証に読める。実態は「現 ProgressMessage 長では WindowWidth-1 幅で覆える前提に依存」「全角 2 cell 幅を構造的に補正していない」を明文化、長文 ProgressMessage 追加時の修正 hint も併記
   - **[R16 #4] CHANGELOG R13 ナンバリング順を整理**: R13 L1 (保留) を L4 の後から L2 の前 (= L1/L2/L3/L4 の自然順) に移動、後追い時のスキャンが直感的に
 - **PR #148 round 15 シニアレビュー反映**:
-  - **[R15 M1] 死参照訂正**: `Invoke-NativeWithCapture` のセクションヘッダコメント `(冒頭の \`2>&1\` trap セクション参照)` が v1.0.8 のセクション再構成で stale に。「冒頭の『Native command 呼び出しの方針』セクション参照」に修正
+  - **[R15 M1] 死参照訂正**: `Invoke-NativeWithCapture` のセクションヘッダコメント `(冒頭の \`2>&1\` trap セクション参照)` が v0.1.8 のセクション再構成で stale に。「冒頭の『Native command 呼び出しの方針』セクション参照」に修正
   - **[R15 M2] WindowWidth fallback コメントと実装の divergence 解消**: コメント「0 以下を返す」と実装 `-lt 30` の食い違いを明文化。「30 未満」は WindowWidth=0 の非 console host と極端に狭い実コンソールの両方を catch する threshold である旨を明示
   - **[R15 M3] vswhere の silent pass 解消**: コメントが「実行環境破損で stderr 出力する可能性」を挙げて Invoke-NativeWithCapture に移行していたにも関わらず ExitCode / StdErr を完全に無視していた silent pass を修正。vswhere 失敗時は `Write-Warn` で診断情報を出して PATH fallback に切替 (release は続行可能なため Fail にはしない)
   - **[R15 L1] Combined 4 case コメント精度向上**: 第 4 case「stderr 空 → stdout のみ」は stdout 末尾改行なしのとき不正確 (実は `\n` が付く)。stdout 末尾改行の有無を主軸にした 2 分岐構造に書き換え、各分岐で stderr の各 case を入れ子で記述
@@ -95,9 +99,9 @@
   - **[Codex P2] vswhere に `-utf8` フラグ追加**: `Invoke-NativeWithCapture` は stdout/stderr を UTF-8 として decode するが、vswhere は default で system codepage 出力。非 UTF-8 locale で日本語 VS install path 等 non-ASCII path が mojibake → 後段 `Test-Path` 失敗 → MSBuild 検出失敗の silent path に落ちる。`-utf8` を Arguments に追加して vswhere 出力を UTF-8 強制
   - **[Codex P2 ×2] `[Console]::OutputEncoding` を try/catch でガード**: non-console host (CI / headless / redirected execution) では console API setter が `IOException` を投げ、`$ErrorActionPreference='Stop'` 下で release 開始前に script abort する path。script 冒頭の pin + `Invoke-ExternalProcess` finally の再 pin 両方を try/catch でラップ、script-level `$script:Utf8NoBomEncoding` を一意ソースとして共有
   - **[R14 H1] `WaitForExit()` コメントの自己矛盾を訂正**: 旧コメント「パイプバッファ完全フラッシュを保証」は誤り (WaitForExit no-arg のフラッシュ保証は `BeginOutputReadLine` 系の event-based async 読み取りに対するもので、本実装の `ReadToEndAsync` Task-based には適用されない)。実際のフラッシュ保証は `$outTask.Result` / `$errTask.Result` が EOF までブロックすることで提供。コメントを「`.Result` を削除すると出力切り捨てバグが発生するため touch しないこと」に書き換え
-  - **[R14 M1] CHANGELOG label 重複解消**: 同 v1.0.8 entry 内に「Wave 2 シニアレビュー反映 (M1-M3)」と「PR #148 シニアレビュー反映 (M1-M3)」が共存し M1-M3 が 2 セット存在、後追い不能だった。本 entry のラベルを「R14」「W2」「Codex P2」等の round 識別子付きに変更
+  - **[R14 M1] CHANGELOG label 重複解消**: 同 v0.1.8 entry 内に「Wave 2 シニアレビュー反映 (M1-M3)」と「PR #148 シニアレビュー反映 (M1-M3)」が共存し M1-M3 が 2 セット存在、後追い不能だった。本 entry のラベルを「R14」「W2」「Codex P2」等の round 識別子付きに変更
   - **[R14 L1] zip size 表示の小ファイル対応**: `[int]($bytes / 1MB)` は 1MB 未満で 0 表示になり破損誤解を招く。`if ge 1MB → MB / ge 1KB → KB / else B` の自動切替に変更、Phase 2 以降の Updater 単体 zip 等で発火する想定
-  - **[R14 L2] ShowProgress 中の Task リーク (Known follow-up)**: `ReadToEndAsync()` 開始後に ShowProgress ループ内で例外発生 → finally で Dispose() → Task が `ObjectDisposedException` で faulted のまま GC まで放置。実害ほぼなし (現状実行 path で発火経路なし) だが、post v1.0.8 で `-TimeoutSeconds` + CancellationToken 対応する際に合わせて整理
+  - **[R14 L2] ShowProgress 中の Task リーク (Known follow-up)**: `ReadToEndAsync()` 開始後に ShowProgress ループ内で例外発生 → finally で Dispose() → Task が `ObjectDisposedException` で faulted のまま GC まで放置。実害ほぼなし (現状実行 path で発火経路なし) だが、post v0.1.8 で `-TimeoutSeconds` + CancellationToken 対応する際に合わせて整理
 - **PR #148 round 13 シニアレビュー反映**:
   - **[R13 M1] `gh release delete` UX 退行**: 成功時 stdout/stderr 無音のため `if ($delOut -match '\S')` が false で ShowProgress 行消去後に「無の状態」。`Write-Ok "既存タグ v$Version を削除完了"` を無条件追加して旧 PASS_THROUGH UX を回復
   - **[R13 M2] PASS_THROUGH catalog のメカニズム乖離**: catalog の例示は `& native-cmd` 直書きだが現実装は `Invoke-ExternalProcess` (Process 直叩き)。「(a) 直 & 演算子版」「(b) helper 経由 (推奨)」の 2 実装に分割記述
@@ -117,26 +121,26 @@
 
 #### Changed
 
-- **Native command 呼び出しを `Invoke-NativeWithCapture` helper に一本化 (Wave 1: trap pattern 整理)**: `gh release view` (v1.0.7) / `gh auth status` (Round 11 Critical #1) / `vswhere` (Round 11 Low) を Process 直叩きベースの helper に移行。catalog から「失敗 path で stderr を出すコマンドでは罠を踏む」パターン (`SUPPRESS_BOTH` / `CAPTURE_DIAGNOSTIC` / `TRY_CATCH_NATIVE`) を anti-pattern に格下げ
+- **Native command 呼び出しを `Invoke-NativeWithCapture` helper に一本化 (Wave 1: trap pattern 整理)**: `gh release view` (v0.1.7) / `gh auth status` (Round 11 Critical #1) / `vswhere` (Round 11 Low) を Process 直叩きベースの helper に移行。catalog から「失敗 path で stderr を出すコマンドでは罠を踏む」パターン (`SUPPRESS_BOTH` / `CAPTURE_DIAGNOSTIC` / `TRY_CATCH_NATIVE`) を anti-pattern に格下げ
   - **`Invoke-NativeWithCapture` helper 新設**: `System.Diagnostics.Process` で stdout/stderr/exit code を直接捕捉。PS の error stream を経由しないため NativeCommandError trap を構造的に回避。両 stream を async 読みでデッドロックも回避。返り値は `[PSCustomObject]` で `.StdOut` / `.StdErr` / `.ExitCode` / `.Combined` を提供 (Round 12 #1/3 のリネーム指摘もこの構造変更で自動解消)
   - **catalog 大幅整理**: 6 個あった pattern を「Invoke-NativeWithCapture 推奨 + 3 個の安全な `&` pattern + anti-patterns」に再構成。Round 11 Low の命名軸統一 + Round 12 全般の意図明確化を満たす形に
   - **`gh release view` の structured parse 表現訂正 (Round 11 High + Round 12 #2)**: `--json id` の効果は「存在時の stdout を最小化」のみで、parse はしていない。stderr 文字列マッチでの「不在 vs 別種失敗」判定は gh の英語メッセージ依存である旨をコメントに明記、本来の structured parse (`ConvertFrom-Json` + HTTP 404 判定 etc.) は将来課題として記録
   - **Round 11/12 の Medium / Low 一括対処**: `$_.Exception.Message` 単一行依存 (helper で StdErr 直接取得に変更で解消)、`$releaseViewOutput` mixed content (helper で StdOut/StdErr 分離で解消)、`Out-String` 末尾改行 `.TrimEnd()` 化、elseif → ネスト if/else (exit code を一次軸、stderr を二次軸の構造に)、catalog ↔ call site 重複圧縮 (helper 化で per-site コメントが固有理由 1-2 行に)
-  - **`gh auth status` の同 trap も同時解消 (Round 11 Critical #1)**: v1.0.7 で CHANGELOG note として deferred していたものを Wave 1 で本対応
+  - **`gh auth status` の同 trap も同時解消 (Round 11 Critical #1)**: v0.1.7 で CHANGELOG note として deferred していたものを Wave 1 で本対応
 - **PASS_THROUGH の「例外節」呼称を廃止**: 旧 catalog では「実 release 操作 (gh release create/delete) は例外」と書いていたが、PASS_THROUGH 自体を catalog の一級 pattern として再定義したため例外節は不要に。`Invoke-GhRelease` 内の 2 件のコメントから「例外節 -」を削除
 
-#### Known follow-up (post-v1.0.8 で対処予定)
+#### Known follow-up (post-v0.1.8 で対処予定)
 
-- **`Invoke-NativeWithCapture` 内 TODO**: (a) 引数 quoting helper 切り出し (`Invoke-ExternalProcess` と duplicate)、(b) `-TimeoutSeconds` 引数で network hang ガード — いずれも post v1.0.8 で対処
-- **既存 issue #142 / #143 / #144 / #146**: catalog 重複は本 v1.0.8 で大幅解消、`Release.bat` docstring 分離 / `Read-*` 命名 sweep / `$Context → $PostSync` は別途
-- **#145 (CAPTURE_DIAGNOSTIC ラベル拡張) を本 v1.0.8 で close**: パターン自体を anti-pattern に格下げしたため拡張議論不要に
+- **`Invoke-NativeWithCapture` 内 TODO**: (a) 引数 quoting helper 切り出し (`Invoke-ExternalProcess` と duplicate)、(b) `-TimeoutSeconds` 引数で network hang ガード — いずれも post v0.1.8 で対処
+- **既存 issue #142 / #143 / #144 / #146**: catalog 重複は本 v0.1.8 で大幅解消、`Release.bat` docstring 分離 / `Read-*` 命名 sweep / `$Context → $PostSync` は別途
+- **#145 (CAPTURE_DIAGNOSTIC ラベル拡張) を本 v0.1.8 で close**: パターン自体を anti-pattern に格下げしたため拡張議論不要に
 
-### [Release Tooling v1.0.7] - 2026-05-12
+### [Release Tooling v0.1.7] - 2026-05-12
 
 #### Fixed
 
-- **本番 release で `gh release view` が NativeCommandError trap を踏んで preflight が失敗する問題 (#141 のインライン解決)**: v1.0.6 までの `& gh release view "v$Version" 2>$null | Out-Null` は DRY-RUN で `-SkipUpload` 自動 promote により実行されず、本番 release で v0.1.0 を publish しようとして初めて発火した
-  - **根本原因**: PS 5.1 + `$ErrorActionPreference='Stop'` 環境では、native command が **exit 非ゼロ + stderr 出力** という組合せを返した場合に `2>$null` redirect が trap を防げない。これは PS が native command 用に別途生成する NativeCommandError ErrorRecord が `2>$null` の redirect 処理よりも先 (exit code 確定時点) に作られるため。v1.0.6 までの集約コメントは「`Out-String` を経由すれば Stop の判定対象から外れる」と書いていたが、これは exit 0 限定の挙動で、`gh release view "v0.1.0"` 不在時の `exit 1 + stderr "release not found"` には適用できなかった
+- **本番 release で `gh release view` が NativeCommandError trap を踏んで preflight が失敗する問題 (#141 のインライン解決)**: v0.1.6 までの `& gh release view "v$Version" 2>$null | Out-Null` は DRY-RUN で `-SkipUpload` 自動 promote により実行されず、本番 release で v0.1.0 を publish しようとして初めて発火した
+  - **根本原因**: PS 5.1 + `$ErrorActionPreference='Stop'` 環境では、native command が **exit 非ゼロ + stderr 出力** という組合せを返した場合に `2>$null` redirect が trap を防げない。これは PS が native command 用に別途生成する NativeCommandError ErrorRecord が `2>$null` の redirect 処理よりも先 (exit code 確定時点) に作られるため。v0.1.6 までの集約コメントは「`Out-String` を経由すれば Stop の判定対象から外れる」と書いていたが、これは exit 0 限定の挙動で、`gh release view "v0.1.0"` 不在時の `exit 1 + stderr "release not found"` には適用できなかった
   - **修正**: `try/catch` で受ける `TRY_CATCH_NATIVE` パターンを新設 + 該当 call site に適用。`--json id` で stdout を最小化 (#141 で提案していた structured parse)、`"release not found"` 文字列マッチで "確実に存在しない" を確証、別種の失敗 (auth / network / API rate limit / gh install 破損 等) は preflight で早期 Fail させる形に。これで H2 silent false-negative (gh の auth/network 障害を「タグ衝突なし」と誤判定して zip ビルド完了後に fail する path) も同時解消
   - **catalog 全体の精度向上**: 集約コメントの機構説明に「重要な制約」セクションを追加、`SUPPRESS_BOTH` / `CAPTURE_STDOUT` / `CAPTURE_DIAGNOSTIC` の各パターンが「success/failure path のどちらで stderr を出すか」によって安全性が変わる旨を明記。失敗 path で stderr を出すコマンドには `TRY_CATCH_NATIVE` 一択
   - 影響範囲は preflight の 1 call site のみ。zip / upload ロジックには変更なし
@@ -146,7 +150,7 @@
 
 - **`gh auth status` の call site は本 PR の catalog 制約に未追従**: `Release.ps1` の `Assert-Preflight` 内 `$authStatusOutput = & gh auth status 2>&1 | Out-String` (CAPTURE_DIAGNOSTIC) は、本 PR で新設した制約 (「失敗 path で stderr を出すコマンドには TRY_CATCH_NATIVE 必須」) に該当する。`gh auth status` は未認証時 exit 1 + stderr 出力なので、`gh auth login` 未実行の dev clone / token 期限切れ / `GH_TOKEN` 消失 等のシナリオで NativeCommandError 例外で abort し、本来表示するはずの `Fail "gh 認証に失敗しました ..."` メッセージが届かない。本 PR のスコープは `gh release view` の 1 call site に絞ったため未対応、改善ブランチでまとめて TRY_CATCH_NATIVE に移行予定。シニアレビュー round 11 で同 PR 内対応 or CHANGELOG note のどちらかが許容ラインとされたため、後者を選択
 
-### [Release Tooling v1.0.6] - 2026-05-11
+### [Release Tooling v0.1.6] - 2026-05-11
 
 #### Fixed
 
@@ -158,7 +162,7 @@
 
 #### Changed
 
-- **v1.0.5 で導入した `[WARN]` メッセージの日本語併記行を削除**: chcp 取得失敗パスは codepage 未切替 + ファイル no-BOM のため日本語 echo の文字化けが確定的、ASCII-only ルールに整合させる形で意図的に撤回
+- **v0.1.5 で導入した `[WARN]` メッセージの日本語併記行を削除**: chcp 取得失敗パスは codepage 未切替 + ファイル no-BOM のため日本語 echo の文字化けが確定的、ASCII-only ルールに整合させる形で意図的に撤回
 - **`2>&1` trap 関連の per-site コメント 3 箇所を集約 + 参照形式に整理**: Release.ps1 冒頭の `Set-StrictMode` 直後に集約コメントを設置、各 call site は集約参照 + 1-2 行の理由のみ。集約ラベルは self-documenting な名前 (`SUPPRESS_BOTH` / `CAPTURE_DIAGNOSTIC` / `CAPTURE_STDOUT` / `CAPTURE_STDOUT_PASS_STDERR` / `PASS_THROUGH` / `STOP_TRAP`) で索引参照型コメントの欠点 (表まで戻る往復) を解消。集約コメント内に「機構」セクションを追加して PS 7.x 等への移植時の調査起点を明示
   - **シニアレビュー round 7 反映**: `Assert-WorkingTreeClean` の git status call site は stdout を変数 capture / stderr を console 直書きする hybrid なので、PASS_THROUGH (console 直書き、変数 capture なし) では実態と乖離していた。`CAPTURE_STDOUT_PASS_STDERR` パターンを新設して移行。call site のパターンマーカーと catalog 定義の整合性を保つことが「self-documenting パターン名」アプローチの前提
   - **`STREAM_TO_VAR` の独立記載を廃止**: `STOP_TRAP` と本質的に同じ罠 (`2>&1` 自体が原因) で、変数 capture 有無は表面の違い。「PS バージョンで挙動が変わる」表現が誤読を招くため統合し、両形式を `STOP_TRAP` 配下にまとめて回避策を 2 つ並記
@@ -198,7 +202,7 @@
   - **L5**: `Get-BundleReleaseNotes` の `\Z` コメントを精度向上。現実の発火条件は「初回 Bundle release + 後続セクション未追加の極初期状態」のみで、汎用的な「セクション順変更時」は誤誘導
   - **H2 → 別 issue 化 (#141)**: `gh release view` の exit code 単独依存による silent false-negative。zip ビルド完了後に fail する path が残るが、本 PR スコープ外で `--json id` への移行を別 issue として trackable 化
 
-### [Release Tooling v1.0.5] - 2026-05-11
+### [Release Tooling v0.1.5] - 2026-05-11
 
 #### Fixed
 
@@ -212,27 +216,27 @@
   - **BOM 認識不能環境での脱出経路** (Win 10 1809 以前の古い cmd.exe build 等) を docstring に記録: 「BOM 外して UTF-8 (no BOM) + CRLF に戻し、chcp 65001 より前の REM / echo は ASCII 化」の 3 ステップ
   - `Release.bat` の docstring に CRLF 必須の経緯を追記
 
-### [Release Tooling v1.0.4] - 2026-05-11
+### [Release Tooling v0.1.4] - 2026-05-11
 
 #### Fixed
 
-- **`-DryRun` モードでも GitHub preflight が走る問題を修正 (Codex P2 #137)**: 旧実装は `-DryRun` 時も `-SkipUpload` がなければ `gh auth status` / `gh release view` を呼び出していた。`-DryRun` は zip 化と upload を skip するモードのため、preflight だけ network 必須にする意味は無い。gh 認証なし環境やオフライン環境で `-DryRun` 単体実行が fail していた問題を解消。v1.0.3 で導入した `-Offline → -SkipUpload promote` ロジックを拡張し、`if (($Offline -or $DryRun) -and -not $SkipUpload) { $SkipUpload = $true }` の形に統合。docstring も `-DryRun` の説明を更新
+- **`-DryRun` モードでも GitHub preflight が走る問題を修正 (Codex P2 #137)**: 旧実装は `-DryRun` 時も `-SkipUpload` がなければ `gh auth status` / `gh release view` を呼び出していた。`-DryRun` は zip 化と upload を skip するモードのため、preflight だけ network 必須にする意味は無い。gh 認証なし環境やオフライン環境で `-DryRun` 単体実行が fail していた問題を解消。v0.1.3 で導入した `-Offline → -SkipUpload promote` ロジックを拡張し、`if (($Offline -or $DryRun) -and -not $SkipUpload) { $SkipUpload = $true }` の形に統合。docstring も `-DryRun` の説明を更新
 
-### [Release Tooling v1.0.3] - 2026-05-11
+### [Release Tooling v0.1.3] - 2026-05-11
 
 #### Fixed
 
 - **manifest sync 後の working tree 再検証を追加 (Codex P1 #137)**: `Test-Preflight` で working tree clean を要求した後、`Set-ManifestVersions` が `project.godot` / `export_presets.cfg` を書き換えると tree が dirty になり、その状態で packaging + tag 付けが進むと **source ↔ artifact traceability が崩れる** 問題を解消。新規 `Assert-WorkingTreeClean` 共通関数を切り出し、preflight と sync 後の 2 タイミングで呼ぶように変更。sync 後の dirty 検出時は「`Set-ManifestVersions` が書き換えた差分をコミットしてから再実行」という具体的なメッセージで fail (`Set-ManifestVersions` は idempotent なので 2 回目以降は no-op)
 - **`-Offline` モードで GitHub preflight が走る問題を修正 (Codex P2 #137)**: 旧実装は `-Offline` 時も `-SkipUpload` がなければ `gh auth status` / `gh release view` を呼び出していた。オフライン環境ではこれらが必ず fail するため `-Offline` フラグが advertise 通り機能していなかった。`param` block 直後で `if ($Offline -and -not $SkipUpload) { $SkipUpload = $true }` の自動 promote を追加し、`-Offline` 指定時は upload 関連の preflight + 実 upload を全て skip する形に統一。docstring も `-Offline` の説明を更新
 
-### [Release Tooling v1.0.2] - 2026-05-11
+### [Release Tooling v0.1.2] - 2026-05-11
 
 #### Fixed
 
 - **`export_presets.cfg` が gitignore で除外されてクリーン clone で Release.ps1 が即 fail する問題を修正 (Codex P1 #137)**: Godot のデフォルト `.gitignore` テンプレが `export_presets.cfg` を除外する慣習で、本プロジェクトの初期 `.gitignore` もそれを踏襲していた。しかし Release.ps1 の `Set-ManifestVersions` が `application/file_version` を書き換えるため必須ファイルになっており、別開発者の clean clone では `ReadAllText` の段階で fail していた。`.gitignore` から `export_presets.cfg` を除外し tracked 化、初期の Godot エディタ生成版を repo に含める形に変更
 - **`bin\Release\` 再帰コピーで前回ビルド時の runtime ゴミが zip に混入し得る問題を修正 (Codex P1 #137)**: 開発者が Manager を直接 `bin\Release\` から起動した場合、log / db / backups 等の runtime ファイルが `bin\Release\` に発生する。`Get-ChildItem -Recurse -File | Where Extension -ne '.pdb'` で拾ってると、これら不要ファイルが release zip に紛れ込む可能性があった。`Build-Manager` の msbuild 直前に `bin\Release\` を `Remove-Item -Recurse -Force` で完全削除し、毎回クリーンビルドする形に変更。これで bin\Release/ には msbuild が生成した正規の output のみが残り、コピー対象の予期せぬ追加が起きない
 
-### [Release Tooling v1.0.1] - 2026-05-11
+### [Release Tooling v0.1.1] - 2026-05-11
 
 #### Changed
 
@@ -242,7 +246,7 @@
   - `Release.bat` から `RELEASE_VERSION` ファイル読み取り処理を削除、引数を Release.ps1 にそのまま forward する形に簡素化
   - SPEC §3.7.7 / AGENTS.md "Release and Versioning" / §3.7.8 チェックリストも同方式に対応する形に更新
 
-### [Release Tooling v1.0.0] - 2026-05-11
+### [Release Tooling v0.1.0] - 2026-05-11
 
 #### Added
 

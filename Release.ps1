@@ -120,14 +120,14 @@ try {
 $OutputEncoding = $script:Utf8NoBomEncoding
 
 # ============================================================================
-# Native command 呼び出しの方針 (v1.0.8 で再整理)
+# Native command 呼び出しの方針 (v0.1.8 で再整理)
 # ============================================================================
 # 経緯: PS 5.1 + $ErrorActionPreference='Stop' 下では、`&` 演算子 + native
 # command の組み合わせで「exit 非ゼロ + stderr 出力」を返すコマンドが
 # NativeCommandError の terminating error を発生させる。
-# v1.0.6 までは `2>$null` / `2>&1 | Out-String` 系で回避できると考えていたが、
-# v1.0.7 で実証された通り PS の error stream への ErrorRecord 化が redirect
-# よりも先に発火するため redirect は防御にならない。v1.0.8 で
+# v0.1.6 までは `2>$null` / `2>&1 | Out-String` 系で回避できると考えていたが、
+# v0.1.7 で実証された通り PS の error stream への ErrorRecord 化が redirect
+# よりも先に発火するため redirect は防御にならない。v0.1.8 で
 # `Invoke-NativeWithCapture` ヘルパー (System.Diagnostics.Process 直叩き) に
 # 一本化、`&` 系の patterns は「success exit が確証できる場合のみ」に格下げ。
 #
@@ -158,36 +158,36 @@ $OutputEncoding = $script:Utf8NoBomEncoding
 #          # 引数 quoting + finally で [Console]::OutputEncoding を UTF-8 に再ピン留め
 #          # 大量 verbose 出力 + 長時間処理向け (Godot CLI export / msbuild / nuget restore)
 #
-#      注: gh release create/delete は v1.0.7 まで (a) PASS_THROUGH だったが、TTY 検出
-#          で進捗 OFF + 完了まで無音になる UX 問題のため v1.0.8 で
+#      注: gh release create/delete は v0.1.7 まで (a) PASS_THROUGH だったが、TTY 検出
+#          で進捗 OFF + 完了まで無音になる UX 問題のため v0.1.8 で
 #          Invoke-NativeWithCapture -ShowProgress に移行
 #
 # ANTI-PATTERNS (使用禁止) — いずれも踏み抜き履歴と deprecation 時点を 2 値で記録:
 #
 #   X. STOP_TRAP — & cmd 2>&1 / $var = & cmd 2>&1
 #      stderr が ErrorRecord として success stream に流れ Stop trap 発火。
-#      初回 deprecate from v1.0.0 (script 新設時点)。
+#      初回 deprecate from v0.1.0 (script 新設時点)。
 #      回避: Invoke-NativeWithCapture へ移行。
 #
 #   X. SUPPRESS_BOTH — & cmd 2>$null | Out-Null
-#      踏み抜き: v1.0.6 (本番 release で gh release view が trap 発火)
-#      deprecation: v1.0.8 (anti-pattern として正式格下げ)
+#      踏み抜き: v0.1.6 (本番 release で gh release view が trap 発火)
+#      deprecation: v0.1.8 (anti-pattern として正式格下げ)
 #      「2>$null で stderr を捨てれば trap 防げる」前提が誤りだった
 #
 #   X. CAPTURE_DIAGNOSTIC — $out = & cmd 2>&1 | Out-String
-#      踏み抜き: v1.0.7 (gh release view の "release not found" stderr で trap)
-#      deprecation: v1.0.8 (anti-pattern として正式格下げ)
+#      踏み抜き: v0.1.7 (gh release view の "release not found" stderr で trap)
+#      deprecation: v0.1.8 (anti-pattern として正式格下げ)
 #      「Out-String を経由すれば Stop の判定対象外」前提が誤りだった
 #
 #   X. CAPTURE_STDOUT — $out = & cmd 2>$null
-#      踏み抜き履歴なし、deprecation: v1.0.8
+#      踏み抜き履歴なし、deprecation: v0.1.8
 #      SUPPRESS_BOTH と同じ構造 (2>$null) を持つため同じ trap 形状。
-#      本 script では vswhere で使用していたが v1.0.8 で helper に移行、
+#      本 script では vswhere で使用していたが v0.1.8 で helper に移行、
 #      残存 call site ゼロのため anti-pattern 化
 #
 #   X. TRY_CATCH_NATIVE — try { & cmd 2>&1 | Out-String } catch { ... }
-#      導入: v1.0.7 (CAPTURE_DIAGNOSTIC の trap 回避策として)
-#      deprecation: v1.0.8 (Invoke-NativeWithCapture が同目的を関数化したため不要)
+#      導入: v0.1.7 (CAPTURE_DIAGNOSTIC の trap 回避策として)
+#      deprecation: v0.1.8 (Invoke-NativeWithCapture が同目的を関数化したため不要)
 #
 # PS 7.3+ 移行時の注意 (現状未対応):
 #   PS 7.3 以降は $PSNativeCommandUseErrorActionPreference (default $true) が
@@ -346,7 +346,7 @@ function Invoke-NativeWithCapture {
     #   して機能せず、引数のパースが破損する (\ × N + " → \ × (N/2) + " デコード)。
     #   現 call site (zip / 一時 notes / vswhere) はいずれも trailing backslash を
     #   持たないため安全。新規 call site でディレクトリパスを渡す場合は要注意。
-    # TODO (post v1.0.8): 共通化候補。MSVC argv 規則の特殊ケース (\ を引用直前) で
+    # TODO (post v0.1.8): 共通化候補。MSVC argv 規則の特殊ケース (\ を引用直前) で
     #                     Invoke-ExternalProcess との 2 箇所が silent に divergence
     #                     する危険、共通 helper 切り出し時に CommandLineToArgvW 規則
     #                     準拠 (\ × N + " → \\ × N + \") に置換
@@ -376,7 +376,7 @@ function Invoke-NativeWithCapture {
         # 両 stream を async で読みデッドロック回避 (片方のバッファが満杯になると
         # child が block する)。WaitForExit() は timeout なし → network hang する
         # コマンド (gh API 呼び出し) では preflight が無限待機する path が残る
-        # → TODO (post v1.0.8): -TimeoutSeconds 引数 + WaitForExit($ms) への移行
+        # → TODO (post v0.1.8): -TimeoutSeconds 引数 + WaitForExit($ms) への移行
         $outTask = $proc.StandardOutput.ReadToEndAsync()
         $errTask = $proc.StandardError.ReadToEndAsync()
 
