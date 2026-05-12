@@ -13,6 +13,16 @@
 
 リリース zip 全体に付与する独立バージョン。GitHub Releases の本文として `Release.ps1` がこのセクションを抜き出して使う。エンドユーザー（来場スタッフ / 顧問の先生 / 部員）向けの **summary** を書く。技術詳細は `## Launcher` / `## Manager` / `## Release Tooling` 等の別セクションを参照。詳細仕様は [SPECIFICATION.md §3.7.7](SPECIFICATION.md) を参照。
 
+### [Bundle v0.2.0] - 2026-05-13
+
+**Phase 2 配布フロー整備 + 初回インストーラ実装** (#108 Phase 2)。zip ダブルクリック展開 → `Install.bat` ダブルクリック → 親フォルダを GUI 選択 → インストール完了、までの 1 経路を提供。`<親>/Launcher.bat` / `<親>/Manager.bat` の親フォルダ直下ショートカットにより部員の日常起動も `<親>` を開けばダブルクリック 1 回で済む。再インストール時はゲームデータ (`prism.db` / `games/` / `backups/` / `responses/` / `logs/`) を自動保護。
+
+- Launcher: 変更なし (v0.5.16 同梱)
+- Manager: 変更なし (v0.8.9 同梱)
+- Release Tooling: v0.1.8 → v0.1.9 (`templates/Install.bat` 等の同梱、Y/N upload prompt、tag 衝突 graceful exit、exit code 体系 0/1/2/3、non-interactive 検出 等。詳細は `## Release Tooling` セクションを参照)
+
+**Notes**: Phase 2 完成版 (本番運用可)。Phase 3 (Updater.exe) / Phase 4 (Manager UI アップデートタブ) / Phase 5 (Launcher 通知バナー) は今後の release で順次実装予定。
+
 ### [Bundle v0.1.0] - 2026-05-11
 
 初回 Bundle リリース。`Release.bat` 1 発でビルド + zip + GitHub Releases アップロードまで自動化する配布インフラを導入 (#108 Phase 1)。
