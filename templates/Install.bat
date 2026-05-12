@@ -71,19 +71,61 @@ echo 例: D:\Games を選ぶ → D:\Games\GCTonePrism\ にインストール
 echo.
 
 REM ---- PowerShell で FolderBrowserDialog を起動して選択パスを取得 ----
-REM PowerShell の Add-Type で WinForms 読み込み、ダイアログを出して選択パスのみを stdout に。
-REM 注: Write-Output ではなく [Console]::Out.WriteLine + [Environment]::Exit(0) で
-REM **明示的に 1 行のみ書き出し + 後続出力を全て封じる**。Add-Type warning が
-REM stdout に出る (将来の PS version、profile side-effect 等) ケースで for /f の
-REM 最終行が pollute される M4 review 指摘への防御。
-set "PS_DIALOG_CMD=Add-Type -AssemblyName System.Windows.Forms ^| Out-Null; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'GCTonePrism のインストール先の親フォルダを選択してください'; $d.ShowNewFolderButton = $true; if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.WriteLine($d.SelectedPath); [Environment]::Exit(0) } else { [Environment]::Exit(1) }"
-for /f "usebackq tokens=* delims=" %%P in (`powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -Command "%PS_DIALOG_CMD%"`) do set "INSTALL_PARENT=%%P"
+REM PS 出力を temp file に書き出し → ERRORLEVEL で 3 way dispatch:
+REM   0 = OK (path 書き出し済)
+REM   2 = ユーザー Cancel (明示的に [Environment]::Exit(2) で返す、PS 内部 error
+REM        の exit 1 と区別するため 2 を使用)
+REM   その他 = PS 実行失敗 (実行 policy block / PS 未 install / PS_DIALOG_CMD
+REM            syntax error 等の "real installer failure")
+REM
+REM 旧実装 (`for /f ... do set INSTALL_PARENT=%%P` + `if not defined` チェック) は
+REM 「PS 起動失敗」と「ユーザー Cancel」を区別できず両方 cancel 扱い (exit 0) で
+REM Codex P2 が「real installer failures が成功扱いになる」と指摘。temp file 経由
+REM に変更して exit code を確実に捕捉、PS 起動失敗時は :fail goto → exit 1。
+REM
+REM `[Console]::Out.Write` (newline なし) を使う理由: `WriteLine` だと CRLF が
+REM 末尾に付き、`set /p` の挙動 (CR を残す cmd.exe version あり) で path 末尾に
+REM 余計な CR が残る。Write なら temp file は path のみ、set /p で clean に読める。
+set "PS_DIALOG_CMD=Add-Type -AssemblyName System.Windows.Forms ^| Out-Null; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'GCTonePrism のインストール先の親フォルダを選択してください'; $d.ShowNewFolderButton = $true; if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath); [Environment]::Exit(0) } else { [Environment]::Exit(2) }"
+set "TEMP_DIALOG_OUT=%TEMP%\gctone_install_dialog_%RANDOM%.tmp"
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -Command "%PS_DIALOG_CMD%" > "%TEMP_DIALOG_OUT%"
+set DIALOG_EXIT=%ERRORLEVEL%
 
+if %DIALOG_EXIT% EQU 0 goto :dialog_ok
+if %DIALOG_EXIT% EQU 2 goto :dialog_cancel
+goto :dialog_fail
+
+:dialog_ok
+set /p INSTALL_PARENT=<"%TEMP_DIALOG_OUT%"
+del "%TEMP_DIALOG_OUT%" 2>nul
 if not defined INSTALL_PARENT (
     echo.
-    echo [INFO] キャンセルされました。インストールを中止します。
-    goto :end
+    echo [FAIL] PowerShell が exit 0 を返しましたが選択パスが取得できませんでした ^(想定外^)。
+    echo        本シナリオが再現する場合は GitHub issue で報告してください。
+    goto :fail
 )
+goto :dialog_done
+
+:dialog_cancel
+del "%TEMP_DIALOG_OUT%" 2>nul
+echo.
+echo [INFO] キャンセルされました。インストールを中止します。
+goto :end
+
+:dialog_fail
+echo.
+echo [FAIL] PowerShell の起動 / 実行に失敗しました ^(exit %DIALOG_EXIT%^)。
+echo        PowerShell が利用可能か、Execution Policy を確認してください:
+echo          powershell.exe -NoProfile -Command "Get-ExecutionPolicy -List"
+if exist "%TEMP_DIALOG_OUT%" (
+    echo.
+    echo PS stdout の内容:
+    type "%TEMP_DIALOG_OUT%"
+)
+del "%TEMP_DIALOG_OUT%" 2>nul
+goto :fail
+
+:dialog_done
 
 REM ---- 入れ子検知 ----
 REM 親パスの末尾が GCTonePrism / GCTonePrism\ の場合、二重入れ子 (<親>\GCTonePrism\GCTonePrism\)

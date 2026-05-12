@@ -34,6 +34,11 @@
 #### Fixed (PR #149 シニアレビュー round 1 + Codex P2)
 
 - **[Codex P2] FolderBrowserDialog 選択パス内の `!` 文字が delayed expansion で破壊される bug**: `Install.bat` 全体で `setlocal enabledelayedexpansion` を有効化していたため、選択パスに `!` が含まれる場合 (例: `D:\Backup!\` 等のユーザー命名パス) に `for /f ... do set INSTALL_PARENT=%%P` の段階で `!` が delayed expansion token として解釈され削除される。本ファイル refactor 後は `!VAR!` 参照が実質ゼロのため、`setlocal disabledelayedexpansion` に変更して構造的に解消
+- **[Codex P2 round 2] PowerShell 起動失敗とユーザー Cancel が exit code で区別不能 → real installer failures が exit 0 に丸まる bug**: 旧 `for /f ... do set INSTALL_PARENT=%%P` + `if not defined INSTALL_PARENT` チェックは「PS 起動失敗 (PS 未 install / AppLocker block / PS_DIALOG_CMD syntax error 等)」と「ユーザー Cancel」の両方で `INSTALL_PARENT` undef → cancel 扱い (exit 0) になる。Phase 3 で Updater が Install.bat を invoke する場合、real failures を成功扱いしてしまう実害ある silent failure path。修正:
+  - PS 終了コードを 3 値で意味付け: `0` = OK + path 出力 / `2` = ユーザー Cancel (旧 `1` → `2` に変更、PS 内部 error の exit 1 と区別) / その他 = PS 実行失敗
+  - 出力を `%TEMP%\gctone_install_dialog_<RANDOM>.tmp` 経由で受け取り、bat 側で `ERRORLEVEL` を確実に捕捉 (`for /f` の弱い exit code 伝播を回避)
+  - 3-way dispatch: `:dialog_ok` (続行) / `:dialog_cancel` (`goto :end`、exit 0) / `:dialog_fail` (`goto :fail`、exit 1 + Execution Policy 確認手順案内 + PS stdout 内容表示)
+  - PS one-liner も `[Console]::Out.WriteLine` → `[Console]::Out.Write` に変更 (末尾 CRLF を抑止、`set /p` の cmd.exe 版差での CR 残留 trap を回避)
 - **[M2] Install.bat の失敗 path も `exit /b 0` で caller から成否区別不能**: 4 つの失敗経路 (files/ 不在 / 入れ子検知 / robocopy 失敗 / mkdir 失敗) がすべて `:end` に合流して `exit /b 0`。Phase 3 で Updater から Install.bat を呼び出す場合に exit code でエラー判定できない。`:fail` label を新設 + `EXIT_CODE` sentinel を導入、失敗 path は `goto :fail` で 1、成功 / ユーザーキャンセル (folder dialog cancel / 上書き N) は 0 を返す形に
 - **[M3] docstring の ASCII 規約と実装の乖離**: 「chcp 65001 より上の REM / echo は ASCII 必須」と書きながら、自身の docstring REM 行が日本語だった。`@echo off` 下で REM は表示されないので mojibake は echo にしか発生しないのが実態。docstring を「echo は ASCII 必須、REM は日本語 OK」に修正
 - **[M4] PS one-liner の多行出力に対する防御**: `Write-Output $d.SelectedPath` だけだと将来 Add-Type warning が stdout に出るケース等で for /f の最終行が pollute される可能性。`[Console]::Out.WriteLine + [Environment]::Exit(0)` で明示的に 1 行のみ書き出し + 後続出力を封じる形に変更
