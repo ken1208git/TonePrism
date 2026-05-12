@@ -996,6 +996,15 @@ function Resolve-TagConflict {
             $script:DeleteExistingRelease = $false
         } else {
             # 別種の失敗 (auth / network / API rate limit / gh install 破損 等)
+            # この時点で zip は既に作成済み (New-Zip 完了後にこの関数が呼ばれる)。
+            # publish できなくとも zip 自体は流用可能なので、Fail 直前にパスを案内する。
+            # シニアレビュー M3: 既存タグの graceful exit path と同じ "zip は残っている"
+            # メッセージを network 失敗 path にも適用、ユーザーが zip を破棄されたと
+            # 誤解する path を防ぐ。
+            Write-Host ""
+            Write-Info "zip は以下に残っています (publish 失敗とは独立、Install.bat 検証等に流用可):"
+            Write-Info "  $ZipPath"
+            Write-Host ""
             Fail "gh release view が予期せず失敗しました (exit $($releaseResult.ExitCode)):`n$($releaseResult.Combined.TrimEnd())"
         }
     }

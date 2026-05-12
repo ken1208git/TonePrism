@@ -31,6 +31,26 @@
 
 ### [Release Tooling v0.1.9] - 2026-05-12
 
+#### Fixed (PR #149 シニアレビュー round 2 + Codex P1/P2 round 2)
+
+- **[Codex bot P1] `show_folder_dialog.ps1` setup エラーが Cancel と区別不能 → real failures が exit 0 に丸まる bug**: `Add-Type` / `New-Object` / property 代入の非終了エラー後も `if ($d.ShowDialog() -eq OK)` 行に到達し、`$d` が null だと else 分岐に流れて `exit 2` (user cancel と同じ) を返してしまう問題。Install.bat 側は exit 2 を Cancel として処理して `goto :end` (成功扱い、exit 0) するため、自動化呼出し / Phase 3 Updater から見ると「ユーザがキャンセルした」のか「PS が壊れた」のか区別不能だった。`$ErrorActionPreference = 'Stop'` で非終了エラーを終了エラーに昇格 + try/catch で Add-Type 〜 ShowDialog を囲み、catch 時は stderr にメッセージ + `[Environment]::Exit(1)`。Install.bat 側の 3-way dispatch (0/2/else) で exit 1 は自動的に `:dialog_fail` に流れるので bat 側修正不要。exit code の意味 (0=OK / 1=catch / 2=Cancel / その他=PS host 起動失敗) を冒頭コメントに追記
+- **Install.bat の残骸 cmd window 問題 (Manager 自動起動 Y 経路のみ)**: 「だいたい問題なくなったけど、最後に残骸だけ残る」報告対応。原因 2 段。
+  - **段 1: `exit /b %EXIT_CODE%` → `exit %EXIT_CODE%`**: ダブルクリック起動 (`cmd /c install.bat`) では `exit /b` で caller cmd が追従終了するはずだが、Windows Terminal 等一部の terminal host で空 prompt が残るケースがあった。`exit` (without `/b`) で cmd プロセスを直接終了させ、window を統一的に閉じる。トレードオフ: 将来 `call install.bat` を書くと caller bat も巻き添えで終了するため、SPEC §3.7.4 Updater 仕様に「`Process.Start("cmd","/c install.bat ...")` 経由で呼ぶこと」を明記 (シニアレビュー L3)
+  - **段 2: `start "" "Manager.bat"` → `start "" "Manager.exe"` 直叩き**: 段 1 でも Y 経路のみ window 残存が継続。Manager.bat は単に `start "" "...Manager.exe"` する 2 行 wrapper のため、Install.bat から `start "" Manager.bat` すると中間 cmd プロセスが一瞬発生 → Windows Terminal がそれを子プロセスとみなして Install.bat の window を「終了待ち」状態に保持していた。直接 Manager.exe を `start ""` することで中間 cmd を排除し、Install.bat 終了後に親 window がクリーンに閉じる。Manager.bat 自体は `<親>/` 直下の日常起動用として残り、機能影響なし
+- **INSTALL_README.txt 冒頭文言の組織名誤読対策**: 旧「ゲームセンターTONE 開発の Prism ランチャーシステム」は「ゲームセンターTONE という会社/組織が開発した」と読めてしまっていた。ゲームセンターTONE は文化祭企画の名前なので、「文化祭企画『ゲームセンターTONE』の Prism ランチャーシステム」に修正
+
+#### Changed (PR #149 シニアレビュー round 2)
+
+- **[M1] 1 PR 1 bump 規約に整合**: SPEC 変更履歴の v1.10.9 (ショートカット bat 1 階層上 relocation) を v1.10.8 (Phase 2 元仕様) に統合。両方とも同じ「Phase 2 / #108」スコープで breaking change でも別関心事でもないため、AGENTS.md "CHANGELOG Section Roles" の規約 (1 PR 1 bump、レビュー対応コミットでは既存エントリの description を加筆) に揃える
+- **[M2] Y/N 判定の寛容度を Release.ps1 と統一**: Install.bat の `OVERWRITE_CONFIRM` / `START_MANAGER` は `if /i "%X%"=="Y"` で **Y/y のみ受理** だったため、Release.ps1 の Y/N upload prompt (`y/yes` 両受理) を触っているユーザーが「yes」と打って意図せず abort する path があった。Install.bat の 2 箇所も `Y` / `YES` 両方を受理する形に拡張、INSTALL_README にも「Y / y / yes」明示
+- **[M3] `Resolve-TagConflict` の network 失敗 path にも zip path 案内を追加**: 既存タグ + `-Force` なし時は graceful exit + zip path 案内だったが、gh release view の auth/network 失敗時は `Fail` で exit 1 のみで zip path を案内せず「ビルド完了 → ネットワーク一時障害 → Fail → ユーザー: zip が捨てられたと誤解」する path があった。Fail 直前に `Write-Info "zip は $ZipPath に残っています"` を追加、graceful exit path と同じ "publish 失敗とは独立して zip は流用可" メッセージで統一
+- **[M4] Install.bat 最終 pause を日本語化**: 周囲が全て日本語 UX なのに cmd default の "Press any key to continue . . ." だけ英語だった一貫性破れ。`pause >nul` + `echo  何かキーを押して終了します...` の 2 行に置換、文言を制御
+- **[L1] set quoted/unquoted の規約コメント追記**: line 44-46 で「path-derived は quoted set 必須」と宣言しつつ numeric sentinels (`MANAGER_FOUND` / `LAUNCHER_FOUND` / `MANAGER_STARTED` / `EXIT_CODE`) は unquoted という不整合が将来 maintainer を混乱させる懸念。「quote rule applies to path / user-input values, not to numeric flags」とコメントで明文化、混在の合理化を行った
+- **[L2] PR #149 description の検証ログを最新化**: ExpectedFiles 12 → **13** (`show_folder_dialog.ps1` 追加で +1)、staging 構造の記述も最新の `<親>/` ショートカット bat 配置に同期、検証 Stage 3 の "deferred" を実機 E2E 完了済みにマーク
+- **[L3] SPEC §3.7.4 Updater に Install.bat 起動方式を明記**: `Install.bat` 終端の `exit` (not `exit /b`) は `call install.bat` で呼ぶと caller bat も巻き添えで終了する silent danger があるため、Phase 3 Updater は `Process.Start("cmd", "/c install.bat ...")` 形式で呼ぶこと、を SPEC 側にも明記。bat 末尾の REM コメントだけだと埋もれる懸念があり、SPEC の Updater 責務節に格上げ
+- **[L4] `:wait_close` の unbounded loop を docstring に明記**: Manager.exe / Launcher.exe を user が close できない場合 (hung process / 別 session / 権限不足) Ctrl+C しか退出手段がない設計を **意図** として docstring 化。Phase 2 の対象 (人がダブルクリック) では「インストーラが固まっている、なぜ?」と気付かせる方が auto-fail で原因を隠すより良いという根拠と、Phase 3 Updater が forced termination の責務を持つ役割分担を明記。将来 unattended re-install フローで問題化したら max-iterations 追加の hint も併記
+- **[L5] INSTALL_README に shortcut bat 上書き注意を追加**: 再 install (上書き Y) で `copy /Y` により `<親>/Launcher.bat` / `<親>/Manager.bat` が無条件上書きされる挙動を README の「緊急アップデート」項目に明記。ゲームデータ保護リストと並べて wrapper bat も列挙し、カスタマイズ消失の path をユーザに事前認知させる
+
 #### Fixed (PR #149 シニアレビュー round 1 + Codex P2)
 
 - **[Codex P2] FolderBrowserDialog 選択パス内の `!` 文字が delayed expansion で破壊される bug**: `Install.bat` 全体で `setlocal enabledelayedexpansion` を有効化していたため、選択パスに `!` が含まれる場合 (例: `D:\Backup!\` 等のユーザー命名パス) に `for /f ... do set INSTALL_PARENT=%%P` の段階で `!` が delayed expansion token として解釈され削除される。本ファイル refactor 後は `!VAR!` 参照が実質ゼロのため、`setlocal disabledelayedexpansion` に変更して構造的に解消
@@ -55,7 +75,7 @@
   - Release.ps1 Copy-Templates: `filesTemplates` を空配列に、`rootTemplates` に Launcher.bat / Manager.bat を追加
   - Assert-ExpectedFiles: `files\Launcher.bat` / `files\Manager.bat` → zip ルートの `Launcher.bat` / `Manager.bat`
   - INSTALL_README.txt: 日常使い path 例 (`D:\Games\Launcher.bat`) に更新
-  - SPEC §3.7.1 (zip 構造 + インストール後構造) + §3.7.5 (Launcher 日常起動 path) + 変更履歴 v1.10.9 更新
+  - SPEC §3.7.1 (zip 構造 + インストール後構造) + §3.7.5 (Launcher 日常起動 path) を更新、変更履歴は v1.10.8 entry に統合 (1 PR 1 bump 規約、シニアレビュー M1)
 - **Install.bat の cmd parser 問題を構造的に解消 (`.ps1` 切り出し + `[...]` 使用)**: 数回の試行錯誤を経て、根本原因は (a) 長い `set "PS_DIALOG_CMD=...日本語..."` の Japanese byte 列が cmd の line tokenize を壊し PS に malformed command を渡す、(b) `set "..."` 内の `^|` が literal で残り PS に届く (cmd quoted set では `^` 非 escape)、(c) `echo (text)` の `(` が cmd で block 開始と解釈される、と判明。これらを構造的に回避:
   - **PS dialog code を `templates/show_folder_dialog.ps1` に切り出し**: cmd parsing を経由せず PS native の UTF-8 処理に任せる。Japanese description (`'GCTonePrism のインストール先の親フォルダを選択してください'`) を維持可能。Install.bat 側は `powershell.exe -File "%~dp0show_folder_dialog.ps1"` で起動するだけ
   - **echo の `(` `)` を `[` `]` に置換 (14 箇所)**: `[` `]` は cmd で escape 不要、`^(` `^)` の top-level 不安定挙動を回避

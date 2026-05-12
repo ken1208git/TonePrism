@@ -21,12 +21,12 @@
 
 4. (既にインストール済みの場合) 警告が表示されます
    → 通常のアップデートは Manager の「アップデート」タブから行ってください
-   → Manager が壊れて起動できない場合のみ Y を押して上書きしてください
+   → Manager が壊れて起動できない場合のみ Y / y / yes を入力して上書きしてください
    → ゲームデータ (prism.db / games / backups / responses / logs) は維持されます
 
 5. インストール完了後、「Manager を起動しますか？」と聞かれます
-   → Y を押すと Manager が起動します
-   → N を押すと Install.bat を閉じて手動で起動できます
+   → Y / y / yes と入力すると Manager が起動します
+   → N または何も入力せず Enter で Install.bat を閉じて手動で起動できます
 
 
 【日常の起動方法】
@@ -53,7 +53,9 @@
 - 最新版の zip を再ダウンロード
 - 同じ Install.bat を実行
 - 既存検出時の警告で Y を選択
-  ※ ゲームデータは維持されます
+  ※ ゲームデータ (prism.db / games / backups / responses / logs) は維持されます
+  ※ Launcher.bat / Manager.bat (ショートカット) は最新版で上書きされます
+    (1 行 wrapper を自分でカスタマイズしていた場合は失われるので注意)
 
 
 【トラブルシューティング】

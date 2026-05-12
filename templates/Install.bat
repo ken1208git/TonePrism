@@ -41,9 +41,15 @@ REM FolderBrowserDialog paths containing `!` (e.g. D:\Backup!\) are preserved
 REM as-is. No `!VAR!` references exist in this file.
 setlocal disabledelayedexpansion
 
-REM Quoted set form: path-derived values may contain cmd metachars (`&`, `^` 等)
-REM e.g. if zip is extracted under `D:\R&D\`. Unquoted assignment would split the
-REM line into multiple commands and abort. Quoted form stores the value literally.
+REM Quoted set form (`set "VAR=value"`) is required for *path-derived* values that
+REM may contain cmd metachars (`&`, `^` 等) e.g. if zip is extracted under `D:\R&D\`.
+REM Unquoted assignment would split the line into multiple commands and abort.
+REM Quoted form stores the value literally.
+REM
+REM Note: numeric sentinels (MANAGER_FOUND / LAUNCHER_FOUND / MANAGER_STARTED /
+REM EXIT_CODE 等) are intentionally NOT quoted below — they only hold ERRORLEVEL
+REM (0/1) or `1` literals, so quoting adds noise without value. The quote rule
+REM applies to path / user-input values, not to numeric flags. (シニアレビュー L1)
 set "SCRIPT_DIR=%~dp0"
 set "FILES_DIR=%SCRIPT_DIR%files"
 REM Exit code sentinel: failure paths goto :fail to set 1.
@@ -166,7 +172,9 @@ REM empty so we always evaluate the latest input (defends against future change
 REM that might set OVERWRITE_CONFIRM upstream).
 set "OVERWRITE_CONFIRM="
 set /p OVERWRITE_CONFIRM=上書きしますか？ (Y/N):
-if /i "%OVERWRITE_CONFIRM%"=="Y" goto :checkprocess
+REM Accept y / Y / yes / Yes / YES (Release.ps1 の upload prompt と寛容度を揃える)
+if /i "%OVERWRITE_CONFIRM%"=="Y"   goto :checkprocess
+if /i "%OVERWRITE_CONFIRM%"=="YES" goto :checkprocess
 echo.
 echo [INFO] インストールを中止しました。
 goto :end
@@ -175,6 +183,22 @@ REM ---- Detect running Manager / Launcher; wait for user to close manually ----
 REM findstr exit 0 = process found (= running), exit 1 = not found.
 REM We do NOT auto-kill: user might have unsaved work. Phase 3 Updater will handle
 REM controlled termination if needed.
+REM
+REM NOTE on wait loop termination (シニアレビュー L4):
+REM   :wait_close is an UNBOUNDED loop with no timeout — if the user cannot close
+REM   Manager / Launcher (hung process, locked by another session, permission issue),
+REM   the only exit path is Ctrl+C. Ctrl+C aborts the bat without running :end, so
+REM   %EXIT_CODE% is not set and the cmd exit code is undefined from the caller's
+REM   perspective. This is INTENTIONAL for the current Phase 2 scope:
+REM     - Phase 2 is "human double-clicks Install.bat", and a stuck process is
+REM       almost always operator error that's better surfaced as "the installer
+REM       seems stuck, what's going on?" than silently aborted.
+REM     - Bounded loop with auto-fail would mask the real cause (e.g. operator
+REM       forgot to close a tab) behind a generic "installer failed" message.
+REM     - Phase 3 Updater is the proper place for forced termination (it owns the
+REM       Manager process lifecycle and can decide to kill safely).
+REM   If the loop becomes a problem in practice (e.g. unattended re-install flows
+REM   where Ctrl+C isn't available), add a max-iterations counter here and goto :fail.
 :checkprocess
 tasklist /FI "IMAGENAME eq GCTonePrism_Manager.exe" 2>nul | findstr /I "GCTonePrism_Manager.exe" >nul
 set MANAGER_FOUND=%ERRORLEVEL%
@@ -257,7 +281,11 @@ REM ---- Manager start Y/N (top-level, no Japanese echo inside block) ----
 REM set /p empty-Enter retains previous value. Initialize to defend.
 set "START_MANAGER="
 set /p START_MANAGER=Manager を起動しますか？ (Y/N):
-if /i not "%START_MANAGER%"=="Y" goto :end
+REM Accept y / Y / yes / Yes / YES (Release.ps1 の upload prompt と寛容度を揃える)
+if /i "%START_MANAGER%"=="Y"   goto :do_start_manager
+if /i "%START_MANAGER%"=="YES" goto :do_start_manager
+goto :end
+:do_start_manager
 echo.
 echo [INFO] Manager を起動します...
 REM Launch Manager.exe directly (bypass Manager.bat wrapper). Manager.bat itself is
@@ -278,7 +306,10 @@ goto :end
 
 :end
 echo.
-if not defined MANAGER_STARTED pause
+REM Final pause (only when Manager not auto-started). cmd default の英語メッセージ
+REM "Press any key to continue . . ." を避けて日本語に統一 (シニアレビュー M4)。
+if not defined MANAGER_STARTED echo  何かキーを押して終了します...
+if not defined MANAGER_STARTED pause >nul
 REM `exit` (not `exit /b`) forces cmd process termination so the double-clicked
 REM Install.bat window doesn't leave a residual empty prompt. With `exit /b` the
 REM bat returns to caller; for `cmd /c install.bat` (the typical Explorer
