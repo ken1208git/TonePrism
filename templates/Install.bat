@@ -89,7 +89,11 @@ REM   2 = ユーザー Cancel (明示的に [Environment]::Exit(2)、PS 内部 e
 REM   その他 = PS 実行失敗 (Execution Policy block / PS 未 install 等)
 REM
 REM `[Console]::Out.Write` (newline なし) で書き出して set /p の CR trap を回避。
-set "PS_DIALOG_CMD=Add-Type -AssemblyName System.Windows.Forms ^| Out-Null; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'GCTonePrism のインストール先の親フォルダを選択してください'; $d.ShowNewFolderButton = $true; if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath); [Environment]::Exit(0) } else { [Environment]::Exit(2) }"
+REM PS_DIALOG_CMD 内は ASCII のみ (Japanese 含めると cmd parser が UTF-8/cp932 の
+REM byte boundary 不一致で line を mis-tokenize、`em.Windows.Forms is not recognized`
+REM 等の連鎖エラーで dialog 表示前に PS が壊れる)。dialog title は英語にして、
+REM ユーザー向けの日本語説明は事前 echo (line 71-75) で提示済み
+set "PS_DIALOG_CMD=Add-Type -AssemblyName System.Windows.Forms ^| Out-Null; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Select parent folder for GCTonePrism installation'; $d.ShowNewFolderButton = $true; if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath); [Environment]::Exit(0) } else { [Environment]::Exit(2) }"
 set "TEMP_DIALOG_OUT=%TEMP%\gctone_install_dialog_%RANDOM%.tmp"
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -Command "%PS_DIALOG_CMD%" > "%TEMP_DIALOG_OUT%"
 set DIALOG_EXIT=%ERRORLEVEL%
