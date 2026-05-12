@@ -1,56 +1,55 @@
 @echo off
 REM ============================================================================
-REM Install.bat - GCTonePrism 初回インストーラ (#108 Phase 2)
+REM Install.bat - GCTonePrism initial installer (#108 Phase 2)
 REM
-REM File format: UTF-8 (no BOM) + CRLF (.gitattributes の *.bat eol=crlf で強制、
-REM Release.ps1 の Copy-Templates も staging 時に強制 CRLF 化)
+REM File format: UTF-8 (no BOM) + CRLF. Enforced by:
+REM   - .gitattributes (*.bat eol=crlf) at git checkout
+REM   - Release.ps1 Copy-Templates normalization at staging
 REM
-REM ASCII boundary rule (Release.bat と同じ規約):
-REM   - chcp 65001 より上の echo は ASCII 必須 (codepage 未切替のため日本語は
-REM     cp932 mojibake)。REM は @echo off 環境で表示されないため日本語 OK
-REM   - chcp 65001 以降は echo も日本語可
-REM   - BOM は NG (一部 cmd.exe build で `@echo off` が壊れる、PR #140 経緯)
+REM Encoding rule:
+REM   - Above chcp 65001: ASCII only (codepage not switched yet, Japanese mojibakes)
+REM   - Below chcp 65001: Japanese OK in echo arguments
+REM   - REM comments: keep ASCII English even below chcp boundary. cmd's parser
+REM     can misinterpret Japanese byte sequences combined with backticks, parens,
+REM     ellipses etc. in REM lines and emit cascading "is not recognized" errors
+REM     for subsequent lines. Keeping REM ASCII is the safest convention.
+REM   - BOM is NG (some cmd.exe builds break @echo off on BOM, see PR #140).
 REM
-REM 重要な構造規約:
-REM   (1) 日本語 echo は (...) ブロック内に置かない (top-level goto パターンで実装)。
-REM       cmd は `if cond (echo 日本語... goto :fail)` を parse-time 展開する際に
-REM       ブロック内日本語 byte 列を mis-tokenize する動作が観測された。回避:
-REM       `if not cond goto :label / [...日本語 echo...] / goto :fail / :label`
-REM       の linear flow に統一。
-REM   (2) **echo 引数に `(` `)` は使わない**。代わりに `[` `]` か Japanese 括弧
-REM       「」 を使う。cmd は `echo (foo)` の `(` を block 開始として解釈する場合があり、
-REM       `^(` escape を試しても top-level では不安定 (実機で 'em.Windows.Forms' is
-REM       not recognized 等の連鎖エラー発生)。`[` `]` は cmd で escape 不要、safer。
-REM   (3) **PS 起動の引数 (-Command / -File) で日本語を含む長い文字列を inline
-REM       しない**。`set "PS_CMD=...日本語..."` の Japanese byte が cmd の line
-REM       parsing を壊し、PS に malformed command を渡す。dialog 等の PS コードは
-REM       別 .ps1 ファイル (show_folder_dialog.ps1 等) に切り出して
-REM       `powershell.exe -File "...ps1"` 経由で起動する。
+REM Structural rules:
+REM   (1) Japanese echo MUST live at top-level only (not inside `if ... (...)` blocks).
+REM       cmd parses block bodies at parse-time and mistokenizes Japanese byte
+REM       sequences. Use linear `if not cond goto :label / [...echo...] / goto :fail`
+REM       pattern instead.
+REM   (2) echo arguments MUST NOT contain literal `(` or `)`. Use `[` `]` or
+REM       Japanese brackets `「」` instead. `(` is interpreted as block-open by
+REM       cmd even when escaped with `^(`.
+REM   (3) PowerShell invocations MUST NOT inline long commands with Japanese in
+REM       `set "PS_CMD=...日本語..."` form. cmd's line tokenizer cannot handle
+REM       this and PS receives malformed command. Move PS code to a separate
+REM       .ps1 file and invoke with `powershell.exe -File ...ps1`.
 REM
-REM Usage (zip ルートから):
-REM   Install.bat                ダブルクリック実行 (来場スタッフ / 部員向け)
+REM Usage:
+REM   Install.bat   -- double-click to run (target user: 部員 / 来場スタッフ)
 REM
 REM Flow:
-REM   1. FolderBrowserDialog で <親> パス選択
-REM   2. 入れ子検知: <親> 末尾が GCTonePrism なら警告 + abort
-REM   3. 既存検知: <親>\GCTonePrism\ 存在?
-REM        Yes -> Y/N 警告 (上書き or abort、Y なら保護データ温存 + Manager close 待機)
-REM        No  -> 新規作成 + files/* 全コピー
-REM   4. Manager 起動 Y/N -> Y なら Manager.bat 起動
+REM   1. FolderBrowserDialog (via show_folder_dialog.ps1) selects parent folder.
+REM   2. Nest check: abort if parent path ends in GCTonePrism.
+REM   3. Existing check: <parent>\GCTonePrism\ exists?
+REM        Yes -> Y/N warning. Y = overwrite preserving user data + manager-close wait.
+REM        No  -> mkdir + copy files/.
+REM   4. Manager-start Y/N prompt.
 REM
-REM Exit codes:
-REM   0  正常終了 or ユーザーキャンセル (folder dialog cancel / 上書き N 等)
-REM   1  失敗 (files/ 不在 / 入れ子検知 / mkdir 失敗 / robocopy 失敗 / PS 起動失敗)
+REM Exit codes (for Phase 3 Updater integration):
+REM   0  success or user cancel (dialog cancel / overwrite N / manager-start N).
+REM   1  failure (files/ missing / nested path / mkdir fail / robocopy fail / PS launch fail).
 REM ============================================================================
 
-REM 重要: delayed expansion は **明示的に無効** (Codex P2 対応)。
-REM 理由: FolderBrowserDialog の選択パスに `!` が含まれていた場合
-REM (例: D:\Games\Backup!\、`!` を含むユーザー名等)、delayed expansion が
-REM 有効だと `set INSTALL_PARENT=%%P` の段階で `!` が削除/解釈される。
-REM 本ファイル内に `!VAR!` 参照は存在しないので無効化して問題なし。
+REM setlocal disabledelayedexpansion: delayed expansion is intentionally off so
+REM FolderBrowserDialog paths containing `!` (e.g. D:\Backup!\) are preserved
+REM as-is. No `!VAR!` references exist in this file.
 setlocal disabledelayedexpansion
 
-REM ---- codepage 切替 (Release.bat と同じ pattern、PR #140 で確立) ----
+REM ---- Codepage switch (same pattern as Release.bat, established in PR #140) ----
 for /f "tokens=2 delims=:" %%a in ('chcp') do set ORIGINAL_CODEPAGE=%%a
 if defined ORIGINAL_CODEPAGE set ORIGINAL_CODEPAGE=%ORIGINAL_CODEPAGE: =%
 if defined ORIGINAL_CODEPAGE (
@@ -62,14 +61,14 @@ if defined ORIGINAL_CODEPAGE (
     echo [WARN] Failed to capture codepage, Japanese output may be garbled.
 )
 
-REM ==== ASCII boundary (above: ASCII only, below: Japanese OK) ====
+REM ==== ASCII boundary (above: ASCII only, below: Japanese OK in echo) ====
 
 set SCRIPT_DIR=%~dp0
 set FILES_DIR=%SCRIPT_DIR%files
-REM exit code sentinel
+REM Exit code sentinel: failure paths goto :fail to set 1.
 set EXIT_CODE=0
 
-REM ---- files/ 不在チェック (top-level、ブロック内に日本語 echo 置かない) ----
+REM ---- files/ existence check (top-level, no Japanese echo inside block) ----
 if exist "%FILES_DIR%" goto :files_ok
 echo [FAIL] files/ ディレクトリが見つかりません: %FILES_DIR%
 echo        zip を正しく展開してから Install.bat を実行してください。
@@ -86,18 +85,16 @@ echo.
 echo 例: D:\Games を選ぶ → D:\Games\GCTonePrism\ にインストール
 echo.
 
-REM ---- PowerShell で FolderBrowserDialog を起動 → temp file 経由で受け取り ----
-REM PS 終了コードを 3 値で意味付け:
-REM   0 = OK (path 書き出し済)
-REM   2 = ユーザー Cancel (明示的に [Environment]::Exit(2)、PS 内部 error の 1 と区別)
-REM   その他 = PS 実行失敗 (Execution Policy block / PS 未 install / show_folder_dialog.ps1 不在 等)
+REM ---- Launch FolderBrowserDialog via show_folder_dialog.ps1 ----
+REM PS exit code dispatch:
+REM   0  = OK (selected path written to stdout)
+REM   2  = user cancel (explicit [Environment]::Exit(2), distinct from PS error exit 1)
+REM   other = PS launch failure (policy block / PS missing / .ps1 missing / etc.)
 REM
-REM dialog code は別 file `show_folder_dialog.ps1` に切り出し済み (zip ルート同梱)。
-REM 旧: `-Command "Add-Type...日本語description...; ..."` を inline していたが、
-REM cmd の bat parser が長い `set "..."` 内の Japanese byte 列を mis-tokenize して
-REM PS に malformed command を渡してしまう問題があった (description の Japanese byte が
-REM `System.Windows.Forms` を分割して PS error)。.ps1 を分離することで cmd parsing
-REM を経由せず PS native の UTF-8 処理に任せ、Japanese description を維持できる。
+REM Why a separate .ps1 (vs inline -Command "..."):
+REM   cmd's bat parser cannot reliably tokenize a long `set "PS_CMD=...日本語..."`
+REM   string. The Japanese byte sequence splits adjacent ASCII tokens like
+REM   System.Windows.Forms, and PS receives malformed input.
 set "TEMP_DIALOG_OUT=%TEMP%\gctone_install_dialog_%RANDOM%.tmp"
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0show_folder_dialog.ps1" > "%TEMP_DIALOG_OUT%"
 set DIALOG_EXIT=%ERRORLEVEL%
@@ -136,9 +133,9 @@ goto :fail
 
 :dialog_done
 
-REM ---- 入れ子検知 (top-level、ブロック内に日本語 echo 置かない) ----
-REM 親パスの末尾が GCTonePrism / GCTonePrism\ の場合、二重入れ子 (<親>\GCTonePrism\GCTonePrism\)
-REM になるので警告 + abort。末尾 \ の有無に対応するため両方チェック
+REM ---- Nest check ----
+REM If the selected parent path ends in GCTonePrism (with or without trailing \),
+REM we'd create <parent>\GCTonePrism\GCTonePrism\ which is nested. Warn + abort.
 set "INSTALL_PARENT_NO_TRAIL=%INSTALL_PARENT%"
 if "%INSTALL_PARENT_NO_TRAIL:~-1%"=="\" set "INSTALL_PARENT_NO_TRAIL=%INSTALL_PARENT_NO_TRAIL:~0,-1%"
 for %%F in ("%INSTALL_PARENT_NO_TRAIL%") do set "INSTALL_PARENT_LEAF=%%~nxF"
@@ -158,7 +155,7 @@ echo.
 echo インストール先: %INSTALL_TARGET%
 echo.
 
-REM ---- 既存検知 → top-level label に分岐 ----
+REM ---- Existing install check: dispatch to top-level labels ----
 if exist "%INSTALL_TARGET%\" goto :existing_install
 goto :new_install
 
@@ -178,7 +175,9 @@ echo    - backups\      [バックアップ]
 echo    - responses\    [アンケート回答]
 echo    - logs\         [ログ]
 echo.
-REM set /p は空 Enter で変数を更新しない仕様、事前初期化で「前回値保持」事故を防ぐ
+REM set /p preserves the previous value when user just hits Enter. Initialize to
+REM empty so we always evaluate the latest input (defends against future change
+REM that might set OVERWRITE_CONFIRM upstream).
 set "OVERWRITE_CONFIRM="
 set /p OVERWRITE_CONFIRM=上書きしますか？ (Y/N):
 if /i "%OVERWRITE_CONFIRM%"=="Y" goto :checkprocess
@@ -186,8 +185,10 @@ echo.
 echo [INFO] インストールを中止しました。
 goto :end
 
-REM ---- Manager / Launcher 稼働中検出 + 手動 close 待機 ----
-REM findstr exit 0 = 該当プロセス発見 (= 稼働中)、exit 1 = 未発見 (= 停止中)
+REM ---- Detect running Manager / Launcher; wait for user to close manually ----
+REM findstr exit 0 = process found (= running), exit 1 = not found.
+REM We do NOT auto-kill: user might have unsaved work. Phase 3 Updater will handle
+REM controlled termination if needed.
 :checkprocess
 tasklist /FI "IMAGENAME eq GCTonePrism_Manager.exe" 2>nul | findstr /I "GCTonePrism_Manager.exe" >nul
 set MANAGER_FOUND=%ERRORLEVEL%
@@ -209,14 +210,13 @@ goto :checkprocess
 :do_overwrite
 echo.
 echo [INFO] 上書きインストールを開始します...
-REM robocopy: /E = 空ディレクトリ含む全コピー、/XF = 除外ファイル、/XD = 除外ディレクトリ
-REM /NFL /NDL /NJH /NJS /NC /NS /NP = 出力簡素化、/R:1 /W:1 = retry 控えめ
-REM 注: /XF / /XD は「名前マッチ」でツリー全体を走査するため、将来 component 内に
-REM 同名 dir (例: Companions/logs/) を作る場合は意図せず除外される副作用に注意。
-REM 現状の files/ には prism.db / games / backups / responses / logs が含まれないので
-REM 実害なし、防御的に明示している
+REM robocopy: /E recursive incl. empty dirs, /XF excludes files, /XD excludes dirs,
+REM /NFL /NDL /NJH /NJS /NC /NS /NP minimal output, /R:1 /W:1 retry conservative.
+REM /XF and /XD match by *name* across the entire tree, so future components named
+REM games/backups/etc. would be silently excluded. Currently safe because files/
+REM never contains these names. Documented for future maintainers.
 robocopy "%FILES_DIR%" "%INSTALL_TARGET%" /E /XF prism.db /XD games backups responses logs /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1
-REM robocopy の終了コードは bit field、< 8 が成功 (1=コピーあり, 0=変更なし, 等)
+REM robocopy exit code is a bitfield, < 8 = success (0 no change, 1 files copied, etc.).
 if not errorlevel 8 goto :install_done
 echo.
 echo [FAIL] ファイルコピーに失敗しました [robocopy exit %ERRORLEVEL%]。
@@ -249,16 +249,16 @@ echo    %INSTALL_TARGET%\Launcher.bat   [来場者用 Launcher 起動]
 echo    %INSTALL_TARGET%\Manager.bat    [運営用 Manager 起動]
 echo.
 
-REM ---- Manager 起動 Y/N (top-level、ブロック内に日本語 echo 置かない) ----
-REM 事前初期化で「前回値保持」事故防止 (set /p 空 Enter 罠)
+REM ---- Manager start Y/N (top-level, no Japanese echo inside block) ----
+REM set /p empty-Enter retains previous value. Initialize to defend.
 set "START_MANAGER="
 set /p START_MANAGER=Manager を起動しますか？ (Y/N):
 if /i not "%START_MANAGER%"=="Y" goto :end
 echo.
 echo [INFO] Manager を起動します...
 start "" "%INSTALL_TARGET%\Manager.bat"
-REM Manager 起動 path では Install.bat window の pause を抑止 (Manager UI と
-REM Install.bat の "何かキーを押してください" prompt が同時表示される UX 退行回避)
+REM Suppress final pause when Manager started (avoid stacking Install.bat 'press
+REM any key' prompt on top of Manager UI).
 set MANAGER_STARTED=1
 goto :end
 
@@ -268,8 +268,6 @@ goto :end
 
 :end
 echo.
-REM Manager 起動 path 以外では pause で結果メッセージを残す
 if not defined MANAGER_STARTED pause
-REM 呼出元 cmd の codepage を復元 (Release.bat と同じ pattern)
 if defined ORIGINAL_CODEPAGE chcp %ORIGINAL_CODEPAGE% >nul
 endlocal & exit /b %EXIT_CODE%
