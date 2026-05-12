@@ -130,10 +130,22 @@ powershell.exe -ExecutionPolicy Bypass -File "%SCRIPT_DIR%Release.ps1" %FORWARDE
 
 set EXIT_CODE=%ERRORLEVEL%
 echo.
-if %EXIT_CODE% NEQ 0 (
-    echo [FAIL] Release.ps1 が exit code %EXIT_CODE% で終了しました
-) else (
+REM Exit code 体系 (Release.ps1 と一致、シニアレビュー round 3 M4):
+REM   0 = success: publish 成功 / -SkipUpload / -DryRun
+REM   1 = failure: script の本来失敗 (build / publish / env)
+REM   2 = skip:    tag conflict + -Force なしによる publish skip (env 起因)
+REM   3 = skip:    Y/N の N 回答による intentional skip
+REM
+REM Caller (CI 等) はこの bat の %ERRORLEVEL% で 4 状態を区別できる。
+REM Release.bat 自体は表示のみ責任を持ち、exit code はそのまま透過する。
+if %EXIT_CODE% EQU 0 (
     echo Release.bat: 正常終了
+) else if %EXIT_CODE% EQU 2 (
+    echo Release.bat: publish skip [exit 2: tag conflict + -Force なし、zip は生成済み]
+) else if %EXIT_CODE% EQU 3 (
+    echo Release.bat: publish skip [exit 3: Y/N の N 回答、zip は生成済み]
+) else (
+    echo [FAIL] Release.ps1 が exit code %EXIT_CODE% で終了しました
 )
 
 if %NO_PAUSE% EQU 0 (

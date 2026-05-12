@@ -31,6 +31,31 @@
 
 ### [Release Tooling v0.1.9] - 2026-05-12
 
+#### Fixed (PR #149 シニアレビュー round 3)
+
+- **[M2] `:dialog_fail` 経路で PS stderr (実際の失敗理由) が捕捉されていなかった bug**: 旧実装は `> "%TEMP_DIALOG_OUT%"` で stdout のみリダイレクト、stderr は親 cmd console に直流していた。インタラクティブ実行では人間が画面で見られるが、Phase 3 Updater が `cmd /c install.bat > log.txt 2>&1` で呼ぶ運用に入ると stderr 行は log に残らない (= 自動化呼出しで診断情報が失われる) silent path。`show_folder_dialog.ps1:catch` の `[Console]::Error.WriteLine` 出力も同じ理由で消える。修正: `> stdout.tmp 2> stderr.tmp` に分離キャプチャ、`:dialog_fail` で `PS stderr の内容:` + `PS stdout の内容:` を順に表示。`:dialog_ok` / `:dialog_cancel` でも err tmp ファイルを cleanup
+- **[M3] Manager 自動起動経路が SPEC §3.7.5 の「日常起動は Manager.bat 経由」規約を bypass していた**: round 2 で「Manager.bat 経由だと中間 cmd 残骸が出る」問題を「Manager.exe 直叩き」で回避していたが、SPEC で規約として明文化した「日常起動は Manager.bat 経由」を Install.bat の auto-start path だけ破る silent inconsistency。将来「Manager.bat 内で working dir 設定 / 環境変数 export / ログ転送」等を追加した時に auto-start 経路だけ漏れる path を防ぐため、規約準拠側に揃え直す。修正 2 段:
+  - **Manager.bat / Launcher.bat 末尾に `exit` 追加**: 中間 cmd 残骸の根本原因 (Manager.bat の cmd プロセスが `start "" Manager.exe` 後も "次の行" を待ってアイドル) を Manager.bat 側で解消。`start` で Manager.exe を detach した後は cmd が do nothing なので、`exit` で cmd を強制終了 → 親 (Install.bat) から見ても子 cmd は即時終了 → window 残骸なし
+  - **Install.bat auto-start を Manager.bat 経由に復元**: `start "" "%INSTALL_TARGET%\GCTonePrism_Manager\GCTonePrism_Manager.exe"` → `start "" "%INSTALL_PARENT_NO_TRAIL%\Manager.bat"`。SPEC §3.7.5 と整合し、Manager.bat lifecycle 変更時の漏れ path を解消
+  - trade-off: `call Manager.bat` で呼ぶと caller bat も `exit` で巻き添えで終了する。Manager.bat / Launcher.bat は leaf shortcut (他 bat の building block ではない) という前提で許容、docstring に明記
+- **[M4] `Resolve-TagConflict` 既存タグ検出 / Y/N の N で `exit 0` が「成功」と「skip」を区別不能だった bug**: caller (CI / 上位 script) から見ると `Release.bat` の `exit 0` が「publish 成功」「tag 衝突で skip」「N で skip」のいずれかを区別できない。CI で `.\Release.bat -SkipUpload:$false` 回しても、tag 衝突で publish せず exit 0 を返すと CI は緑になる silent path。同 PR 内で「誤 publish 防止優先」(Y/N 完全一致マッチ) と書きながら「期待通り publish できたか」を caller が exit code で検出できない設計矛盾。修正: exit code 体系を細分化:
+  - `0` = success (publish 成功 / `-SkipUpload` / `-DryRun`)
+  - `1` = failure (script の本来失敗: build / publish / env)
+  - `2` = skip (tag conflict + `-Force` なしによる publish skip、env 起因)
+  - `3` = skip (Y/N の N 回答による intentional skip)
+  - Release.bat 側も 4 状態を区別表示 (`正常終了` / `publish skip [exit 2: ...]` / `publish skip [exit 3: ...]` / `[FAIL]`)、exit code はそのまま透過
+- **[L1] `Release.ps1:940` のコメントで関数名が `Assert-NoTagConflict` (実体 `Resolve-TagConflict`)**: 同 PR 内で命名 divergent、Resolve-TagConflict に修正 + コメント内容も最新の "zip 完成後 / Y/N upload prompt の前に呼ぶ" 配置説明に更新
+
+#### Changed (PR #149 シニアレビュー round 3)
+
+- **[M1] CHANGELOG `### [Release Tooling v0.1.9]` の `#### Added` を最終形に書き換え**: 旧記述は round 1 時点の事実を残しつつ round 2 までの修正を `#### Fixed` に追記する累積型だったため、同一 version エントリ内で「`<親>\GCTonePrism\Launcher.bat` 配置」(Added) vs 「1 階層上に変更」(Fixed)、「`chcp 65001` save/restore」(Added) vs 「cp932 staging で chcp 撤去」(Fixed)、「ExpectedFiles 12 件」(Changed) vs 「13 件」(別 bullet) が並存して読みづらかった。AGENTS.md "1 PR 1 bump、レビュー対応コミットでは既存エントリの description を加筆・修正" 規約に従い、`#### Added` 側を最終形 (`<親>/` shortcut + cp932 staging + ExpectedFiles 13 件 + `show_folder_dialog.ps1` 同梱 + `exit` 終端 + Phase 3 起動規約) に書き換え、journey 自体は `#### Fixed` 各 bullet に残す形に整理
+- **[L3] FolderBrowserDialog SelectedPath の trailing whitespace 防御コメント**: `:dialog_ok` の `set /p INSTALL_PARENT=<...` 直前に「.NET 4.x の SelectedPath は trailing space を付けない実装で確認済、問題化したら whitespace trim を入れること」を明記、将来の OS / .NET 変更に対する fail-safe ガイドラインを残す
+- **[L4] `%TEMP_DIALOG_OUT%` / `%TEMP_DIALOG_ERR%` の衝突確率を 1/32K → 1/1G に低減**: 旧実装は `%RANDOM%` 単独 (15-bit、1/32768)、新実装は `%RANDOM%%RANDOM%` (30-bit、1/1G 弱)。インタラクティブ double-click 想定のため並列実行はまずないが、「ユーザー誤って 2 回 double click → 前回 instance がまだ dialog 待ち」のケースで tmp ファイル shared → `set /p` が前回 path を inherit する silent bug を構造的に低減
+
+#### Added (PR #149 シニアレビュー round 3)
+
+- **SPEC §3.7.8 チェックリスト「Updater」項目に Phase 3 Install.bat 起動規約を追加 (L5)**: 「`Process.Start("cmd", "/c install.bat ...")` 形式必須、`call` 形式 / 直接起動禁止、理由は §3.7.4」を着手前チェック項目として明示。AGENTS.md から本節へのリンク済みなので、Phase 3 着手時に自然と参照される導線が確保される
+
 #### Fixed (PR #149 シニアレビュー round 2 + Codex P1/P2 round 2)
 
 - **[Codex bot P1] `show_folder_dialog.ps1` setup エラーが Cancel と区別不能 → real failures が exit 0 に丸まる bug**: `Add-Type` / `New-Object` / property 代入の非終了エラー後も `if ($d.ShowDialog() -eq OK)` 行に到達し、`$d` が null だと else 分岐に流れて `exit 2` (user cancel と同じ) を返してしまう問題。Install.bat 側は exit 2 を Cancel として処理して `goto :end` (成功扱い、exit 0) するため、自動化呼出し / Phase 3 Updater から見ると「ユーザがキャンセルした」のか「PS が壊れた」のか区別不能だった。`$ErrorActionPreference = 'Stop'` で非終了エラーを終了エラーに昇格 + try/catch で Add-Type 〜 ShowDialog を囲み、catch 時は stderr にメッセージ + `[Environment]::Exit(1)`。Install.bat 側の 3-way dispatch (0/2/else) で exit 1 は自動的に `:dialog_fail` に流れるので bat 側修正不要。exit code の意味 (0=OK / 1=catch / 2=Cancel / その他=PS host 起動失敗) を冒頭コメントに追記
@@ -137,33 +162,43 @@
 
 #### Added
 
+注: 本セクションは PR #149 最終状態の事実のみを記述する。レビュー round 1/2/3 で複数回書き換わった項目 (cp932 staging / `<親>/` shortcut 配置 / ExpectedFiles 件数 / `show_folder_dialog.ps1` 切り出し 等) は、その変遷理由を `#### Fixed` 各 bullet で記録している (シニアレビュー round 3 M1)。
+
 - **`templates/Install.bat`** — 初回インストーラ実装 (#108 Phase 2)
-  - PowerShell `FolderBrowserDialog` で親フォルダを GUI 選択 (`set /p` 経由のパス入力 typo を回避)
+  - PowerShell `FolderBrowserDialog` で親フォルダを GUI 選択 (`set /p` 経由のパス入力 typo を回避、dialog は `show_folder_dialog.ps1` に切り出し `-File` 起動)
   - 入れ子検知: 親パス末尾が `GCTonePrism` なら警告 + abort (二重入れ子 `<親>\GCTonePrism\GCTonePrism\` 防止)
   - 既存検知: `<親>\GCTonePrism\` ディレクトリ存在で判定 (metadata file 不要、単純化)
     - Y/N 警告メッセージで「アップデートは Manager UI から推奨 / Manager 壊れた / クリーンインストール時のみ Y / ゲームデータ (prism.db / games / backups / responses / logs) は維持」を明示
     - Y → Manager.exe / Launcher.exe 稼働中チェック (`tasklist`) → 稼働中なら「閉じてから Enter」表示で手動 close 待機 (自動 kill しない、§3.7.4 Updater の責務に残す) → robocopy で保護データ除外 (`/XF prism.db /XD games backups responses logs`) しつつ上書き
     - N → abort
-  - 新規時: ディレクトリ作成 + robocopy で `files/*` 全コピー
-  - 完了後 Manager 起動 Y/N プロンプト → Y なら `Manager.bat` 経由で起動 (旧設計の自動起動は廃止)
-  - codepage 切替: Release.bat と同じ pattern (UTF-8 no BOM + CRLF + chcp 65001 save/restore + non-numeric guard、PR #140 経緯)
+  - 新規時: ディレクトリ作成 + robocopy で `files/*` 全コピー、加えて `<親>/Launcher.bat` / `<親>/Manager.bat` (parent-level shortcut) を `copy /Y` で配置
+  - 完了後 Manager 起動 Y/N プロンプト → Y なら **`<親>/Manager.bat` 経由で Manager.exe 起動** (旧設計の自動起動は廃止、SPEC §3.7.5 の Manager.bat 経由規約と整合)
+  - file format: 編集ソースは UTF-8 (no BOM) + CRLF、staging 時 Release.ps1 Copy-Templates が **cp932 (Shift-JIS) + CRLF** に変換 (cmd の bat parser が system codepage で読む仕様に合わせる、JP Windows 校内向け配布スコープのため非 JP locale で mojibake になる trade-off は許容、詳細は `templates/Install.bat` 冒頭 docstring 参照)
+  - 終端 `exit %EXIT_CODE%` (not `exit /b`) で cmd プロセスを直接終了させ、ダブルクリック起動時の window が確実に閉じるように。Phase 3 Updater 呼出し時は `Process.Start("cmd", "/c install.bat ...")` 形式必須 (SPEC §3.7.4)
+  - exit code: `0` = success / cancel、`1` = failure (files/ 不在 / 入れ子検知 / robocopy 失敗 / mkdir 失敗 / PS 失敗) — Phase 3 Updater integration 用
+- **`templates/show_folder_dialog.ps1`** — FolderBrowserDialog launcher (Install.bat の `-File` 経由で起動)
+  - Install.bat 内 `-Command "..."` インラインだと cmd parser が長い `set "PS_DIALOG_CMD=...日本語..."` を破壊するため別ファイル化、Japanese description を維持可能
+  - `$ErrorActionPreference = 'Stop'` + try/catch で setup / launch 失敗を `exit 1` で区別
+  - exit code 3-way dispatch: `0` = OK + stdout に選択 path / `1` = catch (stderr に詳細) / `2` = user Cancel / その他 = PS host 起動失敗
+  - file format: UTF-8 BOM + CRLF (PS 5.1 default ASCII 読み込みでの Japanese mojibake 防止)
 - **`templates/INSTALL_README.txt`** — 配布 zip 同梱の部員向け手順書
   - インストール手順 (zip 展開 → Install.bat → folder dialog → Y/N → Manager 起動 Y/N)
-  - 日常起動方法 (`Launcher.bat` / `Manager.bat` ショートカット)
-  - アップデート方法 (通常: Manager UI、緊急: Install.bat 上書き)
+  - 日常起動方法 (`<親>/Launcher.bat` / `<親>/Manager.bat` を `<親>` 直下から直接ダブルクリック)
+  - アップデート方法 (通常: Manager UI、緊急: Install.bat 上書き、ゲームデータ保護リスト明記)
   - トラブルシューティング 4 項目
-- **`templates/Launcher.bat` / `templates/Manager.bat`** — 部員日常起動用ルートショートカット
-  - `start "" "%~dp0GCTonePrism_<comp>\GCTonePrism_<comp>.exe"` の最小 wrapper
-  - インストール後の最終構造で `<親>\GCTonePrism\Launcher.bat` / `Manager.bat` として配置、部員は `GCTonePrism_Launcher\` まで辿らず日常起動可能 (SPEC §3.7.1 / §3.7.5)
+- **`templates/Launcher.bat` / `templates/Manager.bat`** — 部員日常起動用 **parent-level shortcut** (`<親>/` 直下配置)
+  - 内容: `start "" "%~dp0GCTonePrism\GCTonePrism_<comp>\GCTonePrism_<comp>.exe"` (1 階層下の component exe を起動)
+  - インストール後の最終構造: `<親>/Launcher.bat`、`<親>/Manager.bat`、`<親>/GCTonePrism/` が `<親>` 直下に並ぶ。部員は `<親>` を開けば即ダブルクリックで起動可能、`GCTonePrism/GCTonePrism_<comp>/` まで辿る煩雑さを排除 (SPEC §3.7.1 / §3.7.5)
 
 #### Changed
 
-- **`Release.ps1` Copy-Templates 拡張**: 旧仕様の Install.bat / INSTALL_README.txt の 2 件 WARN を廃止、4 ファイル (zip root × 2 + files/ 配下 × 2) の正規 staging 配置に。テンプレート不在時は `Fail` (旧 WARN だったが Phase 2 完成後はテンプレート存在が必須前提のため厳密化)
-- **`Release.ps1` Assert-ExpectedFiles 拡張**: 期待ファイル一覧を 8 → **12 件** に。zip ルートの `Install.bat` / `INSTALL_README.txt` + `files/Launcher.bat` / `files/Manager.bat` を追加、SPEC §3.7.1 正規 zip 構造との対応を明示
-- **`SPECIFICATION.md` §3.7.1 / §3.7.2 / §3.7.5 更新** (変更履歴 v1.10.8):
-  - §3.7.1 正規 zip 構造に `files/Launcher.bat` / `files/Manager.bat` を追加、ルートショートカット規約の理由 (部員日常使いの煩雑さ解消) を明文化
+- **`Release.ps1` Copy-Templates 拡張**: 旧仕様の Install.bat / INSTALL_README.txt の 2 件 WARN を廃止、**5 ファイル** (zip root × 5: Install.bat / INSTALL_README.txt / show_folder_dialog.ps1 / Launcher.bat / Manager.bat) の正規 staging 配置に。`.bat` は cp932 + CRLF、`.ps1` は UTF-8 BOM + CRLF に staging 時変換 (それぞれ cmd parser / PS 5.1 のデフォルト読み込み挙動に合わせる)。テンプレート不在時は `Fail` (旧 WARN だったが Phase 2 完成後はテンプレート存在が必須前提のため厳密化)
+- **`Release.ps1` Assert-ExpectedFiles 拡張**: 期待ファイル一覧を 8 → **13 件** に (zip ルート 5 + files/ 配下 8)。SPEC §3.7.1 正規 zip 構造との対応を明示
+- **`SPECIFICATION.md` §3.7.1 / §3.7.2 / §3.7.4 / §3.7.5 更新** (変更履歴 v1.10.8):
+  - §3.7.1 正規 zip 構造に zip-root レベルの `Launcher.bat` / `Manager.bat` (parent-level shortcut) + `show_folder_dialog.ps1` を追加、ルートショートカット規約の理由 (部員日常使いの煩雑さ解消、`<親>` 直下から直接起動) を明文化
   - §3.7.2 を Approach C 仕様に再定義 (FolderBrowserDialog / 既存検知 Y/N / Manager UI 推奨 / 保護データ温存 / Manager 起動 Y/N)、旧仕様の自動起動 + `GCTonePrism_Manager` 配下チェックを廃止
-  - §3.7.5 Launcher 側の役割に「日常起動は `GCTonePrism/Launcher.bat` から」の規約を明記
+  - §3.7.4 Updater 仕様に「Install.bat は `Process.Start("cmd", "/c install.bat ...")` 形式で呼ぶこと、`call` 形式 / 直接起動は禁止」を明記 (Install.bat 終端 `exit` の caller 巻き込み trade-off に対する制約)
+  - §3.7.5 Launcher 側の役割に「日常起動は `<親>/Launcher.bat` から」の規約を明記
 
 ### [Release Tooling v0.1.8] - 2026-05-12
 

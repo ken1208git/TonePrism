@@ -937,9 +937,9 @@ function Assert-Preflight {
     # uncommitted change
     Assert-WorkingTreeClean -Context "preflight"
 
-    # 注: 既存リリースとのタグ衝突チェックは Assert-NoTagConflict() で別フェーズ。
-    # Y/N upload prompt で「Y = 公開する」と決まった後にのみ判定する設計
-    # (zip 生成までは v0.1.0 既存でも通すことで、Install.bat 検証等の運用を救う)
+    # 注: 既存リリースとのタグ衝突チェックは Resolve-TagConflict() で別フェーズ。
+    # zip 完成後 / Y/N upload prompt の前に呼ぶ設計 (zip 生成までは既存タグでも通す
+    # ことで、Install.bat 検証等の運用を救う; "publish 不可なのに Y を聞く" 順序を避ける)
 }
 
 # ============================================================================
@@ -968,10 +968,18 @@ function Resolve-TagConflict {
             $script:DeleteExistingRelease = $true
         } else {
             # 既存 + -Force なし: publish 不可、Y/N に進ませず情報提示で graceful exit。
-            # Fail (exit 1 + 赤字 FAIL) ではなく warn + exit 0 にしている理由:
+            # exit code: 2 = tag conflict による publish skip (シニアレビュー round 3 M4)。
+            # 旧設計は exit 0 で「成功 + 公開なし」を表現していたが、CI が
+            # `Release.bat` を回した結果「publish できなかった」のか「publish した」のかを
+            # exit code 単独で区別できない silent path だった。新設計の exit code 体系:
+            #   0  = publish 成功 / -SkipUpload / -DryRun
+            #   1  = script の本来失敗 (build error / publish error / 環境破損等)
+            #   2  = tag conflict による publish skip (env state、CI から見ると "未発火")
+            #   3  = Y/N の N 回答による intentional skip
+            # Fail (exit 1 + 赤字 FAIL) ではなく warn + exit 2 にしている理由:
             #   - zip 生成自体は成功している (Install.bat 検証等に流用可)
             #   - publish 不可は「環境状態」であって「script の失敗」ではない
-            #   - exit 0 にすることで caller (CI / 上位 script) も「成功 + 公開なし」と判定可能
+            #   - 2 で区別すれば CI が "未発火" を検出して別途リトライ判断できる
             Write-Host ""
             Write-Warn "GitHub Releases に v$Version が既存です。本セッションでは publish できません。"
             Write-Host ""
@@ -985,7 +993,7 @@ function Resolve-TagConflict {
             Write-Info "  (b) CHANGELOG.md の ## Bundle に v$Version 以外の新 entry 追加 → .\Release.bat"
             Write-Info "     version を bump して新規 publish"
             Write-Host ""
-            exit 0
+            exit 2
         }
     } else {
         # exit 非ゼロ → 不在 or 別種失敗。stderr の英文字列で識別
@@ -1628,7 +1636,12 @@ if ($confirmUpload -inotmatch '^(y|yes)$') {
     Write-Info "別環境での Install.bat 検証等に流用可。後で公開する場合は同 version の release"
     Write-Info "を作り直す必要があるため、CHANGELOG に同 Bundle entry が既に書かれている前提で"
     Write-Info ".\Release.bat を再実行 → 同 zip を再生成 → y/yes 選択、で publish 可能。"
-    exit 0
+    # exit code 3 = Y/N の N 回答による intentional skip (シニアレビュー round 3 M4)。
+    # tag conflict skip (exit 2) と区別する: 前者は env 起因の "publish 不可"、
+    # こちらは user の判断による "publish しない"。CI から見ると両方 "未発火" だが、
+    # リトライ可否 / オペレーター介入の必要性が違う。code 体系は Resolve-TagConflict
+    # コメント参照。
+    exit 3
 }
 
 Invoke-GhRelease
