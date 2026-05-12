@@ -14,9 +14,10 @@
           - Windows 同梱の .NET Framework MSBuild 4 は csc が古すぎて使えない（VS Build Tools のインストールが必要、~1-2 GB）
         - release/v<version>/files/ に staging
         - Compress-Archive で release/GCTonePrism_v<version>.zip 生成
-        - gh release create でアップロード（-SkipUpload で抑止）
+        - zip 完成後、Y/N 確認プロンプト → Y なら gh release create でアップロード、N なら zip だけ残して終了
+          (`-SkipUpload` で confirm prompt 自体を skip。CI 等の non-interactive 運用向け)
 
-    TODO Phase 2 (#108): templates/Install.bat / INSTALL_README.txt を staging に同梱
+    Phase 2 (#108) 完成: templates/Install.bat / INSTALL_README.txt / Launcher.bat / Manager.bat 同梱
     TODO Phase 3 (#108): GCTonePrism_Updater/ の dotnet publish を追加
     TODO #101:           GCTonePrism_Launcher/Companions/ のループを追加
     TODO Monitor:        GCTonePrism_Monitor/ 追加時にビルドステップ追加
@@ -1510,6 +1511,33 @@ New-Zip
 if ($SkipUpload) {
     Write-Host ""
     Write-Host "SKIP-UPLOAD 完了: $ZipPath を確認してください。" -ForegroundColor Yellow
+    exit 0
+}
+
+# upload 直前 Y/N 確認 (#108 Phase 2 で追加):
+# 「ビルド + zip 化までは自動、本番 GitHub Releases 公開は明示的同意」型のフロー。
+# zip だけ作って別環境に展開テスト (Install.bat 等) したい運用シナリオで、
+# `-SkipUpload` を毎回付け忘れて誤 publish するのを防ぐ。
+# 完全 non-interactive 運用 (CI 等) では `-SkipUpload` を明示するか、
+# `Y` を stdin に流す形で対応。
+Write-Step "GitHub Releases 公開確認"
+Write-Info "Bundle version: $Version"
+Write-Info "zip ファイル:   $ZipPath"
+$zipBytes = (Get-Item $ZipPath).Length
+$zipSizeHuman = if ($zipBytes -ge 1MB) {
+    "$([math]::Round($zipBytes / 1MB, 1)) MB"
+} elseif ($zipBytes -ge 1KB) {
+    "$([math]::Round($zipBytes / 1KB, 1)) KB"
+} else { "$zipBytes B" }
+Write-Info "サイズ:        $zipSizeHuman"
+Write-Host ""
+$confirmUpload = Read-Host "    GitHub Releases に v$Version を公開しますか？ (Y/N)"
+if ($confirmUpload -inotmatch '^y') {
+    Write-Host ""
+    Write-Warn "アップロードをスキップしました。zip は $ZipPath に残っています。"
+    Write-Info "別環境での Install.bat 検証等に流用可。後で公開する場合は同 version の release"
+    Write-Info "を作り直す必要があるため、CHANGELOG に同 Bundle entry が既に書かれている前提で"
+    Write-Info ".\Release.bat を再実行 → 同 zip を再生成 → Y 選択、で publish 可能。"
     exit 0
 }
 

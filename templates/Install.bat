@@ -90,82 +90,92 @@ echo.
 echo インストール先: %INSTALL_TARGET%
 echo.
 
-REM ---- 既存検知 ----
-if exist "%INSTALL_TARGET%\" (
-    echo ============================================================================
-    echo  [警告] 既存インストールを検出しました
-    echo ============================================================================
-    echo.
-    echo  通常、アップデートは Manager UI から行うのを推奨します
-    echo  ^(Phase 4 実装後、現在は未実装^)。
-    echo.
-    echo  Manager が壊れて起動できない / クリーンインストールしたい場合のみ Y を押してください。
-    echo  Y を押した場合でも以下のゲームデータは維持されます:
-    echo    - prism.db ^(ゲーム情報 DB^)
-    echo    - games\        ^(ゲーム実体^)
-    echo    - backups\      ^(バックアップ^)
-    echo    - responses\    ^(アンケート回答^)
-    echo    - logs\         ^(ログ^)
-    echo.
-    set /p OVERWRITE_CONFIRM=上書きしますか？ (Y/N):
-    if /i not "!OVERWRITE_CONFIRM!"=="Y" (
-        echo.
-        echo [INFO] インストールを中止しました。
-        goto :end
-    )
+REM ---- 既存検知 → top-level label に分岐 ----
+REM 注: cmd.exe は `(...)` ブロックを parse-time に全展開するため、ブロック内で
+REM set した変数を `%VAR%` で参照すると stale/empty 値が読まれる ("EQU was
+REM unexpected" 等の parse error)。さらに `:label` を `()` 内に置くと `goto`
+REM の動作が不安定。両 issue 回避のため、本セクションは top-level の label +
+REM goto 構造で実装する (Codex P1 review 対応)。
+if exist "%INSTALL_TARGET%\" goto :existing_install
+goto :new_install
 
-    REM ---- Manager / Launcher 稼働中検出 + 手動 close 待機 ----
-    :checkprocess
-    tasklist /FI "IMAGENAME eq GCTonePrism_Manager.exe" 2>nul | findstr /I "GCTonePrism_Manager.exe" >nul
-    set MANAGER_RUNNING=%ERRORLEVEL%
-    tasklist /FI "IMAGENAME eq GCTonePrism_Launcher.exe" 2>nul | findstr /I "GCTonePrism_Launcher.exe" >nul
-    set LAUNCHER_RUNNING=%ERRORLEVEL%
-    if %MANAGER_RUNNING% EQU 0 (
-        echo.
-        echo [警告] GCTonePrism_Manager.exe が稼働中です。
-    )
-    if %LAUNCHER_RUNNING% EQU 0 (
-        echo [警告] GCTonePrism_Launcher.exe が稼働中です。
-    )
-    if %MANAGER_RUNNING% EQU 0 goto :wait_close
-    if %LAUNCHER_RUNNING% EQU 0 goto :wait_close
-    goto :do_overwrite
-    :wait_close
+:existing_install
+echo ============================================================================
+echo  [警告] 既存インストールを検出しました
+echo ============================================================================
+echo.
+echo  通常、アップデートは Manager UI から行うのを推奨します
+echo  ^(Phase 4 実装後、現在は未実装^)。
+echo.
+echo  Manager が壊れて起動できない / クリーンインストールしたい場合のみ Y を押してください。
+echo  Y を押した場合でも以下のゲームデータは維持されます:
+echo    - prism.db ^(ゲーム情報 DB^)
+echo    - games\        ^(ゲーム実体^)
+echo    - backups\      ^(バックアップ^)
+echo    - responses\    ^(アンケート回答^)
+echo    - logs\         ^(ログ^)
+echo.
+set /p OVERWRITE_CONFIRM=上書きしますか？ (Y/N):
+if /i not "%OVERWRITE_CONFIRM%"=="Y" (
     echo.
-    echo  Manager / Launcher を全て閉じてから Enter キーを押してください...
-    pause >nul
-    goto :checkprocess
-
-    :do_overwrite
-    echo.
-    echo [INFO] 上書きインストールを開始します...
-    REM robocopy: /E = 空ディレクトリ含む全コピー、/XF = 除外ファイル、/XD = 除外ディレクトリ
-    REM /NFL /NDL /NJH /NJS /NC /NS /NP = 出力簡素化、/R:1 /W:1 = retry 控えめ
-    REM robocopy 除外は GCTonePrism_Manager\ サブディレクトリ配下のものを名前指定で除外
-    REM (フルパス指定すると環境依存になるためファイル名 / ディレクトリ名のみで指定)
-    robocopy "%FILES_DIR%" "%INSTALL_TARGET%" /E /XF prism.db /XD games backups responses logs /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1
-    REM robocopy の終了コードは bit field、< 8 が成功 (1=コピーあり, 0=変更なし, 等)
-    if errorlevel 8 (
-        echo.
-        echo [FAIL] ファイルコピーに失敗しました ^(robocopy exit %ERRORLEVEL%^)。
-        goto :end
-    )
-) else (
-    echo [INFO] 新規インストールを開始します...
-    mkdir "%INSTALL_TARGET%" 2>nul
-    if not exist "%INSTALL_TARGET%\" (
-        echo.
-        echo [FAIL] インストール先フォルダを作成できませんでした: %INSTALL_TARGET%
-        echo        書き込み権限を確認してください。
-        goto :end
-    )
-    robocopy "%FILES_DIR%" "%INSTALL_TARGET%" /E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1
-    if errorlevel 8 (
-        echo.
-        echo [FAIL] ファイルコピーに失敗しました ^(robocopy exit %ERRORLEVEL%^)。
-        goto :end
-    )
+    echo [INFO] インストールを中止しました。
+    goto :end
 )
+
+REM ---- Manager / Launcher 稼働中検出 + 手動 close 待機 ----
+REM findstr exit 0 = 該当プロセス発見 (= 稼働中)、exit 1 = 未発見 (= 停止中)
+:checkprocess
+tasklist /FI "IMAGENAME eq GCTonePrism_Manager.exe" 2>nul | findstr /I "GCTonePrism_Manager.exe" >nul
+set MANAGER_FOUND=%ERRORLEVEL%
+tasklist /FI "IMAGENAME eq GCTonePrism_Launcher.exe" 2>nul | findstr /I "GCTonePrism_Launcher.exe" >nul
+set LAUNCHER_FOUND=%ERRORLEVEL%
+if "%MANAGER_FOUND%"=="0" goto :wait_close
+if "%LAUNCHER_FOUND%"=="0" goto :wait_close
+goto :do_overwrite
+
+:wait_close
+echo.
+if "%MANAGER_FOUND%"=="0" echo [警告] GCTonePrism_Manager.exe が稼働中です。
+if "%LAUNCHER_FOUND%"=="0" echo [警告] GCTonePrism_Launcher.exe が稼働中です。
+echo.
+echo  Manager / Launcher を全て閉じてから Enter キーを押してください...
+pause >nul
+goto :checkprocess
+
+:do_overwrite
+echo.
+echo [INFO] 上書きインストールを開始します...
+REM robocopy: /E = 空ディレクトリ含む全コピー、/XF = 除外ファイル、/XD = 除外ディレクトリ
+REM /NFL /NDL /NJH /NJS /NC /NS /NP = 出力簡素化、/R:1 /W:1 = retry 控えめ
+REM robocopy 除外は GCTonePrism_Manager\ サブディレクトリ配下のものを名前指定で除外
+REM (フルパス指定すると環境依存になるためファイル名 / ディレクトリ名のみで指定)
+robocopy "%FILES_DIR%" "%INSTALL_TARGET%" /E /XF prism.db /XD games backups responses logs /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1
+REM robocopy の終了コードは bit field、< 8 が成功 (1=コピーあり, 0=変更なし, 等)
+if errorlevel 8 (
+    echo.
+    echo [FAIL] ファイルコピーに失敗しました ^(robocopy exit %ERRORLEVEL%^)。
+    goto :end
+)
+goto :install_done
+
+:new_install
+echo [INFO] 新規インストールを開始します...
+mkdir "%INSTALL_TARGET%" 2>nul
+if not exist "%INSTALL_TARGET%\" (
+    echo.
+    echo [FAIL] インストール先フォルダを作成できませんでした: %INSTALL_TARGET%
+    echo        書き込み権限を確認してください。
+    goto :end
+)
+robocopy "%FILES_DIR%" "%INSTALL_TARGET%" /E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1
+if errorlevel 8 (
+    echo.
+    echo [FAIL] ファイルコピーに失敗しました ^(robocopy exit %ERRORLEVEL%^)。
+    goto :end
+)
+goto :install_done
+
+:install_done
 
 echo.
 echo ============================================================================
