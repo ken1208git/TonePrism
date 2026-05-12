@@ -1329,7 +1329,20 @@ function Copy-Templates {
         }
         $dstDir = Split-Path $dst -Parent
         if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Path $dstDir -Force | Out-Null }
-        Copy-Item $src $dst -Force
+
+        if ($src -match '\.bat$') {
+            # cmd.exe は LF-only bat を正しく parse できず double-click で即 close
+            # する (PR #140 の Release.bat 同種事故、本 Phase 2 では Install.bat で
+            # 再発)。.gitattributes の `*.bat eol=crlf` は git checkout 時のみ強制
+            # するため、Write tool 等で working tree に LF が残った場合に staging
+            # へ LF のまま流れ込む。ここで強制 CRLF normalize して防御。
+            $content = [System.IO.File]::ReadAllText($src, $script:Utf8NoBomEncoding)
+            # 既存改行を一旦 \n に正規化してから \r\n に揃える (CRLF / LF / mixed 全対応)
+            $content = ($content -replace "`r`n", "`n") -replace "`n", "`r`n"
+            [System.IO.File]::WriteAllText($dst, $content, $script:Utf8NoBomEncoding)
+        } else {
+            Copy-Item $src $dst -Force
+        }
         Write-Ok "$($tpl.Label) 同梱"
     }
 }
