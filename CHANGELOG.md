@@ -41,6 +41,14 @@
   - `Invoke-NativeWithCapture` に `-ShowProgress` / `-ProgressMessage` パラメータを追加 (500ms 間隔で経過秒数を `\r` 上書き表示)
   - `Invoke-GhRelease` (gh release delete / create) を PASS_THROUGH → helper + ShowProgress に移行、zip サイズも表示 (`アップロード中 (zip 59 MB)... 12s 経過`)
   - 完了後は progress 行を消して、gh が stdout に出す release URL を `Write-Info` で再表示
+- **PR #148 シニアレビュー反映 (M1-M3 + L2-L4)**:
+  - **M1**: `gh release delete` は成功時 stdout/stderr 無音のため `if ($delOut -match '\S')` が false で ShowProgress 行消去後に「無の状態」になる UX 退行。明示的に `Write-Ok "既存タグ v$Version を削除完了"` を無条件追加して旧 PASS_THROUGH UX を回復
+  - **M2**: catalog の PASS_THROUGH 説明が `& native-cmd` 直書きの 1 形態に書かれていたが、現状の実装は `Invoke-ExternalProcess` (System.Diagnostics.Process 直叩き) なのでメカニズム乖離。「(a) 直 & 演算子版 (現状未使用)」「(b) `Invoke-ExternalProcess` helper 経由 (推奨)」の 2 実装に分けて記述、(a) は encoding 再ピン留め保護がない旨も注記
+  - **M3**: `ShowProgress` パスで `WaitForExit()` 未呼び出しだった非対称を解消。`HasExited` ループ終了後にも明示的に `WaitForExit()` (no-op だが .NET 慣習に従いパイプフラッシュを保証) を追加、両 path を対称化
+  - **L2**: M3 の CHANGELOG 説明文に「`[Console]::WindowWidth` が 0 以下を返す non-console host も同様に fallback 120」を追記、コード側 (`if ($clearWidth -lt 30) { $clearWidth = 120 }`) との整合を明示
+  - **L3**: 引数 quoting の trailing backslash 制約 (`"C:\path\"` → CommandLineToArgvW 解析破損) を helper の inline コメントとして明文化、現 call site (zip / 一時 notes / vswhere) はいずれも該当しないため安全、新規 call site でディレクトリパスを渡す際の注意として残す
+  - **L4**: `Invoke-ExternalProcess` にも `Process.Start` 失敗時の context 付き rethrow (`'$FilePath' の起動に失敗しました: ...`) を追加、`Invoke-NativeWithCapture` と例外メッセージ粒度を対称化
+  - **L1 (保留)**: CHANGELOG v1.0.7 / v1.0.8 の日付 `2026-05-12` (JST) は commit author date と一致。reviewer は UTC context (2026-05-11) で見ていた解釈ズレ。日付ポリシー (JST 統一 / UTC 統一 / PR merge 日) の策定は CHANGELOG 全体に関わるため別途
 - **Wave 2 シニアレビュー反映 (M1-M3 + L1-L4)**:
   - **M1**: catalog の PS 7.3+ 移行注意コメントから vswhere を削除 (Wave 1 で helper 化済みのため stale)、残る `&` イディオムは `Assert-WorkingTreeClean` の `git status --porcelain` のみと正確化
   - **M2**: `Invoke-NativeWithCapture` docstring に「`$LASTEXITCODE` は更新されない、`.ExitCode` を使え」を明記。Process 直叩きの構造上 `&` の自動変数を avoid、caller が古い値を読む silent failure を防ぐ

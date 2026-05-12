@@ -132,14 +132,23 @@ $OutputEncoding           = [System.Text.UTF8Encoding]::new($false)
 #      # exit code チェック必須 ($output が空でも非ゼロ exit を見落とさないため)
 #      # 例: git status --porcelain (Assert-WorkingTreeClean)
 #
-#   3. pattern: PASS_THROUGH
-#      & native-cmd                  # stdout/stderr 両方 console 直書き、変数 capture なし
-#      # exit code チェック必須 (成否を判定する唯一の信号が exit code のみ)
-#      # 例: Invoke-ExternalProcess 経由 (Godot CLI export / msbuild / nuget restore)。
-#      #     大量の verbose 出力をリアルタイムで見せたい長時間処理向け。
-#      # 注: gh release create/delete は v1.0.7 まで PASS_THROUGH だったが、TTY 検出で
-#      #     進捗 OFF + 完了まで無音になる UX 問題のため v1.0.8 で
-#      #     Invoke-NativeWithCapture -ShowProgress に移行
+#   3. pattern: PASS_THROUGH — 2 実装あり、機能は同等だが内部メカニズムが違う
+#
+#      (a) 直 & 演算子版 (現状本 script 内で使用なし):
+#          & native-cmd               # stdout/stderr 両方 console 直書き、変数 capture なし
+#          # exit code チェック必須 (成否を判定する唯一の信号が exit code のみ)
+#          # 注: PS 5.1 + chcp 65001 で子プロセスが OutputEncoding を OEM に戻す
+#          #     既知バグの再ピン留め保護がない。短時間の単発呼び出し向け
+#
+#      (b) Invoke-ExternalProcess helper 経由 (推奨、現状の全 PASS_THROUGH 系):
+#          $exitCode = Invoke-ExternalProcess -FilePath $cmd -Arguments @(...)
+#          # 内部は [System.Diagnostics.Process]::Start + WaitForExit + Dispose
+#          # 引数 quoting + finally で [Console]::OutputEncoding を UTF-8 に再ピン留め
+#          # 大量 verbose 出力 + 長時間処理向け (Godot CLI export / msbuild / nuget restore)
+#
+#      注: gh release create/delete は v1.0.7 まで (a) PASS_THROUGH だったが、TTY 検出
+#          で進捗 OFF + 完了まで無音になる UX 問題のため v1.0.8 で
+#          Invoke-NativeWithCapture -ShowProgress に移行
 #
 # ANTI-PATTERNS (使用禁止) — いずれも踏み抜き履歴と deprecation 時点を 2 値で記録:
 #
@@ -316,8 +325,15 @@ function Invoke-NativeWithCapture {
         [string]$ProgressMessage = "実行中..."
     )
     # 引数 quoting は Invoke-ExternalProcess と同じ規則
+    # 既知制約: trailing backslash を持つパス引数 (例: "C:\path\") は壊れる。
+    #   `"C:\path\"` に変換すると CommandLineToArgvW の規則上 `\"` が閉じ引用符と
+    #   して機能せず、引数のパースが破損する (\ × N + " → \ × (N/2) + " デコード)。
+    #   現 call site (zip / 一時 notes / vswhere) はいずれも trailing backslash を
+    #   持たないため安全。新規 call site でディレクトリパスを渡す場合は要注意。
     # TODO (post v1.0.8): 共通化候補。MSVC argv 規則の特殊ケース (\ を引用直前) で
-    #                     2 箇所が silent に divergence する危険がある
+    #                     Invoke-ExternalProcess との 2 箇所が silent に divergence
+    #                     する危険、共通 helper 切り出し時に CommandLineToArgvW 規則
+    #                     準拠 (\ × N + " → \\ × N + \") に置換
     $quoted = $Arguments | ForEach-Object {
         if ($_ -match '\s|"') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
     }
@@ -353,8 +369,8 @@ function Invoke-NativeWithCapture {
             # 500ms 間隔で経過秒数を `\r` 上書き表示 (CR で行頭戻り、新しい数字で上書き)
             # clear 幅は console window 幅から動的算出: ProgressMessage 長 / Japanese
             # 文字 cell 幅 / elapsed 桁数によらず消し残しが出ない。WindowWidth 取得
-            # 失敗時 (ISE 等の非 console host) は 120 で fallback (cmd.exe / Windows
-            # Terminal の典型幅 80 を超える safe margin)
+            # 失敗時 (ISE 等の非 console host) は 120 で fallback、WindowWidth が
+            # 0 以下を返す non-console host も同様に 120 で fallback
             $clearWidth = try { [Console]::WindowWidth - 1 } catch { 120 }
             if ($clearWidth -lt 30) { $clearWidth = 120 }
             $clearLine = ' ' * $clearWidth
@@ -366,9 +382,11 @@ function Invoke-NativeWithCapture {
             }
             # progress 行を完全に消して cursor を行頭へ (後続の出力が綺麗に流れる)
             Write-Host -NoNewline "`r$clearLine`r"
-        } else {
-            $proc.WaitForExit()
         }
+        # 両 path 対称化: HasExited で抜けた場合も .NET 慣習に従い WaitForExit() を
+        # 明示呼びしてパイプバッファ完全フラッシュを保証 (no-arg 版は無限待機だが
+        # HasExited=$true なので即 return、no-op)
+        $proc.WaitForExit()
 
         # AggregateException (faulted task) は明示メッセージで rethrow し、何が
         # 失敗したか caller に伝える
@@ -1027,7 +1045,14 @@ function Invoke-ExternalProcess {
 
     $proc = $null
     try {
-        $proc = [System.Diagnostics.Process]::Start($psi)
+        # Process.Start 失敗 (file not found / 権限不足) を Invoke-NativeWithCapture
+        # と同じ pattern で何を起動しようとしたかを含むメッセージで rethrow、
+        # 両 helper の例外メッセージ粒度を対称化
+        try {
+            $proc = [System.Diagnostics.Process]::Start($psi)
+        } catch {
+            throw "Invoke-ExternalProcess: '$FilePath' の起動に失敗しました: $($_.Exception.Message)"
+        }
         $proc.WaitForExit()
         $exitCode = $proc.ExitCode
     } finally {
@@ -1273,6 +1298,10 @@ function Invoke-GhRelease {
         if ($delResult.ExitCode -ne 0) {
             Fail "既存 release の削除に失敗しました:`n$($delResult.Combined.TrimEnd())"
         }
+        # gh release delete は成功時 stdout/stderr ともに無音なので、
+        # ShowProgress 行が消えた後の「無の状態」を避けるため明示的な完了表示
+        # (gh の将来 version で出力するようになった場合は追加で Write-Info)
+        Write-Ok "既存タグ v$Version を削除完了"
         $delOut = $delResult.StdOut.TrimEnd()
         if ($delOut -match '\S') { Write-Info $delOut }
     }
