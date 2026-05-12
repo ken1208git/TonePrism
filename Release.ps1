@@ -1312,8 +1312,9 @@ function Copy-Templates {
 
     # zip ルート配置
     $rootTemplates = @(
-        @{ Src = 'templates\Install.bat';        Dest = 'Install.bat';        Label = 'Install.bat' },
-        @{ Src = 'templates\INSTALL_README.txt'; Dest = 'INSTALL_README.txt'; Label = 'INSTALL_README.txt' }
+        @{ Src = 'templates\Install.bat';            Dest = 'Install.bat';            Label = 'Install.bat' },
+        @{ Src = 'templates\INSTALL_README.txt';     Dest = 'INSTALL_README.txt';     Label = 'INSTALL_README.txt' },
+        @{ Src = 'templates\show_folder_dialog.ps1'; Dest = 'show_folder_dialog.ps1'; Label = 'show_folder_dialog.ps1 (Install.bat dialog helper)' }
     )
     # files/ 配下配置 (インストール後の GCTonePrism\Launcher.bat / Manager.bat になる)
     $filesTemplates = @(
@@ -1335,11 +1336,20 @@ function Copy-Templates {
             # する (PR #140 の Release.bat 同種事故、本 Phase 2 では Install.bat で
             # 再発)。.gitattributes の `*.bat eol=crlf` は git checkout 時のみ強制
             # するため、Write tool 等で working tree に LF が残った場合に staging
-            # へ LF のまま流れ込む。ここで強制 CRLF normalize して防御。
+            # へ LF のまま流れ込む。ここで強制 CRLF normalize + UTF-8 no BOM 維持。
             $content = [System.IO.File]::ReadAllText($src, $script:Utf8NoBomEncoding)
-            # 既存改行を一旦 \n に正規化してから \r\n に揃える (CRLF / LF / mixed 全対応)
             $content = ($content -replace "`r`n", "`n") -replace "`n", "`r`n"
             [System.IO.File]::WriteAllText($dst, $content, $script:Utf8NoBomEncoding)
+        } elseif ($src -match '\.ps1$') {
+            # PS 5.1 は .ps1 ファイルを default で ASCII (Windows-1252) として読み込む
+            # ため、Japanese 等の non-ASCII char が含まれると mojibake になる。BOM が
+            # あれば UTF-8 として正しく読まれるため **UTF-8 with BOM** で staging。
+            # working tree の BOM 有無に依存しないよう ReadAllText で auto-detect
+            # して読み、Write 時に強制 BOM 付与。CRLF も bat と同じ理由で normalize
+            $content = [System.IO.File]::ReadAllText($src)  # auto-detect encoding via BOM/heuristics
+            $content = ($content -replace "`r`n", "`n") -replace "`n", "`r`n"
+            $utf8WithBom = [System.Text.UTF8Encoding]::new($true)
+            [System.IO.File]::WriteAllText($dst, $content, $utf8WithBom)
         } else {
             Copy-Item $src $dst -Force
         }
@@ -1359,6 +1369,7 @@ function Assert-ExpectedFiles {
         # zip ルート
         'Install.bat',
         'INSTALL_README.txt',
+        'show_folder_dialog.ps1',
         # files/ 配下 = インストール後の <親>\GCTonePrism\ に展開される payload
         'files\Launcher.bat',
         'files\Manager.bat',

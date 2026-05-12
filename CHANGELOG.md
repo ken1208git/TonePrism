@@ -34,6 +34,12 @@
 #### Fixed (PR #149 シニアレビュー round 1 + Codex P2)
 
 - **[Codex P2] FolderBrowserDialog 選択パス内の `!` 文字が delayed expansion で破壊される bug**: `Install.bat` 全体で `setlocal enabledelayedexpansion` を有効化していたため、選択パスに `!` が含まれる場合 (例: `D:\Backup!\` 等のユーザー命名パス) に `for /f ... do set INSTALL_PARENT=%%P` の段階で `!` が delayed expansion token として解釈され削除される。本ファイル refactor 後は `!VAR!` 参照が実質ゼロのため、`setlocal disabledelayedexpansion` に変更して構造的に解消
+- **Install.bat の cmd parser 問題を構造的に解消 (`.ps1` 切り出し + `[...]` 使用)**: 数回の試行錯誤を経て、根本原因は (a) 長い `set "PS_DIALOG_CMD=...日本語..."` の Japanese byte 列が cmd の line tokenize を壊し PS に malformed command を渡す、(b) `set "..."` 内の `^|` が literal で残り PS に届く (cmd quoted set では `^` 非 escape)、(c) `echo (text)` の `(` が cmd で block 開始と解釈される、と判明。これらを構造的に回避:
+  - **PS dialog code を `templates/show_folder_dialog.ps1` に切り出し**: cmd parsing を経由せず PS native の UTF-8 処理に任せる。Japanese description (`'GCTonePrism のインストール先の親フォルダを選択してください'`) を維持可能。Install.bat 側は `powershell.exe -File "%~dp0show_folder_dialog.ps1"` で起動するだけ
+  - **echo の `(` `)` を `[` `]` に置換 (14 箇所)**: `[` `]` は cmd で escape 不要、`^(` `^)` の top-level 不安定挙動を回避
+  - **Release.ps1 Copy-Templates**: .ps1 を **UTF-8 BOM + CRLF** で staging に書き出し (PS 5.1 default の ASCII 読み込みで Japanese mojibake を防ぐため BOM 必須)
+  - **Assert-ExpectedFiles**: 12 → 13 件 (`show_folder_dialog.ps1` 追加)
+  - **Install.bat docstring の構造規約 (3) 新規追記**: 「PS 起動の引数で日本語を含む長い文字列を inline しない、別 .ps1 に切り出して `-File` 経由で起動する」を明文化、将来 maintainer が誤って inline に戻すのを防ぐ
 - **Install.bat 実行時に「'em.Windows.Forms' is not recognized」等 cmd parse error が連発する bug**: ユーザー実機の testing で、Install.bat が `[FAIL] PowerShell が exit 0 を返しましたが選択パスが取得できませんでした` と並んで `'��よう' is not recognized` `'em.Windows.Forms' is not recognized` `'場合は' is not recognized` 等の cmd error が散発した。原因: cmd は `if cond (echo 日本語... goto :fail)` のような `(...)` ブロックを parse-time に展開する際、UTF-8 で書かれた日本語の byte 列を mis-tokenize して fragment を command として実行する動作。chcp 65001 が success していても、cmd の bat parser はブロック展開時に system codepage (cp932 on JP Windows) で byte を解釈する余地があり、Japanese 含む `(...)` block が壊れる。welcome 等 top-level の echo は正常動作するが、`if (...) echo ... goto :fail` パターンは全滅。
   - 修正: 全 `(...)` ブロック内の Japanese echo を **top-level goto pattern** に refactor。`if cond (echo X / goto Y)` → `if not cond goto :ok / [...echo X...] / goto :fail / :ok / [...continue...]` の linear flow に統一
   - 既存 refactor (Codex P1 で existing_install branch のみ実施) を全 block (files/ 不在 / dialog_ok 防御 / dialog_fail / 入れ子検知 / overwrite cancel / robocopy fail × 2 / mkdir fail / Manager 起動) に展開
