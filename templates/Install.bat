@@ -274,4 +274,14 @@ goto :end
 :end
 echo.
 if not defined MANAGER_STARTED pause
-endlocal & exit /b %EXIT_CODE%
+REM `exit` (not `exit /b`) forces cmd process termination so the double-clicked
+REM Install.bat window doesn't leave a residual empty prompt. With `exit /b` the
+REM bat returns to caller; for `cmd /c install.bat` (the typical Explorer
+REM double-click invocation) cmd exits afterwards, but some terminals / cmd-host
+REM combinations keep an interactive prompt instead. `exit %CODE%` exits cmd
+REM directly with the given code so the window closes uniformly.
+REM
+REM Trade-off: if a future caller uses `call install.bat` from another bat,
+REM `exit` would also terminate the caller. For Phase 3 Updater integration,
+REM invoke via `Process.Start("cmd", "/c install.bat ...")` instead of `call`.
+endlocal & exit %EXIT_CODE%
