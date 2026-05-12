@@ -93,99 +93,114 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # ============================================================================
-# Native command の `2>&1` trap (PS 5.1 + $ErrorActionPreference='Stop' 環境)
+# Console output encoding を UTF-8 (no BOM) にピン留め
 # ============================================================================
-# このスクリプトでは git / gh / msbuild / nuget 等の native command を呼び出すが、
-# `2>&1` で stderr を success stream に merge すると PS 5.1 + Stop モードでは
-# native command の stderr 出力が NativeCommandError の terminating error として
-# 扱われ、本来「正常系」のはずの path で script が止まる。
+# PS 5.1 + chcp 65001 環境では、子プロセス (Invoke-ExternalProcess 経由の
+# Godot CLI / msbuild / nuget 等、RedirectStandardOutput=$false でコンソール
+# ハンドルを継承するもの) が走った後、後続の Write-Host で日本語が doubled
+# rendering される既知バグがある (症状例: `完了` → `完完了了`、ASCII は影響なし)。
+# 観察例として本番 v0.1.0 release では msbuild 後に発火を確認、ただし原因として
+# Godot / nuget も同じ条件を満たすので等価候補。
+# `[Console]::OutputEncoding` を UTF-8 (no BOM) で明示ピン留めしておく + 各
+# Invoke-ExternalProcess 呼び出し後に再ピン留めすることで発火を防ぐ。
+# `$OutputEncoding` は PS pipeline → native command への送信時の encoding。
 #
-# 機構: $ErrorActionPreference='Stop' は success stream に流れる ErrorRecord を
-# terminating error として扱う。`2>&1` は stderr の string output を ErrorRecord
-# として success stream に流すため Stop の判定対象になる。一方 Out-String を経由
-# すると ErrorRecord が string 化される。(PS 5.1 で確認。PS 7.x は stream 処理
-# 仕様が異なるため要再検証)
+# 非 console host ガード: CI / headless / redirected 実行コンテキストでは
+# `[Console]::OutputEncoding` setter が IOException を投げ、$ErrorActionPreference='Stop'
+# 環境では release 開始前に script が hard abort する。try/catch で吸収。
+# (script-level の $script:Utf8NoBomEncoding を一意ソースとして共有、
+#  Invoke-ExternalProcess の finally でも同じインスタンスを再代入)
+$script:Utf8NoBomEncoding = [System.Text.UTF8Encoding]::new($false)
+try {
+    [Console]::OutputEncoding = $script:Utf8NoBomEncoding
+} catch {
+    # non-console host では console API は使えないが、$OutputEncoding (PS 変数) は
+    # 引き続き設定可能、native command pipeline 送信側は UTF-8 のまま維持される
+}
+$OutputEncoding = $script:Utf8NoBomEncoding
+
+# ============================================================================
+# Native command 呼び出しの方針 (v1.0.8 で再整理)
+# ============================================================================
+# 経緯: PS 5.1 + $ErrorActionPreference='Stop' 下では、`&` 演算子 + native
+# command の組み合わせで「exit 非ゼロ + stderr 出力」を返すコマンドが
+# NativeCommandError の terminating error を発生させる。
+# v1.0.6 までは `2>$null` / `2>&1 | Out-String` 系で回避できると考えていたが、
+# v1.0.7 で実証された通り PS の error stream への ErrorRecord 化が redirect
+# よりも先に発火するため redirect は防御にならない。v1.0.8 で
+# `Invoke-NativeWithCapture` ヘルパー (System.Diagnostics.Process 直叩き) に
+# 一本化、`&` 系の patterns は「success exit が確証できる場合のみ」に格下げ。
 #
-# !! 重要な制約 (v1.0.7 で訂正): !!
-#   Out-String 経由でも、native command が **exit 非ゼロ + stderr 出力** という
-#   組み合わせを返した場合は Stop の trap が飛ぶ。これは PS が native command 用
-#   に別途生成する NativeCommandError ErrorRecord が Out-String の pipeline 化
-#   よりも先 (exit code 確定時点) に作られるため。
-#   - success path で stderr を出すコマンド (例: gh auth status exit 0): OK
-#   - 失敗 path で stderr を出すコマンド (例: gh release view exit 1): NG
-#   後者には TRY_CATCH_NATIVE を使う必要がある。
+# 採用ガイドライン (call site では「pattern: 名前」で参照):
 #
-# PS 7.3+ 移行時の追加注意 (現状未対応):
+#   1. Invoke-NativeWithCapture (RECOMMENDED for any failable command)
+#      $result = Invoke-NativeWithCapture -FilePath 'gh' -Arguments @('release','view','v1.0','--json','id')
+#      # → $result.StdOut / $result.StdErr / $result.ExitCode / $result.Combined
+#      # System.Diagnostics.Process で PS error stream を経由しないため罠なし。
+#      # 失敗 path で stderr を出すコマンドは必ずこれ (gh release view / gh auth status 等)。
+#
+#   2. pattern: CAPTURE_STDOUT_PASS_STDERR
+#      $output = & native-cmd        # stdout は変数 capture、stderr は console 直書き
+#      # exit code チェック必須 ($output が空でも非ゼロ exit を見落とさないため)
+#      # 例: git status --porcelain (Assert-WorkingTreeClean)
+#
+#   3. pattern: PASS_THROUGH — 2 実装あり、機能は同等だが内部メカニズムが違う
+#
+#      (a) 直 & 演算子版 (現状本 script 内で使用なし):
+#          & native-cmd               # stdout/stderr 両方 console 直書き、変数 capture なし
+#          # exit code チェック必須 (成否を判定する唯一の信号が exit code のみ)
+#          # 注: PS 5.1 + chcp 65001 で子プロセスが OutputEncoding を OEM に戻す
+#          #     既知バグの再ピン留め保護がない。短時間の単発呼び出し向け
+#
+#      (b) Invoke-ExternalProcess helper 経由 (推奨、現状の全 PASS_THROUGH 系):
+#          $exitCode = Invoke-ExternalProcess -FilePath $cmd -Arguments @(...)
+#          # 内部は [System.Diagnostics.Process]::Start + WaitForExit + Dispose
+#          # 引数 quoting + finally で [Console]::OutputEncoding を UTF-8 に再ピン留め
+#          # 大量 verbose 出力 + 長時間処理向け (Godot CLI export / msbuild / nuget restore)
+#
+#      注: gh release create/delete は v1.0.7 まで (a) PASS_THROUGH だったが、TTY 検出
+#          で進捗 OFF + 完了まで無音になる UX 問題のため v1.0.8 で
+#          Invoke-NativeWithCapture -ShowProgress に移行
+#
+# ANTI-PATTERNS (使用禁止) — いずれも踏み抜き履歴と deprecation 時点を 2 値で記録:
+#
+#   X. STOP_TRAP — & cmd 2>&1 / $var = & cmd 2>&1
+#      stderr が ErrorRecord として success stream に流れ Stop trap 発火。
+#      初回 deprecate from v1.0.0 (script 新設時点)。
+#      回避: Invoke-NativeWithCapture へ移行。
+#
+#   X. SUPPRESS_BOTH — & cmd 2>$null | Out-Null
+#      踏み抜き: v1.0.6 (本番 release で gh release view が trap 発火)
+#      deprecation: v1.0.8 (anti-pattern として正式格下げ)
+#      「2>$null で stderr を捨てれば trap 防げる」前提が誤りだった
+#
+#   X. CAPTURE_DIAGNOSTIC — $out = & cmd 2>&1 | Out-String
+#      踏み抜き: v1.0.7 (gh release view の "release not found" stderr で trap)
+#      deprecation: v1.0.8 (anti-pattern として正式格下げ)
+#      「Out-String を経由すれば Stop の判定対象外」前提が誤りだった
+#
+#   X. CAPTURE_STDOUT — $out = & cmd 2>$null
+#      踏み抜き履歴なし、deprecation: v1.0.8
+#      SUPPRESS_BOTH と同じ構造 (2>$null) を持つため同じ trap 形状。
+#      本 script では vswhere で使用していたが v1.0.8 で helper に移行、
+#      残存 call site ゼロのため anti-pattern 化
+#
+#   X. TRY_CATCH_NATIVE — try { & cmd 2>&1 | Out-String } catch { ... }
+#      導入: v1.0.7 (CAPTURE_DIAGNOSTIC の trap 回避策として)
+#      deprecation: v1.0.8 (Invoke-NativeWithCapture が同目的を関数化したため不要)
+#
+# PS 7.3+ 移行時の注意 (現状未対応):
 #   PS 7.3 以降は $PSNativeCommandUseErrorActionPreference (default $true) が
 #   追加され、`& native-cmd` の非ゼロ exit code 自体が ErrorActionPreference に
-#   従って terminating error 化する。本スクリプトの「2>&1 を外して $LASTEXITCODE で
-#   判定」というイディオム (例: Assert-WorkingTreeClean の git status, vswhere の
-#   失敗パス等) は、PS 7.3+ では `if ($LASTEXITCODE -ne 0)` に到達せず、エラー
-#   メッセージや context 情報を出す前に script 自体が abort する経路に変わる。
-#   将来 PS 7 移行する場合は以下のいずれか必須:
+#   従って terminating error 化する。本スクリプトで残る `&` イディオムは
+#   Assert-WorkingTreeClean の `git status --porcelain` のみ。これは PS 7.3+ で
+#   `if ($LASTEXITCODE -ne 0)` に到達せず abort する。
+#   (Invoke-NativeWithCapture / Invoke-ExternalProcess は Process 直叩きのため
+#    $PSNativeCommandUseErrorActionPreference の影響を受けず、移行後も安全)
+#   PS 7 移行時には以下のいずれかが必須:
 #     (a) script 冒頭で $PSNativeCommandUseErrorActionPreference = $false に固定
-#     (b) 各 $LASTEXITCODE チェックを try/catch でラップ
+#     (b) 残った `&` 系 (git status) も Invoke-NativeWithCapture に移行
 #   現状は PS 5.1 を前提とした実装。
-#
-# パターン早見表 (call site では「pattern: 名前」で参照する):
-#
-#   # pattern: SUPPRESS_BOTH (stderr / stdout 両方破棄、exit code のみ判定)
-#   & native-cmd 2>$null | Out-Null
-#   # ↑ 「success path で stderr を出さない」コマンド限定 (例: vswhere)
-#   # ↑ 失敗 path で stderr を出すコマンドは NativeCommandError trap が飛ぶ
-#   #   (v1.0.6 の gh release view で本番踏み → v1.0.7 で TRY_CATCH_NATIVE 化)
-#
-#   # pattern: CAPTURE_DIAGNOSTIC (success exit + stderr 出力を文字列化保持)
-#   $output = & native-cmd 2>&1 | Out-String
-#   # ↑ success path で stderr を出すコマンド限定 (例: gh auth status exit 0)
-#   # ↑ 失敗 path で stderr を出すと Stop trap 発火、TRY_CATCH_NATIVE 必須
-#
-#   # pattern: TRY_CATCH_NATIVE (失敗 exit + stderr 出力を安全に捕捉)
-#   $output = ''; $exit = 0
-#   try {
-#       $output = & native-cmd 2>&1 | Out-String
-#       $exit   = $LASTEXITCODE
-#   } catch {
-#       $output = $_.Exception.Message
-#       $exit   = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
-#   }
-#   # ↑ 失敗 path で stderr を出すコマンド用 (例: gh release view 不在時 exit 1)
-#   # ↑ catch 内で $LASTEXITCODE が 0 に戻る環境があるため明示 fallback
-#
-#   # pattern: CAPTURE_STDOUT (stdout は変数に、stderr は破棄)
-#   $output = & native-cmd 2>$null
-#   # ↑ 「success path で stderr を出さない」コマンド限定 (例: vswhere)
-#   # ↑ SUPPRESS_BOTH と同じ制約: 失敗 path で stderr を出すと Stop trap が飛ぶ
-#
-#   # pattern: CAPTURE_STDOUT_PASS_STDERR (stdout は変数、stderr は console 直書き)
-#   $output = & native-cmd
-#   # ↑ stderr は親 console に直行 (ErrorRecord 化されないので Stop しない)
-#   # ↑ stdout は通常の string array として変数に capture される
-#   # ↑ exit code チェック必須 (出力が空でも $LASTEXITCODE 非ゼロのまま誤判定防止)
-#
-#   # pattern: PASS_THROUGH (console 直書き、変数 capture なし)
-#   & native-cmd
-#   # ↑ stdout/stderr 両方とも親 console に直行
-#   # ↑ exit code チェック必須 (成否を判定する唯一の信号が exit code のみのため)
-#
-#   # ANTI-PATTERN: STOP_TRAP (Stop モードで terminating error が飛ぶ)
-#   & native-cmd 2>&1                # 変数 capture なし版
-#   $var = & native-cmd 2>&1         # 変数 capture あり版
-#   # ↑ どちらも同じ罠。本質は `2>&1` 自体: stderr が ErrorRecord として success
-#   #   stream に流れ、$ErrorActionPreference='Stop' の判定対象になる
-#   # ↑ 「変数 capture なし版」は通常書く理由がないが、副作用 only の native
-#   #   call で stderr も console に出したい意図で `2>&1` をつけてしまう typo
-#   #   として頻発するため anti-pattern として明示。redirect なしの PASS_THROUGH
-#   #   が正解 (stderr は自動で console 直行する)
-#   # ↑ 回避策: (a) success exit が前提なら Out-String 挟む = CAPTURE_DIAGNOSTIC
-#   #          (b) 失敗 exit があり得るなら try/catch で囲む = TRY_CATCH_NATIVE
-#   #          (c) 2>&1 自体をやめる = SUPPRESS_BOTH / CAPTURE_STDOUT / *_PASS_STDERR 系
-#   #          (a) は exit 0 限定なので、失敗を扱うなら (b) が正解
-#
-# 例外:
-#   - 実 release 操作 (Invoke-GhRelease 内の gh release create / delete) は
-#     PASS_THROUGH を採用する。出力をユーザーに見せて何が起きているか追える
-#     ようにするのが目的 (preflight 中の SUPPRESS_BOTH とは方針が逆)
 # ============================================================================
 
 # -Offline / -DryRun は upload を行わないので preflight の gh 関連チェックも
@@ -277,6 +292,172 @@ function Fail       { param([string]$Message)
 function Get-ToolPath { param([string]$Name)
     $cmd = Get-Command $Name -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source } else { return $null }
+}
+
+# ============================================================================
+# Native command の罠なし呼び出し (冒頭の「Native command 呼び出しの方針」セクション参照)
+# ============================================================================
+
+function Invoke-NativeWithCapture {
+    <#
+    .SYNOPSIS
+        Native command を実行し、stdout / stderr / exit code を罠なく取得する。
+    .DESCRIPTION
+        PowerShell の call operator `&` は「exit 非ゼロ + stderr 出力」の native
+        command で NativeCommandError を生成し、$ErrorActionPreference='Stop' 下で
+        terminating error として throw する。`2>&1 | Out-String` も同じ罠を踏む
+        (Out-String が処理する前に PS の error stream で trap が発火)。本関数は
+        System.Diagnostics.Process で stdout/stderr を直接捕捉し、PS の error
+        pipeline を経由しないため罠を完全に回避できる。
+
+        失敗 path で stderr を出すコマンド (例: gh release view 不在時 exit 1 +
+        "release not found"、gh auth status 未認証時 exit 1) の preflight 系
+        チェックは本関数を使うこと。
+    .OUTPUTS
+        PSCustomObject:
+          StdOut   - 標準出力 (string、UTF-8 として decode)
+          StdErr   - 標準エラー (string、UTF-8 として decode)
+          ExitCode - プロセスの終了コード (int)
+          Combined - StdOut + "`n" + StdErr 連結 (検索用、stdout 末尾の改行有無で
+                     joining 境界がぶれないよう明示 separator)
+        注 1: 子プロセス側が UTF-8 で書く前提。`gh` はデフォルトで UTF-8。
+        `vswhere` はデフォルト system codepage 出力なので、本 helper 経由の
+        call site では `-utf8` フラグを必ず付与して UTF-8 出力を強制する
+        (Resolve-MsBuild 内、日本語 VS install path 等の非 ASCII path も正しく
+        decode)。msbuild / nuget は OEM 系 codepage を出す可能性があるため
+        本 helper は使わず、Invoke-ExternalProcess (直 console 出力 + encoding
+        再ピン留め) 経由で扱う。
+        注 2: 本関数は System.Diagnostics.Process 直叩きのため、PS 自動変数の
+        `$LASTEXITCODE` は **更新されない**。caller は必ず返り値の `.ExitCode` を
+        参照すること。helper 呼び出し直後に `if ($LASTEXITCODE -ne 0)` と書くと、
+        その前の `&` 呼び出しの古い値を読む silent failure path になるため厳禁。
+    #>
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [string[]]$Arguments = @(),
+        # gh release create のように TTY 検出で進捗描画を OFF にするコマンド向け。
+        # ハングしてないことを示す経過秒数を `\r` 上書きで表示。
+        [switch]$ShowProgress,
+        [string]$ProgressMessage = "実行中..."
+    )
+    # 引数 quoting は Invoke-ExternalProcess と同じ規則
+    # 既知制約: trailing backslash を持つパス引数 (例: "C:\path\") は壊れる。
+    #   `"C:\path\"` に変換すると CommandLineToArgvW の規則上 `\"` が閉じ引用符と
+    #   して機能せず、引数のパースが破損する (\ × N + " → \ × (N/2) + " デコード)。
+    #   現 call site (zip / 一時 notes / vswhere) はいずれも trailing backslash を
+    #   持たないため安全。新規 call site でディレクトリパスを渡す場合は要注意。
+    # TODO (post v1.0.8): 共通化候補。MSVC argv 規則の特殊ケース (\ を引用直前) で
+    #                     Invoke-ExternalProcess との 2 箇所が silent に divergence
+    #                     する危険、共通 helper 切り出し時に CommandLineToArgvW 規則
+    #                     準拠 (\ × N + " → \\ × N + \") に置換
+    $quoted = $Arguments | ForEach-Object {
+        if ($_ -match '\s|"') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+    }
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName               = $FilePath
+    $psi.Arguments              = $quoted -join ' '
+    $psi.UseShellExecute        = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError  = $true
+    $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+    $psi.StandardErrorEncoding  = [System.Text.Encoding]::UTF8
+
+    $proc = $null
+    try {
+        # Process.Start 自体が Win32Exception を出す path (file not found / 権限不足)。
+        # caller は Get-ToolPath で事前 check しているが、helper 単体としても
+        # 例外メッセージに何を実行しようとしたか含める
+        try {
+            $proc = [System.Diagnostics.Process]::Start($psi)
+        } catch {
+            throw "Invoke-NativeWithCapture: '$FilePath' の起動に失敗しました: $($_.Exception.Message)"
+        }
+
+        # 両 stream を async で読みデッドロック回避 (片方のバッファが満杯になると
+        # child が block する)。WaitForExit() は timeout なし → network hang する
+        # コマンド (gh API 呼び出し) では preflight が無限待機する path が残る
+        # → TODO (post v1.0.8): -TimeoutSeconds 引数 + WaitForExit($ms) への移行
+        $outTask = $proc.StandardOutput.ReadToEndAsync()
+        $errTask = $proc.StandardError.ReadToEndAsync()
+
+        # 非 TTY (CI / log file redirect 等) では `\r` が行リセットとして機能せず、
+        # progress 更新ごとに改行付きで log に展開されてノイズになる。
+        # IsOutputRedirected で検出して live progress を抑止 (取得自体が例外を投げる
+        # 非 console host も同様に redirected 扱いで skip = 安全側)
+        $isRedirected = try { [Console]::IsOutputRedirected } catch { $true }
+        if ($ShowProgress -and -not $isRedirected) {
+            # 進捗描画なしコマンド (gh release create 等) のための擬似 progress。
+            # 500ms 間隔で経過秒数を `\r` 上書き表示 (CR で行頭戻り、新しい数字で上書き)
+            # clear 幅は console window 幅から動的算出。現在の ProgressMessage 長
+            # (~20 chars + zip サイズ + elapsed) では全角文字含めても WindowWidth-1
+            # 幅の空白で覆える前提に依存している (全角文字の 2 cell 幅を構造的に
+            # 補正してはいない、長文 ProgressMessage を追加する場合は実 cell 幅
+            # 計算 = ASCII 1 + 全角 2 への切替を検討する)。
+            # Fallback 条件 (どちらも 120 cells に置換):
+            #   - WindowWidth 取得が例外を投げる (ISE 等の非 console host)
+            #   - WindowWidth - 1 が 30 未満 (例: WindowWidth=0 を返す non-console host /
+            #     極端に狭い実コンソール)。30 は ProgressMessage 等が最低限収まる threshold
+            $clearWidth = try { [Console]::WindowWidth - 1 } catch { 120 }
+            if ($clearWidth -lt 30) { $clearWidth = 120 }
+            $clearLine = ' ' * $clearWidth
+            $start = Get-Date
+            while (-not $proc.HasExited) {
+                $elapsed = [int]((Get-Date) - $start).TotalSeconds
+                Write-Host -NoNewline "`r    $ProgressMessage ${elapsed}s 経過"
+                Start-Sleep -Milliseconds 500
+            }
+            # progress 行を完全に消して cursor を行頭へ (後続の出力が綺麗に流れる)
+            Write-Host -NoNewline "`r$clearLine`r"
+        }
+        # 両 path 合流点の WaitForExit() の役割は path 毎に異なる:
+        #   ShowProgress 経路: HasExited ループ後の no-op、表面的対称性のみ
+        #   非 ShowProgress 経路: プロセス完了を明示待機する唯一のポイント
+        # どちらも削除不可。前者は対称性 / 保険、後者は機能上の必須。
+        #
+        # 注: WaitForExit() (no-arg) のパイプバッファフラッシュ保証は
+        # BeginOutputReadLine / BeginErrorReadLine (event-based 非同期) に対する
+        # ものであり、本実装が使う ReadToEndAsync (Task-based) には適用されない。
+        # 実際のフラッシュ保証は直後の $outTask.Result / $errTask.Result が EOF まで
+        # ブロックすることで提供される。`.Result` を削除すると出力切り捨てバグが
+        # 発生するため touch しないこと
+        $proc.WaitForExit()
+
+        # AggregateException (faulted task) は明示メッセージで rethrow し、何が
+        # 失敗したか caller に伝える
+        try {
+            $stdout = $outTask.Result
+            $stderr = $errTask.Result
+        } catch {
+            throw "Invoke-NativeWithCapture: '$FilePath' の出力読み取りに失敗しました: $($_.Exception.Message)"
+        }
+
+        # Combined の separator 判定 (stdout の末尾改行を軸に 2 分岐):
+        #   stdout 空 or 末尾 \n あり  → 単純連結 ($stdout + $stderr)
+        #     - stdout 空 + stderr 有  → $stderr そのまま (Combined 先頭 = stderr、^regex effective)
+        #     - 末尾 \n あり + stderr 有 → 改行はすでに含まれる
+        #     - stderr 空              → $stdout だけ (trailing \n 有無は stdout 次第)
+        #   stdout 末尾 \n なし        → `\n` を明示挟む ($stdout + "`n" + $stderr)
+        #     - stderr 有              → ^pattern 取りこぼし防止
+        #     - stderr 空              → Combined 末尾に trailing \n が付く (caller が
+        #                                TrimEnd() で吸収する想定、現 call site は全て適用済み)
+        if ($stdout -and -not $stdout.EndsWith("`n")) {
+            $combined = $stdout + "`n" + $stderr
+        } else {
+            $combined = $stdout + $stderr
+        }
+
+        return [PSCustomObject]@{
+            StdOut   = $stdout
+            StdErr   = $stderr
+            ExitCode = $proc.ExitCode
+            Combined = $combined
+        }
+    } finally {
+        # Process オブジェクトは Dispose 必須 (handle leak 防止)
+        if ($null -ne $proc) {
+            $proc.Dispose()
+        }
+    }
 }
 
 # ============================================================================
@@ -533,8 +714,29 @@ function Resolve-MsBuild {
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
     if (-not (Test-Path $vswhere)) { $vswhere = "$env:ProgramFiles\Microsoft Visual Studio\Installer\vswhere.exe" }
     if (Test-Path $vswhere) {
-        # pattern: CAPTURE_STDOUT (冒頭集約コメント参照)
-        $vsInstall = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath 2>$null
+        # vswhere は検索 hit なし時に exit 0 + 空 stdout を返すが、実行環境破損
+        # (権限 / インストーラ破損 等) で exit 非ゼロ + stderr 出力する可能性もある。
+        # `-utf8` 必須: Invoke-NativeWithCapture は stdout を UTF-8 として decode する
+        # ため、vswhere の default (system codepage) 出力だと non-UTF-8 locale で
+        # non-ASCII install path (日本語 VS install path 等) が mojibake → 後段の
+        # Test-Path が失敗 → MSBuild 検出失敗の path に落ちる
+        $vswhereResult = Invoke-NativeWithCapture -FilePath $vswhere `
+            -Arguments @('-latest', '-products', '*', '-requires', 'Microsoft.Component.MSBuild', '-property', 'installationPath', '-utf8')
+        # vswhere 失敗時は warn して PATH fallback path に落とす (Fail にはしない —
+        # PATH に msbuild があれば release は続行できるため)。コメント上で「stderr
+        # 出力する可能性」を挙げた以上、その出力をユーザーに届けないと silent pass
+        if ($vswhereResult.ExitCode -ne 0) {
+            Write-Warn "vswhere が exit $($vswhereResult.ExitCode) で終了 (権限 / VS Installer 破損等の可能性):"
+            $vswhereStderr = $vswhereResult.StdErr.TrimEnd()
+            if ($vswhereStderr -match '\S') { Write-Warn $vswhereStderr }
+            Write-Info "PATH fallback に切替えて MSBuild を探します"
+            # 失敗時の StdOut は意図的に破棄: 部分出力 (権限エラーで途中まで吐いた
+            # 不完全 path 等) を後段の Test-Path 経路に流すと「PATH fallback に切替」
+            # 宣言と矛盾、`if ($vsInstall)` ブロックを silent skip するために明示クリア
+            $vsInstall = ''
+        } else {
+            $vsInstall = $vswhereResult.StdOut.Trim()
+        }
         if ($vsInstall) {
             $vsCands = @(
                 (Join-Path $vsInstall 'MSBuild\Current\Bin\MSBuild.exe'),
@@ -692,24 +894,22 @@ function Assert-Preflight {
             Fail "gh (GitHub CLI) が見つかりません。`n        https://cli.github.com/ からインストールするか、-SkipUpload で upload を抑止してください。"
         }
         Write-Ok "gh: $gh"
-        # pattern: CAPTURE_DIAGNOSTIC (冒頭集約コメント参照)
-        # gh auth status は失敗原因が多様 (未認証 / token expiry / network / proxy /
-        # gh 自体の install 破損)、Fail メッセージに stderr ダンプを含めて切り分け可能にする
-        $authStatusOutput = & gh auth status 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0) {
-            Fail "gh 認証に失敗しました (`gh auth login` を実行 / network / proxy / token expiry 等を確認)。`n$authStatusOutput"
+        # gh auth status は未認証時 exit 1 + stderr 出力 → Invoke-NativeWithCapture で
+        # 罠なく捕捉。失敗原因は多様 (未認証 / token expiry / network / proxy /
+        # gh install 破損)、Combined を Fail メッセージに含めて切り分け可能にする
+        $authResult = Invoke-NativeWithCapture -FilePath 'gh' -Arguments @('auth', 'status')
+        if ($authResult.ExitCode -ne 0) {
+            Fail "gh 認証に失敗しました (`gh auth login` を実行 / network / proxy / token expiry 等を確認)。`n$($authResult.Combined.TrimEnd())"
         }
         Write-Ok "gh 認証 OK"
-        # gh は exit 0 でも stderr に early warning を出すことがある (token scope
-        # 不足の予兆 / token expiry 近接通知 等)。失敗してないので Fail はしないが、
-        # リリース担当に気付かせる。
-        #
-        # 検出は `^warning:` (gh の公式 warning prefix) のみに絞る。token expiry の
-        # 特殊形式までカバーする regex は false positive を増やし、かつ gh の出力
-        # フォーマット変更に脆弱。本格的な structured 検出は別 issue (#141 系) で
-        # JSON parse に寄せる方針なので、ここでは過信を生む特殊形式を持たない。
-        if ($authStatusOutput -match '(?im)^warning:') {
-            Write-Warn "gh auth status からの警告 (release 実行自体は継続):`n$authStatusOutput"
+        # gh は exit 0 でも stderr に early warning を出すことがある (token scope 不足の
+        # 予兆 / token expiry 近接通知 等)。Fail はしないが、リリース担当に気付かせる。
+        # 検出は `^warning:` (gh 公式の warning prefix) のみに絞る (token expiry 特殊形式
+        # まで網羅する regex は false positive 多 + gh 出力フォーマット変更に脆弱)。
+        # warning は実態として stderr 出力なので StdErr を直接見る (Combined だと
+        # stdout 末尾改行有無で行境界がブレうる)
+        if ($authResult.StdErr -match '(?im)^warning:') {
+            Write-Warn "gh auth status からの警告 (release 実行自体は継続):`n$($authResult.StdErr.TrimEnd())"
         }
     }
 
@@ -738,40 +938,34 @@ function Assert-Preflight {
 
     # 既存リリースとのタグ衝突
     if (-not $SkipUpload) {
-        # pattern: TRY_CATCH_NATIVE (冒頭集約コメント参照)
-        # gh release view は release 不在時に exit 1 + stderr "release not found"
-        # を出す。PS 5.1 + Stop 環境では `2>$null` も `2>&1 | Out-String` も
-        # native command stderr の NativeCommandError 化 (Stop trap) を防げない
-        # ため、try/catch で受ける + 出力中の "release not found" 文字列で
-        # 「存在しない」を確証する形にする。これで gh の auth / network 等
-        # 別種の失敗 (exit 非ゼロ + 別 stderr) を「タグ衝突なし」と誤判定する
-        # H2 silent false-negative も同時に解消 (#141 のインライン解決)。
-        $releaseViewOutput = ''
-        $releaseViewExit   = 0
-        try {
-            # --json id: 存在時の JSON dump を最小化 (preflight console を汚さない)
-            $releaseViewOutput = & gh release view "v$Version" --json id 2>&1 | Out-String
-            $releaseViewExit   = $LASTEXITCODE
-        } catch {
-            $releaseViewOutput = $_.Exception.Message
-            $releaseViewExit   = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
-        }
+        # gh release view は release 不在時に exit 1 + stderr "release not found" を出す。
+        # Invoke-NativeWithCapture で stdout/stderr/exit を罠なく分離捕捉。
+        # `--json id`: 存在時の stdout を最小化 (capture 文字列が小さくなる、parse はしない)。
+        # 存在判定は exit code を一次軸、stderr 文字列マッチは「不在 vs 別種失敗」の識別のみ。
+        $releaseResult = Invoke-NativeWithCapture -FilePath 'gh' `
+            -Arguments @('release', 'view', "v$Version", '--json', 'id')
 
-        if ($releaseViewExit -eq 0) {
+        if ($releaseResult.ExitCode -eq 0) {
+            # 既存 release あり
             if ($Force) {
                 Write-Warn "タグ v$Version は既存だが -Force のため後で削除して作り直す"
                 $script:DeleteExistingRelease = $true
             } else {
                 Fail "GitHub Releases に v$Version が既存です。-Force で削除して作り直すか、別バージョンで実行してください。"
             }
-        } elseif ($releaseViewOutput -match 'release not found') {
-            Write-Ok "タグ衝突なし: v$Version"
-            $script:DeleteExistingRelease = $false
         } else {
-            # 別種の失敗 (auth / network / API rate limit / gh install 破損 等)
-            # zip ビルド完了後の `gh release create` で fail するより、preflight で
-            # 早期 fail させて時間 / 計算資源を浪費しない
-            Fail "gh release view が予期せず失敗しました (exit $releaseViewExit):`n$releaseViewOutput"
+            # exit 非ゼロ → 不在 or 別種失敗。stderr の英文字列で識別
+            # (注: gh の i18n / 文言変更で取りこぼし可能性あり、その時は再 trapping。
+            #  本格的な structured 検出は --json + ConvertFrom-Json + HTTP 404 判定 etc.)
+            if ($releaseResult.StdErr -match 'release not found') {
+                Write-Ok "タグ衝突なし: v$Version"
+                $script:DeleteExistingRelease = $false
+            } else {
+                # 別種の失敗 (auth / network / API rate limit / gh install 破損 等)
+                # zip ビルド完了後の gh release create で fail するより、preflight で
+                # 早期 fail させて時間 / 計算資源を浪費しない
+                Fail "gh release view が予期せず失敗しました (exit $($releaseResult.ExitCode)):`n$($releaseResult.Combined.TrimEnd())"
+            }
         }
     }
 }
@@ -824,8 +1018,7 @@ function Write-FileUtf8NoBom {
     param([string]$Path, [string]$Content)
     # Godot ConfigFile / project.godot は BOM を識別子として解釈してパースエラーを起こすため
     # UTF-8 BOM なしで書き出す
-    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-    [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
+    [System.IO.File]::WriteAllText($Path, $Content, $script:Utf8NoBomEncoding)
 }
 
 function Set-ManifestVersions {
@@ -903,9 +1096,37 @@ function Invoke-ExternalProcess {
     $psi.RedirectStandardOutput = $false  # コンソールに直接出力
     $psi.RedirectStandardError = $false
 
-    $proc = [System.Diagnostics.Process]::Start($psi)
-    $proc.WaitForExit()
-    return $proc.ExitCode
+    $proc = $null
+    try {
+        # Process.Start 失敗 (file not found / 権限不足) を Invoke-NativeWithCapture
+        # と同じ pattern で何を起動しようとしたかを含むメッセージで rethrow、
+        # 両 helper の例外メッセージ粒度を対称化
+        try {
+            $proc = [System.Diagnostics.Process]::Start($psi)
+        } catch {
+            throw "Invoke-ExternalProcess: '$FilePath' の起動に失敗しました: $($_.Exception.Message)"
+        }
+        $proc.WaitForExit()
+        $exitCode = $proc.ExitCode
+    } finally {
+        if ($null -ne $proc) { $proc.Dispose() }
+        # Invoke-ExternalProcess 経由の子プロセス (Godot CLI / msbuild / nuget) が
+        # コンソール encoding を OEM 系に戻して去ると、後続 Write-Host で日本語が
+        # doubled rendering される PS 5.1 バグの予防的再ピン留め (script 冒頭の
+        # pin と二重防御)。
+        # 非 console host (CI / headless 等) で console API が IOException を投げる
+        # ケースを try/catch で吸収 — finally は外部ツール呼び出しの度に走るため
+        # ガードなしだと release flow が abort する。
+        # 注: $OutputEncoding (PS variable、pipeline → native command 送信側) は
+        # 子プロセスから変更不可なので再ピン留め不要、script 冒頭の代入が継続有効
+        try {
+            [Console]::OutputEncoding = $script:Utf8NoBomEncoding
+        } catch {
+            # non-console host では再ピン留め不要 (そもそも doubled rendering は
+            # 対話端末でしか起きないため、CI 等では skip OK)
+        }
+    }
+    return $exitCode
 }
 
 function Build-Launcher {
@@ -1134,21 +1355,50 @@ function Invoke-GhRelease {
 
     if ($script:DeleteExistingRelease) {
         Write-Info "既存タグ v$Version を削除"
-        # pattern: PASS_THROUGH (例外節 - 冒頭集約コメント参照)
-        # 実 release 操作中の gh 出力はユーザーに見せる方針
-        & gh release delete "v$Version" --yes --cleanup-tag
-        if ($LASTEXITCODE -ne 0) { Fail "既存 release の削除に失敗しました" }
+        $delResult = Invoke-NativeWithCapture -FilePath 'gh' `
+            -Arguments @('release', 'delete', "v$Version", '--yes', '--cleanup-tag') `
+            -ShowProgress -ProgressMessage "既存 release を削除中..."
+        if ($delResult.ExitCode -ne 0) {
+            Fail "既存 release の削除に失敗しました:`n$($delResult.Combined.TrimEnd())"
+        }
+        # gh release delete は成功時 stdout/stderr ともに無音なので、
+        # ShowProgress 行が消えた後の「無の状態」を避けるため明示的な完了表示
+        Write-Ok "既存タグ v$Version を削除完了"
+        # 下記は future-proofing (現行 gh では成功時 stdout 空のため発火しない、
+        # 将来 version が完了メッセージ等を出力するようになった場合に表示)
+        $delOut = $delResult.StdOut.TrimEnd()
+        if ($delOut -match '\S') { Write-Info $delOut }
     }
 
     # CHANGELOG から抽出した Bundle セクション本文を --notes に渡す
     # 一時ファイル経由にする (CLI 引数の改行 / 引用符 escape を避けるため)
     $tmpNotes = New-TemporaryFile
     try {
-        [System.IO.File]::WriteAllText($tmpNotes.FullName, $script:ReleaseNotesText, [System.Text.UTF8Encoding]::new($false))
-        # pattern: PASS_THROUGH (例外節 - 冒頭集約コメント参照)
-        # upload 進捗等を見せたいので redirect しない
-        & gh release create "v$Version" $ZipPath --notes-file $tmpNotes.FullName --title "v$Version"
-        if ($LASTEXITCODE -ne 0) { Fail "gh release create に失敗しました" }
+        [System.IO.File]::WriteAllText($tmpNotes.FullName, $script:ReleaseNotesText, $script:Utf8NoBomEncoding)
+        # zip サイズは MB / KB を自動切替で表示 (小さいファイル時に `0 MB` 表示で
+        # 破損誤解を避ける、Phase 2 以降の Updater 単体 zip 等で発火する想定)
+        $zipBytes = (Get-Item $ZipPath).Length
+        $zipSize  = if ($zipBytes -ge 1MB) {
+            "$([math]::Round($zipBytes / 1MB, 1)) MB"
+        } elseif ($zipBytes -ge 1KB) {
+            "$([math]::Round($zipBytes / 1KB, 1)) KB"
+        } else {
+            "$zipBytes B"
+        }
+        $uploadResult = Invoke-NativeWithCapture -FilePath 'gh' `
+            -Arguments @('release', 'create', "v$Version", $ZipPath, '--notes-file', $tmpNotes.FullName, '--title', "v$Version") `
+            -ShowProgress -ProgressMessage "アップロード中 (zip $zipSize)..."
+        if ($uploadResult.ExitCode -ne 0) {
+            Fail "gh release create に失敗しました:`n$($uploadResult.Combined.TrimEnd())"
+        }
+        # 成功時、gh は release URL を stdout に dump するのでユーザーに表示。
+        # 注: gh の将来 version で stdout フォーマットが変わると URL が表示されない
+        # silent path になるが、成功は exit code で確実に取れているため fatal で
+        # はない (`Write-Ok "公開完了"` は出る、URL は手動で confirm 可能)。
+        # 同型の脆弱性は gh release view の "release not found" stderr マッチ側でも
+        # 抱えており、本格的な structured 検出は別 issue 系で対処予定。
+        $uploadOut = $uploadResult.StdOut.TrimEnd()
+        if ($uploadOut -match '\S') { Write-Info $uploadOut }
     } finally {
         Remove-Item $tmpNotes.FullName -Force -ErrorAction SilentlyContinue
     }

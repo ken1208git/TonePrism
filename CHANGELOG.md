@@ -29,6 +29,76 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
+### [Release Tooling v1.0.8] - 2026-05-12
+
+#### Fixed
+
+- **msbuild 後の日本語 doubled rendering (Wave 2)**: 症状例 `完了` → `完完了了`、ASCII は影響なし、複数 Write-Host が 1 行に collapse。PS 5.1 + chcp 65001 環境で子プロセス (msbuild) がコンソールハンドル継承後にコンソール encoding を OEM 系に戻して去ることが原因の既知バグ。修正:
+  - script 冒頭で `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)` + `$OutputEncoding` を明示ピン留め
+  - `Invoke-ExternalProcess` の finally ブロックで再ピン留め (二重防御、msbuild 等の毎呼び出し後)
+  - 同じ try/finally で Process オブジェクトの Dispose() も追加 (handle leak 防止)
+- **upload progress が表示されない問題 (Wave 2)**: `gh release create` は TTY 検出で進捗描画を OFF にするため、PS から呼ぶと upload 中ずっと無音 → ハング懸念。修正:
+  - `Invoke-NativeWithCapture` に `-ShowProgress` / `-ProgressMessage` パラメータを追加 (500ms 間隔で経過秒数を `\r` 上書き表示)
+  - `Invoke-GhRelease` (gh release delete / create) を PASS_THROUGH → helper + ShowProgress に移行、zip サイズも表示 (`アップロード中 (zip 59 MB)... 12s 経過`)
+  - 完了後は progress 行を消して、gh が stdout に出す release URL を `Write-Info` で再表示
+- **PR #148 round 17 シニアレビュー反映**:
+  - **[R17 #2] UTF8Encoding 一意ソース統一**: `Invoke-GhRelease` の `WriteAllText` (`tmpNotes` 書き込み) と `Write-FileUtf8NoBom` helper が `[System.Text.UTF8Encoding]::new($false)` を新規生成しており、本 PR の「`$script:Utf8NoBomEncoding` を一意ソースとして共有」設計に違反していた。両箇所を `$script:Utf8NoBomEncoding` 参照に置換、UTF-8 encoding instance を script 内で完全に一意化
+  - **[R17 #3] `$OutputEncoding` 再ピン留め不要の理由を明文化**: `Invoke-ExternalProcess` finally で `[Console]::OutputEncoding` だけ再ピン留めし `$OutputEncoding` (PS pipeline 側 encoding) は触らない理由 (PS 変数なので子プロセスから変更不可) をコメント追記、保守者が「漏れか?」と判断して不要な再ピン留めを追加する誤修正を防止
+  - **[R17 #4] `Invoke-NativeWithCapture` docstring 注 1 を vswhere `-utf8` 対応反映**: 旧記述「vswhere は ASCII 中心」は同 PR 内で追加した `-utf8` 化と乖離。「vswhere はデフォルト system codepage 出力なので、本 helper 経由の call site では `-utf8` を必ず付与」に更新、日本語 VS install path も正しく decode できる旨を明示
+  - **[R17 #5] ShowProgress を `IsOutputRedirected` で抑止**: 非 TTY (CI / log file redirect) では `\r` が行リセットとして機能せず、progress 更新ごとに改行付きで log に展開されてノイズになる。`[Console]::IsOutputRedirected` (取得失敗時は redirected 扱いで safe-side) で検出して live progress を skip、redirected 環境では従来の gh TTY-off モードと同じく完了まで無音 → URL 表示の動作に degrade
+  - **[R17 #1 (false positive)]** PR body Commits 数: reviewer は "(7)" と認識していたが、round 16 push 後の `gh pr edit` で既に "(8)" に更新済み、stale view を見ていた可能性。本 round では body 再更新 (commit 8 を含む) のみ
+- **PR #148 round 16 シニアレビュー反映**:
+  - **[R16 #1] vswhere 失敗時の `$vsInstall` クリア**: round 15 で `Write-Info "PATH fallback に切替"` と宣言したのに、続く `$vsInstall = $vswhereResult.StdOut.Trim()` が無条件実行で「失敗時 stdout の部分出力」も後段 `Test-Path` 経路に流れる構造矛盾。`if/else` に分けて失敗 branch で `$vsInstall = ''` を明示、最終的に `Test-Path` で実害は止まるが、宣言と実装の意図不一致を解消
+  - **[R16 #2] `WaitForExit()` の両 path 役割を明示**: 旧コメント「.NET 慣習との表面的対称性のみ」は非 ShowProgress 経路で誤誘導 (実際にはここがプロセス完了を明示待機する唯一のポイント)。「ShowProgress 経路 = no-op / 非 ShowProgress 経路 = 必須」と path 毎の役割を明記、削除不可の根拠を両 path で示す
+  - **[R16 #3] `clearLine` 全角 cell 幅の注意書きを正確化**: 旧コメント「Japanese 文字 cell 幅によらず消し残しが出ない」は実装より強い保証に読める。実態は「現 ProgressMessage 長では WindowWidth-1 幅で覆える前提に依存」「全角 2 cell 幅を構造的に補正していない」を明文化、長文 ProgressMessage 追加時の修正 hint も併記
+  - **[R16 #4] CHANGELOG R13 ナンバリング順を整理**: R13 L1 (保留) を L4 の後から L2 の前 (= L1/L2/L3/L4 の自然順) に移動、後追い時のスキャンが直感的に
+- **PR #148 round 15 シニアレビュー反映**:
+  - **[R15 M1] 死参照訂正**: `Invoke-NativeWithCapture` のセクションヘッダコメント `(冒頭の \`2>&1\` trap セクション参照)` が v1.0.8 のセクション再構成で stale に。「冒頭の『Native command 呼び出しの方針』セクション参照」に修正
+  - **[R15 M2] WindowWidth fallback コメントと実装の divergence 解消**: コメント「0 以下を返す」と実装 `-lt 30` の食い違いを明文化。「30 未満」は WindowWidth=0 の非 console host と極端に狭い実コンソールの両方を catch する threshold である旨を明示
+  - **[R15 M3] vswhere の silent pass 解消**: コメントが「実行環境破損で stderr 出力する可能性」を挙げて Invoke-NativeWithCapture に移行していたにも関わらず ExitCode / StdErr を完全に無視していた silent pass を修正。vswhere 失敗時は `Write-Warn` で診断情報を出して PATH fallback に切替 (release は続行可能なため Fail にはしない)
+  - **[R15 L1] Combined 4 case コメント精度向上**: 第 4 case「stderr 空 → stdout のみ」は stdout 末尾改行なしのとき不正確 (実は `\n` が付く)。stdout 末尾改行の有無を主軸にした 2 分岐構造に書き換え、各分岐で stderr の各 case を入れ子で記述
+  - **[R15 L2] gh release delete dead code を future-proofing と明示**: 現行 gh では成功時 stdout 空なので `if ($delOut -match '\S')` ブランチは常に false。コメントを「現行は発火しない、gh 将来 version への future-proofing として残置」に書き換え、reader が「`Write-Ok` では不十分な case があるのか?」と誤解する path を防止
+  - **[R15 L3] CHANGELOG R13 L2/L3 フォーマット統一**: 他エントリの `**[R## L#] 見出し**: 説明文` 形式に揃える ( `↔` や文の ぶつ切りを解消)
+- **PR #148 round 14 シニアレビュー + Codex bot P2 反映**:
+  - **[Codex P2] vswhere に `-utf8` フラグ追加**: `Invoke-NativeWithCapture` は stdout/stderr を UTF-8 として decode するが、vswhere は default で system codepage 出力。非 UTF-8 locale で日本語 VS install path 等 non-ASCII path が mojibake → 後段 `Test-Path` 失敗 → MSBuild 検出失敗の silent path に落ちる。`-utf8` を Arguments に追加して vswhere 出力を UTF-8 強制
+  - **[Codex P2 ×2] `[Console]::OutputEncoding` を try/catch でガード**: non-console host (CI / headless / redirected execution) では console API setter が `IOException` を投げ、`$ErrorActionPreference='Stop'` 下で release 開始前に script abort する path。script 冒頭の pin + `Invoke-ExternalProcess` finally の再 pin 両方を try/catch でラップ、script-level `$script:Utf8NoBomEncoding` を一意ソースとして共有
+  - **[R14 H1] `WaitForExit()` コメントの自己矛盾を訂正**: 旧コメント「パイプバッファ完全フラッシュを保証」は誤り (WaitForExit no-arg のフラッシュ保証は `BeginOutputReadLine` 系の event-based async 読み取りに対するもので、本実装の `ReadToEndAsync` Task-based には適用されない)。実際のフラッシュ保証は `$outTask.Result` / `$errTask.Result` が EOF までブロックすることで提供。コメントを「`.Result` を削除すると出力切り捨てバグが発生するため touch しないこと」に書き換え
+  - **[R14 M1] CHANGELOG label 重複解消**: 同 v1.0.8 entry 内に「Wave 2 シニアレビュー反映 (M1-M3)」と「PR #148 シニアレビュー反映 (M1-M3)」が共存し M1-M3 が 2 セット存在、後追い不能だった。本 entry のラベルを「R14」「W2」「Codex P2」等の round 識別子付きに変更
+  - **[R14 L1] zip size 表示の小ファイル対応**: `[int]($bytes / 1MB)` は 1MB 未満で 0 表示になり破損誤解を招く。`if ge 1MB → MB / ge 1KB → KB / else B` の自動切替に変更、Phase 2 以降の Updater 単体 zip 等で発火する想定
+  - **[R14 L2] ShowProgress 中の Task リーク (Known follow-up)**: `ReadToEndAsync()` 開始後に ShowProgress ループ内で例外発生 → finally で Dispose() → Task が `ObjectDisposedException` で faulted のまま GC まで放置。実害ほぼなし (現状実行 path で発火経路なし) だが、post v1.0.8 で `-TimeoutSeconds` + CancellationToken 対応する際に合わせて整理
+- **PR #148 round 13 シニアレビュー反映**:
+  - **[R13 M1] `gh release delete` UX 退行**: 成功時 stdout/stderr 無音のため `if ($delOut -match '\S')` が false で ShowProgress 行消去後に「無の状態」。`Write-Ok "既存タグ v$Version を削除完了"` を無条件追加して旧 PASS_THROUGH UX を回復
+  - **[R13 M2] PASS_THROUGH catalog のメカニズム乖離**: catalog の例示は `& native-cmd` 直書きだが現実装は `Invoke-ExternalProcess` (Process 直叩き)。「(a) 直 & 演算子版」「(b) helper 経由 (推奨)」の 2 実装に分割記述
+  - **[R13 M3] `ShowProgress` パスで `WaitForExit()` 未呼び出し**: HasExited ループ後にも `WaitForExit()` 明示呼びを追加、両 path 合流点で対称化 (上記 R14 H1 でコメント内容を訂正)
+  - **[R13 L1 (保留)] CHANGELOG 日付ポリシー**: JST 統一 / UTC 統一 / PR merge 日のいずれかに統一する議論は CHANGELOG 全体に関わるため別途
+  - **[R13 L2] WindowWidth fallback 条件の記載追加**: R13 M3 説明文に「`[Console]::WindowWidth` が 0 以下を返す non-console host も同様に fallback 120」を追記、コード側との整合を明示 (round 15 M2 で更に「30 未満も含む」に精度向上)
+  - **[R13 L3] 引数 quoting backslash 制約のドキュメント化**: trailing backslash を持つパス引数 (`"C:\path\"`) は CommandLineToArgvW 規則上 `\"` が閉じ引用符として機能せず引数 parse 破損する既知制約を helper の inline コメントに明文化、現 call site は該当なし
+  - **[R13 L4] `Invoke-ExternalProcess` の Process.Start 失敗 rethrow**: `Invoke-NativeWithCapture` と同じ context 付き例外メッセージ粒度で対称化
+- **PR #148 round 12 (Wave 2) シニアレビュー反映**:
+  - **[W2 M1]** catalog の PS 7.3+ 移行注意から vswhere を削除 (Wave 1 で helper 化済みのため stale)、残る `&` イディオムは `Assert-WorkingTreeClean` の `git status --porcelain` のみと正確化
+  - **[W2 M2]** `Invoke-NativeWithCapture` docstring に「`$LASTEXITCODE` は更新されない、`.ExitCode` を使え」を明記
+  - **[W2 M3]** ShowProgress の clear-line 幅を 70 ハードコード → `[Console]::WindowWidth - 1` で動的算出 (fallback 120)
+  - **[W2 L1]** gh release create 成功時の URL 表示が gh の stdout フォーマット依存である旨をコメントに明記
+  - **[W2 L2]** encoding pin コメントの「特に msbuild」断定を「Godot CLI / msbuild / nuget 等」に緩和
+  - **[W2 L3]** `.Trim() / .TrimEnd()` 二重呼び解消 (`-match '\S'` + 一時変数化)
+  - **[W2 L4]** `Combined` separator 判定コメントを 4 case 網羅に書き換え
+
+#### Changed
+
+- **Native command 呼び出しを `Invoke-NativeWithCapture` helper に一本化 (Wave 1: trap pattern 整理)**: `gh release view` (v1.0.7) / `gh auth status` (Round 11 Critical #1) / `vswhere` (Round 11 Low) を Process 直叩きベースの helper に移行。catalog から「失敗 path で stderr を出すコマンドでは罠を踏む」パターン (`SUPPRESS_BOTH` / `CAPTURE_DIAGNOSTIC` / `TRY_CATCH_NATIVE`) を anti-pattern に格下げ
+  - **`Invoke-NativeWithCapture` helper 新設**: `System.Diagnostics.Process` で stdout/stderr/exit code を直接捕捉。PS の error stream を経由しないため NativeCommandError trap を構造的に回避。両 stream を async 読みでデッドロックも回避。返り値は `[PSCustomObject]` で `.StdOut` / `.StdErr` / `.ExitCode` / `.Combined` を提供 (Round 12 #1/3 のリネーム指摘もこの構造変更で自動解消)
+  - **catalog 大幅整理**: 6 個あった pattern を「Invoke-NativeWithCapture 推奨 + 3 個の安全な `&` pattern + anti-patterns」に再構成。Round 11 Low の命名軸統一 + Round 12 全般の意図明確化を満たす形に
+  - **`gh release view` の structured parse 表現訂正 (Round 11 High + Round 12 #2)**: `--json id` の効果は「存在時の stdout を最小化」のみで、parse はしていない。stderr 文字列マッチでの「不在 vs 別種失敗」判定は gh の英語メッセージ依存である旨をコメントに明記、本来の structured parse (`ConvertFrom-Json` + HTTP 404 判定 etc.) は将来課題として記録
+  - **Round 11/12 の Medium / Low 一括対処**: `$_.Exception.Message` 単一行依存 (helper で StdErr 直接取得に変更で解消)、`$releaseViewOutput` mixed content (helper で StdOut/StdErr 分離で解消)、`Out-String` 末尾改行 `.TrimEnd()` 化、elseif → ネスト if/else (exit code を一次軸、stderr を二次軸の構造に)、catalog ↔ call site 重複圧縮 (helper 化で per-site コメントが固有理由 1-2 行に)
+  - **`gh auth status` の同 trap も同時解消 (Round 11 Critical #1)**: v1.0.7 で CHANGELOG note として deferred していたものを Wave 1 で本対応
+- **PASS_THROUGH の「例外節」呼称を廃止**: 旧 catalog では「実 release 操作 (gh release create/delete) は例外」と書いていたが、PASS_THROUGH 自体を catalog の一級 pattern として再定義したため例外節は不要に。`Invoke-GhRelease` 内の 2 件のコメントから「例外節 -」を削除
+
+#### Known follow-up (post-v1.0.8 で対処予定)
+
+- **`Invoke-NativeWithCapture` 内 TODO**: (a) 引数 quoting helper 切り出し (`Invoke-ExternalProcess` と duplicate)、(b) `-TimeoutSeconds` 引数で network hang ガード — いずれも post v1.0.8 で対処
+- **既存 issue #142 / #143 / #144 / #146**: catalog 重複は本 v1.0.8 で大幅解消、`Release.bat` docstring 分離 / `Read-*` 命名 sweep / `$Context → $PostSync` は別途
+- **#145 (CAPTURE_DIAGNOSTIC ラベル拡張) を本 v1.0.8 で close**: パターン自体を anti-pattern に格下げしたため拡張議論不要に
+
 ### [Release Tooling v1.0.7] - 2026-05-12
 
 #### Fixed
