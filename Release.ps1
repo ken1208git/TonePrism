@@ -379,8 +379,11 @@ function Invoke-NativeWithCapture {
         if ($ShowProgress) {
             # 進捗描画なしコマンド (gh release create 等) のための擬似 progress。
             # 500ms 間隔で経過秒数を `\r` 上書き表示 (CR で行頭戻り、新しい数字で上書き)
-            # clear 幅は console window 幅から動的算出: ProgressMessage 長 / Japanese
-            # 文字 cell 幅 / elapsed 桁数によらず消し残しが出ない。
+            # clear 幅は console window 幅から動的算出。現在の ProgressMessage 長
+            # (~20 chars + zip サイズ + elapsed) では全角文字含めても WindowWidth-1
+            # 幅の空白で覆える前提に依存している (全角文字の 2 cell 幅を構造的に
+            # 補正してはいない、長文 ProgressMessage を追加する場合は実 cell 幅
+            # 計算 = ASCII 1 + 全角 2 への切替を検討する)。
             # Fallback 条件 (どちらも 120 cells に置換):
             #   - WindowWidth 取得が例外を投げる (ISE 等の非 console host)
             #   - WindowWidth - 1 が 30 未満 (例: WindowWidth=0 を返す non-console host /
@@ -397,15 +400,17 @@ function Invoke-NativeWithCapture {
             # progress 行を完全に消して cursor を行頭へ (後続の出力が綺麗に流れる)
             Write-Host -NoNewline "`r$clearLine`r"
         }
-        # 両 path 合流点。ShowProgress 経路は HasExited で抜けて WaitForExit() は
-        # no-op、非 ShowProgress 経路はここで完了待機。
+        # 両 path 合流点の WaitForExit() の役割は path 毎に異なる:
+        #   ShowProgress 経路: HasExited ループ後の no-op、表面的対称性のみ
+        #   非 ShowProgress 経路: プロセス完了を明示待機する唯一のポイント
+        # どちらも削除不可。前者は対称性 / 保険、後者は機能上の必須。
+        #
         # 注: WaitForExit() (no-arg) のパイプバッファフラッシュ保証は
         # BeginOutputReadLine / BeginErrorReadLine (event-based 非同期) に対する
         # ものであり、本実装が使う ReadToEndAsync (Task-based) には適用されない。
-        # 実際のフラッシュ保証は直後の $outTask.Result / $errTask.Result が提供する
-        # (これらはストリームが EOF に達するまでブロックする)。
-        # WaitForExit() を残しているのは .NET 慣習との表面的な対称性のみ、
-        # `.Result` を削除すると出力切り捨てバグが発生するため touch しないこと
+        # 実際のフラッシュ保証は直後の $outTask.Result / $errTask.Result が EOF まで
+        # ブロックすることで提供される。`.Result` を削除すると出力切り捨てバグが
+        # 発生するため touch しないこと
         $proc.WaitForExit()
 
         # AggregateException (faulted task) は明示メッセージで rethrow し、何が
@@ -716,8 +721,13 @@ function Resolve-MsBuild {
             $vswhereStderr = $vswhereResult.StdErr.TrimEnd()
             if ($vswhereStderr -match '\S') { Write-Warn $vswhereStderr }
             Write-Info "PATH fallback に切替えて MSBuild を探します"
+            # 失敗時の StdOut は意図的に破棄: 部分出力 (権限エラーで途中まで吐いた
+            # 不完全 path 等) を後段の Test-Path 経路に流すと「PATH fallback に切替」
+            # 宣言と矛盾、`if ($vsInstall)` ブロックを silent skip するために明示クリア
+            $vsInstall = ''
+        } else {
+            $vsInstall = $vswhereResult.StdOut.Trim()
         }
-        $vsInstall = $vswhereResult.StdOut.Trim()
         if ($vsInstall) {
             $vsCands = @(
                 (Join-Path $vsInstall 'MSBuild\Current\Bin\MSBuild.exe'),

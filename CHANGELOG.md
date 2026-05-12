@@ -41,6 +41,11 @@
   - `Invoke-NativeWithCapture` に `-ShowProgress` / `-ProgressMessage` パラメータを追加 (500ms 間隔で経過秒数を `\r` 上書き表示)
   - `Invoke-GhRelease` (gh release delete / create) を PASS_THROUGH → helper + ShowProgress に移行、zip サイズも表示 (`アップロード中 (zip 59 MB)... 12s 経過`)
   - 完了後は progress 行を消して、gh が stdout に出す release URL を `Write-Info` で再表示
+- **PR #148 round 16 シニアレビュー反映**:
+  - **[R16 #1] vswhere 失敗時の `$vsInstall` クリア**: round 15 で `Write-Info "PATH fallback に切替"` と宣言したのに、続く `$vsInstall = $vswhereResult.StdOut.Trim()` が無条件実行で「失敗時 stdout の部分出力」も後段 `Test-Path` 経路に流れる構造矛盾。`if/else` に分けて失敗 branch で `$vsInstall = ''` を明示、最終的に `Test-Path` で実害は止まるが、宣言と実装の意図不一致を解消
+  - **[R16 #2] `WaitForExit()` の両 path 役割を明示**: 旧コメント「.NET 慣習との表面的対称性のみ」は非 ShowProgress 経路で誤誘導 (実際にはここがプロセス完了を明示待機する唯一のポイント)。「ShowProgress 経路 = no-op / 非 ShowProgress 経路 = 必須」と path 毎の役割を明記、削除不可の根拠を両 path で示す
+  - **[R16 #3] `clearLine` 全角 cell 幅の注意書きを正確化**: 旧コメント「Japanese 文字 cell 幅によらず消し残しが出ない」は実装より強い保証に読める。実態は「現 ProgressMessage 長では WindowWidth-1 幅で覆える前提に依存」「全角 2 cell 幅を構造的に補正していない」を明文化、長文 ProgressMessage 追加時の修正 hint も併記
+  - **[R16 #4] CHANGELOG R13 ナンバリング順を整理**: R13 L1 (保留) を L4 の後から L2 の前 (= L1/L2/L3/L4 の自然順) に移動、後追い時のスキャンが直感的に
 - **PR #148 round 15 シニアレビュー反映**:
   - **[R15 M1] 死参照訂正**: `Invoke-NativeWithCapture` のセクションヘッダコメント `(冒頭の \`2>&1\` trap セクション参照)` が v1.0.8 のセクション再構成で stale に。「冒頭の『Native command 呼び出しの方針』セクション参照」に修正
   - **[R15 M2] WindowWidth fallback コメントと実装の divergence 解消**: コメント「0 以下を返す」と実装 `-lt 30` の食い違いを明文化。「30 未満」は WindowWidth=0 の非 console host と極端に狭い実コンソールの両方を catch する threshold である旨を明示
@@ -59,10 +64,10 @@
   - **[R13 M1] `gh release delete` UX 退行**: 成功時 stdout/stderr 無音のため `if ($delOut -match '\S')` が false で ShowProgress 行消去後に「無の状態」。`Write-Ok "既存タグ v$Version を削除完了"` を無条件追加して旧 PASS_THROUGH UX を回復
   - **[R13 M2] PASS_THROUGH catalog のメカニズム乖離**: catalog の例示は `& native-cmd` 直書きだが現実装は `Invoke-ExternalProcess` (Process 直叩き)。「(a) 直 & 演算子版」「(b) helper 経由 (推奨)」の 2 実装に分割記述
   - **[R13 M3] `ShowProgress` パスで `WaitForExit()` 未呼び出し**: HasExited ループ後にも `WaitForExit()` 明示呼びを追加、両 path 合流点で対称化 (上記 R14 H1 でコメント内容を訂正)
+  - **[R13 L1 (保留)] CHANGELOG 日付ポリシー**: JST 統一 / UTC 統一 / PR merge 日のいずれかに統一する議論は CHANGELOG 全体に関わるため別途
   - **[R13 L2] WindowWidth fallback 条件の記載追加**: R13 M3 説明文に「`[Console]::WindowWidth` が 0 以下を返す non-console host も同様に fallback 120」を追記、コード側との整合を明示 (round 15 M2 で更に「30 未満も含む」に精度向上)
   - **[R13 L3] 引数 quoting backslash 制約のドキュメント化**: trailing backslash を持つパス引数 (`"C:\path\"`) は CommandLineToArgvW 規則上 `\"` が閉じ引用符として機能せず引数 parse 破損する既知制約を helper の inline コメントに明文化、現 call site は該当なし
   - **[R13 L4] `Invoke-ExternalProcess` の Process.Start 失敗 rethrow**: `Invoke-NativeWithCapture` と同じ context 付き例外メッセージ粒度で対称化
-  - **[R13 L1 (保留)] CHANGELOG 日付ポリシー**: JST 統一 / UTC 統一 / PR merge 日のいずれかに統一する議論は CHANGELOG 全体に関わるため別途
 - **PR #148 round 12 (Wave 2) シニアレビュー反映**:
   - **[W2 M1]** catalog の PS 7.3+ 移行注意から vswhere を削除 (Wave 1 で helper 化済みのため stale)、残る `&` イディオムは `Assert-WorkingTreeClean` の `git status --porcelain` のみと正確化
   - **[W2 M2]** `Invoke-NativeWithCapture` docstring に「`$LASTEXITCODE` は更新されない、`.ExitCode` を使え」を明記
