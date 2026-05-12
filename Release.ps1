@@ -104,8 +104,20 @@ $ErrorActionPreference = 'Stop'
 # `[Console]::OutputEncoding` を UTF-8 (no BOM) で明示ピン留めしておく + 各
 # Invoke-ExternalProcess 呼び出し後に再ピン留めすることで発火を防ぐ。
 # `$OutputEncoding` は PS pipeline → native command への送信時の encoding。
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-$OutputEncoding           = [System.Text.UTF8Encoding]::new($false)
+#
+# 非 console host ガード: CI / headless / redirected 実行コンテキストでは
+# `[Console]::OutputEncoding` setter が IOException を投げ、$ErrorActionPreference='Stop'
+# 環境では release 開始前に script が hard abort する。try/catch で吸収。
+# (script-level の $script:Utf8NoBomEncoding を一意ソースとして共有、
+#  Invoke-ExternalProcess の finally でも同じインスタンスを再代入)
+$script:Utf8NoBomEncoding = [System.Text.UTF8Encoding]::new($false)
+try {
+    [Console]::OutputEncoding = $script:Utf8NoBomEncoding
+} catch {
+    # non-console host では console API は使えないが、$OutputEncoding (PS 変数) は
+    # 引き続き設定可能、native command pipeline 送信側は UTF-8 のまま維持される
+}
+$OutputEncoding = $script:Utf8NoBomEncoding
 
 # ============================================================================
 # Native command 呼び出しの方針 (v1.0.8 で再整理)
@@ -383,9 +395,15 @@ function Invoke-NativeWithCapture {
             # progress 行を完全に消して cursor を行頭へ (後続の出力が綺麗に流れる)
             Write-Host -NoNewline "`r$clearLine`r"
         }
-        # 両 path 対称化: HasExited で抜けた場合も .NET 慣習に従い WaitForExit() を
-        # 明示呼びしてパイプバッファ完全フラッシュを保証 (no-arg 版は無限待機だが
-        # HasExited=$true なので即 return、no-op)
+        # 両 path 合流点。ShowProgress 経路は HasExited で抜けて WaitForExit() は
+        # no-op、非 ShowProgress 経路はここで完了待機。
+        # 注: WaitForExit() (no-arg) のパイプバッファフラッシュ保証は
+        # BeginOutputReadLine / BeginErrorReadLine (event-based 非同期) に対する
+        # ものであり、本実装が使う ReadToEndAsync (Task-based) には適用されない。
+        # 実際のフラッシュ保証は直後の $outTask.Result / $errTask.Result が提供する
+        # (これらはストリームが EOF に達するまでブロックする)。
+        # WaitForExit() を残しているのは .NET 慣習との表面的な対称性のみ、
+        # `.Result` を削除すると出力切り捨てバグが発生するため touch しないこと
         $proc.WaitForExit()
 
         # AggregateException (faulted task) は明示メッセージで rethrow し、何が
@@ -679,9 +697,13 @@ function Resolve-MsBuild {
     if (Test-Path $vswhere) {
         # vswhere は検索 hit なし時に exit 0 + 空 stdout を返すが、実行環境破損
         # (権限 / インストーラ破損 等) で stderr 出力する可能性もあるため
-        # Invoke-NativeWithCapture で罠なく capture
+        # Invoke-NativeWithCapture で罠なく capture。
+        # `-utf8` 必須: Invoke-NativeWithCapture は stdout を UTF-8 として decode する
+        # ため、vswhere の default (system codepage) 出力だと non-UTF-8 locale で
+        # non-ASCII install path (日本語 VS install path 等) が mojibake → 後段の
+        # Test-Path が失敗 → MSBuild 検出失敗の path に落ちる
         $vswhereResult = Invoke-NativeWithCapture -FilePath $vswhere `
-            -Arguments @('-latest', '-products', '*', '-requires', 'Microsoft.Component.MSBuild', '-property', 'installationPath')
+            -Arguments @('-latest', '-products', '*', '-requires', 'Microsoft.Component.MSBuild', '-property', 'installationPath', '-utf8')
         $vsInstall = $vswhereResult.StdOut.Trim()
         if ($vsInstall) {
             $vsCands = @(
@@ -1060,8 +1082,16 @@ function Invoke-ExternalProcess {
         # Invoke-ExternalProcess 経由の子プロセス (Godot CLI / msbuild / nuget) が
         # コンソール encoding を OEM 系に戻して去ると、後続 Write-Host で日本語が
         # doubled rendering される PS 5.1 バグの予防的再ピン留め (script 冒頭の
-        # pin と二重防御)
-        [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+        # pin と二重防御)。
+        # 非 console host (CI / headless 等) で console API が IOException を投げる
+        # ケースを try/catch で吸収 — finally は外部ツール呼び出しの度に走るため
+        # ガードなしだと release flow が abort する
+        try {
+            [Console]::OutputEncoding = $script:Utf8NoBomEncoding
+        } catch {
+            # non-console host では再ピン留め不要 (そもそも doubled rendering は
+            # 対話端末でしか起きないため、CI 等では skip OK)
+        }
     }
     return $exitCode
 }
@@ -1311,10 +1341,19 @@ function Invoke-GhRelease {
     $tmpNotes = New-TemporaryFile
     try {
         [System.IO.File]::WriteAllText($tmpNotes.FullName, $script:ReleaseNotesText, [System.Text.UTF8Encoding]::new($false))
-        $zipSizeMb = [int]((Get-Item $ZipPath).Length / 1MB)
+        # zip サイズは MB / KB を自動切替で表示 (小さいファイル時に `0 MB` 表示で
+        # 破損誤解を避ける、Phase 2 以降の Updater 単体 zip 等で発火する想定)
+        $zipBytes = (Get-Item $ZipPath).Length
+        $zipSize  = if ($zipBytes -ge 1MB) {
+            "$([math]::Round($zipBytes / 1MB, 1)) MB"
+        } elseif ($zipBytes -ge 1KB) {
+            "$([math]::Round($zipBytes / 1KB, 1)) KB"
+        } else {
+            "$zipBytes B"
+        }
         $uploadResult = Invoke-NativeWithCapture -FilePath 'gh' `
             -Arguments @('release', 'create', "v$Version", $ZipPath, '--notes-file', $tmpNotes.FullName, '--title', "v$Version") `
-            -ShowProgress -ProgressMessage "アップロード中 (zip $zipSizeMb MB)..."
+            -ShowProgress -ProgressMessage "アップロード中 (zip $zipSize)..."
         if ($uploadResult.ExitCode -ne 0) {
             Fail "gh release create に失敗しました:`n$($uploadResult.Combined.TrimEnd())"
         }

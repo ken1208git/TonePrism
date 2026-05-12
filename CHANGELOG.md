@@ -41,22 +41,29 @@
   - `Invoke-NativeWithCapture` に `-ShowProgress` / `-ProgressMessage` パラメータを追加 (500ms 間隔で経過秒数を `\r` 上書き表示)
   - `Invoke-GhRelease` (gh release delete / create) を PASS_THROUGH → helper + ShowProgress に移行、zip サイズも表示 (`アップロード中 (zip 59 MB)... 12s 経過`)
   - 完了後は progress 行を消して、gh が stdout に出す release URL を `Write-Info` で再表示
-- **PR #148 シニアレビュー反映 (M1-M3 + L2-L4)**:
-  - **M1**: `gh release delete` は成功時 stdout/stderr 無音のため `if ($delOut -match '\S')` が false で ShowProgress 行消去後に「無の状態」になる UX 退行。明示的に `Write-Ok "既存タグ v$Version を削除完了"` を無条件追加して旧 PASS_THROUGH UX を回復
-  - **M2**: catalog の PASS_THROUGH 説明が `& native-cmd` 直書きの 1 形態に書かれていたが、現状の実装は `Invoke-ExternalProcess` (System.Diagnostics.Process 直叩き) なのでメカニズム乖離。「(a) 直 & 演算子版 (現状未使用)」「(b) `Invoke-ExternalProcess` helper 経由 (推奨)」の 2 実装に分けて記述、(a) は encoding 再ピン留め保護がない旨も注記
-  - **M3**: `ShowProgress` パスで `WaitForExit()` 未呼び出しだった非対称を解消。`HasExited` ループ終了後にも明示的に `WaitForExit()` (no-op だが .NET 慣習に従いパイプフラッシュを保証) を追加、両 path を対称化
-  - **L2**: M3 の CHANGELOG 説明文に「`[Console]::WindowWidth` が 0 以下を返す non-console host も同様に fallback 120」を追記、コード側 (`if ($clearWidth -lt 30) { $clearWidth = 120 }`) との整合を明示
-  - **L3**: 引数 quoting の trailing backslash 制約 (`"C:\path\"` → CommandLineToArgvW 解析破損) を helper の inline コメントとして明文化、現 call site (zip / 一時 notes / vswhere) はいずれも該当しないため安全、新規 call site でディレクトリパスを渡す際の注意として残す
-  - **L4**: `Invoke-ExternalProcess` にも `Process.Start` 失敗時の context 付き rethrow (`'$FilePath' の起動に失敗しました: ...`) を追加、`Invoke-NativeWithCapture` と例外メッセージ粒度を対称化
-  - **L1 (保留)**: CHANGELOG v1.0.7 / v1.0.8 の日付 `2026-05-12` (JST) は commit author date と一致。reviewer は UTC context (2026-05-11) で見ていた解釈ズレ。日付ポリシー (JST 統一 / UTC 統一 / PR merge 日) の策定は CHANGELOG 全体に関わるため別途
-- **Wave 2 シニアレビュー反映 (M1-M3 + L1-L4)**:
-  - **M1**: catalog の PS 7.3+ 移行注意コメントから vswhere を削除 (Wave 1 で helper 化済みのため stale)、残る `&` イディオムは `Assert-WorkingTreeClean` の `git status --porcelain` のみと正確化
-  - **M2**: `Invoke-NativeWithCapture` docstring に「`$LASTEXITCODE` は更新されない、`.ExitCode` を使え」を明記。Process 直叩きの構造上 `&` の自動変数を avoid、caller が古い値を読む silent failure を防ぐ
-  - **M3**: ShowProgress の clear-line 幅を 70 ハードコード → `[Console]::WindowWidth - 1` で動的算出 (fallback 120)、ProgressMessage / 日本語 cell 幅 / elapsed 桁数に依存しない消去を実現
-  - **L1**: gh release create 成功時の URL 表示が gh の stdout フォーマット依存である旨をコメントに明記 (silent path だが exit code で成否は確実、URL は fatal ではないので allowed)
-  - **L2**: encoding pin コメントの「特に msbuild」断定を「Godot CLI / msbuild / nuget 等、`RedirectStandardOutput=$false` でコンソールハンドル継承するもの」に緩和。v0.1.0 で観察された発火例は msbuild 後だが、原因として等価候補
-  - **L3**: `$delResult.StdOut.Trim() ... $delResult.StdOut.TrimEnd()` の二重 trim を `-match '\S'` + 一時変数化で 1 回に
-  - **L4**: `Combined` の separator 判定コメントを 4 case 網羅 (stdout 空 / 末尾 `\n` あり / なし / stderr 空) に書き換え
+- **PR #148 round 14 シニアレビュー + Codex bot P2 反映**:
+  - **[Codex P2] vswhere に `-utf8` フラグ追加**: `Invoke-NativeWithCapture` は stdout/stderr を UTF-8 として decode するが、vswhere は default で system codepage 出力。非 UTF-8 locale で日本語 VS install path 等 non-ASCII path が mojibake → 後段 `Test-Path` 失敗 → MSBuild 検出失敗の silent path に落ちる。`-utf8` を Arguments に追加して vswhere 出力を UTF-8 強制
+  - **[Codex P2 ×2] `[Console]::OutputEncoding` を try/catch でガード**: non-console host (CI / headless / redirected execution) では console API setter が `IOException` を投げ、`$ErrorActionPreference='Stop'` 下で release 開始前に script abort する path。script 冒頭の pin + `Invoke-ExternalProcess` finally の再 pin 両方を try/catch でラップ、script-level `$script:Utf8NoBomEncoding` を一意ソースとして共有
+  - **[R14 H1] `WaitForExit()` コメントの自己矛盾を訂正**: 旧コメント「パイプバッファ完全フラッシュを保証」は誤り (WaitForExit no-arg のフラッシュ保証は `BeginOutputReadLine` 系の event-based async 読み取りに対するもので、本実装の `ReadToEndAsync` Task-based には適用されない)。実際のフラッシュ保証は `$outTask.Result` / `$errTask.Result` が EOF までブロックすることで提供。コメントを「`.Result` を削除すると出力切り捨てバグが発生するため touch しないこと」に書き換え
+  - **[R14 M1] CHANGELOG label 重複解消**: 同 v1.0.8 entry 内に「Wave 2 シニアレビュー反映 (M1-M3)」と「PR #148 シニアレビュー反映 (M1-M3)」が共存し M1-M3 が 2 セット存在、後追い不能だった。本 entry のラベルを「R14」「W2」「Codex P2」等の round 識別子付きに変更
+  - **[R14 L1] zip size 表示の小ファイル対応**: `[int]($bytes / 1MB)` は 1MB 未満で 0 表示になり破損誤解を招く。`if ge 1MB → MB / ge 1KB → KB / else B` の自動切替に変更、Phase 2 以降の Updater 単体 zip 等で発火する想定
+  - **[R14 L2] ShowProgress 中の Task リーク (Known follow-up)**: `ReadToEndAsync()` 開始後に ShowProgress ループ内で例外発生 → finally で Dispose() → Task が `ObjectDisposedException` で faulted のまま GC まで放置。実害ほぼなし (現状実行 path で発火経路なし) だが、post v1.0.8 で `-TimeoutSeconds` + CancellationToken 対応する際に合わせて整理
+- **PR #148 round 13 シニアレビュー反映**:
+  - **[R13 M1] `gh release delete` UX 退行**: 成功時 stdout/stderr 無音のため `if ($delOut -match '\S')` が false で ShowProgress 行消去後に「無の状態」。`Write-Ok "既存タグ v$Version を削除完了"` を無条件追加して旧 PASS_THROUGH UX を回復
+  - **[R13 M2] PASS_THROUGH catalog のメカニズム乖離**: catalog の例示は `& native-cmd` 直書きだが現実装は `Invoke-ExternalProcess` (Process 直叩き)。「(a) 直 & 演算子版」「(b) helper 経由 (推奨)」の 2 実装に分割記述
+  - **[R13 M3] `ShowProgress` パスで `WaitForExit()` 未呼び出し**: HasExited ループ後にも `WaitForExit()` 明示呼びを追加、両 path 合流点で対称化 (上記 R14 H1 でコメント内容を訂正)
+  - **[R13 L2]** ↔ R13 M3 説明文の `WindowWidth` 0 以下 fallback 条件を CHANGELOG にも記載
+  - **[R13 L3]** 引数 quoting の trailing backslash 制約を helper inline コメントとして明文化
+  - **[R13 L4]** `Invoke-ExternalProcess` にも Process.Start 失敗時 context 付き rethrow を追加、両 helper 対称化
+  - **[R13 L1 (保留)]** CHANGELOG 日付ポリシー (JST 統一 / UTC 統一 / PR merge 日) の策定は CHANGELOG 全体議論なので別途
+- **PR #148 round 12 (Wave 2) シニアレビュー反映**:
+  - **[W2 M1]** catalog の PS 7.3+ 移行注意から vswhere を削除 (Wave 1 で helper 化済みのため stale)、残る `&` イディオムは `Assert-WorkingTreeClean` の `git status --porcelain` のみと正確化
+  - **[W2 M2]** `Invoke-NativeWithCapture` docstring に「`$LASTEXITCODE` は更新されない、`.ExitCode` を使え」を明記
+  - **[W2 M3]** ShowProgress の clear-line 幅を 70 ハードコード → `[Console]::WindowWidth - 1` で動的算出 (fallback 120)
+  - **[W2 L1]** gh release create 成功時の URL 表示が gh の stdout フォーマット依存である旨をコメントに明記
+  - **[W2 L2]** encoding pin コメントの「特に msbuild」断定を「Godot CLI / msbuild / nuget 等」に緩和
+  - **[W2 L3]** `.Trim() / .TrimEnd()` 二重呼び解消 (`-match '\S'` + 一時変数化)
+  - **[W2 L4]** `Combined` separator 判定コメントを 4 case 網羅に書き換え
 
 #### Changed
 
