@@ -92,12 +92,12 @@ namespace GCTonePrism.Manager
                     break;
                 }
                 
-                // 優先順位3: GCTonePrism_Managerフォルダが存在する場合（実行ファイルがその中にある場合）
-                // 実行ファイルがGCTonePrism_Managerフォルダ内にある場合、親ディレクトリをプロジェクトルートとする
-                if (Directory.Exists(Path.Combine(currentPath, "GCTonePrism_Manager")) &&
-                    exePath.StartsWith(Path.Combine(currentPath, "GCTonePrism_Manager"), StringComparison.OrdinalIgnoreCase))
+                // 優先順位3: Managerフォルダが存在する場合（実行ファイルがその中にある場合）
+                // 実行ファイルがManagerフォルダ内にある場合、親ディレクトリをプロジェクトルートとする
+                if (Directory.Exists(Path.Combine(currentPath, "Manager")) &&
+                    exePath.StartsWith(Path.Combine(currentPath, "Manager"), StringComparison.OrdinalIgnoreCase))
                 {
-                    Console.WriteLine($"[PathManager] GCTonePrism_Managerフォルダを検出: {currentPath}");
+                    Console.WriteLine($"[PathManager] Managerフォルダを検出: {currentPath}");
                     detectedBaseDirectory = currentPath;
                     break;
                 }
@@ -111,30 +111,30 @@ namespace GCTonePrism.Manager
             {
                 string errorMessage = $"エラー: プロジェクトルートが見つかりません。\n\n" +
                                      $"実行ファイルのパス: {exePath}\n\n" +
-                                     $"このアプリケーションは、GCTonePrism_Managerフォルダ内から実行してください。";
+                                     $"このアプリケーションは、Managerフォルダ内から実行してください。";
                 Console.WriteLine($"[PathManager] {errorMessage}");
                 throw new DirectoryNotFoundException(errorMessage);
             }
             
-            // GCTonePrism_Managerフォルダが存在し、実行ファイルがその中にあるか確認
-            string managerFolderPath = Path.Combine(detectedBaseDirectory, "GCTonePrism_Manager");
+            // Managerフォルダが存在し、実行ファイルがその中にあるか確認
+            string managerFolderPath = Path.Combine(detectedBaseDirectory, "Manager");
             if (!Directory.Exists(managerFolderPath))
             {
-                string errorMessage = $"エラー: GCTonePrism_Managerフォルダが見つかりません。\n\n" +
+                string errorMessage = $"エラー: Managerフォルダが見つかりません。\n\n" +
                                      $"プロジェクトルート: {detectedBaseDirectory}\n" +
                                      $"実行ファイルのパス: {exePath}\n\n" +
-                                     $"このアプリケーションは、GCTonePrism_Managerフォルダ内から実行してください。";
+                                     $"このアプリケーションは、Managerフォルダ内から実行してください。";
                 Console.WriteLine($"[PathManager] {errorMessage}");
                 throw new DirectoryNotFoundException(errorMessage);
             }
             
             if (!exePath.StartsWith(managerFolderPath, StringComparison.OrdinalIgnoreCase))
             {
-                string errorMessage = $"エラー: 実行ファイルがGCTonePrism_Managerフォルダ内にありません。\n\n" +
+                string errorMessage = $"エラー: 実行ファイルがManagerフォルダ内にありません。\n\n" +
                                      $"プロジェクトルート: {detectedBaseDirectory}\n" +
-                                     $"GCTonePrism_Managerフォルダ: {managerFolderPath}\n" +
+                                     $"Managerフォルダ: {managerFolderPath}\n" +
                                      $"実行ファイルのパス: {exePath}\n\n" +
-                                     $"このアプリケーションは、GCTonePrism_Managerフォルダ内から実行してください。";
+                                     $"このアプリケーションは、Managerフォルダ内から実行してください。";
                 Console.WriteLine($"[PathManager] {errorMessage}");
                 throw new DirectoryNotFoundException(errorMessage);
             }

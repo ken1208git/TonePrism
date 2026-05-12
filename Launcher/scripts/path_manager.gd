@@ -43,17 +43,17 @@ static func _find_base_directory() -> String:
 			return project_root
 		else:
 			# res://から取得したパスにprism.dbがない場合、親ディレクトリを確認
-			# プロジェクトルートはGCTonePrism_Launcherフォルダの親ディレクトリ
+			# プロジェクトルートはLauncherフォルダの親ディレクトリ
 			var parent_path = project_root.get_base_dir()
 			var parent_db_path = parent_path.path_join("prism.db")
 			if FileAccess.file_exists(parent_db_path):
 				print("[PathManager] res://の親ディレクトリからプロジェクトルートを検出: ", parent_path)
 				return parent_path
 			else:
-				# DBが見つからない場合でも、もしここが "GCTonePrism_Launcher" なら
+				# DBが見つからない場合でも、もしここが "Launcher" なら
 				# その親をプロジェクトルートとみなして返す（開発中のフォルダ構造を信じる）
 				# これは、DBファイルがまだ存在しない初期状態などでのパス解決を防ぐため
-				if project_root.ends_with("GCTonePrism_Launcher") or parent_path.ends_with("GCTonePrism"):
+				if project_root.ends_with("Launcher") or parent_path.ends_with("GCTonePrism"):
 					print("[PathManager] DB未検出だがフォルダ構造からルートを推測: ", parent_path)
 					return parent_path
 				
@@ -90,13 +90,13 @@ static func _find_base_directory_from_executable() -> String:
 			detected_base_directory = current_dir_path
 			break
 		
-		# 優先順位3: GCTonePrism_Launcherフォルダが存在する場合（実行ファイルがその中にある場合）
-		# 実行ファイルがGCTonePrism_Launcherフォルダ内にある場合、親ディレクトリをプロジェクトルートとする
-		var launcher_folder_check = current_dir_path.path_join("GCTonePrism_Launcher")
+		# 優先順位3: Launcherフォルダが存在する場合（実行ファイルがその中にある場合）
+		# 実行ファイルがLauncherフォルダ内にある場合、親ディレクトリをプロジェクトルートとする
+		var launcher_folder_check = current_dir_path.path_join("Launcher")
 		if dir.dir_exists(launcher_folder_check):
-			# 実行ファイルがGCTonePrism_Launcherフォルダ内にあるか確認
+			# 実行ファイルがLauncherフォルダ内にあるか確認
 			if exe_path.begins_with(launcher_folder_check):
-				print("[PathManager] GCTonePrism_Launcherフォルダを検出: ", current_dir_path)
+				print("[PathManager] Launcherフォルダを検出: ", current_dir_path)
 				detected_base_directory = current_dir_path
 				break
 		
@@ -113,28 +113,28 @@ static func _find_base_directory_from_executable() -> String:
 	if detected_base_directory.is_empty():
 		var error_message = "エラー: プロジェクトルートが見つかりません。\n\n" + \
 						   "実行ファイルのパス: " + exe_path + "\n\n" + \
-		                   "このアプリケーションは、GCTonePrism_Launcherフォルダ内から実行してください。"
+		                   "このアプリケーションは、Launcherフォルダ内から実行してください。"
 		print("[PathManager] ", error_message)
 		push_error(error_message)
 		return exe_path
 	
-	# GCTonePrism_Launcherフォルダが存在し、実行ファイルがその中にあるか確認
-	var launcher_folder_path = detected_base_directory.path_join("GCTonePrism_Launcher")
+	# Launcherフォルダが存在し、実行ファイルがその中にあるか確認
+	var launcher_folder_path = detected_base_directory.path_join("Launcher")
 	if not DirAccess.dir_exists_absolute(launcher_folder_path):
-		var error_message = "エラー: GCTonePrism_Launcherフォルダが見つかりません。\n\n" + \
+		var error_message = "エラー: Launcherフォルダが見つかりません。\n\n" + \
 						   "プロジェクトルート: " + detected_base_directory + "\n" + \
 						   "実行ファイルのパス: " + exe_path + "\n\n" + \
-		                   "このアプリケーションは、GCTonePrism_Launcherフォルダ内から実行してください。"
+		                   "このアプリケーションは、Launcherフォルダ内から実行してください。"
 		print("[PathManager] ", error_message)
 		push_error(error_message)
 		return detected_base_directory
 	
 	if not exe_path.begins_with(launcher_folder_path):
-		var error_message = "エラー: 実行ファイルがGCTonePrism_Launcherフォルダ内にありません。\n\n" + \
+		var error_message = "エラー: 実行ファイルがLauncherフォルダ内にありません。\n\n" + \
 						   "プロジェクトルート: " + detected_base_directory + "\n" + \
-						   "GCTonePrism_Launcherフォルダ: " + launcher_folder_path + "\n" + \
+						   "Launcherフォルダ: " + launcher_folder_path + "\n" + \
 						   "実行ファイルのパス: " + exe_path + "\n\n" + \
-		                   "このアプリケーションは、GCTonePrism_Launcherフォルダ内から実行してください。"
+		                   "このアプリケーションは、Launcherフォルダ内から実行してください。"
 		print("[PathManager] ", error_message)
 		push_error(error_message)
 		return detected_base_directory

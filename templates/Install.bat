@@ -265,6 +265,37 @@ goto :checkprocess
 :do_overwrite
 echo.
 echo [INFO] 上書きインストールを開始します...
+goto :migrate_legacy_manager
+
+REM ---- v0.2.0 → v0.3.0+ 旧構造 migration (シニアレビュー / ディレクトリ rename 整理対応) ----
+REM v0.2.0 までは `<install>/GCTonePrism_Manager/` / `<install>/GCTonePrism_Launcher/` 配置。
+REM v0.3.0 から `<install>/Manager/` / `<install>/Launcher/` + `<install>/Companions/Updater/` に変更。
+REM 旧構造を検出したらリネームしてからロボコピーする (`move` で dir 名のみ変更 = 中身そのまま carry-over)。
+REM 一度移行すれば以降はリネーム不要 (旧 dir 不在で skip)。
+REM top-level goto pattern: 日本語 echo を if-block 内に置くと cmd parser cascade するため
+REM (構造規約 1)、各 step を独立ラベルにしている。
+:migrate_legacy_manager
+if not exist "%INSTALL_TARGET%\GCTonePrism_Manager\" goto :migrate_legacy_launcher
+echo [INFO] 旧構造 (v0.2.0) 検出: GCTonePrism_Manager\ → Manager\ に移行
+move "%INSTALL_TARGET%\GCTonePrism_Manager" "%INSTALL_TARGET%\Manager" >nul
+if errorlevel 1 goto :migrate_failed
+:migrate_legacy_launcher
+if not exist "%INSTALL_TARGET%\GCTonePrism_Launcher\" goto :do_robocopy
+echo [INFO] 旧構造 (v0.2.0) 検出: GCTonePrism_Launcher\ → Launcher\ に移行
+move "%INSTALL_TARGET%\GCTonePrism_Launcher" "%INSTALL_TARGET%\Launcher" >nul
+if errorlevel 1 goto :migrate_failed
+goto :do_robocopy
+
+:migrate_failed
+echo.
+echo [FAIL] 旧構造 (v0.2.0) から新構造へのフォルダ移行に失敗しました。
+echo        フォルダロック / 書き込み権限を確認してください。
+echo        手動で以下のリネームを行えば回避可能:
+echo          "%INSTALL_TARGET%\GCTonePrism_Manager"  → "%INSTALL_TARGET%\Manager"
+echo          "%INSTALL_TARGET%\GCTonePrism_Launcher" → "%INSTALL_TARGET%\Launcher"
+goto :fail
+
+:do_robocopy
 REM ============================================================================
 REM USER DATA PROTECTION — read this carefully before modifying robocopy flags.
 REM ============================================================================

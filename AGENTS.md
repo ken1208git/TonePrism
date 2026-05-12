@@ -12,6 +12,20 @@
 - 新機能の追加は、既存ファイルへの追記ではなく新ファイル作成を必ず検討する。
 - 既存ファイルへの関数追加時、ファイルの責務と合わなければ別ファイルにする。
 
+## Naming Conventions
+
+リポジトリ内の各層で命名規約を分ける。理由は層ごとに「衝突回避の必要性」が違うため。
+
+- **トップレベル dir 名 (リポジトリ構造) = 短縮**: `Launcher/` / `Manager/` / `Monitor/` / `Companions/`。リポジトリ全体が GCTonePrism なので prefix は冗長。`Companions/` 配下のサブツール dir も `Companions/Updater/` / `Companions/WindowProbe/` と短縮。
+- **csproj / アセンブリ名 / exe ファイル名 = `GCTonePrism_<Name>`**: `GCTonePrism_Manager.exe` / `GCTonePrism_Updater.exe` / 将来 `GCTonePrism_WindowProbe.exe`。**理由: 実機 OS との接点 (tasklist / `Process.GetProcessesByName` / Windows のショートカット / プロセス管理 UI) で `Manager.exe` / `Updater.exe` のような汎用名は他アプリと衝突する。特に Chrome / Edge / 各種 Updater など多くのアプリが `Updater.exe` を使う**。prefix 維持で uniqueness を担保。
+- **C# namespace = `GCTonePrism.<Name>`**: `GCTonePrism.Manager` / `GCTonePrism.Updater`。namespace 衝突は実害が小さいが、コード読みやすさのため exe 名と一貫させる。
+
+主要 vs サポートの分類:
+- **主要アプリ** (Launcher / Manager / Monitor): リポジトリルート直下に置く独立 dir。
+- **サポート exe** (それ以外、Updater / WindowProbe / PauseOverlay 等): `Companions/` 配下に集約。dev-time / runtime 共通の配置で、Launcher 補助か Manager 補助かを問わず統一する (Launcher 補助 Companion は Launcher が相対 path で呼び出して使う)。
+
+詳細は **SPECIFICATION.md §2.4** (Companions) / **§3.7.4** (Updater) を参照。
+
 ## Release and Versioning
 - コミット直前に Launcher / Manager / Monitor / Updater / Companions の各バージョン番号を上げるべきかを必ず提案する。
 - **Bundle version の bump はリリース実行時のみ**。`Release.bat` を押す直前に `CHANGELOG.md` の `## Bundle` セクションに新エントリを追加（最上段、`### [Bundle vX.Y.Z]` 形式）。これが Bundle version と release_notes 両方の SoT。開発中の component bump とは別タイミング。
@@ -39,7 +53,7 @@
 
 ## Cross-component Standards (ファイルログ)
 - 新規クライアントコンポーネント（Launcher / Manager / Monitor 等）を追加・改修する際は、ファイルログ基盤を必ず実装する。仕様詳細は **SPECIFICATION.md §3.6** を参照。
-- 参照実装: [`GCTonePrism_Manager/Services/Logger.cs`](GCTonePrism_Manager/Services/Logger.cs), [`GCTonePrism_Launcher/scripts/logger.gd`](GCTonePrism_Launcher/scripts/logger.gd)
+- 参照実装: [`Manager/Services/Logger.cs`](Manager/Services/Logger.cs), [`Launcher/scripts/logger.gd`](Launcher/scripts/logger.gd)
 - Logger 自体の障害は握り潰す（再帰ハング回避のため、Logger 内部例外はログにも書かない）。
 
 ## Launcher Implementation

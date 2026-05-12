@@ -39,6 +39,19 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
+### [Release Tooling v0.1.10] - 2026-05-13
+
+#### Changed (ディレクトリ命名規約 + Companions 再定義、SPEC v1.10.9 連動、#108 Phase 3 着手準備)
+
+- **トップレベル dir rename**: `GCTonePrism_Launcher/` → `Launcher/`、`GCTonePrism_Manager/` → `Manager/`。リポジトリ全体が GCTonePrism なので prefix 冗長、Folder 名は短縮の方が視覚的にスッキリ。csproj / アセンブリ / exe 名は `GCTonePrism_<Name>` prefix を維持 (process 検知 uniqueness のため、`tasklist` / `Process.GetProcessesByName` で他アプリの `Manager.exe` / `Updater.exe` と衝突を避ける)。AGENTS.md に新規 `## Naming Conventions` セクションを追加して命名規約を明文化
+- **Companions 概念再定義** (SPEC §2.4): 旧仕様「Launcher 専用サブコンポーネント、`GCTonePrism_Launcher/Companions/` 配下」を「主要 (Launcher / Manager / Monitor) を補助する独立 exe 群、リポジトリルート `Companions/` 配下、dev/runtime 一貫配置」に拡張。Updater (Phase 3) もこのカテゴリに含まれる。Launcher 補助 Companion (#101 WindowProbe / #30 PauseOverlay) も runtime で `<install>/Companions/<Name>/` 配置に変更 (旧仕様の「Launcher exe と同じ dir に同梱」を廃止)
+- **§3.7.3 / §3.7.4 Updater 役割を Manager-heavy + minimal Updater に再定義**: 旧仕様の fat Updater 設計 (Updater が全 component 置換) を改め、「Manager 自身の置換だけが Updater を必須とする」(Launcher / Companions は外部プロセスで Manager から kill + 直接置換可能、shortcut bat / Updater.exe 自体は稼働していないので Manager から直接置換可能) に整理。Updater のスコープ大幅縮小 (50-150 行の最小 CLI)、Phase 4 Manager UI が大半の責務 (download / 各 component 置換 / progress バー) を持つ形に
+- **Release.ps1 path 更新**: `$LauncherDir` / `$ManagerDir` / `$FilesDir` 配下の staging path / `ExpectedFiles` の path 全て新 dir 名 (`Launcher/` / `Manager/`) で更新。`Build-Launcher` / `Build-Manager` の中身 logic は不変 (csproj / exe 名は prefix 付き維持なので変更不要)
+- **templates path 更新**: `Launcher.bat` / `Manager.bat` の `%~dp0GCTonePrism\GCTonePrism_<X>\GCTonePrism_<X>.exe` → `%~dp0GCTonePrism\<X>\GCTonePrism_<X>.exe` (dir 短縮、exe 名 prefix 維持)。Install.bat の `tasklist` 引数は exe 名 (`GCTonePrism_Manager.exe`) なので変更不要
+- **Install.bat に v0.2.0 旧構造 migration 追加**: 既存検出 + Y 経路で `<install>/GCTonePrism_Manager/` / `<install>/GCTonePrism_Launcher/` を検出したら `<install>/Manager/` / `<install>/Launcher/` に `move` でリネームしてから robocopy 実行。`move` で dir 名のみ変更 = 中身そのまま carry-over なので prism.db / games/ / backups/ / responses/ / logs/ も自然に維持される。一度移行すれば以降はリネーム不要 (旧 dir 不在で skip)。top-level goto pattern に従って `:migrate_legacy_manager` / `:migrate_legacy_launcher` / `:migrate_failed` / `:do_robocopy` の独立ラベルで構造化
+- **PathManager.cs / path_manager.gd の self-reference 修正**: Manager / Launcher 自身が runtime で `"GCTonePrism_Manager"` / `"GCTonePrism_Launcher"` という親 dir 名を検出してプロジェクトルートを解決していたロジックを `"Manager"` / `"Launcher"` に置換。新 install 構造で正しく動く
+- **README.md ディレクトリ構成図を新 dir 名で更新** + 命名規約への参照を追加
+
 ### [Release Tooling v0.1.9] - 2026-05-12
 
 #### Fixed (PR #149 シニアレビュー round 5)

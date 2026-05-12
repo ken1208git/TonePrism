@@ -21,14 +21,19 @@
 
 ```text
 GCTonePrism/
-├── GCTonePrism_Launcher/   # Godot 製ランチャー本体
-├── GCTonePrism_Manager/    # WinForms 製管理ツール
+├── Launcher/               # 主要: Godot 製ランチャー本体
+├── Manager/                # 主要: WinForms 製管理ツール
+├── Monitor/                # 主要: 監視ソフト (将来)
+├── Companions/             # 補助 exe 集約 (SPEC §2.4)
+│   └── Updater/            # Manager 置換用 (SPEC §3.7.4、#108 Phase 3)
 ├── games/                  # 展示対象ゲームやサンプルデータ
 ├── docs/                   # 補助ドキュメント
 ├── prism.db                # SQLite データベース
 ├── SPECIFICATION.md        # 仕様書
 └── CHANGELOG.md            # 変更履歴
 ```
+
+トップレベル命名規約: dir 名は短縮 (`Launcher/`, `Manager/`, `Companions/<Name>/`)、csproj / アセンブリ / exe 名は `GCTonePrism_<Name>` prefix 維持 (例: `GCTonePrism_Launcher.exe`、process 検知 uniqueness のため)。詳細は [AGENTS.md "Naming Conventions"](AGENTS.md) を参照。
 
 ## 動作環境
 
@@ -60,7 +65,7 @@ git clone https://github.com/ken1208git/GCTonePrism.git
 ### 2. Launcher を開く
 
 1. Godot Engine 4.6 をインストールします。
-2. Godot エディタで [GCTonePrism_Launcher/project.godot](GCTonePrism_Launcher/project.godot) を開きます。
+2. Godot エディタで [Launcher/project.godot](Launcher/project.godot) を開きます。
 3. 必要に応じてそのまま実行します。
 
 補足:
@@ -68,7 +73,7 @@ git clone https://github.com/ken1208git/GCTonePrism.git
 
 ### 3. Manager を開く
 
-1. Visual Studio 2026 で [GCTonePrism_Manager/GCTonePrism_Manager.csproj](GCTonePrism_Manager/GCTonePrism_Manager.csproj) を開きます。
+1. Visual Studio 2026 で [Manager/GCTonePrism_Manager.csproj](Manager/GCTonePrism_Manager.csproj) を開きます。
 2. NuGet パッケージを復元します。
 3. `Debug` もしくは `Release` でビルドして起動します。
 
