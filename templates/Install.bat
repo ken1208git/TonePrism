@@ -260,8 +260,13 @@ set /p START_MANAGER=Manager を起動しますか？ (Y/N):
 if /i not "%START_MANAGER%"=="Y" goto :end
 echo.
 echo [INFO] Manager を起動します...
-REM Use parent-level Manager.bat (one above GCTonePrism/), placed by :copy_shortcuts above.
-start "" "%INSTALL_PARENT_NO_TRAIL%\Manager.bat"
+REM Launch Manager.exe directly (bypass Manager.bat wrapper). Manager.bat itself is
+REM just `start "" Manager.exe`, so spawning it via `start ""` would create an extra
+REM intermediate cmd process. Some terminal hosts (e.g. Windows Terminal) appear to
+REM keep the parent Install.bat window open while that intermediate cmd is alive,
+REM leaving a residual empty prompt after install completes. Direct exe launch
+REM removes the intermediate cmd entirely, so the parent terminates cleanly.
+start "" "%INSTALL_TARGET%\GCTonePrism_Manager\GCTonePrism_Manager.exe"
 REM Suppress final pause when Manager started (avoid stacking Install.bat 'press
 REM any key' prompt on top of Manager UI).
 set MANAGER_STARTED=1
