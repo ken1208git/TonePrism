@@ -320,9 +320,13 @@ function Invoke-NativeWithCapture {
           ExitCode - プロセスの終了コード (int)
           Combined - StdOut + "`n" + StdErr 連結 (検索用、stdout 末尾の改行有無で
                      joining 境界がぶれないよう明示 separator)
-        注 1: 子プロセス側が UTF-8 で書く前提。`gh` は UTF-8 だが、`vswhere` は ASCII
-        中心、msbuild / nuget は OEM 系 codepage を出す可能性あり (本 helper は現状
-        gh / vswhere のみで使用)。
+        注 1: 子プロセス側が UTF-8 で書く前提。`gh` はデフォルトで UTF-8。
+        `vswhere` はデフォルト system codepage 出力なので、本 helper 経由の
+        call site では `-utf8` フラグを必ず付与して UTF-8 出力を強制する
+        (Resolve-MsBuild 内、日本語 VS install path 等の非 ASCII path も正しく
+        decode)。msbuild / nuget は OEM 系 codepage を出す可能性があるため
+        本 helper は使わず、Invoke-ExternalProcess (直 console 出力 + encoding
+        再ピン留め) 経由で扱う。
         注 2: 本関数は System.Diagnostics.Process 直叩きのため、PS 自動変数の
         `$LASTEXITCODE` は **更新されない**。caller は必ず返り値の `.ExitCode` を
         参照すること。helper 呼び出し直後に `if ($LASTEXITCODE -ne 0)` と書くと、
@@ -376,7 +380,12 @@ function Invoke-NativeWithCapture {
         $outTask = $proc.StandardOutput.ReadToEndAsync()
         $errTask = $proc.StandardError.ReadToEndAsync()
 
-        if ($ShowProgress) {
+        # 非 TTY (CI / log file redirect 等) では `\r` が行リセットとして機能せず、
+        # progress 更新ごとに改行付きで log に展開されてノイズになる。
+        # IsOutputRedirected で検出して live progress を抑止 (取得自体が例外を投げる
+        # 非 console host も同様に redirected 扱いで skip = 安全側)
+        $isRedirected = try { [Console]::IsOutputRedirected } catch { $true }
+        if ($ShowProgress -and -not $isRedirected) {
             # 進捗描画なしコマンド (gh release create 等) のための擬似 progress。
             # 500ms 間隔で経過秒数を `\r` 上書き表示 (CR で行頭戻り、新しい数字で上書き)
             # clear 幅は console window 幅から動的算出。現在の ProgressMessage 長
@@ -1009,8 +1018,7 @@ function Write-FileUtf8NoBom {
     param([string]$Path, [string]$Content)
     # Godot ConfigFile / project.godot は BOM を識別子として解釈してパースエラーを起こすため
     # UTF-8 BOM なしで書き出す
-    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-    [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
+    [System.IO.File]::WriteAllText($Path, $Content, $script:Utf8NoBomEncoding)
 }
 
 function Set-ManifestVersions {
@@ -1108,7 +1116,9 @@ function Invoke-ExternalProcess {
         # pin と二重防御)。
         # 非 console host (CI / headless 等) で console API が IOException を投げる
         # ケースを try/catch で吸収 — finally は外部ツール呼び出しの度に走るため
-        # ガードなしだと release flow が abort する
+        # ガードなしだと release flow が abort する。
+        # 注: $OutputEncoding (PS variable、pipeline → native command 送信側) は
+        # 子プロセスから変更不可なので再ピン留め不要、script 冒頭の代入が継続有効
         try {
             [Console]::OutputEncoding = $script:Utf8NoBomEncoding
         } catch {
@@ -1364,7 +1374,7 @@ function Invoke-GhRelease {
     # 一時ファイル経由にする (CLI 引数の改行 / 引用符 escape を避けるため)
     $tmpNotes = New-TemporaryFile
     try {
-        [System.IO.File]::WriteAllText($tmpNotes.FullName, $script:ReleaseNotesText, [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText($tmpNotes.FullName, $script:ReleaseNotesText, $script:Utf8NoBomEncoding)
         # zip サイズは MB / KB を自動切替で表示 (小さいファイル時に `0 MB` 表示で
         # 破損誤解を避ける、Phase 2 以降の Updater 単体 zip 等で発火する想定)
         $zipBytes = (Get-Item $ZipPath).Length

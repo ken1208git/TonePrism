@@ -41,6 +41,12 @@
   - `Invoke-NativeWithCapture` に `-ShowProgress` / `-ProgressMessage` パラメータを追加 (500ms 間隔で経過秒数を `\r` 上書き表示)
   - `Invoke-GhRelease` (gh release delete / create) を PASS_THROUGH → helper + ShowProgress に移行、zip サイズも表示 (`アップロード中 (zip 59 MB)... 12s 経過`)
   - 完了後は progress 行を消して、gh が stdout に出す release URL を `Write-Info` で再表示
+- **PR #148 round 17 シニアレビュー反映**:
+  - **[R17 #2] UTF8Encoding 一意ソース統一**: `Invoke-GhRelease` の `WriteAllText` (`tmpNotes` 書き込み) と `Write-FileUtf8NoBom` helper が `[System.Text.UTF8Encoding]::new($false)` を新規生成しており、本 PR の「`$script:Utf8NoBomEncoding` を一意ソースとして共有」設計に違反していた。両箇所を `$script:Utf8NoBomEncoding` 参照に置換、UTF-8 encoding instance を script 内で完全に一意化
+  - **[R17 #3] `$OutputEncoding` 再ピン留め不要の理由を明文化**: `Invoke-ExternalProcess` finally で `[Console]::OutputEncoding` だけ再ピン留めし `$OutputEncoding` (PS pipeline 側 encoding) は触らない理由 (PS 変数なので子プロセスから変更不可) をコメント追記、保守者が「漏れか?」と判断して不要な再ピン留めを追加する誤修正を防止
+  - **[R17 #4] `Invoke-NativeWithCapture` docstring 注 1 を vswhere `-utf8` 対応反映**: 旧記述「vswhere は ASCII 中心」は同 PR 内で追加した `-utf8` 化と乖離。「vswhere はデフォルト system codepage 出力なので、本 helper 経由の call site では `-utf8` を必ず付与」に更新、日本語 VS install path も正しく decode できる旨を明示
+  - **[R17 #5] ShowProgress を `IsOutputRedirected` で抑止**: 非 TTY (CI / log file redirect) では `\r` が行リセットとして機能せず、progress 更新ごとに改行付きで log に展開されてノイズになる。`[Console]::IsOutputRedirected` (取得失敗時は redirected 扱いで safe-side) で検出して live progress を skip、redirected 環境では従来の gh TTY-off モードと同じく完了まで無音 → URL 表示の動作に degrade
+  - **[R17 #1 (false positive)]** PR body Commits 数: reviewer は "(7)" と認識していたが、round 16 push 後の `gh pr edit` で既に "(8)" に更新済み、stale view を見ていた可能性。本 round では body 再更新 (commit 8 を含む) のみ
 - **PR #148 round 16 シニアレビュー反映**:
   - **[R16 #1] vswhere 失敗時の `$vsInstall` クリア**: round 15 で `Write-Info "PATH fallback に切替"` と宣言したのに、続く `$vsInstall = $vswhereResult.StdOut.Trim()` が無条件実行で「失敗時 stdout の部分出力」も後段 `Test-Path` 経路に流れる構造矛盾。`if/else` に分けて失敗 branch で `$vsInstall = ''` を明示、最終的に `Test-Path` で実害は止まるが、宣言と実装の意図不一致を解消
   - **[R16 #2] `WaitForExit()` の両 path 役割を明示**: 旧コメント「.NET 慣習との表面的対称性のみ」は非 ShowProgress 経路で誤誘導 (実際にはここがプロセス完了を明示待機する唯一のポイント)。「ShowProgress 経路 = no-op / 非 ShowProgress 経路 = 必須」と path 毎の役割を明記、削除不可の根拠を両 path で示す
