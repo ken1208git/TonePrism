@@ -41,6 +41,20 @@
 
 ### [Release Tooling v0.1.10] - 2026-05-13
 
+#### Fixed (PR #150 シニアレビュー round 1)
+
+- **[H1] SPEC §3.7.3 / §3.7.4 の user data 保護記述が実態と乖離していた**: 「Manager 側 / Updater 側ともに rename-rollback の `.bak` から保護対象を新 dir に carry-over する形で保護を実現」と記述していたが、実際の user data (`prism.db` / `games/` / `backups/` / `responses/` / `logs/`) は `<install>/` 直下に配置されていて Manager / Launcher dir の外。`Manager/` を `.bak` にリネームしても `.bak/prism.db` は存在せず carry-over 対象自体がない。**実際の保護機構は構造的なもの** (user data が component dir の外にあるので、各 component dir の置換と無関係に残る)。Phase 3 / Phase 4 の実装者がこの誤った記述を信じて余計な carry-over コードを書くと no-op になるか Manager 内部の設定ファイル等を user data と勘違いする path があった。修正: §3.7.3 step [13] のコメントを「user data は `<install>/` 直下にあるので置換と無関係に残る」に書き換え、「**保護されるユーザーデータ**」段落に「保護の仕組み」サブ項目を追加して「`<install>/` 直下配置による構造的保護 vs `.bak` (binary atomic rollback 用) の役割分離」を明文化。§3.7.4 Updater 責務 (3) も同期
+- **[M2] Install.bat migration が「新 dir も既存」のケースで silent failure する path**: Windows の `move srcdir dstdir` は dst が既存ディレクトリの場合、エラーで失敗するのではなく **src を dst の中にネスト移動** (`dst\src\` を作る) する挙動を取るバージョン / シェル組合せがある。errorlevel 0 で済んで `:migrate_failed` には飛ばず、`<install>/Manager/GCTonePrism_Manager/` の壊れたネスト構造ができたまま `:do_robocopy` が走り、ユーザーに見えにくいゴミが堆積する path。発生シナリオは v0.3.0 install + 過去 zip バックアップ復元 / partial install 再試行など theoretical だが silent 性が高い。修正: `move` の前に `if exist "<new>\" goto :migrate_conflict_<name>` の事前 destination-exists ガードを追加、両 dir 並存時は user に手動判断を促す `:migrate_conflict_manager` / `:migrate_conflict_launcher` ラベルで `:fail` に倒す (旧 / 新 / merge の 3 択をメッセージで案内)
+- **[L1] SPEC 変更履歴 v1.10.9 の旧仕様引用 path ミス**: (b) 項で「旧仕様「Launcher 専用サブコンポーネント、`Launcher/Companions/` 配下」」と書いていたが、旧仕様 (v1.10.3〜v1.10.8) の実 path は `GCTonePrism_Launcher/Companions/`。§2.4 「旧仕様との差分」段落とも不一致だった。修正
+
+#### Changed (PR #150 シニアレビュー round 1)
+
+- **[M1] Manager v0.8.10 + Launcher v0.5.17 への version bump**: PR #150 の PathManager.cs / path_manager.gd の self-reference リテラル変更は **runtime 動作変更** (新 binary は旧 install 構造を正しく解決できない / 逆も同様)。AGENTS.md 「Release and Versioning」§ の「コミット直前に各 binary version 番号を上げるべきかを必ず提案する」規約に従い、Manager / Launcher 共に patch bump + CHANGELOG `## Manager` / `## Launcher` 各セクションに entry 追加
+
+#### Acknowledged (PR #150 シニアレビュー round 1 L2)
+
+- **PathManager priority-3 detection の汎用名化による false-positive 余地**: dir 名短縮で `"Manager"` / `"Launcher"` は他アプリ / 他配置でも一般的な名前になり、priority-1 (`prism.db`) / priority-2 (`.git`) がともに hit しない極限状況 (初回 install 失敗で partial 配置等) で `D:\Launcher\GCTonePrism_Launcher.exe` のような misplaced install での誤判定余地が増えた。`exe_path.StartsWith(...)` ガードで実害は限定的だが、長期的には複合 guard (sibling `Launcher/` + `Manager/` の同時存在 / prism.db への parent 一致等) で強化する余地あり。本 PR では対応せず別 issue で扱う
+
 #### Changed (ディレクトリ命名規約 + Companions 再定義、SPEC v1.10.9 連動、#108 Phase 3 着手準備)
 
 - **トップレベル dir rename**: `GCTonePrism_Launcher/` → `Launcher/`、`GCTonePrism_Manager/` → `Manager/`。リポジトリ全体が GCTonePrism なので prefix 冗長、Folder 名は短縮の方が視覚的にスッキリ。csproj / アセンブリ / exe 名は `GCTonePrism_<Name>` prefix を維持 (process 検知 uniqueness のため、`tasklist` / `Process.GetProcessesByName` で他アプリの `Manager.exe` / `Updater.exe` と衝突を避ける)。AGENTS.md に新規 `## Naming Conventions` セクションを追加して命名規約を明文化
@@ -459,6 +473,16 @@
 ---
 
 ## Launcher（ランチャー本体）
+
+### [Launcher v0.5.17] - 2026-05-13
+
+#### Changed (#108 Phase 3 着手準備 / dir rename 連動)
+
+- **`scripts/path_manager.gd` の self-reference リテラル修正**: 旧 dir 名 `"GCTonePrism_Launcher"` を新 dir 名 `"Launcher"` に置換 (7 箇所、コメント / エラー message / detection ロジック内)。`_find_base_directory_from_executable()` の priority-3 fallback で「実行ファイルが Launcher フォルダ内にある場合、親をプロジェクトルートとする」判定が新構造 `<install>/Launcher/GCTonePrism_Launcher.exe` で正しく動くようにする。
+- **runtime 動作の変更点**: v0.5.16 までの binary は旧 install 構造 (`<install>/GCTonePrism_Launcher/`) を期待していたが、v0.5.17 以降は新構造 (`<install>/Launcher/`) を期待する。Install.bat の v0.2.0 → 新構造 migration ロジック (`templates/Install.bat`) と組み合わせて、上書きインストール時に旧 → 新 dir リネームが自動で行われる前提。
+- **配布構造変更**: Launcher exe は今後 `<install>/Launcher/GCTonePrism_Launcher.exe` に配置される (旧: `<install>/GCTonePrism_Launcher/GCTonePrism_Launcher.exe`)。exe ファイル名 `GCTonePrism_Launcher.exe` 自体は維持 (process 検知 uniqueness のため、AGENTS.md "Naming Conventions" 参照)。
+
+詳細は Release Tooling v0.1.10 entry および SPEC §2.4 / §3.7.x 変更履歴 v1.10.9 を参照。
 
 ### [Launcher v0.5.16] - 2026-05-11
 
@@ -888,6 +912,16 @@
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.8.10] - 2026-05-13
+
+#### Changed (#108 Phase 3 着手準備 / dir rename 連動)
+
+- **`PathManager.cs` の self-reference リテラル修正**: 旧 dir 名 `"GCTonePrism_Manager"` を新 dir 名 `"Manager"` に置換 (4 箇所、コメント / エラー message / detection ロジック内)。`FindBaseDirectory()` の priority-3 fallback で「実行ファイルが Manager フォルダ内にある場合、親をプロジェクトルートとする」判定が新構造 `<install>/Manager/GCTonePrism_Manager.exe` で正しく動くようにする。
+- **runtime 動作の変更点**: v0.8.9 までの binary は旧 install 構造 (`<install>/GCTonePrism_Manager/`) を期待していたが、v0.8.10 以降は新構造 (`<install>/Manager/`) を期待する。Install.bat の v0.2.0 → 新構造 migration ロジック (`templates/Install.bat`) と組み合わせて、上書きインストール時に旧 → 新 dir リネームが自動で行われる前提。
+- **配布構造変更**: Manager exe は今後 `<install>/Manager/GCTonePrism_Manager.exe` に配置される (旧: `<install>/GCTonePrism_Manager/GCTonePrism_Manager.exe`)。exe ファイル名 `GCTonePrism_Manager.exe` 自体は維持 (process 検知 uniqueness のため、AGENTS.md "Naming Conventions" 参照)。
+
+詳細は Release Tooling v0.1.10 entry および SPEC §2.4 / §3.7.x 変更履歴 v1.10.9 を参照。
 
 ### [Manager v0.8.9] - 2026-05-11
 
