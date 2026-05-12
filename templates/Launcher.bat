@@ -1,6 +1,6 @@
 @echo off
-REM Launcher.bat - launches GCTonePrism Launcher from the install root.
-REM Bundled by Release.ps1 at files/Launcher.bat, deployed to <install>/GCTonePrism/Launcher.bat.
+REM Launcher.bat - launches GCTonePrism Launcher from the install parent folder.
+REM Deployed by Install.bat to <parent>/Launcher.bat (one level above GCTonePrism/).
 REM File format: UTF-8 (no BOM) + CRLF, enforced by .gitattributes (*.bat eol=crlf)
 REM   and Release.ps1 Copy-Templates normalization.
-start "" "%~dp0GCTonePrism_Launcher\GCTonePrism_Launcher.exe"
+start "" "%~dp0GCTonePrism\GCTonePrism_Launcher\GCTonePrism_Launcher.exe"

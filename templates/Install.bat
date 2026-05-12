@@ -217,10 +217,8 @@ REM games/backups/etc. would be silently excluded. Currently safe because files/
 REM never contains these names. Documented for future maintainers.
 robocopy "%FILES_DIR%" "%INSTALL_TARGET%" /E /XF prism.db /XD games backups responses logs /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1
 REM robocopy exit code is a bitfield, < 8 = success (0 no change, 1 files copied, etc.).
-if not errorlevel 8 goto :install_done
-echo.
-echo [FAIL] ファイルコピーに失敗しました [robocopy exit %ERRORLEVEL%]。
-goto :fail
+if errorlevel 8 goto :copy_failed
+goto :copy_shortcuts
 
 :new_install
 echo [INFO] 新規インストールを開始します...
@@ -232,9 +230,29 @@ echo        書き込み権限を確認してください。
 goto :fail
 :new_mkdir_ok
 robocopy "%FILES_DIR%" "%INSTALL_TARGET%" /E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1
-if not errorlevel 8 goto :install_done
+if errorlevel 8 goto :copy_failed
+goto :copy_shortcuts
+
+:copy_failed
 echo.
 echo [FAIL] ファイルコピーに失敗しました [robocopy exit %ERRORLEVEL%]。
+goto :fail
+
+:copy_shortcuts
+REM Copy parent-level shortcuts (Launcher.bat / Manager.bat) from zip root to
+REM <parent>/ (= one level above GCTonePrism/). This places daily-use shortcuts
+REM directly under the user's selected parent folder for easier discovery.
+REM See SPEC §3.7.1.
+copy /Y "%SCRIPT_DIR%Launcher.bat" "%INSTALL_PARENT_NO_TRAIL%\Launcher.bat" >nul
+if errorlevel 1 goto :shortcut_failed
+copy /Y "%SCRIPT_DIR%Manager.bat" "%INSTALL_PARENT_NO_TRAIL%\Manager.bat" >nul
+if errorlevel 1 goto :shortcut_failed
+goto :install_done
+
+:shortcut_failed
+echo.
+echo [FAIL] ショートカット bat のコピーに失敗しました [%INSTALL_PARENT_NO_TRAIL%]。
+echo        書き込み権限を確認してください。
 goto :fail
 
 :install_done
@@ -244,9 +262,9 @@ echo ===========================================================================
 echo  インストール完了: %INSTALL_TARGET%
 echo ============================================================================
 echo.
-echo  日常使い:
-echo    %INSTALL_TARGET%\Launcher.bat   [来場者用 Launcher 起動]
-echo    %INSTALL_TARGET%\Manager.bat    [運営用 Manager 起動]
+echo  日常使い [%INSTALL_PARENT_NO_TRAIL%\ 直下のショートカット]:
+echo    Launcher.bat   [来場者用 Launcher 起動]
+echo    Manager.bat    [運営用 Manager 起動]
 echo.
 
 REM ---- Manager start Y/N (top-level, no Japanese echo inside block) ----
@@ -256,7 +274,8 @@ set /p START_MANAGER=Manager を起動しますか？ (Y/N):
 if /i not "%START_MANAGER%"=="Y" goto :end
 echo.
 echo [INFO] Manager を起動します...
-start "" "%INSTALL_TARGET%\Manager.bat"
+REM Use parent-level Manager.bat (one above GCTonePrism/), placed by :copy_shortcuts above.
+start "" "%INSTALL_PARENT_NO_TRAIL%\Manager.bat"
 REM Suppress final pause when Manager started (avoid stacking Install.bat 'press
 REM any key' prompt on top of Manager UI).
 set MANAGER_STARTED=1

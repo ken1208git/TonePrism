@@ -1310,17 +1310,19 @@ function Build-Manager {
 function Copy-Templates {
     Write-Step "テンプレートを staging に同梱"
 
-    # zip ルート配置
+    # zip ルート配置 (Install.bat / 設定 / dialog helper + ショートカット bat)
+    # Launcher.bat / Manager.bat は zip ルートに置き、Install.bat が <親>/ (=
+    # GCTonePrism/ の1つ上、選んだ親フォルダ直下) にコピーする規約 (Phase 2 で
+    # 階層変更、SPEC §3.7.1 参照)
     $rootTemplates = @(
         @{ Src = 'templates\Install.bat';            Dest = 'Install.bat';            Label = 'Install.bat' },
         @{ Src = 'templates\INSTALL_README.txt';     Dest = 'INSTALL_README.txt';     Label = 'INSTALL_README.txt' },
-        @{ Src = 'templates\show_folder_dialog.ps1'; Dest = 'show_folder_dialog.ps1'; Label = 'show_folder_dialog.ps1 (Install.bat dialog helper)' }
+        @{ Src = 'templates\show_folder_dialog.ps1'; Dest = 'show_folder_dialog.ps1'; Label = 'show_folder_dialog.ps1 (Install.bat dialog helper)' },
+        @{ Src = 'templates\Launcher.bat';           Dest = 'Launcher.bat';           Label = 'Launcher.bat (shortcut, parent-level)' },
+        @{ Src = 'templates\Manager.bat';            Dest = 'Manager.bat';            Label = 'Manager.bat (shortcut, parent-level)' }
     )
-    # files/ 配下配置 (インストール後の GCTonePrism\Launcher.bat / Manager.bat になる)
-    $filesTemplates = @(
-        @{ Src = 'templates\Launcher.bat'; Dest = 'files\Launcher.bat'; Label = 'Launcher.bat (shortcut)' },
-        @{ Src = 'templates\Manager.bat';  Dest = 'files\Manager.bat';  Label = 'Manager.bat (shortcut)' }
-    )
+    # files/ 配下配置: 現状なし (component 本体は Build フェーズで配置済み)
+    $filesTemplates = @()
 
     foreach ($tpl in ($rootTemplates + $filesTemplates)) {
         $src = Join-Path $RepoRoot $tpl.Src
@@ -1366,13 +1368,13 @@ function Assert-ExpectedFiles {
 
     # 期待ファイル一覧 (zip ルート + files/ 配下、SPEC §3.7.1 正規構造)
     $expected = @(
-        # zip ルート
+        # zip ルート (Install.bat が <親>/ にコピーするショートカット bat 含む)
         'Install.bat',
         'INSTALL_README.txt',
         'show_folder_dialog.ps1',
+        'Launcher.bat',
+        'Manager.bat',
         # files/ 配下 = インストール後の <親>\GCTonePrism\ に展開される payload
-        'files\Launcher.bat',
-        'files\Manager.bat',
         'files\GCTonePrism_Launcher\GCTonePrism_Launcher.exe',
         'files\GCTonePrism_Manager\GCTonePrism_Manager.exe',
         'files\GCTonePrism_Manager\GCTonePrism_Manager.exe.config',

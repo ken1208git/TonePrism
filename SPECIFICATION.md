@@ -808,22 +808,34 @@ csproj 命名規則は `GCTonePrism_<Companion 名>` で Manager (`GCTonePrism_M
 #### 3.7.1 配布形態
 
 - **配布物**: 1 つの zip ファイルにインストーラと全コンポーネントを同梱
-- **zip 内の正規構造**: zip ルートに `Install.bat` / `INSTALL_README.txt` を直置きし、`files/` wrapper の中に component フォルダ群と日常起動ショートカット（`Launcher.bat` / `Manager.bat`）を置く。Install.bat はこの `files/` をインストール先にコピーする規約のため、本構造は厳守する（§3.7.2 / §3.7.6 と整合）。
+- **zip 内の正規構造**: zip ルートに `Install.bat` / `INSTALL_README.txt` / `show_folder_dialog.ps1` / `Launcher.bat` / `Manager.bat` を直置きし、`files/` wrapper の中に component フォルダ群を置く。`Install.bat` は `files/` を `<親>/GCTonePrism/` にコピーし、zip ルートの `Launcher.bat` / `Manager.bat` を `<親>/` 直下 (= GCTonePrism/ の 1 階層上) にコピーする規約。
 
   ```
   GCTonePrism_v<version>.zip
   ├── Install.bat                            # 初回インストール用バッチ
   ├── INSTALL_README.txt                     # 部員向けインストール手順書
-  └── files/                                 # 配布物本体（中身が <インストール先>/GCTonePrism/ にコピーされる）
-      ├── Launcher.bat                       # 来場者用 Launcher 起動ショートカット（§3.7.5）
-      ├── Manager.bat                        # 運営用 Manager 起動ショートカット
+  ├── show_folder_dialog.ps1                 # Install.bat の FolderBrowserDialog helper
+  ├── Launcher.bat                           # 来場者用 Launcher 起動ショートカット（§3.7.5、<親>/ 直下にコピーされる）
+  ├── Manager.bat                            # 運営用 Manager 起動ショートカット（同上）
+  └── files/                                 # 配布物本体（中身が <親>/GCTonePrism/ にコピーされる）
       ├── GCTonePrism_Launcher/              # Launcher（Godot エクスポート成果物 + プラグイン DLL）
       │   └── Companions/                    # Companions の実行ファイル群（§2.4）
       ├── GCTonePrism_Manager/               # Manager（dotnet publish 成果物）
       └── GCTonePrism_Updater/               # Updater（dotnet publish 成果物、§3.7.4）
   ```
 
-- **ルート ショートカット（`Launcher.bat` / `Manager.bat`）の設置理由**: インストール後の最終構造で、部員は `GCTonePrism/Launcher.bat` をダブルクリックするだけで Launcher を起動できる。`GCTonePrism/GCTonePrism_Launcher/GCTonePrism_Launcher.exe` まで辿る運用は来場スタッフ / 部員の日常使いには煩雑なため、ルート直下のショートカットを必須とする。中身は `start "" "%~dp0GCTonePrism_Launcher\GCTonePrism_Launcher.exe"` の最小 wrapper、Manager.bat も同様。
+  インストール後の構造:
+  ```
+  <親>/                                      # ユーザーが Install.bat で選んだ親フォルダ
+  ├── Launcher.bat                           # 部員が日常的にダブルクリックする入口
+  ├── Manager.bat                            # 運営担当者の入口
+  └── GCTonePrism/                           # 本体 (部員は通常触らない)
+      ├── GCTonePrism_Launcher/...
+      ├── GCTonePrism_Manager/...
+      └── GCTonePrism_Updater/...
+  ```
+
+- **ルート ショートカット（`Launcher.bat` / `Manager.bat`）の設置理由**: インストール後、部員は `<親>` フォルダ (例: `D:\Games`) を開けば即 `Launcher.bat` が見える運用にする。旧設計では `<親>/GCTonePrism/Launcher.bat` の位置だったため、部員が `GCTonePrism/` サブフォルダに入る一手間が必要だったが、来場スタッフ / 部員の日常使いでは煩雑だったため Phase 2 で `<親>/` 直下に変更。中身は `start "" "%~dp0GCTonePrism\GCTonePrism_Launcher\GCTonePrism_Launcher.exe"` の最小 wrapper、Manager.bat も同様。配置自体は Install.bat の `copy /Y` 経由で行う (zip 構造上は zip ルートに置く)。
 
 - **配布チャネル**: GitHub Releases
   - 公開リポジトリのため学校 LAN 外からもアクセス可能（家での個人テスト等に対応）
@@ -920,7 +932,7 @@ Launcher / Manager / Companions / Updater は常に 1 つの zip に同梱され
 
 Launcher はアップデート操作の主体ではない。これは「ゲーム来場者が普通に触る画面でアップデート操作可能になっているのは好ましくない」という権限分離の発想による。
 
-- **日常起動**: 部員 / 来場スタッフは `GCTonePrism/Launcher.bat` をダブルクリックで起動する（§3.7.1 のルート ショートカット規約）。`GCTonePrism/GCTonePrism_Launcher/GCTonePrism_Launcher.exe` の直接起動は想定しない（パス煩雑のため）
+- **日常起動**: 部員 / 来場スタッフは `<親>/Launcher.bat` をダブルクリックで起動する（§3.7.1 のルート ショートカット規約、Phase 2 で `GCTonePrism/Launcher.bat` から `<親>/Launcher.bat` に階層変更）。`GCTonePrism/GCTonePrism_Launcher/GCTonePrism_Launcher.exe` の直接起動は想定しない（パス煩雑のため）
 - 起動時に GitHub Releases API で新バージョン有無を確認（バックグラウンド、起動を遅延させない）
 - 新バージョンあり時はスクリーンセーバー画面または設定画面に小さな通知バナーを表示
   - 文言例: 「新バージョンが利用可能です。Manager から更新してください。」
@@ -2841,6 +2853,7 @@ Install.bat により以下の構造で展開される：
 
 | 日付 | バージョン | 変更内容 | 変更者 |
 | --- | --- | --- | --- |
+| 2026-05-12 | 1.10.9 | §3.7.1 / §3.7.5 のショートカット bat (`Launcher.bat` / `Manager.bat`) 配置を **1 階層上** (= `<親>` 直下) に変更 (#108 Phase 2、ユーザー UX 要望)。旧: `<親>/GCTonePrism/Launcher.bat` (部員が GCTonePrism/ サブフォルダに入る一手間あり)、新: `<親>/Launcher.bat` (`<親>` を開けば即ダブルクリック可能)。zip 内構造も `files/Launcher.bat` から zip ルートの `Launcher.bat` に移動、Install.bat が `<親>/` へ `copy /Y` で配置する。bat 内 path も `%~dp0GCTonePrism_Launcher\...` → `%~dp0GCTonePrism\GCTonePrism_Launcher\...` に更新 (1 階層分の親パス追加)。INSTALL_README.txt / Install.bat の完了 message も同期更新。インストール後の見た目: `<親>/Launcher.bat`、`<親>/Manager.bat`、`<親>/GCTonePrism/` が並ぶ形に。 | Kenshiro Kuroga & Claude |
 | 2026-05-12 | 1.10.8 | §3.7.1 / §3.7.2 / §3.7.5 を #108 Phase 2 の Install.bat 実装に合わせて更新：(a) §3.7.1 の正規 zip 構造に `files/Launcher.bat` / `files/Manager.bat` の **ルート ショートカット bat** を追加（インストール後の `GCTonePrism/Launcher.bat` ダブルクリックで日常起動できるようにし、部員が `GCTonePrism/GCTonePrism_Launcher/GCTonePrism_Launcher.exe` まで辿る煩雑さを解消）。(b) §3.7.2 初回インストールを **Approach C** に再定義：PowerShell `FolderBrowserDialog` で親フォルダ選択、入れ子検知は「親パス末尾が `GCTonePrism` で終わるか」のみに簡素化（旧仕様の `GCTonePrism_Manager` 配下チェックは廃止）、既存検出時は Y/N 警告で「通常のアップデートは Manager UI から推奨 / 緊急時のみ Y で上書き / ゲームデータ（prism.db / games/ / backups/ / responses/ / logs/）は維持」を明示、稼働中 Manager / Launcher は自動 kill せず手動 close 待機（自動 kill は §3.7.4 Updater の責務に残す）、最後に Manager 起動 Y/N プロンプト（旧仕様の自動起動は廃止）。Install.bat = 初回 + 手動アップデート両対応（Approach C）、Manager UI 経由（§3.7.3）が壊れた / 未実装の場合の復旧経路として位置付け。(c) §3.7.5 Launcher 側の役割に「日常起動は `GCTonePrism/Launcher.bat` から」の規約を明記。実装は `templates/Install.bat` / `templates/INSTALL_README.txt` / `templates/Launcher.bat` / `templates/Manager.bat` で完結、`Release.ps1` の Copy-Templates / Assert-ExpectedFiles も同期更新。 | Kenshiro Kuroga & Claude |
 | 2026-05-11 | 1.10.7 | §3.7.7 から `RELEASE_VERSION` ファイルへの言及を削除 (#108 Phase 1 関連)：Bundle version も `CHANGELOG.md` の最新 `### [Bundle vX.Y.Z]` エントリから自動取得する形に統合。`RELEASE_VERSION` ファイルは廃止し、ソースとなるファイルを CHANGELOG.md 1 つに集約してエントリの重複登録を避ける。`Release.ps1` は `-Version` 引数を optional 化、省略時は CHANGELOG から自動取得。AGENTS.md "Release and Versioning" の文言も同方式に対応。§3.7.8 チェックリストの `RELEASE_VERSION bump` 項目を「CHANGELOG `## Bundle` セクションに新エントリ追加」に書き換え。 | Kenshiro Kuroga & Claude |
 | 2026-05-11 | 1.10.6 | §3.7.7 を CHANGELOG ベースの release_notes 生成設計に更新 (#108 Phase 1 関連)：`release_notes/` ディレクトリ案を廃止し、`CHANGELOG.md` の `## Bundle` セクションを SoT として `Release.ps1` が該当 Bundle エントリを抽出して `gh release create --notes` に直接渡す形に変更。重複記述を避け、CHANGELOG を SoT に統一。AGENTS.md に新規「CHANGELOG Section Roles」セクションを追加し、`## Bundle` = エンドユーザー向け summary / `## Launcher` `## Manager` = 開発者向け詳細 / `## Release Tooling` = 配布インフラ履歴、という役割分担を明文化。Bundle bump はリリース実行時のみ（開発中の component bump とは別タイミング）という運用ルールも明記。 | Kenshiro Kuroga & Claude |

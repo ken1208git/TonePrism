@@ -34,6 +34,18 @@
 #### Fixed (PR #149 シニアレビュー round 1 + Codex P2)
 
 - **[Codex P2] FolderBrowserDialog 選択パス内の `!` 文字が delayed expansion で破壊される bug**: `Install.bat` 全体で `setlocal enabledelayedexpansion` を有効化していたため、選択パスに `!` が含まれる場合 (例: `D:\Backup!\` 等のユーザー命名パス) に `for /f ... do set INSTALL_PARENT=%%P` の段階で `!` が delayed expansion token として解釈され削除される。本ファイル refactor 後は `!VAR!` 参照が実質ゼロのため、`setlocal disabledelayedexpansion` に変更して構造的に解消
+- **ショートカット bat (`Launcher.bat` / `Manager.bat`) の配置を 1 階層上に変更** (ユーザー UX 要望):
+  - 旧: `<親>/GCTonePrism/Launcher.bat` (部員が `GCTonePrism/` サブフォルダに入る必要があった)
+  - 新: `<親>/Launcher.bat` (`<親>` を開けば即ダブルクリック可能)
+  - インストール後の見た目: `<親>/Launcher.bat` + `<親>/Manager.bat` + `<親>/GCTonePrism/` が並ぶ
+  - zip 内構造: `files/Launcher.bat` → zip ルートの `Launcher.bat` に移動 (`files/` は component 本体専用に)
+  - Install.bat: `:copy_shortcuts` label を追加し、files/ → `<親>/GCTonePrism/` の robocopy 後に zip ルートの `Launcher.bat` / `Manager.bat` を `copy /Y` で `<親>/` に配置
+  - Launcher.bat / Manager.bat 内 path: `%~dp0GCTonePrism_Launcher\...` → `%~dp0GCTonePrism\GCTonePrism_Launcher\...` (1 階層分の親パス追加)
+  - Manager 起動 Y/N の `start` path: `%INSTALL_TARGET%\Manager.bat` → `%INSTALL_PARENT_NO_TRAIL%\Manager.bat` (`<親>/Manager.bat`)
+  - Release.ps1 Copy-Templates: `filesTemplates` を空配列に、`rootTemplates` に Launcher.bat / Manager.bat を追加
+  - Assert-ExpectedFiles: `files\Launcher.bat` / `files\Manager.bat` → zip ルートの `Launcher.bat` / `Manager.bat`
+  - INSTALL_README.txt: 日常使い path 例 (`D:\Games\Launcher.bat`) に更新
+  - SPEC §3.7.1 (zip 構造 + インストール後構造) + §3.7.5 (Launcher 日常起動 path) + 変更履歴 v1.10.9 更新
 - **Install.bat の cmd parser 問題を構造的に解消 (`.ps1` 切り出し + `[...]` 使用)**: 数回の試行錯誤を経て、根本原因は (a) 長い `set "PS_DIALOG_CMD=...日本語..."` の Japanese byte 列が cmd の line tokenize を壊し PS に malformed command を渡す、(b) `set "..."` 内の `^|` が literal で残り PS に届く (cmd quoted set では `^` 非 escape)、(c) `echo (text)` の `(` が cmd で block 開始と解釈される、と判明。これらを構造的に回避:
   - **PS dialog code を `templates/show_folder_dialog.ps1` に切り出し**: cmd parsing を経由せず PS native の UTF-8 処理に任せる。Japanese description (`'GCTonePrism のインストール先の親フォルダを選択してください'`) を維持可能。Install.bat 側は `powershell.exe -File "%~dp0show_folder_dialog.ps1"` で起動するだけ
   - **echo の `(` `)` を `[` `]` に置換 (14 箇所)**: `[` `]` は cmd で escape 不要、`^(` `^)` の top-level 不安定挙動を回避

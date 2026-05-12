@@ -31,12 +31,16 @@
 
 【日常の起動方法】
 
-インストール先 GCTonePrism\ フォルダの中に以下の 2 つのショートカットがあります。
+インストール時に選んだ「親フォルダ」直下に、以下の 2 つのショートカットが
+作成されます。
 
 - Launcher.bat  ← 来場者向け Launcher を起動 (通常はこれを使う)
 - Manager.bat   ← 運営担当者向け Manager を起動 (ゲーム管理 / アンケート確認)
 
-それぞれダブルクリックで起動できます。
+例: D:\Games を親に選んだ場合
+  D:\Games\Launcher.bat       ← ダブルクリックで Launcher 起動
+  D:\Games\Manager.bat        ← ダブルクリックで Manager 起動
+  D:\Games\GCTonePrism\       ← 本体 (普段は触らない)
 
 
 【アップデート方法】
