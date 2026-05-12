@@ -41,14 +41,17 @@ REM FolderBrowserDialog paths containing `!` (e.g. D:\Backup!\) are preserved
 REM as-is. No `!VAR!` references exist in this file.
 setlocal disabledelayedexpansion
 
-set SCRIPT_DIR=%~dp0
-set FILES_DIR=%SCRIPT_DIR%files
+REM Quoted set form: path-derived values may contain cmd metachars (`&`, `^` 等)
+REM e.g. if zip is extracted under `D:\R&D\`. Unquoted assignment would split the
+REM line into multiple commands and abort. Quoted form stores the value literally.
+set "SCRIPT_DIR=%~dp0"
+set "FILES_DIR=%SCRIPT_DIR%files"
 REM Exit code sentinel: failure paths goto :fail to set 1.
-set EXIT_CODE=0
+set "EXIT_CODE=0"
 
 REM ---- files/ existence check (top-level, no Japanese echo inside block) ----
 if exist "%FILES_DIR%" goto :files_ok
-echo [FAIL] files/ ディレクトリが見つかりません: %FILES_DIR%
+echo [FAIL] files/ ディレクトリが見つかりません: "%FILES_DIR%"
 echo        zip を正しく展開してから Install.bat を実行してください。
 goto :fail
 :files_ok
@@ -73,12 +76,17 @@ REM Why a separate .ps1 (vs inline -Command "..."):
 REM   cmd's bat parser cannot reliably tokenize a long `set "PS_CMD=...日本語..."`
 REM   string. The Japanese byte sequence splits adjacent ASCII tokens like
 REM   System.Windows.Forms, and PS receives malformed input.
+REM 重要: INSTALL_PARENT は caller env から inherit する可能性があるため、dialog
+REM 起動 *前* に明示的にクリア。`set /p` は input が空 (file が空) なら変数を
+REM 更新しないため、初期化しないと前回値 / 環境値が leak して別パスへ install
+REM するリスクあり (bot review P2 #4)。
+set "INSTALL_PARENT="
 set "TEMP_DIALOG_OUT=%TEMP%\gctone_install_dialog_%RANDOM%.tmp"
-powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0show_folder_dialog.ps1" > "%TEMP_DIALOG_OUT%"
-set DIALOG_EXIT=%ERRORLEVEL%
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "%SCRIPT_DIR%show_folder_dialog.ps1" > "%TEMP_DIALOG_OUT%"
+set "DIALOG_EXIT=%ERRORLEVEL%"
 
-if %DIALOG_EXIT% EQU 0 goto :dialog_ok
-if %DIALOG_EXIT% EQU 2 goto :dialog_cancel
+if "%DIALOG_EXIT%"=="0" goto :dialog_ok
+if "%DIALOG_EXIT%"=="2" goto :dialog_cancel
 goto :dialog_fail
 
 :dialog_ok
@@ -121,7 +129,7 @@ for %%F in ("%INSTALL_PARENT_NO_TRAIL%") do set "INSTALL_PARENT_LEAF=%%~nxF"
 if /i not "%INSTALL_PARENT_LEAF%"=="GCTonePrism" goto :not_nested
 echo.
 echo [FAIL] 選択されたフォルダ自体が GCTonePrism です:
-echo        %INSTALL_PARENT%
+echo        "%INSTALL_PARENT%"
 echo.
 echo        「親フォルダ」を選んでください [その下に GCTonePrism\ が作成されます]。
 echo        例: D:\Games\GCTonePrism\ にインストールしたい場合は D:\Games を選択。
@@ -130,7 +138,7 @@ goto :fail
 
 set "INSTALL_TARGET=%INSTALL_PARENT_NO_TRAIL%\GCTonePrism"
 echo.
-echo インストール先: %INSTALL_TARGET%
+echo インストール先: "%INSTALL_TARGET%"
 echo.
 
 REM ---- Existing install check: dispatch to top-level labels ----
@@ -203,7 +211,7 @@ echo [INFO] 新規インストールを開始します...
 mkdir "%INSTALL_TARGET%" 2>nul
 if exist "%INSTALL_TARGET%\" goto :new_mkdir_ok
 echo.
-echo [FAIL] インストール先フォルダを作成できませんでした: %INSTALL_TARGET%
+echo [FAIL] インストール先フォルダを作成できませんでした: "%INSTALL_TARGET%"
 echo        書き込み権限を確認してください。
 goto :fail
 :new_mkdir_ok
@@ -229,7 +237,7 @@ goto :install_done
 
 :shortcut_failed
 echo.
-echo [FAIL] ショートカット bat のコピーに失敗しました [%INSTALL_PARENT_NO_TRAIL%]。
+echo [FAIL] ショートカット bat のコピーに失敗しました ["%INSTALL_PARENT_NO_TRAIL%"]。
 echo        書き込み権限を確認してください。
 goto :fail
 
@@ -237,10 +245,10 @@ goto :fail
 
 echo.
 echo ============================================================================
-echo  インストール完了: %INSTALL_TARGET%
+echo  インストール完了: "%INSTALL_TARGET%"
 echo ============================================================================
 echo.
-echo  日常使い [%INSTALL_PARENT_NO_TRAIL%\ 直下のショートカット]:
+echo  日常使い ["%INSTALL_PARENT_NO_TRAIL%"\ 直下のショートカット]:
 echo    Launcher.bat   [来場者用 Launcher 起動]
 echo    Manager.bat    [運営用 Manager 起動]
 echo.

@@ -34,6 +34,11 @@
 #### Fixed (PR #149 シニアレビュー round 1 + Codex P2)
 
 - **[Codex P2] FolderBrowserDialog 選択パス内の `!` 文字が delayed expansion で破壊される bug**: `Install.bat` 全体で `setlocal enabledelayedexpansion` を有効化していたため、選択パスに `!` が含まれる場合 (例: `D:\Backup!\` 等のユーザー命名パス) に `for /f ... do set INSTALL_PARENT=%%P` の段階で `!` が delayed expansion token として解釈され削除される。本ファイル refactor 後は `!VAR!` 参照が実質ゼロのため、`setlocal disabledelayedexpansion` に変更して構造的に解消
+- **PR #149 Codex bot review 対応 (P2 #4 #5 #6)**:
+  - **P2 #4**: `INSTALL_PARENT` が caller env から inherit して `set /p` が input なしの場合に stale 値で続行する path を解消。`set "INSTALL_PARENT="` を dialog 起動 *前* に追加して initialize
+  - **P2 #5**: `set SCRIPT_DIR=%~dp0` / `set FILES_DIR=...` の unquoted 形式は zip 展開 path に `&` 等の cmd metachar (例: `D:\R&D\`) が含まれると line split で abort する path だった → `set "VAR=value"` quoted 形式に統一
+  - **P2 #6**: `echo %INSTALL_TARGET%` 等 user-controlled path を出力する 7 箇所の echo を `echo "%VAR%"` 形式に変更。`%VAR%` 展開後の path に `&` 含むと cmd の multi-command split で異常出力 / fragment 実行になる path を解消。引用符付きの出力 (`インストール先: "D:\Games\GCTonePrism"`) になるが、edge case 防御として allowed
+  - **過去 review で既に解消**: P1 #1 (overwrite-process delayed expansion) は top-level goto refactor 済、P2 #2 (path 内 `!`) は disabledelayedexpansion 済、P2 #3 (PS 失敗 vs Cancel) は 3-way dispatch 済
 - **Install.bat の cmd parse cascade 問題を根本解決: staging encoding を cp932 (Shift-JIS) に変換**: ユーザー実機テストで何度試しても解消しなかった「`'�に'` `'em.Windows.Forms'` `'��データは維持されます:'` 等の 'is not recognized' 連鎖エラー + Manager 起動後の黒画面残存」の根本原因が判明: **`chcp 65001` は console output codepage のみ切り替え、cmd の bat ファイル parser は **システム codepage** (JP Windows = cp932) で読み続ける** 仕様。UTF-8 で書かれた長文 Japanese echo (`Manager が壊れて起動できない / クリーンインストールしたい場合のみ Y を押してください。` 等 30+ chars) の byte 境界を parser が mis-tokenize → cascade。修正:
   - **Release.ps1 Copy-Templates が .bat staging 時に UTF-8 → cp932 変換**: cmd の system codepage と一致するので parser が natively 読める。長文 Japanese 行も安全に処理。デメリットの非 JP Windows での mojibake は JP 校内向け配布なので OK
   - **Install.bat から `chcp 65001` ロジック撤去**: cp932 file ↔ cp932 system で一致するため不要。同時に「ASCII boundary rule」も削除 (codepage 切替がないので boundary 自体存在しない)
