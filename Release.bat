@@ -130,11 +130,30 @@ powershell.exe -ExecutionPolicy Bypass -File "%SCRIPT_DIR%Release.ps1" %FORWARDE
 
 set EXIT_CODE=%ERRORLEVEL%
 echo.
-if %EXIT_CODE% NEQ 0 (
-    echo [FAIL] Release.ps1 が exit code %EXIT_CODE% で終了しました
-) else (
-    echo Release.bat: 正常終了
-)
+REM Exit code dispatch via top-level goto labels (NOT if/else block).
+REM cmd's bat parser reads files under the system codepage (cp932 on JP locale),
+REM so multi-byte Japanese inside `if cond (echo ...)` blocks can mis-tokenize
+REM and emit `'fragment' is not recognized` errors. The Install.bat refactor
+REM (#108 Phase 2) established this pattern; applying the same fix here after
+REM PR #149 round 3 reintroduced the issue. Each echo lives at top level.
+REM Codes (matches Release.ps1): 0 = success, 1 = failure, 2 = tag conflict skip,
+REM 3 = N answer skip. Caller (CI) reads %ERRORLEVEL% to distinguish all 4.
+if %EXIT_CODE% EQU 0 goto :ec_success
+if %EXIT_CODE% EQU 2 goto :ec_skip_conflict
+if %EXIT_CODE% EQU 3 goto :ec_skip_n
+goto :ec_fail
+:ec_success
+echo Release.bat: 正常終了
+goto :ec_done
+:ec_skip_conflict
+echo Release.bat: publish skip [exit 2: tag conflict + -Force なし、zip は生成済み]
+goto :ec_done
+:ec_skip_n
+echo Release.bat: publish skip [exit 3: Y/N の N 回答、zip は生成済み]
+goto :ec_done
+:ec_fail
+echo [FAIL] Release.ps1 が exit code %EXIT_CODE% で終了しました
+:ec_done
 
 if %NO_PAUSE% EQU 0 (
     echo.

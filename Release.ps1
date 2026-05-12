@@ -14,9 +14,10 @@
           - Windows 同梱の .NET Framework MSBuild 4 は csc が古すぎて使えない（VS Build Tools のインストールが必要、~1-2 GB）
         - release/v<version>/files/ に staging
         - Compress-Archive で release/GCTonePrism_v<version>.zip 生成
-        - gh release create でアップロード（-SkipUpload で抑止）
+        - zip 完成後、Y/N 確認プロンプト → Y なら gh release create でアップロード、N なら zip だけ残して終了
+          (`-SkipUpload` で confirm prompt 自体を skip。CI 等の non-interactive 運用向け)
 
-    TODO Phase 2 (#108): templates/Install.bat / INSTALL_README.txt を staging に同梱
+    Phase 2 (#108) 完成: templates/Install.bat / INSTALL_README.txt / Launcher.bat / Manager.bat 同梱
     TODO Phase 3 (#108): GCTonePrism_Updater/ の dotnet publish を追加
     TODO #101:           GCTonePrism_Launcher/Companions/ のループを追加
     TODO Monitor:        GCTonePrism_Monitor/ 追加時にビルドステップ追加
@@ -120,14 +121,14 @@ try {
 $OutputEncoding = $script:Utf8NoBomEncoding
 
 # ============================================================================
-# Native command 呼び出しの方針 (v1.0.8 で再整理)
+# Native command 呼び出しの方針 (v0.1.8 で再整理)
 # ============================================================================
 # 経緯: PS 5.1 + $ErrorActionPreference='Stop' 下では、`&` 演算子 + native
 # command の組み合わせで「exit 非ゼロ + stderr 出力」を返すコマンドが
 # NativeCommandError の terminating error を発生させる。
-# v1.0.6 までは `2>$null` / `2>&1 | Out-String` 系で回避できると考えていたが、
-# v1.0.7 で実証された通り PS の error stream への ErrorRecord 化が redirect
-# よりも先に発火するため redirect は防御にならない。v1.0.8 で
+# v0.1.6 までは `2>$null` / `2>&1 | Out-String` 系で回避できると考えていたが、
+# v0.1.7 で実証された通り PS の error stream への ErrorRecord 化が redirect
+# よりも先に発火するため redirect は防御にならない。v0.1.8 で
 # `Invoke-NativeWithCapture` ヘルパー (System.Diagnostics.Process 直叩き) に
 # 一本化、`&` 系の patterns は「success exit が確証できる場合のみ」に格下げ。
 #
@@ -158,36 +159,36 @@ $OutputEncoding = $script:Utf8NoBomEncoding
 #          # 引数 quoting + finally で [Console]::OutputEncoding を UTF-8 に再ピン留め
 #          # 大量 verbose 出力 + 長時間処理向け (Godot CLI export / msbuild / nuget restore)
 #
-#      注: gh release create/delete は v1.0.7 まで (a) PASS_THROUGH だったが、TTY 検出
-#          で進捗 OFF + 完了まで無音になる UX 問題のため v1.0.8 で
+#      注: gh release create/delete は v0.1.7 まで (a) PASS_THROUGH だったが、TTY 検出
+#          で進捗 OFF + 完了まで無音になる UX 問題のため v0.1.8 で
 #          Invoke-NativeWithCapture -ShowProgress に移行
 #
 # ANTI-PATTERNS (使用禁止) — いずれも踏み抜き履歴と deprecation 時点を 2 値で記録:
 #
 #   X. STOP_TRAP — & cmd 2>&1 / $var = & cmd 2>&1
 #      stderr が ErrorRecord として success stream に流れ Stop trap 発火。
-#      初回 deprecate from v1.0.0 (script 新設時点)。
+#      初回 deprecate from v0.1.0 (script 新設時点)。
 #      回避: Invoke-NativeWithCapture へ移行。
 #
 #   X. SUPPRESS_BOTH — & cmd 2>$null | Out-Null
-#      踏み抜き: v1.0.6 (本番 release で gh release view が trap 発火)
-#      deprecation: v1.0.8 (anti-pattern として正式格下げ)
+#      踏み抜き: v0.1.6 (本番 release で gh release view が trap 発火)
+#      deprecation: v0.1.8 (anti-pattern として正式格下げ)
 #      「2>$null で stderr を捨てれば trap 防げる」前提が誤りだった
 #
 #   X. CAPTURE_DIAGNOSTIC — $out = & cmd 2>&1 | Out-String
-#      踏み抜き: v1.0.7 (gh release view の "release not found" stderr で trap)
-#      deprecation: v1.0.8 (anti-pattern として正式格下げ)
+#      踏み抜き: v0.1.7 (gh release view の "release not found" stderr で trap)
+#      deprecation: v0.1.8 (anti-pattern として正式格下げ)
 #      「Out-String を経由すれば Stop の判定対象外」前提が誤りだった
 #
 #   X. CAPTURE_STDOUT — $out = & cmd 2>$null
-#      踏み抜き履歴なし、deprecation: v1.0.8
+#      踏み抜き履歴なし、deprecation: v0.1.8
 #      SUPPRESS_BOTH と同じ構造 (2>$null) を持つため同じ trap 形状。
-#      本 script では vswhere で使用していたが v1.0.8 で helper に移行、
+#      本 script では vswhere で使用していたが v0.1.8 で helper に移行、
 #      残存 call site ゼロのため anti-pattern 化
 #
 #   X. TRY_CATCH_NATIVE — try { & cmd 2>&1 | Out-String } catch { ... }
-#      導入: v1.0.7 (CAPTURE_DIAGNOSTIC の trap 回避策として)
-#      deprecation: v1.0.8 (Invoke-NativeWithCapture が同目的を関数化したため不要)
+#      導入: v0.1.7 (CAPTURE_DIAGNOSTIC の trap 回避策として)
+#      deprecation: v0.1.8 (Invoke-NativeWithCapture が同目的を関数化したため不要)
 #
 # PS 7.3+ 移行時の注意 (現状未対応):
 #   PS 7.3 以降は $PSNativeCommandUseErrorActionPreference (default $true) が
@@ -346,7 +347,7 @@ function Invoke-NativeWithCapture {
     #   して機能せず、引数のパースが破損する (\ × N + " → \ × (N/2) + " デコード)。
     #   現 call site (zip / 一時 notes / vswhere) はいずれも trailing backslash を
     #   持たないため安全。新規 call site でディレクトリパスを渡す場合は要注意。
-    # TODO (post v1.0.8): 共通化候補。MSVC argv 規則の特殊ケース (\ を引用直前) で
+    # TODO (post v0.1.8): 共通化候補。MSVC argv 規則の特殊ケース (\ を引用直前) で
     #                     Invoke-ExternalProcess との 2 箇所が silent に divergence
     #                     する危険、共通 helper 切り出し時に CommandLineToArgvW 規則
     #                     準拠 (\ × N + " → \\ × N + \") に置換
@@ -376,7 +377,7 @@ function Invoke-NativeWithCapture {
         # 両 stream を async で読みデッドロック回避 (片方のバッファが満杯になると
         # child が block する)。WaitForExit() は timeout なし → network hang する
         # コマンド (gh API 呼び出し) では preflight が無限待機する path が残る
-        # → TODO (post v1.0.8): -TimeoutSeconds 引数 + WaitForExit($ms) への移行
+        # → TODO (post v0.1.8): -TimeoutSeconds 引数 + WaitForExit($ms) への移行
         $outTask = $proc.StandardOutput.ReadToEndAsync()
         $errTask = $proc.StandardError.ReadToEndAsync()
 
@@ -936,36 +937,83 @@ function Assert-Preflight {
     # uncommitted change
     Assert-WorkingTreeClean -Context "preflight"
 
-    # 既存リリースとのタグ衝突
-    if (-not $SkipUpload) {
-        # gh release view は release 不在時に exit 1 + stderr "release not found" を出す。
-        # Invoke-NativeWithCapture で stdout/stderr/exit を罠なく分離捕捉。
-        # `--json id`: 存在時の stdout を最小化 (capture 文字列が小さくなる、parse はしない)。
-        # 存在判定は exit code を一次軸、stderr 文字列マッチは「不在 vs 別種失敗」の識別のみ。
-        $releaseResult = Invoke-NativeWithCapture -FilePath 'gh' `
-            -Arguments @('release', 'view', "v$Version", '--json', 'id')
+    # 注: 既存リリースとのタグ衝突チェックは Resolve-TagConflict() で別フェーズ。
+    # zip 完成後 / Y/N upload prompt の前に呼ぶ設計 (zip 生成までは既存タグでも通す
+    # ことで、Install.bat 検証等の運用を救う; "publish 不可なのに Y を聞く" 順序を避ける)
+}
 
-        if ($releaseResult.ExitCode -eq 0) {
-            # 既存 release あり
-            if ($Force) {
-                Write-Warn "タグ v$Version は既存だが -Force のため後で削除して作り直す"
-                $script:DeleteExistingRelease = $true
-            } else {
-                Fail "GitHub Releases に v$Version が既存です。-Force で削除して作り直すか、別バージョンで実行してください。"
-            }
+# ============================================================================
+# Phase 9.5: 既存リリースとのタグ衝突チェック (zip 完成後、Y/N prompt の前に呼ぶ)
+# ============================================================================
+# Y/N prompt の前にチェックする理由:
+#   旧設計 (Y/N の後にチェック) では「publish 不可なのに Y を聞いて、Y 押させた後に
+#   Fail」というミスリードな順序になる。先にチェックすれば、conflict 検出時に
+#   「publish できません、zip は残します」と graceful exit でき、ユーザーが
+#   Y/N の判断をする前に状態を把握できる。
+
+function Resolve-TagConflict {
+    Write-Step "GitHub Releases タグ衝突チェック"
+
+    # gh release view は release 不在時に exit 1 + stderr "release not found" を出す。
+    # Invoke-NativeWithCapture で stdout/stderr/exit を罠なく分離捕捉。
+    # `--json id`: 存在時の stdout を最小化 (capture 文字列が小さくなる、parse はしない)。
+    # 存在判定は exit code を一次軸、stderr 文字列マッチは「不在 vs 別種失敗」の識別のみ。
+    $releaseResult = Invoke-NativeWithCapture -FilePath 'gh' `
+        -Arguments @('release', 'view', "v$Version", '--json', 'id')
+
+    if ($releaseResult.ExitCode -eq 0) {
+        # 既存 release あり
+        if ($Force) {
+            Write-Warn "タグ v$Version は既存だが -Force のため後で削除して作り直す"
+            $script:DeleteExistingRelease = $true
         } else {
-            # exit 非ゼロ → 不在 or 別種失敗。stderr の英文字列で識別
-            # (注: gh の i18n / 文言変更で取りこぼし可能性あり、その時は再 trapping。
-            #  本格的な structured 検出は --json + ConvertFrom-Json + HTTP 404 判定 etc.)
-            if ($releaseResult.StdErr -match 'release not found') {
-                Write-Ok "タグ衝突なし: v$Version"
-                $script:DeleteExistingRelease = $false
-            } else {
-                # 別種の失敗 (auth / network / API rate limit / gh install 破損 等)
-                # zip ビルド完了後の gh release create で fail するより、preflight で
-                # 早期 fail させて時間 / 計算資源を浪費しない
-                Fail "gh release view が予期せず失敗しました (exit $($releaseResult.ExitCode)):`n$($releaseResult.Combined.TrimEnd())"
-            }
+            # 既存 + -Force なし: publish 不可、Y/N に進ませず情報提示で graceful exit。
+            # exit code: 2 = tag conflict による publish skip (シニアレビュー round 3 M4)。
+            # 旧設計は exit 0 で「成功 + 公開なし」を表現していたが、CI が
+            # `Release.bat` を回した結果「publish できなかった」のか「publish した」のかを
+            # exit code 単独で区別できない silent path だった。新設計の exit code 体系:
+            #   0  = publish 成功 / -SkipUpload / -DryRun
+            #   1  = script の本来失敗 (build error / publish error / 環境破損等)
+            #   2  = tag conflict による publish skip (env state、CI から見ると "未発火")
+            #   3  = Y/N の N 回答による intentional skip
+            # Fail (exit 1 + 赤字 FAIL) ではなく warn + exit 2 にしている理由:
+            #   - zip 生成自体は成功している (Install.bat 検証等に流用可)
+            #   - publish 不可は「環境状態」であって「script の失敗」ではない
+            #   - 2 で区別すれば CI が "未発火" を検出して別途リトライ判断できる
+            Write-Host ""
+            Write-Warn "GitHub Releases に v$Version が既存です。本セッションでは publish できません。"
+            Write-Host ""
+            Write-Info "zip は以下に残っています (Install.bat 検証等に流用可):"
+            Write-Info "  $ZipPath"
+            Write-Host ""
+            Write-Info "publish するには以下のいずれか:"
+            Write-Info "  (a) .\Release.bat -Force"
+            Write-Info "     既存 v$Version を削除して同 version で publish 再実行"
+            Write-Info "     (再 build は走るが Godot / nuget の DL キャッシュは温存されるため初回より速い)"
+            Write-Info "  (b) CHANGELOG.md の ## Bundle に v$Version 以外の新 entry 追加 → .\Release.bat"
+            Write-Info "     version を bump して新規 publish"
+            Write-Host ""
+            exit 2
+        }
+    } else {
+        # exit 非ゼロ → 不在 or 別種失敗。stderr の英文字列で識別
+        # (注: gh の i18n / 文言変更で取りこぼし可能性あり、その時は再 trapping。
+        #  本格的な structured 検出は --json + ConvertFrom-Json + HTTP 404 判定 etc.)
+        if ($releaseResult.StdErr -match 'release not found') {
+            Write-Ok "タグ衝突なし: v$Version"
+            $script:DeleteExistingRelease = $false
+        } else {
+            # 別種の失敗 (auth / network / API rate limit / gh install 破損 等)
+            # この時点で zip は既に作成済み (New-Zip 完了後にこの関数が呼ばれる)。
+            # publish できなくとも zip 自体は流用可能なので、Fail 直前にパスを案内する。
+            # シニアレビュー M3: 既存タグの graceful exit path と同じ "zip は残っている"
+            # メッセージを network 失敗 path にも適用、ユーザーが zip を破棄されたと
+            # 誤解する path を防ぐ。
+            Write-Host ""
+            Write-Info "zip は以下に残っています (publish 失敗とは独立、Install.bat 検証等に流用可):"
+            Write-Info "  $ZipPath"
+            Write-Host ""
+            Fail "gh release view が予期せず失敗しました (exit $($releaseResult.ExitCode)):`n$($releaseResult.Combined.TrimEnd())"
         }
     }
 }
@@ -1269,27 +1317,74 @@ function Build-Manager {
 }
 
 # ============================================================================
-# Phase 6: Install.bat / INSTALL_README.txt 同梱 (Phase 2 で実装)
+# Phase 6: Install.bat / INSTALL_README.txt + Launcher.bat / Manager.bat 同梱
 # ============================================================================
+# zip 配布物の構造 (SPEC §3.7.1 正規 zip 構造):
+#   zip ルート:    Install.bat / INSTALL_README.txt
+#   zip files/:    Launcher.bat / Manager.bat (Install.bat が <インストール先>\GCTonePrism\
+#                  にコピーする payload、ユーザーは GCTonePrism\Launcher.bat 等で日常起動)
 
 function Copy-Templates {
     Write-Step "テンプレートを staging に同梱"
 
-    $installBat = Join-Path $RepoRoot 'templates\Install.bat'
-    $installReadme = Join-Path $RepoRoot 'templates\INSTALL_README.txt'
+    # zip ルート配置 (Install.bat / 設定 / dialog helper + ショートカット bat)
+    # Launcher.bat / Manager.bat は zip ルートに置き、Install.bat が <親>/ (=
+    # GCTonePrism/ の1つ上、選んだ親フォルダ直下) にコピーする規約 (Phase 2 で
+    # 階層変更、SPEC §3.7.1 参照)
+    $rootTemplates = @(
+        @{ Src = 'templates\Install.bat';            Dest = 'Install.bat';            Label = 'Install.bat' },
+        @{ Src = 'templates\INSTALL_README.txt';     Dest = 'INSTALL_README.txt';     Label = 'INSTALL_README.txt' },
+        @{ Src = 'templates\show_folder_dialog.ps1'; Dest = 'show_folder_dialog.ps1'; Label = 'show_folder_dialog.ps1 (Install.bat dialog helper)' },
+        @{ Src = 'templates\Launcher.bat';           Dest = 'Launcher.bat';           Label = 'Launcher.bat (shortcut, parent-level)' },
+        @{ Src = 'templates\Manager.bat';            Dest = 'Manager.bat';            Label = 'Manager.bat (shortcut, parent-level)' }
+    )
+    # files/ 配下配置: 現状なし (component 本体は Build フェーズで配置済み)
+    $filesTemplates = @()
 
-    if (-not (Test-Path $installBat)) {
-        Write-Warn "Install.bat が未作成です（Phase 2 / #108 で実装予定）"
-    } else {
-        Copy-Item $installBat (Join-Path $StagingDir 'Install.bat')
-        Write-Ok "Install.bat 同梱"
-    }
+    foreach ($tpl in ($rootTemplates + $filesTemplates)) {
+        $src = Join-Path $RepoRoot $tpl.Src
+        $dst = Join-Path $StagingDir $tpl.Dest
+        if (-not (Test-Path $src)) {
+            Fail "テンプレートが見つかりません: $src"
+        }
+        $dstDir = Split-Path $dst -Parent
+        if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Path $dstDir -Force | Out-Null }
 
-    if (-not (Test-Path $installReadme)) {
-        Write-Warn "INSTALL_README.txt が未作成です（Phase 2 / #108 で実装予定）"
-    } else {
-        Copy-Item $installReadme (Join-Path $StagingDir 'INSTALL_README.txt')
-        Write-Ok "INSTALL_README.txt 同梱"
+        if ($src -match '\.bat$') {
+            # cmd.exe は LF-only bat を parse できず double-click で即 close する
+            # (PR #140 で Release.bat、Phase 2 で Install.bat が踏んだ事故)。
+            # `.gitattributes` の `*.bat eol=crlf` は git checkout 時のみ強制する
+            # ため、Write tool 編集後の working tree LF が staging に流れ込む。
+            # ここで強制 CRLF normalize。
+            #
+            # **エンコーディング: cp932 (Shift-JIS) に変換して書き出す**:
+            #   cmd.exe の bat parser は **システム codepage** (JP Windows = cp932)
+            #   でファイルを読み、`chcp 65001` を bat 内で呼んでも切り替わるのは
+            #   console output codepage のみ、ファイル解析側は cp932 のまま。
+            #   UTF-8 で書かれた長文 Japanese echo は parser が byte 境界で
+            #   mis-tokenize して "is not recognized" 連鎖エラーになる
+            #   (Phase 2 で複数 round 試行錯誤の末判明)。
+            #   cp932 でファイルを置けば parser が natively 読めて Japanese 行も
+            #   安全。デメリット: 非 JP Windows (cp437/1252 等) では mojibake する
+            #   が、本配布は JP 校内向けなので OK。
+            $content = [System.IO.File]::ReadAllText($src, $script:Utf8NoBomEncoding)
+            $content = ($content -replace "`r`n", "`n") -replace "`n", "`r`n"
+            $cp932 = [System.Text.Encoding]::GetEncoding(932)
+            [System.IO.File]::WriteAllText($dst, $content, $cp932)
+        } elseif ($src -match '\.ps1$') {
+            # PS 5.1 は .ps1 ファイルを default で ASCII (Windows-1252) として読み込む
+            # ため、Japanese 等の non-ASCII char が含まれると mojibake になる。BOM が
+            # あれば UTF-8 として正しく読まれるため **UTF-8 with BOM** で staging。
+            # working tree の BOM 有無に依存しないよう ReadAllText で auto-detect
+            # して読み、Write 時に強制 BOM 付与。CRLF も bat と同じ理由で normalize
+            $content = [System.IO.File]::ReadAllText($src)  # auto-detect encoding via BOM/heuristics
+            $content = ($content -replace "`r`n", "`n") -replace "`n", "`r`n"
+            $utf8WithBom = [System.Text.UTF8Encoding]::new($true)
+            [System.IO.File]::WriteAllText($dst, $content, $utf8WithBom)
+        } else {
+            Copy-Item $src $dst -Force
+        }
+        Write-Ok "$($tpl.Label) 同梱"
     }
 }
 
@@ -1300,8 +1395,15 @@ function Copy-Templates {
 function Assert-ExpectedFiles {
     Write-Step "ExpectedFiles 検証"
 
-    # 期待ファイル一覧
+    # 期待ファイル一覧 (zip ルート + files/ 配下、SPEC §3.7.1 正規構造)
     $expected = @(
+        # zip ルート (Install.bat が <親>/ にコピーするショートカット bat 含む)
+        'Install.bat',
+        'INSTALL_README.txt',
+        'show_folder_dialog.ps1',
+        'Launcher.bat',
+        'Manager.bat',
+        # files/ 配下 = インストール後の <親>\GCTonePrism\ に展開される payload
         'files\GCTonePrism_Launcher\GCTonePrism_Launcher.exe',
         'files\GCTonePrism_Manager\GCTonePrism_Manager.exe',
         'files\GCTonePrism_Manager\GCTonePrism_Manager.exe.config',
@@ -1495,6 +1597,83 @@ if ($SkipUpload) {
     Write-Host ""
     Write-Host "SKIP-UPLOAD 完了: $ZipPath を確認してください。" -ForegroundColor Yellow
     exit 0
+}
+
+# zip 完成後の upload フロー (v0.1.9 で再設計):
+#   旧: preflight でタグ衝突チェック → build 前に即 fail (zip 検証用途も塞いでいた)
+#   v0.1.9 中間: build → zip → Y/N → 衝突チェック (Y 押させてから fail でミスリード)
+#   v0.1.9 最終: build → zip → 衝突チェック → Y/N (publish 可能な状態だけ Y を聞く)
+#
+# (1) タグ衝突チェック
+#       既存 + Force なし → 「publish できません」案内で graceful exit (zip は preserve)
+#       既存 + Force あり → warn + DeleteExistingRelease=true で続行
+#       不在            → OK で続行
+Resolve-TagConflict
+
+# (2) 公開確認 Y/N (ここまで来た時点で publish 可能 = 衝突なし or -Force)
+Write-Step "GitHub Releases 公開確認"
+Write-Info "Bundle version: $Version"
+Write-Info "zip ファイル:   $ZipPath"
+$zipBytes = (Get-Item $ZipPath).Length
+$zipSizeHuman = if ($zipBytes -ge 1MB) {
+    "$([math]::Round($zipBytes / 1MB, 1)) MB"
+} elseif ($zipBytes -ge 1KB) {
+    "$([math]::Round($zipBytes / 1KB, 1)) KB"
+} else { "$zipBytes B" }
+Write-Info "サイズ:        $zipSizeHuman"
+if ($script:DeleteExistingRelease) {
+    Write-Info "(-Force: 既存 v$Version を削除して再 publish 予定)"
+}
+Write-Host ""
+
+# Non-interactive 検出 (シニアレビュー round 4 M3 + round 5 M1):
+#   Read-Host は stdin が redirect されている / 端末がない環境で空文字列を返す。
+#   `'^(y|yes)$'` は空に一致しないので、CI で `-SkipUpload` 付け忘れた場合に
+#   何の警告もなく exit 3 (= N 回答 skip) になる silent path があった。
+#   これでは「user が意図的に N と答えた」のか「stdin がなくて空が返った」のか
+#   exit code で区別できず、exit code 体系 (2 = env state, 3 = user 判断) の
+#   区別が崩れる。明示的に「-SkipUpload を付けてください」と Fail (exit 1) する。
+#
+# 判定: UserInteractive AND -not IsInputRedirected。
+#   - UserInteractive: PS host が user 対話可能と判定したか (CI / Service 等で false)
+#   - IsInputRedirected: stdin がパイプやファイルから redirect されているか
+#
+# 重要 (round 5 M1): 各 API は **独立した try** で取得する。旧実装は両 API を
+# 1 つの try ブロックでまとめていたが、最初の API で `$isInteractive = $false`
+# が確定した後に 2 番目の API が例外を投げると、catch が `$true` に巻き戻して
+# silent path を再導入してしまっていた。独立 try で取得して最後に AND 合成
+# することで、片側 API 失敗が他方の確定判定を上書きしないようにする。
+# 取得失敗時の default は安全側 (interactive 扱い → 従来通り Read-Host に進む)。
+$ui = try { [Environment]::UserInteractive } catch { $true }
+$inputRedirected = try { [Console]::IsInputRedirected } catch { $false }
+$isInteractive = $ui -and -not $inputRedirected
+if (-not $isInteractive) {
+    Write-Host ""
+    Write-Warn "非対話環境 (CI / stdin redirected) を検出しました。"
+    Write-Info "Y/N upload prompt は対話前提のため、本セッションでは安全側で abort します。"
+    Write-Info "CI / 自動化からは `-SkipUpload` または `-DryRun` を明示指定してください。"
+    Write-Info "(zip は $ZipPath に残っています、別環境で publish するか SkipUpload で build-only 実行)"
+    Fail "non-interactive environment: -SkipUpload / -DryRun 未指定で Read-Host を呼ぼうとしました"
+}
+
+$confirmUpload = Read-Host "    GitHub Releases に v$Version を公開しますか？ (y/yes/n/no で回答)"
+# 厳格マッチ: `^y` だけだと `yikes` / `yo` 等の typo / 「YES (確認)」末尾括弧でも
+# 公開が走るため、`y` / `yes` 完全一致 (大小文字不問) のみ Y 扱い。
+# 誤判定で abort → 再実行する方が誤公開より低コスト (GitHub Releases publish は
+# 巻き戻し不可、明示的同意の意図に合わせる)
+if ($confirmUpload -inotmatch '^(y|yes)$') {
+    Write-Host ""
+    Write-Warn "アップロードをスキップしました。zip は $ZipPath に残っています。"
+    Write-Info "別環境での Install.bat 検証等に流用可。"
+    Write-Info "再度 publish を試みる場合は .\Release.bat を再実行 → y/yes 選択。"
+    Write-Info "(再 build (Godot export / msbuild) は走るが、Godot / nuget の DL キャッシュは"
+    Write-Info " 温存されるため初回より速い。`tag conflict` graceful exit と同じキャッシュ挙動)"
+    # exit code 3 = Y/N の N 回答による intentional skip (シニアレビュー round 3 M4)。
+    # tag conflict skip (exit 2) と区別する: 前者は env 起因の "publish 不可"、
+    # こちらは user の判断による "publish しない"。CI から見ると両方 "未発火" だが、
+    # リトライ可否 / オペレーター介入の必要性が違う。code 体系は Resolve-TagConflict
+    # コメント参照。
+    exit 3
 }
 
 Invoke-GhRelease

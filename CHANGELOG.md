@@ -29,7 +29,212 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
-### [Release Tooling v1.0.8] - 2026-05-12
+### [Release Tooling v0.1.9] - 2026-05-12
+
+#### Fixed (PR #149 シニアレビュー round 5)
+
+- **[M1] `isInteractive` 検出ロジックの catch reset が片側判定の non-interactive を上書きする silent path**: round 4 で導入した non-interactive 検出ブロックで、`[Environment]::UserInteractive` が `$false` 確定後に `[Console]::IsInputRedirected` getter が non-console host で例外を投げると、catch が `$isInteractive = $true` で上書きする path があった。WSH host / カスタム PS host で `UserInteractive=$false` だが IsInputRedirected getter が IOException を投げる → catch で reset → Read-Host 空文字 → exit 3 silent skip という、本修正が解消したかった silent path に戻ってしまう構造。修正: 各 API を独立 try で取得し最後に AND 合成 (`$ui = try { ... } catch { $true }` / `$inputRedirected = try { ... } catch { $false }` / `$isInteractive = $ui -and -not $inputRedirected`)。片側 API 失敗が他方の確定判定を巻き戻さない構造に
+- **[M2] exit 3 メッセージの「ビルドキャッシュは温存」表現が実装と乖離**: round 4 L4 で tag conflict path と表現統一した結果、「Godot export / msbuild は再実行されず、zip のみ再生成」と書いてしまったが、実装上は `Build-Launcher` / `Build-Manager` が毎回呼ばれ、`Clear-Staging` で staging も毎回削除、`bin\Release\` も clean build される。温存されるのは `tools/godot/` / `tools/nuget.exe` の **DL キャッシュ** のみで、Godot export / msbuild 出力は実際には再生成される。修正: 両 path のメッセージを「再 build (Godot export / msbuild) は走るが、Godot / nuget の DL キャッシュは温存されるため初回より速い」と正確化、Resolve-TagConflict 側も「再 build は走るが DL キャッシュは温存」と同じ表現に統一
+
+#### Changed (PR #149 シニアレビュー round 5)
+
+- **[L1] Install.bat:59 `set "EXIT_CODE=0"` → `set EXIT_CODE=0`**: numeric 規約 (line 51-55 で明文化済の「quote rule applies to path / user-input values, not to numeric flags」) を自分で破っていた 1 箇所を是正。`:fail` の `set EXIT_CODE=1` と表記揃え、他の numeric sentinel (`MANAGER_FOUND` / `LAUNCHER_FOUND` / `MANAGER_STARTED`) と一貫
+- **[L3] SPEC §3.7.2 入れ子検知に case-insensitive を明記**: 実装 (`if /i not "..." == "GCTonePrism"`) は case-insensitive だが SPEC は厳密 case-sensitive にも読めた。「比較は case-insensitive、`gctoneprism` / `GCTONEPRISM` も検出する。Windows の伝統的 path 比較に合わせる」と一文追加、将来 case-sensitive fs (ReFS / WSL) で挙動が変わる場合の参照点を明示
+- **[L5] INSTALL_README の copy 失敗 Q&A を 2 path で区別**: 旧 Q&A は `:copy_failed` (files/ → GCTonePrism/ の robocopy 失敗) だけを想定した記述で、`:shortcut_failed` (Launcher.bat / Manager.bat → `<親>/` の copy 失敗) の場合の権限確認先が異なる点に触れていなかった。「ファイルコピーに失敗」(GCTonePrism\ 配下の書き込み権限) と「ショートカット bat のコピーに失敗」(`<親>` 自体の書き込み権限) を別 Q&A に分離、学校サーバーで `<親>` のみ制限つきの稀ケースを救う
+
+#### Added (PR #149 シニアレビュー round 5)
+
+- **[L2] `show_folder_dialog.ps1` に try/finally Dispose 追加**: `FolderBrowserDialog` は `IDisposable` 実装、短命プロセスで GC でも回収されるが、`ShowDialog` 中の COM 例外 / Add-Type 後の例外 path で確実に native handle を解放するため明示 Dispose。catch 経路 + 通常終了経路の両方で `$d.Dispose()` が呼ばれる
+- **[L4] `show_folder_dialog.ps1` に `Set-StrictMode -Version Latest` 追加**: Release.ps1 (line 93) との整合性。$d が null 状態で property assign に至った場合に明確なエラー surface、silent runtime fault を防ぐ防御強化
+
+#### Fixed (PR #149 シニアレビュー round 4)
+
+- **[M2] robocopy コメントが「ユーザーデータ保護の主機構」を誤って伝える bug**: 旧コメントは `/XF` `/XD` を保護の主軸として説明していたが、実際に user data (prism.db / games / backups / responses / logs) を保護しているのは **robocopy の default 非ミラー挙動** (dest 側にあって source にないファイル / ディレクトリは touch しない) であり、`/XF /XD` は「source 側に勘違いで同名ファイル / ディレクトリが混入した場合の defense-in-depth」に過ぎない。現状 source (`files/`) には保護対象名は入らないので `/XF /XD` は 実質 no-op。誤解の害: 将来「コピー効率化のため `/MIR` 追加」を検討した時に「`/XF /XD` があるから user data は守られる」と誤判断 → `/MIR` の "source にないものを削除" 挙動で user data が即削除される silent path。修正: コメントを「PRIMARY protection = default 非ミラー挙動 / `/XF /XD` = defense-in-depth / **`/MIR` 追加禁止**、必要になった場合は `/XO` + pre-copy snapshot + SPEC §3.7.3 と同期」の警告文に書き直し
+- **[M3] `Read-Host` が non-interactive 環境で silent exit 3 になる bug**: Y/N upload prompt は対話前提だが、`Read-Host` は stdin redirect / 端末なし環境で空文字列を返し、`'^(y|yes)$'` regex に一致しないため exit 3 (= N 回答 skip) で終了する。CI で `-SkipUpload` 付け忘れた場合、エラーメッセージなしで Warn 行のみ出して silent skip。exit code 体系 (2 = env state, 3 = user 判断) の区別も崩れる。修正: Read-Host 前に `[Environment]::UserInteractive` + `[Console]::IsInputRedirected` で non-interactive を検出し、検出時は明示的に `Fail "non-interactive environment: -SkipUpload / -DryRun 未指定で Read-Host を呼ぼうとしました"` (exit 1) で abort、`-SkipUpload` または `-DryRun` を案内する Write-Info 付き
+- **[M1] Launcher.bat の `exit` 採用理由コメントが Launcher.bat の文脈で literally false**: 旧コメントは「Install.bat が Manager を起動する経路で residual cmd window 問題が出た」と書かれており、Manager.bat の文脈では正しいが Launcher.bat 自体は Install.bat の auto-start path から呼ばれない (Install.bat に Launcher 起動経路はない) ため事実関係がそのまま当てはまらない。copy-paste 痕跡で未来の保守者が「Launcher.bat も Install.bat に呼ばれているのか」と誤解する path。修正: 「leaf shortcut (他 bat の building block ではない) として Manager.bat と同じ `exit` discipline を予防的に適用」「観測された residual cmd 問題は Manager 経路のみ、Launcher.bat 自体は forward-looking consistency choice」と書き直し、参照は Manager.bat docstring に集約
+
+#### Changed (PR #149 シニアレビュー round 4)
+
+- **[L1] SPEC §3.7.5 「階層変更」表現を修正**: 旧記述「Phase 2 で `GCTonePrism/Launcher.bat` から `<親>/Launcher.bat` に階層変更」は、リリース歴を辿る読者に「以前は `GCTonePrism/Launcher.bat` として配布されていた」と誤解させる。実際には `GCTonePrism/Launcher.bat` 配置は PR #149 内の中間コミット時点の設計で published version 履歴ではない。「Phase 2 で `<親>/Launcher.bat` 直下配置として新規導入、初期案では `GCTonePrism/Launcher.bat` も検討されたが published 前に確定」と整理
+- **[L2] Install.bat の `set /p` プロンプト内の `(Y/N)` を `[Y/N]` に統一**: line 19 docstring rule の「echo arguments MUST NOT contain literal `(` or `)`」を echo に限定して書いていたが、`set /p` プロンプトでも `(Y/N)` を露出させていた整合性欠如。`set /p` parser も内部的に block 解釈と独立している保証は薄く、将来の cmd 挙動変化への安全マージンとして `(` `)` 禁止ルールを `echo / set /p prompt` 両方に拡張。既存の 2 箇所 (`OVERWRITE_CONFIRM` / `START_MANAGER` プロンプト) も `[Y/N]` に置換
+- **[L4] exit 3 N 回答メッセージを tag conflict path と表現統一**: 旧文言「同 zip を再生成」が「ファイルが消える → 再作成」と誤読されやすかった。「ビルドキャッシュは温存され、Godot export / msbuild は再実行されない (zip のみ再生成で retry は速い)」と tag conflict graceful exit path の説明と同じ表現に揃え、技術的に正確な記述に統一
+- **[L5] PR description の "Known untested" を UNC share root と sub-path で区別整理**: 旧表記は `\\学校サーバー\PCクラブ` を UNC root の例として挙げていたが、`PCクラブ` が share name か sub-path か曖昧。本当に未テストなのは share root 直接選択 (`\\server\share` 形式) のケース。`\\server\share\sub` は通常 path 扱いで edge case ではない、と区別。**ドライブルート (`C:\` 等)** も追加で Known untested に明記、leaf extraction が空文字列を返して INSTALL_TARGET= drive root + GCTonePrism で続行し、mkdir が権限不足で graceful fail する path を docstring 化
+
+#### Added (PR #149 シニアレビュー round 4)
+
+- **Install.bat docstring の leaf extraction edge case 注記 (L3)**: `for %%F in (...) do %%~nxF` がドライブルート (`D:\`) と UNC root (`\\server\share`) で divergent な値を返す挙動を明文化、各ケースの後段挙動 (drive root mkdir 権限失敗 / UNC share-as-folder 続行) を `:nest_check` 周辺コメントに記述
+- **Install.bat docstring の structural rule (2) を `set /p` 含む形に拡張**: 「echo / set /p prompt arguments MUST NOT contain literal `(` or `)`」「even top-level placement isn't formally guaranteed by docs against future cmd version changes」と一貫性を明記
+
+#### Fixed (PR #149 シニアレビュー round 3)
+
+- **[M2] `:dialog_fail` 経路で PS stderr (実際の失敗理由) が捕捉されていなかった bug**: 旧実装は `> "%TEMP_DIALOG_OUT%"` で stdout のみリダイレクト、stderr は親 cmd console に直流していた。インタラクティブ実行では人間が画面で見られるが、Phase 3 Updater が `cmd /c install.bat > log.txt 2>&1` で呼ぶ運用に入ると stderr 行は log に残らない (= 自動化呼出しで診断情報が失われる) silent path。`show_folder_dialog.ps1:catch` の `[Console]::Error.WriteLine` 出力も同じ理由で消える。修正: `> stdout.tmp 2> stderr.tmp` に分離キャプチャ、`:dialog_fail` で `PS stderr の内容:` + `PS stdout の内容:` を順に表示。`:dialog_ok` / `:dialog_cancel` でも err tmp ファイルを cleanup
+- **[M3] Manager 自動起動経路が SPEC §3.7.5 の「日常起動は Manager.bat 経由」規約を bypass していた**: round 2 で「Manager.bat 経由だと中間 cmd 残骸が出る」問題を「Manager.exe 直叩き」で回避していたが、SPEC で規約として明文化した「日常起動は Manager.bat 経由」を Install.bat の auto-start path だけ破る silent inconsistency。将来「Manager.bat 内で working dir 設定 / 環境変数 export / ログ転送」等を追加した時に auto-start 経路だけ漏れる path を防ぐため、規約準拠側に揃え直す。修正 2 段:
+  - **Manager.bat / Launcher.bat 末尾に `exit` 追加**: 中間 cmd 残骸の根本原因 (Manager.bat の cmd プロセスが `start "" Manager.exe` 後も "次の行" を待ってアイドル) を Manager.bat 側で解消。`start` で Manager.exe を detach した後は cmd が do nothing なので、`exit` で cmd を強制終了 → 親 (Install.bat) から見ても子 cmd は即時終了 → window 残骸なし
+  - **Install.bat auto-start を Manager.bat 経由に復元**: `start "" "%INSTALL_TARGET%\GCTonePrism_Manager\GCTonePrism_Manager.exe"` → `start "" "%INSTALL_PARENT_NO_TRAIL%\Manager.bat"`。SPEC §3.7.5 と整合し、Manager.bat lifecycle 変更時の漏れ path を解消
+  - trade-off: `call Manager.bat` で呼ぶと caller bat も `exit` で巻き添えで終了する。Manager.bat / Launcher.bat は leaf shortcut (他 bat の building block ではない) という前提で許容、docstring に明記
+- **[M4] `Resolve-TagConflict` 既存タグ検出 / Y/N の N で `exit 0` が「成功」と「skip」を区別不能だった bug**: caller (CI / 上位 script) から見ると `Release.bat` の `exit 0` が「publish 成功」「tag 衝突で skip」「N で skip」のいずれかを区別できない。CI で `.\Release.bat -SkipUpload:$false` 回しても、tag 衝突で publish せず exit 0 を返すと CI は緑になる silent path。同 PR 内で「誤 publish 防止優先」(Y/N 完全一致マッチ) と書きながら「期待通り publish できたか」を caller が exit code で検出できない設計矛盾。修正: exit code 体系を細分化:
+  - `0` = success (publish 成功 / `-SkipUpload` / `-DryRun`)
+  - `1` = failure (script の本来失敗: build / publish / env)
+  - `2` = skip (tag conflict + `-Force` なしによる publish skip、env 起因)
+  - `3` = skip (Y/N の N 回答による intentional skip)
+  - Release.bat 側も 4 状態を区別表示 (`正常終了` / `publish skip [exit 2: ...]` / `publish skip [exit 3: ...]` / `[FAIL]`)、exit code はそのまま透過
+- **[L1] `Release.ps1:940` のコメントで関数名が `Assert-NoTagConflict` (実体 `Resolve-TagConflict`)**: 同 PR 内で命名 divergent、Resolve-TagConflict に修正 + コメント内容も最新の "zip 完成後 / Y/N upload prompt の前に呼ぶ" 配置説明に更新
+
+#### Changed (PR #149 シニアレビュー round 3)
+
+- **[M1] CHANGELOG `### [Release Tooling v0.1.9]` の `#### Added` を最終形に書き換え**: 旧記述は round 1 時点の事実を残しつつ round 2 までの修正を `#### Fixed` に追記する累積型だったため、同一 version エントリ内で「`<親>\GCTonePrism\Launcher.bat` 配置」(Added) vs 「1 階層上に変更」(Fixed)、「`chcp 65001` save/restore」(Added) vs 「cp932 staging で chcp 撤去」(Fixed)、「ExpectedFiles 12 件」(Changed) vs 「13 件」(別 bullet) が並存して読みづらかった。AGENTS.md "1 PR 1 bump、レビュー対応コミットでは既存エントリの description を加筆・修正" 規約に従い、`#### Added` 側を最終形 (`<親>/` shortcut + cp932 staging + ExpectedFiles 13 件 + `show_folder_dialog.ps1` 同梱 + `exit` 終端 + Phase 3 起動規約) に書き換え、journey 自体は `#### Fixed` 各 bullet に残す形に整理
+- **[L3] FolderBrowserDialog SelectedPath の trailing whitespace 防御コメント**: `:dialog_ok` の `set /p INSTALL_PARENT=<...` 直前に「.NET 4.x の SelectedPath は trailing space を付けない実装で確認済、問題化したら whitespace trim を入れること」を明記、将来の OS / .NET 変更に対する fail-safe ガイドラインを残す
+- **[L4] `%TEMP_DIALOG_OUT%` / `%TEMP_DIALOG_ERR%` の衝突確率を 1/32K → 1/1G に低減**: 旧実装は `%RANDOM%` 単独 (15-bit、1/32768)、新実装は `%RANDOM%%RANDOM%` (30-bit、1/1G 弱)。インタラクティブ double-click 想定のため並列実行はまずないが、「ユーザー誤って 2 回 double click → 前回 instance がまだ dialog 待ち」のケースで tmp ファイル shared → `set /p` が前回 path を inherit する silent bug を構造的に低減
+
+#### Added (PR #149 シニアレビュー round 3)
+
+- **SPEC §3.7.8 チェックリスト「Updater」項目に Phase 3 Install.bat 起動規約を追加 (L5)**: 「`Process.Start("cmd", "/c install.bat ...")` 形式必須、`call` 形式 / 直接起動禁止、理由は §3.7.4」を着手前チェック項目として明示。AGENTS.md から本節へのリンク済みなので、Phase 3 着手時に自然と参照される導線が確保される
+
+#### Fixed (PR #149 シニアレビュー round 2 + Codex P1/P2 round 2)
+
+- **[Codex bot P1] `show_folder_dialog.ps1` setup エラーが Cancel と区別不能 → real failures が exit 0 に丸まる bug**: `Add-Type` / `New-Object` / property 代入の非終了エラー後も `if ($d.ShowDialog() -eq OK)` 行に到達し、`$d` が null だと else 分岐に流れて `exit 2` (user cancel と同じ) を返してしまう問題。Install.bat 側は exit 2 を Cancel として処理して `goto :end` (成功扱い、exit 0) するため、自動化呼出し / Phase 3 Updater から見ると「ユーザがキャンセルした」のか「PS が壊れた」のか区別不能だった。`$ErrorActionPreference = 'Stop'` で非終了エラーを終了エラーに昇格 + try/catch で Add-Type 〜 ShowDialog を囲み、catch 時は stderr にメッセージ + `[Environment]::Exit(1)`。Install.bat 側の 3-way dispatch (0/2/else) で exit 1 は自動的に `:dialog_fail` に流れるので bat 側修正不要。exit code の意味 (0=OK / 1=catch / 2=Cancel / その他=PS host 起動失敗) を冒頭コメントに追記
+- **Install.bat の残骸 cmd window 問題 (Manager 自動起動 Y 経路のみ)**: 「だいたい問題なくなったけど、最後に残骸だけ残る」報告対応。原因 2 段。
+  - **段 1: `exit /b %EXIT_CODE%` → `exit %EXIT_CODE%`**: ダブルクリック起動 (`cmd /c install.bat`) では `exit /b` で caller cmd が追従終了するはずだが、Windows Terminal 等一部の terminal host で空 prompt が残るケースがあった。`exit` (without `/b`) で cmd プロセスを直接終了させ、window を統一的に閉じる。トレードオフ: 将来 `call install.bat` を書くと caller bat も巻き添えで終了するため、SPEC §3.7.4 Updater 仕様に「`Process.Start("cmd","/c install.bat ...")` 経由で呼ぶこと」を明記 (シニアレビュー L3)
+  - **段 2: `start "" "Manager.bat"` → `start "" "Manager.exe"` 直叩き**: 段 1 でも Y 経路のみ window 残存が継続。Manager.bat は単に `start "" "...Manager.exe"` する 2 行 wrapper のため、Install.bat から `start "" Manager.bat` すると中間 cmd プロセスが一瞬発生 → Windows Terminal がそれを子プロセスとみなして Install.bat の window を「終了待ち」状態に保持していた。直接 Manager.exe を `start ""` することで中間 cmd を排除し、Install.bat 終了後に親 window がクリーンに閉じる。Manager.bat 自体は `<親>/` 直下の日常起動用として残り、機能影響なし
+- **INSTALL_README.txt 冒頭文言の組織名誤読対策**: 旧「ゲームセンターTONE 開発の Prism ランチャーシステム」は「ゲームセンターTONE という会社/組織が開発した」と読めてしまっていた。ゲームセンターTONE は文化祭企画の名前なので、「文化祭企画『ゲームセンターTONE』の Prism ランチャーシステム」に修正
+
+#### Changed (PR #149 シニアレビュー round 2)
+
+- **[M1] 1 PR 1 bump 規約に整合**: SPEC 変更履歴の v1.10.9 (ショートカット bat 1 階層上 relocation) を v1.10.8 (Phase 2 元仕様) に統合。両方とも同じ「Phase 2 / #108」スコープで breaking change でも別関心事でもないため、AGENTS.md "CHANGELOG Section Roles" の規約 (1 PR 1 bump、レビュー対応コミットでは既存エントリの description を加筆) に揃える
+- **[M2] Y/N 判定の寛容度を Release.ps1 と統一**: Install.bat の `OVERWRITE_CONFIRM` / `START_MANAGER` は `if /i "%X%"=="Y"` で **Y/y のみ受理** だったため、Release.ps1 の Y/N upload prompt (`y/yes` 両受理) を触っているユーザーが「yes」と打って意図せず abort する path があった。Install.bat の 2 箇所も `Y` / `YES` 両方を受理する形に拡張、INSTALL_README にも「Y / y / yes」明示
+- **[M3] `Resolve-TagConflict` の network 失敗 path にも zip path 案内を追加**: 既存タグ + `-Force` なし時は graceful exit + zip path 案内だったが、gh release view の auth/network 失敗時は `Fail` で exit 1 のみで zip path を案内せず「ビルド完了 → ネットワーク一時障害 → Fail → ユーザー: zip が捨てられたと誤解」する path があった。Fail 直前に `Write-Info "zip は $ZipPath に残っています"` を追加、graceful exit path と同じ "publish 失敗とは独立して zip は流用可" メッセージで統一
+- **[M4] Install.bat 最終 pause を日本語化**: 周囲が全て日本語 UX なのに cmd default の "Press any key to continue . . ." だけ英語だった一貫性破れ。`pause >nul` + `echo  何かキーを押して終了します...` の 2 行に置換、文言を制御
+- **[L1] set quoted/unquoted の規約コメント追記**: line 44-46 で「path-derived は quoted set 必須」と宣言しつつ numeric sentinels (`MANAGER_FOUND` / `LAUNCHER_FOUND` / `MANAGER_STARTED` / `EXIT_CODE`) は unquoted という不整合が将来 maintainer を混乱させる懸念。「quote rule applies to path / user-input values, not to numeric flags」とコメントで明文化、混在の合理化を行った
+- **[L2] PR #149 description の検証ログを最新化**: ExpectedFiles 12 → **13** (`show_folder_dialog.ps1` 追加で +1)、staging 構造の記述も最新の `<親>/` ショートカット bat 配置に同期、検証 Stage 3 の "deferred" を実機 E2E 完了済みにマーク
+- **[L3] SPEC §3.7.4 Updater に Install.bat 起動方式を明記**: `Install.bat` 終端の `exit` (not `exit /b`) は `call install.bat` で呼ぶと caller bat も巻き添えで終了する silent danger があるため、Phase 3 Updater は `Process.Start("cmd", "/c install.bat ...")` 形式で呼ぶこと、を SPEC 側にも明記。bat 末尾の REM コメントだけだと埋もれる懸念があり、SPEC の Updater 責務節に格上げ
+- **[L4] `:wait_close` の unbounded loop を docstring に明記**: Manager.exe / Launcher.exe を user が close できない場合 (hung process / 別 session / 権限不足) Ctrl+C しか退出手段がない設計を **意図** として docstring 化。Phase 2 の対象 (人がダブルクリック) では「インストーラが固まっている、なぜ?」と気付かせる方が auto-fail で原因を隠すより良いという根拠と、Phase 3 Updater が forced termination の責務を持つ役割分担を明記。将来 unattended re-install フローで問題化したら max-iterations 追加の hint も併記
+- **[L5] INSTALL_README に shortcut bat 上書き注意を追加**: 再 install (上書き Y) で `copy /Y` により `<親>/Launcher.bat` / `<親>/Manager.bat` が無条件上書きされる挙動を README の「緊急アップデート」項目に明記。ゲームデータ保護リストと並べて wrapper bat も列挙し、カスタマイズ消失の path をユーザに事前認知させる
+
+#### Fixed (PR #149 シニアレビュー round 1 + Codex P2)
+
+- **[Codex P2] FolderBrowserDialog 選択パス内の `!` 文字が delayed expansion で破壊される bug**: `Install.bat` 全体で `setlocal enabledelayedexpansion` を有効化していたため、選択パスに `!` が含まれる場合 (例: `D:\Backup!\` 等のユーザー命名パス) に `for /f ... do set INSTALL_PARENT=%%P` の段階で `!` が delayed expansion token として解釈され削除される。本ファイル refactor 後は `!VAR!` 参照が実質ゼロのため、`setlocal disabledelayedexpansion` に変更して構造的に解消
+- **PR #149 Codex bot review 対応 (P2 #4 #5 #6)**:
+  - **P2 #4**: `INSTALL_PARENT` が caller env から inherit して `set /p` が input なしの場合に stale 値で続行する path を解消。`set "INSTALL_PARENT="` を dialog 起動 *前* に追加して initialize
+  - **P2 #5**: `set SCRIPT_DIR=%~dp0` / `set FILES_DIR=...` の unquoted 形式は zip 展開 path に `&` 等の cmd metachar (例: `D:\R&D\`) が含まれると line split で abort する path だった → `set "VAR=value"` quoted 形式に統一
+  - **P2 #6**: `echo %INSTALL_TARGET%` 等 user-controlled path を出力する 7 箇所の echo を `echo "%VAR%"` 形式に変更。`%VAR%` 展開後の path に `&` 含むと cmd の multi-command split で異常出力 / fragment 実行になる path を解消。引用符付きの出力 (`インストール先: "D:\Games\GCTonePrism"`) になるが、edge case 防御として allowed
+  - **過去 review で既に解消**: P1 #1 (overwrite-process delayed expansion) は top-level goto refactor 済、P2 #2 (path 内 `!`) は disabledelayedexpansion 済、P2 #3 (PS 失敗 vs Cancel) は 3-way dispatch 済
+- **Install.bat の cmd parse cascade 問題を根本解決: staging encoding を cp932 (Shift-JIS) に変換**: ユーザー実機テストで何度試しても解消しなかった「`'�に'` `'em.Windows.Forms'` `'��データは維持されます:'` 等の 'is not recognized' 連鎖エラー + Manager 起動後の黒画面残存」の根本原因が判明: **`chcp 65001` は console output codepage のみ切り替え、cmd の bat ファイル parser は **システム codepage** (JP Windows = cp932) で読み続ける** 仕様。UTF-8 で書かれた長文 Japanese echo (`Manager が壊れて起動できない / クリーンインストールしたい場合のみ Y を押してください。` 等 30+ chars) の byte 境界を parser が mis-tokenize → cascade。修正:
+  - **Release.ps1 Copy-Templates が .bat staging 時に UTF-8 → cp932 変換**: cmd の system codepage と一致するので parser が natively 読める。長文 Japanese 行も安全に処理。デメリットの非 JP Windows での mojibake は JP 校内向け配布なので OK
+  - **Install.bat から `chcp 65001` ロジック撤去**: cp932 file ↔ cp932 system で一致するため不要。同時に「ASCII boundary rule」も削除 (codepage 切替がないので boundary 自体存在しない)
+  - **Install.bat docstring の構造規約 (1)(2)(3) は維持**: cmd parser の `(...)` block / literal `(` / inline 日本語の各 quirk は cp932 でも残るので、引き続き必要
+  - 副次効果: Manager 自動起動後の黒画面残存も解消 (parser cascade で `start` の後始末が狂っていたのが root cause だった)
+- **ショートカット bat (`Launcher.bat` / `Manager.bat`) の配置を 1 階層上に変更** (ユーザー UX 要望):
+  - 旧: `<親>/GCTonePrism/Launcher.bat` (部員が `GCTonePrism/` サブフォルダに入る必要があった)
+  - 新: `<親>/Launcher.bat` (`<親>` を開けば即ダブルクリック可能)
+  - インストール後の見た目: `<親>/Launcher.bat` + `<親>/Manager.bat` + `<親>/GCTonePrism/` が並ぶ
+  - zip 内構造: `files/Launcher.bat` → zip ルートの `Launcher.bat` に移動 (`files/` は component 本体専用に)
+  - Install.bat: `:copy_shortcuts` label を追加し、files/ → `<親>/GCTonePrism/` の robocopy 後に zip ルートの `Launcher.bat` / `Manager.bat` を `copy /Y` で `<親>/` に配置
+  - Launcher.bat / Manager.bat 内 path: `%~dp0GCTonePrism_Launcher\...` → `%~dp0GCTonePrism\GCTonePrism_Launcher\...` (1 階層分の親パス追加)
+  - Manager 起動 Y/N の `start` path: `%INSTALL_TARGET%\Manager.bat` → `%INSTALL_PARENT_NO_TRAIL%\Manager.bat` (`<親>/Manager.bat`)
+  - Release.ps1 Copy-Templates: `filesTemplates` を空配列に、`rootTemplates` に Launcher.bat / Manager.bat を追加
+  - Assert-ExpectedFiles: `files\Launcher.bat` / `files\Manager.bat` → zip ルートの `Launcher.bat` / `Manager.bat`
+  - INSTALL_README.txt: 日常使い path 例 (`D:\Games\Launcher.bat`) に更新
+  - SPEC §3.7.1 (zip 構造 + インストール後構造) + §3.7.5 (Launcher 日常起動 path) を更新、変更履歴は v1.10.8 entry に統合 (1 PR 1 bump 規約、シニアレビュー M1)
+- **Install.bat の cmd parser 問題を構造的に解消 (`.ps1` 切り出し + `[...]` 使用)**: 数回の試行錯誤を経て、根本原因は (a) 長い `set "PS_DIALOG_CMD=...日本語..."` の Japanese byte 列が cmd の line tokenize を壊し PS に malformed command を渡す、(b) `set "..."` 内の `^|` が literal で残り PS に届く (cmd quoted set では `^` 非 escape)、(c) `echo (text)` の `(` が cmd で block 開始と解釈される、と判明。これらを構造的に回避:
+  - **PS dialog code を `templates/show_folder_dialog.ps1` に切り出し**: cmd parsing を経由せず PS native の UTF-8 処理に任せる。Japanese description (`'GCTonePrism のインストール先の親フォルダを選択してください'`) を維持可能。Install.bat 側は `powershell.exe -File "%~dp0show_folder_dialog.ps1"` で起動するだけ
+  - **echo の `(` `)` を `[` `]` に置換 (14 箇所)**: `[` `]` は cmd で escape 不要、`^(` `^)` の top-level 不安定挙動を回避
+  - **Release.ps1 Copy-Templates**: .ps1 を **UTF-8 BOM + CRLF** で staging に書き出し (PS 5.1 default の ASCII 読み込みで Japanese mojibake を防ぐため BOM 必須)
+  - **Assert-ExpectedFiles**: 12 → 13 件 (`show_folder_dialog.ps1` 追加)
+  - **Install.bat docstring の構造規約 (3) 新規追記**: 「PS 起動の引数で日本語を含む長い文字列を inline しない、別 .ps1 に切り出して `-File` 経由で起動する」を明文化、将来 maintainer が誤って inline に戻すのを防ぐ
+- **Install.bat 実行時に「'em.Windows.Forms' is not recognized」等 cmd parse error が連発する bug**: ユーザー実機の testing で、Install.bat が `[FAIL] PowerShell が exit 0 を返しましたが選択パスが取得できませんでした` と並んで `'��よう' is not recognized` `'em.Windows.Forms' is not recognized` `'場合は' is not recognized` 等の cmd error が散発した。原因: cmd は `if cond (echo 日本語... goto :fail)` のような `(...)` ブロックを parse-time に展開する際、UTF-8 で書かれた日本語の byte 列を mis-tokenize して fragment を command として実行する動作。chcp 65001 が success していても、cmd の bat parser はブロック展開時に system codepage (cp932 on JP Windows) で byte を解釈する余地があり、Japanese 含む `(...)` block が壊れる。welcome 等 top-level の echo は正常動作するが、`if (...) echo ... goto :fail` パターンは全滅。
+  - 修正: 全 `(...)` ブロック内の Japanese echo を **top-level goto pattern** に refactor。`if cond (echo X / goto Y)` → `if not cond goto :ok / [...echo X...] / goto :fail / :ok / [...continue...]` の linear flow に統一
+  - 既存 refactor (Codex P1 で existing_install branch のみ実施) を全 block (files/ 不在 / dialog_ok 防御 / dialog_fail / 入れ子検知 / overwrite cancel / robocopy fail × 2 / mkdir fail / Manager 起動) に展開
+  - docstring に「日本語 echo は (...) ブロック内に置かない」規約を構造規約として明文化
+  - 副次効果: 一部 echo の `^(` `^)` エスケープが不要になった (ブロック外なので) → 可読性向上
+- **Install.bat ダブルクリックで一瞬だけ開いて即閉じる bug (LF/CRLF 不一致)**: cmd.exe は LF-only bat を正しく parse できず double-click で即終了する (PR #140 の Release.bat 同種事故、本 Phase 2 で Install.bat に再発)。原因: `.gitattributes` の `*.bat eol=crlf` は git checkout 時に working tree を CRLF 化するが、Write tool 経由の編集で working tree に LF が残っており、Release.ps1 の `Copy-Item` がそのまま staging へ LF コピーしていた。zip の Install.bat は LF だったため double-click で開いた瞬間に cmd.exe parse 失敗 → 即 close。修正: `Copy-Templates` 内で `$src -match '\.bat$'` の場合に `ReadAllText` → `\r\n` 正規化 → `WriteAllText` で強制 CRLF 化。working tree の改行状態に依存せず確実に CRLF zip を出力できるように
+- **[Codex P2 round 2] PowerShell 起動失敗とユーザー Cancel が exit code で区別不能 → real installer failures が exit 0 に丸まる bug**: 旧 `for /f ... do set INSTALL_PARENT=%%P` + `if not defined INSTALL_PARENT` チェックは「PS 起動失敗 (PS 未 install / AppLocker block / PS_DIALOG_CMD syntax error 等)」と「ユーザー Cancel」の両方で `INSTALL_PARENT` undef → cancel 扱い (exit 0) になる。Phase 3 で Updater が Install.bat を invoke する場合、real failures を成功扱いしてしまう実害ある silent failure path。修正:
+  - PS 終了コードを 3 値で意味付け: `0` = OK + path 出力 / `2` = ユーザー Cancel (旧 `1` → `2` に変更、PS 内部 error の exit 1 と区別) / その他 = PS 実行失敗
+  - 出力を `%TEMP%\gctone_install_dialog_<RANDOM>.tmp` 経由で受け取り、bat 側で `ERRORLEVEL` を確実に捕捉 (`for /f` の弱い exit code 伝播を回避)
+  - 3-way dispatch: `:dialog_ok` (続行) / `:dialog_cancel` (`goto :end`、exit 0) / `:dialog_fail` (`goto :fail`、exit 1 + Execution Policy 確認手順案内 + PS stdout 内容表示)
+  - PS one-liner も `[Console]::Out.WriteLine` → `[Console]::Out.Write` に変更 (末尾 CRLF を抑止、`set /p` の cmd.exe 版差での CR 残留 trap を回避)
+- **[M2] Install.bat の失敗 path も `exit /b 0` で caller から成否区別不能**: 4 つの失敗経路 (files/ 不在 / 入れ子検知 / robocopy 失敗 / mkdir 失敗) がすべて `:end` に合流して `exit /b 0`。Phase 3 で Updater から Install.bat を呼び出す場合に exit code でエラー判定できない。`:fail` label を新設 + `EXIT_CODE` sentinel を導入、失敗 path は `goto :fail` で 1、成功 / ユーザーキャンセル (folder dialog cancel / 上書き N) は 0 を返す形に
+- **[M3] docstring の ASCII 規約と実装の乖離**: 「chcp 65001 より上の REM / echo は ASCII 必須」と書きながら、自身の docstring REM 行が日本語だった。`@echo off` 下で REM は表示されないので mojibake は echo にしか発生しないのが実態。docstring を「echo は ASCII 必須、REM は日本語 OK」に修正
+- **[M4] PS one-liner の多行出力に対する防御**: `Write-Output $d.SelectedPath` だけだと将来 Add-Type warning が stdout に出るケース等で for /f の最終行が pollute される可能性。`[Console]::Out.WriteLine + [Environment]::Exit(0)` で明示的に 1 行のみ書き出し + 後続出力を封じる形に変更
+
+#### Changed (PR #149 シニアレビュー round 1)
+
+- **[M1] `:wait_close` 文言を `pause` の挙動に整合**: 「Enter キーを押してください」→「何かキーを押してください」(`pause` は ReadKey ベースで任意キーで進むため、文言通り Enter を期待するユーザーには直感に反していた)
+- **[L1] `robocopy /XD` 名前マッチの副作用を明記**: `/XF /XD` はツリー全体で同名 file/dir を除外するため、将来 component 内に `Companions/logs/` 等の同名 dir が登場すると意図せず除外される。現状 files/ には保護対象名と衝突する物がないので実害なし、コメントで明記
+- **[L2] Manager 起動 path で Install.bat の `pause` を抑止**: Manager.bat 起動 → Manager UI 表示中に Install.bat の「何かキーを押してください」が同時表示される UX 退行を回避、`MANAGER_STARTED=1` sentinel で `:end` の pause を skip
+- **[L4] `set /p` 空 Enter の「前回値保持」事故を防ぐ事前初期化**: `set "OVERWRITE_CONFIRM="` / `set "START_MANAGER="` を `set /p` 直前に追加。現状の variable chain では発火経路なしだが、将来上流で同名変数が定義される変更が入った時の silent break を防ぐ
+- **[L5] `Release.ps1` の Y/N 判定を厳格マッチ化**: 旧 `-inotmatch '^y'` は先頭 y 一致のみで `yikes` / `yo` / 「YES (確認)」末尾括弧等の typo でも公開が走る。`-imatch '^(y|yes)$'` の完全一致に変更、prompt 文言も「y/yes/n/no で回答」に明示。誤判定で abort → 再実行する方が誤 publish より低コスト (GitHub Releases publish は巻き戻し不可)
+
+#### Acknowledged (PR #149 L3 scope creep)
+
+- 本 PR は (a) Install.bat 等 Phase 2 本体 (b) Release.ps1 Y/N upload prompt 追加 (c) Release Tooling v1.0.x → v0.1.x rename の 3 つの関心事が混在している scope creep の指摘 (PR review L3)。次回類似シナリオでは分割を検討、本 PR ではすでに review が進行しているため merge 完了させる方針
+
+#### Fixed (PR #149 Codex P1)
+
+- **`Install.bat` の parenthesized block 内で `%VAR%` parse-time 展開 bug**: 既存検出 branch の `MANAGER_RUNNING` / `LAUNCHER_RUNNING` は `if exist (...)` ブロック内で `set` していたが、続く `if %VAR% EQU 0` の比較が parse-time に展開される (cmd.exe 仕様)。これにより stale/empty 値で `EQU was unexpected` の parse error が発生し、**GCTonePrism が既存の場合の overwrite フロー全体が壊れる** P1 bug だった。さらにラベル `:checkprocess` / `:wait_close` / `:do_overwrite` が `()` ブロック内に置かれており `goto` の動作も不安定。両 issue を構造 refactor で解消:
+  - `if exist () (...) else (...)` を **`goto :existing_install` / `goto :new_install` の top-level 分岐** に書き換え、すべての label を `()` 外に移動
+  - `tasklist | findstr` の結果取得を top-level に置き、`%ERRORLEVEL%` が run-time に正しく評価される構造に
+  - 変数名も `MANAGER_RUNNING` → `MANAGER_FOUND` に変更 (findstr exit 0 = 発見 = 稼働中、の意味を明示)
+
+#### Changed (upload prompt + タグ衝突チェック位置変更)
+
+- **`Release.bat` / `Release.ps1`: zip 化後の `Y/N` 公開確認 prompt 追加**: user 提案、Install.bat 等の動作確認ワークフローを安全に作るため。新フロー: ビルド → zip 化 → 「GitHub Releases に v$Version を公開しますか？ (Y/N)」prompt → Y で `gh release create`、N で「zip だけ残して終了」。これにより:
+  - **本番 release publish を毎回明示的に同意する形に変更**、誤 publish のリスク削減
+  - zip だけ作って別環境に持ち出して Install.bat 動作確認、という運用が default で可能 (`-SkipUpload` を毎回付け忘れる必要なし)
+  - `-SkipUpload` は引き続き有効 (prompt 自体を skip、CI / non-interactive 運用向け)
+  - prompt の Read-Host 入力が `y` / `yes` 完全一致 (大小文字不問) の場合のみ公開、それ以外は abort (round 1 L5 で typo 寛容を厳格化)
+- docstring の `gh release create でアップロード（-SkipUpload で抑止）` → `zip 完成後、Y/N 確認プロンプト → Y なら gh release create、N なら zip だけ残して終了` に更新
+- **タグ衝突チェックを `Assert-Preflight` → `Resolve-TagConflict` (zip 後 / Y/N 前) に移動**: 段階的に 3 つの設計を経た最終形。
+  - 旧 (v0.1.7 以前): preflight でタグ衝突を確認 → 既存なら build 前に即 fail。「Install.bat 検証用に zip だけ欲しい」シナリオで毎回 `-SkipUpload` を付け忘れる問題があった
+  - 中間 (v0.1.9 途中): build → zip → Y/N prompt → Y 確定後にタグ衝突チェック → 既存なら Fail。「publish 不可なのに Y を聞いて、Y 押させた後に fail」というミスリードな順序
+  - 最終 (v0.1.9): build → zip → **タグ衝突チェック** → Y/N prompt。publish 可能な状態 (衝突なし or `-Force`) に絞ってから Y/N を聞く。
+  - 既存 + `-Force` なし時の挙動: 旧 `Fail` (exit 1 + 赤字 FAIL) ではなく `Write-Warn` + 復旧手順案内 + `exit 0` で graceful exit。「zip 生成は成功している」「publish 不可は env 状態であって script の失敗ではない」「caller (CI 等) も exit 0 を正常扱いで判定可能」のため。
+  - preflight は env 系 (gh auth / CHANGELOG / working tree) のみに役割を絞り、「事前 fail-fast」と「build 投資後の状態確認」の責務を分離。
+
+#### Changed (versioning scheme)
+
+- **Release Tooling の version numbering を v1.0.x → v0.1.x に renumber**: 初版 (Phase 1) 時に v1.0.0 開始としたが、他コンポーネント (Launcher v0.5.x / Manager v0.8.x / Bundle v0.1.0) が全て pre-1.0 dev mode の中で Release Tooling だけ v1.x になっていた。さらに毎 PR で構造変更を繰り返している現実 (本 entry までに 9 patch、結構な breaking 含む) と SemVer v1.0 = stable の意味が乖離していた。v1.0.x には git tag / GitHub Release が一切存在せず外部参照ゼロのため、CHANGELOG / Release.ps1 inline コメント / AGENTS.md の歴史言及をすべて v0.1.x に retroactive rename。今後の patch も v0.1.10, v0.1.11 ... と続く。Bundle が 1.0 に到達した時点で各 component と合わせて Release Tooling も v1.0 を検討する想定
+
+#### Added
+
+注: 本セクションは PR #149 最終状態の事実のみを記述する。レビュー round 1/2/3 で複数回書き換わった項目 (cp932 staging / `<親>/` shortcut 配置 / ExpectedFiles 件数 / `show_folder_dialog.ps1` 切り出し 等) は、その変遷理由を `#### Fixed` 各 bullet で記録している (シニアレビュー round 3 M1)。
+
+- **`templates/Install.bat`** — 初回インストーラ実装 (#108 Phase 2)
+  - PowerShell `FolderBrowserDialog` で親フォルダを GUI 選択 (`set /p` 経由のパス入力 typo を回避、dialog は `show_folder_dialog.ps1` に切り出し `-File` 起動)
+  - 入れ子検知: 親パス末尾が `GCTonePrism` なら警告 + abort (二重入れ子 `<親>\GCTonePrism\GCTonePrism\` 防止)
+  - 既存検知: `<親>\GCTonePrism\` ディレクトリ存在で判定 (metadata file 不要、単純化)
+    - Y/N 警告メッセージで「アップデートは Manager UI から推奨 / Manager 壊れた / クリーンインストール時のみ Y / ゲームデータ (prism.db / games / backups / responses / logs) は維持」を明示
+    - Y → Manager.exe / Launcher.exe 稼働中チェック (`tasklist`) → 稼働中なら「閉じてから Enter」表示で手動 close 待機 (自動 kill しない、§3.7.4 Updater の責務に残す) → robocopy で保護データ除外 (`/XF prism.db /XD games backups responses logs`) しつつ上書き
+    - N → abort
+  - 新規時: ディレクトリ作成 + robocopy で `files/*` 全コピー、加えて `<親>/Launcher.bat` / `<親>/Manager.bat` (parent-level shortcut) を `copy /Y` で配置
+  - 完了後 Manager 起動 Y/N プロンプト → Y なら **`<親>/Manager.bat` 経由で Manager.exe 起動** (旧設計の自動起動は廃止、SPEC §3.7.5 の Manager.bat 経由規約と整合)
+  - file format: 編集ソースは UTF-8 (no BOM) + CRLF、staging 時 Release.ps1 Copy-Templates が **cp932 (Shift-JIS) + CRLF** に変換 (cmd の bat parser が system codepage で読む仕様に合わせる、JP Windows 校内向け配布スコープのため非 JP locale で mojibake になる trade-off は許容、詳細は `templates/Install.bat` 冒頭 docstring 参照)
+  - 終端 `exit %EXIT_CODE%` (not `exit /b`) で cmd プロセスを直接終了させ、ダブルクリック起動時の window が確実に閉じるように。Phase 3 Updater 呼出し時は `Process.Start("cmd", "/c install.bat ...")` 形式必須 (SPEC §3.7.4)
+  - exit code: `0` = success / cancel、`1` = failure (files/ 不在 / 入れ子検知 / robocopy 失敗 / mkdir 失敗 / PS 失敗) — Phase 3 Updater integration 用
+- **`templates/show_folder_dialog.ps1`** — FolderBrowserDialog launcher (Install.bat の `-File` 経由で起動)
+  - Install.bat 内 `-Command "..."` インラインだと cmd parser が長い `set "PS_DIALOG_CMD=...日本語..."` を破壊するため別ファイル化、Japanese description を維持可能
+  - `$ErrorActionPreference = 'Stop'` + try/catch で setup / launch 失敗を `exit 1` で区別
+  - exit code 3-way dispatch: `0` = OK + stdout に選択 path / `1` = catch (stderr に詳細) / `2` = user Cancel / その他 = PS host 起動失敗
+  - file format: UTF-8 BOM + CRLF (PS 5.1 default ASCII 読み込みでの Japanese mojibake 防止)
+- **`templates/INSTALL_README.txt`** — 配布 zip 同梱の部員向け手順書
+  - インストール手順 (zip 展開 → Install.bat → folder dialog → Y/N → Manager 起動 Y/N)
+  - 日常起動方法 (`<親>/Launcher.bat` / `<親>/Manager.bat` を `<親>` 直下から直接ダブルクリック)
+  - アップデート方法 (通常: Manager UI、緊急: Install.bat 上書き、ゲームデータ保護リスト明記)
+  - トラブルシューティング 4 項目
+- **`templates/Launcher.bat` / `templates/Manager.bat`** — 部員日常起動用 **parent-level shortcut** (`<親>/` 直下配置)
+  - 内容: `start "" "%~dp0GCTonePrism\GCTonePrism_<comp>\GCTonePrism_<comp>.exe"` (1 階層下の component exe を起動)
+  - インストール後の最終構造: `<親>/Launcher.bat`、`<親>/Manager.bat`、`<親>/GCTonePrism/` が `<親>` 直下に並ぶ。部員は `<親>` を開けば即ダブルクリックで起動可能、`GCTonePrism/GCTonePrism_<comp>/` まで辿る煩雑さを排除 (SPEC §3.7.1 / §3.7.5)
+
+#### Changed
+
+- **`Release.ps1` Copy-Templates 拡張**: 旧仕様の Install.bat / INSTALL_README.txt の 2 件 WARN を廃止、**5 ファイル** (zip root × 5: Install.bat / INSTALL_README.txt / show_folder_dialog.ps1 / Launcher.bat / Manager.bat) の正規 staging 配置に。`.bat` は cp932 + CRLF、`.ps1` は UTF-8 BOM + CRLF に staging 時変換 (それぞれ cmd parser / PS 5.1 のデフォルト読み込み挙動に合わせる)。テンプレート不在時は `Fail` (旧 WARN だったが Phase 2 完成後はテンプレート存在が必須前提のため厳密化)
+- **`Release.ps1` Assert-ExpectedFiles 拡張**: 期待ファイル一覧を 8 → **13 件** に (zip ルート 5 + files/ 配下 8)。SPEC §3.7.1 正規 zip 構造との対応を明示
+- **`SPECIFICATION.md` §3.7.1 / §3.7.2 / §3.7.4 / §3.7.5 更新** (変更履歴 v1.10.8):
+  - §3.7.1 正規 zip 構造に zip-root レベルの `Launcher.bat` / `Manager.bat` (parent-level shortcut) + `show_folder_dialog.ps1` を追加、ルートショートカット規約の理由 (部員日常使いの煩雑さ解消、`<親>` 直下から直接起動) を明文化
+  - §3.7.2 を Approach C 仕様に再定義 (FolderBrowserDialog / 既存検知 Y/N / Manager UI 推奨 / 保護データ温存 / Manager 起動 Y/N)、旧仕様の自動起動 + `GCTonePrism_Manager` 配下チェックを廃止
+  - §3.7.4 Updater 仕様に「Install.bat は `Process.Start("cmd", "/c install.bat ...")` 形式で呼ぶこと、`call` 形式 / 直接起動は禁止」を明記 (Install.bat 終端 `exit` の caller 巻き込み trade-off に対する制約)
+  - §3.7.5 Launcher 側の役割に「日常起動は `<親>/Launcher.bat` から」の規約を明記
+
+### [Release Tooling v0.1.8] - 2026-05-12
 
 #### Fixed
 
@@ -53,7 +258,7 @@
   - **[R16 #3] `clearLine` 全角 cell 幅の注意書きを正確化**: 旧コメント「Japanese 文字 cell 幅によらず消し残しが出ない」は実装より強い保証に読める。実態は「現 ProgressMessage 長では WindowWidth-1 幅で覆える前提に依存」「全角 2 cell 幅を構造的に補正していない」を明文化、長文 ProgressMessage 追加時の修正 hint も併記
   - **[R16 #4] CHANGELOG R13 ナンバリング順を整理**: R13 L1 (保留) を L4 の後から L2 の前 (= L1/L2/L3/L4 の自然順) に移動、後追い時のスキャンが直感的に
 - **PR #148 round 15 シニアレビュー反映**:
-  - **[R15 M1] 死参照訂正**: `Invoke-NativeWithCapture` のセクションヘッダコメント `(冒頭の \`2>&1\` trap セクション参照)` が v1.0.8 のセクション再構成で stale に。「冒頭の『Native command 呼び出しの方針』セクション参照」に修正
+  - **[R15 M1] 死参照訂正**: `Invoke-NativeWithCapture` のセクションヘッダコメント `(冒頭の \`2>&1\` trap セクション参照)` が v0.1.8 のセクション再構成で stale に。「冒頭の『Native command 呼び出しの方針』セクション参照」に修正
   - **[R15 M2] WindowWidth fallback コメントと実装の divergence 解消**: コメント「0 以下を返す」と実装 `-lt 30` の食い違いを明文化。「30 未満」は WindowWidth=0 の非 console host と極端に狭い実コンソールの両方を catch する threshold である旨を明示
   - **[R15 M3] vswhere の silent pass 解消**: コメントが「実行環境破損で stderr 出力する可能性」を挙げて Invoke-NativeWithCapture に移行していたにも関わらず ExitCode / StdErr を完全に無視していた silent pass を修正。vswhere 失敗時は `Write-Warn` で診断情報を出して PATH fallback に切替 (release は続行可能なため Fail にはしない)
   - **[R15 L1] Combined 4 case コメント精度向上**: 第 4 case「stderr 空 → stdout のみ」は stdout 末尾改行なしのとき不正確 (実は `\n` が付く)。stdout 末尾改行の有無を主軸にした 2 分岐構造に書き換え、各分岐で stderr の各 case を入れ子で記述
@@ -63,9 +268,9 @@
   - **[Codex P2] vswhere に `-utf8` フラグ追加**: `Invoke-NativeWithCapture` は stdout/stderr を UTF-8 として decode するが、vswhere は default で system codepage 出力。非 UTF-8 locale で日本語 VS install path 等 non-ASCII path が mojibake → 後段 `Test-Path` 失敗 → MSBuild 検出失敗の silent path に落ちる。`-utf8` を Arguments に追加して vswhere 出力を UTF-8 強制
   - **[Codex P2 ×2] `[Console]::OutputEncoding` を try/catch でガード**: non-console host (CI / headless / redirected execution) では console API setter が `IOException` を投げ、`$ErrorActionPreference='Stop'` 下で release 開始前に script abort する path。script 冒頭の pin + `Invoke-ExternalProcess` finally の再 pin 両方を try/catch でラップ、script-level `$script:Utf8NoBomEncoding` を一意ソースとして共有
   - **[R14 H1] `WaitForExit()` コメントの自己矛盾を訂正**: 旧コメント「パイプバッファ完全フラッシュを保証」は誤り (WaitForExit no-arg のフラッシュ保証は `BeginOutputReadLine` 系の event-based async 読み取りに対するもので、本実装の `ReadToEndAsync` Task-based には適用されない)。実際のフラッシュ保証は `$outTask.Result` / `$errTask.Result` が EOF までブロックすることで提供。コメントを「`.Result` を削除すると出力切り捨てバグが発生するため touch しないこと」に書き換え
-  - **[R14 M1] CHANGELOG label 重複解消**: 同 v1.0.8 entry 内に「Wave 2 シニアレビュー反映 (M1-M3)」と「PR #148 シニアレビュー反映 (M1-M3)」が共存し M1-M3 が 2 セット存在、後追い不能だった。本 entry のラベルを「R14」「W2」「Codex P2」等の round 識別子付きに変更
+  - **[R14 M1] CHANGELOG label 重複解消**: 同 v0.1.8 entry 内に「Wave 2 シニアレビュー反映 (M1-M3)」と「PR #148 シニアレビュー反映 (M1-M3)」が共存し M1-M3 が 2 セット存在、後追い不能だった。本 entry のラベルを「R14」「W2」「Codex P2」等の round 識別子付きに変更
   - **[R14 L1] zip size 表示の小ファイル対応**: `[int]($bytes / 1MB)` は 1MB 未満で 0 表示になり破損誤解を招く。`if ge 1MB → MB / ge 1KB → KB / else B` の自動切替に変更、Phase 2 以降の Updater 単体 zip 等で発火する想定
-  - **[R14 L2] ShowProgress 中の Task リーク (Known follow-up)**: `ReadToEndAsync()` 開始後に ShowProgress ループ内で例外発生 → finally で Dispose() → Task が `ObjectDisposedException` で faulted のまま GC まで放置。実害ほぼなし (現状実行 path で発火経路なし) だが、post v1.0.8 で `-TimeoutSeconds` + CancellationToken 対応する際に合わせて整理
+  - **[R14 L2] ShowProgress 中の Task リーク (Known follow-up)**: `ReadToEndAsync()` 開始後に ShowProgress ループ内で例外発生 → finally で Dispose() → Task が `ObjectDisposedException` で faulted のまま GC まで放置。実害ほぼなし (現状実行 path で発火経路なし) だが、post v0.1.8 で `-TimeoutSeconds` + CancellationToken 対応する際に合わせて整理
 - **PR #148 round 13 シニアレビュー反映**:
   - **[R13 M1] `gh release delete` UX 退行**: 成功時 stdout/stderr 無音のため `if ($delOut -match '\S')` が false で ShowProgress 行消去後に「無の状態」。`Write-Ok "既存タグ v$Version を削除完了"` を無条件追加して旧 PASS_THROUGH UX を回復
   - **[R13 M2] PASS_THROUGH catalog のメカニズム乖離**: catalog の例示は `& native-cmd` 直書きだが現実装は `Invoke-ExternalProcess` (Process 直叩き)。「(a) 直 & 演算子版」「(b) helper 経由 (推奨)」の 2 実装に分割記述
@@ -85,26 +290,26 @@
 
 #### Changed
 
-- **Native command 呼び出しを `Invoke-NativeWithCapture` helper に一本化 (Wave 1: trap pattern 整理)**: `gh release view` (v1.0.7) / `gh auth status` (Round 11 Critical #1) / `vswhere` (Round 11 Low) を Process 直叩きベースの helper に移行。catalog から「失敗 path で stderr を出すコマンドでは罠を踏む」パターン (`SUPPRESS_BOTH` / `CAPTURE_DIAGNOSTIC` / `TRY_CATCH_NATIVE`) を anti-pattern に格下げ
+- **Native command 呼び出しを `Invoke-NativeWithCapture` helper に一本化 (Wave 1: trap pattern 整理)**: `gh release view` (v0.1.7) / `gh auth status` (Round 11 Critical #1) / `vswhere` (Round 11 Low) を Process 直叩きベースの helper に移行。catalog から「失敗 path で stderr を出すコマンドでは罠を踏む」パターン (`SUPPRESS_BOTH` / `CAPTURE_DIAGNOSTIC` / `TRY_CATCH_NATIVE`) を anti-pattern に格下げ
   - **`Invoke-NativeWithCapture` helper 新設**: `System.Diagnostics.Process` で stdout/stderr/exit code を直接捕捉。PS の error stream を経由しないため NativeCommandError trap を構造的に回避。両 stream を async 読みでデッドロックも回避。返り値は `[PSCustomObject]` で `.StdOut` / `.StdErr` / `.ExitCode` / `.Combined` を提供 (Round 12 #1/3 のリネーム指摘もこの構造変更で自動解消)
   - **catalog 大幅整理**: 6 個あった pattern を「Invoke-NativeWithCapture 推奨 + 3 個の安全な `&` pattern + anti-patterns」に再構成。Round 11 Low の命名軸統一 + Round 12 全般の意図明確化を満たす形に
   - **`gh release view` の structured parse 表現訂正 (Round 11 High + Round 12 #2)**: `--json id` の効果は「存在時の stdout を最小化」のみで、parse はしていない。stderr 文字列マッチでの「不在 vs 別種失敗」判定は gh の英語メッセージ依存である旨をコメントに明記、本来の structured parse (`ConvertFrom-Json` + HTTP 404 判定 etc.) は将来課題として記録
   - **Round 11/12 の Medium / Low 一括対処**: `$_.Exception.Message` 単一行依存 (helper で StdErr 直接取得に変更で解消)、`$releaseViewOutput` mixed content (helper で StdOut/StdErr 分離で解消)、`Out-String` 末尾改行 `.TrimEnd()` 化、elseif → ネスト if/else (exit code を一次軸、stderr を二次軸の構造に)、catalog ↔ call site 重複圧縮 (helper 化で per-site コメントが固有理由 1-2 行に)
-  - **`gh auth status` の同 trap も同時解消 (Round 11 Critical #1)**: v1.0.7 で CHANGELOG note として deferred していたものを Wave 1 で本対応
+  - **`gh auth status` の同 trap も同時解消 (Round 11 Critical #1)**: v0.1.7 で CHANGELOG note として deferred していたものを Wave 1 で本対応
 - **PASS_THROUGH の「例外節」呼称を廃止**: 旧 catalog では「実 release 操作 (gh release create/delete) は例外」と書いていたが、PASS_THROUGH 自体を catalog の一級 pattern として再定義したため例外節は不要に。`Invoke-GhRelease` 内の 2 件のコメントから「例外節 -」を削除
 
-#### Known follow-up (post-v1.0.8 で対処予定)
+#### Known follow-up (post-v0.1.8 で対処予定)
 
-- **`Invoke-NativeWithCapture` 内 TODO**: (a) 引数 quoting helper 切り出し (`Invoke-ExternalProcess` と duplicate)、(b) `-TimeoutSeconds` 引数で network hang ガード — いずれも post v1.0.8 で対処
-- **既存 issue #142 / #143 / #144 / #146**: catalog 重複は本 v1.0.8 で大幅解消、`Release.bat` docstring 分離 / `Read-*` 命名 sweep / `$Context → $PostSync` は別途
-- **#145 (CAPTURE_DIAGNOSTIC ラベル拡張) を本 v1.0.8 で close**: パターン自体を anti-pattern に格下げしたため拡張議論不要に
+- **`Invoke-NativeWithCapture` 内 TODO**: (a) 引数 quoting helper 切り出し (`Invoke-ExternalProcess` と duplicate)、(b) `-TimeoutSeconds` 引数で network hang ガード — いずれも post v0.1.8 で対処
+- **既存 issue #142 / #143 / #144 / #146**: catalog 重複は本 v0.1.8 で大幅解消、`Release.bat` docstring 分離 / `Read-*` 命名 sweep / `$Context → $PostSync` は別途
+- **#145 (CAPTURE_DIAGNOSTIC ラベル拡張) を本 v0.1.8 で close**: パターン自体を anti-pattern に格下げしたため拡張議論不要に
 
-### [Release Tooling v1.0.7] - 2026-05-12
+### [Release Tooling v0.1.7] - 2026-05-12
 
 #### Fixed
 
-- **本番 release で `gh release view` が NativeCommandError trap を踏んで preflight が失敗する問題 (#141 のインライン解決)**: v1.0.6 までの `& gh release view "v$Version" 2>$null | Out-Null` は DRY-RUN で `-SkipUpload` 自動 promote により実行されず、本番 release で v0.1.0 を publish しようとして初めて発火した
-  - **根本原因**: PS 5.1 + `$ErrorActionPreference='Stop'` 環境では、native command が **exit 非ゼロ + stderr 出力** という組合せを返した場合に `2>$null` redirect が trap を防げない。これは PS が native command 用に別途生成する NativeCommandError ErrorRecord が `2>$null` の redirect 処理よりも先 (exit code 確定時点) に作られるため。v1.0.6 までの集約コメントは「`Out-String` を経由すれば Stop の判定対象から外れる」と書いていたが、これは exit 0 限定の挙動で、`gh release view "v0.1.0"` 不在時の `exit 1 + stderr "release not found"` には適用できなかった
+- **本番 release で `gh release view` が NativeCommandError trap を踏んで preflight が失敗する問題 (#141 のインライン解決)**: v0.1.6 までの `& gh release view "v$Version" 2>$null | Out-Null` は DRY-RUN で `-SkipUpload` 自動 promote により実行されず、本番 release で v0.1.0 を publish しようとして初めて発火した
+  - **根本原因**: PS 5.1 + `$ErrorActionPreference='Stop'` 環境では、native command が **exit 非ゼロ + stderr 出力** という組合せを返した場合に `2>$null` redirect が trap を防げない。これは PS が native command 用に別途生成する NativeCommandError ErrorRecord が `2>$null` の redirect 処理よりも先 (exit code 確定時点) に作られるため。v0.1.6 までの集約コメントは「`Out-String` を経由すれば Stop の判定対象から外れる」と書いていたが、これは exit 0 限定の挙動で、`gh release view "v0.1.0"` 不在時の `exit 1 + stderr "release not found"` には適用できなかった
   - **修正**: `try/catch` で受ける `TRY_CATCH_NATIVE` パターンを新設 + 該当 call site に適用。`--json id` で stdout を最小化 (#141 で提案していた structured parse)、`"release not found"` 文字列マッチで "確実に存在しない" を確証、別種の失敗 (auth / network / API rate limit / gh install 破損 等) は preflight で早期 Fail させる形に。これで H2 silent false-negative (gh の auth/network 障害を「タグ衝突なし」と誤判定して zip ビルド完了後に fail する path) も同時解消
   - **catalog 全体の精度向上**: 集約コメントの機構説明に「重要な制約」セクションを追加、`SUPPRESS_BOTH` / `CAPTURE_STDOUT` / `CAPTURE_DIAGNOSTIC` の各パターンが「success/failure path のどちらで stderr を出すか」によって安全性が変わる旨を明記。失敗 path で stderr を出すコマンドには `TRY_CATCH_NATIVE` 一択
   - 影響範囲は preflight の 1 call site のみ。zip / upload ロジックには変更なし
@@ -114,7 +319,7 @@
 
 - **`gh auth status` の call site は本 PR の catalog 制約に未追従**: `Release.ps1` の `Assert-Preflight` 内 `$authStatusOutput = & gh auth status 2>&1 | Out-String` (CAPTURE_DIAGNOSTIC) は、本 PR で新設した制約 (「失敗 path で stderr を出すコマンドには TRY_CATCH_NATIVE 必須」) に該当する。`gh auth status` は未認証時 exit 1 + stderr 出力なので、`gh auth login` 未実行の dev clone / token 期限切れ / `GH_TOKEN` 消失 等のシナリオで NativeCommandError 例外で abort し、本来表示するはずの `Fail "gh 認証に失敗しました ..."` メッセージが届かない。本 PR のスコープは `gh release view` の 1 call site に絞ったため未対応、改善ブランチでまとめて TRY_CATCH_NATIVE に移行予定。シニアレビュー round 11 で同 PR 内対応 or CHANGELOG note のどちらかが許容ラインとされたため、後者を選択
 
-### [Release Tooling v1.0.6] - 2026-05-11
+### [Release Tooling v0.1.6] - 2026-05-11
 
 #### Fixed
 
@@ -126,7 +331,7 @@
 
 #### Changed
 
-- **v1.0.5 で導入した `[WARN]` メッセージの日本語併記行を削除**: chcp 取得失敗パスは codepage 未切替 + ファイル no-BOM のため日本語 echo の文字化けが確定的、ASCII-only ルールに整合させる形で意図的に撤回
+- **v0.1.5 で導入した `[WARN]` メッセージの日本語併記行を削除**: chcp 取得失敗パスは codepage 未切替 + ファイル no-BOM のため日本語 echo の文字化けが確定的、ASCII-only ルールに整合させる形で意図的に撤回
 - **`2>&1` trap 関連の per-site コメント 3 箇所を集約 + 参照形式に整理**: Release.ps1 冒頭の `Set-StrictMode` 直後に集約コメントを設置、各 call site は集約参照 + 1-2 行の理由のみ。集約ラベルは self-documenting な名前 (`SUPPRESS_BOTH` / `CAPTURE_DIAGNOSTIC` / `CAPTURE_STDOUT` / `CAPTURE_STDOUT_PASS_STDERR` / `PASS_THROUGH` / `STOP_TRAP`) で索引参照型コメントの欠点 (表まで戻る往復) を解消。集約コメント内に「機構」セクションを追加して PS 7.x 等への移植時の調査起点を明示
   - **シニアレビュー round 7 反映**: `Assert-WorkingTreeClean` の git status call site は stdout を変数 capture / stderr を console 直書きする hybrid なので、PASS_THROUGH (console 直書き、変数 capture なし) では実態と乖離していた。`CAPTURE_STDOUT_PASS_STDERR` パターンを新設して移行。call site のパターンマーカーと catalog 定義の整合性を保つことが「self-documenting パターン名」アプローチの前提
   - **`STREAM_TO_VAR` の独立記載を廃止**: `STOP_TRAP` と本質的に同じ罠 (`2>&1` 自体が原因) で、変数 capture 有無は表面の違い。「PS バージョンで挙動が変わる」表現が誤読を招くため統合し、両形式を `STOP_TRAP` 配下にまとめて回避策を 2 つ並記
@@ -166,7 +371,7 @@
   - **L5**: `Get-BundleReleaseNotes` の `\Z` コメントを精度向上。現実の発火条件は「初回 Bundle release + 後続セクション未追加の極初期状態」のみで、汎用的な「セクション順変更時」は誤誘導
   - **H2 → 別 issue 化 (#141)**: `gh release view` の exit code 単独依存による silent false-negative。zip ビルド完了後に fail する path が残るが、本 PR スコープ外で `--json id` への移行を別 issue として trackable 化
 
-### [Release Tooling v1.0.5] - 2026-05-11
+### [Release Tooling v0.1.5] - 2026-05-11
 
 #### Fixed
 
@@ -180,27 +385,27 @@
   - **BOM 認識不能環境での脱出経路** (Win 10 1809 以前の古い cmd.exe build 等) を docstring に記録: 「BOM 外して UTF-8 (no BOM) + CRLF に戻し、chcp 65001 より前の REM / echo は ASCII 化」の 3 ステップ
   - `Release.bat` の docstring に CRLF 必須の経緯を追記
 
-### [Release Tooling v1.0.4] - 2026-05-11
+### [Release Tooling v0.1.4] - 2026-05-11
 
 #### Fixed
 
-- **`-DryRun` モードでも GitHub preflight が走る問題を修正 (Codex P2 #137)**: 旧実装は `-DryRun` 時も `-SkipUpload` がなければ `gh auth status` / `gh release view` を呼び出していた。`-DryRun` は zip 化と upload を skip するモードのため、preflight だけ network 必須にする意味は無い。gh 認証なし環境やオフライン環境で `-DryRun` 単体実行が fail していた問題を解消。v1.0.3 で導入した `-Offline → -SkipUpload promote` ロジックを拡張し、`if (($Offline -or $DryRun) -and -not $SkipUpload) { $SkipUpload = $true }` の形に統合。docstring も `-DryRun` の説明を更新
+- **`-DryRun` モードでも GitHub preflight が走る問題を修正 (Codex P2 #137)**: 旧実装は `-DryRun` 時も `-SkipUpload` がなければ `gh auth status` / `gh release view` を呼び出していた。`-DryRun` は zip 化と upload を skip するモードのため、preflight だけ network 必須にする意味は無い。gh 認証なし環境やオフライン環境で `-DryRun` 単体実行が fail していた問題を解消。v0.1.3 で導入した `-Offline → -SkipUpload promote` ロジックを拡張し、`if (($Offline -or $DryRun) -and -not $SkipUpload) { $SkipUpload = $true }` の形に統合。docstring も `-DryRun` の説明を更新
 
-### [Release Tooling v1.0.3] - 2026-05-11
+### [Release Tooling v0.1.3] - 2026-05-11
 
 #### Fixed
 
 - **manifest sync 後の working tree 再検証を追加 (Codex P1 #137)**: `Test-Preflight` で working tree clean を要求した後、`Set-ManifestVersions` が `project.godot` / `export_presets.cfg` を書き換えると tree が dirty になり、その状態で packaging + tag 付けが進むと **source ↔ artifact traceability が崩れる** 問題を解消。新規 `Assert-WorkingTreeClean` 共通関数を切り出し、preflight と sync 後の 2 タイミングで呼ぶように変更。sync 後の dirty 検出時は「`Set-ManifestVersions` が書き換えた差分をコミットしてから再実行」という具体的なメッセージで fail (`Set-ManifestVersions` は idempotent なので 2 回目以降は no-op)
 - **`-Offline` モードで GitHub preflight が走る問題を修正 (Codex P2 #137)**: 旧実装は `-Offline` 時も `-SkipUpload` がなければ `gh auth status` / `gh release view` を呼び出していた。オフライン環境ではこれらが必ず fail するため `-Offline` フラグが advertise 通り機能していなかった。`param` block 直後で `if ($Offline -and -not $SkipUpload) { $SkipUpload = $true }` の自動 promote を追加し、`-Offline` 指定時は upload 関連の preflight + 実 upload を全て skip する形に統一。docstring も `-Offline` の説明を更新
 
-### [Release Tooling v1.0.2] - 2026-05-11
+### [Release Tooling v0.1.2] - 2026-05-11
 
 #### Fixed
 
 - **`export_presets.cfg` が gitignore で除外されてクリーン clone で Release.ps1 が即 fail する問題を修正 (Codex P1 #137)**: Godot のデフォルト `.gitignore` テンプレが `export_presets.cfg` を除外する慣習で、本プロジェクトの初期 `.gitignore` もそれを踏襲していた。しかし Release.ps1 の `Set-ManifestVersions` が `application/file_version` を書き換えるため必須ファイルになっており、別開発者の clean clone では `ReadAllText` の段階で fail していた。`.gitignore` から `export_presets.cfg` を除外し tracked 化、初期の Godot エディタ生成版を repo に含める形に変更
 - **`bin\Release\` 再帰コピーで前回ビルド時の runtime ゴミが zip に混入し得る問題を修正 (Codex P1 #137)**: 開発者が Manager を直接 `bin\Release\` から起動した場合、log / db / backups 等の runtime ファイルが `bin\Release\` に発生する。`Get-ChildItem -Recurse -File | Where Extension -ne '.pdb'` で拾ってると、これら不要ファイルが release zip に紛れ込む可能性があった。`Build-Manager` の msbuild 直前に `bin\Release\` を `Remove-Item -Recurse -Force` で完全削除し、毎回クリーンビルドする形に変更。これで bin\Release/ には msbuild が生成した正規の output のみが残り、コピー対象の予期せぬ追加が起きない
 
-### [Release Tooling v1.0.1] - 2026-05-11
+### [Release Tooling v0.1.1] - 2026-05-11
 
 #### Changed
 
@@ -210,7 +415,7 @@
   - `Release.bat` から `RELEASE_VERSION` ファイル読み取り処理を削除、引数を Release.ps1 にそのまま forward する形に簡素化
   - SPEC §3.7.7 / AGENTS.md "Release and Versioning" / §3.7.8 チェックリストも同方式に対応する形に更新
 
-### [Release Tooling v1.0.0] - 2026-05-11
+### [Release Tooling v0.1.0] - 2026-05-11
 
 #### Added
 
