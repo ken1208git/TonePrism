@@ -30,6 +30,14 @@
 # indistinguishable from intentional cancellation.
 $ErrorActionPreference = 'Stop'
 
+# Strict mode catches typos / uninitialized variable references at parse / runtime
+# (シニアレビュー round 5 L4). Even in this 50-line script, $d being null after a
+# silent New-Object failure would surface as a clear error rather than propagate
+# as $null.Description = ... -> hard-to-trace runtime fault.
+Set-StrictMode -Version Latest
+
+$d = $null
+$result = $null
 try {
     Add-Type -AssemblyName System.Windows.Forms
     $d = New-Object System.Windows.Forms.FolderBrowserDialog
@@ -38,13 +46,21 @@ try {
     $result = $d.ShowDialog()
 } catch {
     [Console]::Error.WriteLine("[ERROR] show_folder_dialog setup/launch failed: $($_.Exception.Message)")
+    # finally で Dispose してから明示 Exit (シニアレビュー round 5 L2)
+    if ($null -ne $d) { try { $d.Dispose() } catch { } }
     [Environment]::Exit(1)
 }
 
-if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-    # Out.Write (newline なし): bat 側の set /p が末尾 CR 残留する trap を回避
-    [Console]::Out.Write($d.SelectedPath)
-    [Environment]::Exit(0)
-} else {
-    [Environment]::Exit(2)
+try {
+    if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+        # Out.Write (newline なし): bat 側の set /p が末尾 CR 残留する trap を回避
+        [Console]::Out.Write($d.SelectedPath)
+        [Environment]::Exit(0)
+    } else {
+        [Environment]::Exit(2)
+    }
+} finally {
+    # FolderBrowserDialog は IDisposable。短命プロセスなので GC でも回収されるが、
+    # 明示的に Dispose して native handle を確実に解放 (round 5 L2)。
+    if ($null -ne $d) { try { $d.Dispose() } catch { } }
 }

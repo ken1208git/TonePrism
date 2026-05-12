@@ -31,6 +31,22 @@
 
 ### [Release Tooling v0.1.9] - 2026-05-12
 
+#### Fixed (PR #149 シニアレビュー round 5)
+
+- **[M1] `isInteractive` 検出ロジックの catch reset が片側判定の non-interactive を上書きする silent path**: round 4 で導入した non-interactive 検出ブロックで、`[Environment]::UserInteractive` が `$false` 確定後に `[Console]::IsInputRedirected` getter が non-console host で例外を投げると、catch が `$isInteractive = $true` で上書きする path があった。WSH host / カスタム PS host で `UserInteractive=$false` だが IsInputRedirected getter が IOException を投げる → catch で reset → Read-Host 空文字 → exit 3 silent skip という、本修正が解消したかった silent path に戻ってしまう構造。修正: 各 API を独立 try で取得し最後に AND 合成 (`$ui = try { ... } catch { $true }` / `$inputRedirected = try { ... } catch { $false }` / `$isInteractive = $ui -and -not $inputRedirected`)。片側 API 失敗が他方の確定判定を巻き戻さない構造に
+- **[M2] exit 3 メッセージの「ビルドキャッシュは温存」表現が実装と乖離**: round 4 L4 で tag conflict path と表現統一した結果、「Godot export / msbuild は再実行されず、zip のみ再生成」と書いてしまったが、実装上は `Build-Launcher` / `Build-Manager` が毎回呼ばれ、`Clear-Staging` で staging も毎回削除、`bin\Release\` も clean build される。温存されるのは `tools/godot/` / `tools/nuget.exe` の **DL キャッシュ** のみで、Godot export / msbuild 出力は実際には再生成される。修正: 両 path のメッセージを「再 build (Godot export / msbuild) は走るが、Godot / nuget の DL キャッシュは温存されるため初回より速い」と正確化、Resolve-TagConflict 側も「再 build は走るが DL キャッシュは温存」と同じ表現に統一
+
+#### Changed (PR #149 シニアレビュー round 5)
+
+- **[L1] Install.bat:59 `set "EXIT_CODE=0"` → `set EXIT_CODE=0`**: numeric 規約 (line 51-55 で明文化済の「quote rule applies to path / user-input values, not to numeric flags」) を自分で破っていた 1 箇所を是正。`:fail` の `set EXIT_CODE=1` と表記揃え、他の numeric sentinel (`MANAGER_FOUND` / `LAUNCHER_FOUND` / `MANAGER_STARTED`) と一貫
+- **[L3] SPEC §3.7.2 入れ子検知に case-insensitive を明記**: 実装 (`if /i not "..." == "GCTonePrism"`) は case-insensitive だが SPEC は厳密 case-sensitive にも読めた。「比較は case-insensitive、`gctoneprism` / `GCTONEPRISM` も検出する。Windows の伝統的 path 比較に合わせる」と一文追加、将来 case-sensitive fs (ReFS / WSL) で挙動が変わる場合の参照点を明示
+- **[L5] INSTALL_README の copy 失敗 Q&A を 2 path で区別**: 旧 Q&A は `:copy_failed` (files/ → GCTonePrism/ の robocopy 失敗) だけを想定した記述で、`:shortcut_failed` (Launcher.bat / Manager.bat → `<親>/` の copy 失敗) の場合の権限確認先が異なる点に触れていなかった。「ファイルコピーに失敗」(GCTonePrism\ 配下の書き込み権限) と「ショートカット bat のコピーに失敗」(`<親>` 自体の書き込み権限) を別 Q&A に分離、学校サーバーで `<親>` のみ制限つきの稀ケースを救う
+
+#### Added (PR #149 シニアレビュー round 5)
+
+- **[L2] `show_folder_dialog.ps1` に try/finally Dispose 追加**: `FolderBrowserDialog` は `IDisposable` 実装、短命プロセスで GC でも回収されるが、`ShowDialog` 中の COM 例外 / Add-Type 後の例外 path で確実に native handle を解放するため明示 Dispose。catch 経路 + 通常終了経路の両方で `$d.Dispose()` が呼ばれる
+- **[L4] `show_folder_dialog.ps1` に `Set-StrictMode -Version Latest` 追加**: Release.ps1 (line 93) との整合性。$d が null 状態で property assign に至った場合に明確なエラー surface、silent runtime fault を防ぐ防御強化
+
 #### Fixed (PR #149 シニアレビュー round 4)
 
 - **[M2] robocopy コメントが「ユーザーデータ保護の主機構」を誤って伝える bug**: 旧コメントは `/XF` `/XD` を保護の主軸として説明していたが、実際に user data (prism.db / games / backups / responses / logs) を保護しているのは **robocopy の default 非ミラー挙動** (dest 側にあって source にないファイル / ディレクトリは touch しない) であり、`/XF /XD` は「source 側に勘違いで同名ファイル / ディレクトリが混入した場合の defense-in-depth」に過ぎない。現状 source (`files/`) には保護対象名は入らないので `/XF /XD` は 実質 no-op。誤解の害: 将来「コピー効率化のため `/MIR` 追加」を検討した時に「`/XF /XD` があるから user data は守られる」と誤判断 → `/MIR` の "source にないものを削除" 挙動で user data が即削除される silent path。修正: コメントを「PRIMARY protection = default 非ミラー挙動 / `/XF /XD` = defense-in-depth / **`/MIR` 追加禁止**、必要になった場合は `/XO` + pre-copy snapshot + SPEC §3.7.3 と同期」の警告文に書き直し

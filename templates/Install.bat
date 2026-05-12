@@ -56,7 +56,8 @@ REM applies to path / user-input values, not to numeric flags. (シニアレビ�
 set "SCRIPT_DIR=%~dp0"
 set "FILES_DIR=%SCRIPT_DIR%files"
 REM Exit code sentinel: failure paths goto :fail to set 1.
-set "EXIT_CODE=0"
+REM (numeric per L1 rule — unquoted, matches :fail's `set EXIT_CODE=1`)
+set EXIT_CODE=0
 
 REM ---- files/ existence check (top-level, no Japanese echo inside block) ----
 if exist "%FILES_DIR%" goto :files_ok

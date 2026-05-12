@@ -852,7 +852,7 @@ csproj 命名規則は `GCTonePrism_<Companion 名>` で Manager (`GCTonePrism_M
 2. 展開したフォルダ内の `Install.bat` をダブルクリック
 3. **PowerShell の `FolderBrowserDialog`** が立ち上がり、「親フォルダ」を選択（例: `\\学校サーバー\PCクラブ`、`D:\Games` 等）
    - 親フォルダ配下に `GCTonePrism/` サブフォルダが自動作成される
-   - 入れ子防止: 親パス自体の末尾が `GCTonePrism` で終わる場合は警告を出して中止（`<親>\GCTonePrism\GCTonePrism\` という二重入れ子を防ぐため）
+   - 入れ子防止: 親パス自体の末尾が `GCTonePrism` で終わる場合は警告を出して中止（`<親>\GCTonePrism\GCTonePrism\` という二重入れ子を防ぐため）。比較は **case-insensitive**（Install.bat の `if /i` による）で、`gctoneprism` / `GCTONEPRISM` 等の異 case 表記も検出する。Windows の伝統的な path 比較が case-insensitive である慣習に合わせる
    - 旧仕様で挙げていた `GCTonePrism_Manager` 配下の存在チェックは廃止：「既存検出は `<親>\GCTonePrism\` ディレクトリ存在の単純チェック」に統一（次項）
 4. 既存検出: `<親>\GCTonePrism\` が既にある場合 → 警告 + Y/N 確認
    - 警告メッセージは「通常のアップデートは Manager UI から行うのを推奨」「Manager が壊れて起動できない / クリーンインストールしたい場合のみ Y を押してください」「Y を押した場合でもゲームデータ（`prism.db` / `games/` / `backups/` / `responses/` / `logs/`）は維持されます」を含む

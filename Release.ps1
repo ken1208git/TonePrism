@@ -989,7 +989,7 @@ function Resolve-TagConflict {
             Write-Info "publish するには以下のいずれか:"
             Write-Info "  (a) .\Release.bat -Force"
             Write-Info "     既存 v$Version を削除して同 version で publish 再実行"
-            Write-Info "     (zip + build キャッシュ温存のため retry は速い)"
+            Write-Info "     (再 build は走るが Godot / nuget の DL キャッシュは温存されるため初回より速い)"
             Write-Info "  (b) CHANGELOG.md の ## Bundle に v$Version 以外の新 entry 追加 → .\Release.bat"
             Write-Info "     version を bump して新規 publish"
             Write-Host ""
@@ -1626,7 +1626,7 @@ if ($script:DeleteExistingRelease) {
 }
 Write-Host ""
 
-# Non-interactive 検出 (シニアレビュー round 4 M3):
+# Non-interactive 検出 (シニアレビュー round 4 M3 + round 5 M1):
 #   Read-Host は stdin が redirect されている / 端末がない環境で空文字列を返す。
 #   `'^(y|yes)$'` は空に一致しないので、CI で `-SkipUpload` 付け忘れた場合に
 #   何の警告もなく exit 3 (= N 回答 skip) になる silent path があった。
@@ -1634,18 +1634,19 @@ Write-Host ""
 #   exit code で区別できず、exit code 体系 (2 = env state, 3 = user 判断) の
 #   区別が崩れる。明示的に「-SkipUpload を付けてください」と Fail (exit 1) する。
 #
-# 判定: [Environment]::UserInteractive AND -not [Console]::IsInputRedirected。
+# 判定: UserInteractive AND -not IsInputRedirected。
 #   - UserInteractive: PS host が user 対話可能と判定したか (CI / Service 等で false)
 #   - IsInputRedirected: stdin がパイプやファイルから redirect されているか
-#   両方とも安全側 (検出失敗時は interactive 扱い → 従来通り Read-Host に進む) を取る。
-$isInteractive = $true
-try {
-    if (-not [Environment]::UserInteractive) { $isInteractive = $false }
-    if ([Console]::IsInputRedirected) { $isInteractive = $false }
-} catch {
-    # console API 取得失敗 (non-console host 等) は interactive 扱いで従来動作
-    $isInteractive = $true
-}
+#
+# 重要 (round 5 M1): 各 API は **独立した try** で取得する。旧実装は両 API を
+# 1 つの try ブロックでまとめていたが、最初の API で `$isInteractive = $false`
+# が確定した後に 2 番目の API が例外を投げると、catch が `$true` に巻き戻して
+# silent path を再導入してしまっていた。独立 try で取得して最後に AND 合成
+# することで、片側 API 失敗が他方の確定判定を上書きしないようにする。
+# 取得失敗時の default は安全側 (interactive 扱い → 従来通り Read-Host に進む)。
+$ui = try { [Environment]::UserInteractive } catch { $true }
+$inputRedirected = try { [Console]::IsInputRedirected } catch { $false }
+$isInteractive = $ui -and -not $inputRedirected
 if (-not $isInteractive) {
     Write-Host ""
     Write-Warn "非対話環境 (CI / stdin redirected) を検出しました。"
@@ -1665,8 +1666,8 @@ if ($confirmUpload -inotmatch '^(y|yes)$') {
     Write-Warn "アップロードをスキップしました。zip は $ZipPath に残っています。"
     Write-Info "別環境での Install.bat 検証等に流用可。"
     Write-Info "再度 publish を試みる場合は .\Release.bat を再実行 → y/yes 選択。"
-    Write-Info "(ビルドキャッシュは温存されるため Godot export / msbuild は再実行されず、zip"
-    Write-Info " のみ再生成で retry は速い。`tag conflict` の graceful exit と同じキャッシュ挙動)"
+    Write-Info "(再 build (Godot export / msbuild) は走るが、Godot / nuget の DL キャッシュは"
+    Write-Info " 温存されるため初回より速い。`tag conflict` graceful exit と同じキャッシュ挙動)"
     # exit code 3 = Y/N の N 回答による intentional skip (シニアレビュー round 3 M4)。
     # tag conflict skip (exit 2) と区別する: 前者は env 起因の "publish 不可"、
     # こちらは user の判断による "publish しない"。CI から見ると両方 "未発火" だが、
