@@ -295,7 +295,7 @@ function Get-ToolPath { param([string]$Name)
 }
 
 # ============================================================================
-# Native command の罠なし呼び出し (冒頭の `2>&1` trap セクション参照)
+# Native command の罠なし呼び出し (冒頭の「Native command 呼び出しの方針」セクション参照)
 # ============================================================================
 
 function Invoke-NativeWithCapture {
@@ -380,9 +380,11 @@ function Invoke-NativeWithCapture {
             # 進捗描画なしコマンド (gh release create 等) のための擬似 progress。
             # 500ms 間隔で経過秒数を `\r` 上書き表示 (CR で行頭戻り、新しい数字で上書き)
             # clear 幅は console window 幅から動的算出: ProgressMessage 長 / Japanese
-            # 文字 cell 幅 / elapsed 桁数によらず消し残しが出ない。WindowWidth 取得
-            # 失敗時 (ISE 等の非 console host) は 120 で fallback、WindowWidth が
-            # 0 以下を返す non-console host も同様に 120 で fallback
+            # 文字 cell 幅 / elapsed 桁数によらず消し残しが出ない。
+            # Fallback 条件 (どちらも 120 cells に置換):
+            #   - WindowWidth 取得が例外を投げる (ISE 等の非 console host)
+            #   - WindowWidth - 1 が 30 未満 (例: WindowWidth=0 を返す non-console host /
+            #     極端に狭い実コンソール)。30 は ProgressMessage 等が最低限収まる threshold
             $clearWidth = try { [Console]::WindowWidth - 1 } catch { 120 }
             if ($clearWidth -lt 30) { $clearWidth = 120 }
             $clearLine = ' ' * $clearWidth
@@ -415,12 +417,15 @@ function Invoke-NativeWithCapture {
             throw "Invoke-NativeWithCapture: '$FilePath' の出力読み取りに失敗しました: $($_.Exception.Message)"
         }
 
-        # Combined の separator 判定 (4 case 網羅):
-        #   stdout 空                          → $stderr そのまま (separator 不要、
-        #                                        Combined 先頭が stderr なので `^` regex は effective)
-        #   stdout 有 + 末尾 \n あり           → 単純連結 (改行はすでに含まれる)
-        #   stdout 有 + 末尾 \n なし + stderr → `\n` を明示挟む (^pattern 取りこぼし防止)
-        #   stderr 空                          → 上記いずれかで stdout のみ
+        # Combined の separator 判定 (stdout の末尾改行を軸に 2 分岐):
+        #   stdout 空 or 末尾 \n あり  → 単純連結 ($stdout + $stderr)
+        #     - stdout 空 + stderr 有  → $stderr そのまま (Combined 先頭 = stderr、^regex effective)
+        #     - 末尾 \n あり + stderr 有 → 改行はすでに含まれる
+        #     - stderr 空              → $stdout だけ (trailing \n 有無は stdout 次第)
+        #   stdout 末尾 \n なし        → `\n` を明示挟む ($stdout + "`n" + $stderr)
+        #     - stderr 有              → ^pattern 取りこぼし防止
+        #     - stderr 空              → Combined 末尾に trailing \n が付く (caller が
+        #                                TrimEnd() で吸収する想定、現 call site は全て適用済み)
         if ($stdout -and -not $stdout.EndsWith("`n")) {
             $combined = $stdout + "`n" + $stderr
         } else {
@@ -696,14 +701,22 @@ function Resolve-MsBuild {
     if (-not (Test-Path $vswhere)) { $vswhere = "$env:ProgramFiles\Microsoft Visual Studio\Installer\vswhere.exe" }
     if (Test-Path $vswhere) {
         # vswhere は検索 hit なし時に exit 0 + 空 stdout を返すが、実行環境破損
-        # (権限 / インストーラ破損 等) で stderr 出力する可能性もあるため
-        # Invoke-NativeWithCapture で罠なく capture。
+        # (権限 / インストーラ破損 等) で exit 非ゼロ + stderr 出力する可能性もある。
         # `-utf8` 必須: Invoke-NativeWithCapture は stdout を UTF-8 として decode する
         # ため、vswhere の default (system codepage) 出力だと non-UTF-8 locale で
         # non-ASCII install path (日本語 VS install path 等) が mojibake → 後段の
         # Test-Path が失敗 → MSBuild 検出失敗の path に落ちる
         $vswhereResult = Invoke-NativeWithCapture -FilePath $vswhere `
             -Arguments @('-latest', '-products', '*', '-requires', 'Microsoft.Component.MSBuild', '-property', 'installationPath', '-utf8')
+        # vswhere 失敗時は warn して PATH fallback path に落とす (Fail にはしない —
+        # PATH に msbuild があれば release は続行できるため)。コメント上で「stderr
+        # 出力する可能性」を挙げた以上、その出力をユーザーに届けないと silent pass
+        if ($vswhereResult.ExitCode -ne 0) {
+            Write-Warn "vswhere が exit $($vswhereResult.ExitCode) で終了 (権限 / VS Installer 破損等の可能性):"
+            $vswhereStderr = $vswhereResult.StdErr.TrimEnd()
+            if ($vswhereStderr -match '\S') { Write-Warn $vswhereStderr }
+            Write-Info "PATH fallback に切替えて MSBuild を探します"
+        }
         $vsInstall = $vswhereResult.StdOut.Trim()
         if ($vsInstall) {
             $vsCands = @(
@@ -1330,8 +1343,9 @@ function Invoke-GhRelease {
         }
         # gh release delete は成功時 stdout/stderr ともに無音なので、
         # ShowProgress 行が消えた後の「無の状態」を避けるため明示的な完了表示
-        # (gh の将来 version で出力するようになった場合は追加で Write-Info)
         Write-Ok "既存タグ v$Version を削除完了"
+        # 下記は future-proofing (現行 gh では成功時 stdout 空のため発火しない、
+        # 将来 version が完了メッセージ等を出力するようになった場合に表示)
         $delOut = $delResult.StdOut.TrimEnd()
         if ($delOut -match '\S') { Write-Info $delOut }
     }
