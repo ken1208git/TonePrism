@@ -31,6 +31,24 @@
 
 ### [Release Tooling v0.1.9] - 2026-05-12
 
+#### Fixed (PR #149 シニアレビュー round 4)
+
+- **[M2] robocopy コメントが「ユーザーデータ保護の主機構」を誤って伝える bug**: 旧コメントは `/XF` `/XD` を保護の主軸として説明していたが、実際に user data (prism.db / games / backups / responses / logs) を保護しているのは **robocopy の default 非ミラー挙動** (dest 側にあって source にないファイル / ディレクトリは touch しない) であり、`/XF /XD` は「source 側に勘違いで同名ファイル / ディレクトリが混入した場合の defense-in-depth」に過ぎない。現状 source (`files/`) には保護対象名は入らないので `/XF /XD` は 実質 no-op。誤解の害: 将来「コピー効率化のため `/MIR` 追加」を検討した時に「`/XF /XD` があるから user data は守られる」と誤判断 → `/MIR` の "source にないものを削除" 挙動で user data が即削除される silent path。修正: コメントを「PRIMARY protection = default 非ミラー挙動 / `/XF /XD` = defense-in-depth / **`/MIR` 追加禁止**、必要になった場合は `/XO` + pre-copy snapshot + SPEC §3.7.3 と同期」の警告文に書き直し
+- **[M3] `Read-Host` が non-interactive 環境で silent exit 3 になる bug**: Y/N upload prompt は対話前提だが、`Read-Host` は stdin redirect / 端末なし環境で空文字列を返し、`'^(y|yes)$'` regex に一致しないため exit 3 (= N 回答 skip) で終了する。CI で `-SkipUpload` 付け忘れた場合、エラーメッセージなしで Warn 行のみ出して silent skip。exit code 体系 (2 = env state, 3 = user 判断) の区別も崩れる。修正: Read-Host 前に `[Environment]::UserInteractive` + `[Console]::IsInputRedirected` で non-interactive を検出し、検出時は明示的に `Fail "non-interactive environment: -SkipUpload / -DryRun 未指定で Read-Host を呼ぼうとしました"` (exit 1) で abort、`-SkipUpload` または `-DryRun` を案内する Write-Info 付き
+- **[M1] Launcher.bat の `exit` 採用理由コメントが Launcher.bat の文脈で literally false**: 旧コメントは「Install.bat が Manager を起動する経路で residual cmd window 問題が出た」と書かれており、Manager.bat の文脈では正しいが Launcher.bat 自体は Install.bat の auto-start path から呼ばれない (Install.bat に Launcher 起動経路はない) ため事実関係がそのまま当てはまらない。copy-paste 痕跡で未来の保守者が「Launcher.bat も Install.bat に呼ばれているのか」と誤解する path。修正: 「leaf shortcut (他 bat の building block ではない) として Manager.bat と同じ `exit` discipline を予防的に適用」「観測された residual cmd 問題は Manager 経路のみ、Launcher.bat 自体は forward-looking consistency choice」と書き直し、参照は Manager.bat docstring に集約
+
+#### Changed (PR #149 シニアレビュー round 4)
+
+- **[L1] SPEC §3.7.5 「階層変更」表現を修正**: 旧記述「Phase 2 で `GCTonePrism/Launcher.bat` から `<親>/Launcher.bat` に階層変更」は、リリース歴を辿る読者に「以前は `GCTonePrism/Launcher.bat` として配布されていた」と誤解させる。実際には `GCTonePrism/Launcher.bat` 配置は PR #149 内の中間コミット時点の設計で published version 履歴ではない。「Phase 2 で `<親>/Launcher.bat` 直下配置として新規導入、初期案では `GCTonePrism/Launcher.bat` も検討されたが published 前に確定」と整理
+- **[L2] Install.bat の `set /p` プロンプト内の `(Y/N)` を `[Y/N]` に統一**: line 19 docstring rule の「echo arguments MUST NOT contain literal `(` or `)`」を echo に限定して書いていたが、`set /p` プロンプトでも `(Y/N)` を露出させていた整合性欠如。`set /p` parser も内部的に block 解釈と独立している保証は薄く、将来の cmd 挙動変化への安全マージンとして `(` `)` 禁止ルールを `echo / set /p prompt` 両方に拡張。既存の 2 箇所 (`OVERWRITE_CONFIRM` / `START_MANAGER` プロンプト) も `[Y/N]` に置換
+- **[L4] exit 3 N 回答メッセージを tag conflict path と表現統一**: 旧文言「同 zip を再生成」が「ファイルが消える → 再作成」と誤読されやすかった。「ビルドキャッシュは温存され、Godot export / msbuild は再実行されない (zip のみ再生成で retry は速い)」と tag conflict graceful exit path の説明と同じ表現に揃え、技術的に正確な記述に統一
+- **[L5] PR description の "Known untested" を UNC share root と sub-path で区別整理**: 旧表記は `\\学校サーバー\PCクラブ` を UNC root の例として挙げていたが、`PCクラブ` が share name か sub-path か曖昧。本当に未テストなのは share root 直接選択 (`\\server\share` 形式) のケース。`\\server\share\sub` は通常 path 扱いで edge case ではない、と区別。**ドライブルート (`C:\` 等)** も追加で Known untested に明記、leaf extraction が空文字列を返して INSTALL_TARGET= drive root + GCTonePrism で続行し、mkdir が権限不足で graceful fail する path を docstring 化
+
+#### Added (PR #149 シニアレビュー round 4)
+
+- **Install.bat docstring の leaf extraction edge case 注記 (L3)**: `for %%F in (...) do %%~nxF` がドライブルート (`D:\`) と UNC root (`\\server\share`) で divergent な値を返す挙動を明文化、各ケースの後段挙動 (drive root mkdir 権限失敗 / UNC share-as-folder 続行) を `:nest_check` 周辺コメントに記述
+- **Install.bat docstring の structural rule (2) を `set /p` 含む形に拡張**: 「echo / set /p prompt arguments MUST NOT contain literal `(` or `)`」「even top-level placement isn't formally guaranteed by docs against future cmd version changes」と一貫性を明記
+
 #### Fixed (PR #149 シニアレビュー round 3)
 
 - **[M2] `:dialog_fail` 経路で PS stderr (実際の失敗理由) が捕捉されていなかった bug**: 旧実装は `> "%TEMP_DIALOG_OUT%"` で stdout のみリダイレクト、stderr は親 cmd console に直流していた。インタラクティブ実行では人間が画面で見られるが、Phase 3 Updater が `cmd /c install.bat > log.txt 2>&1` で呼ぶ運用に入ると stderr 行は log に残らない (= 自動化呼出しで診断情報が失われる) silent path。`show_folder_dialog.ps1:catch` の `[Console]::Error.WriteLine` 出力も同じ理由で消える。修正: `> stdout.tmp 2> stderr.tmp` に分離キャプチャ、`:dialog_fail` で `PS stderr の内容:` + `PS stdout の内容:` を順に表示。`:dialog_ok` / `:dialog_cancel` でも err tmp ファイルを cleanup

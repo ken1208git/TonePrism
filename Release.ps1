@@ -1625,6 +1625,36 @@ if ($script:DeleteExistingRelease) {
     Write-Info "(-Force: 既存 v$Version を削除して再 publish 予定)"
 }
 Write-Host ""
+
+# Non-interactive 検出 (シニアレビュー round 4 M3):
+#   Read-Host は stdin が redirect されている / 端末がない環境で空文字列を返す。
+#   `'^(y|yes)$'` は空に一致しないので、CI で `-SkipUpload` 付け忘れた場合に
+#   何の警告もなく exit 3 (= N 回答 skip) になる silent path があった。
+#   これでは「user が意図的に N と答えた」のか「stdin がなくて空が返った」のか
+#   exit code で区別できず、exit code 体系 (2 = env state, 3 = user 判断) の
+#   区別が崩れる。明示的に「-SkipUpload を付けてください」と Fail (exit 1) する。
+#
+# 判定: [Environment]::UserInteractive AND -not [Console]::IsInputRedirected。
+#   - UserInteractive: PS host が user 対話可能と判定したか (CI / Service 等で false)
+#   - IsInputRedirected: stdin がパイプやファイルから redirect されているか
+#   両方とも安全側 (検出失敗時は interactive 扱い → 従来通り Read-Host に進む) を取る。
+$isInteractive = $true
+try {
+    if (-not [Environment]::UserInteractive) { $isInteractive = $false }
+    if ([Console]::IsInputRedirected) { $isInteractive = $false }
+} catch {
+    # console API 取得失敗 (non-console host 等) は interactive 扱いで従来動作
+    $isInteractive = $true
+}
+if (-not $isInteractive) {
+    Write-Host ""
+    Write-Warn "非対話環境 (CI / stdin redirected) を検出しました。"
+    Write-Info "Y/N upload prompt は対話前提のため、本セッションでは安全側で abort します。"
+    Write-Info "CI / 自動化からは `-SkipUpload` または `-DryRun` を明示指定してください。"
+    Write-Info "(zip は $ZipPath に残っています、別環境で publish するか SkipUpload で build-only 実行)"
+    Fail "non-interactive environment: -SkipUpload / -DryRun 未指定で Read-Host を呼ぼうとしました"
+}
+
 $confirmUpload = Read-Host "    GitHub Releases に v$Version を公開しますか？ (y/yes/n/no で回答)"
 # 厳格マッチ: `^y` だけだと `yikes` / `yo` 等の typo / 「YES (確認)」末尾括弧でも
 # 公開が走るため、`y` / `yes` 完全一致 (大小文字不問) のみ Y 扱い。
@@ -1633,9 +1663,10 @@ $confirmUpload = Read-Host "    GitHub Releases に v$Version を公開します
 if ($confirmUpload -inotmatch '^(y|yes)$') {
     Write-Host ""
     Write-Warn "アップロードをスキップしました。zip は $ZipPath に残っています。"
-    Write-Info "別環境での Install.bat 検証等に流用可。後で公開する場合は同 version の release"
-    Write-Info "を作り直す必要があるため、CHANGELOG に同 Bundle entry が既に書かれている前提で"
-    Write-Info ".\Release.bat を再実行 → 同 zip を再生成 → y/yes 選択、で publish 可能。"
+    Write-Info "別環境での Install.bat 検証等に流用可。"
+    Write-Info "再度 publish を試みる場合は .\Release.bat を再実行 → y/yes 選択。"
+    Write-Info "(ビルドキャッシュは温存されるため Godot export / msbuild は再実行されず、zip"
+    Write-Info " のみ再生成で retry は速い。`tag conflict` の graceful exit と同じキャッシュ挙動)"
     # exit code 3 = Y/N の N 回答による intentional skip (シニアレビュー round 3 M4)。
     # tag conflict skip (exit 2) と区別する: 前者は env 起因の "publish 不可"、
     # こちらは user の判断による "publish しない"。CI から見ると両方 "未発火" だが、

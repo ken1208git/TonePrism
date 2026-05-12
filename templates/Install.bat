@@ -16,7 +16,10 @@ REM     for the school deployment target.
 REM
 REM Structural rules (still apply since they protect against cmd parser quirks):
 REM   (1) Japanese echo MUST live at top-level only (not inside `if ... (...)` blocks).
-REM   (2) echo arguments MUST NOT contain literal `(` or `)`. Use `[` `]` instead.
+REM   (2) echo / set /p prompt arguments MUST NOT contain literal `(` or `)`.
+REM       Use `[` `]` instead. (set /p prompts go through the same parser as echo;
+REM       even top-level placement isn't formally guaranteed by docs against
+REM       future cmd version changes — keep the rule uniform for safety.)
 REM   (3) PowerShell invocations MUST NOT inline long commands with Japanese in
 REM       `set "PS_CMD=...日本語..."` form. Use external .ps1 + `-File`.
 REM
@@ -156,6 +159,19 @@ goto :fail
 REM ---- Nest check ----
 REM If the selected parent path ends in GCTonePrism (with or without trailing \),
 REM we'd create <parent>\GCTonePrism\GCTonePrism\ which is nested. Warn + abort.
+REM
+REM Edge cases for the leaf extraction (シニアレビュー round 4 L3):
+REM   - Drive root `D:\`        -> strip trailing \ leaves `D:` ->
+REM                                `%%~nxF` returns empty string -> leaf = "" ->
+REM                                nest check passes (empty != "GCTonePrism") ->
+REM                                INSTALL_TARGET = `D:\GCTonePrism` -> mkdir
+REM                                may fail with permission (drive root often
+REM                                requires admin), caught by :new_install
+REM                                mkdir-failed branch. Acceptable degradation.
+REM   - UNC root `\\server\share`-> leaf = "share" -> nest passes (unless share
+REM                                is literally named GCTonePrism) ->
+REM                                INSTALL_TARGET = `\\server\share\GCTonePrism`.
+REM                                Untested in E2E, see PR Known untested list.
 set "INSTALL_PARENT_NO_TRAIL=%INSTALL_PARENT%"
 if "%INSTALL_PARENT_NO_TRAIL:~-1%"=="\" set "INSTALL_PARENT_NO_TRAIL=%INSTALL_PARENT_NO_TRAIL:~0,-1%"
 for %%F in ("%INSTALL_PARENT_NO_TRAIL%") do set "INSTALL_PARENT_LEAF=%%~nxF"
@@ -199,7 +215,7 @@ REM set /p preserves the previous value when user just hits Enter. Initialize to
 REM empty so we always evaluate the latest input (defends against future change
 REM that might set OVERWRITE_CONFIRM upstream).
 set "OVERWRITE_CONFIRM="
-set /p OVERWRITE_CONFIRM=上書きしますか？ (Y/N):
+set /p OVERWRITE_CONFIRM=上書きしますか？ [Y/N]:
 REM Accept y / Y / yes / Yes / YES (Release.ps1 の upload prompt と寛容度を揃える)
 if /i "%OVERWRITE_CONFIRM%"=="Y"   goto :checkprocess
 if /i "%OVERWRITE_CONFIRM%"=="YES" goto :checkprocess
@@ -248,11 +264,37 @@ goto :checkprocess
 :do_overwrite
 echo.
 echo [INFO] 上書きインストールを開始します...
-REM robocopy: /E recursive incl. empty dirs, /XF excludes files, /XD excludes dirs,
-REM /NFL /NDL /NJH /NJS /NC /NS /NP minimal output, /R:1 /W:1 retry conservative.
-REM /XF and /XD match by *name* across the entire tree, so future components named
-REM games/backups/etc. would be silently excluded. Currently safe because files/
-REM never contains these names. Documented for future maintainers.
+REM ============================================================================
+REM USER DATA PROTECTION — read this carefully before modifying robocopy flags.
+REM ============================================================================
+REM The PRIMARY protection mechanism is robocopy's DEFAULT non-mirror behavior:
+REM   robocopy without /MIR does NOT delete destination files / directories
+REM   that are absent from source. So user-generated data in INSTALL_TARGET
+REM   (prism.db / games/ / backups/ / responses/ / logs/) is left untouched
+REM   simply because those names don't exist in the source FILES_DIR.
+REM
+REM `/XF prism.db /XD games backups responses logs` is DEFENSE-IN-DEPTH only:
+REM   it guards against a hypothetical future regression where someone
+REM   accidentally adds a `prism.db` placeholder or a `games/` template into
+REM   `files/` (which would then overwrite real user data on upgrade install).
+REM   If today's FILES_DIR has no such names, /XF and /XD are effectively no-ops
+REM   — verified by Assert-ExpectedFiles in Release.ps1.
+REM
+REM ⚠ DO NOT add /MIR. /MIR enables "delete dest files not in source" which
+REM   would IMMEDIATELY destroy all user data (prism.db, games/, etc.). Neither
+REM   /XF nor /XD prevents /MIR's purge. If you ever need a mirror-style sync,
+REM   the protection list must be reimplemented as `/XO` + manual pre-copy
+REM   snapshot of user data, AND /XF /XD must be kept in strict sync with the
+REM   SPEC §3.7.3 user-data list. Today: just don't add /MIR.
+REM
+REM Other flags: /E recursive incl. empty dirs, /NFL /NDL /NJH /NJS /NC /NS /NP
+REM minimal output, /R:1 /W:1 retry conservative.
+REM
+REM Note on /XF /XD name-matching: they match by *name* across the entire tree,
+REM so future components containing a `games/` or `backups/` subfolder would be
+REM silently excluded. Safe today (no such names in files/) but worth flagging
+REM if a future component adds one.
+REM ============================================================================
 robocopy "%FILES_DIR%" "%INSTALL_TARGET%" /E /XF prism.db /XD games backups responses logs /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1
 REM robocopy exit code is a bitfield, < 8 = success (0 no change, 1 files copied, etc.).
 if errorlevel 8 goto :copy_failed
@@ -308,7 +350,7 @@ echo.
 REM ---- Manager start Y/N (top-level, no Japanese echo inside block) ----
 REM set /p empty-Enter retains previous value. Initialize to defend.
 set "START_MANAGER="
-set /p START_MANAGER=Manager を起動しますか？ (Y/N):
+set /p START_MANAGER=Manager を起動しますか？ [Y/N]:
 REM Accept y / Y / yes / Yes / YES (Release.ps1 の upload prompt と寛容度を揃える)
 if /i "%START_MANAGER%"=="Y"   goto :do_start_manager
 if /i "%START_MANAGER%"=="YES" goto :do_start_manager

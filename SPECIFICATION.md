@@ -933,7 +933,7 @@ Launcher / Manager / Companions / Updater は常に 1 つの zip に同梱され
 
 Launcher はアップデート操作の主体ではない。これは「ゲーム来場者が普通に触る画面でアップデート操作可能になっているのは好ましくない」という権限分離の発想による。
 
-- **日常起動**: 部員 / 来場スタッフは `<親>/Launcher.bat` をダブルクリックで起動する（§3.7.1 のルート ショートカット規約、Phase 2 で `GCTonePrism/Launcher.bat` から `<親>/Launcher.bat` に階層変更）。`GCTonePrism/GCTonePrism_Launcher/GCTonePrism_Launcher.exe` の直接起動は想定しない（パス煩雑のため）
+- **日常起動**: 部員 / 来場スタッフは `<親>/Launcher.bat` をダブルクリックで起動する（§3.7.1 のルート ショートカット規約、Phase 2 で **`<親>/Launcher.bat` 直下配置として新規導入**。Phase 2 初期案では `GCTonePrism/Launcher.bat` 配置も検討されたが、`<親>` を開けば即起動できる UX を優先して published 前に確定）。`GCTonePrism/GCTonePrism_Launcher/GCTonePrism_Launcher.exe` の直接起動は想定しない（パス煩雑のため）
 - 起動時に GitHub Releases API で新バージョン有無を確認（バックグラウンド、起動を遅延させない）
 - 新バージョンあり時はスクリーンセーバー画面または設定画面に小さな通知バナーを表示
   - 文言例: 「新バージョンが利用可能です。Manager から更新してください。」
