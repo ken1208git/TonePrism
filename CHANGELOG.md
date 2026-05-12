@@ -65,7 +65,12 @@
   - `-SkipUpload` は引き続き有効 (prompt 自体を skip、CI / non-interactive 運用向け)
   - prompt の Read-Host 入力が `y` / `yes` 完全一致 (大小文字不問) の場合のみ公開、それ以外は abort (round 1 L5 で typo 寛容を厳格化)
 - docstring の `gh release create でアップロード（-SkipUpload で抑止）` → `zip 完成後、Y/N 確認プロンプト → Y なら gh release create、N なら zip だけ残して終了` に更新
-- **タグ衝突チェックを `Assert-Preflight` から `Assert-NoTagConflict` (Y/N 後) に移動**: 旧設計では preflight で「v$Version 既存」を検出すると build 前に即 fail していたが、user が「v0.1.0 既存の状態で Install.bat 検証用 zip だけ欲しい」シナリオで毎回 `-SkipUpload` を付ける必要があった。新設計では build / zip まで通し、upload 確定 (Y) 後にタグ衝突チェック → 既存なら Fail で `-Force` or version bump を案内 (zip は preserve、`-Force` 再実行時 build cache 効くため retry 速い)。preflight は env 系チェック (gh auth / CHANGELOG / working tree) のみに役割を絞り、「事前 fail-fast」と「build 投資後の最終判断」の責務を分離
+- **タグ衝突チェックを `Assert-Preflight` → `Resolve-TagConflict` (zip 後 / Y/N 前) に移動**: 段階的に 3 つの設計を経た最終形。
+  - 旧 (v0.1.7 以前): preflight でタグ衝突を確認 → 既存なら build 前に即 fail。「Install.bat 検証用に zip だけ欲しい」シナリオで毎回 `-SkipUpload` を付け忘れる問題があった
+  - 中間 (v0.1.9 途中): build → zip → Y/N prompt → Y 確定後にタグ衝突チェック → 既存なら Fail。「publish 不可なのに Y を聞いて、Y 押させた後に fail」というミスリードな順序
+  - 最終 (v0.1.9): build → zip → **タグ衝突チェック** → Y/N prompt。publish 可能な状態 (衝突なし or `-Force`) に絞ってから Y/N を聞く。
+  - 既存 + `-Force` なし時の挙動: 旧 `Fail` (exit 1 + 赤字 FAIL) ではなく `Write-Warn` + 復旧手順案内 + `exit 0` で graceful exit。「zip 生成は成功している」「publish 不可は env 状態であって script の失敗ではない」「caller (CI 等) も exit 0 を正常扱いで判定可能」のため。
+  - preflight は env 系 (gh auth / CHANGELOG / working tree) のみに役割を絞り、「事前 fail-fast」と「build 投資後の状態確認」の責務を分離。
 
 #### Changed (versioning scheme)
 

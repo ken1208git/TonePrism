@@ -943,10 +943,15 @@ function Assert-Preflight {
 }
 
 # ============================================================================
-# Phase 9.5: 既存リリースとのタグ衝突チェック (upload Y/N で Y 確定後に呼ぶ)
+# Phase 9.5: 既存リリースとのタグ衝突チェック (zip 完成後、Y/N prompt の前に呼ぶ)
 # ============================================================================
+# Y/N prompt の前にチェックする理由:
+#   旧設計 (Y/N の後にチェック) では「publish 不可なのに Y を聞いて、Y 押させた後に
+#   Fail」というミスリードな順序になる。先にチェックすれば、conflict 検出時に
+#   「publish できません、zip は残します」と graceful exit でき、ユーザーが
+#   Y/N の判断をする前に状態を把握できる。
 
-function Assert-NoTagConflict {
+function Resolve-TagConflict {
     Write-Step "GitHub Releases タグ衝突チェック"
 
     # gh release view は release 不在時に exit 1 + stderr "release not found" を出す。
@@ -962,7 +967,25 @@ function Assert-NoTagConflict {
             Write-Warn "タグ v$Version は既存だが -Force のため後で削除して作り直す"
             $script:DeleteExistingRelease = $true
         } else {
-            Fail "GitHub Releases に v$Version が既存です。`n        対処: (a) ``.\Release.bat -Force`` で既存削除 + 再 publish、または`n              (b) CHANGELOG.md の ## Bundle に新 entry (v$Version 以外) を追加して再実行。`n`n        zip は $ZipPath に残っているため、(a) で再実行する場合も build キャッシュが効いて速い。"
+            # 既存 + -Force なし: publish 不可、Y/N に進ませず情報提示で graceful exit。
+            # Fail (exit 1 + 赤字 FAIL) ではなく warn + exit 0 にしている理由:
+            #   - zip 生成自体は成功している (Install.bat 検証等に流用可)
+            #   - publish 不可は「環境状態」であって「script の失敗」ではない
+            #   - exit 0 にすることで caller (CI / 上位 script) も「成功 + 公開なし」と判定可能
+            Write-Host ""
+            Write-Warn "GitHub Releases に v$Version が既存です。本セッションでは publish できません。"
+            Write-Host ""
+            Write-Info "zip は以下に残っています (Install.bat 検証等に流用可):"
+            Write-Info "  $ZipPath"
+            Write-Host ""
+            Write-Info "publish するには以下のいずれか:"
+            Write-Info "  (a) .\Release.bat -Force"
+            Write-Info "     既存 v$Version を削除して同 version で publish 再実行"
+            Write-Info "     (zip + build キャッシュ温存のため retry は速い)"
+            Write-Info "  (b) CHANGELOG.md の ## Bundle に v$Version 以外の新 entry 追加 → .\Release.bat"
+            Write-Info "     version を bump して新規 publish"
+            Write-Host ""
+            exit 0
         }
     } else {
         # exit 非ゼロ → 不在 or 別種失敗。stderr の英文字列で識別
@@ -1521,12 +1544,18 @@ if ($SkipUpload) {
     exit 0
 }
 
-# upload 直前 Y/N 確認 (#108 Phase 2 で追加):
-# 「ビルド + zip 化までは自動、本番 GitHub Releases 公開は明示的同意」型のフロー。
-# zip だけ作って別環境に展開テスト (Install.bat 等) したい運用シナリオで、
-# `-SkipUpload` を毎回付け忘れて誤 publish するのを防ぐ。
-# 完全 non-interactive 運用 (CI 等) では `-SkipUpload` を明示するか、
-# `Y` を stdin に流す形で対応。
+# zip 完成後の upload フロー (v0.1.9 で再設計):
+#   旧: preflight でタグ衝突チェック → build 前に即 fail (zip 検証用途も塞いでいた)
+#   v0.1.9 中間: build → zip → Y/N → 衝突チェック (Y 押させてから fail でミスリード)
+#   v0.1.9 最終: build → zip → 衝突チェック → Y/N (publish 可能な状態だけ Y を聞く)
+#
+# (1) タグ衝突チェック
+#       既存 + Force なし → 「publish できません」案内で graceful exit (zip は preserve)
+#       既存 + Force あり → warn + DeleteExistingRelease=true で続行
+#       不在            → OK で続行
+Resolve-TagConflict
+
+# (2) 公開確認 Y/N (ここまで来た時点で publish 可能 = 衝突なし or -Force)
 Write-Step "GitHub Releases 公開確認"
 Write-Info "Bundle version: $Version"
 Write-Info "zip ファイル:   $ZipPath"
@@ -1537,15 +1566,16 @@ $zipSizeHuman = if ($zipBytes -ge 1MB) {
     "$([math]::Round($zipBytes / 1KB, 1)) KB"
 } else { "$zipBytes B" }
 Write-Info "サイズ:        $zipSizeHuman"
+if ($script:DeleteExistingRelease) {
+    Write-Info "(-Force: 既存 v$Version を削除して再 publish 予定)"
+}
 Write-Host ""
 $confirmUpload = Read-Host "    GitHub Releases に v$Version を公開しますか？ (y/yes/n/no で回答)"
 # 厳格マッチ: `^y` だけだと `yikes` / `yo` 等の typo / 「YES (確認)」末尾括弧でも
 # 公開が走るため、`y` / `yes` 完全一致 (大小文字不問) のみ Y 扱い。
 # 誤判定で abort → 再実行する方が誤公開より低コスト (GitHub Releases publish は
 # 巻き戻し不可、明示的同意の意図に合わせる)
-if ($confirmUpload -imatch '^(y|yes)$') {
-    # 続行 → タグ衝突チェック → Invoke-GhRelease へフォールスルー
-} else {
+if ($confirmUpload -inotmatch '^(y|yes)$') {
     Write-Host ""
     Write-Warn "アップロードをスキップしました。zip は $ZipPath に残っています。"
     Write-Info "別環境での Install.bat 検証等に流用可。後で公開する場合は同 version の release"
@@ -1553,13 +1583,6 @@ if ($confirmUpload -imatch '^(y|yes)$') {
     Write-Info ".\Release.bat を再実行 → 同 zip を再生成 → y/yes 選択、で publish 可能。"
     exit 0
 }
-
-# upload 確定後、タグ衝突チェック (v0.1.9 で Assert-Preflight から移動)。
-# 旧設計: preflight でタグ衝突を確認 → 既存なら即 fail (build 前)。
-# 新設計: build / zip を先に通して、upload 確定後にタグ衝突を確認。
-# 理由: 既存タグの状態でも zip だけ生成して Install.bat 検証する運用を救う。
-# Fail した場合も zip は preserve されるため、-Force 再実行時の build cache が効く。
-Assert-NoTagConflict
 
 Invoke-GhRelease
 
