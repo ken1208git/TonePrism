@@ -2,31 +2,23 @@
 REM ============================================================================
 REM Install.bat - GCTonePrism initial installer (#108 Phase 2)
 REM
-REM File format: UTF-8 (no BOM) + CRLF. Enforced by:
-REM   - .gitattributes (*.bat eol=crlf) at git checkout
-REM   - Release.ps1 Copy-Templates normalization at staging
+REM File format: cp932 (Shift-JIS) + CRLF at *staging time*.
+REM   - templates/Install.bat (this source) is UTF-8 (no BOM) + CRLF for repo
+REM     readability / cross-platform editing.
+REM   - Release.ps1 Copy-Templates re-encodes to cp932 + CRLF for the zip.
+REM   - Rationale: cmd.exe parses bat files in the SYSTEM codepage (cp932 on JP
+REM     Windows). Bat-internal `chcp 65001` only switches the *console output*
+REM     codepage, NOT the file-reading codepage. Long Japanese lines under
+REM     UTF-8 source caused cmd parser to mistokenize byte sequences and emit
+REM     cascading "is not recognized" errors. Staging as cp932 lets cmd parse
+REM     natively. Cost: non-JP Windows (cp437/1252) would mojibake; out of scope
+REM     for the school deployment target.
 REM
-REM Encoding rule:
-REM   - Above chcp 65001: ASCII only (codepage not switched yet, Japanese mojibakes)
-REM   - Below chcp 65001: Japanese OK in echo arguments
-REM   - REM comments: keep ASCII English even below chcp boundary. cmd's parser
-REM     can misinterpret Japanese byte sequences combined with backticks, parens,
-REM     ellipses etc. in REM lines and emit cascading "is not recognized" errors
-REM     for subsequent lines. Keeping REM ASCII is the safest convention.
-REM   - BOM is NG (some cmd.exe builds break @echo off on BOM, see PR #140).
-REM
-REM Structural rules:
+REM Structural rules (still apply since they protect against cmd parser quirks):
 REM   (1) Japanese echo MUST live at top-level only (not inside `if ... (...)` blocks).
-REM       cmd parses block bodies at parse-time and mistokenizes Japanese byte
-REM       sequences. Use linear `if not cond goto :label / [...echo...] / goto :fail`
-REM       pattern instead.
-REM   (2) echo arguments MUST NOT contain literal `(` or `)`. Use `[` `]` or
-REM       Japanese brackets `「」` instead. `(` is interpreted as block-open by
-REM       cmd even when escaped with `^(`.
+REM   (2) echo arguments MUST NOT contain literal `(` or `)`. Use `[` `]` instead.
 REM   (3) PowerShell invocations MUST NOT inline long commands with Japanese in
-REM       `set "PS_CMD=...日本語..."` form. cmd's line tokenizer cannot handle
-REM       this and PS receives malformed command. Move PS code to a separate
-REM       .ps1 file and invoke with `powershell.exe -File ...ps1`.
+REM       `set "PS_CMD=...日本語..."` form. Use external .ps1 + `-File`.
 REM
 REM Usage:
 REM   Install.bat   -- double-click to run (target user: 部員 / 来場スタッフ)
@@ -48,20 +40,6 @@ REM setlocal disabledelayedexpansion: delayed expansion is intentionally off so
 REM FolderBrowserDialog paths containing `!` (e.g. D:\Backup!\) are preserved
 REM as-is. No `!VAR!` references exist in this file.
 setlocal disabledelayedexpansion
-
-REM ---- Codepage switch (same pattern as Release.bat, established in PR #140) ----
-for /f "tokens=2 delims=:" %%a in ('chcp') do set ORIGINAL_CODEPAGE=%%a
-if defined ORIGINAL_CODEPAGE set ORIGINAL_CODEPAGE=%ORIGINAL_CODEPAGE: =%
-if defined ORIGINAL_CODEPAGE (
-    echo %ORIGINAL_CODEPAGE%| findstr /R "^[0-9][0-9]*$" >nul || set ORIGINAL_CODEPAGE=
-)
-if defined ORIGINAL_CODEPAGE (
-    chcp 65001 >nul
-) else (
-    echo [WARN] Failed to capture codepage, Japanese output may be garbled.
-)
-
-REM ==== ASCII boundary (above: ASCII only, below: Japanese OK in echo) ====
 
 set SCRIPT_DIR=%~dp0
 set FILES_DIR=%SCRIPT_DIR%files
@@ -288,5 +266,4 @@ goto :end
 :end
 echo.
 if not defined MANAGER_STARTED pause
-if defined ORIGINAL_CODEPAGE chcp %ORIGINAL_CODEPAGE% >nul
 endlocal & exit /b %EXIT_CODE%

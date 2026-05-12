@@ -34,6 +34,11 @@
 #### Fixed (PR #149 シニアレビュー round 1 + Codex P2)
 
 - **[Codex P2] FolderBrowserDialog 選択パス内の `!` 文字が delayed expansion で破壊される bug**: `Install.bat` 全体で `setlocal enabledelayedexpansion` を有効化していたため、選択パスに `!` が含まれる場合 (例: `D:\Backup!\` 等のユーザー命名パス) に `for /f ... do set INSTALL_PARENT=%%P` の段階で `!` が delayed expansion token として解釈され削除される。本ファイル refactor 後は `!VAR!` 参照が実質ゼロのため、`setlocal disabledelayedexpansion` に変更して構造的に解消
+- **Install.bat の cmd parse cascade 問題を根本解決: staging encoding を cp932 (Shift-JIS) に変換**: ユーザー実機テストで何度試しても解消しなかった「`'�に'` `'em.Windows.Forms'` `'��データは維持されます:'` 等の 'is not recognized' 連鎖エラー + Manager 起動後の黒画面残存」の根本原因が判明: **`chcp 65001` は console output codepage のみ切り替え、cmd の bat ファイル parser は **システム codepage** (JP Windows = cp932) で読み続ける** 仕様。UTF-8 で書かれた長文 Japanese echo (`Manager が壊れて起動できない / クリーンインストールしたい場合のみ Y を押してください。` 等 30+ chars) の byte 境界を parser が mis-tokenize → cascade。修正:
+  - **Release.ps1 Copy-Templates が .bat staging 時に UTF-8 → cp932 変換**: cmd の system codepage と一致するので parser が natively 読める。長文 Japanese 行も安全に処理。デメリットの非 JP Windows での mojibake は JP 校内向け配布なので OK
+  - **Install.bat から `chcp 65001` ロジック撤去**: cp932 file ↔ cp932 system で一致するため不要。同時に「ASCII boundary rule」も削除 (codepage 切替がないので boundary 自体存在しない)
+  - **Install.bat docstring の構造規約 (1)(2)(3) は維持**: cmd parser の `(...)` block / literal `(` / inline 日本語の各 quirk は cp932 でも残るので、引き続き必要
+  - 副次効果: Manager 自動起動後の黒画面残存も解消 (parser cascade で `start` の後始末が狂っていたのが root cause だった)
 - **ショートカット bat (`Launcher.bat` / `Manager.bat`) の配置を 1 階層上に変更** (ユーザー UX 要望):
   - 旧: `<親>/GCTonePrism/Launcher.bat` (部員が `GCTonePrism/` サブフォルダに入る必要があった)
   - 新: `<親>/Launcher.bat` (`<親>` を開けば即ダブルクリック可能)

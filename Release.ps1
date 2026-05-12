@@ -1334,14 +1334,26 @@ function Copy-Templates {
         if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Path $dstDir -Force | Out-Null }
 
         if ($src -match '\.bat$') {
-            # cmd.exe は LF-only bat を正しく parse できず double-click で即 close
-            # する (PR #140 の Release.bat 同種事故、本 Phase 2 では Install.bat で
-            # 再発)。.gitattributes の `*.bat eol=crlf` は git checkout 時のみ強制
-            # するため、Write tool 等で working tree に LF が残った場合に staging
-            # へ LF のまま流れ込む。ここで強制 CRLF normalize + UTF-8 no BOM 維持。
+            # cmd.exe は LF-only bat を parse できず double-click で即 close する
+            # (PR #140 で Release.bat、Phase 2 で Install.bat が踏んだ事故)。
+            # `.gitattributes` の `*.bat eol=crlf` は git checkout 時のみ強制する
+            # ため、Write tool 編集後の working tree LF が staging に流れ込む。
+            # ここで強制 CRLF normalize。
+            #
+            # **エンコーディング: cp932 (Shift-JIS) に変換して書き出す**:
+            #   cmd.exe の bat parser は **システム codepage** (JP Windows = cp932)
+            #   でファイルを読み、`chcp 65001` を bat 内で呼んでも切り替わるのは
+            #   console output codepage のみ、ファイル解析側は cp932 のまま。
+            #   UTF-8 で書かれた長文 Japanese echo は parser が byte 境界で
+            #   mis-tokenize して "is not recognized" 連鎖エラーになる
+            #   (Phase 2 で複数 round 試行錯誤の末判明)。
+            #   cp932 でファイルを置けば parser が natively 読めて Japanese 行も
+            #   安全。デメリット: 非 JP Windows (cp437/1252 等) では mojibake する
+            #   が、本配布は JP 校内向けなので OK。
             $content = [System.IO.File]::ReadAllText($src, $script:Utf8NoBomEncoding)
             $content = ($content -replace "`r`n", "`n") -replace "`n", "`r`n"
-            [System.IO.File]::WriteAllText($dst, $content, $script:Utf8NoBomEncoding)
+            $cp932 = [System.Text.Encoding]::GetEncoding(932)
+            [System.IO.File]::WriteAllText($dst, $content, $cp932)
         } elseif ($src -match '\.ps1$') {
             # PS 5.1 は .ps1 ファイルを default で ASCII (Windows-1252) として読み込む
             # ため、Japanese 等の non-ASCII char が含まれると mojibake になる。BOM が
