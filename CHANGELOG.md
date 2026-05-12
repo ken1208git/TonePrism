@@ -31,6 +31,25 @@
 
 ### [Release Tooling v0.1.9] - 2026-05-12
 
+#### Fixed (PR #149 シニアレビュー round 1 + Codex P2)
+
+- **[Codex P2] FolderBrowserDialog 選択パス内の `!` 文字が delayed expansion で破壊される bug**: `Install.bat` 全体で `setlocal enabledelayedexpansion` を有効化していたため、選択パスに `!` が含まれる場合 (例: `D:\Backup!\` 等のユーザー命名パス) に `for /f ... do set INSTALL_PARENT=%%P` の段階で `!` が delayed expansion token として解釈され削除される。本ファイル refactor 後は `!VAR!` 参照が実質ゼロのため、`setlocal disabledelayedexpansion` に変更して構造的に解消
+- **[M2] Install.bat の失敗 path も `exit /b 0` で caller から成否区別不能**: 4 つの失敗経路 (files/ 不在 / 入れ子検知 / robocopy 失敗 / mkdir 失敗) がすべて `:end` に合流して `exit /b 0`。Phase 3 で Updater から Install.bat を呼び出す場合に exit code でエラー判定できない。`:fail` label を新設 + `EXIT_CODE` sentinel を導入、失敗 path は `goto :fail` で 1、成功 / ユーザーキャンセル (folder dialog cancel / 上書き N) は 0 を返す形に
+- **[M3] docstring の ASCII 規約と実装の乖離**: 「chcp 65001 より上の REM / echo は ASCII 必須」と書きながら、自身の docstring REM 行が日本語だった。`@echo off` 下で REM は表示されないので mojibake は echo にしか発生しないのが実態。docstring を「echo は ASCII 必須、REM は日本語 OK」に修正
+- **[M4] PS one-liner の多行出力に対する防御**: `Write-Output $d.SelectedPath` だけだと将来 Add-Type warning が stdout に出るケース等で for /f の最終行が pollute される可能性。`[Console]::Out.WriteLine + [Environment]::Exit(0)` で明示的に 1 行のみ書き出し + 後続出力を封じる形に変更
+
+#### Changed (PR #149 シニアレビュー round 1)
+
+- **[M1] `:wait_close` 文言を `pause` の挙動に整合**: 「Enter キーを押してください」→「何かキーを押してください」(`pause` は ReadKey ベースで任意キーで進むため、文言通り Enter を期待するユーザーには直感に反していた)
+- **[L1] `robocopy /XD` 名前マッチの副作用を明記**: `/XF /XD` はツリー全体で同名 file/dir を除外するため、将来 component 内に `Companions/logs/` 等の同名 dir が登場すると意図せず除外される。現状 files/ には保護対象名と衝突する物がないので実害なし、コメントで明記
+- **[L2] Manager 起動 path で Install.bat の `pause` を抑止**: Manager.bat 起動 → Manager UI 表示中に Install.bat の「何かキーを押してください」が同時表示される UX 退行を回避、`MANAGER_STARTED=1` sentinel で `:end` の pause を skip
+- **[L4] `set /p` 空 Enter の「前回値保持」事故を防ぐ事前初期化**: `set "OVERWRITE_CONFIRM="` / `set "START_MANAGER="` を `set /p` 直前に追加。現状の variable chain では発火経路なしだが、将来上流で同名変数が定義される変更が入った時の silent break を防ぐ
+- **[L5] `Release.ps1` の Y/N 判定を厳格マッチ化**: 旧 `-inotmatch '^y'` は先頭 y 一致のみで `yikes` / `yo` / 「YES (確認)」末尾括弧等の typo でも公開が走る。`-imatch '^(y|yes)$'` の完全一致に変更、prompt 文言も「y/yes/n/no で回答」に明示。誤判定で abort → 再実行する方が誤 publish より低コスト (GitHub Releases publish は巻き戻し不可)
+
+#### Acknowledged (PR #149 L3 scope creep)
+
+- 本 PR は (a) Install.bat 等 Phase 2 本体 (b) Release.ps1 Y/N upload prompt 追加 (c) Release Tooling v1.0.x → v0.1.x rename の 3 つの関心事が混在している scope creep の指摘 (PR review L3)。次回類似シナリオでは分割を検討、本 PR ではすでに review が進行しているため merge 完了させる方針
+
 #### Fixed (PR #149 Codex P1)
 
 - **`Install.bat` の parenthesized block 内で `%VAR%` parse-time 展開 bug**: 既存検出 branch の `MANAGER_RUNNING` / `LAUNCHER_RUNNING` は `if exist (...)` ブロック内で `set` していたが、続く `if %VAR% EQU 0` の比較が parse-time に展開される (cmd.exe 仕様)。これにより stale/empty 値で `EQU was unexpected` の parse error が発生し、**GCTonePrism が既存の場合の overwrite フロー全体が壊れる** P1 bug だった。さらにラベル `:checkprocess` / `:wait_close` / `:do_overwrite` が `()` ブロック内に置かれており `goto` の動作も不安定。両 issue を構造 refactor で解消:

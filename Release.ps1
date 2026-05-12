@@ -1531,13 +1531,19 @@ $zipSizeHuman = if ($zipBytes -ge 1MB) {
 } else { "$zipBytes B" }
 Write-Info "サイズ:        $zipSizeHuman"
 Write-Host ""
-$confirmUpload = Read-Host "    GitHub Releases に v$Version を公開しますか？ (Y/N)"
-if ($confirmUpload -inotmatch '^y') {
+$confirmUpload = Read-Host "    GitHub Releases に v$Version を公開しますか？ (y/yes/n/no で回答)"
+# 厳格マッチ: `^y` だけだと `yikes` / `yo` 等の typo / 「YES (確認)」末尾括弧でも
+# 公開が走るため、`y` / `yes` 完全一致 (大小文字不問) のみ Y 扱い。
+# 誤判定で abort → 再実行する方が誤公開より低コスト (GitHub Releases publish は
+# 巻き戻し不可、明示的同意の意図に合わせる)
+if ($confirmUpload -imatch '^(y|yes)$') {
+    # 続行 → Invoke-GhRelease へフォールスルー
+} else {
     Write-Host ""
     Write-Warn "アップロードをスキップしました。zip は $ZipPath に残っています。"
     Write-Info "別環境での Install.bat 検証等に流用可。後で公開する場合は同 version の release"
     Write-Info "を作り直す必要があるため、CHANGELOG に同 Bundle entry が既に書かれている前提で"
-    Write-Info ".\Release.bat を再実行 → 同 zip を再生成 → Y 選択、で publish 可能。"
+    Write-Info ".\Release.bat を再実行 → 同 zip を再生成 → y/yes 選択、で publish 可能。"
     exit 0
 }
 
