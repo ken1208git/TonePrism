@@ -57,14 +57,15 @@
   - `tasklist | findstr` の結果取得を top-level に置き、`%ERRORLEVEL%` が run-time に正しく評価される構造に
   - 変数名も `MANAGER_RUNNING` → `MANAGER_FOUND` に変更 (findstr exit 0 = 発見 = 稼働中、の意味を明示)
 
-#### Changed (upload prompt)
+#### Changed (upload prompt + タグ衝突チェック位置変更)
 
 - **`Release.bat` / `Release.ps1`: zip 化後の `Y/N` 公開確認 prompt 追加**: user 提案、Install.bat 等の動作確認ワークフローを安全に作るため。新フロー: ビルド → zip 化 → 「GitHub Releases に v$Version を公開しますか？ (Y/N)」prompt → Y で `gh release create`、N で「zip だけ残して終了」。これにより:
   - **本番 release publish を毎回明示的に同意する形に変更**、誤 publish のリスク削減
   - zip だけ作って別環境に持ち出して Install.bat 動作確認、という運用が default で可能 (`-SkipUpload` を毎回付け忘れる必要なし)
   - `-SkipUpload` は引き続き有効 (prompt 自体を skip、CI / non-interactive 運用向け)
-  - prompt の Read-Host 入力が `Y` で始まる場合のみ公開、それ以外は abort
+  - prompt の Read-Host 入力が `y` / `yes` 完全一致 (大小文字不問) の場合のみ公開、それ以外は abort (round 1 L5 で typo 寛容を厳格化)
 - docstring の `gh release create でアップロード（-SkipUpload で抑止）` → `zip 完成後、Y/N 確認プロンプト → Y なら gh release create、N なら zip だけ残して終了` に更新
+- **タグ衝突チェックを `Assert-Preflight` から `Assert-NoTagConflict` (Y/N 後) に移動**: 旧設計では preflight で「v$Version 既存」を検出すると build 前に即 fail していたが、user が「v0.1.0 既存の状態で Install.bat 検証用 zip だけ欲しい」シナリオで毎回 `-SkipUpload` を付ける必要があった。新設計では build / zip まで通し、upload 確定 (Y) 後にタグ衝突チェック → 既存なら Fail で `-Force` or version bump を案内 (zip は preserve、`-Force` 再実行時 build cache 効くため retry 速い)。preflight は env 系チェック (gh auth / CHANGELOG / working tree) のみに役割を絞り、「事前 fail-fast」と「build 投資後の最終判断」の責務を分離
 
 #### Changed (versioning scheme)
 

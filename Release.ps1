@@ -937,36 +937,43 @@ function Assert-Preflight {
     # uncommitted change
     Assert-WorkingTreeClean -Context "preflight"
 
-    # 既存リリースとのタグ衝突
-    if (-not $SkipUpload) {
-        # gh release view は release 不在時に exit 1 + stderr "release not found" を出す。
-        # Invoke-NativeWithCapture で stdout/stderr/exit を罠なく分離捕捉。
-        # `--json id`: 存在時の stdout を最小化 (capture 文字列が小さくなる、parse はしない)。
-        # 存在判定は exit code を一次軸、stderr 文字列マッチは「不在 vs 別種失敗」の識別のみ。
-        $releaseResult = Invoke-NativeWithCapture -FilePath 'gh' `
-            -Arguments @('release', 'view', "v$Version", '--json', 'id')
+    # 注: 既存リリースとのタグ衝突チェックは Assert-NoTagConflict() で別フェーズ。
+    # Y/N upload prompt で「Y = 公開する」と決まった後にのみ判定する設計
+    # (zip 生成までは v0.1.0 既存でも通すことで、Install.bat 検証等の運用を救う)
+}
 
-        if ($releaseResult.ExitCode -eq 0) {
-            # 既存 release あり
-            if ($Force) {
-                Write-Warn "タグ v$Version は既存だが -Force のため後で削除して作り直す"
-                $script:DeleteExistingRelease = $true
-            } else {
-                Fail "GitHub Releases に v$Version が既存です。-Force で削除して作り直すか、別バージョンで実行してください。"
-            }
+# ============================================================================
+# Phase 9.5: 既存リリースとのタグ衝突チェック (upload Y/N で Y 確定後に呼ぶ)
+# ============================================================================
+
+function Assert-NoTagConflict {
+    Write-Step "GitHub Releases タグ衝突チェック"
+
+    # gh release view は release 不在時に exit 1 + stderr "release not found" を出す。
+    # Invoke-NativeWithCapture で stdout/stderr/exit を罠なく分離捕捉。
+    # `--json id`: 存在時の stdout を最小化 (capture 文字列が小さくなる、parse はしない)。
+    # 存在判定は exit code を一次軸、stderr 文字列マッチは「不在 vs 別種失敗」の識別のみ。
+    $releaseResult = Invoke-NativeWithCapture -FilePath 'gh' `
+        -Arguments @('release', 'view', "v$Version", '--json', 'id')
+
+    if ($releaseResult.ExitCode -eq 0) {
+        # 既存 release あり
+        if ($Force) {
+            Write-Warn "タグ v$Version は既存だが -Force のため後で削除して作り直す"
+            $script:DeleteExistingRelease = $true
         } else {
-            # exit 非ゼロ → 不在 or 別種失敗。stderr の英文字列で識別
-            # (注: gh の i18n / 文言変更で取りこぼし可能性あり、その時は再 trapping。
-            #  本格的な structured 検出は --json + ConvertFrom-Json + HTTP 404 判定 etc.)
-            if ($releaseResult.StdErr -match 'release not found') {
-                Write-Ok "タグ衝突なし: v$Version"
-                $script:DeleteExistingRelease = $false
-            } else {
-                # 別種の失敗 (auth / network / API rate limit / gh install 破損 等)
-                # zip ビルド完了後の gh release create で fail するより、preflight で
-                # 早期 fail させて時間 / 計算資源を浪費しない
-                Fail "gh release view が予期せず失敗しました (exit $($releaseResult.ExitCode)):`n$($releaseResult.Combined.TrimEnd())"
-            }
+            Fail "GitHub Releases に v$Version が既存です。`n        対処: (a) ``.\Release.bat -Force`` で既存削除 + 再 publish、または`n              (b) CHANGELOG.md の ## Bundle に新 entry (v$Version 以外) を追加して再実行。`n`n        zip は $ZipPath に残っているため、(a) で再実行する場合も build キャッシュが効いて速い。"
+        }
+    } else {
+        # exit 非ゼロ → 不在 or 別種失敗。stderr の英文字列で識別
+        # (注: gh の i18n / 文言変更で取りこぼし可能性あり、その時は再 trapping。
+        #  本格的な structured 検出は --json + ConvertFrom-Json + HTTP 404 判定 etc.)
+        if ($releaseResult.StdErr -match 'release not found') {
+            Write-Ok "タグ衝突なし: v$Version"
+            $script:DeleteExistingRelease = $false
+        } else {
+            # 別種の失敗 (auth / network / API rate limit / gh install 破損 等)
+            Fail "gh release view が予期せず失敗しました (exit $($releaseResult.ExitCode)):`n$($releaseResult.Combined.TrimEnd())"
         }
     }
 }
@@ -1537,7 +1544,7 @@ $confirmUpload = Read-Host "    GitHub Releases に v$Version を公開します
 # 誤判定で abort → 再実行する方が誤公開より低コスト (GitHub Releases publish は
 # 巻き戻し不可、明示的同意の意図に合わせる)
 if ($confirmUpload -imatch '^(y|yes)$') {
-    # 続行 → Invoke-GhRelease へフォールスルー
+    # 続行 → タグ衝突チェック → Invoke-GhRelease へフォールスルー
 } else {
     Write-Host ""
     Write-Warn "アップロードをスキップしました。zip は $ZipPath に残っています。"
@@ -1546,6 +1553,13 @@ if ($confirmUpload -imatch '^(y|yes)$') {
     Write-Info ".\Release.bat を再実行 → 同 zip を再生成 → y/yes 選択、で publish 可能。"
     exit 0
 }
+
+# upload 確定後、タグ衝突チェック (v0.1.9 で Assert-Preflight から移動)。
+# 旧設計: preflight でタグ衝突を確認 → 既存なら即 fail (build 前)。
+# 新設計: build / zip を先に通して、upload 確定後にタグ衝突を確認。
+# 理由: 既存タグの状態でも zip だけ生成して Install.bat 検証する運用を救う。
+# Fail した場合も zip は preserve されるため、-Force 再実行時の build cache が効く。
+Assert-NoTagConflict
 
 Invoke-GhRelease
 
