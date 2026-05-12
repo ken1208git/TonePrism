@@ -10,8 +10,10 @@
 #
 # Exit codes (Install.bat 側で 3-way dispatch):
 #   0  選択 OK → stdout に選択 path (改行なし)
-#   2  ユーザー Cancel (PS 内部 error の exit 1 と区別するため 2 使用)
-#   その他  PS 実行失敗 (Add-Type 失敗、UI 起動失敗 等)
+#   1  setup / launch 失敗 (try/catch で受けた exception)。stderr に詳細
+#   2  ユーザー Cancel (Dialog の Cancel ボタン / バツ押下)
+#   その他  PS host 自体の起動失敗 (.ps1 missing / Execution Policy block 等。
+#          この場合 .ps1 内 catch には到達しない)
 #
 # 設計経緯: もともと Install.bat 内に PS 一行 (`-Command "Add-Type...; ..."`)
 # として inline していたが、cmd の bat parser が長い `set "VAR=...日本語..."` 行を
@@ -21,12 +23,25 @@
 # Japanese description を安全に維持できる。
 # ============================================================================
 
-Add-Type -AssemblyName System.Windows.Forms
-$d = New-Object System.Windows.Forms.FolderBrowserDialog
-$d.Description = 'GCTonePrism のインストール先の親フォルダを選択してください'
-$d.ShowNewFolderButton = $true
+# Stop on non-terminating errors so Add-Type / New-Object / property assignment
+# failures surface as catchable exceptions (Codex bot P1, 2026-05-12). Without this
+# a failing Add-Type would still let the script reach the ShowDialog branch with a
+# null $d, hit the else, and exit 2 (= user cancel) — making real install errors
+# indistinguishable from intentional cancellation.
+$ErrorActionPreference = 'Stop'
 
-if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+try {
+    Add-Type -AssemblyName System.Windows.Forms
+    $d = New-Object System.Windows.Forms.FolderBrowserDialog
+    $d.Description = 'GCTonePrism のインストール先の親フォルダを選択してください'
+    $d.ShowNewFolderButton = $true
+    $result = $d.ShowDialog()
+} catch {
+    [Console]::Error.WriteLine("[ERROR] show_folder_dialog setup/launch failed: $($_.Exception.Message)")
+    [Environment]::Exit(1)
+}
+
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     # Out.Write (newline なし): bat 側の set /p が末尾 CR 残留する trap を回避
     [Console]::Out.Write($d.SelectedPath)
     [Environment]::Exit(0)
