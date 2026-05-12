@@ -29,6 +29,38 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
+### [Release Tooling v1.0.9] - 2026-05-12
+
+#### Added
+
+- **`templates/Install.bat`** — 初回インストーラ実装 (#108 Phase 2)
+  - PowerShell `FolderBrowserDialog` で親フォルダを GUI 選択 (`set /p` 経由のパス入力 typo を回避)
+  - 入れ子検知: 親パス末尾が `GCTonePrism` なら警告 + abort (二重入れ子 `<親>\GCTonePrism\GCTonePrism\` 防止)
+  - 既存検知: `<親>\GCTonePrism\` ディレクトリ存在で判定 (metadata file 不要、単純化)
+    - Y/N 警告メッセージで「アップデートは Manager UI から推奨 / Manager 壊れた / クリーンインストール時のみ Y / ゲームデータ (prism.db / games / backups / responses / logs) は維持」を明示
+    - Y → Manager.exe / Launcher.exe 稼働中チェック (`tasklist`) → 稼働中なら「閉じてから Enter」表示で手動 close 待機 (自動 kill しない、§3.7.4 Updater の責務に残す) → robocopy で保護データ除外 (`/XF prism.db /XD games backups responses logs`) しつつ上書き
+    - N → abort
+  - 新規時: ディレクトリ作成 + robocopy で `files/*` 全コピー
+  - 完了後 Manager 起動 Y/N プロンプト → Y なら `Manager.bat` 経由で起動 (旧設計の自動起動は廃止)
+  - codepage 切替: Release.bat と同じ pattern (UTF-8 no BOM + CRLF + chcp 65001 save/restore + non-numeric guard、PR #140 経緯)
+- **`templates/INSTALL_README.txt`** — 配布 zip 同梱の部員向け手順書
+  - インストール手順 (zip 展開 → Install.bat → folder dialog → Y/N → Manager 起動 Y/N)
+  - 日常起動方法 (`Launcher.bat` / `Manager.bat` ショートカット)
+  - アップデート方法 (通常: Manager UI、緊急: Install.bat 上書き)
+  - トラブルシューティング 4 項目
+- **`templates/Launcher.bat` / `templates/Manager.bat`** — 部員日常起動用ルートショートカット
+  - `start "" "%~dp0GCTonePrism_<comp>\GCTonePrism_<comp>.exe"` の最小 wrapper
+  - インストール後の最終構造で `<親>\GCTonePrism\Launcher.bat` / `Manager.bat` として配置、部員は `GCTonePrism_Launcher\` まで辿らず日常起動可能 (SPEC §3.7.1 / §3.7.5)
+
+#### Changed
+
+- **`Release.ps1` Copy-Templates 拡張**: 旧仕様の Install.bat / INSTALL_README.txt の 2 件 WARN を廃止、4 ファイル (zip root × 2 + files/ 配下 × 2) の正規 staging 配置に。テンプレート不在時は `Fail` (旧 WARN だったが Phase 2 完成後はテンプレート存在が必須前提のため厳密化)
+- **`Release.ps1` Assert-ExpectedFiles 拡張**: 期待ファイル一覧を 8 → **12 件** に。zip ルートの `Install.bat` / `INSTALL_README.txt` + `files/Launcher.bat` / `files/Manager.bat` を追加、SPEC §3.7.1 正規 zip 構造との対応を明示
+- **`SPECIFICATION.md` §3.7.1 / §3.7.2 / §3.7.5 更新** (変更履歴 v1.10.8):
+  - §3.7.1 正規 zip 構造に `files/Launcher.bat` / `files/Manager.bat` を追加、ルートショートカット規約の理由 (部員日常使いの煩雑さ解消) を明文化
+  - §3.7.2 を Approach C 仕様に再定義 (FolderBrowserDialog / 既存検知 Y/N / Manager UI 推奨 / 保護データ温存 / Manager 起動 Y/N)、旧仕様の自動起動 + `GCTonePrism_Manager` 配下チェックを廃止
+  - §3.7.5 Launcher 側の役割に「日常起動は `GCTonePrism/Launcher.bat` から」の規約を明記
+
 ### [Release Tooling v1.0.8] - 2026-05-12
 
 #### Fixed

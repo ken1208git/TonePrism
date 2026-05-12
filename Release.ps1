@@ -1269,27 +1269,37 @@ function Build-Manager {
 }
 
 # ============================================================================
-# Phase 6: Install.bat / INSTALL_README.txt 同梱 (Phase 2 で実装)
+# Phase 6: Install.bat / INSTALL_README.txt + Launcher.bat / Manager.bat 同梱
 # ============================================================================
+# zip 配布物の構造 (SPEC §3.7.1 正規 zip 構造):
+#   zip ルート:    Install.bat / INSTALL_README.txt
+#   zip files/:    Launcher.bat / Manager.bat (Install.bat が <インストール先>\GCTonePrism\
+#                  にコピーする payload、ユーザーは GCTonePrism\Launcher.bat 等で日常起動)
 
 function Copy-Templates {
     Write-Step "テンプレートを staging に同梱"
 
-    $installBat = Join-Path $RepoRoot 'templates\Install.bat'
-    $installReadme = Join-Path $RepoRoot 'templates\INSTALL_README.txt'
+    # zip ルート配置
+    $rootTemplates = @(
+        @{ Src = 'templates\Install.bat';        Dest = 'Install.bat';        Label = 'Install.bat' },
+        @{ Src = 'templates\INSTALL_README.txt'; Dest = 'INSTALL_README.txt'; Label = 'INSTALL_README.txt' }
+    )
+    # files/ 配下配置 (インストール後の GCTonePrism\Launcher.bat / Manager.bat になる)
+    $filesTemplates = @(
+        @{ Src = 'templates\Launcher.bat'; Dest = 'files\Launcher.bat'; Label = 'Launcher.bat (shortcut)' },
+        @{ Src = 'templates\Manager.bat';  Dest = 'files\Manager.bat';  Label = 'Manager.bat (shortcut)' }
+    )
 
-    if (-not (Test-Path $installBat)) {
-        Write-Warn "Install.bat が未作成です（Phase 2 / #108 で実装予定）"
-    } else {
-        Copy-Item $installBat (Join-Path $StagingDir 'Install.bat')
-        Write-Ok "Install.bat 同梱"
-    }
-
-    if (-not (Test-Path $installReadme)) {
-        Write-Warn "INSTALL_README.txt が未作成です（Phase 2 / #108 で実装予定）"
-    } else {
-        Copy-Item $installReadme (Join-Path $StagingDir 'INSTALL_README.txt')
-        Write-Ok "INSTALL_README.txt 同梱"
+    foreach ($tpl in ($rootTemplates + $filesTemplates)) {
+        $src = Join-Path $RepoRoot $tpl.Src
+        $dst = Join-Path $StagingDir $tpl.Dest
+        if (-not (Test-Path $src)) {
+            Fail "テンプレートが見つかりません: $src"
+        }
+        $dstDir = Split-Path $dst -Parent
+        if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Path $dstDir -Force | Out-Null }
+        Copy-Item $src $dst -Force
+        Write-Ok "$($tpl.Label) 同梱"
     }
 }
 
@@ -1300,8 +1310,14 @@ function Copy-Templates {
 function Assert-ExpectedFiles {
     Write-Step "ExpectedFiles 検証"
 
-    # 期待ファイル一覧
+    # 期待ファイル一覧 (zip ルート + files/ 配下、SPEC §3.7.1 正規構造)
     $expected = @(
+        # zip ルート
+        'Install.bat',
+        'INSTALL_README.txt',
+        # files/ 配下 = インストール後の <親>\GCTonePrism\ に展開される payload
+        'files\Launcher.bat',
+        'files\Manager.bat',
         'files\GCTonePrism_Launcher\GCTonePrism_Launcher.exe',
         'files\GCTonePrism_Manager\GCTonePrism_Manager.exe',
         'files\GCTonePrism_Manager\GCTonePrism_Manager.exe.config',
