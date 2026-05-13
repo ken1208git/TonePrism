@@ -29,17 +29,24 @@ namespace GCTonePrism.Updater
         /// <summary>
         /// rename-rollback 方式で Manager dir を置換する (Step 1: rename + Step 2: copy のみ)。
         ///
-        /// シニアレビュー round 1 H1 対応: 旧実装は `.bak` 削除も同関数内で行っていたが、
+        /// ⚠ **stateful API**: Replace 成功 (true 返却) 後、caller は **必ず** 以下のいずれかを呼ぶ:
+        ///   - 成功確定時: <see cref="CleanupBak"/> で `.bak` を best-effort 削除
+        ///   - 検証 (restart-exe 存在等) 失敗時: <see cref="RollbackFromBak"/> で旧 Manager 復元
+        ///
+        /// caller がどちらも呼ばないと `.bak` がディスクに残留し、次回 Replace で「過去 run の残骸
+        /// .bak を先に掃除」branch に流れる (動作 OK だが浪費)。**新規 caller を追加する場合は
+        /// 必ず CleanupBak/RollbackFromBak の呼び出しをペアで実装すること** (シニアレビュー round 2 L3
+        /// で stateful API の footgun として明示化)。
+        ///
+        /// シニアレビュー round 1 H1 対応の経緯: 旧実装は `.bak` 削除も同関数内で行っていたが、
         /// caller (Program.cs) が restart-exe 存在検証を行う前に `.bak` が消えてしまい、
         /// release packaging bug 等で新 target に restart-exe が無いケースで「旧 Manager 消失 +
         /// 新 Manager 不在」の復旧不能 broken state に陥っていた。Replace を Step 1/2 のみに
-        /// 絞り、`.bak` 削除は caller が `restart-exe` 検証 OK 後に <see cref="CleanupBak"/> で
-        /// 明示的に呼ぶ形に分離。Step 2 失敗時は Replace 内で自動 Rollback、検証段階の失敗は
-        /// caller が <see cref="RollbackFromBak"/> を呼んで `.bak` から復元できる API に。
+        /// 絞り、`.bak` 削除を別 API に分離して caller の検証 hook を挟む構造に。
         /// </summary>
         /// <param name="stagingDir">staging dir のルート (中の `files/Manager/` をソースに使う)</param>
-        /// <param name="managerTargetDir">置換先の既存 Manager dir</param>
-        /// <returns>true: Step 1/2 成功 (`.bak` は target+".bak" に存在、caller が CleanupBak を呼ぶ責務) / false: 失敗 (rollback 実施済 = 旧 Manager が復元されている)</returns>
+        /// <param name="managerTargetDir">置換先の既存 Manager dir (絶対 path 必須、CliArgs で GetFullPath 済を期待)</param>
+        /// <returns>true: Step 1/2 成功、`.bak` は target+".bak" に存在。**caller は CleanupBak または RollbackFromBak を必ず呼ぶこと** / false: 失敗 (Replace 内で自動 Rollback 実施済 = 旧 Manager が復元、`.bak` も消費済)</returns>
         /// <exception cref="InvalidOperationException">rollback にも失敗した致命的状態</exception>
         public static bool Replace(string stagingDir, string managerTargetDir)
         {
@@ -50,7 +57,12 @@ namespace GCTonePrism.Updater
                 return false;
             }
 
-            string parentDir = Path.GetDirectoryName(managerTargetDir);
+            // シニアレビュー round 2 M1: trailing-slash 付き path に対する parent 計算の silent
+            // divergence を解消。`Path.GetDirectoryName("D:\Manager\")` は `"D:\Manager"` (Manager
+            // dir 自身) を返すので、TrimEnd で trailing slash を剥がしてから親計算する必要がある。
+            // Program.cs:64 の log-dir 計算と同じ pattern。CliArgs の Path.GetFullPath は trailing
+            // slash を保持するため、ここで明示 TrimEnd しないと bug 化する。
+            string parentDir = Path.GetDirectoryName(managerTargetDir.TrimEnd('\\', '/'));
             if (string.IsNullOrEmpty(parentDir) || !Directory.Exists(parentDir))
             {
                 Logger.Error($"manager-target の親 dir が存在しません: {parentDir}");
@@ -78,24 +90,30 @@ namespace GCTonePrism.Updater
             // [Replace X/Y] のラベルを使う。outer = Program.cs の [Step 1/3] (Manager 待機) /
             // [Step 2/3] (本 Replace 呼出し) / [Step 3/3] (起動)、inner = 本 FileReplacer の
             // [Replace 1/2] (rename) / [Replace 2/2] (copy)、CleanupBak 内は単独メッセージ。
+            //
+            // round 2 L2: target dir 不在は **caller の引数誤り** として fail back する。SPEC §3.7.4
+            // で Updater は Manager UI からの更新用 spawn 専用 (新規 install は Install.bat 担当)
+            // なので、target 不在は typo (--manager-target に間違った path 渡し) しかありえない。
+            // 旧実装は Warn だけで copy を進めていたため、`<install>/typo/Manager` のような誤 path
+            // に新規 install してしまう silent typo 吸収 path があった。Error + return false で
+            // Manager UI 側に引数エラーとして検出させる。
             bool targetExisted = Directory.Exists(managerTargetDir);
-            if (targetExisted)
+            if (!targetExisted)
             {
-                Logger.Info($"[Replace 1/2] 既存 Manager dir を .bak にリネーム");
-                Logger.Info($"  {managerTargetDir} → {bakDir}");
-                try
-                {
-                    Directory.Move(managerTargetDir, bakDir);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Error($"Replace 1/2 失敗 (rename): {ex.Message}");
-                    return false;
-                }
+                Logger.Error($"target dir が存在しません (caller の引数誤り疑い): {managerTargetDir}");
+                Logger.Error("Updater は Manager UI からの更新 spawn 専用です。新規 install は Install.bat を使用してください。");
+                return false;
             }
-            else
+            Logger.Info($"[Replace 1/2] 既存 Manager dir を .bak にリネーム");
+            Logger.Info($"  {managerTargetDir} → {bakDir}");
+            try
             {
-                Logger.Warn($"target dir が存在しません (新規インストール扱い): {managerTargetDir}");
+                Directory.Move(managerTargetDir, bakDir);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"Replace 1/2 失敗 (rename): {ex.Message}");
+                return false;
             }
 
             // [Replace 2/2] staging → target へ copy

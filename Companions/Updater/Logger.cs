@@ -157,6 +157,15 @@ namespace GCTonePrism.Updater
                 path = Path.Combine(_logDirectory, $"{baseName}_{counter}{FileNameSuffix}");
                 counter++;
             }
+            // シニアレビュー round 2 L6: counter 100 到達時の silent fallback を可視化。
+            // 通常運用 (1 起動 = 1 Initialize) では発火しないが、Phase 4 で Manager UI が retry loop
+            // を組んだ場合 / 自動テスト時に発火可能。100 到達時はファイル衝突状態のままで
+            // CreateNew → IOException → Initialize catch で握り潰し → Console のみで続行、
+            // という silent fallback path に流れる。Console に Warn だけは残す。
+            if (counter >= 100 && File.Exists(path))
+            {
+                Console.Error.WriteLine($"[WARN] [Logger] 同名ログファイル多すぎ (100 件) — Console のみで続行する可能性: {path}");
+            }
 
             var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
             _writer = new StreamWriter(stream, new UTF8Encoding(false));

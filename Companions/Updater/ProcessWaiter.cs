@@ -25,6 +25,11 @@ namespace GCTonePrism.Updater
     {
         private const string ManagerProcessName = "GCTonePrism_Manager";
         private const int PollIntervalMs = 500;
+        // 待機継続ログを N iter ごとに 1 回出す (PollIntervalMs × LogEveryNIter = 実 interval)。
+        // 名前付き定数化 (シニアレビュー round 2 L4) で「PollIntervalMs を変えるとログ間隔も連動して
+        // 暗黙に変わる」silent magic number 連動を解消、変更時に意図して両方触る形に。
+        // 現状: 500ms × 10 = 5 秒ごとログ。
+        private const int LogEveryNIter = 10;
 
         /// <summary>
         /// Manager プロセスが全て終了するまで polling で待機する。
@@ -70,9 +75,9 @@ namespace GCTonePrism.Updater
                     {
                         Logger.Info($"Manager プロセス {procs.Length} 件検出、終了待機 (timeout {timeoutSeconds}s)");
                     }
-                    else if (iter % 10 == 0)
+                    else if (iter % LogEveryNIter == 0)
                     {
-                        // 5 秒ごとに 1 回ログ
+                        // PollIntervalMs × LogEveryNIter ごとに 1 回ログ (現状 5 秒間隔)
                         Logger.Info($"...待機継続中 ({sw.Elapsed.TotalSeconds:F1}s 経過、{procs.Length} 件残存)");
                     }
 

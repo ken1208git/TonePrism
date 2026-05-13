@@ -18,7 +18,7 @@ namespace GCTonePrism.Updater
     ///   --manager-target   (必須) 既存 Manager dir。rename-rollback で置換する dir
     ///   --restart-exe      (必須) 置換後に起動する Manager.exe フルパス
     ///   --log-dir          (任意) ログ出力先。省略時は `<install>/logs/updater/` (manager-target の親から導出、SPEC §3.7.4 準拠)
-    ///   --wait-timeout     (任意) Manager プロセス終了待ちの timeout 秒数 (default 60)
+    ///   --wait-timeout     (任意) Manager プロセス終了待ちの timeout 秒数 (default: 60、0 = 無制限待機)
     ///   --force-kill       (任意) timeout 経過後に Manager を強制 kill するか (default off)
     ///
     /// 引数 parse 失敗時は ArgumentException を投げる (Program.cs 側で catch + Logger.Error + exit 2)。
@@ -82,10 +82,15 @@ namespace GCTonePrism.Updater
             //   - Path.GetFullPath で正規化することで、後段の Logger / FileReplacer / Process.Start
             //     全箇所で path の絶対性を仮定できる。`"\\"` のような病的入力も `"C:\"` 等の
             //     drive root absolute path に正規化されるので L4 も副次的に解消。
-            //   - 例外 (UnauthorizedAccessException / PathTooLongException 等) は Program 側
-            //     catch (Exception) で受けて exit 2 にせず 1 (予期しない例外) に倒すか、
-            //     ここで ArgumentException に変換するか判断。ArgumentException 変換で exit 2
-            //     (引数エラー) として user に明示する。
+            //
+            // catch 範囲 (シニアレビュー round 2 M2): GetFullPath 公式契約のうち「引数自体の不備」
+            // 系の例外のみ ArgumentException に変換 (= exit 2 引数エラー、user の入力ミスを明示)。
+            //   - ArgumentException: null / 空 / invalid characters
+            //   - PathTooLongException: MAX_PATH (260) 超過
+            //   - NotSupportedException: ":" 含む (drive letter 以外) など
+            // それ以外 (SecurityException / UnauthorizedAccessException 等の権限・環境問題) は
+            // throw を抜けて Program.cs:77 の catch (Exception) で exit 1 (予期しない例外) に倒す。
+            // 「引数エラー」表記の正確性を保ち、Manager UI 側の障害解析を misleading にしない。
             try
             {
                 result.StagingDir = System.IO.Path.GetFullPath(result.StagingDir);
@@ -96,9 +101,17 @@ namespace GCTonePrism.Updater
                     result.LogDir = System.IO.Path.GetFullPath(result.LogDir);
                 }
             }
-            catch (Exception ex)
+            catch (ArgumentException ex)
             {
-                throw new ArgumentException($"path 引数の絶対パス化に失敗: {ex.Message}", ex);
+                throw new ArgumentException($"path 引数の絶対パス化に失敗 (引数不備): {ex.Message}", ex);
+            }
+            catch (System.IO.PathTooLongException ex)
+            {
+                throw new ArgumentException($"path 引数が長すぎます (MAX_PATH 260 超過): {ex.Message}", ex);
+            }
+            catch (NotSupportedException ex)
+            {
+                throw new ArgumentException($"path 引数の形式がサポートされません: {ex.Message}", ex);
             }
             return result;
         }

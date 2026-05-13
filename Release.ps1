@@ -1353,11 +1353,16 @@ function Build-Updater {
 
     # bin/Release/ から staging へコピー (*.pdb 除外)
     # 配布構造は SPEC §3.7.1 / §2.4 に従い `<staging>/files/Companions/Updater/` 配下に配置
-    $outDir = Join-Path $FilesDir 'Companions\Updater'
-    New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+    #
+    # シニアレビュー round 2 L5: build 成果物 dir の存在 check を先に行ってから staging dir を
+    # 作る順序に。msbuild が exit 0 で抜けたが成果物 dir 生成失敗の pathological case で
+    # 空 staging dir 残骸を作らない (最終的に Clear-Staging で消えるが、check 順としては
+    # 「check first, mutate second」が clean)。
     if (-not (Test-Path $binRelease)) {
         Fail "Updater ビルド出力が見つかりません: $binRelease"
     }
+    $outDir = Join-Path $FilesDir 'Companions\Updater'
+    New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
     Get-ChildItem $binRelease -Recurse | Where-Object {
         -not $_.PSIsContainer -and $_.Extension -ne '.pdb'

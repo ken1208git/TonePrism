@@ -41,6 +41,21 @@
 
 ### [Release Tooling v0.1.11] - 2026-05-13
 
+#### Fixed (PR #152 シニアレビュー round 2)
+
+- **[M1] FileReplacer.Replace の parent dir 存在チェックが trailing-slash で誤動作する bug**: `Path.GetDirectoryName(managerTargetDir)` を TrimEnd なしで呼んでいたため、`managerTargetDir = "D:\Manager\"` (CliArgs の `Path.GetFullPath` が trailing slash を保持) の場合に `GetDirectoryName` が `"D:\Manager"` (Manager dir 自身) を返し、parent check が Manager dir 自身の存在を見る silent divergence があった。Program.cs:64 の log-dir 計算と pattern を揃え、`TrimEnd('\\', '/')` してから `GetDirectoryName` に渡す形に修正
+- **[M2] CliArgs.Parse の `Path.GetFullPath` catch が広すぎ、想定外例外を引数エラー (exit 2) に倒していた**: 旧実装は `catch (Exception ex)` で全例外を `ArgumentException` 変換 → exit 2。`SecurityException` / `UnauthorizedAccessException` 等の権限・環境問題まで「引数エラー」表示で Manager UI 側の障害解析を misleading にする path。`Path.GetFullPath` 公式契約の「引数自体の不備」系 3 種 (`ArgumentException` / `PathTooLongException` / `NotSupportedException`) に catch を絞り、それ以外は Program.cs:77 の `catch (Exception)` で exit 1 (予期しない例外) に倒す形に変更
+
+#### Changed (PR #152 シニアレビュー round 2)
+
+- **[M3] CHANGELOG `## Updater v0.1.0` の `3-step` 記述を正確化**: 同 PR 内の round 1 H1 修正で FileReplacer を「Replace (2-step) + CleanupBak / RollbackFromBak 別 API」に分離したのに、Updater v0.1.0 entry は「rename-rollback 3-step 置換」と旧記述のままだった unfortunate 残骸を解消。「Replace (Step 1 rename + Step 2 copy の 2-step API) + CleanupBak (cleanup) + RollbackFromBak (rollback) の 3 API、概念的には rename → copy → cleanup/rollback の 3 動作」と正確な API 説明に書き換え
+- **[L1] CliArgs クラス頭部 XML doc に `--wait-timeout 0 = 無制限待機` 追記** (round 1 L2 漏れ): round 1 L2 で UsageText には反映したが XML doc が漏れていた三者矛盾。漏れを解消、XML doc + UsageText で「default: 60、0 = 無制限待機」と一致
+- **[L2] FileReplacer の `targetExisted == false` を silent typo 吸収 → Error + return false に変更**: SPEC §3.7.4 で Updater は Manager UI からの更新 spawn 専用 (新規 install は Install.bat 担当) なので target dir 不在は caller の typo (`--manager-target` 誤指定) しかありえない。旧実装は Warn だけで copy を進めて誤 path に新規 install してしまう silent failure mode を作っていた。Error + return false に変更、caller (Manager UI / Phase 4) に引数エラーとして検出させる。「Updater は Manager UI からの更新 spawn 専用、新規 install は Install.bat を使用」案内も追加
+- **[L3] FileReplacer.Replace の stateful API (cleanup caller 責務) を XML doc 警告強化**: Replace 成功時の `.bak` cleanup が caller 規約に依存する footgun を XML doc 冒頭に `⚠ stateful API` で明示警告 + 「新規 caller を追加する場合は必ず CleanupBak/RollbackFromBak の呼び出しをペアで実装すること」を追記。API signature 変更 (e.g. IDisposable) は本 PR scope 外、docstring 強化で対応
+- **[L4] ProcessWaiter の `iter % 10` を `LogEveryNIter` 名前付き定数に抽出**: `PollIntervalMs × LogEveryNIter = 実 interval` の magic number 連動を `private const int LogEveryNIter = 10;` で明示化。PollIntervalMs を変えるとログ間隔も silent に変わる罠を解消、コメントで「現状 500ms × 10 = 5 秒ごと」と意図を明記
+- **[L5] Build-Updater の `Test-Path $binRelease` を `New-Item $outDir` より先に**: msbuild が exit 0 で抜けたが成果物 dir 生成失敗の pathological case で空 staging dir 残骸を作らないよう、check 先行・mutate 後 の order に整理。Build-Manager との pattern は今後も整える方向 (本 PR scope は Updater のみ)
+- **[L6] Logger.OpenSessionFile の counter 100 到達時に Console.Error Warn を追加**: 同一秒に 100 回 Initialize 試行で `FileMode.CreateNew` が IOException → Initialize catch で silent fallback → Console のみで続行する path を可視化。Phase 4 で Manager UI が retry loop を組んだ場合 / 自動テスト時に発火可能、現状運用では発火しないが silent fallback を可視化
+
 #### Fixed (PR #152 シニアレビュー round 1)
 
 - **[H1] Updater で restart-exe 検証が `.bak` 削除後 → 復旧不能 broken state を作る**: 旧実装は `FileReplacer.Replace` 内で .bak 削除まで行ってから Program 側で `File.Exists(args.RestartExe)` チェックしていた。staging 側に `GCTonePrism_Manager.exe` が無い release packaging bug 等で「旧 Manager 消失 + 新 Manager 不在」の復旧不能状態に陥る path。修正: `FileReplacer.Replace` を Step 1 (rename) + Step 2 (copy) のみに絞り、`.bak` 削除は `CleanupBak` メソッドに分離。失敗時の rollback も `RollbackFromBak` を public 化。Program.cs 側で Replace 成功後に restart-exe 存在検証 → OK なら CleanupBak、NG なら RollbackFromBak で旧 Manager 復元 + exit 6 の flow に変更。H1 シナリオの単体テスト (staging に Manager.exe を意図的に欠損させる) で「旧 Manager.exe 復元 + user data 維持 + .bak 消費済」の動作確認済
@@ -592,7 +607,7 @@
 - `Program.cs` — entry + main flow (CLI parse → Manager 終了待ち → 置換 → 再起動)
 - `CliArgs.cs` — `--staging` / `--manager-target` / `--restart-exe` / `--log-dir` / `--wait-timeout` / `--force-kill` の parser
 - `ProcessWaiter.cs` — `Process.GetProcessesByName("GCTonePrism_Manager")` の polling、`--force-kill` 時の強制終了対応
-- `FileReplacer.cs` — `Manager/` dir 単位の rename-rollback 3-step 置換 (`.bak` リネーム → staging copy → `.bak` 削除)。user data は `<install>/` 直下にあり Manager dir の外なので carry-over 不要 (SPEC §3.7.3「保護の仕組み」構造的保護に従う)
+- `FileReplacer.cs` — `Manager/` dir 単位の rename-rollback 置換。`Replace` (Step 1 rename + Step 2 copy の 2-step API) + `CleanupBak` (`.bak` 削除、caller が restart-exe 検証 OK 後に呼ぶ) + `RollbackFromBak` (`.bak` から復元、caller が検証失敗時に呼ぶ) の 3 つの API に分割 (round 1 H1 修正により API 分離)。概念的には「rename → copy → cleanup or rollback」の 3 動作を rename-rollback の atomic スナップショットで実現。user data は `<install>/` 直下にあり Manager dir の外なので carry-over 不要 (SPEC §3.7.3「保護の仕組み」構造的保護に従う)
 - `Logger.cs` — Manager の `Services/Logger.cs` を簡略化、`Console.SetOut` フック無しの直接書込み式、出力先 `<install>/logs/updater/updater_<PCname>_<YYYY-MM-DD_HHmmss>.log`
 - csproj / App.config / AssemblyInfo.cs
 
