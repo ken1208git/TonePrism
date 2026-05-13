@@ -41,7 +41,18 @@
 
 ### [Release Tooling v0.1.14] - 2026-05-14
 
-**TL;DR**: small cleanup 4 件 (#142 / #143 / #144 / #146) を 1 PR で消化。本来の deliverable は entry 末尾の **`#### Changed (refactor/release-tooling-cleanup、#142 / #143 / #144 / #146)`** セクション参照。以下に並ぶ round 1〜7 の `#### Changed (PR #156 シニアレビュー round N)` は review iteration 中の self-correction 履歴 (forward-looking text からの PR/round 番号 embed 自己違反 sweep、規約境界明確化、cross-reference 修正、CHANGELOG / PR body / SPEC / Release.bat の整合性同期、`Release.bat` の自己違反 ASCII 境界 sweep + AGENTS / SPEC の境界曖昧化 fence 等)。
+**TL;DR**: small cleanup 4 件 (#142 / #143 / #144 / #146) を 1 PR で消化。本来の deliverable は entry 末尾の **`#### Changed (refactor/release-tooling-cleanup、#142 / #143 / #144 / #146)`** セクション参照。以下に並ぶ round 1〜8 の `#### Changed (PR #156 シニアレビュー round N)` は review iteration 中の self-correction 履歴 (forward-looking text からの PR/round 番号 embed 自己違反 sweep、規約境界明確化、cross-reference 修正、CHANGELOG / PR body / SPEC / Release.bat の整合性同期、`Release.bat` の自己違反 ASCII 境界 sweep + AGENTS / SPEC の境界曖昧化 fence、SPEC SoT と code 状態の REM/echo 非対称扱い同期 等)。
+
+#### Changed (PR #156 シニアレビュー round 8)
+
+- **[Medium-2] SPEC 変更履歴 table v1.10.14 entry 内の line embed 2 箇所を literal anchor に置換 (round 7 [Low-1] sweep の table 内漏れ)**: round 7 [Low-1] で SPEC §3.7.9.1 本体の `Release.bat:46-48` line range embed を literal-content anchor に置換したが、**SPEC 変更履歴 table の v1.10.14 entry 内** に同型 embed が 2 箇所残存していた sweep 漏れ (`Release.bat:46-48` を 1 回、`line 21 / 26 / 29 / 48` を 1 回)。round 1 [High-3] / round 6 [High-3] / round 7 [High-2] で本 PR 内に何度も立てた「行番号 / line range 直 embed は rot 源泉」規約を SPEC table 内 row にも適用、`Release.bat` の `==== ASCII boundary (only when chcp 65001 succeeded above) ====` で始まる REM block / Usage REM block の `See SPECIFICATION.md` reference 行 / `setlocal enabledelayedexpansion` 直前 REM / chcp 切替 header REM / ASCII boundary marker 末尾 REM のような literal-content anchor に置換、Release.bat に REM を 1 行追加しても rot しない形に。round 7 [Low-1] の sweep 範囲を「SPEC §3.7.9.1 本体 + SPEC 変更履歴 table」に拡張
+- **[Low-1] SPEC §3.7.9.2 に `%VAR: =%` leading space strip step の説明を追加 (doc-vs-impl gap 解消)**: `Release.bat` の `if defined ORIGINAL_CODEPAGE set ORIGINAL_CODEPAGE=%ORIGINAL_CODEPAGE: =%` は `for /f delims=:` 由来の leading space ( ` 932` のような形) を pure decimal に normalize する **validation 前提の必須 step** だが、本 PR の docstring SPEC 移管で Release.bat 本体の inline 説明 (旧 line 51 相当) が削除された一方で、SPEC §3.7.9.2 側は「`findstr /R "^[0-9][0-9]*$"` で純 decimal を確認」と書くのみで strip step に触れていなかった doc-vs-impl gap。「SPEC が whys、Release.bat が what + minimum context」原則に照らすと当該 step の why は SPEC 側にあるべきだった漏れ。SPEC §3.7.9.2 に「**leading space の strip (findstr 前段の必須 normalize)**」段落を新設、strip 省略時の silent rot path (findstr が leading space で fail → 数値 capture 成功 case でも skip path に落ちる) も明示
+- **[Low-3] SPEC §3.7.9.1 「ASCII 境界」を REM / echo 非対称扱いに再記述 (round 7 [Medium-3] で code 側に立てた判定基準を SoT に反映)**: round 7 [Medium-3] で「**REM = ASCII pure、echo = WARN-zone 規約に従い Japanese OK**」の判定基準を Release.bat code 側で確立したが、**SoT 側 (SPEC §3.7.9.1) は「REM / echo 同列に ASCII で書き」の対称表現のまま**で code-vs-SoT 乖離が発生していた (= 次に Release.bat を触る人が SPEC §3.7.9.1 を読んで「post-WARN zone なら REM も Japanese OK」と判断する path 残存)。SPEC §3.7.9.1 を「REM (pre/post WARN-zone 問わず ASCII pure、tokenizer 安全側)」と「echo (`:runps` 冒頭の予告 WARN 以降なら Japanese OK、user value 維持)」を分岐記述する形に更新、SoT を code 状態に再同期。SPEC 変更履歴 v1.10.15 → v1.10.16
+
+#### 受容 (本 PR scope では対応せず、次 sweep 候補として明示)
+
+- **[Medium-1] CHANGELOG `[Release Tooling v0.1.14]` entry の self-correction 比率 ~86% (再掲、deferral 維持)**: round 7 [Low-2] で flag 済の scope 偏り、本 round で「**集約圧縮は再帰 paradox を起こさない (既存内容の物理移動、新規違反ではない)**」と review 指摘を反映して deferral 理由を訂正済 (旧 paradox framing は厳密には誤りだった)。merge 後に「`v0.1.14` entry round 1〜8 圧縮」だけの専用 issue + PR を立てて 1 段で消化、当該 PR では round 1〜8 全 entry → 「self-correction history (詳細は merged PR #156 コメント参照)」1 行に短縮する案を recommend。`## Bundle` セクションが GitHub Releases に流れる SoT で `## Release Tooling` は開発者向け詳細履歴という規約 (AGENTS.md `CHANGELOG Section Roles`) を考えるとエンドユーザー被害ゼロで開発者の読解コストのみが問題
+- **[Low-2] AGENTS.md「Release Tooling 命名規約」が PSScriptAnalyzer `PSUseApprovedVerbs` warning との関係に未言及**: `Assert-*` は PS approved verb ではないため PSScriptAnalyzer 導入時に 8 件の warning が出る可能性があるが、現状 repo に PSScriptAnalyzer / `PSScriptAnalyzerSettings.psd1` は無く実害ゼロ (`Glob '*.psd1'` ヒットなし)、warning は発生しない。PSScriptAnalyzer 導入を判断する別 issue 起票時に「`PSUseApprovedVerbs` を `Assert-*` に対して suppress する `.psd1` 設定」要件も合わせて整理する方が穏便、本 PR scope では明文化 skip
 
 #### Changed (PR #156 シニアレビュー round 7)
 
@@ -58,7 +69,7 @@
 
 #### 受容 (本 PR scope では対応せず、次 sweep 候補として明示)
 
-- **[Low-2] CHANGELOG `## Release Tooling v0.1.14` entry の round 1〜7 self-correction 部分を 1 bullet 集約に圧縮**: round 5 [Medium-3] で TL;DR 1 行を冒頭追加したが、round 6 / round 7 で更に self-correction round が増え、deliverable `#### Changed (#142 / #143 / #144 / #146)` 比率は ~17% のまま (本 round 後で計 28 sub-bullet 中 4 bullet = ~14% に更に悪化)。本 PR 内で集約圧縮すると round 8 で「集約 self-correction history も sweep すべき」と meta-flag される **再帰 paradox** が発生するため、**集約圧縮は専用 PR (or `consolidate-changelog-rounds` 系の別 sweep) で独立 review** する方が圧縮基準を fence できる。本 PR は merge して終了、集約は別 issue 化が穏便
+- **[Low-2] CHANGELOG `## Release Tooling v0.1.14` entry の round 1〜7 self-correction 部分を 1 bullet 集約に圧縮**: round 5 [Medium-3] で TL;DR 1 行を冒頭追加したが、round 6 / round 7 で更に self-correction round が増え、deliverable `#### Changed (#142 / #143 / #144 / #146)` 比率は ~17% のまま (本 round 後で計 28 sub-bullet 中 4 bullet = ~14% に更に悪化)。圧縮自体は round N+1 の self-correction として flag される性質のものではなく (既存内容の物理移動であって新規違反ではない) **専用 PR で 1 段消化する方が圧縮基準を独立 review できる**。`## Bundle` セクションが GitHub Releases に流れる SoT で `## Release Tooling` は開発者向け詳細履歴という規約 (AGENTS.md `CHANGELOG Section Roles`) を考えると、エンドユーザー被害ゼロで開発者の読解コストのみが問題、本 PR scope に押し込むより専用 issue 化が穏便
 
 #### Changed (PR #156 シニアレビュー round 6)
 
