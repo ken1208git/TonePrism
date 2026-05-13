@@ -1,0 +1,156 @@
+using System;
+using System.Diagnostics;
+using System.IO;
+
+namespace GCTonePrism.Updater
+{
+    /// <summary>
+    /// GCTonePrism_Updater entry point.
+    ///
+    /// 責務 (SPEC §3.7.4 minimum scope):
+    ///   1. CLI 引数 parse
+    ///   2. Manager プロセス完全終了を polling 待機
+    ///   3. `Manager/` dir を rename-rollback 方式で置換
+    ///   4. 新 Manager.exe を起動
+    ///   5. 自分終了
+    ///
+    /// Manager UI 側 (§3.7.3 [4]〜[10]、Phase 4) が Launcher / Companions / shortcut bat / Updater 自身の
+    /// 置換まで担当した後で本 Updater を spawn する。本 Updater は spawn 後に Manager が graceful 終了
+    /// するのを待ち、自分自身が Manager 置換 + 再起動を行う。
+    ///
+    /// Exit codes (CliArgs.UsageText() も参照):
+    ///   0 = 成功
+    ///   2 = 引数エラー
+    ///   3 = Manager プロセス終了 timeout (--force-kill 未指定)
+    ///   4 = ファイル置換失敗 (rollback 実施済)
+    ///   5 = rollback も失敗した致命的状態
+    ///   6 = 新 Manager.exe 起動失敗
+    /// </summary>
+    internal static class Program
+    {
+        private static int Main(string[] args)
+        {
+            // ----- Step 0: 引数 parse -----
+            CliArgs parsed;
+            try
+            {
+                parsed = CliArgs.Parse(args);
+            }
+            catch (ArgumentException ex)
+            {
+                if (ex.Message == "HELP")
+                {
+                    Console.Out.WriteLine(CliArgs.UsageText());
+                    return 0;
+                }
+                Console.Error.WriteLine($"[ERROR] 引数解析失敗: {ex.Message}");
+                Console.Error.WriteLine();
+                Console.Error.WriteLine(CliArgs.UsageText());
+                return 2;
+            }
+
+            // ----- Step 0.5: Logger 初期化 -----
+            // log-dir 未指定なら manager-target の親 dir / logs / updater を default に使う
+            string logDir = parsed.LogDir;
+            if (string.IsNullOrEmpty(logDir))
+            {
+                try
+                {
+                    string managerParent = Path.GetDirectoryName(parsed.ManagerTargetDir.TrimEnd('\\', '/'));
+                    if (!string.IsNullOrEmpty(managerParent))
+                    {
+                        logDir = Path.Combine(managerParent, "logs", "updater");
+                    }
+                }
+                catch { /* fall back to exe-relative default in Logger.Initialize */ }
+            }
+            Logger.Initialize(logDir);
+
+            int exitCode;
+            try
+            {
+                exitCode = Run(parsed);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("予期しない例外で abort", ex);
+                exitCode = 1;
+            }
+            finally
+            {
+                Logger.Shutdown();
+            }
+            return exitCode;
+        }
+
+        private static int Run(CliArgs args)
+        {
+            Logger.Info("============================================================");
+            Logger.Info("GCTonePrism_Updater (Phase 3 minimal CLI)");
+            Logger.Info("============================================================");
+            Logger.Info($"  --staging         : {args.StagingDir}");
+            Logger.Info($"  --manager-target  : {args.ManagerTargetDir}");
+            Logger.Info($"  --restart-exe     : {args.RestartExe}");
+            Logger.Info($"  --wait-timeout    : {args.WaitTimeoutSeconds}s");
+            Logger.Info($"  --force-kill      : {args.ForceKill}");
+            Logger.Info("------------------------------------------------------------");
+
+            // ----- Step 1: Manager プロセス終了待機 -----
+            Logger.Info("[Step 1/3] Manager プロセスの終了を待機");
+            bool exited = ProcessWaiter.WaitForManagerExit(args.WaitTimeoutSeconds, args.ForceKill);
+            if (!exited)
+            {
+                Logger.Error("Manager プロセスが終了しなかったため abort (--force-kill で強制終了可能)");
+                return 3;
+            }
+
+            // ----- Step 2: Manager dir 置換 -----
+            Logger.Info("[Step 2/3] Manager dir 置換 (rename-rollback)");
+            bool replaced;
+            try
+            {
+                replaced = FileReplacer.Replace(args.StagingDir, args.ManagerTargetDir);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // rollback にも失敗した致命的状態
+                Logger.Error($"FATAL: rollback failure", ex);
+                return 5;
+            }
+            if (!replaced)
+            {
+                Logger.Error("ファイル置換失敗 (rollback で旧 Manager 復元済)");
+                return 4;
+            }
+
+            // ----- Step 3: 新 Manager.exe 起動 -----
+            Logger.Info("[Step 3/3] 新 Manager.exe を起動");
+            if (!File.Exists(args.RestartExe))
+            {
+                Logger.Error($"起動対象 exe が存在しません: {args.RestartExe}");
+                return 6;
+            }
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = args.RestartExe,
+                    UseShellExecute = true,
+                    WorkingDirectory = Path.GetDirectoryName(args.RestartExe) ?? string.Empty
+                };
+                Process.Start(psi);
+                Logger.Info($"Manager 起動完了: {args.RestartExe}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"Manager 起動失敗", ex);
+                return 6;
+            }
+
+            Logger.Info("============================================================");
+            Logger.Info("Updater 全工程完了");
+            Logger.Info("============================================================");
+            return 0;
+        }
+    }
+}

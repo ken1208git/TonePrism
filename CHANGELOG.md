@@ -39,6 +39,17 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
+### [Release Tooling v0.1.11] - 2026-05-13
+
+#### Added (#108 Phase 3 完成: Updater 実装着手)
+
+- **`Build-Updater` function in Release.ps1**: `Companions/Updater/GCTonePrism_Updater.csproj` を `msbuild /p:Configuration=Release` で build、staging `<staging>/files/Companions/Updater/` にコピー。Manager と同じ pattern で nuget restore / native DLL 抽出は不要 (Updater は SQLite / WindowsAPICodePack 等の外部依存を持たない単純な Console app)
+- **Build-Updater 呼出し追加**: Main flow `Build-Launcher → Build-Manager → Build-Updater → Copy-Templates` の順に統合
+- **ExpectedFiles +2 件 (13 → 15)**: `files\Companions\Updater\GCTonePrism_Updater.exe` + `.exe.config` を SPEC §3.7.1 正規 zip 構造に追加
+- **TODO コメント更新**: `TODO Phase 3 (#108): Companions/Updater/ の build + staging を追加` を「Phase 3 完成: Companions/Updater/ の build + staging を `Build-Updater` で実装済」に書き換え
+
+詳細は `## Updater (Companions/Updater)` セクション v0.1.0 entry を参照。
+
 ### [Release Tooling v0.1.10] - 2026-05-13
 
 #### Changed (主変更: ディレクトリ命名規約 + Companions 再定義、SPEC v1.10.9 連動、#108 Phase 3 着手準備)
@@ -551,6 +562,36 @@
   - **release_notes は CHANGELOG.md から自動抽出**: 該当 Bundle セクション (`### [Bundle v<X.Y.Z>]`) をパースして `gh release create --notes` に渡す。`release_notes/` ディレクトリは持たない（CHANGELOG が SoT、重複記述なし）
 - **`Release.bat` を repo root に新設**: `Release.ps1` のラッパーバッチ。`RELEASE_VERSION` ファイルを読んで `-Version` を自動補完するため、本番運用は `.\Release.bat` 1 発で完結（ダブルクリック実行も可能）。引数を Release.ps1 にそのまま forward する仕組みのため `.\Release.bat -DryRun -SkipUpload` 等の組み合わせも可能。`-NoPause` 引数で CI / 自動化用の pause 抑止にも対応 (Shift-JIS + CRLF で保存、cmd.exe の日本語環境互換)
 - **`.gitignore` 拡張**: `release/` (Release.ps1 生成物) / `tools/godot/` / `tools/nuget-*.exe` (auto-DL) を git 追跡対象から除外
+
+---
+
+## Updater (Companions/Updater)
+
+`Companions/Updater/GCTonePrism_Updater.exe` の変更履歴。SPEC §2.4 / §3.7.4 参照。
+
+### [Updater v0.1.0] - 2026-05-13
+
+初回リリース (#108 Phase 3)。Manager 自身のファイル置換 + 再起動を担う最小 CLI。Windows のファイルロック制約「実行中のプロセスは自分自身を含むファイルを置き換えられない」を Manager に対してのみ解決する。Launcher / 常駐 Companions / shortcut bat は Manager UI 側 (§3.7.3、Phase 4) が直接置換できるため、Updater の責務は意図的に「Manager 置換 + 再起動」のみに絞られている。
+
+**構成** (8 ファイル、約 750 行):
+- `Program.cs` — entry + main flow (CLI parse → Manager 終了待ち → 置換 → 再起動)
+- `CliArgs.cs` — `--staging` / `--manager-target` / `--restart-exe` / `--log-dir` / `--wait-timeout` / `--force-kill` の parser
+- `ProcessWaiter.cs` — `Process.GetProcessesByName("GCTonePrism_Manager")` の polling、`--force-kill` 時の強制終了対応
+- `FileReplacer.cs` — `Manager/` dir 単位の rename-rollback 3-step 置換 (`.bak` リネーム → staging copy → `.bak` 削除)。user data は `<install>/` 直下にあり Manager dir の外なので carry-over 不要 (SPEC §3.7.3「保護の仕組み」構造的保護に従う)
+- `Logger.cs` — Manager の `Services/Logger.cs` を簡略化、`Console.SetOut` フック無しの直接書込み式、出力先 `<install>/logs/updater/updater_<PCname>_<YYYY-MM-DD_HHmmss>.log`
+- csproj / App.config / AssemblyInfo.cs
+
+**Exit codes** (`CliArgs.UsageText()` 参照):
+- `0` 成功
+- `2` 引数エラー / 必須引数不足
+- `3` Manager プロセスが timeout 内に終了せず (`--force-kill` 未指定)
+- `4` ファイル置換に失敗 (rollback 実施済)
+- `5` rollback にも失敗した致命的状態
+- `6` 新 Manager.exe の起動に失敗
+
+**呼出し前提**: Manager UI (Phase 4) が事前に download / staging / Launcher / Companions / shortcut bat / Updater 自身の置換まで完了させた後、Manager が `Process.Start("Companions\Updater\GCTonePrism_Updater.exe", "--staging ... --manager-target ... --restart-exe ...")` で spawn する。Manager は spawn 直後に graceful 終了、Updater は ProcessWaiter で完全終了を確認してから Manager 置換に進む。
+
+**動作確認**: ローカル単体テスト (staging dummy / target dummy / user data dummy) で 3-step 置換 + user data 維持を確認。Manager UI 連携テストは Phase 4 で実施予定。
 
 ---
 
