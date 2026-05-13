@@ -127,13 +127,14 @@ namespace GCTonePrism.Updater
             // 旧実装は Warn だけで copy を進めていたため、`<install>/typo/Manager` のような誤 path
             // に新規 install してしまう silent typo 吸収 path があった。Error + return false で
             // Manager UI 側に引数エラーとして検出させる。
-            bool targetExisted = Directory.Exists(managerTargetDir);
-            if (!targetExisted)
+            if (!Directory.Exists(managerTargetDir))
             {
                 Logger.Error($"target dir が存在しません (caller の引数誤り疑い): {managerTargetDir}");
                 Logger.Error("Updater は Manager UI からの更新 spawn 専用です。新規 install は Install.bat を使用してください。");
                 return false;
             }
+            // round 3 L1: 上記 early return により以降の経路では target は必ず存在する。
+            // Rollback() への `bakExists` 引数は常に true で渡せる。
             Logger.Info($"[Replace 1/2] 既存 Manager dir を .bak にリネーム");
             Logger.Info($"  {managerTargetDir} → {bakDir}");
             try
@@ -156,8 +157,8 @@ namespace GCTonePrism.Updater
             catch (Exception ex)
             {
                 Logger.Error($"Replace 2/2 失敗 (copy): {ex.Message}");
-                // rollback (Step 1 で作った .bak から復元)
-                Rollback(managerTargetDir, bakDir, targetExisted);
+                // rollback (Step 1 で作った .bak から復元、target は早期 return で存在保証済 → bakExists=true)
+                Rollback(managerTargetDir, bakDir, bakExists: true);
                 return false;
             }
 
@@ -208,7 +209,10 @@ namespace GCTonePrism.Updater
         public static void RollbackFromBak(string managerTargetDir)
         {
             string bakDir = managerTargetDir.TrimEnd('\\', '/') + ".bak";
-            // bak が存在しない = Replace が「新規インストール扱い」で動いた case。target を消すだけ。
+            // round 3 L2: round 2 L2 (target 不在 case を Replace で塞いだ) 後は、Replace 成功 →
+            // 検証失敗で本関数が呼ばれる時点で `.bak` は実質的に存在する。それでも defensive check
+            // として bakExists を計算して Rollback に渡す (Rollback 内の bakExists=false branch は
+            // 外部の手動呼出し等で本関数が想定外状況で呼ばれた場合の fallback として残す)。
             bool bakExists = Directory.Exists(bakDir);
             Rollback(managerTargetDir, bakDir, bakExists);
         }

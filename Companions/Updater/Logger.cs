@@ -40,7 +40,7 @@ namespace GCTonePrism.Updater
         /// ロガーを初期化する。Main の早い段階で呼ぶ。
         /// 失敗しても CLI 実行自体は止めない (例外を握り潰し、以降の API は Console 出力のみ)。
         /// </summary>
-        /// <param name="logDirectory">ログ出力先ディレクトリ。通常 Program.cs から `<install>/logs/updater/` を渡される (SPEC §3.7.4)。null/empty の場合は exe-relative fallback (到達不能、Program.cs が path 決定するため)。</param>
+        /// <param name="logDirectory">ログ出力先ディレクトリ。通常 Program.cs から `<install>/logs/updater/` を渡される (SPEC §3.7.4)。null/empty の場合は exe-relative fallback (通常運用では到達しないが、drive root 病的入力等の極限ケース用に残してある defensive fallback)。</param>
         public static void Initialize(string logDirectory)
         {
             lock (_lock)
@@ -55,7 +55,8 @@ namespace GCTonePrism.Updater
                     // 通常 Program.cs が <install>/logs/updater/ を計算済みで渡してくる (SPEC §3.7.4)。
                     // 病的入力 (manager-target が drive root 等) で空が渡る場合のみ exe-relative
                     // fallback に流れる。シニアレビュー round 1 M1 / L3 で「通常 path は Program 側
-                    // 確定、Logger fallback は到達不能化」方針。
+                    // 確定、Logger fallback は defensive」方針 (round 3 M5 で「到達不能」表現を訂正、
+                    // 極限ケース用に残してある安全網、消さないこと)。
                     _logDirectory = string.IsNullOrEmpty(logDirectory)
                         ? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs", "updater")
                         : logDirectory;
@@ -159,12 +160,15 @@ namespace GCTonePrism.Updater
             }
             // シニアレビュー round 2 L6: counter 100 到達時の silent fallback を可視化。
             // 通常運用 (1 起動 = 1 Initialize) では発火しないが、Phase 4 で Manager UI が retry loop
-            // を組んだ場合 / 自動テスト時に発火可能。100 到達時はファイル衝突状態のままで
+            // を組んだ場合 / 自動テスト時に発火可能。loop 抜け時はファイル衝突状態のままで
             // CreateNew → IOException → Initialize catch で握り潰し → Console のみで続行、
             // という silent fallback path に流れる。Console に Warn だけは残す。
+            //
+            // round 3 L3: 「100 件」表記は loop 実体と off-by-one だった (counter は 2 → 99 までで
+            // 抜け、試した候補は base name + suffix _2 〜 _99 で計 99 件)。表記を正確化。
             if (counter >= 100 && File.Exists(path))
             {
-                Console.Error.WriteLine($"[WARN] [Logger] 同名ログファイル多すぎ (100 件) — Console のみで続行する可能性: {path}");
+                Console.Error.WriteLine($"[WARN] [Logger] 同名ログファイル多すぎ (base + suffix _2 〜 _99 の 99 件全て衝突) — Console のみで続行する可能性: {path}");
             }
 
             var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);

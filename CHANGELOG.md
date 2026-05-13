@@ -41,6 +41,21 @@
 
 ### [Release Tooling v0.1.11] - 2026-05-13
 
+#### Fixed (PR #152 シニアレビュー round 3)
+
+- **[H1] PID-only モードで `Process.GetProcessById(pid)` の戻り値を `ProcessName` 検証せず、PID 再利用で別プロセスを誤 kill するリスク**: round 2 Codex P1 #1 で導入した `--caller-pid` PID-only モードは「Manager exit → OS が同 PID を別プロセス (例: notepad.exe) に再割当 → `--force-kill` 指定時に notepad を kill」という silent danger を抱えていた (Windows PID は exit 済プロセスから再利用される)。修正: `GetTargetProcesses` で `Process.GetProcessById` 直後に `p.ProcessName == "GCTonePrism_Manager"` を検証、不一致時は「PID 再利用 → Manager 既終了」とみなして空配列 (= 待機 skip 経路) に流す。`ProcessName` アクセス中 exit の `InvalidOperationException` も同経路扱い
+
+#### Changed (PR #152 シニアレビュー round 3)
+
+- **[M1] SPEC §3.7.4 に `--caller-pid <PID>` 引数を追記 + 変更履歴 v1.10.10 entry 追加**: round 2 Codex P1 #1 で実装した `--caller-pid` が SPEC に未反映の二者乖離。Updater CLI 引数表に `--caller-pid <PID>` (推奨 = Phase 4 Manager UI が `Process.GetCurrentProcess().Id` を渡す、未指定時は system-wide `GetProcessesByName` fallback) を追記、変更履歴 v1.10.10 entry で round 3 H1 / M1 の SPEC 影響を要約
+- **[M2] CHANGELOG `## Updater v0.1.0` の「約 750 行」行数指標を「8 ファイル」構成指標に置換**: round 2 までの追記で実コード規模が増え行数指標が stale 化。エンドユーザー向け summary としては「行数」より「8 ファイル構成」の方が安定で意味ある粒度
+- **[M3] CHANGELOG `## Updater v0.1.0` のファイル列挙に `--caller-pid` 追記 + ProcessWaiter.cs 説明刷新**: CliArgs.cs 引数列挙 / ProcessWaiter.cs 説明が round 2 の `--caller-pid` + PID-only mode + bounded retry 追加に追随していなかった三者矛盾を解消。CliArgs.cs 列挙に `--caller-pid` 追加、ProcessWaiter.cs 説明に「PID-only モード (caller-pid > 0) + system-wide fallback (未指定時)、`MaxForceKillAttempts = 3` / `MaxEnumerationFailures = 5` の bounded retry」を追記
+- **[M4] CHANGELOG `## Updater v0.1.0` 動作確認項目の `3-step 置換` 記述を round 1 H1 + Codex P1 #3 反映の正確な記述に書き換え**: round 2 M3 で同 entry の API 説明は「2-step + CleanupBak/RollbackFromBak」に直したが、動作確認項目内の「3-step 置換が正しく動作」が漏れていた残骸を解消。「Manager dir 置換 (Replace 2-step + CleanupBak) + restart-exe 不在時の RollbackFromBak 自動復元 + Codex P1 #3 自動復元 (target 不在 + .bak 存在パターン)」と動作内容を正確化
+- **[M5] Program.cs / Logger.cs の「Logger fallback は到達不能」コメントを「通常運用では到達しないが defensive、消さないこと」に訂正**: round 1 M1 + L3 で「Program 側 path 確定で Logger fallback は到達不能化」と表現したが、CliArgs.Parse の `Path.GetFullPath` でも drive root 病的入力 (例: `--manager-target C:\`) では `Path.GetDirectoryName` が null/empty を返し fallback 経路に流れる極限ケースが存在する。「到達不能」表現を訂正、「通常運用では到達しないが極限ケース用に残してある defensive fallback、消さないこと」に書き換え (Program.cs / Logger.cs L43 / Logger.cs L58 の三者同期)
+- **[L1] FileReplacer.Replace の `targetExisted` dead value を削除、`Rollback` 呼び出しで `bakExists: true` を named arg で明示**: round 2 L2 で「target 不在 case を Error + return false」に塞いだ後、`targetExisted` 変数は計算するだけで使われない dead value 化していた。`if (!Directory.Exists(managerTargetDir)) { Error; return false; }` の early return に integrate、変数廃止。同 Replace 内 fail path で `Rollback(managerTargetDir, bakDir, true)` を `Rollback(managerTargetDir, bakDir, bakExists: true)` の named arg にして「Replace 経路では `.bak` は必ず存在する」という invariant をコード上で明示
+- **[L2] FileReplacer.RollbackFromBak のコメントを round 2 L2 後の現実に合わせて刷新**: 「bak が存在しない = 新規インストール扱い」という旧コメントは round 2 L2 (target 不在 case を Replace で塞いだ) 後の現実と乖離していた stale。「round 2 L2 後は Replace 成功 → 検証失敗で本関数が呼ばれる時点で `.bak` は実質的に存在する。defensive check として `bakExists` を計算して渡すのは外部 / 手動呼出しの fallback 経路として残す」に書き換え
+- **[L3] Logger.OpenSessionFile の counter 100 到達時 Warn message を loop 実体と一致させる**: round 2 L6 で追加した Warn が「100 件」と書いていたが、loop は `counter < 100` で抜けるので試行する候補は base name + suffix `_2` 〜 `_99` の計 99 件で off-by-one。「base + suffix _2 〜 _99 の 99 件全て衝突」に正確化。実害なしの表記ズレ
+
 #### Fixed (PR #152 Codex bot round 2 後追い)
 
 シニアレビュー round 2 と並行して Codex bot が 4 件発見 (P1 × 2 + P2 × 2):
@@ -612,10 +627,10 @@
 
 初回リリース (#108 Phase 3)。Manager 自身のファイル置換 + 再起動を担う最小 CLI。Windows のファイルロック制約「実行中のプロセスは自分自身を含むファイルを置き換えられない」を Manager に対してのみ解決する。Launcher / 常駐 Companions / shortcut bat は Manager UI 側 (§3.7.3、Phase 4) が直接置換できるため、Updater の責務は意図的に「Manager 置換 + 再起動」のみに絞られている。
 
-**構成** (8 ファイル、約 750 行):
+**構成** (8 ファイル):
 - `Program.cs` — entry + main flow (CLI parse → Manager 終了待ち → 置換 → 再起動)
-- `CliArgs.cs` — `--staging` / `--manager-target` / `--restart-exe` / `--log-dir` / `--wait-timeout` / `--force-kill` の parser
-- `ProcessWaiter.cs` — `Process.GetProcessesByName("GCTonePrism_Manager")` の polling、`--force-kill` 時の強制終了対応
+- `CliArgs.cs` — `--staging` / `--manager-target` / `--restart-exe` / `--log-dir` / `--wait-timeout` / `--force-kill` / `--caller-pid` の parser
+- `ProcessWaiter.cs` — Manager プロセス終了の polling。`--caller-pid` 指定時は `Process.GetProcessById(pid)` + ProcessName 検証で PID-only wait/kill (round 3 H1)、未指定時は `Process.GetProcessesByName("GCTonePrism_Manager")` の system-wide fallback。`--force-kill` 時の強制終了は bounded retry (`MaxForceKillAttempts = 3`)、`Process.GetProcessesByName` throw は連続 5 回で abort
 - `FileReplacer.cs` — `Manager/` dir 単位の rename-rollback 置換。`Replace` (Step 1 rename + Step 2 copy の 2-step API) + `CleanupBak` (`.bak` 削除、caller が restart-exe 検証 OK 後に呼ぶ) + `RollbackFromBak` (`.bak` から復元、caller が検証失敗時に呼ぶ) の 3 つの API に分割 (round 1 H1 修正により API 分離)。概念的には「rename → copy → cleanup or rollback」の 3 動作を rename-rollback の atomic スナップショットで実現。user data は `<install>/` 直下にあり Manager dir の外なので carry-over 不要 (SPEC §3.7.3「保護の仕組み」構造的保護に従う)
 - `Logger.cs` — Manager の `Services/Logger.cs` を簡略化、`Console.SetOut` フック無しの直接書込み式、出力先 `<install>/logs/updater/updater_<PCname>_<YYYY-MM-DD_HHmmss>.log`
 - csproj / App.config / AssemblyInfo.cs
@@ -630,7 +645,7 @@
 
 **呼出し前提**: Manager UI (Phase 4) が事前に download / staging / Launcher / Companions / shortcut bat / Updater 自身の置換まで完了させた後、Manager が `Process.Start("Companions\Updater\GCTonePrism_Updater.exe", "--staging ... --manager-target ... --restart-exe ...")` で spawn する。Manager は spawn 直後に graceful 終了、Updater は ProcessWaiter で完全終了を確認してから Manager 置換に進む。
 
-**動作確認**: ローカル単体テスト (staging dummy / target dummy / user data dummy) で 3-step 置換 + user data 維持を確認。Manager UI 連携テストは Phase 4 で実施予定。
+**動作確認**: ローカル単体テスト (staging dummy / target dummy / user data dummy) で Manager dir 置換 (Replace 2-step + CleanupBak) + user data 維持 + 前回 rollback 失敗状態からの自動復元 (round 2 Codex P1 #3) を確認。Manager UI 連携テストは Phase 4 で実施予定。
 
 ---
 

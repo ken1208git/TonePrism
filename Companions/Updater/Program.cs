@@ -52,14 +52,15 @@ namespace GCTonePrism.Updater
             // ----- Step 0.5: Logger 初期化 -----
             // log-dir 未指定なら manager-target の親 dir / logs / updater を default に使う
             // (SPEC §3.7.4: `<install>/logs/updater/`、シニアレビュー round 1 M1 + L3 で
-            //  UsageText / Logger fallback の三者一致に揃え直した。Logger.Initialize 内の
-            //  exe-relative fallback は **到達不能** にするため、Program 側で必ず最終 path を
-            //  確定してから渡す。)
+            //  UsageText / Logger fallback の三者一致に揃え直した。Program 側で最終 path を確定
+            //  して Logger.Initialize に渡す方針。Logger.Initialize 内の exe-relative fallback は
+            //  **通常運用では到達しない** が、drive root 病的入力等の極限ケース用に残してある
+            //  ※ round 3 M5 で "到達不能" 表現を訂正。fallback は defensive、消さないこと)
             string logDir = parsed.LogDir;
             if (string.IsNullOrEmpty(logDir))
             {
                 // CliArgs.Parse で ManagerTargetDir は GetFullPath 済み (絶対パス保証、M3)
-                // なので親 dir 計算は安全。null になる極限ケース (drive root が manager-target
+                // なので親 dir 計算は通常成功。null になる極限ケース (drive root が manager-target
                 // 等の病的入力) のみ Logger 側 fallback に流れる。
                 string managerParent = Path.GetDirectoryName(parsed.ManagerTargetDir.TrimEnd('\\', '/'));
                 if (!string.IsNullOrEmpty(managerParent))

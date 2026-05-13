@@ -153,22 +153,50 @@ namespace GCTonePrism.Updater
 
         /// <summary>
         /// wait/kill 対象のプロセス配列を取得。PID-only モード or system-wide fallback。
+        ///
+        /// PID-only モード (Codex round 2 P1 #1) の **ProcessName 検証** (シニアレビュー round 3 H1):
+        ///   Windows は exit 済プロセスの PID を別プロセスに再利用する。Manager (PID=1234) が Updater
+        ///   spawn 直後に exit → OS が 1234 を別プロセス (例: notepad) に割当 → `GetProcessById(1234)`
+        ///   が notepad を返し Manager と誤認 → `--force-kill` 指定時に notepad を kill する silent
+        ///   danger があった。`ProcessName == "GCTonePrism_Manager"` の検証で誤認を排除。不一致なら
+        ///   「Manager 既終了 + PID 再利用」とみなして空配列扱い (= 待機 skip 経路)。
         /// </summary>
         private static Process[] GetTargetProcesses(int callerPid)
         {
             if (callerPid > 0)
             {
                 // PID-only モード: GetProcessById は対象不在で ArgumentException を投げるので捕捉して空配列扱い
+                Process p;
                 try
                 {
-                    Process p = Process.GetProcessById(callerPid);
-                    return new[] { p };
+                    p = Process.GetProcessById(callerPid);
                 }
                 catch (ArgumentException)
                 {
                     // PID 不在 = プロセス終了済 (= 期待状態)
                     return new Process[0];
                 }
+
+                // ProcessName 検証 (PID 再利用での別プロセス誤認防止、H1)。
+                // `.exe` 拡張子は ProcessName には含まれないので比較値は "GCTonePrism_Manager"。
+                string actualName;
+                try
+                {
+                    actualName = p.ProcessName;
+                }
+                catch (InvalidOperationException)
+                {
+                    // ProcessName アクセス中にプロセス exit → Manager 終了済と同じ扱い
+                    try { p.Dispose(); } catch { }
+                    return new Process[0];
+                }
+                if (!string.Equals(actualName, ManagerProcessName, StringComparison.OrdinalIgnoreCase))
+                {
+                    Logger.Info($"PID={callerPid} は別プロセス '{actualName}' (PID 再利用と判定)、Manager 既終了扱い");
+                    try { p.Dispose(); } catch { }
+                    return new Process[0];
+                }
+                return new[] { p };
             }
             // system-wide fallback
             return Process.GetProcessesByName(ManagerProcessName);
