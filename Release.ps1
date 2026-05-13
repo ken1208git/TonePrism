@@ -587,7 +587,7 @@ function Invoke-DownloadWithRetry {
 # Godot 解決: project.godot 読み取り → patch lookup → DL + キャッシュ
 # ============================================================================
 
-function Read-GodotMinorFromProject {
+function Assert-GodotMinorFromProject {
     $projectGodot = Join-Path $LauncherDir 'project.godot'
     if (-not (Test-Path $projectGodot)) {
         Fail "project.godot が見つかりません: $projectGodot"
@@ -605,7 +605,7 @@ function Resolve-Godot {
     Write-Step "Godot 実行ファイルを解決"
 
     # project.godot から major.minor を取得し、patch を決定（-GodotExe 指定時も templates 確認のため必要）
-    $minor = Read-GodotMinorFromProject
+    $minor = Assert-GodotMinorFromProject
     Write-Info "project.godot 由来の Godot: $minor 系"
 
     $patch = $null
