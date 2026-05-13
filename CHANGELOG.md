@@ -49,11 +49,19 @@
   - **Release.ps1**: `Assert-ChangelogLinkDefs` 関数を追加 (Phase 0.5 = Preflight 直後、round 1 Medium-1 で位置調整)、main flow に組み込み。release 実行前に該当 Bundle version の参照リンク定義が末尾にあるか verify し、無ければ `Fail` で停止する fence。自動 mutation (script が CHANGELOG 末尾を書き換える) は採らず、規約遵守を物理的に強制する形 (人間 / Claude いずれのミスも release.bat 実行直後 = build 前に物理的に検知される、fail-fast)
 - **DRY-RUN 検証**: 本 PR 内で「リンク定義が存在する case」(PASS) を確認、別 fixture で「未追加 case」を `Assert-ChangelogLinkDefs` が `Fail` するか動作確認 (= fence 機能の実証)
 
+#### Changed (PR #153 Codex round 4 後追い + シニアレビュー round 5)
+
+- **[Codex P2] footer 検出を「明示的 sentinel marker」ベースに切替**: round 3 で導入した `LastIndexOf('-->')` は「ファイル中で最後の HTML comment 閉じ」を footer marker とみなす pattern だったが、将来 link def 群の **下** に別の HTML comment (例: `<!-- markdownlint-disable -->` 等の lint directive) が追加された瞬間に footer block が link def 群を含まない範囲に切り出されて normal publish で **false "同期忘れ" Fail** が起きる脆弱性があった。修正: CHANGELOG 末尾 HTML comment 内に明示的 sentinel 文字列 `footer-link-defs-begin` を埋め込み、Release.ps1 は `IndexOf(sentinel)` で位置を取得する形に切替。link def の後ろにいくつ HTML comment が追加されても sentinel は 1 つで識別される構造に。sentinel 変更時は CHANGELOG.md / Release.ps1 の `$FooterSentinel` 定数を同期更新する規約も明文化
+- **[Medium-1] round 4 で新規追加した Write-Warn message の backtick escape 再発を解消 (round 3 Low-2 + round 4 Low-1 の自己矛盾)**: round 4 で他 Fail message から backtick を削除する作業 (Low-1) を行ったが、同 commit で新規追加した Write-Warn (`` "  → 本番 publish (flag なし `Release.bat -NoPause -Force`) では..." ``) には backtick を含めてしまっていた。round 3 Low-2 と全く同型の指摘 (PowerShell double-quoted string で backtick は escape として消費される) を round 4 で半分にしか適用していない自己矛盾。修正: backtick を削除して `Release.bat -NoPause -Force` の裸 string に
+- **[Low-1] Fail message 末尾の `(round 3 Codex P2)` process trivia を削除**: `Fail "CHANGELOG.md 末尾の HTML comment marker (<!-- ... -->) が見つかりません。footer block 開始の sentinel が必要 (round 3 Codex P2)。"` の末尾「(round 3 Codex P2)」は process trivia (review round 番号 + bot 名) で Fail message 本文情報には寄与しない。round 3 Low-1 で AGENTS.md / Release.ps1 header コメントから PR 識別子を削除した critique (「forward-looking な箇所に履歴情報を埋め込む」「2 年後の読者にとって意味を失う」) を user-facing Fail message にも適用。round 3 / Codex 経緯は git blame / CHANGELOG で追える
+- **[Low-2] PR description Test plan を round 1〜5 + Codex round 1〜4 反映に同期**: 初版から「[x] round 1 / round 2 のシニアレビュー対応 (High 1 + Medium 3 + Low 7)」のままで round 3 / 4 / 5 + Codex 反映が抜けていた doc-vs-impl mismatch (5 者同期チェックの対象 = PR body)。round 5 までの items 総数 + 各 round の status を反映
+- **[Low-3] v0.1.12 entry 内の round label 命名を統一**: round 1 (`[High-1]` / `[Medium-1 + Low-2]` / `[Low-1]` 等のフルスペル) と round 3 (フルスペル) と round 4 (`[Low]` 番号なし) と round 2 (`[M2]` / `[L1]` 等の短縮) で 4 round の label 形式がバラバラだった。「4 round の history を 1 entry に集約した本 PR の整理機会」として全体を `[High-N]` / `[Medium-N]` / `[Low-N]` のフルスペル + 番号ありに統一 (番号体系は round ごとに reset、Codex 由来は `[Codex P2]` で識別性維持)。具体的には round 2 の `[M2]` → `[Medium-2]`、`[L1]` → `[Low-1]` 等、round 4 の `[Low]` × 3 → `[Low-1]` / `[Low-2]` / `[Low-3]` に書き換え。round 1 / round 3 は既にフルスペル形式なので変更なし
+
 #### Changed (PR #153 シニアレビュー round 4)
 
-- **[Low] Release.ps1 内 Fail message の backtick escape 漏れを解消 (round 3 Low-2 の取りこぼし)**: round 3 Low-2 で Fail message から backtick を削除する作業を行ったが、本 PR で新規追加した別の Fail message (`Fail "CHANGELOG.md 末尾の HTML comment marker (\`<!-- ... -->\`) が見つかりません..."`) に backtick が残置していた。同 round 内で全体に展開する作業漏れを補完
-- **[Low] CHANGELOG.md 内の Release.ps1 行番号参照を現状値に同期**: round 1 / 2 / 3 の commit を重ねるうちに Release.ps1 内の line 番号が drift していた (Phase 0.5 header: 1022 → 1029、`$expectedUrl` hardcode 箇所: 1077 → 1089 を経て現在 `Assert-ChangelogLinkDefs` 全体は line 1093 近辺)。CHANGELOG entry 内の line 番号参照を実態に追従、または「(現 line 1029)」形式で書き換えて drift の表面化を抑える
-- **[Low] SkipUpload skip 時の Warn message にリマインダー 1 行追加**: round 2 M2 で `-SkipUpload` (DryRun/Offline 経由 auto-promote 含む) 時の skip + warn 挙動を導入したが、「**本番 publish (flag なし `Release.bat -NoPause -Force`) では本検証が enforce される、Bundle entry 追加と同時に link def も追加してください**」というリマインダーが無く、DryRun を繰り返している開発者が初回 publish 時に「DryRun では通ってたのに publish で Fail」と混乱する path があった。Warn を 2 行構成にして 2 行目で本番挙動を予告
+- **[Low-1] Release.ps1 内 Fail message の backtick escape 漏れを解消 (round 3 Low-2 の取りこぼし)**: round 3 Low-2 で Fail message から backtick を削除する作業を行ったが、本 PR で新規追加した別の Fail message (`Fail "CHANGELOG.md 末尾の HTML comment marker (\`<!-- ... -->\`) が見つかりません..."`) に backtick が残置していた。同 round 内で全体に展開する作業漏れを補完
+- **[Low-2] CHANGELOG.md 内の Release.ps1 行番号参照を現状値に同期**: round 1 / 2 / 3 の commit を重ねるうちに Release.ps1 内の line 番号が drift していた (Phase 0.5 header: 1022 → 1029、`$expectedUrl` hardcode 箇所: 1077 → 1089 を経て現在 `Assert-ChangelogLinkDefs` 全体は line 1093 近辺)。CHANGELOG entry 内の line 番号参照を実態に追従、または「(現 line 1029)」形式で書き換えて drift の表面化を抑える
+- **[Low-3] SkipUpload skip 時の Warn message にリマインダー 1 行追加**: round 2 M2 で `-SkipUpload` (DryRun/Offline 経由 auto-promote 含む) 時の skip + warn 挙動を導入したが、「**本番 publish (flag なし `Release.bat -NoPause -Force`) では本検証が enforce される、Bundle entry 追加と同時に link def も追加してください**」というリマインダーが無く、DryRun を繰り返している開発者が初回 publish 時に「DryRun では通ってたのに publish で Fail」と混乱する path があった。Warn を 2 行構成にして 2 行目で本番挙動を予告
 - **[scope 外 / 別 issue 登録]** ordering check (Bundle 行群の降順 enforce、現状の fence は presence のみ check で順序は AGENTS.md convention 任せ) は別 issue として記録、本 PR では実装しない (incremental hardening、本 PR の core は presence check 導入)
 
 #### Changed (PR #153 Codex round 2 後追い + シニアレビュー round 3)
@@ -71,10 +79,10 @@
 
 #### Changed (PR #153 シニアレビュー round 2)
 
-- **[M2] `Assert-ChangelogLinkDefs` に `-SkipUpload` gate を追加して既存 Preflight 契約と整合化**: 初版は `-SkipUpload` を gate せず無条件 Fail だったため、既存 `Assert-Preflight` の CHANGELOG `### [Bundle v$Version]` セクション検証 (`if (-not $SkipUpload) {...Fail} else {Write-Warn}`) と非対称だった。SkipUpload は publish しない = 参照リンク URL の resolution 自体が無意味で、staging テスト (`Release.ps1 -SkipUpload -DryRun`) で link def 未追加だけで停止される path があった。修正: `Assert-ChangelogLinkDefs` 冒頭で `if ($SkipUpload) { Write-Warn ...; return }` を入れて既存 Preflight pattern と揃え、AGENTS.md「release 実行時に verify」文言とも整合化。`-DryRun` / `-Offline` は Release.ps1:208-210 で `$SkipUpload = $true` に **auto-promote** される (Codex P2 #137 経緯) ため、DryRun 経由でも skip + warn path に流れる = 既存 Preflight と完全同期。実 fence の動作確認は本番 publish 経路 (flag なし `Release.bat -NoPause -Force`) で初発火を verify する
-- **[L1] AGENTS.md rule から PR 識別子 (`fix/changelog-link-sync PR で導入`) を削除**: rule 末尾の PR 識別子は forward-looking な規約に履歴情報を埋め込んでいて、CHANGELOG 側 (v0.1.12 Added) に既に詳細経緯あり SoT 重複 + 時間と共に rot する (2 年後の読者にとって PR 名は意味を失う)。同 AGENTS.md 内他 rule は pure rule 形式で PR 識別子なし。「`fix/changelog-link-sync` PR で導入、」を削除し、SPEC §3.7.7 への横参照は残置。あわせて「追加位置は既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持)」と「`-SkipUpload` 時のみ skip + warn」を 1 文に統合
-- **[L2] `Write-Step` の位置メタ括弧書きを削除、convention に揃え**: 初版 `Write-Step "CHANGELOG 末尾 Bundle 参照リンク定義の検証 (Preflight 直後 / build 前)"` は近傍の他 `Write-Step` (`"Preflight: 環境とパラメータを検証"` / `"GitHub Releases タグ衝突チェック"`) と異なり位置メタを混入していた。位置情報は header コメント (Release.ps1 Phase 0.5 セクション) で既に伝達済なので Step 表示は action のみに短縮
-- **[L3] Fail message + CHANGELOG HTML comment に「追加位置 = 既存 Bundle 行の先頭 (降順維持)」hint を追加**: 初版 Fail message は「末尾の参照リンク定義ブロックに追加」とだけ案内、CHANGELOG.md 末尾の HTML comment + 既存 link def 群の中で「どこに追加するか」が user message から読み取れなかった。Release.ps1 Fail 出力に「追加位置: 既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持、CHANGELOG 末尾 HTML comment ブロック直下)」を追記 + CHANGELOG.md 末尾 HTML comment にも「**追加位置は既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持、本コメント直下)** とする (= 新しいほど上)」を明示
+- **[Medium-2] `Assert-ChangelogLinkDefs` に `-SkipUpload` gate を追加して既存 Preflight 契約と整合化**: 初版は `-SkipUpload` を gate せず無条件 Fail だったため、既存 `Assert-Preflight` の CHANGELOG `### [Bundle v$Version]` セクション検証 (`if (-not $SkipUpload) {...Fail} else {Write-Warn}`) と非対称だった。SkipUpload は publish しない = 参照リンク URL の resolution 自体が無意味で、staging テスト (`Release.ps1 -SkipUpload -DryRun`) で link def 未追加だけで停止される path があった。修正: `Assert-ChangelogLinkDefs` 冒頭で `if ($SkipUpload) { Write-Warn ...; return }` を入れて既存 Preflight pattern と揃え、AGENTS.md「release 実行時に verify」文言とも整合化。`-DryRun` / `-Offline` は Release.ps1:208-210 で `$SkipUpload = $true` に **auto-promote** される (Codex P2 #137 経緯) ため、DryRun 経由でも skip + warn path に流れる = 既存 Preflight と完全同期。実 fence の動作確認は本番 publish 経路 (flag なし `Release.bat -NoPause -Force`) で初発火を verify する
+- **[Low-1] AGENTS.md rule から PR 識別子 (`fix/changelog-link-sync PR で導入`) を削除**: rule 末尾の PR 識別子は forward-looking な規約に履歴情報を埋め込んでいて、CHANGELOG 側 (v0.1.12 Added) に既に詳細経緯あり SoT 重複 + 時間と共に rot する (2 年後の読者にとって PR 名は意味を失う)。同 AGENTS.md 内他 rule は pure rule 形式で PR 識別子なし。「`fix/changelog-link-sync` PR で導入、」を削除し、SPEC §3.7.7 への横参照は残置。あわせて「追加位置は既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持)」と「`-SkipUpload` 時のみ skip + warn」を 1 文に統合
+- **[Low-2] `Write-Step` の位置メタ括弧書きを削除、convention に揃え**: 初版 `Write-Step "CHANGELOG 末尾 Bundle 参照リンク定義の検証 (Preflight 直後 / build 前)"` は近傍の他 `Write-Step` (`"Preflight: 環境とパラメータを検証"` / `"GitHub Releases タグ衝突チェック"`) と異なり位置メタを混入していた。位置情報は header コメント (Release.ps1 Phase 0.5 セクション) で既に伝達済なので Step 表示は action のみに短縮
+- **[Low-3] Fail message + CHANGELOG HTML comment に「追加位置 = 既存 Bundle 行の先頭 (降順維持)」hint を追加**: 初版 Fail message は「末尾の参照リンク定義ブロックに追加」とだけ案内、CHANGELOG.md 末尾の HTML comment + 既存 link def 群の中で「どこに追加するか」が user message から読み取れなかった。Release.ps1 Fail 出力に「追加位置: 既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持、CHANGELOG 末尾 HTML comment ブロック直下)」を追記 + CHANGELOG.md 末尾 HTML comment にも「**追加位置は既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持、本コメント直下)** とする (= 新しいほど上)」を明示
 
 #### Changed (PR #153 シニアレビュー round 1)
 
@@ -1879,6 +1887,13 @@ Bundle 移行前 (2026-03 まで): Launcher / Manager の個別 GitHub Releases 
 既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持、本コメント直下)** とする (= 新しいほど上)。
 AGENTS.md "Release and Versioning" 規約、Release.ps1 の `Assert-ChangelogLinkDefs` が検証
 して未追加なら Fail で停止する。
+
+footer-link-defs-begin (= Release.ps1 Assert-ChangelogLinkDefs が IndexOf でこの sentinel
+文字列を探して、以降を footer block として match 対象にする。round 5 Codex P2 対応で
+`LastIndexOf('-->')` ベースの「最後の HTML comment」検出から、明示 sentinel ベースに切替。
+将来 link def の下に別の HTML comment (markdownlint directive 等) が追加されても fence が
+壊れない構造に。本 sentinel 文字列を変更する場合は Release.ps1 の $FooterSentinel 定数も
+同期更新すること)
 -->
 
 [Bundle v0.2.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/v0.2.0

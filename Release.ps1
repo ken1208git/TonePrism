@@ -1066,7 +1066,7 @@ function Assert-ChangelogLinkDefs {
         # round 4 Low: 本番 publish 時には Fail で停止することを明示、開発者が DryRun 中に link def
         # 追加を忘れ続けて初回 publish 時に「DryRun では通ってたのに publish で Fail」と混乱する
         # path を防ぐ。
-        Write-Warn "  → 本番 publish (flag なし `Release.bat -NoPause -Force`) では本検証が enforce されます。Bundle entry 追加と同時に link def も追加してください"
+        Write-Warn "  → 本番 publish (flag なし Release.bat -NoPause -Force) では本検証が enforce されます。Bundle entry 追加と同時に link def も追加してください"
         return
     }
 
@@ -1075,19 +1075,29 @@ function Assert-ChangelogLinkDefs {
     # あり。script 冒頭 ($_changelogContent) と同じ ReadAllText で統一して UTF-8 明示 read。
     $changelogContent = [System.IO.File]::ReadAllText($changelogPath, [System.Text.Encoding]::UTF8)
 
-    # round 3 Codex P2: footer block を切り出してその範囲内のみ match。
-    #   round 1 Low-1 で line anchor 化 `(?m)^...\s*$` で本文中のコードブロック内文字列を
-    #   排除する想定だったが、release notes 内の fenced code block で `[Bundle v0.5.0]: ...`
-    #   を例示行として 独立行 で書いた場合、line anchor だけでは false-positive で素通り
-    #   していた (= footer 不在でも check 緑 → dangling Bundle heading link で release)。
-    #   修正: CHANGELOG 末尾の最後の HTML comment marker (`<!-- ... -->`) を footer block の
-    #   開始 sentinel とみなし、それ以降の text だけを match 対象に。LastIndexOf('-->') で
-    #   「ファイル中で最後の HTML comment 閉じ」を見つける = 末尾 footer block の先頭。
-    $footerMarkerEnd = $changelogContent.LastIndexOf('-->')
-    if ($footerMarkerEnd -lt 0) {
-        Fail "CHANGELOG.md 末尾の HTML comment marker (<!-- ... -->) が見つかりません。footer block 開始の sentinel が必要 (round 3 Codex P2)。"
+    # footer block を切り出してその範囲内のみ match。
+    #   line anchor `(?m)^...\s*$` だけでファイル全体に対して match した場合、release notes 内の
+    #   fenced code block で `[Bundle v0.5.0]: ...` を例示行として **独立行** で書いた case で
+    #   false-positive で素通りする path があった (footer 不在でも check 緑 → dangling Bundle
+    #   heading link で release)。
+    #
+    #   修正履歴:
+    #     (1) 旧 (round 3 Codex P2): `LastIndexOf('-->')` で「ファイル中で最後の HTML comment 閉じ」
+    #         を footer block の先頭とみなしていたが、これは「任意の HTML comment」を footer
+    #         marker と扱う pattern で、将来 link def の **下** に別の HTML comment (例:
+    #         markdownlint directive `<!-- markdownlint-disable -->`) が追加された瞬間に
+    #         footer block が link def 群を含まない範囲に切り出されて normal publish で false
+    #         "同期忘れ" Fail が起きる脆弱性があった。
+    #     (2) 現在 (round 5 Codex P2 補強): 明示的 sentinel 文字列 `footer-link-defs-begin` を
+    #         CHANGELOG 末尾 HTML comment 内に埋め込み、`IndexOf(sentinel)` で位置を取得する形に。
+    #         link def の後ろにいくつ HTML comment が追加されても sentinel は 1 つで識別される。
+    #         本 sentinel を変更する場合は CHANGELOG.md 側の HTML comment も同期更新すること。
+    $FooterSentinel = 'footer-link-defs-begin'
+    $sentinelIdx = $changelogContent.IndexOf($FooterSentinel)
+    if ($sentinelIdx -lt 0) {
+        Fail "CHANGELOG.md に footer marker sentinel '$FooterSentinel' が見つかりません。CHANGELOG 末尾 HTML comment 内に sentinel を追加してください。"
     }
-    $footerBlock = $changelogContent.Substring($footerMarkerEnd + 3)
+    $footerBlock = $changelogContent.Substring($sentinelIdx + $FooterSentinel.Length)
 
     # round 3 Low-3: GitHub repo URL は $GitHubRepoSlug 定数 (script 冒頭 SoT) を参照。
     $expectedUrl = "https://github.com/$GitHubRepoSlug/releases/tag/v$Version"
