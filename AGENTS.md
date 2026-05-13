@@ -33,7 +33,7 @@
 - **Bundle entry 追加時に CHANGELOG 末尾の参照リンク定義も同時追加する**。これは `### [Bundle vX.Y.Z]` 見出しを GitHub Releases ページへのリンクに resolve するため (SPEC §3.7.7 「Bundle release が SoT」規約整合)。
   - **Markdown 形式**: `[Bundle vX.Y.Z]: https://github.com/ken1208git/GCTonePrism/releases/tag/vX.Y.Z`
   - **追加位置**: CHANGELOG 末尾 HTML comment block の直下、既存 `[Bundle vX.Y.Z]:` 行群の **先頭** (降順を維持、= 新しいほど上)
-  - **強制 fence**: Release.ps1 の `Assert-ChangelogLinkDefs` (Phase 0.5、Godot export / msbuild より前) が release 実行直後に footer block 内の link def を verify、無ければ Fail で停止 → build を捨てる前に fail-fast
+  - **強制 fence**: Release.ps1 の `Assert-ChangelogLinkDefs` (Phase 0.5、Godot export / msbuild より前) が release 実行直後に footer block 内の link def を verify、(1) **presence** (該当 Bundle version の行が存在するか) と (2) **ordering** (Bundle 行群が SemVer 降順に並んでいるか、issue #154) の両方を enforce、違反あれば Fail で停止 → build を捨てる前に fail-fast (pre-release suffix を含む version は SemVer 比較不可のため順序 check 部分のみ warning で skip)
   - **`-SkipUpload` 時** (および `-DryRun` / `-Offline` 経由 auto-promote 時): publish しないので URL resolution 不要、skip + warn で継続 (既存 `Assert-Preflight` の CHANGELOG セクション検証と同 pattern)
   - **Bundle 移行前の個別 component link 定義** (`Launcher_v0.5.7` / `Manager_v0.7.6` 等) は過去 release tag を指して有効なので残置するが、**Bundle 移行後 (2026-05-11 以降) は個別 component 用リンク定義は追加しない** (対応 GitHub release tag が存在しないため)。`### [Launcher v0.5.17]` のような Bundle 移行後の個別 component 見出しは Markdown 上 dangling reference になるが、本文情報は `## Bundle` entry 経由か commit 履歴で追跡可能なため許容する
 - Bundle bump ルール:

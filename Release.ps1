@@ -1110,20 +1110,67 @@ function Assert-ChangelogLinkDefs {
     $linePattern = '(?m)^' + [regex]::Escape("[Bundle v$Version]: $expectedUrl") + '\s*$'
     $expectedDefDisplay = "[Bundle v$Version]: $expectedUrl"
 
-    if ([regex]::IsMatch($footerBlock, $linePattern)) {
-        Write-Ok "Bundle v$Version の参照リンク定義 OK"
+    if (-not [regex]::IsMatch($footerBlock, $linePattern)) {
+        # round 3 Low-2: backtick escape を削除、PS double-quoted string で意図しない文字消費を排除。
+        Write-Host ""
+        Write-Host "    CHANGELOG.md 末尾 footer block に Bundle v$Version の参照リンク定義が見つかりません" -ForegroundColor Red
+        Write-Host "    (CHANGELOG 末尾 sentinel '$FooterSentinel' 以降の独立行のみ認識、本文中の例示は false-positive 排除)" -ForegroundColor DarkGray
+        Write-Host "    以下を CHANGELOG.md 末尾の参照リンク定義ブロックに追加してから再実行してください:" -ForegroundColor Yellow
+        Write-Host "      $expectedDefDisplay" -ForegroundColor Cyan
+        Write-Host "    追加位置: 既存 [Bundle vX.Y.Z]: 行群の先頭 (降順を維持、CHANGELOG 末尾 HTML comment ブロック直下)" -ForegroundColor Yellow
+        Write-Host "    (AGENTS.md 'Release and Versioning' 規約参照)" -ForegroundColor Yellow
+        Fail "CHANGELOG 末尾参照リンク定義の同期忘れ"
+    }
+    Write-Ok "Bundle v$Version の参照リンク定義 OK (presence)"
+
+    # #154 / issue 154 — Bundle 行群の降順整列 enforce
+    #   現状の fence は presence のみ check で、AGENTS.md 規約「既存 [Bundle vX.Y.Z]: 行群の先頭
+    #   (降順を維持、新しいほど上)」を強制していなかった。例えば `[Bundle v0.1.0]` の下に
+    #   `[Bundle v0.3.0]` を書いても通過する状態で、human reader が「最新リリースがどれか」を
+    #   直感的に判断できなくなる運用劣化リスクと、規約と fence の non-symmetric (doc-vs-impl
+    #   mismatch) があった。
+    #
+    #   実装方針:
+    #     - footer block 内の `^[Bundle vX.Y.Z]: ...` 独立行を順序通りに抽出
+    #     - 隣接ペアで SemVer 比較 → 降順 (上 > 下) でなければ Fail
+    #     - pre-release suffix (例: `0.3.0-rc1`) を含む version は [version] cast 不可なので
+    #       本 fence 範囲外として warning + 順序 check skip (現状 Bundle で pre-release 運用なし、
+    #       将来運用拡張時に SemVer 比較ロジック拡張で対応)
+    #     - Bundle 行が 0 件 (presence check で既に Fail) / 1 件 (順序自明) の case は順序
+    #       check 自体不要 → return
+    $bundleLinePattern = '(?m)^\[Bundle v(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?)\]:'
+    $bundleMatches = [regex]::Matches($footerBlock, $bundleLinePattern)
+    if ($bundleMatches.Count -le 1) {
+        # 1 件以下は順序自明 (presence check は通過済)、ordering check は不要
         return
     }
 
-    # round 3 Low-2: backtick escape を削除、PS double-quoted string で意図しない文字消費を排除。
-    Write-Host ""
-    Write-Host "    CHANGELOG.md 末尾 footer block に Bundle v$Version の参照リンク定義が見つかりません" -ForegroundColor Red
-    Write-Host "    (CHANGELOG 末尾 sentinel '$FooterSentinel' 以降の独立行のみ認識、本文中の例示は false-positive 排除)" -ForegroundColor DarkGray
-    Write-Host "    以下を CHANGELOG.md 末尾の参照リンク定義ブロックに追加してから再実行してください:" -ForegroundColor Yellow
-    Write-Host "      $expectedDefDisplay" -ForegroundColor Cyan
-    Write-Host "    追加位置: 既存 [Bundle vX.Y.Z]: 行群の先頭 (降順を維持、CHANGELOG 末尾 HTML comment ブロック直下)" -ForegroundColor Yellow
-    Write-Host "    (AGENTS.md 'Release and Versioning' 規約参照)" -ForegroundColor Yellow
-    Fail "CHANGELOG 末尾参照リンク定義の同期忘れ"
+    $bundleVersions = @($bundleMatches | ForEach-Object { $_.Groups[1].Value })
+    for ($i = 0; $i -lt $bundleVersions.Count - 1; $i++) {
+        $upper = $bundleVersions[$i]
+        $lower = $bundleVersions[$i + 1]
+        # pre-release suffix を含むペアは SemVer 比較ロジック不在、warning で skip
+        if ($upper -match '-' -or $lower -match '-') {
+            Write-Warn "Bundle version に pre-release suffix を含むペアの順序 check は本 fence 範囲外: '$upper' / '$lower' (skip、presence は PASS 済)"
+            continue
+        }
+        $upperVer = [version]$upper
+        $lowerVer = [version]$lower
+        if ($upperVer -le $lowerVer) {
+            Write-Host ""
+            Write-Host "    CHANGELOG.md 末尾 footer block の Bundle 行群が降順に並んでいません" -ForegroundColor Red
+            Write-Host "    位置 $i (上): [Bundle v$upper]:" -ForegroundColor Red
+            Write-Host "    位置 $($i + 1) (下): [Bundle v$lower]: ← 下にあるが version が大きい / 等しい" -ForegroundColor Red
+            Write-Host "    AGENTS.md 規約: 既存 [Bundle vX.Y.Z]: 行群の先頭 (降順を維持、新しいほど上)" -ForegroundColor Yellow
+            Write-Host "    全 Bundle 行 (現状の並び順):" -ForegroundColor Yellow
+            for ($j = 0; $j -lt $bundleVersions.Count; $j++) {
+                $marker = if ($j -eq $i -or $j -eq $i + 1) { ' ← 違反箇所' } else { '' }
+                Write-Host "      [$j] [Bundle v$($bundleVersions[$j])]:$marker" -ForegroundColor DarkGray
+            }
+            Fail "CHANGELOG 末尾 Bundle 行群の降順違反"
+        }
+    }
+    Write-Ok "Bundle 行群の降順整列 OK ($($bundleVersions.Count) 件)"
 }
 
 # ============================================================================

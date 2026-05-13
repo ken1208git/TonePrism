@@ -39,6 +39,23 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
+### [Release Tooling v0.1.13] - 2026-05-14
+
+#### Added (feature/changelog-bundle-ordering、#154)
+
+- **`Assert-ChangelogLinkDefs` に Bundle 行群の SemVer 降順整列 enforce を追加** (presence check に追加で ordering check): PR #153 で導入した fence は「footer block 内に `[Bundle vX.Y.Z]:` 行が **存在するか**」だけ verify する presence check で、AGENTS.md「**追加位置: 既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持)**」規定は convention 任せだった。例えば `[Bundle v0.1.0]` の下に `[Bundle v0.3.0]` を書いても通過する状態で、CHANGELOG の Bundle 行群が時系列ぐちゃぐちゃになり human reader が「最新リリースがどれか」を直感的に判断できなくなる運用劣化リスクと、規約と fence の non-symmetric (doc-vs-impl mismatch) があった。`#154` で別 issue 化していた incremental hardening を実装。
+  - **実装**: footer block 内の `^[Bundle vX.Y.Z]:` 独立行を順序通り抽出 → 隣接ペアで SemVer 比較 (`[version]` cast) → 降順 (上 > 下) でなければ Fail
+  - **pre-release suffix の扱い**: `0.3.0-rc1` 等の suffix 付き version は `[version]` cast 不可のため SemVer 比較ロジック範囲外、warning で順序 check を skip + presence check は維持 (現状 Bundle で pre-release 運用なし、将来運用拡張時に SemVer 比較ロジック拡張で対応)
+  - **Bundle 1 件以下**: 順序自明のため ordering check 自体不要 → presence check 後そのまま return
+  - **Fail message**: 違反箇所 (位置 i 上 / 位置 i+1 下) + 全 Bundle 行の並び順 + 違反箇所マーカー (`← 違反箇所`) を表示、修正しやすい形に
+  - **AGENTS.md `Release and Versioning` の強制 fence 記述を `(1) presence + (2) ordering` の両方 enforce 表記に更新**: 規約と fence の対称性を回復
+  - **手動 fixture test 3 case PASS**:
+    - A (現状 v0.2.0 / v0.1.0 降順): `[OK] Bundle v0.2.0 の参照リンク定義 OK (presence)` + `[OK] Bundle 行群の降順整列 OK (2 件)` → PASS
+    - B (順序逆転、v0.1.0 が上 v0.2.0 が下): presence は OK、ordering で「位置 0 (上): v0.1.0 / 位置 1 (下): v0.2.0 ← 下にあるが version が大きい」と違反箇所表示 + 全 Bundle 行リスト + 違反箇所マーカー表示 → Fail
+    - C (Bundle 1 件のみ): presence OK + ordering check 自体 skip (順序自明) → PASS
+
+---
+
 ### [Release Tooling v0.1.12] - 2026-05-13
 
 #### Added (fix/changelog-link-sync、PR #153)
