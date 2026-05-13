@@ -1019,6 +1019,64 @@ function Resolve-TagConflict {
 }
 
 # ============================================================================
+# Phase 0.5: CHANGELOG 末尾 Bundle 参照リンク定義の検証 (fix/changelog-link-sync)
+# ============================================================================
+# Markdown reference-style link を resolve するためには CHANGELOG 末尾に
+# `[Bundle vX.Y.Z]: https://github.com/.../releases/tag/vX.Y.Z` の定義が要る。
+# Bundle entry 追加時に手で同時追加するのが AGENTS.md "Release and Versioning" 規約だが、
+# 人間 / Claude いずれもミスする可能性があるため、Release.ps1 release 実行前にこの定義の
+# 存在を verify して未追加なら Fail で停止する fence を設ける。
+#
+# 配置: Phase 0.5 (= Assert-Preflight の直後、Build 群より前)
+#   round 1 Medium-1: 初版は Assert-ExpectedFiles の **後** (build 完了後) に置いていたが、
+#   link def 忘れを「数分のフル build を捨ててから検出」する fail-fast 違反だった。本 Assert
+#   は $Version + CHANGELOG.md のみに依存し build 結果を見ない → Preflight 直後に配置する
+#   ことで「実行直後 (build 前) に物理的に検知」を実現。AGENTS.md 「実行直後の Assert」
+#   記述とも整合化。
+#
+# 自動 mutation (Release.ps1 が末尾を書き換える) は採らない:
+#   - commit/staging のタイミングと干渉する
+#   - dry-run と本番で挙動分岐が複雑化する
+#   - SoT (CHANGELOG) を script が書き換える形は git 履歴の追跡性を悪くする
+# 「検証だけ」で止めれば、リリース直前に手追加忘れに気づいて修正 → 再 Release.bat で済む。
+
+function Assert-ChangelogLinkDefs {
+    Write-Step "CHANGELOG 末尾 Bundle 参照リンク定義の検証 (Preflight 直後 / build 前)"
+    $changelogPath = Join-Path $RepoRoot 'CHANGELOG.md'
+    # round 1 Low-3: Get-Content -Raw は PS 5.1 で BOM 無し UTF-8 を CP932 として読む既知挙動
+    # あり。script 冒頭 (Release.ps1:222 付近) の $_changelogContent と同じ ReadAllText で
+    # 統一して UTF-8 明示 read。本件 match 対象は ASCII で実害ゼロだが、保守ノイズ + 将来
+    # defensive のため統一。
+    $changelogContent = [System.IO.File]::ReadAllText($changelogPath, [System.Text.Encoding]::UTF8)
+
+    # round 1 Low-1: 単純 substring match は本文中のコードブロック / 引用に同形式文字列が
+    # 紛れた場合に false-positive で素通りする path があった。Markdown 仕様上 reference link
+    # 定義はどこにあっても resolve するので rendering 上は問題ないが、運用規約「末尾参照
+    # ブロックに集約」と乖離する。行 anchor で「行頭から URL 末尾 + 行末まで」固定の正規
+    # 表現に変える: 末尾の link def ブロック内で 1 行として独立している行のみ match する。
+    #
+    # 正規表現: `(?m)` (multiline) + `^` (行頭) + `[Bundle v<Version>]: <URL>` + `\s*$` (行末)
+    # `<Version>` と `<URL>` 内の `.` などは [regex]::Escape で escape。
+    $expectedUrl = "https://github.com/ken1208git/GCTonePrism/releases/tag/v$Version"
+    $linePattern = '(?m)^' + [regex]::Escape("[Bundle v$Version]: $expectedUrl") + '\s*$'
+    $expectedDefDisplay = "[Bundle v$Version]: $expectedUrl"
+
+    if ([regex]::IsMatch($changelogContent, $linePattern)) {
+        Write-Ok "Bundle v$Version の参照リンク定義 OK"
+        return
+    }
+
+    Write-Host ""
+    Write-Host "    CHANGELOG.md 末尾に Bundle v$Version の参照リンク定義が見つかりません" -ForegroundColor Red
+    Write-Host "    (行頭 anchor で末尾 reference link block 内の行を探しています、" -ForegroundColor DarkGray
+    Write-Host "     本文中のコードブロック内文字列は false-positive 排除のため認識しません)" -ForegroundColor DarkGray
+    Write-Host "    以下を CHANGELOG.md 末尾の参照リンク定義ブロックに追加してから再実行してください:" -ForegroundColor Yellow
+    Write-Host "      $expectedDefDisplay" -ForegroundColor Cyan
+    Write-Host "    (AGENTS.md 'Release and Versioning' 規約参照)" -ForegroundColor Yellow
+    Fail "CHANGELOG 末尾参照リンク定義の同期忘れ"
+}
+
+# ============================================================================
 # Phase 1: Component versions 読み取り
 # ============================================================================
 
@@ -1520,39 +1578,6 @@ function Assert-ExpectedFiles {
 }
 
 # ============================================================================
-# Phase 7.5: CHANGELOG 末尾 Bundle 参照リンク定義の検証 (fix/changelog-link-sync)
-# ============================================================================
-# Markdown reference-style link を resolve するためには CHANGELOG 末尾に
-# `[Bundle vX.Y.Z]: https://github.com/.../releases/tag/vX.Y.Z` の定義が要る。
-# Bundle entry 追加時に手で同時追加するのが AGENTS.md "Release and Versioning" 規約だが、
-# 人間 / Claude いずれもミスする可能性があるため、Release.ps1 release 実行前にこの定義の
-# 存在を verify して未追加なら Fail で停止する fence を設ける。これで CHANGELOG / GitHub
-# Releases の見た目の整合性を物理的に保証。
-#
-# 自動 mutation (Release.ps1 が末尾を書き換える) は採らない:
-#   - commit/staging のタイミングと干渉する
-#   - dry-run と本番で挙動分岐が複雑化する
-#   - SoT (CHANGELOG) を script が書き換える形は git 履歴の追跡性を悪くする
-# 「検証だけ」で止めれば、リリース直前に手追加忘れに気づいて修正 → 再 Release.bat で済む。
-
-function Assert-ChangelogLinkDefs {
-    Write-Step "CHANGELOG 末尾 Bundle 参照リンク定義の検証"
-    $expectedDef = "[Bundle v$Version]: https://github.com/ken1208git/GCTonePrism/releases/tag/v$Version"
-    $changelogPath = Join-Path $RepoRoot 'CHANGELOG.md'
-    $changelogContent = Get-Content $changelogPath -Raw
-    # 単純な substring match (定義行は 1 行で固定形式、行末改行揺れも吸収できる)
-    if ($changelogContent.IndexOf($expectedDef) -lt 0) {
-        Write-Host ""
-        Write-Host "    CHANGELOG.md 末尾に Bundle v$Version の参照リンク定義が見つかりません" -ForegroundColor Red
-        Write-Host "    以下を CHANGELOG.md 末尾の参照リンク定義ブロックに追加してから再実行してください:" -ForegroundColor Yellow
-        Write-Host "      $expectedDef" -ForegroundColor Cyan
-        Write-Host "    (AGENTS.md 'Release and Versioning' 規約参照)" -ForegroundColor Yellow
-        Fail "CHANGELOG 末尾参照リンク定義の同期忘れ"
-    }
-    Write-Ok "Bundle v$Version の参照リンク定義 OK"
-}
-
-# ============================================================================
 # Phase 8: New-Zip
 # ============================================================================
 
@@ -1695,6 +1720,7 @@ if ($Force)      { Write-Host "Mode: FORCE" -ForegroundColor Yellow }
 if ($Offline)    { Write-Host "Mode: OFFLINE" -ForegroundColor Yellow }
 
 Assert-Preflight
+Assert-ChangelogLinkDefs
 Read-ComponentVersions
 Resolve-Godot
 Resolve-MsBuild
@@ -1707,7 +1733,6 @@ Build-Manager
 Build-Updater
 Copy-Templates
 Assert-ExpectedFiles
-Assert-ChangelogLinkDefs
 Clear-OldGodot
 
 if ($DryRun) {

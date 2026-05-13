@@ -41,15 +41,23 @@
 
 ### [Release Tooling v0.1.12] - 2026-05-13
 
-#### Added (fix/changelog-link-sync)
+#### Added (fix/changelog-link-sync、PR #153)
 
 - **CHANGELOG 末尾 Bundle 参照リンク定義の運用ルール + 強制 fence を追加**: PR #152 マージ後に発見した「CHANGELOG 末尾の Keep a Changelog 参照リンク定義が 2026-03 (Launcher v0.5.7 / Manager v0.7.6) から完全に止まっており、Bundle 移行後 (2026-05-11 以降) の `[Bundle v0.1.0]` / `[Bundle v0.2.0]` が dangling reference 状態」の問題に対処。
   - **CHANGELOG.md**: 末尾参照リンクブロックに `[Bundle v0.2.0]` / `[Bundle v0.1.0]` の link 定義追加 + `<!-- ... -->` コメントで Bundle 移行後の規約 (個別 component リンクは追加しない、Bundle release が SoT) を明文化
   - **AGENTS.md** `Release and Versioning` セクション: 「Bundle entry 追加時に CHANGELOG 末尾の参照リンク定義も同時追加」ルールを明文化 + Bundle 移行後の個別 component 見出しが Markdown 上 dangling reference になることを許容理由付きで規定 (SPEC §3.7.7「Bundle release が SoT」規約整合)
-  - **Release.ps1**: `Assert-ChangelogLinkDefs` 関数を追加 (Phase 7.5)、main flow に組み込み (`Assert-ExpectedFiles` 直後)。release 実行前に該当 Bundle version の参照リンク定義が末尾にあるか verify し、無ければ `Fail` で停止する fence。自動 mutation (script が CHANGELOG 末尾を書き換える) は採らず、規約遵守を物理的に強制する形 (人間 / Claude いずれのミスも release.bat 実行直後に物理的に検知される)
+  - **Release.ps1**: `Assert-ChangelogLinkDefs` 関数を追加 (Phase 0.5 = Preflight 直後、round 1 Medium-1 で位置調整)、main flow に組み込み。release 実行前に該当 Bundle version の参照リンク定義が末尾にあるか verify し、無ければ `Fail` で停止する fence。自動 mutation (script が CHANGELOG 末尾を書き換える) は採らず、規約遵守を物理的に強制する形 (人間 / Claude いずれのミスも release.bat 実行直後 = build 前に物理的に検知される、fail-fast)
 - **DRY-RUN 検証**: 本 PR 内で「リンク定義が存在する case」(PASS) を確認、別 fixture で「未追加 case」を `Assert-ChangelogLinkDefs` が `Fail` するか動作確認 (= fence 機能の実証)
 
+#### Changed (PR #153 シニアレビュー round 1)
 
+- **[High-1] CHANGELOG 構造修正: v0.1.11 / v0.1.12 entry の分離**: 初版 commit (`7bb0102`) では既存 `### [Release Tooling v0.1.11]` 見出しを `v0.1.12` に **書き換えてしまい**、配下にあった PR #152 round 8 の Fixed 群 (UseShellExecute=false + WaitForExit 2000ms / Codex P2-1, P2-2 / Medium / Low の重大発見根治) が PR #153 = v0.1.12 の作業として表示される状態になっていた。AGENTS.md「1 PR 内の version bump は原則 1 回のみ」は PR をまたいで version 番号を付け替えるのは想定外 (= PR #152 = v0.1.11、本 PR = v0.1.12 が正しい対応関係)。修正: 旧 v0.1.11 entry の見出し + 配下 Fixed 群を復元、新 v0.1.12 entry を v0.1.11 の **上** に並べる形に再構成。これで「v0.1.11 と v0.1.12 の差分は何だったか?」を CHANGELOG だけで遡れる状態に戻る
+- **[Medium-1 + Low-2] Assert の発火タイミングを build 前 (Preflight 直後) に移動 + AGENTS.md 文言を実装と整合化**: 初版は `Assert-ChangelogLinkDefs` を `Assert-ExpectedFiles` の **後** (= Build-Launcher / Build-Manager / Build-Updater + Copy-Templates の後) に置いていた。link def 忘れを「数分のフル build を捨ててから」検出する fail-fast 違反 + AGENTS.md「Release.bat 実行直後の Assert で物理的に防ぐ」記述と実装の document-vs-impl mismatch があった。修正: `Assert-Preflight` の直後 (build 開始前) に移動、link def 忘れを **数秒で検出 → 修正 → 再 Release.bat** のサイクルに整える。AGENTS.md の「実行直後」記述も実装と一致
+- **[Low-1] Assert を substring match → 正規表現 anchor 化**: 初版の `$changelogContent.IndexOf($expectedDef)` 単純 substring match は、CHANGELOG 本文中のコードブロック / 引用に同形式文字列が紛れた場合 false-positive で PASS する path があった。Markdown 仕様上 reference link 定義はどこにあっても resolve されるので rendering 上は問題ないが、運用規約「末尾参照ブロックに集約」と乖離する。`(?m)^\[Bundle v...\]: <URL>\s*$` の行 anchor で末尾ブロック内の行のみ match
+- **[Low-3] `Get-Content -Raw` → `[System.IO.File]::ReadAllText(..., UTF8)` に統一**: 初版の `Get-Content -Raw` は PowerShell 5.1 で BOM 無し UTF-8 ファイルを Windows ANSI (日本語環境では CP932) として読む既知挙動があり、CHANGELOG.md の他箇所 (Release.ps1:222 の `_changelogContent`) と read 方式が不整合だった。本件 match 対象は ASCII で実害ゼロだが、保守ノイズ + 将来 defensive のため統一
+- **[Low-4] `#### Added` subsection 末尾の余分な空行 2 行削除**: 他 subsection 間は単一空行 convention に揃え
+
+### [Release Tooling v0.1.11] - 2026-05-13
 
 #### Fixed (PR #152 Codex bot round 7 後追い + シニアレビュー round 8 + 重大発見への対応)
 
