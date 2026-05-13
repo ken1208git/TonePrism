@@ -391,21 +391,50 @@ set "INSTALL_MODE=new"
 goto :copy_shortcuts
 
 :copy_shortcuts
-REM Copy parent-level shortcuts (Launcher.bat / Manager.bat) from zip root to
-REM <parent>/ (= one level above GCTonePrism/). This places daily-use shortcuts
-REM directly under the user's selected parent folder for easier discovery.
-REM See SPEC §3.7.1.
-REM
-REM Order: shortcut copy is performed BEFORE robocopy in both overwrite and
-REM new_install paths, so that shortcut bat always points to the current install
-REM structure even if robocopy is interrupted partway through.
-copy /Y "%SCRIPT_DIR%Launcher.bat" "%INSTALL_PARENT_NO_TRAIL%\Launcher.bat" >nul
-if errorlevel 1 goto :shortcut_failed
-copy /Y "%SCRIPT_DIR%Manager.bat" "%INSTALL_PARENT_NO_TRAIL%\Manager.bat" >nul
-if errorlevel 1 goto :shortcut_failed
-goto :do_robocopy_dispatch
+REM ============================================================================
+REM Dispatch for shortcut copy + robocopy ordering by INSTALL_MODE (Codex P2):
+REM   overwrite: shortcut → robocopy (round 3 L3: robocopy 中断時に shortcut bat の
+REM                                   新 path 整合を保証、partial-failure 後の Install.bat
+REM                                   再実行で復旧可能)
+REM   new:       robocopy → shortcut (Codex P2: 新規 install で robocopy 失敗時に
+REM                                   broken shortcut bat が `<親>/` に残るのを防ぐ。
+REM                                   旧 install がない new path では shortcut を先に
+REM                                   作る利点がない)
+REM ============================================================================
+if "%INSTALL_MODE%"=="overwrite" goto :overwrite_shortcut_then_robocopy
+goto :new_robocopy_then_shortcut
 
-:do_robocopy_dispatch
+:overwrite_shortcut_then_robocopy
+call :do_shortcut_copy
+if errorlevel 1 goto :shortcut_failed
+goto :do_robocopy_overwrite
+
+:new_robocopy_then_shortcut
+call :do_robocopy
+if errorlevel 1 goto :copy_failed
+call :do_shortcut_copy
+if errorlevel 1 goto :shortcut_failed
+goto :install_done
+
+REM ----- Subroutine: shortcut bat copy (Launcher.bat / Manager.bat → <parent>/) -----
+REM `call :do_shortcut_copy` で呼び出し、ERRORLEVEL で成否伝播。SPEC §3.7.1 のルート
+REM ショートカット規約に従って <親>/ 直下に配置。
+:do_shortcut_copy
+copy /Y "%SCRIPT_DIR%Launcher.bat" "%INSTALL_PARENT_NO_TRAIL%\Launcher.bat" >nul
+if errorlevel 1 exit /b 1
+copy /Y "%SCRIPT_DIR%Manager.bat" "%INSTALL_PARENT_NO_TRAIL%\Manager.bat" >nul
+if errorlevel 1 exit /b 1
+exit /b 0
+
+REM ----- Subroutine: robocopy for new_install (no /XF /XD because no user data yet) -----
+REM new_install path 用。overwrite 用は :do_robocopy_overwrite で独立 (`/XF /XD` defense-in-depth 必要)。
+:do_robocopy
+robocopy "%FILES_DIR%" "%INSTALL_TARGET%" /E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1
+REM robocopy exit code is a bitfield, < 8 = success (0 no change, 1 files copied, etc.).
+if errorlevel 8 exit /b 1
+exit /b 0
+
+:do_robocopy_overwrite
 REM ============================================================================
 REM USER DATA PROTECTION — read this carefully before modifying robocopy flags.
 REM ============================================================================
@@ -437,24 +466,19 @@ REM so future components containing a `games/` or `backups/` subfolder would be
 REM silently excluded. Safe today (no such names in files/) but worth flagging
 REM if a future component adds one.
 REM ============================================================================
-if "%INSTALL_MODE%"=="overwrite" goto :do_robocopy_overwrite
-goto :do_robocopy_new
-
-:do_robocopy_overwrite
 robocopy "%FILES_DIR%" "%INSTALL_TARGET%" /E /XF prism.db /XD games backups responses logs /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1
 REM robocopy exit code is a bitfield, < 8 = success (0 no change, 1 files copied, etc.).
-if errorlevel 8 goto :copy_failed
-goto :install_done
-
-:do_robocopy_new
-robocopy "%FILES_DIR%" "%INSTALL_TARGET%" /E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1
 if errorlevel 8 goto :copy_failed
 goto :install_done
 
 :copy_failed
 echo.
 echo [FAIL] ファイルコピーに失敗しました [robocopy exit %ERRORLEVEL%]。
-echo        Install.bat 再実行で復旧可能です [shortcut bat はすでに新版で配置済み]。
+REM Install.bat 再実行で復旧可能だが、shortcut bat の状態は INSTALL_MODE で異なる:
+REM - overwrite: shortcut copy 先行成功 → robocopy 失敗 (shortcut は新 path、Codex P2 関連)
+REM - new:       robocopy 失敗 → shortcut copy 未到達 (shortcut bat 不在、broken shortcut の regression なし)
+if "%INSTALL_MODE%"=="overwrite" echo        Install.bat 再実行で復旧可能です [shortcut bat はすでに新版で配置済み]。
+if "%INSTALL_MODE%"=="new"       echo        Install.bat 再実行で復旧可能です [shortcut bat はまだ配置されていません]。
 goto :fail
 
 :shortcut_failed

@@ -52,6 +52,14 @@
 - **PathManager.cs / path_manager.gd の self-reference 修正**: Manager / Launcher 自身が runtime で `"GCTonePrism_Manager"` / `"GCTonePrism_Launcher"` という親 dir 名を検出してプロジェクトルートを解決していたロジックを `"Manager"` / `"Launcher"` に置換。新 install 構造で正しく動く
 - **README.md ディレクトリ構成図を新 dir 名で更新** + 命名規約への参照を追加
 
+#### Fixed (PR #150 Codex bot round 6 後追い)
+
+- **[Codex P2] new_install path で robocopy 失敗時に broken shortcut bat が残る regression**: round 3 L3 で「shortcut copy を robocopy の前に統一移動」した時、overwrite path の partial-failure 対策 (migration 後の robocopy 中断で shortcut bat 旧 path 残存問題) を解消するためだったが、`INSTALL_MODE=new` の場合に **副作用 regression** を導入していた。新規 install で shortcut copy 成功 + robocopy 失敗 (権限 / disk full / Ctrl+C) のとき、partial / 空の `<install>/GCTonePrism/` を指す `<親>/Launcher.bat` / `<親>/Manager.bat` が壊れた状態で残る path。修正: `INSTALL_MODE` で順序分岐:
+  - overwrite: shortcut → robocopy (round 3 L3 維持、migration partial-failure 対策)
+  - new:       robocopy → shortcut (shortcut bat は完全インストール成功後にのみ作成、broken shortcut の regression 解消)
+  - `call :do_shortcut_copy` / `call :do_robocopy` の subroutine 風実装 (`exit /b N` で成否伝播) で共通 shortcut copy ロジックを 1 箇所に集約
+  - `:copy_failed` メッセージも `INSTALL_MODE` で条件分岐 (「shortcut bat はすでに新版で配置済み」(overwrite) vs 「shortcut bat はまだ配置されていません」(new))
+
 #### Changed (PR #150 シニアレビュー round 6)
 
 - **[M1/M2] AGENTS.md / SPEC §3.7.3 / §3.7.6 / §2.2 機能13 の「Updater / Companions」並列列挙を包含関係に整理**: 本 PR 自身が §2.4 で「Updater は Companions の一員」と再定義したのに、4 箇所 (AGENTS.md L30, SPEC L584/L939/L1040) で並列列挙が残っていた catalog (§2.4) vs call site の矛盾。「Launcher / Manager / 各 Companion (Updater / WindowProbe 等、§2.4)」形式に統一して包含関係を反映。1 PR 内の自己矛盾を解消
