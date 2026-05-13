@@ -289,13 +289,13 @@ if not exist "%INSTALL_TARGET%\GCTonePrism_Manager\" goto :migrate_legacy_launch
 if exist "%INSTALL_TARGET%\Manager\" goto :migrate_conflict_manager
 echo [INFO] 旧構造 (v0.2.0) 検出: GCTonePrism_Manager\ → Manager\ に移行
 move "%INSTALL_TARGET%\GCTonePrism_Manager" "%INSTALL_TARGET%\Manager" >nul
-if errorlevel 1 goto :migrate_failed
+if errorlevel 1 goto :migrate_failed_manager
 :migrate_legacy_launcher
 if not exist "%INSTALL_TARGET%\GCTonePrism_Launcher\" goto :do_robocopy
 if exist "%INSTALL_TARGET%\Launcher\" goto :migrate_conflict_launcher
 echo [INFO] 旧構造 (v0.2.0) 検出: GCTonePrism_Launcher\ → Launcher\ に移行
 move "%INSTALL_TARGET%\GCTonePrism_Launcher" "%INSTALL_TARGET%\Launcher" >nul
-if errorlevel 1 goto :migrate_failed
+if errorlevel 1 goto :migrate_failed_launcher
 goto :do_robocopy
 
 :migrate_conflict_manager
@@ -326,16 +326,72 @@ echo        どちらを選んでもユーザーデータ [prism.db / games / ba
 echo        これらは "%INSTALL_TARGET%\" 直下にあり Launcher dir の外なので、Launcher dir の削除と無関係に維持されます。
 goto :fail
 
-:migrate_failed
+REM :migrate_failed_manager と :migrate_failed_launcher は独立ラベル (シニアレビュー round 3 M1)。
+REM 旧 `:migrate_failed` 共通ラベルだと、Manager 移行成功 + Launcher 移行失敗のケースで
+REM 「Manager の rename が必要」と案内してしまい (実際は完了済)、user が「移動元が無い」と
+REM 混乱する path があった。失敗側だけの手動 rename 手順を案内する形に分離。
+:migrate_failed_manager
 echo.
-echo [FAIL] 旧構造 (v0.2.0) から新構造へのフォルダ移行に失敗しました。
+echo [FAIL] 旧構造 (v0.2.0) → 新構造への Manager フォルダ移行に失敗しました。
 echo        フォルダロック / 書き込み権限を確認してください。
 echo        手動で以下のリネームを行えば回避可能:
 echo          "%INSTALL_TARGET%\GCTonePrism_Manager"  → "%INSTALL_TARGET%\Manager"
+echo        Launcher 側は本実行ではまだ移行を試みていないので、現状維持で OK。
+echo        Install.bat 再実行で Launcher 側の移行が走ります。
+goto :fail
+
+:migrate_failed_launcher
+echo.
+echo [FAIL] 旧構造 (v0.2.0) → 新構造への Launcher フォルダ移行に失敗しました。
+echo        Manager 側はすでに移行済 ["%INSTALL_TARGET%\Manager" が新版]、Launcher 側のみ rename 失敗。
+echo        フォルダロック / 書き込み権限を確認してください。
+echo        手動で以下のリネームを行えば回避可能:
 echo          "%INSTALL_TARGET%\GCTonePrism_Launcher" → "%INSTALL_TARGET%\Launcher"
 goto :fail
 
 :do_robocopy
+REM Set sentinel for the unified :copy_shortcuts → :do_robocopy_dispatch flow below.
+REM Both overwrite and new_install paths go through :copy_shortcuts first so that
+REM shortcut bat updates happen BEFORE robocopy starts (シニアレビュー round 3 L3).
+REM   旧 flow: migration / mkdir → robocopy → copy_shortcuts → install_done
+REM   新 flow: migration / mkdir → copy_shortcuts → robocopy → install_done
+REM 旧 flow では robocopy の partial failure (Ctrl+C / OS reboot / 権限エラー等で中断)
+REM 時に shortcut bat が旧 path (`%~dp0GCTonePrism\GCTonePrism_Launcher\...`) のままで
+REM 実体は新 dir `<install>/Launcher/` に既に移動済 → user が Launcher.bat ダブルクリック
+REM で「ファイルが見つかりません」になる窓があった。shortcut copy を先に実施することで
+REM 「中断時も shortcut bat は新 path を指す」状態を保証し、Install.bat 再実行で robocopy
+REM リトライ → 復旧、の経路を整合的にする。
+set INSTALL_MODE=overwrite
+goto :copy_shortcuts
+
+:new_install
+echo [INFO] 新規インストールを開始します...
+mkdir "%INSTALL_TARGET%" 2>nul
+if exist "%INSTALL_TARGET%\" goto :new_mkdir_ok
+echo.
+echo [FAIL] インストール先フォルダを作成できませんでした: "%INSTALL_TARGET%"
+echo        書き込み権限を確認してください。
+goto :fail
+:new_mkdir_ok
+set INSTALL_MODE=new
+goto :copy_shortcuts
+
+:copy_shortcuts
+REM Copy parent-level shortcuts (Launcher.bat / Manager.bat) from zip root to
+REM <parent>/ (= one level above GCTonePrism/). This places daily-use shortcuts
+REM directly under the user's selected parent folder for easier discovery.
+REM See SPEC §3.7.1.
+REM
+REM Order (round 3 L3): shortcut copy is now performed BEFORE robocopy in both
+REM overwrite and new_install paths, so that shortcut bat always points to the
+REM current install structure even if robocopy is interrupted partway through.
+copy /Y "%SCRIPT_DIR%Launcher.bat" "%INSTALL_PARENT_NO_TRAIL%\Launcher.bat" >nul
+if errorlevel 1 goto :shortcut_failed
+copy /Y "%SCRIPT_DIR%Manager.bat" "%INSTALL_PARENT_NO_TRAIL%\Manager.bat" >nul
+if errorlevel 1 goto :shortcut_failed
+goto :do_robocopy_dispatch
+
+:do_robocopy_dispatch
 REM ============================================================================
 REM USER DATA PROTECTION — read this carefully before modifying robocopy flags.
 REM ============================================================================
@@ -367,39 +423,25 @@ REM so future components containing a `games/` or `backups/` subfolder would be
 REM silently excluded. Safe today (no such names in files/) but worth flagging
 REM if a future component adds one.
 REM ============================================================================
+if "%INSTALL_MODE%"=="overwrite" goto :do_robocopy_overwrite
+goto :do_robocopy_new
+
+:do_robocopy_overwrite
 robocopy "%FILES_DIR%" "%INSTALL_TARGET%" /E /XF prism.db /XD games backups responses logs /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1
 REM robocopy exit code is a bitfield, < 8 = success (0 no change, 1 files copied, etc.).
 if errorlevel 8 goto :copy_failed
-goto :copy_shortcuts
+goto :install_done
 
-:new_install
-echo [INFO] 新規インストールを開始します...
-mkdir "%INSTALL_TARGET%" 2>nul
-if exist "%INSTALL_TARGET%\" goto :new_mkdir_ok
-echo.
-echo [FAIL] インストール先フォルダを作成できませんでした: "%INSTALL_TARGET%"
-echo        書き込み権限を確認してください。
-goto :fail
-:new_mkdir_ok
+:do_robocopy_new
 robocopy "%FILES_DIR%" "%INSTALL_TARGET%" /E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1
 if errorlevel 8 goto :copy_failed
-goto :copy_shortcuts
+goto :install_done
 
 :copy_failed
 echo.
 echo [FAIL] ファイルコピーに失敗しました [robocopy exit %ERRORLEVEL%]。
+echo        Install.bat 再実行で復旧可能です [shortcut bat はすでに新版で配置済み]。
 goto :fail
-
-:copy_shortcuts
-REM Copy parent-level shortcuts (Launcher.bat / Manager.bat) from zip root to
-REM <parent>/ (= one level above GCTonePrism/). This places daily-use shortcuts
-REM directly under the user's selected parent folder for easier discovery.
-REM See SPEC §3.7.1.
-copy /Y "%SCRIPT_DIR%Launcher.bat" "%INSTALL_PARENT_NO_TRAIL%\Launcher.bat" >nul
-if errorlevel 1 goto :shortcut_failed
-copy /Y "%SCRIPT_DIR%Manager.bat" "%INSTALL_PARENT_NO_TRAIL%\Manager.bat" >nul
-if errorlevel 1 goto :shortcut_failed
-goto :install_done
 
 :shortcut_failed
 echo.

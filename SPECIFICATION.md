@@ -964,7 +964,7 @@ Launcher / Manager / Companions / Updater は常に 1 つの zip に同梱され
       ↓
 [9] Manager: `<親>/Launcher.bat` / `<親>/Manager.bat` shortcut bat を置換
       ↓
-[10] Manager: `Companions/Updater/` 自身を置換（変更ありの場合のみ。Updater は実行されていないので Manager から直接置換可能）
+[10] Manager: `Companions/Updater/` 自身を置換（実装上は常に staging の新 Updater で置換する。バージョン比較 / hash 確認による diff 検出は実装簡素化のため省略、毎回 1〜2 ファイルの再 copy なのでコスト無視できる）
       ↓
 [11] Manager: Updater.exe を spawn → CLI 引数で staging path / Manager 設置先 / 新 Manager exe path を渡す → Manager 自身は graceful 終了
       ↓
@@ -1018,7 +1018,7 @@ Windows のファイルロック制約「実行中のプロセスは自分自身
   - `--force-kill` (任意): timeout 後の強制終了を許可
 - **UI**: コンソールのみ。Manager が spawn する短命プロセスなので、ユーザー視点では「Manager UI のプログレスバーが終わった直後に一瞬 console が出て新 Manager が立ち上がる」体験。GUI window は持たない
 - **ログ実装**: §3.6 ベースライン準拠、Manager の `Services/Logger.cs` を簡略化した独自 Logger（`Console.SetOut` フックなしの直接書き込み式）。出力先は `<install>/logs/updater/updater_<PCname>_<YYYY-MM-DD_HHmmss>.log`
-- **Updater 自身の更新**: 通常は変更しない設計だが、変更時は **Manager 側** が新 Updater を staging から `Companions/Updater/` に copy してから spawn することで、「実行中の新 Updater が Manager を置換」する経路で同伴更新を実現する（Updater 自身に「自分を更新する」ロジックを持たせない構造）
+- **Updater 自身の更新**: 通常は変更しない設計だが、変更時は **Manager 側** が新 Updater を staging から `Companions/Updater/` に copy してから spawn することで、「実行中の新 Updater が Manager を置換」する経路で同伴更新を実現する（Updater 自身に「自分を更新する」ロジックを持たせない構造）。実装は **常に staging の新 Updater で置換** する単純な path で OK（バージョン比較 / hash 確認による diff 検出は不要、Updater は 1〜2 ファイルの小規模 dir なので毎回 copy しても無視できるコスト）
 - **Install.bat の起動方式**: Updater が緊急復旧経路として `Install.bat` を内部呼び出しする実装を入れる場合、**必ず `Process.Start("cmd", "/c <Install.bat path> [args]")` 形式で呼ぶこと**（`call <Install.bat>` 形式 / `Process.Start("<Install.bat>")` 直接起動は禁止）。理由: `Install.bat` の終端は `exit %EXIT_CODE%`（`exit /b` ではない）で、ダブルクリック起動時の cmd ウィンドウを確実に閉じる目的で `cmd` プロセスごと終了させる設計になっている。`call` で呼ぶと caller bat ごと巻き添えで終了する silent danger があり、`Process.Start` の直接起動だと bat の関連付け解決が environment 依存で不安定。`cmd /c` 経由なら子 cmd プロセスのみが `exit` で終了し、Updater プロセスは影響を受けない。
 
 #### 3.7.5 Launcher 側の役割

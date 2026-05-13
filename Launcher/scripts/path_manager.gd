@@ -53,6 +53,15 @@ static func _find_base_directory() -> String:
 				# DBが見つからない場合でも、もしここが "Launcher" なら
 				# その親をプロジェクトルートとみなして返す（開発中のフォルダ構造を信じる）
 				# これは、DBファイルがまだ存在しない初期状態などでのパス解決を防ぐため
+				#
+				# NOTE (PR #150 round 3 L1): ends_with("Launcher") は文字列 prefix collision の余地
+				# があり、`MyLauncher` / `WindowLauncher` 等の末尾 "Launcher" を含む dir 名にも hit
+				# する。ただし本ブランチは editor 起動時の fallback (project.godot を Godot エディタ
+				# が読んで起動した直後、prism.db 未生成の初期状態) のみで発火する path。実機 install
+				# 経路は _find_base_directory_from_executable() を通り、こちらは PR #150 round 2 M2 で
+				# separator 付き begins_with に修正済み。editor 文脈での false-match は project.godot
+				# の位置で project_root が自動決まるため実害低と判断、修正は将来余裕があれば issue #151
+				# (priority-3 detection 強化) の scope で実施。
 				if project_root.ends_with("Launcher") or parent_path.ends_with("GCTonePrism"):
 					print("[PathManager] DB未検出だがフォルダ構造からルートを推測: ", parent_path)
 					return parent_path

@@ -52,6 +52,19 @@
 - **PathManager.cs / path_manager.gd の self-reference 修正**: Manager / Launcher 自身が runtime で `"GCTonePrism_Manager"` / `"GCTonePrism_Launcher"` という親 dir 名を検出してプロジェクトルートを解決していたロジックを `"Manager"` / `"Launcher"` に置換。新 install 構造で正しく動く
 - **README.md ディレクトリ構成図を新 dir 名で更新** + 命名規約への参照を追加
 
+#### Fixed (PR #150 シニアレビュー round 3)
+
+- **[M1] `:migrate_failed` 共通ラベルが partial-failure 時に不正確な手動復旧手順を案内していた**: Manager 移行成功 + Launcher 移行失敗のケースでも、`:migrate_failed` のメッセージが両方の rename 手順を案内していた。この時点で `<install>/GCTonePrism_Manager/` は既に rename 済 → 移動元が存在しないため user が指示通り作業すると「移動元が無い」と混乱する path。修正: `:migrate_failed_manager` / `:migrate_failed_launcher` の独立ラベルに分離、`:migrate_legacy_manager` の `if errorlevel 1` は `:migrate_failed_manager` に、`:migrate_legacy_launcher` の `if errorlevel 1` は `:migrate_failed_launcher` に飛ぶ形に変更。各ラベルは失敗側だけの手動 rename 手順を案内し、Launcher 失敗時は「Manager はすでに移行済」と状況も明示。round 1 M2 (`:migrate_conflict_*` 独立ラベル化) の精神と一貫
+- **[L3] Install.bat: migration / mkdir → robocopy の間に partial-failure 窓があった**: 旧 flow は「migration / mkdir → robocopy → copy_shortcuts」順だったが、robocopy が partial failure (Ctrl+C / OS reboot / 権限エラー等) で中断されると、shortcut bat (`<親>/Launcher.bat` / `Manager.bat`) は旧 path `%~dp0GCTonePrism\GCTonePrism_Launcher\...` のままで実体は `<install>/Launcher/` に既に移動済 → user が Launcher.bat ダブルクリックで「ファイルが見つかりません」エラーになる経路があった。修正: shortcut copy を robocopy の前に統一移動し、両 path (overwrite / new_install) で「migration/mkdir → copy_shortcuts → robocopy → install_done」順に整理。`INSTALL_MODE` sentinel + `:do_robocopy_dispatch` で overwrite (`/XF /XD` 付き) と new_install (除外なし) を分岐させる構造に。`:copy_failed` メッセージにも「shortcut bat は新版で配置済み、Install.bat 再実行で復旧可能」を案内する hint を追記
+
+#### Changed (PR #150 シニアレビュー round 3)
+
+- **[L2] SPEC §3.7.3 step [10] + §3.7.4 Updater 自身の更新に判定方針を明文化**: 「変更ありの場合のみ Updater 置換」という記述に対して判定方法 (hash / manifest / version 比較 / 常に置換) が一切書かれていなかったため、Phase 4 Manager UI 実装時に手戻りリスクがあった。「**実装上は常に staging の新 Updater で置換する** (バージョン比較 / hash 確認による diff 検出は実装簡素化のため省略、Updater は 1〜2 ファイルの小規模 dir なので毎回 copy しても無視できるコスト)」と 1 文追加、両セクションで整合
+
+#### Added (PR #150 シニアレビュー round 3)
+
+- **[L1] `Launcher/scripts/path_manager.gd:56` の `ends_with` に NOTE comment 追加**: editor 起動時の fallback path で `ends_with("Launcher")` / `ends_with("GCTonePrism")` を使っており、文字列 prefix collision の余地はあるが、本 path は editor 専用 (`project.godot` 起動時の prism.db 未生成初期状態) で発火するため、実機 install 経路 (round 2 M2 で separator 付き begins_with に修正済) とは別。NOTE で「editor 文脈での false-match は project.godot の位置で project_root が自動決まるため実害低」と意図を明文化、issue #151 (priority-3 detection 強化) の scope に将来統合検討する旨を記載
+
 #### Fixed (PR #150 シニアレビュー round 2)
 
 - **[M1] `:migrate_conflict_*` メッセージが round 1 H1 で明文化した user data 実態と矛盾していた**: 「中身を merge → 手動で安全な方をベースに必要ファイルだけコピー」という選択肢を案内していたが、実際 `<install>/Manager/` / `<install>/Launcher/` 配下には binary しか入らず、merge すべき user data は存在しない (user data は `<install>/` 直下、§3.7.3「保護の仕組み」)。同 PR 内 H1 の趣旨 (誤った carry-over コードを書く失敗経路を防ぐ) と矛盾するため、Install.bat メッセージから merge 案内を削除、「どちらか一方を削除すれば足りる」「user data は `<install>/` 直下にあるので Manager/Launcher dir の削除と無関係に維持される」と明示する形に書き換え
