@@ -473,11 +473,18 @@ goto :fail
 :shortcut_failed_with_migration_note
 echo.
 echo  [注意] 旧構造 (v0.2.0) → 新構造への dir rename はすでに完了しています:
-if defined MANAGER_MIGRATED  echo          "%INSTALL_TARGET%\Manager"   [旧 GCTonePrism_Manager から rename 済]
+REM 空白は echo の前に 1 個固定 (round 6 L5: VAR 名長さに依存した手動 align は将来 sentinel 追加時に崩れる)
+if defined MANAGER_MIGRATED echo          "%INSTALL_TARGET%\Manager"   [旧 GCTonePrism_Manager から rename 済]
 if defined LAUNCHER_MIGRATED echo          "%INSTALL_TARGET%\Launcher"  [旧 GCTonePrism_Launcher から rename 済]
 echo         旧 dir 名 ["%INSTALL_TARGET%\GCTonePrism_*"] に戻さないでください。
 echo         書き込み権限を解消してから Install.bat を再実行すれば、shortcut bat だけ
 echo         再書き込みされて続行可能です [migration は冪等、再走しても影響なし]。
+echo.
+echo  [警告] Install.bat 再実行までは、"%INSTALL_PARENT_NO_TRAIL%\Launcher.bat" /
+echo         "%INSTALL_PARENT_NO_TRAIL%\Manager.bat" をダブルクリックしないでください。
+echo         2 段階 copy で 1 段目成功 + 2 段目失敗の場合、片方が新 path / もう片方が
+echo         旧 path (壊れた状態) の不揃いになっている可能性があります。再実行で
+echo         両方とも新版に上書きされます。
 goto :fail
 
 :install_done

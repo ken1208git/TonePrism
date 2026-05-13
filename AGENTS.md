@@ -27,7 +27,7 @@
 詳細は **SPECIFICATION.md §2.4** (Companions) / **§3.7.4** (Updater) を参照。
 
 ## Release and Versioning
-- コミット直前に Launcher / Manager / Monitor / Updater / Companions の各バージョン番号を上げるべきかを必ず提案する。
+- コミット直前に Launcher / Manager / Monitor / 各 Companion (Updater / WindowProbe 等) の各バージョン番号を上げるべきかを必ず提案する。
 - **Bundle version の bump はリリース実行時のみ**。`Release.bat` を押す直前に `CHANGELOG.md` の `## Bundle` セクションに新エントリを追加（最上段、`### [Bundle vX.Y.Z]` 形式）。これが Bundle version と release_notes 両方の SoT。開発中の component bump とは別タイミング。
 - Bundle bump ルール:
   - **Major**: いずれかの component に breaking change（DB schema 変更含む）

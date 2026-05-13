@@ -52,6 +52,16 @@
 - **PathManager.cs / path_manager.gd の self-reference 修正**: Manager / Launcher 自身が runtime で `"GCTonePrism_Manager"` / `"GCTonePrism_Launcher"` という親 dir 名を検出してプロジェクトルートを解決していたロジックを `"Manager"` / `"Launcher"` に置換。新 install 構造で正しく動く
 - **README.md ディレクトリ構成図を新 dir 名で更新** + 命名規約への参照を追加
 
+#### Changed (PR #150 シニアレビュー round 6)
+
+- **[M1/M2] AGENTS.md / SPEC §3.7.3 / §3.7.6 / §2.2 機能13 の「Updater / Companions」並列列挙を包含関係に整理**: 本 PR 自身が §2.4 で「Updater は Companions の一員」と再定義したのに、4 箇所 (AGENTS.md L30, SPEC L584/L939/L1040) で並列列挙が残っていた catalog (§2.4) vs call site の矛盾。「Launcher / Manager / 各 Companion (Updater / WindowProbe 等、§2.4)」形式に統一して包含関係を反映。1 PR 内の自己矛盾を解消
+- **[M3] SPEC §3.7.6 step [2] の `dotnet publish` を `msbuild /p:Configuration=Release` に修正**: Manager / Companions は `.NET Framework 4.8` で `dotnet publish` 不可 (`.NET Core / .NET 5+` 向け cmd)、実装の Release.ps1 は `msbuild` を使っている。§3.7.4 で「Build-Updater が個別に msbuild」と明記してるのに §3.7.6 では `dotnet publish` 表記が残っていた同 PR 内の自己矛盾。「`msbuild /p:Configuration=Release` で個別ビルド (`.NET Framework 4.8` 系は `dotnet publish` 不可、`msbuild` 直叩き)」と正確化
+- **[L1] `:shortcut_failed_with_migration_note` に shortcut bat ダブルクリック回避警告追加**: 2 段階 `copy /Y` (Launcher.bat → Manager.bat) で 1 段目成功 + 2 段目失敗の partial-state では、Launcher.bat は新 path / Manager.bat は旧 path の不揃いになる (migration 後なので旧 path 壊れている)。再実行までの間 user が壊れた bat をダブルクリックする path を防ぐため、「Install.bat 再実行までは Launcher.bat / Manager.bat をダブルクリックしないでください」と注意書きを追加 (round 3 L3 の精神「user の操作が破綻状態の dir 構造を見ない」を貫徹)
+- **[L2] SPEC §7.5.1 runtime 構造の `Companions/` に「Phase 3 以降」注記追加**: 本 PR では Updater 実装なし、`Build-Updater` も `ExpectedFiles` の `Companions/...` 項目もない。次の publish (v0.3.0) では `<install>/GCTonePrism/Companions/` は作られない。読者が「Companions/ がすでにある」前提で書き始める path を防ぐため「Phase 3 以降で Updater 配布開始、それまでは dir 自体が存在しない」と明記
+- **[L3] SPEC §2.4 構成方針表の `CompanionsCommon/` を `Common/` に rename**: AGENTS.md 「`Companions/` 配下のサブツール dir は短縮」規約 (`Companions/Updater/` / `Companions/WindowProbe/`) と一貫させるため、`Common/` に短縮 (`Companions/` 配下に居る dir 名に再度 `Companions` を含めるのは冗長)。csproj 名 `GCTonePrism_CompanionsCommon` は disambiguation のため prefix 維持
+- **[L4] CHANGELOG `## Manager v0.8.10` / `## Launcher v0.5.17` 冒頭に patch bump 判断根拠追記**: 配布構造変更を含むため SemVer 厳密だと minor 寄りだが、Install.bat の自動 migration で吸収するため user 視点で invisible → 0.x 系慣習で patch bump 扱い、と CHANGELOG 冒頭で根拠を明示
+- **[L5 sentinel align] `:shortcut_failed_with_migration_note` の `if defined VAR echo` 空白を統一**: VAR 名長さに依存した手動 align (`MANAGER_MIGRATED` 2 個 vs `LAUNCHER_MIGRATED` 1 個) を空白 1 個に統一 + 「将来 sentinel 追加時に align が崩れる」リスクをコメントで明文化
+
 #### Fixed (PR #150 シニアレビュー round 5)
 
 - **[M1] `:shortcut_failed` ラベルが migration 完了状態を案内しない**: overwrite 経路で migration 成功 + shortcut copy 失敗のケースで、user が「shortcut が壊れたから手動で旧 dir 名でフォルダ作り直そう」と誤対処して migration を巻き戻す path があった。`:copy_failed` には「shortcut bat はすでに新版で配置済み」hint があるのに `:shortcut_failed` は非対称で「書き込み権限確認」だけだった。修正: round 3 M1 (`:migrate_failed_launcher` の `MANAGER_MIGRATED` sentinel 条件付き案内) と同パターンで、`:shortcut_failed` に `MANAGER_MIGRATED` / `LAUNCHER_MIGRATED` sentinel を確認する `:shortcut_failed_with_migration_note` 経路を追加。両 sentinel のいずれかが立っていれば「dir rename は完了済、旧 dir 名に戻さないこと」「Install.bat 再実行で続行可能、migration は冪等」を案内。`LAUNCHER_MIGRATED` sentinel も新規追加 (`:migrate_legacy_launcher` 成功時に set)
@@ -527,6 +537,8 @@
 
 ### [Launcher v0.5.17] - 2026-05-13
 
+**bump 判断**: 配布構造の変更 (旧 `GCTonePrism_Launcher/` → 新 `Launcher/`) を含むため SemVer 厳密だと minor (= breaking) 寄りだが、Install.bat の v0.2.0 → 新構造 migration ロジックが自動で吸収するため **エンドユーザー視点では invisible**。0.x 系の慣習で「migration で吸収されるリリース構造変更」は patch bump として扱う (PR #150 round 6 L4)。次の major 区切り (v1.0 リリース時) では本変更も accumulated changelog として記述する。
+
 #### Changed (#108 Phase 3 着手準備 / dir rename 連動、PR #150)
 
 - **`scripts/path_manager.gd` の self-reference リテラル修正**: 旧 dir 名 `"GCTonePrism_Launcher"` を新 dir 名 `"Launcher"` に置換 (7 箇所、コメント / エラー message / detection ロジック内)。`_find_base_directory_from_executable()` の priority-3 fallback で「実行ファイルが Launcher フォルダ内にある場合、親をプロジェクトルートとする」判定が新構造 `<install>/Launcher/GCTonePrism_Launcher.exe` で正しく動くようにする。
@@ -967,6 +979,8 @@
 ## Manager（管理ソフト）
 
 ### [Manager v0.8.10] - 2026-05-13
+
+**bump 判断**: 配布構造の変更 (旧 `GCTonePrism_Manager/` → 新 `Manager/`) を含むため SemVer 厳密だと minor (= breaking) 寄りだが、Install.bat の v0.2.0 → 新構造 migration ロジックが自動で吸収するため **エンドユーザー視点では invisible**。0.x 系の慣習で「migration で吸収されるリリース構造変更」は patch bump として扱う (PR #150 round 6 L4)。次の major 区切り (v1.0 リリース時) では本変更も accumulated changelog として記述する。
 
 #### Changed (#108 Phase 3 着手準備 / dir rename 連動、PR #150)
 
