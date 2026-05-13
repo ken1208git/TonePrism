@@ -1070,10 +1070,11 @@ function Assert-ChangelogLinkDefs {
         return
     }
 
-    $changelogPath = Join-Path $RepoRoot 'CHANGELOG.md'
+    # round 6 Low-2: 既存 module-level $ChangelogPath (script 冒頭 paths section、SoT) を参照、
+    # local 変数の shadow 排除。
     # round 1 Low-3: Get-Content -Raw は PS 5.1 で BOM 無し UTF-8 を CP932 として読む既知挙動
     # あり。script 冒頭 ($_changelogContent) と同じ ReadAllText で統一して UTF-8 明示 read。
-    $changelogContent = [System.IO.File]::ReadAllText($changelogPath, [System.Text.Encoding]::UTF8)
+    $changelogContent = [System.IO.File]::ReadAllText($ChangelogPath, [System.Text.Encoding]::UTF8)
 
     # footer block を切り出してその範囲内のみ match。
     #   line anchor `(?m)^...\s*$` だけでファイル全体に対して match した場合、release notes 内の
@@ -1082,18 +1083,22 @@ function Assert-ChangelogLinkDefs {
     #   heading link で release)。
     #
     #   修正履歴:
-    #     (1) 旧 (round 3 Codex P2): `LastIndexOf('-->')` で「ファイル中で最後の HTML comment 閉じ」
-    #         を footer block の先頭とみなしていたが、これは「任意の HTML comment」を footer
-    #         marker と扱う pattern で、将来 link def の **下** に別の HTML comment (例:
-    #         markdownlint directive `<!-- markdownlint-disable -->`) が追加された瞬間に
-    #         footer block が link def 群を含まない範囲に切り出されて normal publish で false
-    #         "同期忘れ" Fail が起きる脆弱性があった。
-    #     (2) 現在 (round 5 Codex P2 補強): 明示的 sentinel 文字列 `footer-link-defs-begin` を
-    #         CHANGELOG 末尾 HTML comment 内に埋め込み、`IndexOf(sentinel)` で位置を取得する形に。
-    #         link def の後ろにいくつ HTML comment が追加されても sentinel は 1 つで識別される。
-    #         本 sentinel を変更する場合は CHANGELOG.md 側の HTML comment も同期更新すること。
-    $FooterSentinel = 'footer-link-defs-begin'
-    $sentinelIdx = $changelogContent.IndexOf($FooterSentinel)
+    #     (1) round 3 Codex P2: `LastIndexOf('-->')` で「ファイル中で最後の HTML comment 閉じ」
+    #         を footer block の先頭とみなしていたが、将来 link def の **下** に別の HTML comment
+    #         (例: markdownlint directive) が追加された瞬間に footer block が link def 群を含ま
+    #         ない範囲に切り出されて normal publish で false "同期忘れ" Fail が起きる脆弱性。
+    #     (2) round 5 Codex P2: 明示 sentinel `footer-link-defs-begin` を埋め込み `IndexOf` で
+    #         位置取得 → 即 round 5 commit で本文中に sentinel literal を書いてしまい、
+    #         `IndexOf` が body 内の最初の出現を拾って footer block が CHANGELOG 99% に再拡大
+    #         する **自爆** が発生 (= round 6 Codex P2 + シニア Critical-1 で発覚)。
+    #     (3) round 6 で二重防御に再設計 (現在):
+    #         - **sentinel を unique 文字列** `GCTONEPRISM-CHANGELOG-FOOTER-BEGIN-V1` に変更
+    #           (ALL CAPS + hyphen + V1 suffix、human writing で偶発出現しない pattern)
+    #         - **`LastIndexOf` を採用**: 万一 body 中で sentinel が引用された場合でも末尾の
+    #           本物の sentinel を選ぶ。CHANGELOG 構造上「上 = 新エントリ、末尾 = HTML comment
+    #           + link def」で本物 sentinel は常にファイル中最後の出現になる前提。
+    $FooterSentinel = 'GCTONEPRISM-CHANGELOG-FOOTER-BEGIN-V1'
+    $sentinelIdx = $changelogContent.LastIndexOf($FooterSentinel)
     if ($sentinelIdx -lt 0) {
         Fail "CHANGELOG.md に footer marker sentinel '$FooterSentinel' が見つかりません。CHANGELOG 末尾 HTML comment 内に sentinel を追加してください。"
     }
@@ -1113,7 +1118,7 @@ function Assert-ChangelogLinkDefs {
     # round 3 Low-2: backtick escape を削除、PS double-quoted string で意図しない文字消費を排除。
     Write-Host ""
     Write-Host "    CHANGELOG.md 末尾 footer block に Bundle v$Version の参照リンク定義が見つかりません" -ForegroundColor Red
-    Write-Host "    (CHANGELOG 末尾 HTML comment marker 以降の独立行のみ認識、本文中の例示は false-positive 排除)" -ForegroundColor DarkGray
+    Write-Host "    (CHANGELOG 末尾 sentinel '$FooterSentinel' 以降の独立行のみ認識、本文中の例示は false-positive 排除)" -ForegroundColor DarkGray
     Write-Host "    以下を CHANGELOG.md 末尾の参照リンク定義ブロックに追加してから再実行してください:" -ForegroundColor Yellow
     Write-Host "      $expectedDefDisplay" -ForegroundColor Cyan
     Write-Host "    追加位置: 既存 [Bundle vX.Y.Z]: 行群の先頭 (降順を維持、CHANGELOG 末尾 HTML comment ブロック直下)" -ForegroundColor Yellow

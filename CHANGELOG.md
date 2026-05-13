@@ -49,6 +49,21 @@
   - **Release.ps1**: `Assert-ChangelogLinkDefs` 関数を追加 (Phase 0.5 = Preflight 直後、round 1 Medium-1 で位置調整)、main flow に組み込み。release 実行前に該当 Bundle version の参照リンク定義が末尾にあるか verify し、無ければ `Fail` で停止する fence。自動 mutation (script が CHANGELOG 末尾を書き換える) は採らず、規約遵守を物理的に強制する形 (人間 / Claude いずれのミスも release.bat 実行直後 = build 前に物理的に検知される、fail-fast)
 - **DRY-RUN 検証**: 本 PR 内で「リンク定義が存在する case」(PASS) を確認、別 fixture で「未追加 case」を `Assert-ChangelogLinkDefs` が `Fail` するか動作確認 (= fence 機能の実証)
 
+#### Changed (PR #153 Codex round 5 後追い + シニアレビュー round 6)
+
+- **[Critical-1] sentinel 設計が同 PR 内で自己破綻していた path を二重防御で根治**: round 5 で導入した「明示的 sentinel `footer-link-defs-begin` を埋め込み `IndexOf` で位置取得」が、**同じ round 5 commit で破壊**されていた。round 5 entry 本文中に sentinel 文字列 literal を書いた瞬間 (説明のため引用) CHANGELOG.md 内に sentinel が 2 箇所出現 (round 5 entry body + 末尾 HTML comment) → `IndexOf` が body 内の最初の出現を拾って footer block が CHANGELOG ほぼ全体 (~99%) に再拡大する **自爆** が発生。round 3 Codex P2 で塞いだはずの false-positive path (本文中の例示 link def を拾う) が復活する状態。round 6 で二重防御に再設計:
+  - **[1] sentinel を unique 文字列に変更**: `footer-link-defs-begin` → `GCTONEPRISM-CHANGELOG-FOOTER-BEGIN-V1` (ALL CAPS + hyphen + V1 suffix、human writing で偶発出現しない pattern)。CHANGELOG 末尾 HTML comment 内に **単独行** で配置 (`<!-- GCTONEPRISM-CHANGELOG-FOOTER-BEGIN-V1 -->`)、本物の sentinel として識別可能
+  - **[2] `IndexOf` → `LastIndexOf` に変更**: 万一 body 中で sentinel が引用された場合でも末尾の本物の sentinel を選ぶ semantics に。CHANGELOG 構造上「上 = 新エントリ、末尾 = HTML comment + link def」で本物 sentinel は常にファイル中最後の出現になる前提
+  - **動作確認** (fixture test 3 case PASS、auto-promote 一時 off):
+    - A (sentinel + link def 存在): `[OK] Bundle v0.2.0 の参照リンク定義 OK` → PASS path 動作
+    - B (link def 削除): `footer block に ... 見つかりません` + 「sentinel 'GCTONEPRISM-CHANGELOG-FOOTER-BEGIN-V1' 以降の独立行のみ認識」hint 表示 → Fail
+    - C (sentinel 削除): `sentinel 'GCTONEPRISM-CHANGELOG-FOOTER-BEGIN-V1' が見つかりません` → Fail (sentinel 必須化)
+- **[Medium-1] CHANGELOG 内の行番号参照を関数名 / セクション名に anchor 化**: round 4 Low-2 で「行番号 drift を現状値に同期」したと宣言した直後の round 5 commit で再 drift していた (round 5 で sentinel handling block 追加で `$expectedUrl` 行番号がさらに変動)。「行番号を CHANGELOG entry に embed する文化そのもの」が rot 源泉と判明。修正: 既存 entry 内の line 番号参照 (`Release.ps1:1022` / `現 line 1029` / `現 line 1093` 等) を **PR 内で rename しない anchor** (関数名 `Assert-ChangelogLinkDefs` / セクション名 `Phase 0.5 header` / Release.ps1 冒頭の `auto-promote 行` 等) に置換。round 4 Low-2 の応急処置 (drift 追従) を round 6 で根治 (embed 廃止)
+- **[Medium-2] PR description Test plan の fixture C claim と現 commit 状態の矛盾を解消**: Critical-1 修正後 (sentinel unique + LastIndexOf) に fixture B / C を再 verify、PR description の Test plan + 本 entry の動作確認 record を round 6 実機 verify 結果に同期
+- **[Low-1] Fail message hint を実体に揃え**: 旧 Fail message は「CHANGELOG 末尾 HTML comment marker 以降の独立行のみ認識」と謳っていたが Critical-1 の通り実体は 99% の領域を match していた user-facing 乖離。Critical-1 修正と同時に hint 文言を「CHANGELOG 末尾 sentinel '$FooterSentinel' 以降の独立行のみ認識」に更新、実装と一致
+- **[Low-2] `$changelogPath` local 変数を削除して module-level `$ChangelogPath` 定数 (script 冒頭 paths section、SoT) を使用**: 既存 SoT を活用、命名衝突 / 1 行重複の保守ノイズを排除
+- **[Low-3] UTF-8 read 統一の scope を CHANGELOG entry 内に明文化**: round 1 Low-3 で `Assert-ChangelogLinkDefs` 内を `Get-Content -Raw` → `ReadAllText(UTF8)` 統一したが、本 PR scope 外の他箇所 (`Read-LauncherVersion` の version.gd / AssemblyInfo.cs 読み取り等) は `Get-Content -Raw` のまま。「本 PR は CHANGELOG.md 読み取りのみ統一、他は ASCII 確実なので実害なし、script 全体統一は別 issue 化候補」を round 1 Low-3 entry に追記
+
 #### Changed (PR #153 Codex round 4 後追い + シニアレビュー round 5)
 
 - **[Codex P2] footer 検出を「明示的 sentinel marker」ベースに切替**: round 3 で導入した `LastIndexOf('-->')` は「ファイル中で最後の HTML comment 閉じ」を footer marker とみなす pattern だったが、将来 link def 群の **下** に別の HTML comment (例: `<!-- markdownlint-disable -->` 等の lint directive) が追加された瞬間に footer block が link def 群を含まない範囲に切り出されて normal publish で **false "同期忘れ" Fail** が起きる脆弱性があった。修正: CHANGELOG 末尾 HTML comment 内に明示的 sentinel 文字列 `footer-link-defs-begin` を埋め込み、Release.ps1 は `IndexOf(sentinel)` で位置を取得する形に切替。link def の後ろにいくつ HTML comment が追加されても sentinel は 1 つで識別される構造に。sentinel 変更時は CHANGELOG.md / Release.ps1 の `$FooterSentinel` 定数を同期更新する規約も明文化
@@ -60,7 +75,7 @@
 #### Changed (PR #153 シニアレビュー round 4)
 
 - **[Low-1] Release.ps1 内 Fail message の backtick escape 漏れを解消 (round 3 Low-2 の取りこぼし)**: round 3 Low-2 で Fail message から backtick を削除する作業を行ったが、本 PR で新規追加した別の Fail message (`Fail "CHANGELOG.md 末尾の HTML comment marker (\`<!-- ... -->\`) が見つかりません..."`) に backtick が残置していた。同 round 内で全体に展開する作業漏れを補完
-- **[Low-2] CHANGELOG.md 内の Release.ps1 行番号参照を現状値に同期**: round 1 / 2 / 3 の commit を重ねるうちに Release.ps1 内の line 番号が drift していた (Phase 0.5 header: 1022 → 1029、`$expectedUrl` hardcode 箇所: 1077 → 1089 を経て現在 `Assert-ChangelogLinkDefs` 全体は line 1093 近辺)。CHANGELOG entry 内の line 番号参照を実態に追従、または「(現 line 1029)」形式で書き換えて drift の表面化を抑える
+- **[Low-2] CHANGELOG.md 内の Release.ps1 行番号参照を現状値に同期**: round 1 / 2 / 3 の commit を重ねるうちに Release.ps1 内の line 番号が drift していた (旧 commit 時点では Phase 0.5 header / `$expectedUrl` hardcode 箇所等を指す行番号が複数 entry に embed されていた)。CHANGELOG entry 内の line 番号参照を実態に追従する応急処置を実施。**根本対応は round 6 Medium-1 で実施 (行番号 embed 文化そのものを廃止、関数名 / セクション名で anchor 化、本 entry 含む)**
 - **[Low-3] SkipUpload skip 時の Warn message にリマインダー 1 行追加**: round 2 M2 で `-SkipUpload` (DryRun/Offline 経由 auto-promote 含む) 時の skip + warn 挙動を導入したが、「**本番 publish (flag なし `Release.bat -NoPause -Force`) では本検証が enforce される、Bundle entry 追加と同時に link def も追加してください**」というリマインダーが無く、DryRun を繰り返している開発者が初回 publish 時に「DryRun では通ってたのに publish で Fail」と混乱する path があった。Warn を 2 行構成にして 2 行目で本番挙動を予告
 - **[scope 外 / 別 issue 登録]** ordering check (Bundle 行群の降順 enforce、現状の fence は presence のみ check で順序は AGENTS.md convention 任せ) は別 issue として記録、本 PR では実装しない (incremental hardening、本 PR の core は presence check 導入)
 
@@ -69,17 +84,17 @@
 - **[Codex P2] Bundle link 検証を footer block 限定 match に補強**: round 1 Low-1 で line anchor `(?m)^...\s*$` を導入したが、ファイル全体に対して match していたため、release notes 本文の fenced code block 内に同形式の独立行 (例:「link def の追加例」を release notes で説明) が紛れた場合に footer 不在でも check 緑で素通りする path があった (= dangling Bundle heading link で release)。修正: CHANGELOG 末尾の **最後の HTML comment marker** (`<!-- ... -->`) を footer block の開始 sentinel とみなし、`$changelogContent.LastIndexOf('-->')` 以降の部分文字列だけを match 対象に。footer marker 不在時は明示 Fail で停止 (sentinel 必須化)
 - **[Medium-1] CHANGELOG v0.1.12 entry の round 1 heading 欠落を解消**: round 2 commit で `#### Changed (PR #153 シニアレビュー round 1)` heading を入れ忘れ、round 1 items (High-1 / Medium-1+Low-2 / Low-1 / Low-3 / Low-4) が round 2 heading 配下に紛れる integrity 問題があった。空行 3 行が heading 挿入忘れの痕跡。round 1 heading を空行位置に挿入、各 round の items を heading 単位で分離
 - **[Medium-2 案 C] fence Fail path を merge 前に手動 fixture でテスト実施**: `-SkipUpload` gate (round 2 M2) 導入後、`-DryRun` / `-Offline` の auto-promote で fence の Fail path が dry-run で検証不能になり「初発火 = 本番 publish」問題があった。merge 前に手動 fixture で fence の Fail path 動作を 1 度実機 verify:
-  - **fixture A** (link def 存在 + Release.ps1:208-210 の auto-promote 一時 comment out + DryRun): `[OK] Bundle v0.2.0 の参照リンク定義 OK` → fence PASS path で build まで進む **動作確認 OK**
+  - **fixture A** (link def 存在 + Release.ps1 冒頭の DryRun → SkipUpload auto-promote 行を一時 comment out + DryRun): `[OK] Bundle v0.2.0 の参照リンク定義 OK` → fence PASS path で build まで進む **動作確認 OK**
   - **fixture B** (link def 削除 + auto-promote 一時 comment out + DryRun): `CHANGELOG.md 末尾 footer block に Bundle v0.2.0 の参照リンク定義が見つかりません` + `追加位置: 既存 [Bundle vX.Y.Z]: 行群の先頭 (降順を維持、CHANGELOG 末尾 HTML comment ブロック直下)` 表示 → **1.7 秒で Fail で停止** (fail-fast 維持) **動作確認 OK**
   - 案 A (検証専用 flag 新設) / 案 B (verify-only mode) と比較して案 C 採用、scope creep ゼロで merge 前確度を担保。Phase 4 完成時の本番 Bundle release では本検証済の fence ロジックが初発火する想定
-- **[Low-1] Release.ps1 Phase 0.5 header コメント (現 line 1029) から `(fix/changelog-link-sync)` 削除**: round 2 L1 で AGENTS.md から PR 識別子を削除した理由 (「forward-looking な規約に履歴情報を埋め込む」「2 年後の読者にとって PR 名は意味を失う」) は Release.ps1 関数 header にも同じく適用される。同 PR の同 critique を半分にしか適用していなかった自己矛盾を解消。経緯は git blame / CHANGELOG で追える
+- **[Low-1] Release.ps1 Phase 0.5 header コメント (`# Phase 0.5: CHANGELOG 末尾 Bundle 参照リンク定義の検証`) から `(fix/changelog-link-sync)` 削除**: round 2 L1 で AGENTS.md から PR 識別子を削除した理由 (「forward-looking な規約に履歴情報を埋め込む」「2 年後の読者にとって PR 名は意味を失う」) は Release.ps1 関数 header にも同じく適用される。同 PR の同 critique を半分にしか適用していなかった自己矛盾を解消。経緯は git blame / CHANGELOG で追える
 - **[Low-2] Fail message の backtick escape を削除**: `Write-Host "... 既存 `[Bundle vX.Y.Z]:` 行群..."` の backtick は PowerShell double-quoted string で escape 文字として消費 (`` `[ `` → `[`、`` `<space> `` → space) → console 出力で意図した code-formatting 表記が消えていた。backtick 削除して直接 `既存 [Bundle vX.Y.Z]: 行群の先頭 (...)` に簡略化 (現在の出力と等価で保守者の混乱なし)
-- **[Low-3] GitHub repo URL を `$GitHubRepoSlug` 定数に集約**: round 1 で `https://github.com/ken1208git/GCTonePrism/releases/tag/v$Version` を Release.ps1 内に hardcode していた (本 script 内初登場、他箇所は `gh` CLI の repo 自動検出に依拠) ため、fork / repo rename / org transfer 時に検証ロジックだけ古い URL を見るリスクがあった。script 冒頭の paths section に `$GitHubRepoSlug = 'ken1208git/GCTonePrism'` を定義 (SoT)、`Assert-ChangelogLinkDefs` (現 line 1093) で参照
+- **[Low-3] GitHub repo URL を `$GitHubRepoSlug` 定数に集約**: round 1 で `https://github.com/ken1208git/GCTonePrism/releases/tag/v$Version` を Release.ps1 内に hardcode していた (本 script 内初登場、他箇所は `gh` CLI の repo 自動検出に依拠) ため、fork / repo rename / org transfer 時に検証ロジックだけ古い URL を見るリスクがあった。script 冒頭の paths section に `$GitHubRepoSlug = 'ken1208git/GCTonePrism'` を定義 (SoT)、`Assert-ChangelogLinkDefs` 内で参照
 - **[Low-4] AGENTS.md の追加 bullet を sub-bullet に分割**: round 2 L1 で複数主張 (規約 / Markdown 形式 / 追加位置 / fence の存在 / `-SkipUpload` 時の挙動 / SPEC §3.7.7 整合) を 1 文に統合した結果、bullet が ~280 文字に膨らみ release 直前の急ぎ lookup で各情報を素早く拾えない問題があった。同 AGENTS.md 内他 bullet (`Major / Minor / Patch` 列挙) に揃えて sub-bullet 分割 (Markdown 形式 / 追加位置 / 強制 fence / SkipUpload 時の挙動 / Bundle 移行前後の規約) で情報量変えず lookup 性改善
 
 #### Changed (PR #153 シニアレビュー round 2)
 
-- **[Medium-2] `Assert-ChangelogLinkDefs` に `-SkipUpload` gate を追加して既存 Preflight 契約と整合化**: 初版は `-SkipUpload` を gate せず無条件 Fail だったため、既存 `Assert-Preflight` の CHANGELOG `### [Bundle v$Version]` セクション検証 (`if (-not $SkipUpload) {...Fail} else {Write-Warn}`) と非対称だった。SkipUpload は publish しない = 参照リンク URL の resolution 自体が無意味で、staging テスト (`Release.ps1 -SkipUpload -DryRun`) で link def 未追加だけで停止される path があった。修正: `Assert-ChangelogLinkDefs` 冒頭で `if ($SkipUpload) { Write-Warn ...; return }` を入れて既存 Preflight pattern と揃え、AGENTS.md「release 実行時に verify」文言とも整合化。`-DryRun` / `-Offline` は Release.ps1:208-210 で `$SkipUpload = $true` に **auto-promote** される (Codex P2 #137 経緯) ため、DryRun 経由でも skip + warn path に流れる = 既存 Preflight と完全同期。実 fence の動作確認は本番 publish 経路 (flag なし `Release.bat -NoPause -Force`) で初発火を verify する
+- **[Medium-2] `Assert-ChangelogLinkDefs` に `-SkipUpload` gate を追加して既存 Preflight 契約と整合化**: 初版は `-SkipUpload` を gate せず無条件 Fail だったため、既存 `Assert-Preflight` の CHANGELOG `### [Bundle v$Version]` セクション検証 (`if (-not $SkipUpload) {...Fail} else {Write-Warn}` pattern) と非対称だった。SkipUpload は publish しない = 参照リンク URL の resolution 自体が無意味で、staging テスト (`Release.ps1 -SkipUpload -DryRun`) で link def 未追加だけで停止される path があった。修正: `Assert-ChangelogLinkDefs` 冒頭で `if ($SkipUpload) { Write-Warn ...; return }` を入れて既存 Preflight pattern と揃え、AGENTS.md「release 実行時に verify」文言とも整合化。`-DryRun` / `-Offline` は Release.ps1 冒頭の auto-promote 行で `$SkipUpload = $true` に **auto-promote** される (Codex P2 #137 経緯) ため、DryRun 経由でも skip + warn path に流れる = 既存 Preflight と完全同期。実 fence の動作確認は本番 publish 経路 (flag なし `Release.bat -NoPause -Force`) で初発火を verify する
 - **[Low-1] AGENTS.md rule から PR 識別子 (`fix/changelog-link-sync PR で導入`) を削除**: rule 末尾の PR 識別子は forward-looking な規約に履歴情報を埋め込んでいて、CHANGELOG 側 (v0.1.12 Added) に既に詳細経緯あり SoT 重複 + 時間と共に rot する (2 年後の読者にとって PR 名は意味を失う)。同 AGENTS.md 内他 rule は pure rule 形式で PR 識別子なし。「`fix/changelog-link-sync` PR で導入、」を削除し、SPEC §3.7.7 への横参照は残置。あわせて「追加位置は既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持)」と「`-SkipUpload` 時のみ skip + warn」を 1 文に統合
 - **[Low-2] `Write-Step` の位置メタ括弧書きを削除、convention に揃え**: 初版 `Write-Step "CHANGELOG 末尾 Bundle 参照リンク定義の検証 (Preflight 直後 / build 前)"` は近傍の他 `Write-Step` (`"Preflight: 環境とパラメータを検証"` / `"GitHub Releases タグ衝突チェック"`) と異なり位置メタを混入していた。位置情報は header コメント (Release.ps1 Phase 0.5 セクション) で既に伝達済なので Step 表示は action のみに短縮
 - **[Low-3] Fail message + CHANGELOG HTML comment に「追加位置 = 既存 Bundle 行の先頭 (降順維持)」hint を追加**: 初版 Fail message は「末尾の参照リンク定義ブロックに追加」とだけ案内、CHANGELOG.md 末尾の HTML comment + 既存 link def 群の中で「どこに追加するか」が user message から読み取れなかった。Release.ps1 Fail 出力に「追加位置: 既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持、CHANGELOG 末尾 HTML comment ブロック直下)」を追記 + CHANGELOG.md 末尾 HTML comment にも「**追加位置は既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持、本コメント直下)** とする (= 新しいほど上)」を明示
@@ -89,7 +104,7 @@
 - **[High-1] CHANGELOG 構造修正: v0.1.11 / v0.1.12 entry の分離**: 初版 commit (`7bb0102`) では既存 `### [Release Tooling v0.1.11]` 見出しを `v0.1.12` に **書き換えてしまい**、配下にあった PR #152 round 8 の Fixed 群 (UseShellExecute=false + WaitForExit 2000ms / Codex P2-1, P2-2 / Medium / Low の重大発見根治) が PR #153 = v0.1.12 の作業として表示される状態になっていた。AGENTS.md「1 PR 内の version bump は原則 1 回のみ」は PR をまたいで version 番号を付け替えるのは想定外 (= PR #152 = v0.1.11、本 PR = v0.1.12 が正しい対応関係)。修正: 旧 v0.1.11 entry の見出し + 配下 Fixed 群を復元、新 v0.1.12 entry を v0.1.11 の **上** に並べる形に再構成。これで「v0.1.11 と v0.1.12 の差分は何だったか?」を CHANGELOG だけで遡れる状態に戻る
 - **[Medium-1 + Low-2] Assert の発火タイミングを build 前 (Preflight 直後) に移動 + AGENTS.md 文言を実装と整合化**: 初版は `Assert-ChangelogLinkDefs` を `Assert-ExpectedFiles` の **後** (= Build-Launcher / Build-Manager / Build-Updater + Copy-Templates の後) に置いていた。link def 忘れを「数分のフル build を捨ててから」検出する fail-fast 違反 + AGENTS.md「Release.bat 実行直後の Assert で物理的に防ぐ」記述と実装の document-vs-impl mismatch があった。修正: `Assert-Preflight` の直後 (build 開始前) に移動、link def 忘れを **数秒で検出 → 修正 → 再 Release.bat** のサイクルに整える。AGENTS.md の「実行直後」記述も実装と一致
 - **[Low-1] Assert を substring match → 正規表現 anchor 化**: 初版の `$changelogContent.IndexOf($expectedDef)` 単純 substring match は、CHANGELOG 本文中のコードブロック / 引用に同形式文字列が紛れた場合 false-positive で PASS する path があった。Markdown 仕様上 reference link 定義はどこにあっても resolve されるので rendering 上は問題ないが、運用規約「末尾参照ブロックに集約」と乖離する。`(?m)^\[Bundle v...\]: <URL>\s*$` の行 anchor で末尾ブロック内の行のみ match
-- **[Low-3] `Get-Content -Raw` → `[System.IO.File]::ReadAllText(..., UTF8)` に統一**: 初版の `Get-Content -Raw` は PowerShell 5.1 で BOM 無し UTF-8 ファイルを Windows ANSI (日本語環境では CP932) として読む既知挙動があり、CHANGELOG.md の他箇所 (Release.ps1:222 の `_changelogContent`) と read 方式が不整合だった。本件 match 対象は ASCII で実害ゼロだが、保守ノイズ + 将来 defensive のため統一
+- **[Low-3] `Get-Content -Raw` → `[System.IO.File]::ReadAllText(..., UTF8)` に統一**: 初版の `Get-Content -Raw` は PowerShell 5.1 で BOM 無し UTF-8 ファイルを Windows ANSI (日本語環境では CP932) として読む既知挙動があり、Release.ps1 冒頭の Bundle version 抽出 (`$_changelogContent`) と read 方式が不整合だった。本件 match 対象は ASCII で実害ゼロだが、保守ノイズ + 将来 defensive のため `Assert-ChangelogLinkDefs` 内で統一。**scope**: 本 PR は CHANGELOG.md 読み取りのみ統一、Release.ps1 内の他 `Get-Content -Raw` (`Read-LauncherVersion` 等の version.gd / AssemblyInfo.cs 読み取り) は ASCII 確実なので実害なし、別 issue 化候補 (round 6 Low-3 で scope 明文化)
 - **[Low-4] `#### Added` subsection 末尾の余分な空行 2 行削除**: 他 subsection 間は単一空行 convention に揃え
 
 ### [Release Tooling v0.1.11] - 2026-05-13
@@ -1888,13 +1903,16 @@ Bundle 移行前 (2026-03 まで): Launcher / Manager の個別 GitHub Releases 
 AGENTS.md "Release and Versioning" 規約、Release.ps1 の `Assert-ChangelogLinkDefs` が検証
 して未追加なら Fail で停止する。
 
-footer-link-defs-begin (= Release.ps1 Assert-ChangelogLinkDefs が IndexOf でこの sentinel
-文字列を探して、以降を footer block として match 対象にする。round 5 Codex P2 対応で
-`LastIndexOf('-->')` ベースの「最後の HTML comment」検出から、明示 sentinel ベースに切替。
-将来 link def の下に別の HTML comment (markdownlint directive 等) が追加されても fence が
-壊れない構造に。本 sentinel 文字列を変更する場合は Release.ps1 の $FooterSentinel 定数も
-同期更新すること)
+footer marker sentinel (Release.ps1 Assert-ChangelogLinkDefs が `LastIndexOf` で探して、
+以降を footer block として match 対象にする)。本 sentinel 文字列を変更する場合は
+Release.ps1 の $FooterSentinel 定数も同期更新すること。
+
+  round 5 で `LastIndexOf('-->')` から明示 sentinel ベースに切替、round 6 で sentinel 文字列を
+  body text に literal 出現しない ALL CAPS unique 形式に変更 + `LastIndexOf` 採用で二重防御。
+  body 内で sentinel を引用する場合があっても末尾の本物の sentinel が選ばれる構造。
 -->
+
+<!-- GCTONEPRISM-CHANGELOG-FOOTER-BEGIN-V1 -->
 
 [Bundle v0.2.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/v0.2.0
 [Bundle v0.1.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/v0.1.0
