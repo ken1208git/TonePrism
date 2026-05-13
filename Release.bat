@@ -49,7 +49,7 @@ REM   skip path            -> codepage unchanged, see SPEC 3.7.9.2
 
 set SCRIPT_DIR=%~dp0
 
-REM 引数を解析: -NoPause は剥がす、それ以外はそのまま PS に渡す
+REM Parse args: strip -NoPause, forward the rest to PowerShell verbatim
 set NO_PAUSE=0
 set FORWARDED_ARGS=
 :parseargs
@@ -59,8 +59,8 @@ if /i "%~1"=="-NoPause" (
     shift
     goto :parseargs
 )
-REM 引数にスペースが含まれる場合 (パス等) のためダブルクォートで保護
-REM 初回 append 時は leading space を付けないため if defined で分岐
+REM Quote args to protect those containing spaces (paths etc.)
+REM Skip leading space on first append, hence the `if defined` branch
 if defined FORWARDED_ARGS (
     set FORWARDED_ARGS=!FORWARDED_ARGS! "%~1"
 ) else (
@@ -82,7 +82,7 @@ powershell.exe -ExecutionPolicy Bypass -File "%SCRIPT_DIR%Release.ps1" %FORWARDE
 
 set EXIT_CODE=%ERRORLEVEL%
 echo.
-REM Exit code dispatch via top-level goto labels (multi-byte mis-tokenize 回避、SPEC §3.7.9.4)
+REM Exit code dispatch via top-level goto labels (multi-byte mis-tokenize avoidance, SPEC 3.7.9.4)
 REM Codes (matches Release.ps1): 0 = success, 1 = failure, 2 = tag conflict skip, 3 = N answer skip
 if %EXIT_CODE% EQU 0 goto :ec_success
 if %EXIT_CODE% EQU 2 goto :ec_skip_conflict
@@ -105,6 +105,6 @@ if %NO_PAUSE% EQU 0 (
     echo.
     pause
 )
-REM 呼出元 cmd の codepage を復元 (pause の後、直前 echo を pause 中も維持、SPEC §3.7.9.6)
+REM Restore caller cmd codepage (after pause so preceding echo stays during pause, SPEC 3.7.9.6)
 if defined ORIGINAL_CODEPAGE chcp %ORIGINAL_CODEPAGE% >nul
 exit /b %EXIT_CODE%
