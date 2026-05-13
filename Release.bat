@@ -18,15 +18,15 @@ REM stay ASCII (chcp switch below defines the ASCII / UTF-8 boundary).
 REM
 REM Detailed cmd.exe compatibility notes (BOM, chcp 3-way branch, delayed
 REM expansion `!` side effect, top-level goto for multi-byte echo, etc.):
-REM   See SPECIFICATION.md §3.7.9 "Release.bat の cmd.exe 互換性ノート"
+REM   See SPECIFICATION.md section 3.7.9 (Release.bat cmd.exe compatibility notes)
 REM ============================================================================
 
 REM enabledelayedexpansion is required for `!FORWARDED_ARGS!` concatenation in
 REM the parseargs loop below. `!` in arg values is consumed as delayed-expansion
-REM token (current pass-through args contain none, future args see SPEC §3.7.9.3).
+REM token (current pass-through args contain none, future args see SPEC 3.7.9.3).
 setlocal enabledelayedexpansion
 
-REM ---- UTF-8 codepage switch + restore-on-exit (3-way branch, SPEC §3.7.9.2) ----
+REM ---- UTF-8 codepage switch + restore-on-exit (3-way branch, SPEC 3.7.9.2) ----
 REM   captured + numeric  -> chcp 65001, restore on exit
 REM   captured + invalid  -> SKIP (corrupted format)
 REM   not captured        -> SKIP (redirect filter / findstr unavailable / etc.)
@@ -43,9 +43,9 @@ if defined ORIGINAL_CODEPAGE (
     echo [WARN] Skipping UTF-8 codepage switch ^(Japanese output may be garbled^).
 )
 
-REM ==== ASCII boundary ====
-REM   chcp 65001 succeeded -> UTF-8 console below
-REM   skip path -> codepage unchanged, SPEC §3.7.9.2 参照
+REM ==== ASCII boundary (only when chcp 65001 succeeded above) ====
+REM   chcp 65001 succeeded -> UTF-8 console below (Japanese safe)
+REM   skip path            -> codepage unchanged, see SPEC 3.7.9.2
 
 set SCRIPT_DIR=%~dp0
 
