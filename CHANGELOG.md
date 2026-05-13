@@ -41,6 +41,24 @@
 
 ### [Release Tooling v0.1.13] - 2026-05-14
 
+#### Changed (PR #155 シニアレビュー round 1)
+
+- **[Medium-1] 全ペア pre-release skip 時の「OK」誤表示を解消**: 旧実装は pre-release suffix を含む隣接ペアで `continue` skip 後にループ抜け、無条件で `Write-Ok "降順整列 OK"` を出していた。**1 度も実比較していなくても「OK」表示** になる silent danger。例: footer に `[Bundle v0.3.0-rc1]` / `[Bundle v0.2.0-rc1]` だけが並ぶ状態で「実比較 0 / OK」になる path。修正: `$comparedCount` / `$skippedCount` カウンタ導入、ループ後を 3 分岐:
+  - **全 skip** (`comparedCount == 0 && skippedCount > 0`): `Write-Warn "全 N ペアが pre-release suffix のため skip (実比較なし、presence のみ PASS)"`
+  - **一部 skip**: `[OK] Bundle 行群の降順整列 OK (N 件中 M ペア比較、K ペア pre-release skip)`
+  - **全実比較**: `[OK] Bundle 行群の降順整列 OK (N 件)`
+- **[Low-1] 「SemVer 比較」表記を「`[version]` (.NET System.Version, numeric)」に訂正**: AGENTS.md / CHANGELOG / Release.ps1 関数 header コメントで「SemVer 降順」と表現していたが、実装は `[version]` cast (= .NET `System.Version` の 4-part numeric `major.minor.build.revision`) で SemVer pre-release semantics (`1.0.0-rc1 < 1.0.0`) 未サポート。Bundle が 3-part numeric の限り SemVer 順序と一致するが、「比較器そのものは SemVer 準拠ではない」事実を明文化。「現状は `[version]` numeric 比較、pre-release semantics 未対応 (= pre-release suffix 検出時は順序 check skip)」と各所注記
+- **[Low-2] 等値 (重複 link def) と「下が大きい」(ordering 違反) の message を分岐**: 旧 message は `下にあるが version が大きい / 等しい` の OR 表記で両 case を 1 メッセージに統合していたが、user の修正手段が違う (等値 = 重複 link def を片方削除 / 大きい = ordering 違反で並び替え)。`if ($upperVer -eq $lowerVer) { 重複 } elseif ($upperVer -lt $lowerVer) { ordering 違反 }` で分岐、Fail message と修正案内も case 別に
+- **[Low-3] fixture test を 3 件降順 / 順序逆転 / 重複 / 1 件のみ の 4 case に拡張**: 旧 case A (現状 v0.2.0 / v0.1.0 降順) は **新ロジック追加前から PASS していた経路** で、新規 ordering 比較 ロジック (`[version]` cast、`-le` 判定) の retention check になっていなかった。case A' (3 件降順、2 ペア実比較) を追加、case D (重複 link def、Low-2 の新 branch verify) も追加して比較ロジック全 branch を独立 verify
+- **[Low-4] 違反位置表示を 1-indexed に統一**: 旧 `位置 0 / 位置 1` / `[0] [Bundle v...]` は 0-indexed で、Release.ps1 内他 user-facing 表示 (`[Step N/4]` 系) の 1-indexed と乖離。release 直前の急ぎ修正 context で「位置 5 は上から 5 つ目? 6 つ目?」と一瞬迷う path を排除、`位置 $($i + 1)` / `[$($j + 1)]` に統一 (内部 loop index は 0-indexed のまま、表示時のみ +1)
+
+**手動 fixture test 4 case PASS (round 1)** (Release.ps1 冒頭の auto-promote 一時 comment out):
+
+- **A'** (3 件降順 `v0.3.0 / v0.2.0 / v0.1.0`): `[OK] Bundle v0.2.0 の参照リンク定義 OK (presence)` + `[OK] Bundle 行群の降順整列 OK (3 件)` → 2 ペア実比較 PASS
+- **B** (順序逆転 `v0.1.0 / v0.2.0`): presence OK → ordering 違反で「位置 1 (上) / 位置 2 (下) ← 下にあるが version が大きい (ordering 違反)」 + 全 Bundle 行リスト (1-indexed) + 違反箇所マーカー → Fail
+- **C** (Bundle 1 件のみ): presence OK + ordering check 自体 skip
+- **D** (重複 `v0.2.0` × 2): presence OK → 「位置 1 と位置 2: 両方とも [Bundle v0.2.0]:」+ 「修正: どちらか片方の link def を削除してください」 + 重複箇所マーカー → Fail (Low-2 新 branch 動作確認)
+
 #### Added (feature/changelog-bundle-ordering、#154)
 
 - **`Assert-ChangelogLinkDefs` に Bundle 行群の SemVer 降順整列 enforce を追加** (presence check に追加で ordering check): PR #153 で導入した fence は「footer block 内に `[Bundle vX.Y.Z]:` 行が **存在するか**」だけ verify する presence check で、AGENTS.md「**追加位置: 既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持)**」規定は convention 任せだった。例えば `[Bundle v0.1.0]` の下に `[Bundle v0.3.0]` を書いても通過する状態で、CHANGELOG の Bundle 行群が時系列ぐちゃぐちゃになり human reader が「最新リリースがどれか」を直感的に判断できなくなる運用劣化リスクと、規約と fence の non-symmetric (doc-vs-impl mismatch) があった。`#154` で別 issue 化していた incremental hardening を実装。
