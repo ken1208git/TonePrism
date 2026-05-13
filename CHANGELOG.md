@@ -39,6 +39,154 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
+### [Release Tooling v0.1.11] - 2026-05-13
+
+#### Fixed (PR #152 Codex bot round 7 後追い + シニアレビュー round 8 + 重大発見への対応)
+
+- **[round 8 重大発見 → C 案で根治] early-crash check の race condition を構造的に解消**: round 7 で「シナリオ A (early-crash) PASS」と記録した手動テストを round 8 で再実行したところ、**同一コード・同一テストシナリオで PASS しない race condition** を発見。原因は 2 層:
+  - **[1] `UseShellExecute=true`**: Windows shell 経由 spawn のため Process オブジェクトと実 process の handle 紐付けが間接的、`WaitForExit` / `HasExited` の応答が遅延する path がある (.NET Framework 4.8 公式ドキュメントでも UseShellExecute=true は handle 制約あり明記)
+  - **[2] 500ms threshold**: csc cold start + 大きな .NET exe で実 race 範囲内 (round 7 では偶然 PASS、round 8 では検出失敗)
+  - 修正 (C 案): **(B) `Process.Start` の `UseShellExecute` を `true` → `false` に切替** で handle 紐付けを確実化 + **(A) `WaitForExit(500)` → `WaitForExit(2000)` に拡大** で cold start race の確率的余裕を確保。両方の修正で「構造的 + 確率的」両面で防御。
+  - 副作用: Updater 完了が ~1.5 秒遅くなる (許容範囲)。Manager.exe は GUI app (`Application.Run` loop) なので stdout/stderr inherit でも実害なし、`.exe` 直接 spawn で問題なし。
+  - SPEC §3.7.4 の round 4 M-5「UseShellExecute=true 経由の UAC prompt」記述 + round 7 Low-4「500ms 前提」記述を C 案に合わせて更新済 (5 者同期維持)。
+  - **手動テスト 3 シナリオ全 PASS 再確認**: A (early-crash、ExitCode=99 検出 → rollback → 旧 Manager 復元、test marker dummy が bit-perfect 保持) / B (restart-exe 不在、Step 2 後 NG → rollback → 旧 Manager 復元) / E (PID 再利用、caller-pid=自 PowerShell PID で `"PID=N は別プロセス 'powershell' (PID 再利用と判定)、Manager 既終了扱い"` を確認)
+
+- **[Codex P2-1] PID-only モードで「同名 exe 別 install / session」の PID 再利用検知が破綻していた silent danger を解消**: round 3 H1 で `ProcessName == "GCTonePrism_Manager"` 検証を入れたが、これでは「**同じ exe 名で起動した別 install / 別 session の Manager**」(例: D:\Install_A\Manager と E:\Install_B\Manager が同時稼働) による PID 再利用を区別できなかった。Phase 4 で同 PC 複数 install の運用が起きた場合に `--force-kill` 指定で別 install を kill する path が残っていた。修正: `GetTargetProcesses` に `expectedExePath` 引数を追加 (`WaitForManagerExit` signature 拡張、Program.cs から `args.RestartExe` を渡す)、`Process.MainModule.FileName` を取得して期待 path と比較。不一致なら「別 install / session」とみなして空配列扱い (= 待機 skip 経路、`Win32Exception` / `InvalidOperationException` も同経路で安全側 default に倒す)
+- **[Codex P2-2] `RollbackFromBak` の `bakExists == false` branch が silent false-success を返していた**: round 7 までは `bakExists == false` で target 削除して return without throwing していたが、Program.cs の caller (`RollbackAndReturn6` / restart-exe 検証失敗時の RollbackFromBak) は「正常 return = 旧 Manager 復元成功」と解釈して exit 6 を返す。実態は「target も .bak も両方無い致命的状態」で false positive。修正: `InvalidOperationException` を throw → caller の既存 `catch (InvalidOperationException)` 経路で **exit 5 (rollback も失敗した致命的状態)** に倒す。target 削除は best-effort で先に試みる (新 Manager の半端コピーは起動に使えないゴミ、消しておく方が clean)
+
+#### Changed (PR #152 シニアレビュー round 8)
+
+- **[Medium-1] round 7 entry の `OLD_MANAGER_PLACEHOLDER` literal 表現を一般化して credibility 問題を解消**: round 7 シナリオ A / B の PASS 記述に test 用 placeholder 文字列がそのまま残っていて「テスト identifier 忘れ」「本当に test 走ったのか?」と読まれる credibility 問題があった。実態は testbed で `Set-Content` で test marker 文字列を中身に持つ dummy ファイルを置いた、というシンプルな手順。round 7 entry の表現を「test marker 文字列を仕込んだ dummy ファイルが bit-perfect 復元」に書き換え、本 round 8 entry のテスト結果記述も同 pattern で統一
+- **[Medium-2] CliArgs.cs:106 の stale 行番号 `Program.cs:77` 削除 (round 7 Low-1 の漏れ補完)**: round 7 Low-1 で FileReplacer.cs:63 の `Program.cs:64` 参照は削除したが、同型の stale 参照が CliArgs.cs:106 に残っていた抜けを解消。round 6 で Main の `catch (Exception)` 追加により行番号が rot していた。コメント引用 (`Program.cs Main の catch (Exception)`) に置換
+- **[Low-1] `ProcessWaiter` の force-kill `continue` で `iter++` が skip される silent issue を解消**: force-kill `Thread.Sleep(1000); continue;` で while ループ底の `iter++` を skip するため、`iter == 0` (初回ログ) / `iter % LogEveryNIter == 0` (継続ログ) の判定が誤発火して同じ「N 件検出」log が複数回出る path があった (実害なし、ログノイズのみ、round 5 M-2 / Low-2 のログ表記精度との整合性低下)。`continue` 前に明示 `iter++;` 追加
+- **[Low-2] SPEC §3.7.4 exit 6 説明の表記揺れ解消**: `restart-exe が target 配下に不在 等` という曖昧表現を `restart-exe (target 配下を指す path) のファイルが staging 欠落で存在しない 等` に修正。「target 配下でない path 指定」は parse-stage で exit 2 として reject される (round 4 M-3) ので exit 6 の領域ではない点を明確化、他 4 者の `restart-exe 不在` 表現と意味的に揃え (5 者同期維持)
+- **[Low-3] `ProcessWaiter` docstring の「Manager は caller」表現を「parent process」に明示化**: 「caller」は通常「この関数を呼ぶ側 = Updater 自身」と読める ambiguity があったため、`callerPid` パラメータ名と相まって瞬間的に誤読される path を排除。round 6 Codex P2 / Medium-4 等で一貫使用してきた「Manager UI 側 = Updater を spawn した親プロセス」と整合
+- **[Medium-3 + Medium-4] round 7 で確立した「軽量 2 シナリオ手動テスト」「PR body の SPEC 3 bump 明示的逸脱注記」は round 8 でも維持** (新規対応なし、round 7 で完了)
+
+#### Fixed (PR #152 Codex bot round 6 後追い + シニアレビュー round 7)
+
+- **[Codex P2] parse 段階の stderr 出力が UTF-8 で出ていない自己矛盾を解消**: `Console.OutputEncoding = UTF-8` を `Logger.Initialize` 内でしか設定していなかったため、parse 失敗 path (exit 2 / parse-stage exit 1) は Logger 初期化前に走り stderr が OS default codepage (日本語 Windows = CP932) で出ていた。round 6 Medium-4 で SPEC §3.7.4 に「Phase 4 Manager UI は UTF-8 で stderr capture する規約」と明文化したのに、その capture 対象の stderr 自体が UTF-8 で出ていない自己矛盾 → Manager UI 側で mojibake する path。修正: Main 冒頭 (`CliArgs.Parse` の前) で `Console.OutputEncoding = Encoding.UTF8` を best-effort 設定、Logger.Initialize 側の同設定は idempotent なので defensive に残置
+- **[Medium-3 検証] round 6 で新規追加した silent path 防御コードの軽量 2 シナリオ手動テスト PASS**: round 6 で導入した「Process.Start 失敗時 / spawn 直後 early-crash 時の RollbackFromBak」path はコード追加のみで動作確認が伴っていなかったため、軽量 2 シナリオを手動実行で検証:
+  - **シナリオ A (early-crash)**: csc で build した「spawn 直後 `Environment.Exit(99)` する dummy `GCTonePrism_Manager.exe`」を staging に配置 → Updater 実行 → `proc.WaitForExit(500)` で ExitCode=99 検出 → `RollbackAndReturn6` で旧 Manager (test marker 文字列を仕込んだ dummy ファイル) が `.bak` から bit-perfect に復元 → exit 6 を確認 **PASS** (round 8 で race condition 発覚、C 案で再検証、下記 round 8 entry 参照)
+  - **シナリオ B (restart-exe 不在)**: staging から `GCTonePrism_Manager.exe` を意図的に欠落させて Updater 実行 → restart-exe 存在 check NG → `RollbackFromBak` で旧 Manager (test marker dummy) が復元 → exit 6 を確認 **PASS**
+  - **deferment**: シナリオ C (Process.Start throw、0-byte exe による Win32Exception) / シナリオ D (parse-stage SecurityException、権限のない drive 要) は Phase 4 連携 E2E で実施。シナリオ A の `catch (Exception)` path はカバー、SecurityException path は別環境要のため deferment
+
+#### Changed (PR #152 シニアレビュー round 7)
+
+- **[Medium-1 + Medium-2] Step ラベル系列を `3/3` → `4/4` に揃え、class docstring 責務列挙を log と同期**: round 6 Codex P1 で導入した「CleanupBak を Step 4 に移動」が outer log ラベルに反映されておらず、`[Step 1/3]` 〜 `[Step 3/3]` のままで Step 4 が silent (CleanupBak の log が無い) だった。あわせて class docstring の責務列挙が 5 項目 (CLI parse / 待機 / 置換 / 起動 / 自分終了) で log ラベル 3 段とも実体 4 段とも矛盾。修正: Program.cs の全 `[Step N/3]` → `[Step N/4]` + `Step 4/4 .bak を best-effort 削除` の log を追加、class docstring を「Step 0 parse / Step 0.5 Logger init / Step 1/4 待機 / Step 2/4 置換 / Step 3/4 起動+early-crash check / Step 4/4 .bak 削除 / exit」に再編、FileReplacer.cs の outer step 列挙コメントも 4 段表記に更新 (round 1 M2 の「outer/inner ラベル分離」方針を round 6 Step 4 追加に追随させる)
+- **[Medium-4 PR body 明示的逸脱注記] 本 PR で SPEC を v1.10.10 → v1.10.11 → v1.10.12 と 3 回 bump した点を「AGENTS.md 1 PR 1 bump 規約からの明示的逸脱」として PR body に注記**: round 3 M1 (`--caller-pid` 追加) / round 4 (exit code 3 分割 + Console UTF-8 規約 + 非 admin 前提) / round 6 (exit 2 ログ不在 + stderr capture + exit 6 自動 rollback) と 3 ラウンドで段階的に SPEC が確定したため。履歴改変 (v1.10.10 に統合する案) は下流の追跡性を失うため見送り、規約からの逸脱を可視化することで規約遵守の意図を残す。AGENTS.md 規約の「6+ ラウンド review の例外条項」追加は別 PR で検討
+- **[Low-1] FileReplacer.cs:63 の stale 行番号参照 `Program.cs:64` を削除**: round 6 で Step 0 catch 追加により行番号が後退して `Program.cs:64` が Logger 初期化のコメント行を指していた rot 状態。行番号削除 + コメント引用 (`Path.GetDirectoryName(ManagerTargetDir.TrimEnd(...))`) に置換、Claude.md / system 指示の「line-number reference は容易に rot する」原則に整合
+- **[Low-2] CliArgs.UsageText の usage 1 行 summary に `[--caller-pid <PID>]` を追加**: round 3 M3 で CHANGELOG `## Updater v0.1.0` ファイル列挙には追記したが UsageText の usage 1 行版だけが 6 オプションのまま残っていた抜けを解消。Optional セクション側には説明あり、`--help` で「Optional に caller-pid あるけど usage 例にはない、内部 only?」と誤読される path を排除
+- **[Low-3] FileReplacer.CleanupBak の「新規インストール時など」コメントを round 3 L2 方針と整合**: round 6 Low-1 で `Rollback` の `bakExists=false` branch は「pathological state / 外部・手動呼出しの fallback 経路」に書き換えたが、同 file 内の `CleanupBak` (line 184 付近) の同種コメントが「新規インストール時など、そもそも `.bak` が作られていないケース」のまま残って **同 file 内で round 6 Low-1 が半分しか適用されていなかった抜け** を解消。「Replace が rename 前 (Step 1) で abort して `.bak` 作成に至っていない pathological 経路、または過去 run で既に CleanupBak が走った後の想定外再呼出し」と方針整合化
+- **[Low-4] SPEC §3.7.4 に「Manager.exe は spawn 後 500ms 以内に exit しない GUI 常駐 process 前提」を 1 行明文化**: round 6 で追加した `proc.WaitForExit(500)` early-crash check は「Manager が即 exit するモードを将来追加」した場合に正常 fast-exit を early-crash と誤判定する silent assumption を抱える。Manager に `--version` のような short-lived モードを追加する前に SPEC §3.7.4 の early-crash check 仕様 (exitCode 判定追加 等) を再設計する規約を明文化、round 4 M-5 (Manager 非 admin 前提) と同 pattern の defensive SPEC 規約として固定
+
+#### Fixed (PR #152 Codex bot round 5 後追い + シニアレビュー round 6)
+
+- **[Codex P1 + シニア Medium-5] 新 Manager.exe 起動失敗時に rollback できない silent danger を解消 + spawn 直後 early-crash 検出を追加**: 旧実装 (round 1 H1 以降〜round 5 まで) は `.bak` 削除を「restart-exe 存在 check 後 / Process.Start 前」で行っていたため、`Process.Start` が null/throw する path (DLL load 失敗 / access-denied / runtime 依存欠落 / shell association reuse 等) や spawn 直後 0.1s で Manager.exe が crash する early-crash path で「旧 Manager 消失 + 新 Manager 起動失敗」の復旧不能 broken state を作っていた (round 1 H1 fix で broken state を一段階遠ざけたが、Process.Start 周辺がまだ残っていた)。修正: `CleanupBak` を **Process.Start 成功確認後 (Step 4) に移動**、`Process.Start` null/throw/early-crash 各 path で `RollbackAndReturn6` ヘルパー経由で `RollbackFromBak` を呼んで旧 Manager を `.bak` から復元 + exit 6。round 6 Medium-5 と統合し、`proc.WaitForExit(500)` で spawn 直後 500ms の early-crash check を追加 (`proc != null` は OS が spawn process を作った保証だけで、DLL load 失敗 / 0-byte exe / managed exception in Main 等の即 crash を検出できなかった silent failure path も同経路で塞ぐ)。Rollback も失敗した致命的 case は exit 5 (`.bak` から手動復元要)。SPEC §3.7.4 exit 6 説明 + Program.cs class docstring + CliArgs.UsageText + CHANGELOG `## Updater v0.1.0` の 4 箇所に「失敗時自動 rollback + early-crash 検出」を同期反映
+
+- **[Codex P2] Parse 段階の非 ArgumentException が CLR 既定 exit code で抜ける silent danger を解消**: 旧 Main の `try { CliArgs.Parse } catch (ArgumentException)` は `ArgumentException` のみ catch、`Path.GetFullPath` 由来の `SecurityException` / `UnauthorizedAccessException` / `IOException` 等の権限・環境問題は CliArgs.Parse 内部の絞り込み catch (round 2 M2) でも拾えず、CLR 既定の uncaught exception で documented exit codes 0-8 と乖離した予期しない exit code を返す silent danger があった (Phase 4 Manager UI の retry/diagnostic 分岐が壊れる)。修正: Main の Step 0 に `catch (Exception)` を追加、stderr に `ex.GetType().Name` + stack trace + UsageText を出力してから **exit 1 (documented)** に倒す。Logger 未初期化なので stack trace はログファイルに残らず stderr のみ (Medium-4 で SPEC 明文化済)
+
+#### Changed (PR #152 シニアレビュー round 6)
+
+- **[Medium-1] Program.cs class docstring の Exit codes 同期表記を「三者同期」→「5 者同期」に訂正**: round 5 H-1 で「以降の review 完了基準として 5 者同期 (SPEC / Program docstring / UsageText / CHANGELOG / PR body) を固定化」と宣言した meta-rule を、当の Program.cs class docstring が `"CliArgs.UsageText() / SPEC §3.7.4 と三者同期、round 4 H-1 + M-1"` のまま残していて round 5 H-1 が塞いだはずの「自己撞着」を再生産していた。本 entry / `CliArgs.UsageText()` 内部 / Program.cs docstring の同期表記を「5 者同期」に揃え、Phase 4 Manager UI 実装者がこの docstring を見て「3 箇所だけ同期すればよい」と誤解する misleading な lookup path を排除
+- **[Medium-2] SPEC 変更履歴 v1.10.11 entry に round 5 L-3 を加筆 + 新 v1.10.12 entry で round 6 範囲を追加**: v1.10.11 entry が round 4 範囲しか記録しておらず、本文 (SPEC §3.7.4 exit 4 説明の auto-recovery 注記) は round 5 L-3 で加筆済の drift があった。v1.10.11 entry に「round 5 L-3 で exit 4 の auto-recovery 経路注記追加」の 1 文を加筆 + 新 v1.10.12 entry で round 6 範囲 (exit 2/1 Logger 未初期化 + stderr capture 必須 + exit 6 自動 rollback) を追加、AGENTS.md「1 PR 1 bump」規約に従って既存 entry 加筆 / 範囲新規エントリの両建てで同期
+- **[Medium-3] `## Updater v0.1.0` entry 末尾に「詳細な review 経緯」参照行を追加**: round 1〜6 の review 対応詳細は実体が Updater 本体コードの変更でも `## Release Tooling v0.1.11` 配下に詰まっており、Phase 4 以降に「Updater FileReplacer の `.bak` 保持仕様はいつ変わった?」を CHANGELOG で辿る開発者が `## Updater` セクションを見ても出てこない異常導線があった。AGENTS.md「他セクションから参照」原則に従い、`## Updater v0.1.0` 末尾に「詳細な review 経緯は `## Release Tooling v0.1.11` 配下の各 round entry を参照」の 1 行を追加。CHANGELOG 大規模再構成 (本体コード変更 entry を Updater セクションに移動) は scope creep のため見送り、参照導線の確立で代替
+- **[Medium-4] SPEC §3.7.4 に「exit 2 / 1 (parse 段階) はログファイルに残らず stderr のみ」+ 「Phase 4 Manager UI は stderr capture 必須」規約を明文化**: Logger 初期化が CliArgs.Parse の **後** に行われるため、exit 2 (引数エラー、最頻発の user-facing error) は `logs/updater/` に何も残らない可観測性 hole があった。round 4 M-3 で `--restart-exe` validation 追加により exit 2 のヒット確率自体も上がっている。SPEC §3.7.4 exit 2 説明に「parse 段階のため Logger 未初期化、stderr のみ」を明記 + 「Phase 4 Manager UI は `RedirectStandardError = true` で stderr を必ず capture し log viewer に流す規約」を明文化 (Logger 先行 init 案は意味づけ変更の副作用が広いため見送り、SPEC 規約で対応)
+- **[Low-1] FileReplacer.Rollback の `bakExists=false` branch のログメッセージを round 3 L2 方針と整合**: round 3 L2 で「Updater は更新 spawn 専用、新規 install は Install.bat」と方針確立後、本 branch は外部 / 手動呼出しで `.bak` が消えた pathological 状態でのみ到達する fallback 経路に変わったが、Logger メッセージは `"rollback: 新規インストール用の target を削除"` のまま矛盾していた。`"rollback: .bak が存在しないため target のみ削除 (pathological state、外部 / 手動呼出しの fallback 経路)"` に書き換え
+- **[Low-2] ProcessWaiter の `iter == 0` ログで `timeout=0` 時に「無制限」と表示**: `--wait-timeout 0 = 無制限待機` は UsageText / XML doc / SPEC §3.7.4 で公式仕様化済だが、ランタイムログには反映されておらず「timeout 0s」と表示されると「0 秒待ち = 即 timeout」と誤読される可能性があった。三項演算で `timeoutSeconds == 0 ? "無制限" : $"{timeoutSeconds}s"` の表記分岐に
+- **[Low-3] Program.cs:215 の `try { pid = proc.Id; } catch { swallow }` bare catch を `InvalidOperationException` に絞る**: round 4 〜 round 5 を通じて「silent path 全部塞ぐ」防御方針が一貫しているのに、本 1 行だけ bare catch で `NullReferenceException` 等の bug 由来例外も silent に飲み込んでいた。`UseShellExecute=true` で PID 取得不能なケースが docs 明記 (`InvalidOperationException`) なのでこれだけ swallow、それ以外は逃がす。round 2 M2 (`CliArgs.Parse` の catch 範囲絞り) と同じ防御方針に揃える
+
+#### Fixed (PR #152 シニアレビュー round 5)
+
+- **[H-1] CHANGELOG `## Updater v0.1.0` Exit codes 列挙が 6 件のままで他 3 者 (SPEC §3.7.4 / Program.cs class docstring / CliArgs.UsageText) の 9 件と乖離していた自己撞着**: round 4 H-1 entry が明示的に「Exit codes 表を 4 箇所で三者同期」と主張していたが、4 箇所目に該当する CHANGELOG `## Updater v0.1.0` の Exit codes セクション (`0/2/3/4/5/6` の 6 件) が round 4 で更新されておらず、round 4 で追加された exit 1 (M-1) / 7 / 8 (H-1 分割) が抜けていた。Phase 4 Manager UI 実装者が CHANGELOG `## Updater` entry をリファレンスにすると 7/8 への分岐が漏れる misleading な lookup path。修正: CHANGELOG entry を 9 件版に同期 + 「round 5 H-1 で本 entry を 6 件→9 件同期」と経緯記述。あわせて round 5 M-3 で auto-recovery 経路の exit 4 仕様化 (SPEC L-3) と timeout 経路の exit 8 排他化も entry に反映。**5 者同期チェック** (SPEC / Program docstring / UsageText / CHANGELOG / PR body) を以降の review 完了基準として固定化
+
+#### Changed (PR #152 シニアレビュー round 5)
+
+- **[M-2] `CliArgs.ReadValue` が次の `--` 引数を値として消費する silent path を解消**: 旧実装は `--staging --manager-target D:\Manager\ ...` のような value 1 つ忘れパターンで `--manager-target` を `--staging` の値として吸収 → 次 iter で `D:\Manager\` が「未知の引数」として throw する misleading な error path に流れていた。Phase 4 で Manager UI が `--restart-exe "$emptyVar"` のような引数を空変数展開する case も同じ症状なので、明示 check で user-facing error をまっとうな「値が指定されていません (次トークンが別の引数 '...'、value 忘れ疑い)」に倒す。`StartsWith("--", Ordinal)` で判定、負数 / `--` 単独 token は現状の `--wait-timeout` / `--caller-pid` が正整数のみ受理なので副作用なし
+- **[M-3] `ProcessWaiter` の timeout 経路で `enumerationFailed` 単独でも `EnumerationFailed` (exit 8) を返していた too-eager 分岐を排除**: round 4 H-1 では「timeout 時に `enumerationFailed` なら exit 8」と分岐していたが、`consecutiveEnumerationFailures` を check せず **1 回でも失敗** すれば exit 8 を返していたため、「偶発的 1 回失敗 + timeout コインシデンス」が exit 8 になり Phase 4 Manager UI が「短時間後再試行」を選んで同じ timeout で再度 exit 8 → 無限ループ化する path があった。修正: timeout 経路は **常に** `TimedOutNoForceKill` (exit 3) を返し、`EnumerationFailed` (exit 8) は `consecutiveEnumerationFailures >= MaxEnumerationFailures` の早期 abort path **専用** に限定 (両者排他)。enum docstring + Logger メッセージ + SPEC §3.7.4 / CHANGELOG Updater v0.1.0 / Program.cs docstring / CliArgs.UsageText 5 者同期で「8 は連続失敗 path 専用」を明文化
+- **[M-4] `Process.Start` の戻り値 `Process` インスタンスを `using` で wrap (handle leak 防止)**: 旧実装は `Process proc = Process.Start(psi);` で受けたまま Dispose せず finalizer 任せで OS handle (SafeProcessHandle) を release していた。本 CLI は ~1 秒で exit するので OS が cleanup する想定だが、`proc.Id` アクセス時の InvalidOperationException 等で finally に入る path で handle leak する可能性。round 4 まで「silent path 全部塞ぐ」防御方針で揃えてきた整合性に合わせ、`using (Process proc = Process.Start(psi))` パターンで最後の leak を埋める
+- **[L-1] FileReplacer.Replace の親 dir check エラーメッセージを 2 branch に分割**: 旧実装は `parentDir` が null/empty (drive root `C:\` 等の病的入力で `Path.GetDirectoryName` が null/empty を返す) と「親 dir 不在」の両 case で `"manager-target の親 dir が存在しません: {parentDir}"` 一括だったため、前者で log が末尾切れ ("...存在しません: ") になり障害解析しづらかった。round 3 M5 で「drive root 病的入力は defensive fallback として明示化」方針が確立済なので、ここの障害ログも同レベルの明示性に揃える。`IsNullOrEmpty(parentDir)` 時は「親 dir を計算できません (drive root 等の病的入力疑い): {managerTargetDir}」、`!Directory.Exists` 時は現行メッセージ + `{managerTargetDir}` 併記
+- **[L-2] Release.ps1 Build-Updater で「任意の .exe」ではなく **特定 exe 名** (`GCTonePrism_Updater.exe`) の存在 check を追加**: round 4 L-3 で追加した `.exe` 1 件以上の check は、csproj の `AssemblyName` を将来誰かが変更して別名 .exe を生成しても build step が green になる (任意の .exe で pass) → 後段 Assert-ExpectedFiles で初めて検出する遠回り。特定名 check を `Test-Path (Join-Path $binRelease 'GCTonePrism_Updater.exe')` で追加、csproj 仕様変更時の早期検出に倒す
+- **[L-3] SPEC §3.7.4 の exit 4 に「auto-recovery 経路も同 code を返す」を 1 行明文化**: Codex round 2 P1 #3 で導入した「target 不在 + `.bak` 存在 → `.bak` を target に rename 戻して abort」auto-recovery path は Program.cs で exit 4 を返すが、SPEC 上「単純な replace 失敗 + rollback」と区別できない記述だった。Phase 4 Manager UI が「即 retry が次回 run で正常 path に乗る」(auto-recovery 経路) と「同じ操作を即 retry してもまた fail」(単純失敗経路) を区別する判断材料として、SPEC §3.7.4 に「auto-recovery 経路も本 code を返す、ログメッセージで両 case を区別可能」を 1 行追記。両 case を別 exit code に分けるかは scope creep のため Phase 4 retry policy ガイド執筆時に再検討
+
+#### Fixed (PR #152 シニアレビュー round 4)
+
+- **[H-1] exit code 3 が 3 種類の異なる失敗を一括していて Phase 4 retry 戦略の障壁になっていた**: round 2 Codex P2 #2 (force-kill bounded retry exhausted) + Codex P2 #4 (enumeration 連続失敗) の追加で、`WaitForManagerExit` が `false` を返すパスが「(a) timeout + `--force-kill` 未指定」「(b) `--force-kill` 指定下で MaxForceKillAttempts (3) 超過」「(c) MaxEnumerationFailures (5) 連続失敗」の 3 種に分岐していたが、Program.cs はすべて exit 3 に倒していた。Phase 4 Manager UI が exit 3 を見て「単に `--force-kill` 指定忘れ」と誤判定 → permission denied (構造的問題、(b)) で `--force-kill` 付与 retry を組まれて無限再試行する silent bug 化リスク。修正: ProcessWaiter を `bool` 返しから `WaitResult` enum 返し (`Success` / `TimedOutNoForceKill` / `ForceKillExhausted` / `EnumerationFailed`) に変更、Program.cs で switch して exit 3 / 7 / 8 に分岐。SPEC §3.7.4 / Program.cs class docstring / CliArgs.UsageText の Exit codes 表を 4 箇所で三者同期 (現在は SPEC + 実装 2 箇所の三者同期)
+
+#### Changed (PR #152 シニアレビュー round 4)
+
+- **[M-1] exit code 1 (予期しない実行時例外) が公式仕様から完全に欠落していた**: Program.cs:81 の `catch (Exception)` は exit 1 を返すが、Program.cs class docstring の Exit codes 表 / CliArgs.UsageText / SPEC §3.7.4 すべてに記載がなく、唯一 CliArgs.cs 内のインライン comment だけが exit 1 の存在を示唆していた。Phase 4 Manager UI が exit code 表ベースで分岐実装する際に未定義 code を受信すると caller 任意で「skip / log / report」になり矛盾源を作る。3 箇所すべてに「1 = 予期しない実行時例外 (Logger に stack trace、bug report 対象)」を追記、`--help` ユーザーも `1` を見て「想定内」と判断できる形に
+- **[M-2] `Process.Start(psi)` の戻り値を無視 → 起動成否を検出できない silent path**: 旧実装は `Process.Start(psi);` を即「Manager 起動完了」ログで通過していたが、`UseShellExecute=true` では「OS が既存プロセスを reuse」「OS が起動を抑止」等で null を返すと公式ドキュメントに明記。null/非 null 問わず embedded false success を残し、Manager UI / 部員視点で「Updater は exit 0 で抜けたから OK」と誤誘導される silent failure path があった。修正: 戻り値を `Process proc` で受けて null check、null なら Logger.Error + exit 6 で fail。PID も best-effort で記録 (取得失敗しても起動成功扱い、UseShellExecute=true は PID アクセス保証外)
+- **[M-3] `--restart-exe` が `--manager-target` 配下でない誤 path でも素通り → 誤起動 risk**: 旧実装は `File.Exists(RestartExe)` のみ check で、caller (Manager UI Phase 4) の typo で `--restart-exe C:\Windows\System32\calc.exe` のような誤 path が渡されると、Updater は新 Manager dir を置き換えた後に calc.exe を起動して exit 0 で抜ける silent failure path が残っていた (Manager UI 側は「アップデート成功」表示 → 部員 / 顧問は新 Manager が起動したと信じる mismatch)。修正: CliArgs.Parse の Path.GetFullPath 後に `RestartExe.StartsWith(ManagerTargetDir + DirectorySeparatorChar, OrdinalIgnoreCase)` check を追加、不一致なら ArgumentException で exit 2 に倒す。round 2 L2 (target 不在 typo) と同じ防御方針、末尾 separator 揺れを `TrimEnd` で吸収しつつ prefix 偶然衝突 (`Manager` + `ManagerExtra`) も separator check で排除
+- **[M-4] `Console.OutputEncoding` 未設定 → Manager UI stdout capture 経由で日本語 log が mojibake する path**: Logger 内の全 Info / Warn / Error メッセージは日本語混じり (「[Step 1/3] Manager プロセスの終了を待機」等) で、ファイルログは UTF-8 BOM なし (FileStream + UTF8Encoding(false)) と明示設定済だったが、Console 側は未設定。default は Windows console codepage (日本語 Windows = Shift-JIS / CP932) で、Phase 4 で Manager UI が `RedirectStandardOutput=true` で stdout を log viewer に流す前提なのに encoding が揃わないと mojibake する遅効性 bug。修正: Logger.Initialize 冒頭で `Console.OutputEncoding = Encoding.UTF8` を best-effort で明示設定、SPEC §3.7.4 にも「Manager UI 側も UTF-8 で読む規約」を 1 行追記して双方の規約を固定
+- **[M-5] SPEC §3.7.4 に「Manager.exe は admin 権限を要求しない manifest 前提」を 1 行追記**: `UseShellExecute=true` で起動する Updater の構造上、将来 Manager.exe が requireAdministrator manifest を持つようになった場合に「Updater が消えた直後に UAC prompt が突然出る」体験になる silent assumption だった。SPEC §3.7.4 に「Manager は admin 権限を要求しない設計、将来変更する場合は §3.7.3 / §3.7.4 を再設計すること」と固定し、Program.cs:166 にも同コメントを残して将来 breakage を防ぐ
+- **[L-2] `Logger.CurrentLogPath` が Shutdown 後も古い path を保持する stale 状態を解消**: Shutdown() は `_writer = null` + `_initialized = false` をセットするが `_currentLogPath` は clear していなかった。本 CLI は Main で 1 回 Shutdown して即 exit するので実害なしだが、test code や将来の re-initialize 経路で `Shutdown → CurrentLogPath getter` が前回 path を返す混乱源を断つ。1 行修正 (`_currentLogPath = null;`)
+- **[L-3] `Build-Updater` の copy ループが空 `bin/Release` で silent success する path**: msbuild が exit 0 で抜けたが成果物 dir が空 (msbuild target 設定誤り等の pathological case) の場合、`Get-ChildItem` が 0 件で `Copy-Item` ループが silent に 0 回回り、「Updater 成果物コピー完了」を空コピーで通過する path があった (最終的に Assert-ExpectedFiles で fail するが原因切り分けが遠い)。修正: `Test-Path` check 直後に `.exe` 1 件以上の存在 check を追加、不在なら Build-Updater レベルで早期 fail させて「msbuild 出力なし」を明示
+- **[L-4] FileReplacer.CopyDirectory の docstring に attribute preserve 仕様を 1 行追記**: `File.Copy(..., overwrite: true)` は内容のみコピーし source の ReadOnly / Hidden / System 等の attribute は preserve しない挙動を docstring に明示。Manager 配下は全て通常 attribute なので現状実害なしだが、将来「user data 残し更新」path で attribute 維持が必要になった場合の sleeper bug 化を防ぐ予防的 doc
+
+#### Fixed (PR #152 シニアレビュー round 3)
+
+- **[H1] PID-only モードで `Process.GetProcessById(pid)` の戻り値を `ProcessName` 検証せず、PID 再利用で別プロセスを誤 kill するリスク**: round 2 Codex P1 #1 で導入した `--caller-pid` PID-only モードは「Manager exit → OS が同 PID を別プロセス (例: notepad.exe) に再割当 → `--force-kill` 指定時に notepad を kill」という silent danger を抱えていた (Windows PID は exit 済プロセスから再利用される)。修正: `GetTargetProcesses` で `Process.GetProcessById` 直後に `p.ProcessName == "GCTonePrism_Manager"` を検証、不一致時は「PID 再利用 → Manager 既終了」とみなして空配列 (= 待機 skip 経路) に流す。`ProcessName` アクセス中 exit の `InvalidOperationException` も同経路扱い
+
+#### Changed (PR #152 シニアレビュー round 3)
+
+- **[M1] SPEC §3.7.4 に `--caller-pid <PID>` 引数を追記 + 変更履歴 v1.10.10 entry 追加**: round 2 Codex P1 #1 で実装した `--caller-pid` が SPEC に未反映の二者乖離。Updater CLI 引数表に `--caller-pid <PID>` (推奨 = Phase 4 Manager UI が `Process.GetCurrentProcess().Id` を渡す、未指定時は system-wide `GetProcessesByName` fallback) を追記、変更履歴 v1.10.10 entry で round 3 H1 / M1 の SPEC 影響を要約
+- **[M2] CHANGELOG `## Updater v0.1.0` の「約 750 行」行数指標を「8 ファイル」構成指標に置換**: round 2 までの追記で実コード規模が増え行数指標が stale 化。エンドユーザー向け summary としては「行数」より「8 ファイル構成」の方が安定で意味ある粒度
+- **[M3] CHANGELOG `## Updater v0.1.0` のファイル列挙に `--caller-pid` 追記 + ProcessWaiter.cs 説明刷新**: CliArgs.cs 引数列挙 / ProcessWaiter.cs 説明が round 2 の `--caller-pid` + PID-only mode + bounded retry 追加に追随していなかった三者矛盾を解消。CliArgs.cs 列挙に `--caller-pid` 追加、ProcessWaiter.cs 説明に「PID-only モード (caller-pid > 0) + system-wide fallback (未指定時)、`MaxForceKillAttempts = 3` / `MaxEnumerationFailures = 5` の bounded retry」を追記
+- **[M4] CHANGELOG `## Updater v0.1.0` 動作確認項目の `3-step 置換` 記述を round 1 H1 + Codex P1 #3 反映の正確な記述に書き換え**: round 2 M3 で同 entry の API 説明は「2-step + CleanupBak/RollbackFromBak」に直したが、動作確認項目内の「3-step 置換が正しく動作」が漏れていた残骸を解消。「Manager dir 置換 (Replace 2-step + CleanupBak) + restart-exe 不在時の RollbackFromBak 自動復元 + Codex P1 #3 自動復元 (target 不在 + .bak 存在パターン)」と動作内容を正確化
+- **[M5] Program.cs / Logger.cs の「Logger fallback は到達不能」コメントを「通常運用では到達しないが defensive、消さないこと」に訂正**: round 1 M1 + L3 で「Program 側 path 確定で Logger fallback は到達不能化」と表現したが、CliArgs.Parse の `Path.GetFullPath` でも drive root 病的入力 (例: `--manager-target C:\`) では `Path.GetDirectoryName` が null/empty を返し fallback 経路に流れる極限ケースが存在する。「到達不能」表現を訂正、「通常運用では到達しないが極限ケース用に残してある defensive fallback、消さないこと」に書き換え (Program.cs / Logger.cs L43 / Logger.cs L58 の三者同期)
+- **[L1] FileReplacer.Replace の `targetExisted` dead value を削除、`Rollback` 呼び出しで `bakExists: true` を named arg で明示**: round 2 L2 で「target 不在 case を Error + return false」に塞いだ後、`targetExisted` 変数は計算するだけで使われない dead value 化していた。`if (!Directory.Exists(managerTargetDir)) { Error; return false; }` の early return に integrate、変数廃止。同 Replace 内 fail path で `Rollback(managerTargetDir, bakDir, true)` を `Rollback(managerTargetDir, bakDir, bakExists: true)` の named arg にして「Replace 経路では `.bak` は必ず存在する」という invariant をコード上で明示
+- **[L2] FileReplacer.RollbackFromBak のコメントを round 2 L2 後の現実に合わせて刷新**: 「bak が存在しない = 新規インストール扱い」という旧コメントは round 2 L2 (target 不在 case を Replace で塞いだ) 後の現実と乖離していた stale。「round 2 L2 後は Replace 成功 → 検証失敗で本関数が呼ばれる時点で `.bak` は実質的に存在する。defensive check として `bakExists` を計算して渡すのは外部 / 手動呼出しの fallback 経路として残す」に書き換え
+- **[L3] Logger.OpenSessionFile の counter 100 到達時 Warn message を loop 実体と一致させる**: round 2 L6 で追加した Warn が「100 件」と書いていたが、loop は `counter < 100` で抜けるので試行する候補は base name + suffix `_2` 〜 `_99` の計 99 件で off-by-one。「base + suffix _2 〜 _99 の 99 件全て衝突」に正確化。実害なしの表記ズレ
+
+#### Fixed (PR #152 Codex bot round 2 後追い)
+
+シニアレビュー round 2 と並行して Codex bot が 4 件発見 (P1 × 2 + P2 × 2):
+
+- **[Codex P1 #3] `.bak` を target 検証より先に削除 → 前回 rollback 失敗からの retry で復旧不能**: 前回 run で Step 1 (target → .bak rename) 成功 + Rollback も失敗した場合、`.bak` のみが intact な Manager。次回 retry で「過去 run の残骸 .bak 削除」branch が `.bak` を消すと、唯一の intact Manager が消失 + target も新 rename されて空 → 復旧不能。修正: `.bak` 削除前に target の存在を check し、**target 不在 + .bak 存在** = 前回 rollback 失敗パターンとして自動復元 (`.bak` → target に rename 戻し) して Replace を fail で抜ける構造に。次回 run で正常 path (target あり) に乗る。単体テスト (前回 rollback 失敗状態を artificial 再現) で旧 Manager 自動復元動作確認済
+- **[Codex P1 #1] `GetProcessesByName` system-wide 巻き添えリスクを `--caller-pid` で構造的解消**: round 1 L5 / round 2 L7 では「校内 1 PC 1 install 前提なら実害なし」と comment で acknowledged したが、Codex は P1 として「コード対応」を要求。`--caller-pid <PID>` optional 引数を追加、指定時は `Process.GetProcessById(pid)` で PID-only wait/kill (同 PC の他 install Manager 巻き添えを構造的に排除)。未指定時は従来の `GetProcessesByName` system-wide fallback (後方互換)。Phase 4 で Manager UI が `Process.GetCurrentProcess().Id` を渡す前提
+- **[Codex P2 #2] `--force-kill` の kill 失敗時に無限ループする**: permission denied (elevated Manager 等) で `Process.Kill` が失敗しても `continue` で再 polling → また同じプロセスが見つかる → 永遠にループ。bounded retry (`MaxForceKillAttempts = 3`) を追加、3 回連続 kill 失敗で fail (`Logger.Error` + return false → exit 3)
+- **[Codex P2 #4] `Process.GetProcessesByName` throw 時に空配列 fallback → 「Manager 既終了」誤判定**: IPC / WMI 一時不調等で enumeration が throw した場合、空配列で続行 = Manager 終了済扱いになり Manager 生存中に置換進行 → File-in-use エラー path。修正: enumeration 失敗を sentinel flag で区別、「unknown state、待機継続」扱いに変更 (空配列 fallback でも `return true` には流さない)。`MaxEnumerationFailures = 5` 連続失敗で abort
+
+#### Fixed (PR #152 シニアレビュー round 2)
+
+- **[M1] FileReplacer.Replace の parent dir 存在チェックが trailing-slash で誤動作する bug**: `Path.GetDirectoryName(managerTargetDir)` を TrimEnd なしで呼んでいたため、`managerTargetDir = "D:\Manager\"` (CliArgs の `Path.GetFullPath` が trailing slash を保持) の場合に `GetDirectoryName` が `"D:\Manager"` (Manager dir 自身) を返し、parent check が Manager dir 自身の存在を見る silent divergence があった。Program.cs:64 の log-dir 計算と pattern を揃え、`TrimEnd('\\', '/')` してから `GetDirectoryName` に渡す形に修正
+- **[M2] CliArgs.Parse の `Path.GetFullPath` catch が広すぎ、想定外例外を引数エラー (exit 2) に倒していた**: 旧実装は `catch (Exception ex)` で全例外を `ArgumentException` 変換 → exit 2。`SecurityException` / `UnauthorizedAccessException` 等の権限・環境問題まで「引数エラー」表示で Manager UI 側の障害解析を misleading にする path。`Path.GetFullPath` 公式契約の「引数自体の不備」系 3 種 (`ArgumentException` / `PathTooLongException` / `NotSupportedException`) に catch を絞り、それ以外は Program.cs:77 の `catch (Exception)` で exit 1 (予期しない例外) に倒す形に変更
+
+#### Changed (PR #152 シニアレビュー round 2)
+
+- **[M3] CHANGELOG `## Updater v0.1.0` の `3-step` 記述を正確化**: 同 PR 内の round 1 H1 修正で FileReplacer を「Replace (2-step) + CleanupBak / RollbackFromBak 別 API」に分離したのに、Updater v0.1.0 entry は「rename-rollback 3-step 置換」と旧記述のままだった unfortunate 残骸を解消。「Replace (Step 1 rename + Step 2 copy の 2-step API) + CleanupBak (cleanup) + RollbackFromBak (rollback) の 3 API、概念的には rename → copy → cleanup/rollback の 3 動作」と正確な API 説明に書き換え
+- **[L1] CliArgs クラス頭部 XML doc に `--wait-timeout 0 = 無制限待機` 追記** (round 1 L2 漏れ): round 1 L2 で UsageText には反映したが XML doc が漏れていた三者矛盾。漏れを解消、XML doc + UsageText で「default: 60、0 = 無制限待機」と一致
+- **[L2] FileReplacer の `targetExisted == false` を silent typo 吸収 → Error + return false に変更**: SPEC §3.7.4 で Updater は Manager UI からの更新 spawn 専用 (新規 install は Install.bat 担当) なので target dir 不在は caller の typo (`--manager-target` 誤指定) しかありえない。旧実装は Warn だけで copy を進めて誤 path に新規 install してしまう silent failure mode を作っていた。Error + return false に変更、caller (Manager UI / Phase 4) に引数エラーとして検出させる。「Updater は Manager UI からの更新 spawn 専用、新規 install は Install.bat を使用」案内も追加
+- **[L3] FileReplacer.Replace の stateful API (cleanup caller 責務) を XML doc 警告強化**: Replace 成功時の `.bak` cleanup が caller 規約に依存する footgun を XML doc 冒頭に `⚠ stateful API` で明示警告 + 「新規 caller を追加する場合は必ず CleanupBak/RollbackFromBak の呼び出しをペアで実装すること」を追記。API signature 変更 (e.g. IDisposable) は本 PR scope 外、docstring 強化で対応
+- **[L4] ProcessWaiter の `iter % 10` を `LogEveryNIter` 名前付き定数に抽出**: `PollIntervalMs × LogEveryNIter = 実 interval` の magic number 連動を `private const int LogEveryNIter = 10;` で明示化。PollIntervalMs を変えるとログ間隔も silent に変わる罠を解消、コメントで「現状 500ms × 10 = 5 秒ごと」と意図を明記
+- **[L5] Build-Updater の `Test-Path $binRelease` を `New-Item $outDir` より先に**: msbuild が exit 0 で抜けたが成果物 dir 生成失敗の pathological case で空 staging dir 残骸を作らないよう、check 先行・mutate 後 の order に整理。Build-Manager との pattern は今後も整える方向 (本 PR scope は Updater のみ)
+- **[L6] Logger.OpenSessionFile の counter 100 到達時に Console.Error Warn を追加**: 同一秒に 100 回 Initialize 試行で `FileMode.CreateNew` が IOException → Initialize catch で silent fallback → Console のみで続行する path を可視化。Phase 4 で Manager UI が retry loop を組んだ場合 / 自動テスト時に発火可能、現状運用では発火しないが silent fallback を可視化
+
+#### Fixed (PR #152 シニアレビュー round 1)
+
+- **[H1] Updater で restart-exe 検証が `.bak` 削除後 → 復旧不能 broken state を作る**: 旧実装は `FileReplacer.Replace` 内で .bak 削除まで行ってから Program 側で `File.Exists(args.RestartExe)` チェックしていた。staging 側に `GCTonePrism_Manager.exe` が無い release packaging bug 等で「旧 Manager 消失 + 新 Manager 不在」の復旧不能状態に陥る path。修正: `FileReplacer.Replace` を Step 1 (rename) + Step 2 (copy) のみに絞り、`.bak` 削除は `CleanupBak` メソッドに分離。失敗時の rollback も `RollbackFromBak` を public 化。Program.cs 側で Replace 成功後に restart-exe 存在検証 → OK なら CleanupBak、NG なら RollbackFromBak で旧 Manager 復元 + exit 6 の flow に変更。H1 シナリオの単体テスト (staging に Manager.exe を意図的に欠損させる) で「旧 Manager.exe 復元 + user data 維持 + .bak 消費済」の動作確認済
+
+#### Changed (PR #152 シニアレビュー round 1)
+
+- **[M1 + L3] `--log-dir` default の三者矛盾を解消**: UsageText / CliArgs XML doc / Logger fallback で「exe 隣」と「`<install>/logs/updater/`」が混在していて user が `--help` 読んだ後にログを別場所で探す silent path があった。SPEC §3.7.4 準拠の `<install>/logs/updater/` (manager-target の親から導出) に三者統一、UsageText / CliArgs コメント明記、Logger fallback は Program 側で path 確定保証 (CliArgs path 絶対化と相まって到達不能化) + コメントで「通常 path は Program 側確定、Logger fallback は到達不能化」明記
+- **[M2] FileReplacer 内 Step ラベルを `[Replace X/2]` に分離**: outer Program.cs の `[Step 1/3]` `[Step 2/3]` `[Step 3/3]` と inner FileReplacer の同じラベル形式が衝突して実機ログの障害解析時に紛らわしかった。inner を `[Replace 1/2]` `[Replace 2/2]` に変更、合わせて step 数も 3 → 2 (`.bak` 削除分離による H1 修正の副次効果) + CleanupBak は単独メッセージ
+- **[M3 + L4] CliArgs.Parse で path 4 種を `Path.GetFullPath` で絶対化**: `--staging` / `--manager-target` / `--restart-exe` / `--log-dir` が相対 path で渡されると Updater プロセスの CWD に依存する silent path があった。Parse 末尾で 4 path 全てを `GetFullPath` 通すことで、後段の Logger / FileReplacer / Process.Start 全箇所で path 絶対性を仮定可能に。L4 (`"\\"` 等の病的 root 入力) も `GetFullPath` で drive root absolute に正規化されて副次的に解消
+- **[L1] ProcessWaiter で初回 polling 時に既終了済の場合もログ残す**: Manager が呼び出し前に既に終了していると `[Step 1/3] Manager プロセスの終了を待機` の直後に何もログが出ず Phase 4 で「待機が機能しているか」を後追い確認できない問題を解消。`iter == 0` でも「Manager プロセスは既に終了済み、待機 skip」を 1 行出す
+- **[L2] `--wait-timeout 0` = 無限待機を UsageText に明記**: `ProcessWaiter.WaitForManagerExit` は `timeoutSeconds > 0` を check gate にしていて 0 → 無限待機の挙動だが、UsageText / SPEC は default 60 しか書いていなかった。`--wait-timeout <seconds>  ... (default: 60、0 = 無制限待機)` と UsageText に追記、誤って 0 渡して Updater hang する path を明文化で防ぐ
+- **[L5] ProcessWaiter の `GetProcessesByName` system-wide コメント追加**: `--force-kill` 時に同 PC で test 用 / production 用 Manager.exe が同時稼働している edge case で両方 kill される挙動を明文化。校内 1 install 想定では実害なしだが、将来 `--caller-pid` で自身の PID のみ wait/kill する形に拡張する余地ありと明記
+- **[L6] Logger に `_initFailed` ガード不要理由を明記**: Manager Logger は `_initFailed` ガード持ちだが Updater 版は持たない非対称性を「Initialize は Main() で 1 回しか呼ばれない設計、冪等性は `_initialized` の単純 return で十分」とコメントで明文化
+- **[L7] Manager と同じ ProjectGuid / Guid 同一値運用を確認**: Manager csproj の `ProjectGuid` と AssemblyInfo の `Guid` が同一値 (`EA046367-...`) で運用されているので、Updater 側 (`b5d71e9c-...`) も同一値で OK。既存慣行に従う
+
+#### Added (#108 Phase 3 完成: Updater 実装着手)
+
+- **`Build-Updater` function in Release.ps1**: `Companions/Updater/GCTonePrism_Updater.csproj` を `msbuild /p:Configuration=Release` で build、staging `<staging>/files/Companions/Updater/` にコピー。Manager と同じ pattern で nuget restore / native DLL 抽出は不要 (Updater は SQLite / WindowsAPICodePack 等の外部依存を持たない単純な Console app)
+- **Build-Updater 呼出し追加**: Main flow `Build-Launcher → Build-Manager → Build-Updater → Copy-Templates` の順に統合
+- **ExpectedFiles +2 件 (13 → 15)**: `files\Companions\Updater\GCTonePrism_Updater.exe` + `.exe.config` を SPEC §3.7.1 正規 zip 構造に追加
+- **TODO コメント更新**: `TODO Phase 3 (#108): Companions/Updater/ の build + staging を追加` を「Phase 3 完成: Companions/Updater/ の build + staging を `Build-Updater` で実装済」に書き換え
+
+詳細は `## Updater (Companions/Updater)` セクション v0.1.0 entry を参照。
+
 ### [Release Tooling v0.1.10] - 2026-05-13
 
 #### Changed (主変更: ディレクトリ命名規約 + Companions 再定義、SPEC v1.10.9 連動、#108 Phase 3 着手準備)
@@ -551,6 +699,42 @@
   - **release_notes は CHANGELOG.md から自動抽出**: 該当 Bundle セクション (`### [Bundle v<X.Y.Z>]`) をパースして `gh release create --notes` に渡す。`release_notes/` ディレクトリは持たない（CHANGELOG が SoT、重複記述なし）
 - **`Release.bat` を repo root に新設**: `Release.ps1` のラッパーバッチ。`RELEASE_VERSION` ファイルを読んで `-Version` を自動補完するため、本番運用は `.\Release.bat` 1 発で完結（ダブルクリック実行も可能）。引数を Release.ps1 にそのまま forward する仕組みのため `.\Release.bat -DryRun -SkipUpload` 等の組み合わせも可能。`-NoPause` 引数で CI / 自動化用の pause 抑止にも対応 (Shift-JIS + CRLF で保存、cmd.exe の日本語環境互換)
 - **`.gitignore` 拡張**: `release/` (Release.ps1 生成物) / `tools/godot/` / `tools/nuget-*.exe` (auto-DL) を git 追跡対象から除外
+
+---
+
+## Updater (Companions/Updater)
+
+`Companions/Updater/GCTonePrism_Updater.exe` の変更履歴。SPEC §2.4 / §3.7.4 参照。
+
+### [Updater v0.1.0] - 2026-05-13
+
+初回リリース (#108 Phase 3)。Manager 自身のファイル置換 + 再起動を担う最小 CLI。Windows のファイルロック制約「実行中のプロセスは自分自身を含むファイルを置き換えられない」を Manager に対してのみ解決する。Launcher / 常駐 Companions / shortcut bat は Manager UI 側 (§3.7.3、Phase 4) が直接置換できるため、Updater の責務は意図的に「Manager 置換 + 再起動」のみに絞られている。
+
+**構成** (8 ファイル):
+- `Program.cs` — entry + main flow (CLI parse → Manager 終了待ち → 置換 → 再起動)
+- `CliArgs.cs` — `--staging` / `--manager-target` / `--restart-exe` / `--log-dir` / `--wait-timeout` / `--force-kill` / `--caller-pid` の parser
+- `ProcessWaiter.cs` — Manager プロセス終了の polling。`--caller-pid` 指定時は `Process.GetProcessById(pid)` + ProcessName 検証で PID-only wait/kill (round 3 H1)、未指定時は `Process.GetProcessesByName("GCTonePrism_Manager")` の system-wide fallback。`--force-kill` 時の強制終了は bounded retry (`MaxForceKillAttempts = 3`)、`Process.GetProcessesByName` throw は連続 5 回で abort
+- `FileReplacer.cs` — `Manager/` dir 単位の rename-rollback 置換。`Replace` (Step 1 rename + Step 2 copy の 2-step API) + `CleanupBak` (`.bak` 削除、caller が restart-exe 検証 OK 後に呼ぶ) + `RollbackFromBak` (`.bak` から復元、caller が検証失敗時に呼ぶ) の 3 つの API に分割 (round 1 H1 修正により API 分離)。概念的には「rename → copy → cleanup or rollback」の 3 動作を rename-rollback の atomic スナップショットで実現。user data は `<install>/` 直下にあり Manager dir の外なので carry-over 不要 (SPEC §3.7.3「保護の仕組み」構造的保護に従う)
+- `Logger.cs` — Manager の `Services/Logger.cs` を簡略化、`Console.SetOut` フック無しの直接書込み式、出力先 `<install>/logs/updater/updater_<PCname>_<YYYY-MM-DD_HHmmss>.log`
+- csproj / App.config / AssemblyInfo.cs
+
+**Exit codes** (SPEC §3.7.4 / Program.cs docstring / `CliArgs.UsageText()` / PR #152 body と **5 者同期**、round 4 H-1 で 3 を分割 + M-1 で 1 を追記、round 5 H-1 で本 entry を 6 件→9 件同期、round 6 で 6 失敗時 rollback 仕様化):
+- `0` 成功
+- `1` 予期しない実行時例外 (Logger に stack trace、bug report 対象。parse 段階の例外は stderr のみ、round 6 Codex P2)
+- `2` 引数エラー / 必須引数不足 / `--restart-exe` が `--manager-target` 外 等。**parse 段階のため Logger 未初期化、stderr のみ** (round 6 Medium-4、Phase 4 Manager UI は stderr capture 必須)
+- `3` Manager プロセスが timeout 内に終了せず (`--force-kill` 未指定、付与か手動 close で再試行可)
+- `4` ファイル置換に失敗 (rollback 実施済、auto-recovery 経路も同 code、SPEC §3.7.4 参照)
+- `5` rollback にも失敗した致命的状態 (`.bak` から手動復元要)。round 6 で「新 Manager 起動失敗時の rollback も失敗」case を含む
+- `6` 新 Manager.exe の起動に失敗 (Process.Start null/throw、**spawn 直後 early-crash** (500ms HasExited check)、restart-exe 不在 等)。**round 6 で .bak から旧 Manager を自動復元してから本 code を返す** (Codex P1 + Medium-5)
+- `7` force-kill 試行が bounded retry (3 回) 超過 (permission denied 等、機械的再試行は無意味)
+- `8` process enumeration が連続 5 回失敗 (IPC/WMI 一時障害、短時間後の再試行で回復見込み)
+  - round 5 M-3 で timeout 経路は常に `3`、本 code 8 は「連続 N 回失敗で早期 abort」path 専用に限定 (両者排他)
+
+**呼出し前提**: Manager UI (Phase 4) が事前に download / staging / Launcher / Companions / shortcut bat / Updater 自身の置換まで完了させた後、Manager が `Process.Start("Companions\Updater\GCTonePrism_Updater.exe", "--staging ... --manager-target ... --restart-exe ...")` で spawn する。Manager は spawn 直後に graceful 終了、Updater は ProcessWaiter で完全終了を確認してから Manager 置換に進む。
+
+**動作確認**: ローカル単体テスト (staging dummy / target dummy / user data dummy) で Manager dir 置換 (Replace 2-step + CleanupBak) + user data 維持 + 前回 rollback 失敗状態からの自動復元 (round 2 Codex P1 #3) を確認。Manager UI 連携テストは Phase 4 で実施予定。
+
+**詳細な review 経緯**: round 1〜6 のシニア + Codex bot レビュー対応の詳細は `## Release Tooling v0.1.11` 配下の各 round entry を参照 (AGENTS.md「他セクションから参照」原則準拠、round 6 Medium-3)。本 entry は Updater v0.1.0 の高レベル summary、各 round で塞いだ silent path / 規約整合は Release Tooling v0.1.11 entries に詳述。
 
 ---
 

@@ -18,7 +18,7 @@
           (`-SkipUpload` で confirm prompt 自体を skip。CI 等の non-interactive 運用向け)
 
     Phase 2 (#108) 完成: templates/Install.bat / INSTALL_README.txt / Launcher.bat / Manager.bat 同梱
-    TODO Phase 3 (#108): Companions/Updater/ の build + staging を追加 (次 PR `feature/updater-phase3` で着手予定)
+    Phase 3 (#108) 完成: Companions/Updater/ の build + staging を `Build-Updater` で実装済
     TODO #101:           Companions/WindowProbe/ のループを追加 (#30 PauseOverlay 等が増えたら配列化)
     TODO Monitor:        Monitor/ 追加時にビルドステップ追加
 
@@ -1317,6 +1317,93 @@ function Build-Manager {
 }
 
 # ============================================================================
+# Phase 5.5: Companions/Updater を msbuild で Release ビルド (#108 Phase 3)
+# ============================================================================
+# SPEC §3.7.4: Manager 置換 + 再起動の最小 CLI。.NET Framework 4.8 で SQLite / WindowsAPICodePack
+# 等の外部依存を持たない単純な Console app なので、Build-Manager の nuget restore / native DLL
+# 抽出は不要。msbuild 直叩きでよい。
+function Build-Updater {
+    Write-Step "Updater を msbuild で Release ビルド"
+
+    $updaterDir = Join-Path $RepoRoot 'Companions\Updater'
+    $csproj = Join-Path $updaterDir 'GCTonePrism_Updater.csproj'
+    $binRelease = Join-Path $updaterDir 'bin\Release'
+
+    if (-not (Test-Path $csproj)) {
+        Fail "GCTonePrism_Updater.csproj が見つかりません: $csproj"
+    }
+
+    # 既存 bin/Release/ を消して clean build (Build-Manager と同じ思想)
+    if (Test-Path $binRelease) {
+        Write-Info "bin/Release/ を削除して clean build"
+        Remove-Item -Recurse -Force $binRelease
+    }
+
+    Write-Info "msbuild /p:Configuration=Release"
+    $exitCode = Invoke-ExternalProcess -FilePath $script:ResolvedMsBuild -Arguments @(
+        $csproj,
+        '/p:Configuration=Release',
+        '/verbosity:minimal',
+        '/nologo'
+    )
+    if ($exitCode -ne 0) {
+        Fail "Updater の msbuild に失敗しました (exit code: $exitCode)"
+    }
+    Write-Ok "msbuild 完了"
+
+    # bin/Release/ から staging へコピー (*.pdb 除外)
+    # 配布構造は SPEC §3.7.1 / §2.4 に従い `<staging>/files/Companions/Updater/` 配下に配置
+    #
+    # シニアレビュー round 2 L5: build 成果物 dir の存在 check を先に行ってから staging dir を
+    # 作る順序に。msbuild が exit 0 で抜けたが成果物 dir 生成失敗の pathological case で
+    # 空 staging dir 残骸を作らない (最終的に Clear-Staging で消えるが、check 順としては
+    # 「check first, mutate second」が clean)。
+    if (-not (Test-Path $binRelease)) {
+        Fail "Updater ビルド出力が見つかりません: $binRelease"
+    }
+    # シニアレビュー round 4 L-3: dir 存在 check に加え、`.exe` 1 件以上の存在も check。
+    # msbuild が exit 0 で抜けたが成果物 dir が空 (pathological case、msbuild target が空 sln を
+    # 受け取った等) の場合、`Get-ChildItem` 0 件で copy ループが silent に 0 回回り、
+    # `Write-Ok "Updater 成果物コピー完了"` を空コピーで通過する path があった。最終的に
+    # Assert-ExpectedFiles で fail するが、Build-Updater レベルで早期 fail させた方が原因切り分け
+    # しやすい (msbuild step が悪いのか staging copy step が悪いのかを切り分け)。
+    $exeCount = (Get-ChildItem $binRelease -Recurse -File -Filter '*.exe' -ErrorAction SilentlyContinue | Measure-Object).Count
+    if ($exeCount -lt 1) {
+        Fail "Updater ビルド出力に .exe が見つかりません ($binRelease 内): msbuild は exit 0 だが成果物が生成されていない可能性"
+    }
+    # シニアレビュー round 5 L-2: 任意の .exe 1 件ではなく、**特定の exe 名**
+    # (`GCTonePrism_Updater.exe`) の存在も check。csproj の AssemblyName を将来誰かが変更して
+    # 別名の .exe を生成しても round 4 L-3 だけだと build step green (任意の .exe で pass)、後段
+    # Assert-ExpectedFiles で初めて検出。特定名 check で「msbuild 成功 + 期待 exe 名生成」まで
+    # Build-Updater レベルで担保する。csproj 仕様変更時の早期検出。
+    $expectedExe = Join-Path $binRelease 'GCTonePrism_Updater.exe'
+    if (-not (Test-Path $expectedExe)) {
+        Fail "Updater ビルド出力に GCTonePrism_Updater.exe が見つかりません: csproj の AssemblyName が変更された可能性 (期待 path: $expectedExe)"
+    }
+    $outDir = Join-Path $FilesDir 'Companions\Updater'
+    New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+
+    Get-ChildItem $binRelease -Recurse | Where-Object {
+        -not $_.PSIsContainer -and $_.Extension -ne '.pdb'
+    } | ForEach-Object {
+        $rel = $_.FullName.Substring($binRelease.Length + 1)
+        $dest = Join-Path $outDir $rel
+        $destDir = Split-Path $dest -Parent
+        if (-not (Test-Path $destDir)) {
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+        }
+        Copy-Item $_.FullName $dest
+    }
+    Write-Ok "Updater 成果物コピー完了"
+
+    Write-Info "出力ファイル一覧:"
+    Get-ChildItem $outDir -Recurse -File | ForEach-Object {
+        $rel = $_.FullName.Substring($outDir.Length + 1)
+        Write-Host "        $rel ($($_.Length) bytes)" -ForegroundColor DarkGray
+    }
+}
+
+# ============================================================================
 # Phase 6: Install.bat / INSTALL_README.txt + Launcher.bat / Manager.bat 同梱
 # ============================================================================
 # zip 配布物の構造 (SPEC §3.7.1 正規 zip 構造):
@@ -1411,7 +1498,10 @@ function Assert-ExpectedFiles {
         'files\Manager\Microsoft.WindowsAPICodePack.dll',
         'files\Manager\Microsoft.WindowsAPICodePack.Shell.dll',
         'files\Manager\x64\SQLite.Interop.dll',
-        'files\Manager\x86\SQLite.Interop.dll'
+        'files\Manager\x86\SQLite.Interop.dll',
+        # Updater (Phase 3、SPEC §3.7.4): Manager 置換 + 再起動の最小 CLI、Companions/ 配下に配置
+        'files\Companions\Updater\GCTonePrism_Updater.exe',
+        'files\Companions\Updater\GCTonePrism_Updater.exe.config'
     )
 
     $missing = @()
@@ -1581,6 +1671,7 @@ Assert-WorkingTreeClean -Context "manifest sync 後"
 Clear-Staging
 Build-Launcher
 Build-Manager
+Build-Updater
 Copy-Templates
 Assert-ExpectedFiles
 Clear-OldGodot
