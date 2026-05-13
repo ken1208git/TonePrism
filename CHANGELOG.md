@@ -39,6 +39,27 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
+### [Release Tooling v0.1.14] - 2026-05-14
+
+#### Changed (refactor/release-tooling-cleanup、#142 / #143 / #144 / #146)
+
+PR #140 シニアレビューで保留していた small refactor 4 件を 1 PR でまとめて消化、Release.ps1 / Release.bat の clean-up:
+
+- **[#146] `Assert-WorkingTreeClean` の `$Context` 文字列マッチを `[switch]$PostSync` に置換** (PR #140 round 10 M3): 旧実装は `if ($Context -like '*sync 後*')` で特例 Fail message を切り替えていたが、call site 側の文字列 (`"manifest sync 後"`) を変えた瞬間に特例メッセージが silent に失われ汎用メッセージに落ちる脆弱性 (日本語 → 英語化、typo、文言調整等で簡単に壊れる)。`[switch]$PostSync` parameter で明示切り替え、`$Context` は「ログ表示用」として責務分離。call site (`Assert-WorkingTreeClean -Context "manifest sync 後" -PostSync`) も更新
+- **[#144] `Read-*` (LauncherVersion / ManagerVersion / ComponentVersions) → `Assert-*` rename** (PR #140 round 10 M1): PowerShell verb convention 上「`Read-*` は対話的入力 (`Read-Host` 等)」を意味するため、ファイル読み出し + `Fail` 到達しうる本 3 関数には不適。round 6 (`Test-Preflight → Assert-Preflight`) / round 9 (`Test-ExpectedFiles → Assert-ExpectedFiles`) で確立した「Fail する関数は `Assert-*`」sweep を完結。`Assert-LauncherVersion` / `Assert-ManagerVersion` / `Assert-ComponentVersions` の 3 関数と全 call site を rename
+- **[#142] `2>&1` trap catalog と per-site コメントの方針統一** (PR #140 round 9 M1): catalog 化 ([Release.ps1:95-160](Release.ps1) の `SUPPRESS_BOTH` / `CAPTURE_DIAGNOSTIC` / `CAPTURE_STDOUT` / `CAPTURE_STDOUT_PASS_STDERR` / `PASS_THROUGH` / `STOP_TRAP`) と per-site コメントが「ラベル参照 + ほぼ同内容の詳細説明」を両方書く形に逆戻りしていた問題に対処。**case (c) catalog 一般則 + per-site 固有理由** 方針で統一、catalog 冒頭に per-site 書き方ガイドラインを明示 (「catalog 既述の一般則は per-site から削除」「per-site にはその call site でしか起きない silent danger / 特殊配慮のみ書く」「判定基準: catalog の説明と等価なら per-site から削除」)。実 per-site (`Assert-WorkingTreeClean` の `CAPTURE_STDOUT_PASS_STDERR` 引用) も「git 失敗時の silent pass 防止」の固有理由のみ残す形に短縮済 (#146 修正と同時)
+- **[#143] Release.bat docstring の cmd.exe 経緯を SPECIFICATION.md §3.7.9 に分離** (PR #140 round 9 M3): Release.bat (165 行) の REM (~100 行) が BOM 失敗症状 / chcp フロー / Side effect 警告 / findstr validation 経緯 / top-level goto pattern 等を inline で全部抱えていた。SPECIFICATION.md に新節 **§3.7.9 「Release.bat の cmd.exe 互換性ノート」** を新設 (3.7.9.1 ファイル形式の制約 / 3.7.9.2 chcp 65001 切替 / 3.7.9.3 delayed expansion `!` 副作用 / 3.7.9.4 exit code dispatch を top-level goto label で行う理由 / 3.7.9.5 exit code 体系 / 3.7.9.6 codepage 復元のタイミング)。Release.bat 本体は「Usage + ASCII boundary 注記 + SPEC §3.7.9 参照」の最小構成に圧縮 (165 → **99 行**、約 40% 削減)。次に Release.bat を触る reader の読み解きコスト削減
+
+#### Notes (Release.bat encoding 取扱い)
+
+Release.bat の編集は **UTF-8 (no BOM) + CRLF** 厳守。Write/Edit ツールが encoding を破壊するケースがあり (本 PR でも一度発生)、その場合は `[System.IO.File]::WriteAllText($path, $content, [System.Text.UTF8Encoding]::new($false))` で UTF-8 no BOM に矯正 + 改行も `-replace "\r?\n", "\r\n"` で CRLF に統一する後処理を行うこと (SPEC §3.7.9.1 参照)
+
+#### 検証
+
+通常 DryRun: Preflight → Bundle 参照リンク定義の検証 (skip + 2 行 warn) → コンポーネント version を読み取り (Assert-LauncherVersion / Assert-ManagerVersion 動作確認) → Build- 群 → ExpectedFiles 15/15 OK → DRY-RUN 完了。Release.bat parse エラー無し、`@echo off` 機能 OK (BOM 無し 99 行)。
+
+---
+
 ### [Release Tooling v0.1.13] - 2026-05-14
 
 #### Changed (PR #155 シニアレビュー round 1)
