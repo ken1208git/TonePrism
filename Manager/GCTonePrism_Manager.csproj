@@ -6,7 +6,7 @@
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProjectGuid>{EA046367-F4B6-4EE0-80EC-6F87D82FE4EF}</ProjectGuid>
     <OutputType>WinExe</OutputType>
-    <RootNamespace>Manager</RootNamespace>
+    <RootNamespace>GCTonePrism.Manager</RootNamespace>
     <AssemblyName>GCTonePrism_Manager</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>

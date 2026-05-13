@@ -52,6 +52,21 @@
 - **PathManager.cs / path_manager.gd の self-reference 修正**: Manager / Launcher 自身が runtime で `"GCTonePrism_Manager"` / `"GCTonePrism_Launcher"` という親 dir 名を検出してプロジェクトルートを解決していたロジックを `"Manager"` / `"Launcher"` に置換。新 install 構造で正しく動く
 - **README.md ディレクトリ構成図を新 dir 名で更新** + 命名規約への参照を追加
 
+#### Fixed (PR #150 シニアレビュー round 5)
+
+- **[M1] `:shortcut_failed` ラベルが migration 完了状態を案内しない**: overwrite 経路で migration 成功 + shortcut copy 失敗のケースで、user が「shortcut が壊れたから手動で旧 dir 名でフォルダ作り直そう」と誤対処して migration を巻き戻す path があった。`:copy_failed` には「shortcut bat はすでに新版で配置済み」hint があるのに `:shortcut_failed` は非対称で「書き込み権限確認」だけだった。修正: round 3 M1 (`:migrate_failed_launcher` の `MANAGER_MIGRATED` sentinel 条件付き案内) と同パターンで、`:shortcut_failed` に `MANAGER_MIGRATED` / `LAUNCHER_MIGRATED` sentinel を確認する `:shortcut_failed_with_migration_note` 経路を追加。両 sentinel のいずれかが立っていれば「dir rename は完了済、旧 dir 名に戻さないこと」「Install.bat 再実行で続行可能、migration は冪等」を案内。`LAUNCHER_MIGRATED` sentinel も新規追加 (`:migrate_legacy_launcher` 成功時に set)
+
+#### Changed (PR #150 シニアレビュー round 5)
+
+- **[L1] `set INSTALL_MODE=overwrite` / `set INSTALL_MODE=new` を quoted set に統一**: Install.bat 冒頭 line 47-55 の規約「numeric sentinels だけが unquoted、path / user-input は quoted」に対し、`INSTALL_MODE` は `"overwrite"` / `"new"` の string sentinel で numeric ではないため quoted 形式が一貫する。実害は限定的だが、行末空白が紛れた場合に trailing space で `if "%INSTALL_MODE%"=="overwrite"` が false になる silent bug 余地。`set "INSTALL_MODE=overwrite"` / `set "INSTALL_MODE=new"` の quoted 形に修正
+- **[L2] `:do_robocopy` ラベルを `:overwrite_set_mode` に rename**: ラベル名は「robocopy を実行する」と読めるが実体は `set INSTALL_MODE=overwrite` + `goto :copy_shortcuts` だけで、実際の robocopy は `:do_robocopy_overwrite` で行われる。round 3 L3 の flow 並び替え (migration / mkdir → copy_shortcuts → robocopy) で生じた名前と実態の乖離。`:overwrite_set_mode` に rename して「overwrite 経路の終端 sentinel」であることを明示
+- **[L3] Manager csproj `<RootNamespace>` を `Manager` → `GCTonePrism.Manager` に**: AGENTS.md "Naming Conventions" で明文化した「C# namespace = `GCTonePrism.<Name>`」規約と csproj 設定が不一致だった。既存 30+ ファイルは全て `namespace GCTonePrism.Manager` 明示宣言なので実害なしだが、VS で新規ファイル scaffolding すると namespace 候補が `Manager` で出てきて新規 contributor が誤った namespace で書く余地があった。csproj 修正で scaffolding default も規約準拠に。msbuild Release で既存ビルド成功確認済 (既存 .cs は明示 namespace 宣言で影響なし)
+- **[L4] SPEC §マイルストーン1 line 2604 を新 dir 名に**: 完了済 milestone の技術的達成項目に旧 dir 名 `GCTonePrism_Launcher/` / `GCTonePrism_Manager/` がそのまま残っていた pre-existing inconsistency。本 PR の dir rename sweep の一環で「Launcher/フォルダとManager/フォルダの作成 (旧 dir 名 ... から v1.10.9 でリネーム)」に更新
+
+#### Acknowledged (PR #150 シニアレビュー round 5 L5)
+
+- **PR #149 由来の「シニアレビュー round X LY」識別子の残存**: round 4 L3 で本 PR 由来の round tag を削除する catalog を出したが、PR #149 由来 (Phase 2 PR、`templates/Install.bat:98/101/116/488` および `templates/show_folder_dialog.ps1:34/49/64`) は本 PR scope 外として未 sweep。**意図的判断**: 本 PR の責務は dir rename + Companions 再定義 + Updater 役割再定義であり、過去 PR 由来のコメントスタイル sweep は別 cleanup PR の scope。本 PR では PR #150 由来分のみ削除 (round 4 L3) + 過去 PR 由来は据え置きで static inconsistency が意図的であることを明記
+
 #### Fixed (PR #150 シニアレビュー round 4)
 
 - **[H1] round 2 M2 の Launcher 側 begins_with regression**: `exe_path.begins_with(launcher_folder_check + "/")` 形式に変更したが、`exe_path = OS.get_executable_path().get_base_dir()` は **末尾 "/" を持たない** ため、正規 install 構造 (`<install>/GCTonePrism/Launcher/GCTonePrism_Launcher.exe` で base_dir = `.../Launcher`) で `begins_with(".../Launcher/")` が **常に false** を返す regression があった。priority-1 (prism.db) で base_directory は正しく取れているのに post-loop validation で false にひっかかり、Launcher 起動時に毎回 `push_error("実行ファイルが Launcher フォルダ内にありません")` が走る path。Manager 側 (.NET の `AppDomain.CurrentDomain.BaseDirectory` が末尾 `\` 付き) は偶然動いていたため round 2 では発覚せず。修正: 「等値 OR separator 付き begins_with」の二段比較 (`exe_path == folder OR exe_path.begins_with(folder + "/")`) に変更、Godot get_base_dir の trailing slash 無し仕様に対応。Manager 側も対称性 + .NET ランタイムの BaseDirectory 仕様変更への future-proofing のため同じ二段比較に揃えた。**今後 path_manager 系を編集する場合は実機 Launcher 起動でエラー出ないことを必ず確認すること** (DRY-RUN だけでは検出不能、本 PR で見落としたのと同じパターンを避けるため)

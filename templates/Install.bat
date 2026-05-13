@@ -294,12 +294,15 @@ REM Sentinel: Manager 移行成功時にセット。:migrate_failed_launcher が
 REM 案内する条件として使う (Manager 不在で skip された場合は未 set なので誤情報を避ける)。
 set MANAGER_MIGRATED=1
 :migrate_legacy_launcher
-if not exist "%INSTALL_TARGET%\GCTonePrism_Launcher\" goto :do_robocopy
+if not exist "%INSTALL_TARGET%\GCTonePrism_Launcher\" goto :overwrite_set_mode
 if exist "%INSTALL_TARGET%\Launcher\" goto :migrate_conflict_launcher
 echo [INFO] 旧構造 (v0.2.0) 検出: GCTonePrism_Launcher\ → Launcher\ に移行
 move "%INSTALL_TARGET%\GCTonePrism_Launcher" "%INSTALL_TARGET%\Launcher" >nul
 if errorlevel 1 goto :migrate_failed_launcher
-goto :do_robocopy
+REM Sentinel: Launcher 移行成功時にセット。:shortcut_failed が「Launcher 移行済」を
+REM 案内する条件として使う (:migrate_failed_launcher / :shortcut_failed 共通の状態案内)。
+set LAUNCHER_MIGRATED=1
+goto :overwrite_set_mode
 
 :migrate_conflict_manager
 echo.
@@ -360,8 +363,8 @@ echo        手動で以下のリネームを行えば回避可能:
 echo          "%INSTALL_TARGET%\GCTonePrism_Launcher" → "%INSTALL_TARGET%\Launcher"
 goto :fail
 
-:do_robocopy
-REM Set sentinel for the unified :copy_shortcuts → :do_robocopy_dispatch flow below.
+:overwrite_set_mode
+REM Overwrite 経路の終端: INSTALL_MODE sentinel を立てて :copy_shortcuts に合流。
 REM Both overwrite and new_install paths go through :copy_shortcuts first so that
 REM shortcut bat updates happen BEFORE robocopy starts.
 REM   旧 flow: migration / mkdir → robocopy → copy_shortcuts → install_done
@@ -372,7 +375,7 @@ REM 実体は新 dir `<install>/Launcher/` に既に移動済 → user が Launc
 REM で「ファイルが見つかりません」になる窓があった。shortcut copy を先に実施することで
 REM 「中断時も shortcut bat は新 path を指す」状態を保証し、Install.bat 再実行で robocopy
 REM リトライ → 復旧、の経路を整合的にする。
-set INSTALL_MODE=overwrite
+set "INSTALL_MODE=overwrite"
 goto :copy_shortcuts
 
 :new_install
@@ -384,7 +387,7 @@ echo [FAIL] インストール先フォルダを作成できませんでした: 
 echo        書き込み権限を確認してください。
 goto :fail
 :new_mkdir_ok
-set INSTALL_MODE=new
+set "INSTALL_MODE=new"
 goto :copy_shortcuts
 
 :copy_shortcuts
@@ -458,6 +461,23 @@ goto :fail
 echo.
 echo [FAIL] ショートカット bat のコピーに失敗しました ["%INSTALL_PARENT_NO_TRAIL%"]。
 echo        書き込み権限を確認してください。
+REM Migration が走った場合は user に「dir rename は完了済」を案内 (:migrate_failed_launcher と
+REM 同パターン、:copy_failed の「shortcut bat はすでに新版」hint との対称性)。user が
+REM 「shortcut が壊れたから手動で旧 dir 名に戻そう」と誤対処して migration を巻き戻す path
+REM を防ぐ。両 sentinel (Manager/Launcher) が立つのは「両方の rename 成功時」、片方のみは
+REM 「片方 skip (= 元から不在) + もう片方 rename 成功」のケース。
+if defined MANAGER_MIGRATED goto :shortcut_failed_with_migration_note
+if defined LAUNCHER_MIGRATED goto :shortcut_failed_with_migration_note
+goto :fail
+
+:shortcut_failed_with_migration_note
+echo.
+echo  [注意] 旧構造 (v0.2.0) → 新構造への dir rename はすでに完了しています:
+if defined MANAGER_MIGRATED  echo          "%INSTALL_TARGET%\Manager"   [旧 GCTonePrism_Manager から rename 済]
+if defined LAUNCHER_MIGRATED echo          "%INSTALL_TARGET%\Launcher"  [旧 GCTonePrism_Launcher から rename 済]
+echo         旧 dir 名 ["%INSTALL_TARGET%\GCTonePrism_*"] に戻さないでください。
+echo         書き込み権限を解消してから Install.bat を再実行すれば、shortcut bat だけ
+echo         再書き込みされて続行可能です [migration は冪等、再走しても影響なし]。
 goto :fail
 
 :install_done
