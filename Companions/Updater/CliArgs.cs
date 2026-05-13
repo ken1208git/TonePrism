@@ -199,6 +199,7 @@ namespace GCTonePrism.Updater
                 "Usage:\n" +
                 "  GCTonePrism_Updater.exe --staging <path> --manager-target <path> --restart-exe <path>\n" +
                 "                          [--log-dir <path>] [--wait-timeout <seconds>] [--force-kill]\n" +
+                "                          [--caller-pid <PID>]\n" +
                 "\n" +
                 "Required:\n" +
                 "  --staging <path>          staging dir のルート (中の files/Manager/ をソースに使う)\n" +

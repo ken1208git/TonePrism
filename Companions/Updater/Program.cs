@@ -7,12 +7,15 @@ namespace GCTonePrism.Updater
     /// <summary>
     /// GCTonePrism_Updater entry point.
     ///
-    /// 責務 (SPEC §3.7.4 minimum scope):
-    ///   1. CLI 引数 parse
-    ///   2. Manager プロセス完全終了を polling 待機
-    ///   3. `Manager/` dir を rename-rollback 方式で置換
-    ///   4. 新 Manager.exe を起動
-    ///   5. 自分終了
+    /// 責務 / Run() のステップ構成 (SPEC §3.7.4 minimum scope、round 7 Medium-2 で docstring と
+    /// log ラベルを同期):
+    ///   Step 0   : CLI 引数 parse (Main 内、log には出ない)
+    ///   Step 0.5 : Logger 初期化 (Main 内、log には出ない)
+    ///   Step 1/4 : Manager プロセス完全終了を polling 待機 (Run 内、`[Step 1/4]` log)
+    ///   Step 2/4 : `Manager/` dir を rename-rollback 方式で置換 (Run 内、`[Step 2/4]` log)
+    ///   Step 3/4 : 新 Manager.exe を起動 + early-crash check (Run 内、`[Step 3/4]` log)
+    ///   Step 4/4 : `.bak` を best-effort 削除 (起動成功確認後、Run 内、`[Step 4/4]` log)
+    ///   exit     : 自分終了 (return exit code)
     ///
     /// Manager UI 側 (§3.7.3 [4]〜[10]、Phase 4) が Launcher / Companions / shortcut bat / Updater 自身の
     /// 置換まで担当した後で本 Updater を spawn する。本 Updater は spawn 後に Manager が graceful 終了
@@ -39,6 +42,21 @@ namespace GCTonePrism.Updater
     {
         private static int Main(string[] args)
         {
+            // round 7 Codex P2: parse 段階の stderr 出力 (exit 2 / parse-stage exit 1) を UTF-8 で
+            // 出すため、`Console.OutputEncoding = UTF-8` を Main 冒頭 (Logger.Initialize **より前**)
+            // で先行設定する。
+            //
+            // 旧実装は `Logger.Initialize` (Step 0.5) 内でしか UTF-8 を設定していなかったため、
+            // parse 失敗 path (exit 2 / parse-stage exit 1) は Logger 初期化前に走り stderr が OS
+            // default codepage (日本語 Windows = CP932) で出ていた。round 6 Medium-4 で SPEC §3.7.4
+            // に「Phase 4 Manager UI は UTF-8 で stderr capture する規約」と書いたのに、その capture
+            // 対象の stderr 自体が UTF-8 で出ていない自己矛盾 → Manager UI 側で mojibake する path。
+            //
+            // .NET の `Console.OutputEncoding` setter は内部的に `Console.Out` と `Console.Error`
+            // 両方の encoding を変えるので 1 行で stderr もカバー。失敗時 (テスト環境で Console
+            // redirect 等) は best-effort で swallow、CLI 動作には影響なし。
+            try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { /* best-effort */ }
+
             // ----- Step 0: 引数 parse -----
             CliArgs parsed;
             try
@@ -130,7 +148,7 @@ namespace GCTonePrism.Updater
             // (timeout / force-kill 超過 / enumeration 失敗) を別 exit code に分岐できる。
             // Phase 4 Manager UI が再試行戦略を組む際に「再試行で直る (8)」「user 介入要 (3)」
             // 「構造的問題 (7)」を区別可能。
-            Logger.Info("[Step 1/3] Manager プロセスの終了を待機");
+            Logger.Info("[Step 1/4] Manager プロセスの終了を待機");
             WaitResult waitResult = ProcessWaiter.WaitForManagerExit(args.WaitTimeoutSeconds, args.ForceKill, args.CallerPid);
             switch (waitResult)
             {
@@ -156,7 +174,7 @@ namespace GCTonePrism.Updater
             // が無いケースで「旧 Manager 消失 + 新 Manager 不在」の復旧不能 broken state があった。
             // 修正: Replace は Step 1 (rename) + Step 2 (copy) のみ → restart-exe 存在検証 → OK なら
             // CleanupBak、NG なら RollbackFromBak で旧 Manager 復元。これで H1 silent path を閉じる。
-            Logger.Info("[Step 2/3] Manager dir 置換 (rename-rollback)");
+            Logger.Info("[Step 2/4] Manager dir 置換 (rename-rollback)");
             bool replaced;
             try
             {
@@ -222,7 +240,7 @@ namespace GCTonePrism.Updater
             // failure path を塞ぐ。500ms 以内に exit したら early-crash と判定、RollbackFromBak +
             // exit 6 に倒す。SPEC §3.7.4「一瞬 console が出て新 Manager が立ち上がる」体験を
             // 損なわない範囲の待機。
-            Logger.Info("[Step 3/3] 新 Manager.exe を起動");
+            Logger.Info("[Step 3/4] 新 Manager.exe を起動");
             try
             {
                 var psi = new ProcessStartInfo
@@ -283,7 +301,9 @@ namespace GCTonePrism.Updater
 
             // ----- Step 4: .bak 削除 (起動成功確認後、Codex P1 で round 6 で本位置に移動) -----
             // best-effort、失敗してもアップデート自体は成功扱い (.bak 残骸は手動削除 or 次回 Replace で
-            // 自動掃除)
+            // 自動掃除)。round 7 Medium-1 で log ラベル `[Step 4/4]` を明示追加 (Step ラベル系列を
+            // 3/3 → 4/4 に揃え、docstring 責務 5 ステップとの不整合も解消)。
+            Logger.Info("[Step 4/4] .bak を best-effort 削除");
             FileReplacer.CleanupBak(args.ManagerTargetDir);
 
             Logger.Info("============================================================");

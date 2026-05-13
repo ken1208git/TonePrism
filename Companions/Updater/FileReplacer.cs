@@ -60,8 +60,10 @@ namespace GCTonePrism.Updater
             // シニアレビュー round 2 M1: trailing-slash 付き path に対する parent 計算の silent
             // divergence を解消。`Path.GetDirectoryName("D:\Manager\")` は `"D:\Manager"` (Manager
             // dir 自身) を返すので、TrimEnd で trailing slash を剥がしてから親計算する必要がある。
-            // Program.cs:64 の log-dir 計算と同じ pattern。CliArgs の Path.GetFullPath は trailing
-            // slash を保持するため、ここで明示 TrimEnd しないと bug 化する。
+            // Program.cs の log-dir 計算 (`Path.GetDirectoryName(ManagerTargetDir.TrimEnd(...))`)
+            // と同じ pattern。CliArgs の Path.GetFullPath は trailing slash を保持するため、
+            // ここで明示 TrimEnd しないと bug 化する。
+            // (round 7 Low-1: コード rot 防止のため行番号参照を削除、コメント引用に変更)
             string parentDir = Path.GetDirectoryName(managerTargetDir.TrimEnd('\\', '/'));
             // round 5 L-1: 2 branch に分けてエラーメッセージを区別。旧実装は両 case で
             //   "manager-target の親 dir が存在しません: {parentDir}" 一括だったため、
@@ -128,10 +130,11 @@ namespace GCTonePrism.Updater
             }
 
             // [Replace 1/2] target → .bak リネーム (rollback 元のスナップショット作成)
-            // シニアレビュー round 1 M2: Program.cs の outer Step と語彙衝突しないよう、inner は
-            // [Replace X/Y] のラベルを使う。outer = Program.cs の [Step 1/3] (Manager 待機) /
-            // [Step 2/3] (本 Replace 呼出し) / [Step 3/3] (起動)、inner = 本 FileReplacer の
-            // [Replace 1/2] (rename) / [Replace 2/2] (copy)、CleanupBak 内は単独メッセージ。
+            // シニアレビュー round 1 M2 + round 7 Medium-1: Program.cs の outer Step と語彙衝突
+            // しないよう、inner は [Replace X/Y] のラベルを使う。outer = Program.cs の [Step 1/4]
+            // (Manager 待機) / [Step 2/4] (本 Replace 呼出し) / [Step 3/4] (起動 + early-crash check)
+            // / [Step 4/4] (.bak 削除)、inner = 本 FileReplacer の [Replace 1/2] (rename) /
+            // [Replace 2/2] (copy)、CleanupBak 内は単独メッセージ。
             //
             // round 2 L2: target dir 不在は **caller の引数誤り** として fail back する。SPEC §3.7.4
             // で Updater は Manager UI からの更新用 spawn 専用 (新規 install は Install.bat 担当)
@@ -195,7 +198,12 @@ namespace GCTonePrism.Updater
             string bakDir = managerTargetDir.TrimEnd('\\', '/') + ".bak";
             if (!Directory.Exists(bakDir))
             {
-                // 新規インストール時など、そもそも `.bak` が作られていないケース
+                // round 7 Low-3: round 3 L2 で「Updater は更新 spawn 専用、新規 install は Install.bat」
+                // 方針確立後は、本 branch は **Replace が rename 前 (Step 1) で abort して .bak 作成に
+                // 至っていない pathological 経路**、または **過去 run で既に CleanupBak が走った後の
+                // 想定外再呼出し** でのみ到達する fallback 経路。「新規インストール時など」という旧
+                // コメントは round 3 L2 方針と矛盾していたため訂正 (round 6 Low-1 の Rollback 側修正と
+                // 同じ方針整合化、Low-1 が同 file 内で半分しか適用されていなかった抜けを解消)。
                 return;
             }
             Logger.Info($".bak を削除 (best-effort): {bakDir}");
