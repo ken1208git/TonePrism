@@ -39,7 +39,17 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
-### [Release Tooling v0.1.11] - 2026-05-13
+### [Release Tooling v0.1.12] - 2026-05-13
+
+#### Added (fix/changelog-link-sync)
+
+- **CHANGELOG 末尾 Bundle 参照リンク定義の運用ルール + 強制 fence を追加**: PR #152 マージ後に発見した「CHANGELOG 末尾の Keep a Changelog 参照リンク定義が 2026-03 (Launcher v0.5.7 / Manager v0.7.6) から完全に止まっており、Bundle 移行後 (2026-05-11 以降) の `[Bundle v0.1.0]` / `[Bundle v0.2.0]` が dangling reference 状態」の問題に対処。
+  - **CHANGELOG.md**: 末尾参照リンクブロックに `[Bundle v0.2.0]` / `[Bundle v0.1.0]` の link 定義追加 + `<!-- ... -->` コメントで Bundle 移行後の規約 (個別 component リンクは追加しない、Bundle release が SoT) を明文化
+  - **AGENTS.md** `Release and Versioning` セクション: 「Bundle entry 追加時に CHANGELOG 末尾の参照リンク定義も同時追加」ルールを明文化 + Bundle 移行後の個別 component 見出しが Markdown 上 dangling reference になることを許容理由付きで規定 (SPEC §3.7.7「Bundle release が SoT」規約整合)
+  - **Release.ps1**: `Assert-ChangelogLinkDefs` 関数を追加 (Phase 7.5)、main flow に組み込み (`Assert-ExpectedFiles` 直後)。release 実行前に該当 Bundle version の参照リンク定義が末尾にあるか verify し、無ければ `Fail` で停止する fence。自動 mutation (script が CHANGELOG 末尾を書き換える) は採らず、規約遵守を物理的に強制する形 (人間 / Claude いずれのミスも release.bat 実行直後に物理的に検知される)
+- **DRY-RUN 検証**: 本 PR 内で「リンク定義が存在する case」(PASS) を確認、別 fixture で「未追加 case」を `Assert-ChangelogLinkDefs` が `Fail` するか動作確認 (= fence 機能の実証)
+
+
 
 #### Fixed (PR #152 Codex bot round 7 後追い + シニアレビュー round 8 + 重大発見への対応)
 
@@ -1817,6 +1827,26 @@ PR #150 で dir rename (`GCTonePrism_Manager/` → `Manager/`) に連動して `
 
 ---
 
+<!--
+参照リンク定義 (Markdown reference-style links resolve target)
+
+Bundle 移行後 (2026-05-11 以降): GitHub Releases tag は Bundle 単位 (`v<X.Y.Z>` 形式) のみ。
+個別 component (Launcher / Manager / Updater / Release Tooling) は Bundle release に同梱され
+独立 tag を持たないため、本ファイル本文中の `### [Launcher v0.5.17]` 等の角括弧見出しは
+Markdown 上 dangling reference (text として表示、リンクとして機能しない) になる。これは
+SPEC §3.7.7「Bundle release が SoT」規約準拠の意図的な状態で、本文情報は `## Bundle`
+entry 経由か commit 履歴で追跡可能。
+
+Bundle 移行前 (2026-03 まで): Launcher / Manager の個別 GitHub Releases tag (`Launcher_v0.5.7`
+/ `Manager_v0.7.6` 等) は実在するため、過去履歴として参照リンク定義を残置。
+
+新規 Bundle release 時は本ブロックに `[Bundle vX.Y.Z]: <URL>` を追加すること (AGENTS.md
+"Release and Versioning" 規約、Release.ps1 の `Assert-ChangelogLinkDefs` が検証して
+未追加なら Fail で停止する)。
+-->
+
+[Bundle v0.2.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/v0.2.0
+[Bundle v0.1.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/v0.1.0
 [Launcher Unreleased]: https://github.com/ken1208git/GCTonePrism/compare/launcher-v0.1.0...HEAD
 [Launcher v0.5.7]: https://github.com/ken1208git/GCTonePrism/releases/tag/Launcher_v0.5.7
 [Launcher v0.4.5]: https://github.com/ken1208git/GCTonePrism/releases/tag/Launcher_v0.4.5

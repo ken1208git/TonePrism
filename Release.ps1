@@ -1520,6 +1520,39 @@ function Assert-ExpectedFiles {
 }
 
 # ============================================================================
+# Phase 7.5: CHANGELOG 末尾 Bundle 参照リンク定義の検証 (fix/changelog-link-sync)
+# ============================================================================
+# Markdown reference-style link を resolve するためには CHANGELOG 末尾に
+# `[Bundle vX.Y.Z]: https://github.com/.../releases/tag/vX.Y.Z` の定義が要る。
+# Bundle entry 追加時に手で同時追加するのが AGENTS.md "Release and Versioning" 規約だが、
+# 人間 / Claude いずれもミスする可能性があるため、Release.ps1 release 実行前にこの定義の
+# 存在を verify して未追加なら Fail で停止する fence を設ける。これで CHANGELOG / GitHub
+# Releases の見た目の整合性を物理的に保証。
+#
+# 自動 mutation (Release.ps1 が末尾を書き換える) は採らない:
+#   - commit/staging のタイミングと干渉する
+#   - dry-run と本番で挙動分岐が複雑化する
+#   - SoT (CHANGELOG) を script が書き換える形は git 履歴の追跡性を悪くする
+# 「検証だけ」で止めれば、リリース直前に手追加忘れに気づいて修正 → 再 Release.bat で済む。
+
+function Assert-ChangelogLinkDefs {
+    Write-Step "CHANGELOG 末尾 Bundle 参照リンク定義の検証"
+    $expectedDef = "[Bundle v$Version]: https://github.com/ken1208git/GCTonePrism/releases/tag/v$Version"
+    $changelogPath = Join-Path $RepoRoot 'CHANGELOG.md'
+    $changelogContent = Get-Content $changelogPath -Raw
+    # 単純な substring match (定義行は 1 行で固定形式、行末改行揺れも吸収できる)
+    if ($changelogContent.IndexOf($expectedDef) -lt 0) {
+        Write-Host ""
+        Write-Host "    CHANGELOG.md 末尾に Bundle v$Version の参照リンク定義が見つかりません" -ForegroundColor Red
+        Write-Host "    以下を CHANGELOG.md 末尾の参照リンク定義ブロックに追加してから再実行してください:" -ForegroundColor Yellow
+        Write-Host "      $expectedDef" -ForegroundColor Cyan
+        Write-Host "    (AGENTS.md 'Release and Versioning' 規約参照)" -ForegroundColor Yellow
+        Fail "CHANGELOG 末尾参照リンク定義の同期忘れ"
+    }
+    Write-Ok "Bundle v$Version の参照リンク定義 OK"
+}
+
+# ============================================================================
 # Phase 8: New-Zip
 # ============================================================================
 
@@ -1674,6 +1707,7 @@ Build-Manager
 Build-Updater
 Copy-Templates
 Assert-ExpectedFiles
+Assert-ChangelogLinkDefs
 Clear-OldGodot
 
 if ($DryRun) {

@@ -30,6 +30,8 @@
 ## Release and Versioning
 - コミット直前に Launcher / Manager / Monitor / 各 Companion (Updater / WindowProbe 等) の各バージョン番号を上げるべきかを必ず提案する。
 - **Bundle version の bump はリリース実行時のみ**。`Release.bat` を押す直前に `CHANGELOG.md` の `## Bundle` セクションに新エントリを追加（最上段、`### [Bundle vX.Y.Z]` 形式）。これが Bundle version と release_notes 両方の SoT。開発中の component bump とは別タイミング。
+- **Bundle entry 追加時に CHANGELOG 末尾の参照リンク定義も同時追加** (Markdown 形式: `[Bundle vX.Y.Z]: https://github.com/ken1208git/GCTonePrism/releases/tag/vX.Y.Z`)。これは `### [Bundle vX.Y.Z]` 見出しを GitHub Releases ページへの正しいリンクに resolve するため。Release.ps1 が release 実行時にこの定義の有無を verify して、無ければ Fail で停止する。手追加忘れは Release.bat 実行直後の Assert で物理的に防ぐ仕組み (`fix/changelog-link-sync` PR で導入、 SPEC §3.7.7 「Bundle release が SoT」規約整合)。
+  - Bundle 移行前の個別 component tag (`Launcher_v0.5.7` / `Manager_v0.7.6` 等) のリンク定義は過去 release tag を指して実在する形で残置するが、Bundle 移行後 (2026-05-11 以降) は **個別 component 用リンク定義は追加しない** (対応する GitHub release tag が存在しない、Bundle release が SoT)。`### [Launcher v0.5.17]` のような Bundle 移行後の個別 component 見出しは Markdown 上 dangling reference (角括弧は text として表示、リンクとして機能しない) になるが、本文中の参照は `## Bundle` entry 経由か直接 commit 履歴で十分追えるため許容する。
 - Bundle bump ルール:
   - **Major**: いずれかの component に breaking change（DB schema 変更含む）
   - **Minor**: いずれかの component で機能追加
