@@ -96,11 +96,12 @@ namespace GCTonePrism.Updater
             Logger.Info($"  --restart-exe     : {args.RestartExe}");
             Logger.Info($"  --wait-timeout    : {args.WaitTimeoutSeconds}s");
             Logger.Info($"  --force-kill      : {args.ForceKill}");
+            Logger.Info($"  --caller-pid      : {(args.CallerPid > 0 ? args.CallerPid.ToString() : "<未指定 = system-wide fallback>")}");
             Logger.Info("------------------------------------------------------------");
 
             // ----- Step 1: Manager プロセス終了待機 -----
             Logger.Info("[Step 1/3] Manager プロセスの終了を待機");
-            bool exited = ProcessWaiter.WaitForManagerExit(args.WaitTimeoutSeconds, args.ForceKill);
+            bool exited = ProcessWaiter.WaitForManagerExit(args.WaitTimeoutSeconds, args.ForceKill, args.CallerPid);
             if (!exited)
             {
                 Logger.Error("Manager プロセスが終了しなかったため abort (--force-kill で強制終了可能)");

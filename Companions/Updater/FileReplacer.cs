@@ -70,10 +70,40 @@ namespace GCTonePrism.Updater
             }
 
             string bakDir = managerTargetDir.TrimEnd('\\', '/') + ".bak";
-            // 過去 run の残骸 .bak を先に掃除
+            // 過去 run の残骸 .bak の扱い (Codex round 2 P1 #3 対応):
+            //   target 不在 + .bak 存在 → 前回 run で Rollback も失敗、`.bak` のみが intact な
+            //                              Manager。`.bak` を消すと旧 Manager 消失 + 新 Manager
+            //                              不在の復旧不能 broken state になる。自動復元してから
+            //                              Replace を fail で抜け、次回 run で正常 path に乗せる。
+            //   target 存在 + .bak 存在 → 前回 run で copy 中断 + rollback も走らなかった等の
+            //                              partial state。target を正とみなして `.bak` を残骸として
+            //                              削除して進める。
+            //   target 不在 + .bak 不在 → 新規 install 扱いだが Updater は更新 spawn 専用なので
+            //                              targetExisted=false 経路で round 2 L2 fix が Error 返す。
             if (Directory.Exists(bakDir))
             {
-                Logger.Info($"既存の .bak を削除: {bakDir}");
+                if (!Directory.Exists(managerTargetDir))
+                {
+                    Logger.Warn($"前回 run の rollback 失敗を検出: target 不在 + .bak のみ存在");
+                    Logger.Warn($"  .bak から target に自動復元します: {bakDir} → {managerTargetDir}");
+                    try
+                    {
+                        Directory.Move(bakDir, managerTargetDir);
+                        Logger.Warn($"自動復元完了。本 Replace は abort、Install.bat 再実行か Updater 再実行で続行してください。");
+                        return false;
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error($"自動復元失敗 (致命的状態): {ex.Message}");
+                        throw new InvalidOperationException(
+                            $"前回 run の rollback 失敗 + 本 run での自動復元も失敗。\n" +
+                            $"  target: {managerTargetDir} (不在)\n" +
+                            $"  bak:    {bakDir} (存在、復元失敗)\n" +
+                            $"手動で `.bak` を target にリネームしてください。\n" +
+                            $"原因: {ex.Message}", ex);
+                    }
+                }
+                Logger.Info($"既存の .bak を削除 (target が正、.bak は前回 partial state の残骸): {bakDir}");
                 try
                 {
                     Directory.Delete(bakDir, recursive: true);

@@ -41,6 +41,15 @@
 
 ### [Release Tooling v0.1.11] - 2026-05-13
 
+#### Fixed (PR #152 Codex bot round 2 後追い)
+
+シニアレビュー round 2 と並行して Codex bot が 4 件発見 (P1 × 2 + P2 × 2):
+
+- **[Codex P1 #3] `.bak` を target 検証より先に削除 → 前回 rollback 失敗からの retry で復旧不能**: 前回 run で Step 1 (target → .bak rename) 成功 + Rollback も失敗した場合、`.bak` のみが intact な Manager。次回 retry で「過去 run の残骸 .bak 削除」branch が `.bak` を消すと、唯一の intact Manager が消失 + target も新 rename されて空 → 復旧不能。修正: `.bak` 削除前に target の存在を check し、**target 不在 + .bak 存在** = 前回 rollback 失敗パターンとして自動復元 (`.bak` → target に rename 戻し) して Replace を fail で抜ける構造に。次回 run で正常 path (target あり) に乗る。単体テスト (前回 rollback 失敗状態を artificial 再現) で旧 Manager 自動復元動作確認済
+- **[Codex P1 #1] `GetProcessesByName` system-wide 巻き添えリスクを `--caller-pid` で構造的解消**: round 1 L5 / round 2 L7 では「校内 1 PC 1 install 前提なら実害なし」と comment で acknowledged したが、Codex は P1 として「コード対応」を要求。`--caller-pid <PID>` optional 引数を追加、指定時は `Process.GetProcessById(pid)` で PID-only wait/kill (同 PC の他 install Manager 巻き添えを構造的に排除)。未指定時は従来の `GetProcessesByName` system-wide fallback (後方互換)。Phase 4 で Manager UI が `Process.GetCurrentProcess().Id` を渡す前提
+- **[Codex P2 #2] `--force-kill` の kill 失敗時に無限ループする**: permission denied (elevated Manager 等) で `Process.Kill` が失敗しても `continue` で再 polling → また同じプロセスが見つかる → 永遠にループ。bounded retry (`MaxForceKillAttempts = 3`) を追加、3 回連続 kill 失敗で fail (`Logger.Error` + return false → exit 3)
+- **[Codex P2 #4] `Process.GetProcessesByName` throw 時に空配列 fallback → 「Manager 既終了」誤判定**: IPC / WMI 一時不調等で enumeration が throw した場合、空配列で続行 = Manager 終了済扱いになり Manager 生存中に置換進行 → File-in-use エラー path。修正: enumeration 失敗を sentinel flag で区別、「unknown state、待機継続」扱いに変更 (空配列 fallback でも `return true` には流さない)。`MaxEnumerationFailures = 5` 連続失敗で abort
+
 #### Fixed (PR #152 シニアレビュー round 2)
 
 - **[M1] FileReplacer.Replace の parent dir 存在チェックが trailing-slash で誤動作する bug**: `Path.GetDirectoryName(managerTargetDir)` を TrimEnd なしで呼んでいたため、`managerTargetDir = "D:\Manager\"` (CliArgs の `Path.GetFullPath` が trailing slash を保持) の場合に `GetDirectoryName` が `"D:\Manager"` (Manager dir 自身) を返し、parent check が Manager dir 自身の存在を見る silent divergence があった。Program.cs:64 の log-dir 計算と pattern を揃え、`TrimEnd('\\', '/')` してから `GetDirectoryName` に渡す形に修正
