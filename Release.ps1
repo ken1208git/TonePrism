@@ -1110,20 +1110,102 @@ function Assert-ChangelogLinkDefs {
     $linePattern = '(?m)^' + [regex]::Escape("[Bundle v$Version]: $expectedUrl") + '\s*$'
     $expectedDefDisplay = "[Bundle v$Version]: $expectedUrl"
 
-    if ([regex]::IsMatch($footerBlock, $linePattern)) {
-        Write-Ok "Bundle v$Version の参照リンク定義 OK"
+    if (-not [regex]::IsMatch($footerBlock, $linePattern)) {
+        # round 3 Low-2: backtick escape を削除、PS double-quoted string で意図しない文字消費を排除。
+        Write-Host ""
+        Write-Host "    CHANGELOG.md 末尾 footer block に Bundle v$Version の参照リンク定義が見つかりません" -ForegroundColor Red
+        Write-Host "    (CHANGELOG 末尾 sentinel '$FooterSentinel' 以降の独立行のみ認識、本文中の例示は false-positive 排除)" -ForegroundColor DarkGray
+        Write-Host "    以下を CHANGELOG.md 末尾の参照リンク定義ブロックに追加してから再実行してください:" -ForegroundColor Yellow
+        Write-Host "      $expectedDefDisplay" -ForegroundColor Cyan
+        Write-Host "    追加位置: 既存 [Bundle vX.Y.Z]: 行群の先頭 (降順を維持、CHANGELOG 末尾 HTML comment ブロック直下)" -ForegroundColor Yellow
+        Write-Host "    (AGENTS.md 'Release and Versioning' 規約参照)" -ForegroundColor Yellow
+        Fail "CHANGELOG 末尾参照リンク定義の同期忘れ"
+    }
+    Write-Ok "Bundle v$Version の参照リンク定義 OK (presence)"
+
+    # #154 — Bundle 行群の降順整列 enforce
+    #   現状の fence は presence のみ check で、AGENTS.md 規約「既存 [Bundle vX.Y.Z]: 行群の先頭
+    #   (降順を維持、新しいほど上)」を強制していなかった。例えば `[Bundle v0.1.0]` の下に
+    #   `[Bundle v0.3.0]` を書いても通過する状態で、human reader が「最新リリースがどれか」を
+    #   直感的に判断できなくなる運用劣化リスクと、規約と fence の non-symmetric (doc-vs-impl
+    #   mismatch) があった。
+    #
+    #   実装方針:
+    #     - footer block 内の `^[Bundle vX.Y.Z]: ...` 独立行を順序通りに抽出
+    #     - 隣接ペアで **`[version]` (= .NET System.Version、numeric major.minor.build.revision)
+    #       cast 比較** → 降順 (上 > 下) でなければ Fail
+    #         * 注: 「SemVer 比較」と表現されることがあるが、厳密には `[version]` は SemVer
+    #           pre-release semantics (`1.0.0-rc1 < 1.0.0`) をサポートしない numeric ordering。
+    #           Bundle が 3-part numeric の限り SemVer 順序と一致するので運用上問題なし。
+    #     - pre-release suffix (例: `0.3.0-rc1`) を含む version は `[version]` cast 不可なので
+    #       本 fence 範囲外として warning + 該当ペアの順序 check のみ skip (presence check は維持、
+    #       現状 Bundle で pre-release 運用なし、将来運用拡張時は SemanticVersion 比較ロジック等で
+    #       対応)
+    #     - **round 1 Medium-1**: 全ペアが pre-release skip された場合に「OK」を誤って出さない
+    #       よう、実比較ペア数と skip ペア数をカウントしてループ後の Write-Ok 文言を 3 分岐
+    #     - Bundle 行が 0 件 (presence check で既に Fail) / 1 件 (順序自明) の case は順序
+    #       check 自体不要 → return
+    $bundleLinePattern = '(?m)^\[Bundle v(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?)\]:'
+    $bundleMatches = [regex]::Matches($footerBlock, $bundleLinePattern)
+    if ($bundleMatches.Count -le 1) {
+        # 1 件以下は順序自明 (presence check は通過済)、ordering check は不要
         return
     }
 
-    # round 3 Low-2: backtick escape を削除、PS double-quoted string で意図しない文字消費を排除。
-    Write-Host ""
-    Write-Host "    CHANGELOG.md 末尾 footer block に Bundle v$Version の参照リンク定義が見つかりません" -ForegroundColor Red
-    Write-Host "    (CHANGELOG 末尾 sentinel '$FooterSentinel' 以降の独立行のみ認識、本文中の例示は false-positive 排除)" -ForegroundColor DarkGray
-    Write-Host "    以下を CHANGELOG.md 末尾の参照リンク定義ブロックに追加してから再実行してください:" -ForegroundColor Yellow
-    Write-Host "      $expectedDefDisplay" -ForegroundColor Cyan
-    Write-Host "    追加位置: 既存 [Bundle vX.Y.Z]: 行群の先頭 (降順を維持、CHANGELOG 末尾 HTML comment ブロック直下)" -ForegroundColor Yellow
-    Write-Host "    (AGENTS.md 'Release and Versioning' 規約参照)" -ForegroundColor Yellow
-    Fail "CHANGELOG 末尾参照リンク定義の同期忘れ"
+    $bundleVersions = @($bundleMatches | ForEach-Object { $_.Groups[1].Value })
+    $comparedCount = 0
+    $skippedCount = 0
+    for ($i = 0; $i -lt $bundleVersions.Count - 1; $i++) {
+        $upper = $bundleVersions[$i]
+        $lower = $bundleVersions[$i + 1]
+        # pre-release suffix を含むペアは [version] 比較ロジック範囲外、warning で skip
+        if ($upper -match '-' -or $lower -match '-') {
+            Write-Warn "Bundle version に pre-release suffix を含むペアの順序 check は本 fence 範囲外: '$upper' / '$lower' (該当ペアの ordering のみ skip、presence は PASS 済)"
+            $skippedCount++
+            continue
+        }
+        $upperVer = [version]$upper
+        $lowerVer = [version]$lower
+        $comparedCount++
+
+        # round 1 Low-2: 等値 (重複 link def) と「下が大きい」(ordering 違反) を分岐表示。
+        # round 1 Low-4: 違反位置表示を 1-indexed (human 視点) に統一。
+        if ($upperVer -eq $lowerVer) {
+            Write-Host ""
+            Write-Host "    CHANGELOG.md 末尾 footer block に同じ version の Bundle 行が重複しています" -ForegroundColor Red
+            Write-Host "    位置 $($i + 1) と位置 $($i + 2): 両方とも [Bundle v$upper]:" -ForegroundColor Red
+            Write-Host "    修正: どちらか片方の link def を削除してください" -ForegroundColor Yellow
+            Write-Host "    全 Bundle 行 (現状の並び順):" -ForegroundColor Yellow
+            for ($j = 0; $j -lt $bundleVersions.Count; $j++) {
+                $marker = if ($j -eq $i -or $j -eq $i + 1) { ' ← 重複箇所' } else { '' }
+                Write-Host "      [$($j + 1)] [Bundle v$($bundleVersions[$j])]:$marker" -ForegroundColor DarkGray
+            }
+            Fail "CHANGELOG 末尾 Bundle 行群の重複 link def"
+        }
+        elseif ($upperVer -lt $lowerVer) {
+            Write-Host ""
+            Write-Host "    CHANGELOG.md 末尾 footer block の Bundle 行群が降順に並んでいません" -ForegroundColor Red
+            Write-Host "    位置 $($i + 1) (上): [Bundle v$upper]:" -ForegroundColor Red
+            Write-Host "    位置 $($i + 2) (下): [Bundle v$lower]: ← 下にあるが version が大きい (ordering 違反)" -ForegroundColor Red
+            Write-Host "    修正: 上下を入れ替え (新しい version が上、AGENTS.md 規約: 既存 [Bundle vX.Y.Z]: 行群の先頭に追加、降順を維持)" -ForegroundColor Yellow
+            Write-Host "    全 Bundle 行 (現状の並び順):" -ForegroundColor Yellow
+            for ($j = 0; $j -lt $bundleVersions.Count; $j++) {
+                $marker = if ($j -eq $i -or $j -eq $i + 1) { ' ← 違反箇所' } else { '' }
+                Write-Host "      [$($j + 1)] [Bundle v$($bundleVersions[$j])]:$marker" -ForegroundColor DarkGray
+            }
+            Fail "CHANGELOG 末尾 Bundle 行群の降順違反"
+        }
+    }
+
+    # round 1 Medium-1: 実比較ペア数と skip ペア数で Write-Ok 文言を 3 分岐
+    if ($comparedCount -eq 0 -and $skippedCount -gt 0) {
+        # 全ペアが pre-release skip = 実比較ゼロ、「OK」と倒さず warning に明示
+        Write-Warn "Bundle 行群の順序 check: 全 $skippedCount ペアが pre-release suffix のため skip (実比較なし、presence のみ PASS)"
+    } elseif ($skippedCount -gt 0) {
+        Write-Ok "Bundle 行群の降順整列 OK ($($bundleVersions.Count) 件中 $comparedCount ペア比較、$skippedCount ペア pre-release skip)"
+    } else {
+        Write-Ok "Bundle 行群の降順整列 OK ($($bundleVersions.Count) 件)"
+    }
 }
 
 # ============================================================================
