@@ -1158,7 +1158,7 @@ Release.ps1 と一致 (caller CI は `%ERRORLEVEL%` で 4 通り区別):
 - `2`: タグ衝突 skip (-Force なし)
 - `3`: Y/N の N 回答 skip
 
-`Release.ps1 が exit code N で終了しました` の英文 prefix `[FAIL]` のみ ASCII で出すことで、codepage 切替 skip 時も **失敗の発生自体は判別可能** (本文の日本語 `が exit code` / `で終了しました` は cp932 console で mojibake する可能性あり、ただし Release.bat の `:runps` 経路冒頭で `[WARN] Codepage switch was skipped; the following Japanese output may be garbled.` の予告を ASCII で再 echo して文脈は明示済み、§3.7.9.4 「exit code dispatch を top-level goto label で行う理由」参照)。
+`Release.ps1 が exit code N で終了しました` の英文 prefix `[FAIL]` のみ ASCII で出すことで、codepage 切替 skip 時も **失敗の発生自体は判別可能** (本文の日本語 `が exit code` / `で終了しました` は cp932 console で mojibake する可能性あり)。ただし Release.bat の `:runps` ラベル冒頭の `if not defined ORIGINAL_CODEPAGE` ブロックで `[WARN] Codepage switch was skipped; the following Japanese output may be garbled.` の予告 WARN を ASCII で再 echo して文脈は明示済み (powershell.exe 呼び出し **前**、Japanese 出力の前に予告を入れる位置)。
 
 ##### 3.7.9.6 codepage 復元のタイミング
 

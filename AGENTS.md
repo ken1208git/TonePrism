@@ -44,6 +44,12 @@
 - Bundle version の詳細仕様は **SPECIFICATION.md §3.7.7** を参照。
 - 新規クライアントコンポーネント追加時の更新チェックリストは **SPECIFICATION.md §3.7.8** を参照。
 
+## Release Tooling 命名規約
+
+- **Release.ps1 内の関数命名**: `Fail` (exit 1) 到達しうる関数は `Assert-*` prefix を使う (PR #140 round 6 で `Test-Preflight → Assert-Preflight`、round 9 で `Test-ExpectedFiles → Assert-ExpectedFiles`、PR #156 で `Read-LauncherVersion` / `Read-ManagerVersion` / `Read-ComponentVersions` / `Read-GodotMinorFromProject` → `Assert-*` で sweep 完結)。
+  - **拡張解釈**: `Assert-*` は (a) return 値なしの純粋検証関数だけでなく、(b) **return 値あり + Fail 到達しうる関数** (例: `Assert-LauncherVersion` は version 文字列を return しつつ、ファイル不在で Fail) も含む。理由: 「Fail 到達しうる」を critical 軸とする internal convention で、PS standard の verb-by-purpose 分類 (Get-: 取得、Read-: 読出、Test-: bool 検証) より silent failure 防止を優先。
+  - **PS approved verbs との関係**: `Read-*` も `Assert-*` も語感としては合うが、PS approved verbs では `Read` は approved、`Assert` は **非 approved**。本 project ではこの project-internal convention を優先する (= warning 抑止のため `Get-Verb` 結果より project 規約を上位に置く明示判断)。
+
 ## CHANGELOG Section Roles
 - `## Bundle` セクション: リリース単位の **summary**。Release.ps1 がここを抜き出して GitHub Releases の本文に流すため、エンドユーザー (来場スタッフ / 顧問の先生 / 部員) が読んで意味が分かる粒度で書く（1-3 行 + 影響を受けるコンポーネント版数の言及）
 - `## Launcher` / `## Manager` / 将来の `## Monitor` 等のコンポーネント別セクション: 開発者向けの **詳細履歴**。技術判断、PR / issue 番号、設計の経緯等を書く
