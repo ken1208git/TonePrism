@@ -18,7 +18,7 @@
           (`-SkipUpload` で confirm prompt 自体を skip。CI 等の non-interactive 運用向け)
 
     Phase 2 (#108) 完成: templates/Install.bat / INSTALL_README.txt / Launcher.bat / Manager.bat 同梱
-    TODO Phase 3 (#108): Companions/Updater/ の build + staging を追加 (本 PR で着手予定)
+    TODO Phase 3 (#108): Companions/Updater/ の build + staging を追加 (次 PR `feature/updater-phase3` で着手予定)
     TODO #101:           Companions/<Launcher 補助 Companion>/ のループを追加
     TODO Monitor:        Monitor/ 追加時にビルドステップ追加
 

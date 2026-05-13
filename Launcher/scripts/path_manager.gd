@@ -92,10 +92,14 @@ static func _find_base_directory_from_executable() -> String:
 		
 		# 優先順位3: Launcherフォルダが存在する場合（実行ファイルがその中にある場合）
 		# 実行ファイルがLauncherフォルダ内にある場合、親ディレクトリをプロジェクトルートとする
+		# NOTE: begins_with 比較は末尾区切り ("/") を付与した文字列で行うこと。区切り無しだと
+		#       "Launcher" prefix が "LauncherStudio" 等の兄弟 dir 名にも誤マッチする
+		#       (PR #150 round 2 M2)。Godot の path_join / get_base_dir は "/" separated を返す。
 		var launcher_folder_check = current_dir_path.path_join("Launcher")
+		var launcher_folder_check_with_sep = launcher_folder_check + "/"
 		if dir.dir_exists(launcher_folder_check):
 			# 実行ファイルがLauncherフォルダ内にあるか確認
-			if exe_path.begins_with(launcher_folder_check):
+			if exe_path.begins_with(launcher_folder_check_with_sep):
 				print("[PathManager] Launcherフォルダを検出: ", current_dir_path)
 				detected_base_directory = current_dir_path
 				break
@@ -129,7 +133,9 @@ static func _find_base_directory_from_executable() -> String:
 		push_error(error_message)
 		return detected_base_directory
 	
-	if not exe_path.begins_with(launcher_folder_path):
+	# Separator 付きで begins_with 比較 (兄弟 dir 名との prefix collision 防止、round 2 M2)
+	var launcher_folder_path_with_sep = launcher_folder_path + "/"
+	if not exe_path.begins_with(launcher_folder_path_with_sep):
 		var error_message = "エラー: 実行ファイルがLauncherフォルダ内にありません。\n\n" + \
 						   "プロジェクトルート: " + detected_base_directory + "\n" + \
 						   "Launcherフォルダ: " + launcher_folder_path + "\n" + \

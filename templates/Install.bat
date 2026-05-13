@@ -304,10 +304,12 @@ echo [FAIL] 旧 dir と新 dir が両方存在しています:
 echo          "%INSTALL_TARGET%\GCTonePrism_Manager"  [旧、v0.2.0 配置]
 echo          "%INSTALL_TARGET%\Manager"              [新、v0.3.0+ 配置]
 echo.
-echo        Install.bat は自動でどちらを残すか判断できません。手動で確認してください:
+echo        Install.bat は自動でどちらを残すか判断できません。手動でどちらか一方を削除してから再実行:
 echo          - 新側を残す  → 旧 "%INSTALL_TARGET%\GCTonePrism_Manager" を削除
-echo          - 旧側を残す  → 新 "%INSTALL_TARGET%\Manager" を削除して再実行
-echo          - 中身を merge → 手動で安全な方をベースに必要ファイルだけコピー
+echo          - 旧側を残す  → 新 "%INSTALL_TARGET%\Manager" を削除 [上書きインストール時に Install.bat が再リネームする]
+echo.
+echo        どちらを選んでもユーザーデータ [prism.db / games / backups / responses / logs] は失われません。
+echo        これらは "%INSTALL_TARGET%\" 直下にあり Manager dir の外なので、Manager dir の削除と無関係に維持されます。
 goto :fail
 
 :migrate_conflict_launcher
@@ -316,10 +318,12 @@ echo [FAIL] 旧 dir と新 dir が両方存在しています:
 echo          "%INSTALL_TARGET%\GCTonePrism_Launcher"  [旧、v0.2.0 配置]
 echo          "%INSTALL_TARGET%\Launcher"              [新、v0.3.0+ 配置]
 echo.
-echo        Install.bat は自動でどちらを残すか判断できません。手動で確認してください:
+echo        Install.bat は自動でどちらを残すか判断できません。手動でどちらか一方を削除してから再実行:
 echo          - 新側を残す  → 旧 "%INSTALL_TARGET%\GCTonePrism_Launcher" を削除
-echo          - 旧側を残す  → 新 "%INSTALL_TARGET%\Launcher" を削除して再実行
-echo          - 中身を merge → 手動で安全な方をベースに必要ファイルだけコピー
+echo          - 旧側を残す  → 新 "%INSTALL_TARGET%\Launcher" を削除 [上書きインストール時に Install.bat が再リネームする]
+echo.
+echo        どちらを選んでもユーザーデータ [prism.db / games / backups / responses / logs] は失われません。
+echo        これらは "%INSTALL_TARGET%\" 直下にあり Launcher dir の外なので、Launcher dir の削除と無関係に維持されます。
 goto :fail
 
 :migrate_failed
