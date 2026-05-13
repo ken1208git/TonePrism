@@ -41,12 +41,34 @@
 
 ### [Release Tooling v0.1.11] - 2026-05-13
 
+#### Fixed (PR #152 Codex bot round 7 後追い + シニアレビュー round 8 + 重大発見への対応)
+
+- **[round 8 重大発見 → C 案で根治] early-crash check の race condition を構造的に解消**: round 7 で「シナリオ A (early-crash) PASS」と記録した手動テストを round 8 で再実行したところ、**同一コード・同一テストシナリオで PASS しない race condition** を発見。原因は 2 層:
+  - **[1] `UseShellExecute=true`**: Windows shell 経由 spawn のため Process オブジェクトと実 process の handle 紐付けが間接的、`WaitForExit` / `HasExited` の応答が遅延する path がある (.NET Framework 4.8 公式ドキュメントでも UseShellExecute=true は handle 制約あり明記)
+  - **[2] 500ms threshold**: csc cold start + 大きな .NET exe で実 race 範囲内 (round 7 では偶然 PASS、round 8 では検出失敗)
+  - 修正 (C 案): **(B) `Process.Start` の `UseShellExecute` を `true` → `false` に切替** で handle 紐付けを確実化 + **(A) `WaitForExit(500)` → `WaitForExit(2000)` に拡大** で cold start race の確率的余裕を確保。両方の修正で「構造的 + 確率的」両面で防御。
+  - 副作用: Updater 完了が ~1.5 秒遅くなる (許容範囲)。Manager.exe は GUI app (`Application.Run` loop) なので stdout/stderr inherit でも実害なし、`.exe` 直接 spawn で問題なし。
+  - SPEC §3.7.4 の round 4 M-5「UseShellExecute=true 経由の UAC prompt」記述 + round 7 Low-4「500ms 前提」記述を C 案に合わせて更新済 (5 者同期維持)。
+  - **手動テスト 3 シナリオ全 PASS 再確認**: A (early-crash、ExitCode=99 検出 → rollback → 旧 Manager 復元、test marker dummy が bit-perfect 保持) / B (restart-exe 不在、Step 2 後 NG → rollback → 旧 Manager 復元) / E (PID 再利用、caller-pid=自 PowerShell PID で `"PID=N は別プロセス 'powershell' (PID 再利用と判定)、Manager 既終了扱い"` を確認)
+
+- **[Codex P2-1] PID-only モードで「同名 exe 別 install / session」の PID 再利用検知が破綻していた silent danger を解消**: round 3 H1 で `ProcessName == "GCTonePrism_Manager"` 検証を入れたが、これでは「**同じ exe 名で起動した別 install / 別 session の Manager**」(例: D:\Install_A\Manager と E:\Install_B\Manager が同時稼働) による PID 再利用を区別できなかった。Phase 4 で同 PC 複数 install の運用が起きた場合に `--force-kill` 指定で別 install を kill する path が残っていた。修正: `GetTargetProcesses` に `expectedExePath` 引数を追加 (`WaitForManagerExit` signature 拡張、Program.cs から `args.RestartExe` を渡す)、`Process.MainModule.FileName` を取得して期待 path と比較。不一致なら「別 install / session」とみなして空配列扱い (= 待機 skip 経路、`Win32Exception` / `InvalidOperationException` も同経路で安全側 default に倒す)
+- **[Codex P2-2] `RollbackFromBak` の `bakExists == false` branch が silent false-success を返していた**: round 7 までは `bakExists == false` で target 削除して return without throwing していたが、Program.cs の caller (`RollbackAndReturn6` / restart-exe 検証失敗時の RollbackFromBak) は「正常 return = 旧 Manager 復元成功」と解釈して exit 6 を返す。実態は「target も .bak も両方無い致命的状態」で false positive。修正: `InvalidOperationException` を throw → caller の既存 `catch (InvalidOperationException)` 経路で **exit 5 (rollback も失敗した致命的状態)** に倒す。target 削除は best-effort で先に試みる (新 Manager の半端コピーは起動に使えないゴミ、消しておく方が clean)
+
+#### Changed (PR #152 シニアレビュー round 8)
+
+- **[Medium-1] round 7 entry の `OLD_MANAGER_PLACEHOLDER` literal 表現を一般化して credibility 問題を解消**: round 7 シナリオ A / B の PASS 記述に test 用 placeholder 文字列がそのまま残っていて「テスト identifier 忘れ」「本当に test 走ったのか?」と読まれる credibility 問題があった。実態は testbed で `Set-Content` で test marker 文字列を中身に持つ dummy ファイルを置いた、というシンプルな手順。round 7 entry の表現を「test marker 文字列を仕込んだ dummy ファイルが bit-perfect 復元」に書き換え、本 round 8 entry のテスト結果記述も同 pattern で統一
+- **[Medium-2] CliArgs.cs:106 の stale 行番号 `Program.cs:77` 削除 (round 7 Low-1 の漏れ補完)**: round 7 Low-1 で FileReplacer.cs:63 の `Program.cs:64` 参照は削除したが、同型の stale 参照が CliArgs.cs:106 に残っていた抜けを解消。round 6 で Main の `catch (Exception)` 追加により行番号が rot していた。コメント引用 (`Program.cs Main の catch (Exception)`) に置換
+- **[Low-1] `ProcessWaiter` の force-kill `continue` で `iter++` が skip される silent issue を解消**: force-kill `Thread.Sleep(1000); continue;` で while ループ底の `iter++` を skip するため、`iter == 0` (初回ログ) / `iter % LogEveryNIter == 0` (継続ログ) の判定が誤発火して同じ「N 件検出」log が複数回出る path があった (実害なし、ログノイズのみ、round 5 M-2 / Low-2 のログ表記精度との整合性低下)。`continue` 前に明示 `iter++;` 追加
+- **[Low-2] SPEC §3.7.4 exit 6 説明の表記揺れ解消**: `restart-exe が target 配下に不在 等` という曖昧表現を `restart-exe (target 配下を指す path) のファイルが staging 欠落で存在しない 等` に修正。「target 配下でない path 指定」は parse-stage で exit 2 として reject される (round 4 M-3) ので exit 6 の領域ではない点を明確化、他 4 者の `restart-exe 不在` 表現と意味的に揃え (5 者同期維持)
+- **[Low-3] `ProcessWaiter` docstring の「Manager は caller」表現を「parent process」に明示化**: 「caller」は通常「この関数を呼ぶ側 = Updater 自身」と読める ambiguity があったため、`callerPid` パラメータ名と相まって瞬間的に誤読される path を排除。round 6 Codex P2 / Medium-4 等で一貫使用してきた「Manager UI 側 = Updater を spawn した親プロセス」と整合
+- **[Medium-3 + Medium-4] round 7 で確立した「軽量 2 シナリオ手動テスト」「PR body の SPEC 3 bump 明示的逸脱注記」は round 8 でも維持** (新規対応なし、round 7 で完了)
+
 #### Fixed (PR #152 Codex bot round 6 後追い + シニアレビュー round 7)
 
 - **[Codex P2] parse 段階の stderr 出力が UTF-8 で出ていない自己矛盾を解消**: `Console.OutputEncoding = UTF-8` を `Logger.Initialize` 内でしか設定していなかったため、parse 失敗 path (exit 2 / parse-stage exit 1) は Logger 初期化前に走り stderr が OS default codepage (日本語 Windows = CP932) で出ていた。round 6 Medium-4 で SPEC §3.7.4 に「Phase 4 Manager UI は UTF-8 で stderr capture する規約」と明文化したのに、その capture 対象の stderr 自体が UTF-8 で出ていない自己矛盾 → Manager UI 側で mojibake する path。修正: Main 冒頭 (`CliArgs.Parse` の前) で `Console.OutputEncoding = Encoding.UTF8` を best-effort 設定、Logger.Initialize 側の同設定は idempotent なので defensive に残置
 - **[Medium-3 検証] round 6 で新規追加した silent path 防御コードの軽量 2 シナリオ手動テスト PASS**: round 6 で導入した「Process.Start 失敗時 / spawn 直後 early-crash 時の RollbackFromBak」path はコード追加のみで動作確認が伴っていなかったため、軽量 2 シナリオを手動実行で検証:
-  - **シナリオ A (early-crash)**: csc で build した「spawn 直後 `Environment.Exit(99)` する dummy `GCTonePrism_Manager.exe`」を staging に配置 → Updater 実行 → `proc.WaitForExit(500)` で ExitCode=99 検出 → `RollbackAndReturn6` で旧 Manager (`OLD_MANAGER_PLACEHOLDER_A`) を `.bak` から復元 → exit 6 を確認 **PASS**
-  - **シナリオ B (restart-exe 不在)**: staging から `GCTonePrism_Manager.exe` を意図的に欠落させて Updater 実行 → restart-exe 存在 check NG → `RollbackFromBak` で旧 Manager (`OLD_MANAGER_PLACEHOLDER`) を復元 → exit 6 を確認 **PASS**
+  - **シナリオ A (early-crash)**: csc で build した「spawn 直後 `Environment.Exit(99)` する dummy `GCTonePrism_Manager.exe`」を staging に配置 → Updater 実行 → `proc.WaitForExit(500)` で ExitCode=99 検出 → `RollbackAndReturn6` で旧 Manager (test marker 文字列を仕込んだ dummy ファイル) が `.bak` から bit-perfect に復元 → exit 6 を確認 **PASS** (round 8 で race condition 発覚、C 案で再検証、下記 round 8 entry 参照)
+  - **シナリオ B (restart-exe 不在)**: staging から `GCTonePrism_Manager.exe` を意図的に欠落させて Updater 実行 → restart-exe 存在 check NG → `RollbackFromBak` で旧 Manager (test marker dummy) が復元 → exit 6 を確認 **PASS**
   - **deferment**: シナリオ C (Process.Start throw、0-byte exe による Win32Exception) / シナリオ D (parse-stage SecurityException、権限のない drive 要) は Phase 4 連携 E2E で実施。シナリオ A の `catch (Exception)` path はカバー、SecurityException path は別環境要のため deferment
 
 #### Changed (PR #152 シニアレビュー round 7)

@@ -26,9 +26,11 @@ namespace GCTonePrism.Updater
     /// <summary>
     /// Manager プロセスの完全終了を polling で待機する。
     ///
-    /// SPEC §3.7.4 [責務 2]: Manager は caller。spawn 直後に graceful 終了を始めるが、.NET CLR の cleanup
-    /// に数秒かかることがある。Updater 側は polling して結果が空になるまで待つ。timeout 経過後の挙動は
-    /// --force-kill 引数で制御。
+    /// SPEC §3.7.4 [責務 2]: Manager は Updater の **parent process (Updater を spawn した側)**。
+    /// spawn 直後に graceful 終了を始めるが、.NET CLR の cleanup に数秒かかることがある。Updater
+    /// 側は polling して結果が空になるまで待つ。timeout 経過後の挙動は --force-kill 引数で制御。
+    /// (round 8 Low-3: 旧 docstring の「Manager は caller」表現を「parent process」に明示化、
+    /// 「caller = この関数を呼ぶ側」と読まれる ambiguity を排除)
     ///
     /// 注: Launcher / 常駐 Companions の終了待機は **Manager UI 側の責務** (SPEC §3.7.3 [4]、Phase 4 で実装)。
     /// Updater は Manager のみを対象にする。
@@ -63,8 +65,9 @@ namespace GCTonePrism.Updater
         /// <param name="timeoutSeconds">timeout 秒数 (0 で無制限)</param>
         /// <param name="forceKill">timeout 経過時に強制 kill するか</param>
         /// <param name="callerPid">caller Manager の PID (> 0 で PID-only モード、-1 で system-wide fallback、Codex round 2 P1 #1)</param>
+        /// <param name="expectedExePath">PID-only モード時に MainModule.FileName と一致を要求する Manager.exe の絶対 path (round 8 Codex P2-1、同名 exe 別 install / session の PID 再利用検知に使用)</param>
         /// <returns>失敗種別を区別した <see cref="WaitResult"/> (round 4 H-1、旧 bool 返しから差し替え)。caller (Program.cs) が switch で exit code 0/3/7/8 に分岐する</returns>
-        public static WaitResult WaitForManagerExit(int timeoutSeconds, bool forceKill, int callerPid)
+        public static WaitResult WaitForManagerExit(int timeoutSeconds, bool forceKill, int callerPid, string expectedExePath)
         {
             var sw = Stopwatch.StartNew();
             int iter = 0;
@@ -86,7 +89,7 @@ namespace GCTonePrism.Updater
                 bool enumerationFailed = false;
                 try
                 {
-                    procs = GetTargetProcesses(callerPid);
+                    procs = GetTargetProcesses(callerPid, expectedExePath);
                     consecutiveEnumerationFailures = 0;  // 成功で reset
                 }
                 catch (Exception ex)
@@ -152,6 +155,10 @@ namespace GCTonePrism.Updater
                             KillAll(procs);
                             // kill 後 1 秒待って再 check
                             Thread.Sleep(1000);
+                            // round 8 Low-1: continue で while ループ底の `Thread.Sleep + iter++` を skip
+                            // するため、明示的に iter++ を実行 (ログ表記の重複防止、round 5 M-2 / Low-2
+                            // のログ表記精度との整合)。
+                            iter++;
                             continue;
                         }
                         else
@@ -190,14 +197,24 @@ namespace GCTonePrism.Updater
         /// <summary>
         /// wait/kill 対象のプロセス配列を取得。PID-only モード or system-wide fallback。
         ///
-        /// PID-only モード (Codex round 2 P1 #1) の **ProcessName 検証** (シニアレビュー round 3 H1):
-        ///   Windows は exit 済プロセスの PID を別プロセスに再利用する。Manager (PID=1234) が Updater
-        ///   spawn 直後に exit → OS が 1234 を別プロセス (例: notepad) に割当 → `GetProcessById(1234)`
-        ///   が notepad を返し Manager と誤認 → `--force-kill` 指定時に notepad を kill する silent
-        ///   danger があった。`ProcessName == "GCTonePrism_Manager"` の検証で誤認を排除。不一致なら
-        ///   「Manager 既終了 + PID 再利用」とみなして空配列扱い (= 待機 skip 経路)。
+        /// PID-only モード (Codex round 2 P1 #1) の 2 段識別検証:
+        ///   1. **ProcessName 検証** (シニアレビュー round 3 H1):
+        ///      Windows は exit 済プロセスの PID を別プロセスに再利用する。Manager (PID=1234) が Updater
+        ///      spawn 直後に exit → OS が 1234 を別プロセス (例: notepad) に割当 → `GetProcessById(1234)`
+        ///      が notepad を返し Manager と誤認 → `--force-kill` 指定時に notepad を kill する silent
+        ///      danger があった。`ProcessName == "GCTonePrism_Manager"` で「異名 exe による PID 再利用」を排除。
+        ///   2. **MainModule.FileName 検証** (round 8 Codex P2-1):
+        ///      ProcessName だけでは「**同名** exe (= 同 PC 別 install / 別 session の Manager)」による PID
+        ///      再利用を区別できなかった。例: D:\Install_A\Manager\GCTonePrism_Manager.exe (caller、exit) →
+        ///      OS が PID を E:\Install_B\Manager\GCTonePrism_Manager.exe (別 install で同時稼働中) に再割当
+        ///      → ProcessName 一致で誤認 → `--force-kill` 指定時に E:\ 側を kill する silent danger。
+        ///      `MainModule.FileName` を `expectedExePath` (Program.cs が `--restart-exe` を渡す) と比較して
+        ///      install path 単位で識別を強化。`expectedExePath` が null/empty なら本検証は skip (後方互換)。
+        ///      access denied / process exit 等で取得不能なら「安全側で Manager 既終了扱い」(空配列)。
+        ///   いずれの検証で不一致でも「Manager 既終了 + PID 再利用」とみなして空配列扱い (= 待機 skip 経路)、
+        ///   force-kill 対象から外す。
         /// </summary>
-        private static Process[] GetTargetProcesses(int callerPid)
+        private static Process[] GetTargetProcesses(int callerPid, string expectedExePath)
         {
             if (callerPid > 0)
             {
@@ -213,7 +230,7 @@ namespace GCTonePrism.Updater
                     return new Process[0];
                 }
 
-                // ProcessName 検証 (PID 再利用での別プロセス誤認防止、H1)。
+                // [1] ProcessName 検証 (PID 再利用での異名 exe 誤認防止、round 3 H1)。
                 // `.exe` 拡張子は ProcessName には含まれないので比較値は "GCTonePrism_Manager"。
                 string actualName;
                 try
@@ -231,6 +248,40 @@ namespace GCTonePrism.Updater
                     Logger.Info($"PID={callerPid} は別プロセス '{actualName}' (PID 再利用と判定)、Manager 既終了扱い");
                     try { p.Dispose(); } catch { }
                     return new Process[0];
+                }
+
+                // [2] MainModule.FileName 検証 (round 8 Codex P2-1、同名 exe 別 install / session 識別)。
+                // expectedExePath が指定されている場合のみ実行 (caller が render mode で path 不要な場合の
+                // 後方互換性、現状 Program.cs は常に `--restart-exe` を渡す)。
+                if (!string.IsNullOrEmpty(expectedExePath))
+                {
+                    string actualPath = null;
+                    try
+                    {
+                        // .NET Framework 4.8 で MainModule は 32-64 bit cross-platform / access denied 等で
+                        // 例外を投げうる: Win32Exception (access denied / 32-64 mismatch)、
+                        // InvalidOperationException (process exited)、NotSupportedException (rare)。
+                        actualPath = p.MainModule != null ? p.MainModule.FileName : null;
+                    }
+                    catch (System.ComponentModel.Win32Exception ex)
+                    {
+                        Logger.Info($"PID={callerPid} の MainModule access denied ({ex.Message})、安全側で Manager 既終了扱い (識別不能 PID は kill しない方針)");
+                        try { p.Dispose(); } catch { }
+                        return new Process[0];
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // アクセス中にプロセス exit → 期待状態
+                        try { p.Dispose(); } catch { }
+                        return new Process[0];
+                    }
+
+                    if (!string.Equals(actualPath, expectedExePath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Logger.Info($"PID={callerPid} は同名 exe だが別 path '{actualPath}' (期待: '{expectedExePath}')、別 install / session と判定、Manager 既終了扱い");
+                        try { p.Dispose(); } catch { }
+                        return new Process[0];
+                    }
                 }
                 return new[] { p };
             }

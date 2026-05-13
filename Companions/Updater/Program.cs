@@ -149,7 +149,11 @@ namespace GCTonePrism.Updater
             // Phase 4 Manager UI が再試行戦略を組む際に「再試行で直る (8)」「user 介入要 (3)」
             // 「構造的問題 (7)」を区別可能。
             Logger.Info("[Step 1/4] Manager プロセスの終了を待機");
-            WaitResult waitResult = ProcessWaiter.WaitForManagerExit(args.WaitTimeoutSeconds, args.ForceKill, args.CallerPid);
+            // round 8 Codex P2-1: PID 再利用検知に MainModule.FileName 検証を追加するため、
+            // expected exe path として args.RestartExe を渡す (CliArgs で `--manager-target` 配下に
+            // あることが round 4 M-3 で構造的に保証されているので、caller (Manager UI Phase 4) の
+            // PID と RestartExe path の組が「自身の Manager.exe」を識別する key になる)。
+            WaitResult waitResult = ProcessWaiter.WaitForManagerExit(args.WaitTimeoutSeconds, args.ForceKill, args.CallerPid, args.RestartExe);
             switch (waitResult)
             {
                 case WaitResult.Success:
@@ -218,60 +222,65 @@ namespace GCTonePrism.Updater
             // 新 Manager 起動失敗」の復旧不能 broken state を作る silent danger があった)。
 
             // ----- Step 3: 新 Manager.exe 起動 -----
-            // round 4 M-2: Process.Start の戻り値を null check。
-            // UseShellExecute=true では「OS が既存プロセスを reuse した」「OS が起動を抑止した」等の
-            // 場合に null を返すと公式ドキュメントで明記されている (Microsoft Docs: ProcessStartInfo)。
-            // 旧実装は null/非 null 問わず "Manager 起動完了" ログを出していたため、起動が実体として
-            // 走らなかったケースで Manager UI / 部員視点で「Updater は exit 0 で抜けたから OK」と
-            // 誤誘導される silent false-success path があった。
+            // round 4 M-2: Process.Start 戻り値 null check (起動が実体として走らなかった silent failure 排除)
+            // round 6 Codex P1 + Medium-5: 起動失敗 (null / throw / early-crash) 時は RollbackFromBak で
+            //   旧 Manager を復元 + exit 6。`.bak` は Step 4 (起動成功確認後) で削除。
             //
-            // round 4 M-5: UseShellExecute=true は Manager.exe が requireAdministrator manifest を
-            // 持つ場合に UAC prompt を別 window で出す挙動を含む。現 Manager は非 admin 前提
-            // (SPEC §3.7.4 で明文化済) なので発火しないが、将来 admin 化された場合に「Updater が
-            // 消えた直後に UAC prompt が突然出る」体験になる点は SPEC 規約として固定。
-            //
-            // round 6 Codex P1: 起動失敗 (null / throw / early-crash) 時は RollbackFromBak で
-            // 旧 Manager を復元 + exit 6。`.bak` は Step 4 (起動成功確認後) で削除する。
-            //
-            // round 6 Medium-5: spawn 後 short delay + HasExited check で early-crash を検出。
-            // `proc != null` は「OS が spawn process を作った」までしか保証せず、spawn 直後 0.1s で
-            // Manager.exe が crash (DLL load 失敗 / 0-byte exe / managed exception in Main) しても
-            // 旧実装は exit 0 で抜けて Manager UI に「アップデート成功」と表示させていた silent
-            // failure path を塞ぐ。500ms 以内に exit したら early-crash と判定、RollbackFromBak +
-            // exit 6 に倒す。SPEC §3.7.4「一瞬 console が出て新 Manager が立ち上がる」体験を
-            // 損なわない範囲の待機。
+            // round 8 構造変更 (race condition 根治):
+            //   round 7 test では 500ms WaitForExit が early-crash を検出したが、round 8 test 再実行で
+            //   race condition (test dummy crasher の cold start が 500ms 以上かかる) で見逃した。
+            //   原因は 2 層:
+            //     [1] UseShellExecute=true: Windows shell 経由 spawn のため、Process オブジェクトと
+            //         実 process の handle 紐付けが間接的、WaitForExit/HasExited の応答が遅延する path
+            //         がある (.NET Framework 4.8 の公式ドキュメントでも UseShellExecute=true の場合
+            //         WaitForExit の信頼性に制約あり)
+            //     [2] 500ms threshold が borderline: csc cold start + 大きな .NET exe で実 race 範囲内
+            //   両方を C 案で根治:
+            //     [B] UseShellExecute=false に切替 → 直接 spawn、handle 紐付け確実、WaitForExit 安定
+            //     [A] WaitForExit timeout を 500ms → 2000ms に拡大 → cold start race の確率的余裕
+            //   副作用:
+            //     - Manager.exe は GUI app なので stdout/stderr redirect なし inherit でも実害なし
+            //       (Updater console は元々短命、Manager output が混じる懸念は実用上ゼロ)
+            //     - 環境変数 / working dir inherit は default true で維持
+            //     - SPEC §3.7.4 の round 4 M-5「UseShellExecute=true 経由 UAC prompt」記述は更新要
+            //       (直接 spawn でも Manager.exe が requireAdministrator の場合 OS 既定の UAC prompt が
+            //        出る仕組みは同じ、Manager は非 admin 前提も同じく維持)
+            //     - Updater 完了が ~1.5 秒遅くなる (2000ms 待機)、ユーザー体験への影響は無視できる
             Logger.Info("[Step 3/4] 新 Manager.exe を起動");
             try
             {
                 var psi = new ProcessStartInfo
                 {
                     FileName = args.RestartExe,
-                    UseShellExecute = true,
+                    // round 8 C 案: UseShellExecute=true → false。handle 紐付け確実化で WaitForExit
+                    // (= early-crash check) の信頼性を確保 (round 6 で導入した防御が race condition で
+                    // 一部環境で機能しない silent danger を構造的に解消)。Manager.exe は GUI app
+                    // (Application.Run loop) なので stdout/stderr inherit でも実害なし、stdin も
+                    // 使わない、`.exe` 直接 spawn で問題なし。
+                    UseShellExecute = false,
                     WorkingDirectory = Path.GetDirectoryName(args.RestartExe) ?? string.Empty
                 };
-                // round 5 M-4: Process.Start の戻り値を using で wrap (handle leak 防止)。
+                // round 5 M-4: 戻り値を using で wrap (handle leak 防止)。
                 using (Process proc = Process.Start(psi))
                 {
                     if (proc == null)
                     {
-                        Logger.Error($"Process.Start が null を返却 (起動が実体として走らず、shell association reuse / OS による起動抑止 等の可能性): {args.RestartExe}");
+                        Logger.Error($"Process.Start が null を返却 (起動が実体として走らず、OS による起動抑止 等の可能性): {args.RestartExe}");
                         return RollbackAndReturn6(args.ManagerTargetDir, "Process.Start null");
                     }
                     // PID は best-effort で記録 (取得失敗しても起動自体は成功扱い)
                     int? pid = null;
-                    // round 6 Low-3: bare catch を InvalidOperationException に絞る (UseShellExecute=true で
-                    // PID 取得不能なケースが docs 明記、これだけ swallow して NullReferenceException 等の
-                    // bug 由来例外は逃がさない)。
+                    // round 6 Low-3: bare catch を InvalidOperationException に絞る。
                     try { pid = proc.Id; }
-                    catch (InvalidOperationException) { /* PID 取得不能、best-effort で続行 */ }
-                    Logger.Info($"Manager spawn 成功 (PID={(pid.HasValue ? pid.Value.ToString() : "取得不能")})、early-crash check (500ms)");
+                    catch (InvalidOperationException) { /* PID 取得不能、best-effort */ }
+                    Logger.Info($"Manager spawn 成功 (PID={(pid.HasValue ? pid.Value.ToString() : "取得不能")})、early-crash check (2000ms)");
 
-                    // early-crash check
+                    // early-crash check (round 8 C 案: 500ms → 2000ms)
                     bool earlyExited = false;
                     int? exitCode = null;
                     try
                     {
-                        if (proc.WaitForExit(500))
+                        if (proc.WaitForExit(2000))
                         {
                             earlyExited = true;
                             try { exitCode = proc.ExitCode; }
@@ -280,8 +289,7 @@ namespace GCTonePrism.Updater
                     }
                     catch (InvalidOperationException)
                     {
-                        // WaitForExit 自体不能 (UseShellExecute=true 経由 + handle 未紐付けの極稀ケース)
-                        // → early-crash 検出不能、生存とみなして続行 (false-positive を避ける)
+                        // WaitForExit 自体不能 (極稀ケース) → false-positive 避けて生存とみなして続行
                         Logger.Warn("early-crash check 不能 (handle access 不可)、生存とみなして続行");
                     }
 
@@ -290,7 +298,7 @@ namespace GCTonePrism.Updater
                         Logger.Error($"新 Manager が spawn 直後に exit (ExitCode={(exitCode.HasValue ? exitCode.Value.ToString() : "取得不能")})。DLL load 失敗 / 即 crash 等の可能性");
                         return RollbackAndReturn6(args.ManagerTargetDir, "early-crash detected");
                     }
-                    Logger.Info($"Manager 起動完了: {args.RestartExe} (early-crash check 通過)");
+                    Logger.Info($"Manager 起動完了: {args.RestartExe} (early-crash check 通過、2000ms 生存確認)");
                 }
             }
             catch (Exception ex)

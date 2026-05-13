@@ -244,15 +244,37 @@ namespace GCTonePrism.Updater
         {
             if (!bakExists)
             {
-                // round 6 Low-1: round 3 L2 で「Updater は更新 spawn 専用、新規 install は Install.bat」
-                // 方針を確立した後は、本 branch は **外部 / 手動呼出しで `.bak` が消えた pathological
-                // 状態でのみ** 到達する fallback 経路 (round 3 L2 / FileReplacer.RollbackFromBak の
-                // XML doc 参照)。「新規インストール用」という旧メッセージは round 3 L2 方針と矛盾
-                // するため訂正。
-                Logger.Warn("rollback: .bak が存在しないため target のみ削除 (pathological state、外部 / 手動呼出しの fallback 経路)");
-                try { if (Directory.Exists(managerTargetDir)) Directory.Delete(managerTargetDir, recursive: true); }
-                catch (Exception ex) { Logger.Error($"  target 削除失敗: {ex.Message}"); }
-                return;
+                // round 8 Codex P2-2: `.bak` 不在 = pathological state は **致命的 fatal** で throw する。
+                //
+                // 旧実装 (round 6 Low-1) は「target 削除して return without throwing」だったが、Program.cs
+                // の caller (`RollbackAndReturn6` ヘルパー / restart-exe 検証失敗時 RollbackFromBak) は
+                // **「正常 return = 旧 Manager 復元成功」と解釈して exit 6 を返す**。実態は「target も
+                // .bak も両方無い致命的状態」なので、caller が「復旧成功」と false positive で誤報告する
+                // silent danger があった。
+                //
+                // 修正: `InvalidOperationException` を throw → caller の `catch (InvalidOperationException)`
+                // 経路で exit 5 (rollback も失敗した致命的状態) に倒す。Program.cs 側は既存 catch path に
+                // 委ねるので signature 変更なし。target 削除は best-effort で先に試みる (新 Manager の
+                // 半端コピー = 起動に使えないゴミ、消しておく方が clean、削除失敗しても致命的状態の判定は
+                // 変わらないので例外で throw する事実だけ重要)。
+                Logger.Error("FATAL rollback: `.bak` が存在しない pathological state (新 Manager も旧 Manager も無い致命的状態)");
+                try
+                {
+                    if (Directory.Exists(managerTargetDir))
+                    {
+                        Directory.Delete(managerTargetDir, recursive: true);
+                        Logger.Warn("  target を削除 (中身は新 Manager の半端コピー、起動に使えない)");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error($"  target 削除も失敗: {ex.Message}");
+                }
+                throw new InvalidOperationException(
+                    $"rollback 失敗: `.bak` 不在の pathological state、新 Manager も旧 Manager も両方無い致命的状態。\n" +
+                    $"  target: {managerTargetDir} (削除済または削除失敗)\n" +
+                    $"  bak:    not found\n" +
+                    $"手動で zip 再展開 + Install.bat 再実行が必要");
             }
 
             Logger.Warn("rollback: 旧 Manager dir を .bak から復元");

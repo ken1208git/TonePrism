@@ -103,8 +103,11 @@ namespace GCTonePrism.Updater
             //   - PathTooLongException: MAX_PATH (260) 超過
             //   - NotSupportedException: ":" 含む (drive letter 以外) など
             // それ以外 (SecurityException / UnauthorizedAccessException 等の権限・環境問題) は
-            // throw を抜けて Program.cs:77 の catch (Exception) で exit 1 (予期しない例外) に倒す。
+            // throw を抜けて Program.cs Main の `catch (Exception)` で exit 1 (予期しない例外) に倒す
+            // (round 6 Codex P2 で追加した、ArgumentException catch の後段にある catch block)。
             // 「引数エラー」表記の正確性を保ち、Manager UI 側の障害解析を misleading にしない。
+            // (round 8 Medium-2: 行番号 `Program.cs:77` 参照は round 6 の Main 拡張で rot していたため
+            // 削除、関数名引用に置換。round 7 Low-1 の同型 stale 参照削除の漏れ補完。)
             try
             {
                 result.StagingDir = System.IO.Path.GetFullPath(result.StagingDir);
