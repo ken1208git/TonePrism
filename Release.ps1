@@ -132,17 +132,8 @@ $OutputEncoding = $script:Utf8NoBomEncoding
 # `Invoke-NativeWithCapture` ヘルパー (System.Diagnostics.Process 直叩き) に
 # 一本化、`&` 系の patterns は「success exit が確証できる場合のみ」に格下げ。
 #
-# 採用ガイドライン (call site では「pattern: 名前」で参照):
-#
-#   per-site コメントの書き方 (#142 / PR #140 round 9 M1):
-#     - call site の冒頭に `# pattern: <NAME>` の 1 行で catalog 参照
-#     - catalog 既述の **一般則** (例: 「stderr は console 直書き」「Invoke-ExternalProcess の
-#       finally で UTF-8 再ピン留め」) は per-site から **削除**、catalog 側のみで一元管理
-#     - per-site には **その call site でしか起きない silent danger / 特殊配慮 / 文脈固有
-#       の判断根拠** のみ書く (例: 「git 失敗時 $gitStatus が空文字で誤判定」「TTY 検出で
-#       完了まで無音になる UX 問題」等)
-#     - 判定基準: 「catalog の説明と等価なら per-site から削除、当該 call site でしか
-#       起きない問題のみ per-site に残す」
+# 採用ガイドライン (call site では `# pattern: <NAME>` 1 行で catalog 参照、catalog 既述の
+# 一般則は per-site から削除して固有理由のみ残す形式、#142 / PR #140 round 9 M1):
 #
 #   1. Invoke-NativeWithCapture (RECOMMENDED for any failable command)
 #      $result = Invoke-NativeWithCapture -FilePath 'gh' -Arguments @('release','view','v1.0','--json','id')

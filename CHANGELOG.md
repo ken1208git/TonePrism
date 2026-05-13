@@ -41,6 +41,17 @@
 
 ### [Release Tooling v0.1.14] - 2026-05-14
 
+#### Changed (PR #156 シニアレビュー round 4)
+
+- **[High-1 + Medium-3] AGENTS.md「Release Tooling 命名規約」に purpose 限定句を追加して sweep 誘発 risk を遮断**: 旧文言「`Fail` 到達しうる関数は `Assert-*`」は文字通り適用すると Release.ps1 内 ~10 関数 (`Resolve-Godot` / `Resolve-MsBuild` / `Resolve-Nuget` / `Resolve-TagConflict` / `Set-ManifestVersions` / `Build-Launcher` / `Build-Manager` / `Build-Updater` / `New-Zip` / `Invoke-GhRelease` / `Get-BundleReleaseNotes` 等) が対象になり、次に Release.ps1 を触る人が「`Resolve-Godot` も `Assert-` にすべき」と過剰 sweep を始める誘発要因になっていた (本 PR 自体が round 1 [High-1] で `Read-GodotMinorFromProject` の漏れ補完をした同型 regression が再発する path)。**「主目的が検証 (verification)」の purpose 限定句**を追加、`Resolve-*` (探索/解決) / `Build-*` (生成) / `Set-*` (副作用) / `New-*` (生成) / `Get-*` (取得) / `Invoke-*` (呼出し) は副次的に Fail し得るが対象外と明示。拡張解釈 (b) も「**主目的が検証で**、return 値あり + Fail 到達しうる関数」と purpose 限定句を二重に重ねて境界曖昧化を fence
+- **[Medium-1] catalog 内 per-site 書き方 meta-rule を 9 行 → 2 行に圧縮**: 旧 meta-rule (catalog 既述の一般則は per-site から削除、固有理由のみ残す + 判定基準) を catalog 冒頭に 9 行で固定化していたが、Release.ps1 内の `# pattern:` per-site 適用先は `Assert-WorkingTreeClean` の 1 箇所のみで sample size 1。9 行は明らかにオーバーキル比率。圧縮: 「`# pattern: <NAME>` 1 行で catalog 参照、catalog 既述の一般則は per-site から削除して固有理由のみ残す形式」の 2 行に縮約、適用 site が増えるまで詳細は固定化を delay
+- **[Medium-2] SPEC §3.7.9.5 の `[FAIL]` ASCII prefix 議論を §3.7.9.4 末尾に移動 (構造ミスマッチ解消)**: round 1 [Medium-1] / round 2 [High-2] / round 3 [High-1] の 3 round 連続で同段落の cross-reference 修正を繰り返した構造的根因は「§3.7.9.5 (exit code 体系) 配下に文字化け回避策の話が混在」していた配置ミス。§3.7.9.5 は exit code 表のみに専念、`[FAIL]` ASCII prefix + `:runps` 冒頭 WARN は §3.7.9.4 (top-level goto label) 末尾の「文字化け回避策の連動」段落として束ね直し (chcp skip path + top-level goto + ASCII prefix の 3 段防御を 1 つの文脈で表現)
+- **[Low-2] Release.bat:46 ASCII boundary 1 行 ~115 char を 3 行 REM block に分割**: 旧コメント 1 行で `chcp 65001 succeeded -> UTF-8 console below; on skip path, codepage unchanged -- see SPEC §3.7.9.2` を全部入れていたが横スクロール必須レベル。3 行に分割 (「==== ASCII boundary ====」+ 「chcp 65001 succeeded → UTF-8 console below」+ 「skip path → codepage unchanged, SPEC §3.7.9.2 参照」)。Release.bat 行数は 108 → 110 行に微増、約 33% 削減扱い
+
+#### Followup (本 PR scope 外、別途対応)
+
+- **[Low-1] pre-commit hook fence 化 GitHub issue 作成**: round 2 [Low-2] で書いた「将来 pre-commit hook で fence 化予定」が文書のみで未 issue 化だった点を解消、別途 GitHub issue を立てて TODO を捕捉
+
 #### Changed (PR #156 シニアレビュー round 3)
 
 - **[High-1] SPEC §3.7.9.5 cross-reference を Release.bat コード anchor 直指しに**: round 2 [High-2] で `§3.7.9.2 → §3.7.9.4` に reference 先を移したが、§3.7.9.4 本文も `:runps` / WARN / chcp skip 通知に一切触れておらず dead reference 状態が継続していた self-fix 同型 regression。round 1 [High-3] 「行番号 embed より関数 / セクション anchor」原則の延長で、SPEC 内部 anchor を諦めて **Release.bat の `:runps` ラベル冒頭の `if not defined ORIGINAL_CODEPAGE` ブロック** をコード anchor として直指し + 「powershell.exe 呼び出し **前**、Japanese 出力の前に予告を入れる位置」と文脈明示。これで reader は §3.7.9.4 を引かず直接 Release.bat 本体に飛んで実装確認できる
@@ -80,7 +91,7 @@ PR #140 シニアレビューで保留していた small refactor 4 件を 1 PR 
 - **[#146] `Assert-WorkingTreeClean` の `$Context` 文字列マッチを `[switch]$PostSync` に置換** (PR #140 round 10 M3): 旧実装は `if ($Context -like '*sync 後*')` で特例 Fail message を切り替えていたが、call site 側の文字列 (`"manifest sync 後"`) を変えた瞬間に特例メッセージが silent に失われ汎用メッセージに落ちる脆弱性 (日本語 → 英語化、typo、文言調整等で簡単に壊れる)。`[switch]$PostSync` parameter で明示切り替え、`$Context` は「ログ表示用」として責務分離。call site (`Assert-WorkingTreeClean -Context "manifest sync 後" -PostSync`) も更新
 - **[#144] `Read-*` (LauncherVersion / ManagerVersion / ComponentVersions) → `Assert-*` rename** (PR #140 round 10 M1): 本 project の規約「**Fail する関数は `Assert-*`**」(PR #140 round 6 で `Test-Preflight → Assert-Preflight`、round 9 で `Test-ExpectedFiles → Assert-ExpectedFiles` で確立) に照らすと、ファイル読み出し + `Fail` 到達しうる本 3 関数は同規約の sweep 対象 (PS approved verbs では `Read` も approved だが、本 project では「Fail 到達しうる」を critical 軸として `Assert-*` に揃える internal convention)。`Assert-LauncherVersion` / `Assert-ManagerVersion` / `Assert-ComponentVersions` の 3 関数と全 call site を rename
 - **[#142] `2>&1` trap catalog と per-site コメントの方針統一** (PR #140 round 9 M1): Release.ps1 の `# Native command 呼び出しの方針` catalog セクション (`SUPPRESS_BOTH` / `CAPTURE_DIAGNOSTIC` / `CAPTURE_STDOUT` / `CAPTURE_STDOUT_PASS_STDERR` / `PASS_THROUGH` / `STOP_TRAP`) と per-site コメントが「ラベル参照 + ほぼ同内容の詳細説明」を両方書く形に逆戻りしていた問題に対処。**catalog 一般則 + per-site 固有理由** 方針で統一、catalog 冒頭に per-site 書き方ガイドラインを明示 (「catalog 既述の一般則は per-site から削除」「per-site にはその call site でしか起きない silent danger / 特殊配慮のみ書く」「判定基準: catalog の説明と等価なら per-site から削除」)。実 per-site (`Assert-WorkingTreeClean` の `CAPTURE_STDOUT_PASS_STDERR` 引用) も「git 失敗時の silent pass 防止」の固有理由のみ残す形に短縮済 (#146 修正と同時)
-- **[#143] Release.bat docstring の cmd.exe 経緯を SPECIFICATION.md §3.7.9 に分離** (PR #140 round 9 M3): Release.bat (165 行) の REM (~100 行) が BOM 失敗症状 / chcp フロー / Side effect 警告 / findstr validation 経緯 / top-level goto pattern 等を inline で全部抱えていた。SPECIFICATION.md に新節 **§3.7.9 「Release.bat の cmd.exe 互換性ノート」** を新設 (3.7.9.1 ファイル形式の制約 / 3.7.9.2 chcp 65001 切替 / 3.7.9.3 delayed expansion `!` 副作用 / 3.7.9.4 exit code dispatch を top-level goto label で行う理由 / 3.7.9.5 exit code 体系 / 3.7.9.6 codepage 復元のタイミング)。Release.bat 本体は「Usage + ASCII boundary 注記 + SPEC §3.7.9 参照」の最小構成に圧縮 (165 → **108 行**、約 35% 削減)。次に Release.bat を触る reader の読み解きコスト削減
+- **[#143] Release.bat docstring の cmd.exe 経緯を SPECIFICATION.md §3.7.9 に分離** (PR #140 round 9 M3): Release.bat (165 行) の REM (~100 行) が BOM 失敗症状 / chcp フロー / Side effect 警告 / findstr validation 経緯 / top-level goto pattern 等を inline で全部抱えていた。SPECIFICATION.md に新節 **§3.7.9 「Release.bat の cmd.exe 互換性ノート」** を新設 (3.7.9.1 ファイル形式の制約 / 3.7.9.2 chcp 65001 切替 / 3.7.9.3 delayed expansion `!` 副作用 / 3.7.9.4 exit code dispatch を top-level goto label で行う理由 / 3.7.9.5 exit code 体系 / 3.7.9.6 codepage 復元のタイミング)。Release.bat 本体は「Usage + ASCII boundary 注記 + SPEC §3.7.9 参照」の最小構成に圧縮 (165 → **110 行**、約 33% 削減。#143 完成時は 108 行、その後 round 4 L-2 で ASCII boundary REM を 1 行 → 3 行に分割した結果 +2 行)。次に Release.bat を触る reader の読み解きコスト削減
 
 #### Notes (Release.bat encoding 取扱い)
 
@@ -88,7 +99,7 @@ Release.bat の編集は **UTF-8 (no BOM) + CRLF** 厳守 (SPEC §3.7.9.1 参照
 
 #### 検証
 
-通常 DryRun: Preflight → Bundle 参照リンク定義の検証 (skip + 2 行 warn) → コンポーネント version を読み取り (Assert-LauncherVersion / Assert-ManagerVersion 動作確認) → Build- 群 → ExpectedFiles 15/15 OK → DRY-RUN 完了。Release.bat parse エラー無し、`@echo off` 機能 OK (BOM 無し 108 行)。
+通常 DryRun: Preflight → Bundle 参照リンク定義の検証 (skip + 2 行 warn) → コンポーネント version を読み取り (Assert-LauncherVersion / Assert-ManagerVersion 動作確認) → Build- 群 → ExpectedFiles 15/15 OK → DRY-RUN 完了。Release.bat parse エラー無し、`@echo off` 機能 OK (BOM 無し 110 行、round 4 L-2 後の最終値)。
 
 ---
 

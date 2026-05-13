@@ -43,7 +43,9 @@ if defined ORIGINAL_CODEPAGE (
     echo [WARN] Skipping UTF-8 codepage switch ^(Japanese output may be garbled^).
 )
 
-REM ==== ASCII boundary (chcp 65001 succeeded -> UTF-8 console below; on skip path, codepage unchanged -- see SPEC §3.7.9.2) ====
+REM ==== ASCII boundary ====
+REM   chcp 65001 succeeded -> UTF-8 console below
+REM   skip path -> codepage unchanged, SPEC §3.7.9.2 参照
 
 set SCRIPT_DIR=%~dp0
 
