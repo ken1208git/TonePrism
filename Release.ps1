@@ -133,7 +133,7 @@ $OutputEncoding = $script:Utf8NoBomEncoding
 # 一本化、`&` 系の patterns は「success exit が確証できる場合のみ」に格下げ。
 #
 # 採用ガイドライン (call site では `# pattern: <NAME>` 1 行で catalog 参照、catalog 既述の
-# 一般則は per-site から削除して固有理由のみ残す形式、#142 / PR #140 round 9 M1):
+# 一般則は per-site から削除して固有理由のみ残す形式):
 #
 #   1. Invoke-NativeWithCapture (RECOMMENDED for any failable command)
 #      $result = Invoke-NativeWithCapture -FilePath 'gh' -Arguments @('release','view','v1.0','--json','id')
@@ -834,8 +834,8 @@ function Resolve-Nuget {
 
 function Assert-WorkingTreeClean {
     param(
-        [string]$Context,    # ログ表示用 (どの phase で呼ばれたかの context 文字列)
-        [switch]$PostSync    # 特例メッセージのトリガ (#146 / PR #140 round 10 M3)
+        [string]$Context,    # phase identifier (Fail / Warn message にも含まれる、user-facing diagnostic)
+        [switch]$PostSync    # 特例メッセージ (Set-ManifestVersions が書き換えた旨) のトリガ
     )
     # pattern: CAPTURE_STDOUT_PASS_STDERR
     $gitStatus = & git -C $RepoRoot status --porcelain
@@ -850,10 +850,6 @@ function Assert-WorkingTreeClean {
             Write-Host ""
             Write-Host "    uncommitted change が検出されました ($Context):" -ForegroundColor Yellow
             ($gitStatus -split "`n") | ForEach-Object { Write-Host "        $_" -ForegroundColor Yellow }
-            # #146 / PR #140 round 10 M3: $Context 文字列マッチ (`-like '*sync 後*'`) は call site の
-            # 文字列を変えた瞬間に特例メッセージが silent に失われ汎用メッセージに落ちる脆弱性
-            # があった (日本語 → 英語化、typo、文言調整等で簡単に壊れる)。`[switch]$PostSync` で
-            # 明示的に切り替え、$Context は「ログ表示用」として責務分離。
             if ($PostSync) {
                 Fail "Set-ManifestVersions が tracked files を書き換えました。差分をコミットしてから再実行してください (一度書き換えれば idempotent なので次回 sync は no-op)。-Force でバイパス可能。"
             } else {

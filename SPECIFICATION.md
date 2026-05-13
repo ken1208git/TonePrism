@@ -1135,7 +1135,7 @@ chcp output not captured        → SKIP chcp 65001 (redirect filter 等)
 
 ##### 3.7.9.4 exit code dispatch を top-level goto label で行う理由
 
-cmd の bat parser はファイルを system codepage (JP locale = cp932) で読むため、`if cond (echo マルチバイト...)` ブロック内で日本語が mis-tokenize して `'fragment' is not recognized` error を吐く path がある。これを回避するため exit code dispatch は **top-level goto label** で実装 (Install.bat 統一 pattern、PR #149 round 3 で本 file にも適用)。
+cmd の bat parser はファイルを system codepage (JP locale = cp932) で読むため、`if cond (echo マルチバイト...)` ブロック内で日本語が mis-tokenize して `'fragment' is not recognized` error を吐く path がある。これを回避するため exit code dispatch は **top-level goto label** で実装 (Install.bat 統一 pattern)。
 
 ```cmd
 if %EXIT_CODE% EQU 0 goto :ec_success
