@@ -847,8 +847,6 @@ function Assert-WorkingTreeClean {
         [switch]$PostSync    # 特例メッセージのトリガ (#146 / PR #140 round 10 M3)
     )
     # pattern: CAPTURE_STDOUT_PASS_STDERR
-    # redirect を外しただけだと git 失敗時に $gitStatus が空文字になり「working
-    # tree clean」と誤判定されるため、exit code チェックが必須
     $gitStatus = & git -C $RepoRoot status --porcelain
     if ($LASTEXITCODE -ne 0) {
         Fail "git status の実行に失敗しました (exit code: $LASTEXITCODE, context: $Context)"
