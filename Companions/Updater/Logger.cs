@@ -40,15 +40,22 @@ namespace GCTonePrism.Updater
         /// ロガーを初期化する。Main の早い段階で呼ぶ。
         /// 失敗しても CLI 実行自体は止めない (例外を握り潰し、以降の API は Console 出力のみ)。
         /// </summary>
-        /// <param name="logDirectory">ログ出力先ディレクトリ。null なら exe 隣の `logs/updater/` を使う。</param>
+        /// <param name="logDirectory">ログ出力先ディレクトリ。通常 Program.cs から `<install>/logs/updater/` を渡される (SPEC §3.7.4)。null/empty の場合は exe-relative fallback (到達不能、Program.cs が path 決定するため)。</param>
         public static void Initialize(string logDirectory)
         {
             lock (_lock)
             {
                 if (_initialized) return;
+                // NOTE: シニアレビュー round 1 L6: `_initFailed` ガードは持たない (Manager Logger と
+                // 非対称)。Updater は Main() で 1 回しか Initialize を呼ばない設計なので、init 失敗時
+                // に再 init を防ぐガードは不要。冪等性は `_initialized` の単純な return で十分。
 
                 try
                 {
+                    // 通常 Program.cs が <install>/logs/updater/ を計算済みで渡してくる (SPEC §3.7.4)。
+                    // 病的入力 (manager-target が drive root 等) で空が渡る場合のみ exe-relative
+                    // fallback に流れる。シニアレビュー round 1 M1 / L3 で「通常 path は Program 側
+                    // 確定、Logger fallback は到達不能化」方針。
                     _logDirectory = string.IsNullOrEmpty(logDirectory)
                         ? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs", "updater")
                         : logDirectory;

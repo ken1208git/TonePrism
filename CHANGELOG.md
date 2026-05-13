@@ -41,6 +41,21 @@
 
 ### [Release Tooling v0.1.11] - 2026-05-13
 
+#### Fixed (PR #152 シニアレビュー round 1)
+
+- **[H1] Updater で restart-exe 検証が `.bak` 削除後 → 復旧不能 broken state を作る**: 旧実装は `FileReplacer.Replace` 内で .bak 削除まで行ってから Program 側で `File.Exists(args.RestartExe)` チェックしていた。staging 側に `GCTonePrism_Manager.exe` が無い release packaging bug 等で「旧 Manager 消失 + 新 Manager 不在」の復旧不能状態に陥る path。修正: `FileReplacer.Replace` を Step 1 (rename) + Step 2 (copy) のみに絞り、`.bak` 削除は `CleanupBak` メソッドに分離。失敗時の rollback も `RollbackFromBak` を public 化。Program.cs 側で Replace 成功後に restart-exe 存在検証 → OK なら CleanupBak、NG なら RollbackFromBak で旧 Manager 復元 + exit 6 の flow に変更。H1 シナリオの単体テスト (staging に Manager.exe を意図的に欠損させる) で「旧 Manager.exe 復元 + user data 維持 + .bak 消費済」の動作確認済
+
+#### Changed (PR #152 シニアレビュー round 1)
+
+- **[M1 + L3] `--log-dir` default の三者矛盾を解消**: UsageText / CliArgs XML doc / Logger fallback で「exe 隣」と「`<install>/logs/updater/`」が混在していて user が `--help` 読んだ後にログを別場所で探す silent path があった。SPEC §3.7.4 準拠の `<install>/logs/updater/` (manager-target の親から導出) に三者統一、UsageText / CliArgs コメント明記、Logger fallback は Program 側で path 確定保証 (CliArgs path 絶対化と相まって到達不能化) + コメントで「通常 path は Program 側確定、Logger fallback は到達不能化」明記
+- **[M2] FileReplacer 内 Step ラベルを `[Replace X/2]` に分離**: outer Program.cs の `[Step 1/3]` `[Step 2/3]` `[Step 3/3]` と inner FileReplacer の同じラベル形式が衝突して実機ログの障害解析時に紛らわしかった。inner を `[Replace 1/2]` `[Replace 2/2]` に変更、合わせて step 数も 3 → 2 (`.bak` 削除分離による H1 修正の副次効果) + CleanupBak は単独メッセージ
+- **[M3 + L4] CliArgs.Parse で path 4 種を `Path.GetFullPath` で絶対化**: `--staging` / `--manager-target` / `--restart-exe` / `--log-dir` が相対 path で渡されると Updater プロセスの CWD に依存する silent path があった。Parse 末尾で 4 path 全てを `GetFullPath` 通すことで、後段の Logger / FileReplacer / Process.Start 全箇所で path 絶対性を仮定可能に。L4 (`"\\"` 等の病的 root 入力) も `GetFullPath` で drive root absolute に正規化されて副次的に解消
+- **[L1] ProcessWaiter で初回 polling 時に既終了済の場合もログ残す**: Manager が呼び出し前に既に終了していると `[Step 1/3] Manager プロセスの終了を待機` の直後に何もログが出ず Phase 4 で「待機が機能しているか」を後追い確認できない問題を解消。`iter == 0` でも「Manager プロセスは既に終了済み、待機 skip」を 1 行出す
+- **[L2] `--wait-timeout 0` = 無限待機を UsageText に明記**: `ProcessWaiter.WaitForManagerExit` は `timeoutSeconds > 0` を check gate にしていて 0 → 無限待機の挙動だが、UsageText / SPEC は default 60 しか書いていなかった。`--wait-timeout <seconds>  ... (default: 60、0 = 無制限待機)` と UsageText に追記、誤って 0 渡して Updater hang する path を明文化で防ぐ
+- **[L5] ProcessWaiter の `GetProcessesByName` system-wide コメント追加**: `--force-kill` 時に同 PC で test 用 / production 用 Manager.exe が同時稼働している edge case で両方 kill される挙動を明文化。校内 1 install 想定では実害なしだが、将来 `--caller-pid` で自身の PID のみ wait/kill する形に拡張する余地ありと明記
+- **[L6] Logger に `_initFailed` ガード不要理由を明記**: Manager Logger は `_initFailed` ガード持ちだが Updater 版は持たない非対称性を「Initialize は Main() で 1 回しか呼ばれない設計、冪等性は `_initialized` の単純 return で十分」とコメントで明文化
+- **[L7] Manager と同じ ProjectGuid / Guid 同一値運用を確認**: Manager csproj の `ProjectGuid` と AssemblyInfo の `Guid` が同一値 (`EA046367-...`) で運用されているので、Updater 側 (`b5d71e9c-...`) も同一値で OK。既存慣行に従う
+
 #### Added (#108 Phase 3 完成: Updater 実装着手)
 
 - **`Build-Updater` function in Release.ps1**: `Companions/Updater/GCTonePrism_Updater.csproj` を `msbuild /p:Configuration=Release` で build、staging `<staging>/files/Companions/Updater/` にコピー。Manager と同じ pattern で nuget restore / native DLL 抽出は不要 (Updater は SQLite / WindowsAPICodePack 等の外部依存を持たない単純な Console app)

@@ -17,7 +17,7 @@ namespace GCTonePrism.Updater
     ///   --staging          (必須) staging dir のルート。`&lt;staging&gt;/files/Manager/` を新 Manager のソースとする
     ///   --manager-target   (必須) 既存 Manager dir。rename-rollback で置換する dir
     ///   --restart-exe      (必須) 置換後に起動する Manager.exe フルパス
-    ///   --log-dir          (任意) ログ出力先。省略時は exe 隣の `logs/updater/`
+    ///   --log-dir          (任意) ログ出力先。省略時は `<install>/logs/updater/` (manager-target の親から導出、SPEC §3.7.4 準拠)
     ///   --wait-timeout     (任意) Manager プロセス終了待ちの timeout 秒数 (default 60)
     ///   --force-kill       (任意) timeout 経過後に Manager を強制 kill するか (default off)
     ///
@@ -76,6 +76,30 @@ namespace GCTonePrism.Updater
             }
 
             ValidateRequired(result);
+            // path 引数 4 種を絶対パス化 (シニアレビュー round 1 M3 + L4)。
+            //   - Manager UI (Phase 4) が相対 path を渡すケース、または OS テスト等で相対 path を
+            //     渡された場合、Updater は spawn 元の CWD に依存して動く silent path があった。
+            //   - Path.GetFullPath で正規化することで、後段の Logger / FileReplacer / Process.Start
+            //     全箇所で path の絶対性を仮定できる。`"\\"` のような病的入力も `"C:\"` 等の
+            //     drive root absolute path に正規化されるので L4 も副次的に解消。
+            //   - 例外 (UnauthorizedAccessException / PathTooLongException 等) は Program 側
+            //     catch (Exception) で受けて exit 2 にせず 1 (予期しない例外) に倒すか、
+            //     ここで ArgumentException に変換するか判断。ArgumentException 変換で exit 2
+            //     (引数エラー) として user に明示する。
+            try
+            {
+                result.StagingDir = System.IO.Path.GetFullPath(result.StagingDir);
+                result.ManagerTargetDir = System.IO.Path.GetFullPath(result.ManagerTargetDir);
+                result.RestartExe = System.IO.Path.GetFullPath(result.RestartExe);
+                if (!string.IsNullOrEmpty(result.LogDir))
+                {
+                    result.LogDir = System.IO.Path.GetFullPath(result.LogDir);
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new ArgumentException($"path 引数の絶対パス化に失敗: {ex.Message}", ex);
+            }
             return result;
         }
 
@@ -116,8 +140,8 @@ namespace GCTonePrism.Updater
                 "  --restart-exe <path>      置換後に起動する Manager.exe のフルパス\n" +
                 "\n" +
                 "Optional:\n" +
-                "  --log-dir <path>          ログ出力先 (default: exe 隣の logs/updater/)\n" +
-                "  --wait-timeout <seconds>  Manager プロセス終了待ちの timeout (default: 60)\n" +
+                "  --log-dir <path>          ログ出力先 (default: <install>/logs/updater/、manager-target の親から導出、SPEC §3.7.4 準拠)\n" +
+                "  --wait-timeout <seconds>  Manager プロセス終了待ちの timeout (default: 60、0 = 無制限待機)\n" +
                 "  --force-kill              timeout 経過後に Manager を強制終了する\n" +
                 "\n" +
                 "Exit codes:\n" +

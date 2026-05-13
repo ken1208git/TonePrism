@@ -14,6 +14,12 @@ namespace GCTonePrism.Updater
     ///
     /// 注: Launcher / 常駐 Companions の終了待機は **Manager UI 側の責務** (SPEC §3.7.3 [4]、Phase 4 で実装)。
     /// Updater は Manager のみを対象にする。
+    ///
+    /// 注 (シニアレビュー round 1 L5): Process.GetProcessesByName は system-wide で全 Manager.exe を
+    /// 検出する。校内運用は「1 PC = 1 install」想定 (SPEC §3.7.1 / §3.7.5) なので実害なしだが、
+    /// テスト用 / production 用の Manager.exe が同 PC で同時稼働しているような edge case では両方
+    /// を待機 / kill する。将来 caller (Manager UI) から `--caller-pid` で自身の PID を渡してもらい
+    /// その PID のみ wait/kill する形に拡張する余地あり。
     /// </summary>
     internal static class ProcessWaiter
     {
@@ -50,6 +56,12 @@ namespace GCTonePrism.Updater
                         if (iter > 0)
                         {
                             Logger.Info($"Manager プロセス終了確認 ({sw.Elapsed.TotalSeconds:F1}s 経過)");
+                        }
+                        else
+                        {
+                            // シニアレビュー round 1 L1: 初回 polling で既に終了済の場合もログを残す
+                            // (待機 skip が機能していることを後追い確認できるように)
+                            Logger.Info("Manager プロセスは既に終了済み、待機 skip");
                         }
                         return true;
                     }

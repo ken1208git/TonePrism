@@ -51,18 +51,21 @@ namespace GCTonePrism.Updater
 
             // ----- Step 0.5: Logger 初期化 -----
             // log-dir 未指定なら manager-target の親 dir / logs / updater を default に使う
+            // (SPEC §3.7.4: `<install>/logs/updater/`、シニアレビュー round 1 M1 + L3 で
+            //  UsageText / Logger fallback の三者一致に揃え直した。Logger.Initialize 内の
+            //  exe-relative fallback は **到達不能** にするため、Program 側で必ず最終 path を
+            //  確定してから渡す。)
             string logDir = parsed.LogDir;
             if (string.IsNullOrEmpty(logDir))
             {
-                try
+                // CliArgs.Parse で ManagerTargetDir は GetFullPath 済み (絶対パス保証、M3)
+                // なので親 dir 計算は安全。null になる極限ケース (drive root が manager-target
+                // 等の病的入力) のみ Logger 側 fallback に流れる。
+                string managerParent = Path.GetDirectoryName(parsed.ManagerTargetDir.TrimEnd('\\', '/'));
+                if (!string.IsNullOrEmpty(managerParent))
                 {
-                    string managerParent = Path.GetDirectoryName(parsed.ManagerTargetDir.TrimEnd('\\', '/'));
-                    if (!string.IsNullOrEmpty(managerParent))
-                    {
-                        logDir = Path.Combine(managerParent, "logs", "updater");
-                    }
+                    logDir = Path.Combine(managerParent, "logs", "updater");
                 }
-                catch { /* fall back to exe-relative default in Logger.Initialize */ }
             }
             Logger.Initialize(logDir);
 
@@ -104,7 +107,12 @@ namespace GCTonePrism.Updater
                 return 3;
             }
 
-            // ----- Step 2: Manager dir 置換 -----
+            // ----- Step 2: Manager dir 置換 (Replace + restart-exe 検証 + CleanupBak) -----
+            // シニアレビュー round 1 H1 対応: 旧実装は FileReplacer.Replace 内で .bak 削除まで
+            // 行ってから restart-exe 検証していたため、release packaging bug 等で staging に新 exe
+            // が無いケースで「旧 Manager 消失 + 新 Manager 不在」の復旧不能 broken state があった。
+            // 修正: Replace は Step 1 (rename) + Step 2 (copy) のみ → restart-exe 存在検証 → OK なら
+            // CleanupBak、NG なら RollbackFromBak で旧 Manager 復元。これで H1 silent path を閉じる。
             Logger.Info("[Step 2/3] Manager dir 置換 (rename-rollback)");
             bool replaced;
             try
@@ -123,13 +131,31 @@ namespace GCTonePrism.Updater
                 return 4;
             }
 
-            // ----- Step 3: 新 Manager.exe 起動 -----
-            Logger.Info("[Step 3/3] 新 Manager.exe を起動");
+            // [Step 2 sub-validation] .bak 削除前に restart-exe が新 target に存在することを検証。
+            // 不在なら旧 Manager を .bak から復元してから exit 6 (新 Manager 不在 + 旧 Manager 消失
+            // の復旧不能 broken state を回避)。
             if (!File.Exists(args.RestartExe))
             {
-                Logger.Error($"起動対象 exe が存在しません: {args.RestartExe}");
+                Logger.Error($"起動対象 exe が存在しません (staging に欠損か release packaging bug): {args.RestartExe}");
+                Logger.Warn("旧 Manager を .bak から復元します...");
+                try
+                {
+                    FileReplacer.RollbackFromBak(args.ManagerTargetDir);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Logger.Error($"FATAL: restart-exe 検証失敗後の rollback も失敗", ex);
+                    return 5;
+                }
+                Logger.Warn("旧 Manager 復元完了。Install.bat 再実行で正しい staging から復旧してください。");
                 return 6;
             }
+
+            // 検証 OK → .bak 削除 (best-effort、失敗してもアップデート自体は成功扱い)
+            FileReplacer.CleanupBak(args.ManagerTargetDir);
+
+            // ----- Step 3: 新 Manager.exe 起動 -----
+            Logger.Info("[Step 3/3] 新 Manager.exe を起動");
             try
             {
                 var psi = new ProcessStartInfo
