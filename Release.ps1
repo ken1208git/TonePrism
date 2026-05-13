@@ -1041,7 +1041,24 @@ function Resolve-TagConflict {
 # 「検証だけ」で止めれば、リリース直前に手追加忘れに気づいて修正 → 再 Release.bat で済む。
 
 function Assert-ChangelogLinkDefs {
-    Write-Step "CHANGELOG 末尾 Bundle 参照リンク定義の検証 (Preflight 直後 / build 前)"
+    # round 2 L2: Write-Step convention に揃え (position メタは header コメント側で伝達)。
+    Write-Step "CHANGELOG 末尾 Bundle 参照リンク定義の検証"
+
+    # round 2 M2: -SkipUpload 時は publish しない → 参照リンク URL (releases/tag/vX.Y.Z) の
+    # resolution 自体が無意味、CHANGELOG 完備の強制契約も緩める。既存 Preflight が CHANGELOG
+    # `### [Bundle v$Version]` セクション検証で同じ pattern を採っている (Release.ps1:919
+    # `if (-not $SkipUpload) {...Fail} else {Write-Warn}`)、AGENTS.md「release 実行時に verify」
+    # 文言とも整合。
+    #
+    # 注: `-DryRun` / `-Offline` は Release.ps1:208-210 で `$SkipUpload = $true` に
+    # **auto-promote** される (Codex P2 #137 経緯)。本 gate は DryRun/Offline 経由でも skip path
+    # に流れる = 既存 Preflight と完全同期。実 fence の動作確認は本番 publish 経路 (= flag
+    # なしで `.\Release.bat -NoPause -Force`) で初発火を verify する流れ。
+    if ($SkipUpload) {
+        Write-Warn "Bundle 参照リンク定義の検証を skip (-SkipUpload or -DryRun/-Offline 経由 auto-promote、publish しないので URL resolution 不要)"
+        return
+    }
+
     $changelogPath = Join-Path $RepoRoot 'CHANGELOG.md'
     # round 1 Low-3: Get-Content -Raw は PS 5.1 で BOM 無し UTF-8 を CP932 として読む既知挙動
     # あり。script 冒頭 (Release.ps1:222 付近) の $_changelogContent と同じ ReadAllText で
@@ -1072,6 +1089,7 @@ function Assert-ChangelogLinkDefs {
     Write-Host "     本文中のコードブロック内文字列は false-positive 排除のため認識しません)" -ForegroundColor DarkGray
     Write-Host "    以下を CHANGELOG.md 末尾の参照リンク定義ブロックに追加してから再実行してください:" -ForegroundColor Yellow
     Write-Host "      $expectedDefDisplay" -ForegroundColor Cyan
+    Write-Host "    追加位置: 既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持、CHANGELOG 末尾 HTML comment ブロック直下)" -ForegroundColor Yellow
     Write-Host "    (AGENTS.md 'Release and Versioning' 規約参照)" -ForegroundColor Yellow
     Fail "CHANGELOG 末尾参照リンク定義の同期忘れ"
 }

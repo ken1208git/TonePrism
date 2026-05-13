@@ -49,7 +49,14 @@
   - **Release.ps1**: `Assert-ChangelogLinkDefs` 関数を追加 (Phase 0.5 = Preflight 直後、round 1 Medium-1 で位置調整)、main flow に組み込み。release 実行前に該当 Bundle version の参照リンク定義が末尾にあるか verify し、無ければ `Fail` で停止する fence。自動 mutation (script が CHANGELOG 末尾を書き換える) は採らず、規約遵守を物理的に強制する形 (人間 / Claude いずれのミスも release.bat 実行直後 = build 前に物理的に検知される、fail-fast)
 - **DRY-RUN 検証**: 本 PR 内で「リンク定義が存在する case」(PASS) を確認、別 fixture で「未追加 case」を `Assert-ChangelogLinkDefs` が `Fail` するか動作確認 (= fence 機能の実証)
 
-#### Changed (PR #153 シニアレビュー round 1)
+#### Changed (PR #153 シニアレビュー round 2)
+
+- **[M2] `Assert-ChangelogLinkDefs` に `-SkipUpload` gate を追加して既存 Preflight 契約と整合化**: 初版は `-SkipUpload` を gate せず無条件 Fail だったため、既存 `Assert-Preflight` の CHANGELOG `### [Bundle v$Version]` セクション検証 (`if (-not $SkipUpload) {...Fail} else {Write-Warn}`) と非対称だった。SkipUpload は publish しない = 参照リンク URL の resolution 自体が無意味で、staging テスト (`Release.ps1 -SkipUpload -DryRun`) で link def 未追加だけで停止される path があった。修正: `Assert-ChangelogLinkDefs` 冒頭で `if ($SkipUpload) { Write-Warn ...; return }` を入れて既存 Preflight pattern と揃え、AGENTS.md「release 実行時に verify」文言とも整合化。`-DryRun` / `-Offline` は Release.ps1:208-210 で `$SkipUpload = $true` に **auto-promote** される (Codex P2 #137 経緯) ため、DryRun 経由でも skip + warn path に流れる = 既存 Preflight と完全同期。実 fence の動作確認は本番 publish 経路 (flag なし `Release.bat -NoPause -Force`) で初発火を verify する
+- **[L1] AGENTS.md rule から PR 識別子 (`fix/changelog-link-sync PR で導入`) を削除**: rule 末尾の PR 識別子は forward-looking な規約に履歴情報を埋め込んでいて、CHANGELOG 側 (v0.1.12 Added) に既に詳細経緯あり SoT 重複 + 時間と共に rot する (2 年後の読者にとって PR 名は意味を失う)。同 AGENTS.md 内他 rule は pure rule 形式で PR 識別子なし。「`fix/changelog-link-sync` PR で導入、」を削除し、SPEC §3.7.7 への横参照は残置。あわせて「追加位置は既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持)」と「`-SkipUpload` 時のみ skip + warn」を 1 文に統合
+- **[L2] `Write-Step` の位置メタ括弧書きを削除、convention に揃え**: 初版 `Write-Step "CHANGELOG 末尾 Bundle 参照リンク定義の検証 (Preflight 直後 / build 前)"` は近傍の他 `Write-Step` (`"Preflight: 環境とパラメータを検証"` / `"GitHub Releases タグ衝突チェック"`) と異なり位置メタを混入していた。位置情報は header コメント (Release.ps1 Phase 0.5 セクション) で既に伝達済なので Step 表示は action のみに短縮
+- **[L3] Fail message + CHANGELOG HTML comment に「追加位置 = 既存 Bundle 行の先頭 (降順維持)」hint を追加**: 初版 Fail message は「末尾の参照リンク定義ブロックに追加」とだけ案内、CHANGELOG.md 末尾の HTML comment + 既存 link def 群の中で「どこに追加するか」が user message から読み取れなかった。Release.ps1 Fail 出力に「追加位置: 既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持、CHANGELOG 末尾 HTML comment ブロック直下)」を追記 + CHANGELOG.md 末尾 HTML comment にも「**追加位置は既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持、本コメント直下)** とする (= 新しいほど上)」を明示
+
+
 
 - **[High-1] CHANGELOG 構造修正: v0.1.11 / v0.1.12 entry の分離**: 初版 commit (`7bb0102`) では既存 `### [Release Tooling v0.1.11]` 見出しを `v0.1.12` に **書き換えてしまい**、配下にあった PR #152 round 8 の Fixed 群 (UseShellExecute=false + WaitForExit 2000ms / Codex P2-1, P2-2 / Medium / Low の重大発見根治) が PR #153 = v0.1.12 の作業として表示される状態になっていた。AGENTS.md「1 PR 内の version bump は原則 1 回のみ」は PR をまたいで version 番号を付け替えるのは想定外 (= PR #152 = v0.1.11、本 PR = v0.1.12 が正しい対応関係)。修正: 旧 v0.1.11 entry の見出し + 配下 Fixed 群を復元、新 v0.1.12 entry を v0.1.11 の **上** に並べる形に再構成。これで「v0.1.11 と v0.1.12 の差分は何だったか?」を CHANGELOG だけで遡れる状態に戻る
 - **[Medium-1 + Low-2] Assert の発火タイミングを build 前 (Preflight 直後) に移動 + AGENTS.md 文言を実装と整合化**: 初版は `Assert-ChangelogLinkDefs` を `Assert-ExpectedFiles` の **後** (= Build-Launcher / Build-Manager / Build-Updater + Copy-Templates の後) に置いていた。link def 忘れを「数分のフル build を捨ててから」検出する fail-fast 違反 + AGENTS.md「Release.bat 実行直後の Assert で物理的に防ぐ」記述と実装の document-vs-impl mismatch があった。修正: `Assert-Preflight` の直後 (build 開始前) に移動、link def 忘れを **数秒で検出 → 修正 → 再 Release.bat** のサイクルに整える。AGENTS.md の「実行直後」記述も実装と一致
@@ -1848,9 +1855,10 @@ entry 経由か commit 履歴で追跡可能。
 Bundle 移行前 (2026-03 まで): Launcher / Manager の個別 GitHub Releases tag (`Launcher_v0.5.7`
 / `Manager_v0.7.6` 等) は実在するため、過去履歴として参照リンク定義を残置。
 
-新規 Bundle release 時は本ブロックに `[Bundle vX.Y.Z]: <URL>` を追加すること (AGENTS.md
-"Release and Versioning" 規約、Release.ps1 の `Assert-ChangelogLinkDefs` が検証して
-未追加なら Fail で停止する)。
+新規 Bundle release 時は本ブロックに `[Bundle vX.Y.Z]: <URL>` を追加すること。**追加位置は
+既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持、本コメント直下)** とする (= 新しいほど上)。
+AGENTS.md "Release and Versioning" 規約、Release.ps1 の `Assert-ChangelogLinkDefs` が検証
+して未追加なら Fail で停止する。
 -->
 
 [Bundle v0.2.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/v0.2.0
