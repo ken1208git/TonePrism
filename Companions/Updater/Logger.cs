@@ -52,6 +52,16 @@ namespace GCTonePrism.Updater
 
                 try
                 {
+                    // round 4 M-4: Console.OutputEncoding を UTF-8 に明示。
+                    //   default は Windows console の codepage (日本語 Windows = Shift-JIS / CP932)。
+                    //   Phase 4 で Manager UI が `RedirectStandardOutput=true` で stdout を log viewer に
+                    //   流す前提だが、Manager UI 側 encoding が CP932 と合っていなければ「[Step 1/3]
+                    //   Manager プロセスの終了を待機」が mojibake する path があった。ファイルログは
+                    //   既に UTF-8 BOM なし (FileStream + UTF8Encoding(false))、Console も UTF-8 に
+                    //   統一して Manager UI / 部員視点の log viewer で文字化けしない規約を確立。
+                    //   失敗時 (テスト環境で Console 不在等) は best-effort で握り潰し、CLI 動作には影響なし。
+                    try { Console.OutputEncoding = Encoding.UTF8; } catch { /* best-effort */ }
+
                     // 通常 Program.cs が <install>/logs/updater/ を計算済みで渡してくる (SPEC §3.7.4)。
                     // 病的入力 (manager-target が drive root 等) で空が渡る場合のみ exe-relative
                     // fallback に流れる。シニアレビュー round 1 M1 / L3 で「通常 path は Program 側
@@ -103,6 +113,11 @@ namespace GCTonePrism.Updater
                         _writer.Dispose();
                         _writer = null;
                     }
+                    // round 4 L-2: Shutdown 後に CurrentLogPath が古い path を返す stale 状態を解消。
+                    // 本 CLI は Main で 1 回 Shutdown して即 exit するので実害はないが、test code や
+                    // 将来の re-initialize で `Shutdown → CurrentLogPath getter` が前回 path を返す
+                    // 混乱源を断つ。
+                    _currentLogPath = null;
                     _initialized = false;
                 }
                 catch { /* swallow */ }

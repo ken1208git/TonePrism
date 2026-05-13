@@ -127,6 +127,29 @@ namespace GCTonePrism.Updater
             {
                 throw new ArgumentException($"path 引数の形式がサポートされません: {ex.Message}", ex);
             }
+
+            // round 4 M-3: restart-exe は --manager-target 配下の path しか許可しない。
+            //   旧実装は `File.Exists(RestartExe)` だけ check していたため、caller (Manager UI Phase 4) の
+            //   typo で `--restart-exe C:\Windows\System32\calc.exe` のような誤 path が渡されると、
+            //   Updater は新 Manager dir を置き換えた後に calc.exe を起動して exit 0 で抜ける silent
+            //   failure path が残っていた。Manager UI 側は「アップデート成功」表示 → 部員 / 顧問は
+            //   新 Manager が起動したと信じる mismatch。
+            //   round 2 L2 (target 不在 typo を Error + return false) と同じ防御方針で、引数解析時に
+            //   引数エラー (exit 2) として早期 fail させる。
+            //
+            //   比較ロジック: 両 path とも GetFullPath 済の絶対 path。末尾 separator 揺れを TrimEnd で
+            //   吸収し、`{ManagerTargetDir}{separator}` で始まることを check (大文字小文字無視、
+            //   Windows path 規約)。`--manager-target D:\Manager` + `--restart-exe D:\ManagerExtra\foo.exe`
+            //   のような prefix 偶然衝突を separator check で除外。
+            string normalizedTarget = result.ManagerTargetDir.TrimEnd('\\', '/');
+            string targetWithSep = normalizedTarget + System.IO.Path.DirectorySeparatorChar;
+            if (!result.RestartExe.StartsWith(targetWithSep, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException(
+                    $"--restart-exe は --manager-target 配下を指定してください (caller の typo 防止)。\n" +
+                    $"  --manager-target: {result.ManagerTargetDir}\n" +
+                    $"  --restart-exe:    {result.RestartExe}");
+            }
             return result;
         }
 
@@ -174,13 +197,16 @@ namespace GCTonePrism.Updater
                 "                            (同 PC の他 install Manager を巻き添えにしない)。未指定時は\n" +
                 "                            system-wide GetProcessesByName fallback。\n" +
                 "\n" +
-                "Exit codes:\n" +
+                "Exit codes (round 4 H-1 + M-1 で 3 を 3/7/8 に分割 + 1 を追記、Phase 4 Manager UI の再試行分岐用):\n" +
                 "  0  成功\n" +
-                "  2  引数エラー / 必須引数不足\n" +
-                "  3  Manager プロセスが timeout 内に終了しなかった (--force-kill 未指定)\n" +
-                "  4  ファイル置換に失敗 (rollback 実施済)\n" +
-                "  5  rollback にも失敗した致命的状態\n" +
-                "  6  新 Manager.exe の起動に失敗\n";
+                "  1  予期しない実行時例外 (Logger に stack trace、bug report 対象)\n" +
+                "  2  引数エラー / 必須引数不足 / --restart-exe が --manager-target 外 等\n" +
+                "  3  Manager プロセスが timeout 内に終了しなかった (--force-kill 未指定、--force-kill 付与か手動 close で再試行可)\n" +
+                "  4  ファイル置換に失敗 (rollback 実施済、旧 Manager 復元)\n" +
+                "  5  rollback にも失敗した致命的状態 (`.bak` から手動復元要)\n" +
+                "  6  新 Manager.exe の起動に失敗 (Process.Start null/throw、restart-exe 不在 等)\n" +
+                "  7  force-kill 試行が bounded retry (3 回) 上限超過 (permission denied 等、機械的再試行は無意味)\n" +
+                "  8  process enumeration 連続失敗 (5 回、IPC/WMI 一時障害、短時間後の再試行で回復見込み)\n";
         }
     }
 }

@@ -254,6 +254,14 @@ namespace GCTonePrism.Updater
 
         /// <summary>
         /// Directory.Copy は標準にないので手動。NTFS の hardlink / シンボリックリンクは current scope 外。
+        ///
+        /// <para>**attribute の扱い** (round 4 L-4): `File.Copy(..., overwrite: true)` は内容のみコピーし、
+        /// source の ReadOnly / Hidden / System 等のファイル attribute は **preserve しない**。Manager 配下は
+        /// 全て通常 attribute の .exe / .dll / .config / native DLL なので現状実害なし。将来「user data
+        /// 残し更新」path で attribute 維持が必要な場合は `File.GetAttributes` + `File.SetAttributes` の
+        /// 明示コピーが要る (本 PR scope 外)。なお staging から copy された ReadOnly 属性付き dest
+        /// 残骸への上書きは UnauthorizedAccessException を起こすが、本実装では target を `.bak` rename
+        /// した直後の新規 dir に書き込むので dest 残骸は通常存在しない。</para>
         /// </summary>
         private static void CopyDirectory(string sourceDir, string destDir)
         {

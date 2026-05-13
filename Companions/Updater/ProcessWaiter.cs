@@ -5,6 +5,25 @@ using System.Threading;
 namespace GCTonePrism.Updater
 {
     /// <summary>
+    /// `WaitForManagerExit` の戻り値 (round 4 H-1 対応)。
+    /// 旧 `bool` 返しでは 3 種類の失敗 (timeout / force-kill bounded retry exhausted /
+    /// enumeration 連続失敗) を全て同じ exit 3 に倒していたため、Phase 4 Manager UI が
+    /// 再試行戦略を分岐実装する際に区別できなかった問題を解消。各失敗を別 exit code に
+    /// マップするための切り分け enum。
+    /// </summary>
+    internal enum WaitResult
+    {
+        /// <summary>Manager プロセスが期待通り終了した (→ exit 0 経路)</summary>
+        Success,
+        /// <summary>timeout 経過 + `--force-kill` 未指定 (→ exit 3、caller は --force-kill 付与か手動 close で再試行可能)</summary>
+        TimedOutNoForceKill,
+        /// <summary>`--force-kill` 指定下で MaxForceKillAttempts (3 回) 連続で kill 失敗 (→ exit 7、permission denied 等の構造的問題、機械的再試行は無意味)</summary>
+        ForceKillExhausted,
+        /// <summary>process enumeration が MaxEnumerationFailures (5 回) 連続で throw (→ exit 8、IPC/WMI 一時障害、短時間後再試行に意味あり)</summary>
+        EnumerationFailed,
+    }
+
+    /// <summary>
     /// Manager プロセスの完全終了を polling で待機する。
     ///
     /// SPEC §3.7.4 [責務 2]: Manager は caller。spawn 直後に graceful 終了を始めるが、.NET CLR の cleanup
@@ -44,8 +63,8 @@ namespace GCTonePrism.Updater
         /// <param name="timeoutSeconds">timeout 秒数 (0 で無制限)</param>
         /// <param name="forceKill">timeout 経過時に強制 kill するか</param>
         /// <param name="callerPid">caller Manager の PID (> 0 で PID-only モード、-1 で system-wide fallback、Codex round 2 P1 #1)</param>
-        /// <returns>true: 終了確認できた / false: timeout 経過で残存 (forceKill=false) または force-kill bounded retry 超過 (forceKill=true) または enumeration 連続失敗</returns>
-        public static bool WaitForManagerExit(int timeoutSeconds, bool forceKill, int callerPid)
+        /// <returns>失敗種別を区別した <see cref="WaitResult"/> (round 4 H-1、旧 bool 返しから差し替え)。caller (Program.cs) が switch で exit code 0/3/7/8 に分岐する</returns>
+        public static WaitResult WaitForManagerExit(int timeoutSeconds, bool forceKill, int callerPid)
         {
             var sw = Stopwatch.StartNew();
             int iter = 0;
@@ -79,7 +98,7 @@ namespace GCTonePrism.Updater
                     if (consecutiveEnumerationFailures >= MaxEnumerationFailures)
                     {
                         Logger.Error($"process enumeration が連続 {MaxEnumerationFailures} 回失敗、abort");
-                        return false;
+                        return WaitResult.EnumerationFailed;
                     }
                 }
 
@@ -98,7 +117,7 @@ namespace GCTonePrism.Updater
                             // シニアレビュー round 1 L1: 初回 polling で既に終了済の場合もログを残す
                             Logger.Info("Manager プロセスは既に終了済み、待機 skip");
                         }
-                        return true;
+                        return WaitResult.Success;
                     }
 
                     if (!enumerationFailed)
@@ -122,7 +141,7 @@ namespace GCTonePrism.Updater
                             {
                                 // Codex round 2 P2 #2: bounded retry 超過で abort、無限ループ防止
                                 Logger.Error($"force-kill 試行が {MaxForceKillAttempts} 回連続で残存プロセスを終了できず、abort");
-                                return false;
+                                return WaitResult.ForceKillExhausted;
                             }
                             Logger.Warn($"timeout {timeoutSeconds}s 経過、force-kill 試行 {forceKillAttempts}/{MaxForceKillAttempts}: Manager プロセスを強制終了します ({procs.Length} 件)");
                             KillAll(procs);
@@ -132,9 +151,13 @@ namespace GCTonePrism.Updater
                         }
                         else
                         {
+                            // round 4 H-1: timeout 経路の中でも「enumeration 失敗で force-kill 経路に
+                            // 入れなかった」のと「単に --force-kill 未指定」を区別。Phase 4 Manager UI が
+                            // 「短時間後に再試行する価値あり (WMI 一時不調等)」と「user 介入が必要
+                            // (--force-kill 忘れ or 手動 close 要請)」を分けるための情報。
                             string reason = enumerationFailed ? "enumeration 失敗継続中" : $"{procs.Length} 件残存";
                             Logger.Error($"timeout {timeoutSeconds}s 経過 ({reason})。--force-kill 未指定 or enumeration 失敗のため中止。");
-                            return false;
+                            return enumerationFailed ? WaitResult.EnumerationFailed : WaitResult.TimedOutNoForceKill;
                         }
                     }
                 }

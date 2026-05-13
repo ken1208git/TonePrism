@@ -18,13 +18,16 @@ namespace GCTonePrism.Updater
     /// 置換まで担当した後で本 Updater を spawn する。本 Updater は spawn 後に Manager が graceful 終了
     /// するのを待ち、自分自身が Manager 置換 + 再起動を行う。
     ///
-    /// Exit codes (CliArgs.UsageText() も参照):
+    /// Exit codes (CliArgs.UsageText() / SPEC §3.7.4 と三者同期、round 4 H-1 + M-1):
     ///   0 = 成功
-    ///   2 = 引数エラー
-    ///   3 = Manager プロセス終了 timeout (--force-kill 未指定)
-    ///   4 = ファイル置換失敗 (rollback 実施済)
-    ///   5 = rollback も失敗した致命的状態
-    ///   6 = 新 Manager.exe 起動失敗
+    ///   1 = 予期しない実行時例外 (Logger に stack trace 残る、運用上 bug report 対象)
+    ///   2 = 引数エラー (必須引数不足 / path 解析失敗 / --restart-exe が --manager-target 外 等)
+    ///   3 = Manager プロセス終了 timeout (--force-kill 未指定、caller は --force-kill 付与か手動 close で再試行可能)
+    ///   4 = ファイル置換失敗 (rollback 実施済、旧 Manager 復元)
+    ///   5 = rollback も失敗した致命的状態 (手動復旧必要、`.bak` から手動 rename)
+    ///   6 = 新 Manager.exe 起動失敗 (Process.Start null/throw、restart-exe 不在 等)
+    ///   7 = force-kill 試行 bounded retry (3 回) 超過 (permission denied 等の構造的問題、機械的再試行は無意味)
+    ///   8 = process enumeration 連続失敗 (5 回、IPC/WMI 一時障害、短時間後の再試行に意味あり)
     /// </summary>
     internal static class Program
     {
@@ -101,12 +104,28 @@ namespace GCTonePrism.Updater
             Logger.Info("------------------------------------------------------------");
 
             // ----- Step 1: Manager プロセス終了待機 -----
+            // round 4 H-1: ProcessWaiter は WaitResult enum を返すようになり、3 種の失敗
+            // (timeout / force-kill 超過 / enumeration 失敗) を別 exit code に分岐できる。
+            // Phase 4 Manager UI が再試行戦略を組む際に「再試行で直る (8)」「user 介入要 (3)」
+            // 「構造的問題 (7)」を区別可能。
             Logger.Info("[Step 1/3] Manager プロセスの終了を待機");
-            bool exited = ProcessWaiter.WaitForManagerExit(args.WaitTimeoutSeconds, args.ForceKill, args.CallerPid);
-            if (!exited)
+            WaitResult waitResult = ProcessWaiter.WaitForManagerExit(args.WaitTimeoutSeconds, args.ForceKill, args.CallerPid);
+            switch (waitResult)
             {
-                Logger.Error("Manager プロセスが終了しなかったため abort (--force-kill で強制終了可能)");
-                return 3;
+                case WaitResult.Success:
+                    break;
+                case WaitResult.TimedOutNoForceKill:
+                    Logger.Error("Manager プロセスが timeout 内に終了せず (--force-kill 未指定)。--force-kill 付与か手動 close 後に再試行してください。");
+                    return 3;
+                case WaitResult.ForceKillExhausted:
+                    Logger.Error("force-kill 試行が bounded retry 上限に達して abort。permission denied 等の構造的問題、機械的再試行では解決しません。");
+                    return 7;
+                case WaitResult.EnumerationFailed:
+                    Logger.Error("process enumeration が連続失敗で abort。IPC/WMI 一時不調の可能性、短時間後の再試行で回復するケースあり。");
+                    return 8;
+                default:
+                    Logger.Error($"未知の WaitResult: {waitResult}");
+                    return 1;
             }
 
             // ----- Step 2: Manager dir 置換 (Replace + restart-exe 検証 + CleanupBak) -----
@@ -157,6 +176,17 @@ namespace GCTonePrism.Updater
             FileReplacer.CleanupBak(args.ManagerTargetDir);
 
             // ----- Step 3: 新 Manager.exe 起動 -----
+            // round 4 M-2: Process.Start の戻り値を null check。
+            // UseShellExecute=true では「OS が既存プロセスを reuse した」「OS が起動を抑止した」等の
+            // 場合に null を返すと公式ドキュメントで明記されている (Microsoft Docs: ProcessStartInfo)。
+            // 旧実装は null/非 null 問わず "Manager 起動完了" ログを出していたため、起動が実体として
+            // 走らなかったケースで Manager UI / 部員視点で「Updater は exit 0 で抜けたから OK」と
+            // 誤誘導される silent false-success path があった。
+            //
+            // round 4 M-5: UseShellExecute=true は Manager.exe が requireAdministrator manifest を
+            // 持つ場合に UAC prompt を別 window で出す挙動を含む。現 Manager は非 admin 前提
+            // (SPEC §3.7.4 で明文化済) なので発火しないが、将来 admin 化された場合に「Updater が
+            // 消えた直後に UAC prompt が突然出る」体験になる点は SPEC 規約として固定。
             Logger.Info("[Step 3/3] 新 Manager.exe を起動");
             try
             {
@@ -166,8 +196,16 @@ namespace GCTonePrism.Updater
                     UseShellExecute = true,
                     WorkingDirectory = Path.GetDirectoryName(args.RestartExe) ?? string.Empty
                 };
-                Process.Start(psi);
-                Logger.Info($"Manager 起動完了: {args.RestartExe}");
+                Process proc = Process.Start(psi);
+                if (proc == null)
+                {
+                    Logger.Error($"Process.Start が null を返却 (起動が実体として走らず、shell association reuse / OS による起動抑止 等の可能性): {args.RestartExe}");
+                    return 6;
+                }
+                // PID は best-effort で記録 (取得失敗しても起動自体は成功扱い)
+                int? pid = null;
+                try { pid = proc.Id; } catch { /* swallow */ }
+                Logger.Info($"Manager 起動完了: {args.RestartExe}" + (pid.HasValue ? $" (PID={pid.Value})" : ""));
             }
             catch (Exception ex)
             {

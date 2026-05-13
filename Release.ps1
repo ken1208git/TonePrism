@@ -1361,6 +1361,16 @@ function Build-Updater {
     if (-not (Test-Path $binRelease)) {
         Fail "Updater ビルド出力が見つかりません: $binRelease"
     }
+    # シニアレビュー round 4 L-3: dir 存在 check に加え、`.exe` 1 件以上の存在も check。
+    # msbuild が exit 0 で抜けたが成果物 dir が空 (pathological case、msbuild target が空 sln を
+    # 受け取った等) の場合、`Get-ChildItem` 0 件で copy ループが silent に 0 回回り、
+    # `Write-Ok "Updater 成果物コピー完了"` を空コピーで通過する path があった。最終的に
+    # Assert-ExpectedFiles で fail するが、Build-Updater レベルで早期 fail させた方が原因切り分け
+    # しやすい (msbuild step が悪いのか staging copy step が悪いのかを切り分け)。
+    $exeCount = (Get-ChildItem $binRelease -Recurse -File -Filter '*.exe' -ErrorAction SilentlyContinue | Measure-Object).Count
+    if ($exeCount -lt 1) {
+        Fail "Updater ビルド出力に .exe が見つかりません ($binRelease 内): msbuild は exit 0 だが成果物が生成されていない可能性"
+    }
     $outDir = Join-Path $FilesDir 'Companions\Updater'
     New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
