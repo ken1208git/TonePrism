@@ -94,13 +94,21 @@ namespace GCTonePrism.Manager
                 
                 // 優先順位3: Managerフォルダが存在する場合（実行ファイルがその中にある場合）
                 // 実行ファイルがManagerフォルダ内にある場合、親ディレクトリをプロジェクトルートとする
-                // NOTE: StartsWith 比較は末尾区切り (Path.DirectorySeparatorChar) を付与した文字列で行うこと。
-                //       区切り無しだと "Manager" prefix が "ManagerStudio" 等の兄弟 dir 名にも誤マッチする
-                //       (PR #150 round 2 M2)。
+                //
+                // NOTE: 比較は「等値 OR separator 付き StartsWith」の二段で行うこと。
+                //   - exePath = AppDomain.CurrentDomain.BaseDirectory は現状 .NET の慣習で
+                //     末尾 `\` 付きを返すので separator 付き StartsWith だけでも動くが、これは
+                //     ランタイム実装依存の暗黙前提。将来 .NET 移行等で末尾 `\` が外れた場合、
+                //     ちょうど Manager dir に居る正規ケースで誤って false になる regression
+                //     リスクがある。Launcher 側の Godot get_base_dir() は末尾 "/" を返さない
+                //     ため equality 比較が必須で、対称性のため Manager 側も同じパターンに揃える。
+                //   - separator 付き StartsWith は "Manager" prefix が "ManagerStudio" 等の
+                //     兄弟 dir 名にも誤マッチするのを防ぐため依然必要。
                 string managerCandidate = Path.Combine(currentPath, "Manager");
                 string managerCandidateWithSep = managerCandidate + Path.DirectorySeparatorChar;
                 if (Directory.Exists(managerCandidate) &&
-                    exePath.StartsWith(managerCandidateWithSep, StringComparison.OrdinalIgnoreCase))
+                    (exePath.Equals(managerCandidate, StringComparison.OrdinalIgnoreCase) ||
+                     exePath.StartsWith(managerCandidateWithSep, StringComparison.OrdinalIgnoreCase)))
                 {
                     Console.WriteLine($"[PathManager] Managerフォルダを検出: {currentPath}");
                     detectedBaseDirectory = currentPath;
@@ -133,9 +141,12 @@ namespace GCTonePrism.Manager
                 throw new DirectoryNotFoundException(errorMessage);
             }
             
-            // Separator 付きで StartsWith 比較 (兄弟 dir 名との prefix collision 防止、round 2 M2)
+            // 「等値 OR separator 付き StartsWith」の二段比較。Launcher 側との対称化、および
+            // 将来 .NET ランタイムの BaseDirectory が末尾 `\` を外した場合の future-proofing
+            // (詳細は loop 内の同パターン NOTE を参照)。
             string managerFolderPathWithSep = managerFolderPath + Path.DirectorySeparatorChar;
-            if (!exePath.StartsWith(managerFolderPathWithSep, StringComparison.OrdinalIgnoreCase))
+            if (!exePath.Equals(managerFolderPath, StringComparison.OrdinalIgnoreCase) &&
+                !exePath.StartsWith(managerFolderPathWithSep, StringComparison.OrdinalIgnoreCase))
             {
                 string errorMessage = $"エラー: 実行ファイルがManagerフォルダ内にありません。\n\n" +
                                      $"プロジェクトルート: {detectedBaseDirectory}\n" +

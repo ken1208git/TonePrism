@@ -54,14 +54,14 @@ static func _find_base_directory() -> String:
 				# その親をプロジェクトルートとみなして返す（開発中のフォルダ構造を信じる）
 				# これは、DBファイルがまだ存在しない初期状態などでのパス解決を防ぐため
 				#
-				# NOTE (PR #150 round 3 L1): ends_with("Launcher") は文字列 prefix collision の余地
-				# があり、`MyLauncher` / `WindowLauncher` 等の末尾 "Launcher" を含む dir 名にも hit
-				# する。ただし本ブランチは editor 起動時の fallback (project.godot を Godot エディタ
-				# が読んで起動した直後、prism.db 未生成の初期状態) のみで発火する path。実機 install
-				# 経路は _find_base_directory_from_executable() を通り、こちらは PR #150 round 2 M2 で
-				# separator 付き begins_with に修正済み。editor 文脈での false-match は project.godot
-				# の位置で project_root が自動決まるため実害低と判断、修正は将来余裕があれば issue #151
-				# (priority-3 detection 強化) の scope で実施。
+				# NOTE: ends_with("Launcher") は文字列 prefix collision の余地があり、
+				# `MyLauncher` / `WindowLauncher` 等の末尾 "Launcher" を含む dir 名にも hit する。
+				# ただし本ブランチは editor 起動時の fallback (project.godot を Godot エディタが
+				# 読んで起動した直後、prism.db 未生成の初期状態) のみで発火する path。実機 install
+				# 経路は _find_base_directory_from_executable() を通り、こちらは separator 付き
+				# begins_with で厳密化済み。editor 文脈での false-match は project.godot の位置で
+				# project_root が自動決まるため実害低と判断、修正は issue #151 (priority-3 detection
+				# 強化) の scope で将来実施予定。
 				if project_root.ends_with("Launcher") or parent_path.ends_with("GCTonePrism"):
 					print("[PathManager] DB未検出だがフォルダ構造からルートを推測: ", parent_path)
 					return parent_path
@@ -101,14 +101,20 @@ static func _find_base_directory_from_executable() -> String:
 		
 		# 優先順位3: Launcherフォルダが存在する場合（実行ファイルがその中にある場合）
 		# 実行ファイルがLauncherフォルダ内にある場合、親ディレクトリをプロジェクトルートとする
-		# NOTE: begins_with 比較は末尾区切り ("/") を付与した文字列で行うこと。区切り無しだと
-		#       "Launcher" prefix が "LauncherStudio" 等の兄弟 dir 名にも誤マッチする
-		#       (PR #150 round 2 M2)。Godot の path_join / get_base_dir は "/" separated を返す。
+		#
+		# NOTE: 比較は「等値 OR separator 付き begins_with」の二段で行うこと。
+		#   - exe_path = OS.get_executable_path().get_base_dir() は **末尾 "/" を持たない**
+		#     (例: ".../Launcher")。一方 launcher_folder_check_with_sep は "/" 付き
+		#     (".../Launcher/")。equality を持たないとこの「ちょうど Launcher dir に居る」
+		#     正規ケースで毎回 false になり、push_error が誤発火する。
+		#   - separator 付き begins_with は "Launcher" prefix が "LauncherStudio" 等の
+		#     兄弟 dir 名にも誤マッチするのを防ぐため依然必要。
+		# Godot の path_join / get_base_dir は "/" separated を返す。
 		var launcher_folder_check = current_dir_path.path_join("Launcher")
 		var launcher_folder_check_with_sep = launcher_folder_check + "/"
 		if dir.dir_exists(launcher_folder_check):
-			# 実行ファイルがLauncherフォルダ内にあるか確認
-			if exe_path.begins_with(launcher_folder_check_with_sep):
+			# 実行ファイルがLauncherフォルダ内にあるか確認 (等値 OR separator 付き prefix)
+			if exe_path == launcher_folder_check or exe_path.begins_with(launcher_folder_check_with_sep):
 				print("[PathManager] Launcherフォルダを検出: ", current_dir_path)
 				detected_base_directory = current_dir_path
 				break
@@ -142,9 +148,11 @@ static func _find_base_directory_from_executable() -> String:
 		push_error(error_message)
 		return detected_base_directory
 	
-	# Separator 付きで begins_with 比較 (兄弟 dir 名との prefix collision 防止、round 2 M2)
+	# 「等値 OR separator 付き begins_with」の二段比較。
+	# exe_path は末尾 "/" を持たないので、ちょうど Launcher dir に居る正規ケースは等値で hit、
+	# サブ dir に居る場合は separator 付き begins_with で hit (兄弟 dir 名との prefix collision 防止)。
 	var launcher_folder_path_with_sep = launcher_folder_path + "/"
-	if not exe_path.begins_with(launcher_folder_path_with_sep):
+	if not (exe_path == launcher_folder_path or exe_path.begins_with(launcher_folder_path_with_sep)):
 		var error_message = "エラー: 実行ファイルがLauncherフォルダ内にありません。\n\n" + \
 						   "プロジェクトルート: " + detected_base_directory + "\n" + \
 						   "Launcherフォルダ: " + launcher_folder_path + "\n" + \

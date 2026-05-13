@@ -19,7 +19,7 @@
 
     Phase 2 (#108) 完成: templates/Install.bat / INSTALL_README.txt / Launcher.bat / Manager.bat 同梱
     TODO Phase 3 (#108): Companions/Updater/ の build + staging を追加 (次 PR `feature/updater-phase3` で着手予定)
-    TODO #101:           Companions/<Launcher 補助 Companion>/ のループを追加
+    TODO #101:           Companions/WindowProbe/ のループを追加 (#30 PauseOverlay 等が増えたら配列化)
     TODO Monitor:        Monitor/ 追加時にビルドステップ追加
 
     依存ツールのバージョン管理方針:

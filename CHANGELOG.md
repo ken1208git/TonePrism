@@ -52,6 +52,19 @@
 - **PathManager.cs / path_manager.gd の self-reference 修正**: Manager / Launcher 自身が runtime で `"GCTonePrism_Manager"` / `"GCTonePrism_Launcher"` という親 dir 名を検出してプロジェクトルートを解決していたロジックを `"Manager"` / `"Launcher"` に置換。新 install 構造で正しく動く
 - **README.md ディレクトリ構成図を新 dir 名で更新** + 命名規約への参照を追加
 
+#### Fixed (PR #150 シニアレビュー round 4)
+
+- **[H1] round 2 M2 の Launcher 側 begins_with regression**: `exe_path.begins_with(launcher_folder_check + "/")` 形式に変更したが、`exe_path = OS.get_executable_path().get_base_dir()` は **末尾 "/" を持たない** ため、正規 install 構造 (`<install>/GCTonePrism/Launcher/GCTonePrism_Launcher.exe` で base_dir = `.../Launcher`) で `begins_with(".../Launcher/")` が **常に false** を返す regression があった。priority-1 (prism.db) で base_directory は正しく取れているのに post-loop validation で false にひっかかり、Launcher 起動時に毎回 `push_error("実行ファイルが Launcher フォルダ内にありません")` が走る path。Manager 側 (.NET の `AppDomain.CurrentDomain.BaseDirectory` が末尾 `\` 付き) は偶然動いていたため round 2 では発覚せず。修正: 「等値 OR separator 付き begins_with」の二段比較 (`exe_path == folder OR exe_path.begins_with(folder + "/")`) に変更、Godot get_base_dir の trailing slash 無し仕様に対応。Manager 側も対称性 + .NET ランタイムの BaseDirectory 仕様変更への future-proofing のため同じ二段比較に揃えた。**今後 path_manager 系を編集する場合は実機 Launcher 起動でエラー出ないことを必ず確認すること** (DRY-RUN だけでは検出不能、本 PR で見落としたのと同じパターンを避けるため)
+- **[M1] `:migrate_failed_launcher` メッセージが Manager 未存在ケースで誤情報**: 「Manager 側はすでに移行済」を無条件案内していたが、Manager 不在 case (旧 install で Manager 系のみ削除済 / partial extract 状態) では誤情報。`MANAGER_MIGRATED=1` sentinel を `:migrate_legacy_manager` 成功時にセット、`:migrate_failed_launcher` で `if defined MANAGER_MIGRATED echo ...` で条件付き化、3 状態 (skip / 成功 / fail [別経路]) を正しく分岐
+
+#### Changed (PR #150 シニアレビュー round 4)
+
+- **[L1] `:migrate_conflict_*` メッセージに「通常は新側を残す」推奨を追記**: 旧記述では「新側を残す」「旧側を残す」を対等選択肢として並べていたが、「旧側を残す」は実質ダウングレード操作で、Install.bat 再実行で結局 v0.3.0+ binary が上書きされるためデフォルトでは無効。「推奨: 新側を残す (通常はこちら)」「旧側を残す (v0.2.0 にダウングレードしたい場合のみ)」と推奨を明示、ダウングレードの結果も「結局 v0.3.0+ binary が入るので、v0.2.0 で運用したい場合は zip も v0.2.0 を使うこと」と明記。round 2 M1 で「user data merge 案内」を削除したのと同じ精神
+- **[L2] CHANGELOG `## Launcher v0.5.17` / `## Manager v0.8.10` entry を round 2/3 内容含む形に拡張**: 旧記述は「self-reference リテラル修正」だけで、round 2 M2 (begins_with/StartsWith separator fix) や round 3 L1 (ends_with NOTE) の中身が CHANGELOG エンドユーザー側からは見えなかった。component 別エントリは「いつ何が入ったか」のインデックスとしても機能するため、ロジック改良の概要 + Release Tooling entry への参照を 1 行ずつ追加。Manager 側にも同様の begins_with → StartsWith 二段比較化追記
+- **[L3] コメント内「PR #150 round X MY」識別子を削除**: コードコメントから「(PR #150 round 2 M2)」「(シニアレビュー round 3 L1)」等のタスク識別子を削除。WHY 説明 (sibling dir 名と prefix collision する等) は残し、識別子は CHANGELOG / git log / PR description 側で履歴を辿れるよう一方向参照に。コメントの rot を防ぐ
+- **[L4] Release.ps1 TODO #101 の `<Launcher 補助 Companion>` を具体名 `WindowProbe` に**: SPEC §2.4 / #101 で具体名が確定済みなので generic placeholder のまま放置する必要なし。「#30 PauseOverlay 等が増えたら配列化」のコメント追記でスケール時の方針も明示
+- **[L5] SPEC §3.7.6 step [6] の `release_notes/v<version>.md` 言及を CHANGELOG パースに修正**: v1.10.6 で `release_notes/` ディレクトリ廃止 → CHANGELOG を SoT 化したが、§3.7.6 step リストの該当行が更新漏れで残っていた pre-existing inconsistency。「`CHANGELOG.md` の `## Bundle` セクションから該当 Bundle entry をパース (旧仕様の `release_notes/` ディレクトリは v1.10.6 で廃止、§3.7.7 参照)」に修正
+
 #### Fixed (PR #150 シニアレビュー round 3)
 
 - **[M1] `:migrate_failed` 共通ラベルが partial-failure 時に不正確な手動復旧手順を案内していた**: Manager 移行成功 + Launcher 移行失敗のケースでも、`:migrate_failed` のメッセージが両方の rename 手順を案内していた。この時点で `<install>/GCTonePrism_Manager/` は既に rename 済 → 移動元が存在しないため user が指示通り作業すると「移動元が無い」と混乱する path。修正: `:migrate_failed_manager` / `:migrate_failed_launcher` の独立ラベルに分離、`:migrate_legacy_manager` の `if errorlevel 1` は `:migrate_failed_manager` に、`:migrate_legacy_launcher` の `if errorlevel 1` は `:migrate_failed_launcher` に飛ぶ形に変更。各ラベルは失敗側だけの手動 rename 手順を案内し、Launcher 失敗時は「Manager はすでに移行済」と状況も明示。round 1 M2 (`:migrate_conflict_*` 独立ラベル化) の精神と一貫
@@ -499,9 +512,11 @@
 
 ### [Launcher v0.5.17] - 2026-05-13
 
-#### Changed (#108 Phase 3 着手準備 / dir rename 連動)
+#### Changed (#108 Phase 3 着手準備 / dir rename 連動、PR #150)
 
 - **`scripts/path_manager.gd` の self-reference リテラル修正**: 旧 dir 名 `"GCTonePrism_Launcher"` を新 dir 名 `"Launcher"` に置換 (7 箇所、コメント / エラー message / detection ロジック内)。`_find_base_directory_from_executable()` の priority-3 fallback で「実行ファイルが Launcher フォルダ内にある場合、親をプロジェクトルートとする」判定が新構造 `<install>/Launcher/GCTonePrism_Launcher.exe` で正しく動くようにする。
+- **priority-3 detection の begins_with 比較ロジックを強化**: 旧コードは `exe_path.begins_with(launcher_folder_check)` で末尾区切り無しの prefix 比較だったため `MyLauncher` / `LauncherStudio` 等の兄弟 dir 名に誤マッチする path があった。「等値 OR separator 付き begins_with」の二段比較 (`exe_path == folder OR exe_path.begins_with(folder + "/")`) に変更、Godot の `OS.get_executable_path().get_base_dir()` が末尾 "/" を持たない仕様にも対応 (詳細は Release Tooling v0.1.10 round 4 H1 / round 2 M2 参照)
+- **editor 起動 fallback の `ends_with` に NOTE 追記**: `_find_base_directory()` 編集時 path の `ends_with("Launcher")` / `ends_with("GCTonePrism")` も文字列 prefix collision の余地があるが、editor 専用 fallback (project.godot 経由 + prism.db 未生成初期) で発火するため実害低。意図を明文化、長期的には issue #151 (priority-3 detection 強化) で対応予定
 - **runtime 動作の変更点**: v0.5.16 までの binary は旧 install 構造 (`<install>/GCTonePrism_Launcher/`) を期待していたが、v0.5.17 以降は新構造 (`<install>/Launcher/`) を期待する。Install.bat の v0.2.0 → 新構造 migration ロジック (`templates/Install.bat`) と組み合わせて、上書きインストール時に旧 → 新 dir リネームが自動で行われる前提。
 - **配布構造変更**: Launcher exe は今後 `<install>/Launcher/GCTonePrism_Launcher.exe` に配置される (旧: `<install>/GCTonePrism_Launcher/GCTonePrism_Launcher.exe`)。exe ファイル名 `GCTonePrism_Launcher.exe` 自体は維持 (process 検知 uniqueness のため、AGENTS.md "Naming Conventions" 参照)。
 
@@ -938,9 +953,10 @@
 
 ### [Manager v0.8.10] - 2026-05-13
 
-#### Changed (#108 Phase 3 着手準備 / dir rename 連動)
+#### Changed (#108 Phase 3 着手準備 / dir rename 連動、PR #150)
 
 - **`PathManager.cs` の self-reference リテラル修正**: 旧 dir 名 `"GCTonePrism_Manager"` を新 dir 名 `"Manager"` に置換 (4 箇所、コメント / エラー message / detection ロジック内)。`FindBaseDirectory()` の priority-3 fallback で「実行ファイルが Manager フォルダ内にある場合、親をプロジェクトルートとする」判定が新構造 `<install>/Manager/GCTonePrism_Manager.exe` で正しく動くようにする。
+- **priority-3 detection の StartsWith 比較ロジックを強化**: 旧コードは `exePath.StartsWith(Path.Combine(currentPath, "Manager"))` で末尾区切り無しの prefix 比較だったため `ManagerStudio` 等の兄弟 dir 名に誤マッチする path があった。「等値 OR separator 付き StartsWith」の二段比較に変更 (Launcher 側との対称化 + 将来 .NET ランタイムの BaseDirectory が末尾 `\` を外した場合の future-proofing。詳細は Release Tooling v0.1.10 round 4 H1 / round 2 M2 参照)
 - **runtime 動作の変更点**: v0.8.9 までの binary は旧 install 構造 (`<install>/GCTonePrism_Manager/`) を期待していたが、v0.8.10 以降は新構造 (`<install>/Manager/`) を期待する。Install.bat の v0.2.0 → 新構造 migration ロジック (`templates/Install.bat`) と組み合わせて、上書きインストール時に旧 → 新 dir リネームが自動で行われる前提。
 - **配布構造変更**: Manager exe は今後 `<install>/Manager/GCTonePrism_Manager.exe` に配置される (旧: `<install>/GCTonePrism_Manager/GCTonePrism_Manager.exe`)。exe ファイル名 `GCTonePrism_Manager.exe` 自体は維持 (process 検知 uniqueness のため、AGENTS.md "Naming Conventions" 参照)。
 
