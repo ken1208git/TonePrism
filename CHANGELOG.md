@@ -41,6 +41,22 @@
 
 ### [Release Tooling v0.1.11] - 2026-05-13
 
+#### Fixed (PR #152 Codex bot round 5 後追い + シニアレビュー round 6)
+
+- **[Codex P1 + シニア Medium-5] 新 Manager.exe 起動失敗時に rollback できない silent danger を解消 + spawn 直後 early-crash 検出を追加**: 旧実装 (round 1 H1 以降〜round 5 まで) は `.bak` 削除を「restart-exe 存在 check 後 / Process.Start 前」で行っていたため、`Process.Start` が null/throw する path (DLL load 失敗 / access-denied / runtime 依存欠落 / shell association reuse 等) や spawn 直後 0.1s で Manager.exe が crash する early-crash path で「旧 Manager 消失 + 新 Manager 起動失敗」の復旧不能 broken state を作っていた (round 1 H1 fix で broken state を一段階遠ざけたが、Process.Start 周辺がまだ残っていた)。修正: `CleanupBak` を **Process.Start 成功確認後 (Step 4) に移動**、`Process.Start` null/throw/early-crash 各 path で `RollbackAndReturn6` ヘルパー経由で `RollbackFromBak` を呼んで旧 Manager を `.bak` から復元 + exit 6。round 6 Medium-5 と統合し、`proc.WaitForExit(500)` で spawn 直後 500ms の early-crash check を追加 (`proc != null` は OS が spawn process を作った保証だけで、DLL load 失敗 / 0-byte exe / managed exception in Main 等の即 crash を検出できなかった silent failure path も同経路で塞ぐ)。Rollback も失敗した致命的 case は exit 5 (`.bak` から手動復元要)。SPEC §3.7.4 exit 6 説明 + Program.cs class docstring + CliArgs.UsageText + CHANGELOG `## Updater v0.1.0` の 4 箇所に「失敗時自動 rollback + early-crash 検出」を同期反映
+
+- **[Codex P2] Parse 段階の非 ArgumentException が CLR 既定 exit code で抜ける silent danger を解消**: 旧 Main の `try { CliArgs.Parse } catch (ArgumentException)` は `ArgumentException` のみ catch、`Path.GetFullPath` 由来の `SecurityException` / `UnauthorizedAccessException` / `IOException` 等の権限・環境問題は CliArgs.Parse 内部の絞り込み catch (round 2 M2) でも拾えず、CLR 既定の uncaught exception で documented exit codes 0-8 と乖離した予期しない exit code を返す silent danger があった (Phase 4 Manager UI の retry/diagnostic 分岐が壊れる)。修正: Main の Step 0 に `catch (Exception)` を追加、stderr に `ex.GetType().Name` + stack trace + UsageText を出力してから **exit 1 (documented)** に倒す。Logger 未初期化なので stack trace はログファイルに残らず stderr のみ (Medium-4 で SPEC 明文化済)
+
+#### Changed (PR #152 シニアレビュー round 6)
+
+- **[Medium-1] Program.cs class docstring の Exit codes 同期表記を「三者同期」→「5 者同期」に訂正**: round 5 H-1 で「以降の review 完了基準として 5 者同期 (SPEC / Program docstring / UsageText / CHANGELOG / PR body) を固定化」と宣言した meta-rule を、当の Program.cs class docstring が `"CliArgs.UsageText() / SPEC §3.7.4 と三者同期、round 4 H-1 + M-1"` のまま残していて round 5 H-1 が塞いだはずの「自己撞着」を再生産していた。本 entry / `CliArgs.UsageText()` 内部 / Program.cs docstring の同期表記を「5 者同期」に揃え、Phase 4 Manager UI 実装者がこの docstring を見て「3 箇所だけ同期すればよい」と誤解する misleading な lookup path を排除
+- **[Medium-2] SPEC 変更履歴 v1.10.11 entry に round 5 L-3 を加筆 + 新 v1.10.12 entry で round 6 範囲を追加**: v1.10.11 entry が round 4 範囲しか記録しておらず、本文 (SPEC §3.7.4 exit 4 説明の auto-recovery 注記) は round 5 L-3 で加筆済の drift があった。v1.10.11 entry に「round 5 L-3 で exit 4 の auto-recovery 経路注記追加」の 1 文を加筆 + 新 v1.10.12 entry で round 6 範囲 (exit 2/1 Logger 未初期化 + stderr capture 必須 + exit 6 自動 rollback) を追加、AGENTS.md「1 PR 1 bump」規約に従って既存 entry 加筆 / 範囲新規エントリの両建てで同期
+- **[Medium-3] `## Updater v0.1.0` entry 末尾に「詳細な review 経緯」参照行を追加**: round 1〜6 の review 対応詳細は実体が Updater 本体コードの変更でも `## Release Tooling v0.1.11` 配下に詰まっており、Phase 4 以降に「Updater FileReplacer の `.bak` 保持仕様はいつ変わった?」を CHANGELOG で辿る開発者が `## Updater` セクションを見ても出てこない異常導線があった。AGENTS.md「他セクションから参照」原則に従い、`## Updater v0.1.0` 末尾に「詳細な review 経緯は `## Release Tooling v0.1.11` 配下の各 round entry を参照」の 1 行を追加。CHANGELOG 大規模再構成 (本体コード変更 entry を Updater セクションに移動) は scope creep のため見送り、参照導線の確立で代替
+- **[Medium-4] SPEC §3.7.4 に「exit 2 / 1 (parse 段階) はログファイルに残らず stderr のみ」+ 「Phase 4 Manager UI は stderr capture 必須」規約を明文化**: Logger 初期化が CliArgs.Parse の **後** に行われるため、exit 2 (引数エラー、最頻発の user-facing error) は `logs/updater/` に何も残らない可観測性 hole があった。round 4 M-3 で `--restart-exe` validation 追加により exit 2 のヒット確率自体も上がっている。SPEC §3.7.4 exit 2 説明に「parse 段階のため Logger 未初期化、stderr のみ」を明記 + 「Phase 4 Manager UI は `RedirectStandardError = true` で stderr を必ず capture し log viewer に流す規約」を明文化 (Logger 先行 init 案は意味づけ変更の副作用が広いため見送り、SPEC 規約で対応)
+- **[Low-1] FileReplacer.Rollback の `bakExists=false` branch のログメッセージを round 3 L2 方針と整合**: round 3 L2 で「Updater は更新 spawn 専用、新規 install は Install.bat」と方針確立後、本 branch は外部 / 手動呼出しで `.bak` が消えた pathological 状態でのみ到達する fallback 経路に変わったが、Logger メッセージは `"rollback: 新規インストール用の target を削除"` のまま矛盾していた。`"rollback: .bak が存在しないため target のみ削除 (pathological state、外部 / 手動呼出しの fallback 経路)"` に書き換え
+- **[Low-2] ProcessWaiter の `iter == 0` ログで `timeout=0` 時に「無制限」と表示**: `--wait-timeout 0 = 無制限待機` は UsageText / XML doc / SPEC §3.7.4 で公式仕様化済だが、ランタイムログには反映されておらず「timeout 0s」と表示されると「0 秒待ち = 即 timeout」と誤読される可能性があった。三項演算で `timeoutSeconds == 0 ? "無制限" : $"{timeoutSeconds}s"` の表記分岐に
+- **[Low-3] Program.cs:215 の `try { pid = proc.Id; } catch { swallow }` bare catch を `InvalidOperationException` に絞る**: round 4 〜 round 5 を通じて「silent path 全部塞ぐ」防御方針が一貫しているのに、本 1 行だけ bare catch で `NullReferenceException` 等の bug 由来例外も silent に飲み込んでいた。`UseShellExecute=true` で PID 取得不能なケースが docs 明記 (`InvalidOperationException`) なのでこれだけ swallow、それ以外は逃がす。round 2 M2 (`CliArgs.Parse` の catch 範囲絞り) と同じ防御方針に揃える
+
 #### Fixed (PR #152 シニアレビュー round 5)
 
 - **[H-1] CHANGELOG `## Updater v0.1.0` Exit codes 列挙が 6 件のままで他 3 者 (SPEC §3.7.4 / Program.cs class docstring / CliArgs.UsageText) の 9 件と乖離していた自己撞着**: round 4 H-1 entry が明示的に「Exit codes 表を 4 箇所で三者同期」と主張していたが、4 箇所目に該当する CHANGELOG `## Updater v0.1.0` の Exit codes セクション (`0/2/3/4/5/6` の 6 件) が round 4 で更新されておらず、round 4 で追加された exit 1 (M-1) / 7 / 8 (H-1 分割) が抜けていた。Phase 4 Manager UI 実装者が CHANGELOG `## Updater` entry をリファレンスにすると 7/8 への分岐が漏れる misleading な lookup path。修正: CHANGELOG entry を 9 件版に同期 + 「round 5 H-1 で本 entry を 6 件→9 件同期」と経緯記述。あわせて round 5 M-3 で auto-recovery 経路の exit 4 仕様化 (SPEC L-3) と timeout 経路の exit 8 排他化も entry に反映。**5 者同期チェック** (SPEC / Program docstring / UsageText / CHANGELOG / PR body) を以降の review 完了基準として固定化
@@ -663,14 +679,14 @@
 - `Logger.cs` — Manager の `Services/Logger.cs` を簡略化、`Console.SetOut` フック無しの直接書込み式、出力先 `<install>/logs/updater/updater_<PCname>_<YYYY-MM-DD_HHmmss>.log`
 - csproj / App.config / AssemblyInfo.cs
 
-**Exit codes** (`CliArgs.UsageText()` / SPEC §3.7.4 と 5 者同期、round 4 H-1 で 3 を分割 + M-1 で 1 を追記、round 5 H-1 で本 entry を 6 件→9 件同期):
+**Exit codes** (SPEC §3.7.4 / Program.cs docstring / `CliArgs.UsageText()` / PR #152 body と **5 者同期**、round 4 H-1 で 3 を分割 + M-1 で 1 を追記、round 5 H-1 で本 entry を 6 件→9 件同期、round 6 で 6 失敗時 rollback 仕様化):
 - `0` 成功
-- `1` 予期しない実行時例外 (Logger に stack trace、bug report 対象)
-- `2` 引数エラー / 必須引数不足 / `--restart-exe` が `--manager-target` 外 等
+- `1` 予期しない実行時例外 (Logger に stack trace、bug report 対象。parse 段階の例外は stderr のみ、round 6 Codex P2)
+- `2` 引数エラー / 必須引数不足 / `--restart-exe` が `--manager-target` 外 等。**parse 段階のため Logger 未初期化、stderr のみ** (round 6 Medium-4、Phase 4 Manager UI は stderr capture 必須)
 - `3` Manager プロセスが timeout 内に終了せず (`--force-kill` 未指定、付与か手動 close で再試行可)
 - `4` ファイル置換に失敗 (rollback 実施済、auto-recovery 経路も同 code、SPEC §3.7.4 参照)
-- `5` rollback にも失敗した致命的状態 (`.bak` から手動復元要)
-- `6` 新 Manager.exe の起動に失敗 (Process.Start null/throw 等)
+- `5` rollback にも失敗した致命的状態 (`.bak` から手動復元要)。round 6 で「新 Manager 起動失敗時の rollback も失敗」case を含む
+- `6` 新 Manager.exe の起動に失敗 (Process.Start null/throw、**spawn 直後 early-crash** (500ms HasExited check)、restart-exe 不在 等)。**round 6 で .bak から旧 Manager を自動復元してから本 code を返す** (Codex P1 + Medium-5)
 - `7` force-kill 試行が bounded retry (3 回) 超過 (permission denied 等、機械的再試行は無意味)
 - `8` process enumeration が連続 5 回失敗 (IPC/WMI 一時障害、短時間後の再試行で回復見込み)
   - round 5 M-3 で timeout 経路は常に `3`、本 code 8 は「連続 N 回失敗で早期 abort」path 専用に限定 (両者排他)
@@ -678,6 +694,8 @@
 **呼出し前提**: Manager UI (Phase 4) が事前に download / staging / Launcher / Companions / shortcut bat / Updater 自身の置換まで完了させた後、Manager が `Process.Start("Companions\Updater\GCTonePrism_Updater.exe", "--staging ... --manager-target ... --restart-exe ...")` で spawn する。Manager は spawn 直後に graceful 終了、Updater は ProcessWaiter で完全終了を確認してから Manager 置換に進む。
 
 **動作確認**: ローカル単体テスト (staging dummy / target dummy / user data dummy) で Manager dir 置換 (Replace 2-step + CleanupBak) + user data 維持 + 前回 rollback 失敗状態からの自動復元 (round 2 Codex P1 #3) を確認。Manager UI 連携テストは Phase 4 で実施予定。
+
+**詳細な review 経緯**: round 1〜6 のシニア + Codex bot レビュー対応の詳細は `## Release Tooling v0.1.11` 配下の各 round entry を参照 (AGENTS.md「他セクションから参照」原則準拠、round 6 Medium-3)。本 entry は Updater v0.1.0 の高レベル summary、各 round で塞いだ silent path / 規約整合は Release Tooling v0.1.11 entries に詳述。
 
 ---
 

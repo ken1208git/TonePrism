@@ -236,8 +236,12 @@ namespace GCTonePrism.Updater
         {
             if (!bakExists)
             {
-                // 新規インストールの copy 失敗 → target を消すだけ
-                Logger.Warn("rollback: 新規インストール用の target を削除");
+                // round 6 Low-1: round 3 L2 で「Updater は更新 spawn 専用、新規 install は Install.bat」
+                // 方針を確立した後は、本 branch は **外部 / 手動呼出しで `.bak` が消えた pathological
+                // 状態でのみ** 到達する fallback 経路 (round 3 L2 / FileReplacer.RollbackFromBak の
+                // XML doc 参照)。「新規インストール用」という旧メッセージは round 3 L2 方針と矛盾
+                // するため訂正。
+                Logger.Warn("rollback: .bak が存在しないため target のみ削除 (pathological state、外部 / 手動呼出しの fallback 経路)");
                 try { if (Directory.Exists(managerTargetDir)) Directory.Delete(managerTargetDir, recursive: true); }
                 catch (Exception ex) { Logger.Error($"  target 削除失敗: {ex.Message}"); }
                 return;

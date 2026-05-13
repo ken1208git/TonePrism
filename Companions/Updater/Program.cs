@@ -18,14 +18,20 @@ namespace GCTonePrism.Updater
     /// 置換まで担当した後で本 Updater を spawn する。本 Updater は spawn 後に Manager が graceful 終了
     /// するのを待ち、自分自身が Manager 置換 + 再起動を行う。
     ///
-    /// Exit codes (CliArgs.UsageText() / SPEC §3.7.4 と三者同期、round 4 H-1 + M-1):
+    /// Exit codes (CliArgs.UsageText() / SPEC §3.7.4 / CHANGELOG `## Updater v0.1.0` / PR #152 body と
+    /// **5 者同期**、round 4 H-1 + M-1 で 3 を 3/7/8 分割 + 1 追記、round 5 H-1 で 5 者同期を review
+    /// 完了基準として固定化、round 6 Medium-1 で本 docstring の同期表記を「三者」→「5 者」に訂正):
     ///   0 = 成功
     ///   1 = 予期しない実行時例外 (Logger に stack trace 残る、運用上 bug report 対象)
-    ///   2 = 引数エラー (必須引数不足 / path 解析失敗 / --restart-exe が --manager-target 外 等)
+    ///   2 = 引数エラー (必須引数不足 / path 解析失敗 / --restart-exe が --manager-target 外 等)。
+    ///       **注**: parse 段階で発生するので Logger 未初期化、ログファイルには残らず stderr のみ
+    ///       (SPEC §3.7.4「exit 2 はログファイル不在」規約、round 6 Medium-4)
     ///   3 = Manager プロセス終了 timeout (--force-kill 未指定、caller は --force-kill 付与か手動 close で再試行可能)
-    ///   4 = ファイル置換失敗 (rollback 実施済、旧 Manager 復元)
-    ///   5 = rollback も失敗した致命的状態 (手動復旧必要、`.bak` から手動 rename)
-    ///   6 = 新 Manager.exe 起動失敗 (Process.Start null/throw、restart-exe 不在 等)
+    ///   4 = ファイル置換失敗 (rollback 実施済、旧 Manager 復元)。auto-recovery 経路 (Codex round 2 P1 #3) も同 code
+    ///   5 = rollback も失敗した致命的状態 (手動復旧必要、`.bak` から手動 rename)。新 Manager 起動失敗時の
+    ///       RollbackFromBak も失敗した case を含む (round 6 Codex P1)
+    ///   6 = 新 Manager.exe 起動失敗 (Process.Start null/throw、restart-exe 不在、spawn 直後 early-crash 等。
+    ///       round 6 Codex P1 + Medium-5 で失敗時に RollbackFromBak で旧 Manager 復元)
     ///   7 = force-kill 試行 bounded retry (3 回) 超過 (permission denied 等の構造的問題、機械的再試行は無意味)
     ///   8 = process enumeration 連続失敗 (5 回、IPC/WMI 一時障害、短時間後の再試行に意味あり)
     /// </summary>
@@ -50,6 +56,22 @@ namespace GCTonePrism.Updater
                 Console.Error.WriteLine();
                 Console.Error.WriteLine(CliArgs.UsageText());
                 return 2;
+            }
+            catch (Exception ex)
+            {
+                // round 6 Codex P2: parse 中の非 ArgumentException (`Path.GetFullPath` からの
+                // `SecurityException` / `UnauthorizedAccessException` / `IOException` 等の権限・環境
+                // 問題、または .NET runtime 内部の予期しない例外) を明示的に exit 1 (documented
+                // exit codes) に倒す。旧実装は本 catch が無く CLR 既定の uncaught exception で
+                // 異常終了 → Manager UI Phase 4 の retry/diagnostic 分岐が documented 0-8 と乖離した
+                // 予期しない exit code を受ける silent danger があった。Logger 未初期化なので stack
+                // trace はログファイルに残らず stderr のみ (SPEC §3.7.4 「exit 2 / 1 (parse 段階)
+                // はログファイル不在」規約、round 6 Medium-4)。
+                Console.Error.WriteLine($"[ERROR] 引数解析中に予期しない例外: {ex.GetType().Name}: {ex.Message}");
+                Console.Error.WriteLine(ex.ToString());
+                Console.Error.WriteLine();
+                Console.Error.WriteLine(CliArgs.UsageText());
+                return 1;
             }
 
             // ----- Step 0.5: Logger 初期化 -----
@@ -172,8 +194,10 @@ namespace GCTonePrism.Updater
                 return 6;
             }
 
-            // 検証 OK → .bak 削除 (best-effort、失敗してもアップデート自体は成功扱い)
-            FileReplacer.CleanupBak(args.ManagerTargetDir);
+            // round 6 Codex P1 + Medium-5 対応: `.bak` 削除は **新 Manager.exe の起動成功確認後** に
+            // 移動 (旧実装は restart-exe 存在 check 後 / Process.Start 前で削除していたため、
+            // Process.Start null/throw or spawn 直後 early-crash の各 path で「旧 Manager 消失 +
+            // 新 Manager 起動失敗」の復旧不能 broken state を作る silent danger があった)。
 
             // ----- Step 3: 新 Manager.exe 起動 -----
             // round 4 M-2: Process.Start の戻り値を null check。
@@ -187,6 +211,17 @@ namespace GCTonePrism.Updater
             // 持つ場合に UAC prompt を別 window で出す挙動を含む。現 Manager は非 admin 前提
             // (SPEC §3.7.4 で明文化済) なので発火しないが、将来 admin 化された場合に「Updater が
             // 消えた直後に UAC prompt が突然出る」体験になる点は SPEC 規約として固定。
+            //
+            // round 6 Codex P1: 起動失敗 (null / throw / early-crash) 時は RollbackFromBak で
+            // 旧 Manager を復元 + exit 6。`.bak` は Step 4 (起動成功確認後) で削除する。
+            //
+            // round 6 Medium-5: spawn 後 short delay + HasExited check で early-crash を検出。
+            // `proc != null` は「OS が spawn process を作った」までしか保証せず、spawn 直後 0.1s で
+            // Manager.exe が crash (DLL load 失敗 / 0-byte exe / managed exception in Main) しても
+            // 旧実装は exit 0 で抜けて Manager UI に「アップデート成功」と表示させていた silent
+            // failure path を塞ぐ。500ms 以内に exit したら early-crash と判定、RollbackFromBak +
+            // exit 6 に倒す。SPEC §3.7.4「一瞬 console が出て新 Manager が立ち上がる」体験を
+            // 損なわない範囲の待機。
             Logger.Info("[Step 3/3] 新 Manager.exe を起動");
             try
             {
@@ -197,35 +232,88 @@ namespace GCTonePrism.Updater
                     WorkingDirectory = Path.GetDirectoryName(args.RestartExe) ?? string.Empty
                 };
                 // round 5 M-4: Process.Start の戻り値を using で wrap (handle leak 防止)。
-                //   旧実装は `Process proc = Process.Start(psi);` で受けたまま Dispose せず、
-                //   finalizer 任せで OS handle (SafeProcessHandle) を release していた。本 CLI は
-                //   ~1 秒で exit するので OS が cleanup する想定だが、`proc.Id` アクセス時の
-                //   InvalidOperationException 等で finally に入る path で handle leak する。
-                //   round 4 まで「silent path 全部塞ぐ」方針で揃えてきた整合性に合わせ最後の
-                //   leak を埋める。using は IDisposable パターンに従い null 安全。
                 using (Process proc = Process.Start(psi))
                 {
                     if (proc == null)
                     {
                         Logger.Error($"Process.Start が null を返却 (起動が実体として走らず、shell association reuse / OS による起動抑止 等の可能性): {args.RestartExe}");
-                        return 6;
+                        return RollbackAndReturn6(args.ManagerTargetDir, "Process.Start null");
                     }
                     // PID は best-effort で記録 (取得失敗しても起動自体は成功扱い)
                     int? pid = null;
-                    try { pid = proc.Id; } catch { /* swallow */ }
-                    Logger.Info($"Manager 起動完了: {args.RestartExe}" + (pid.HasValue ? $" (PID={pid.Value})" : ""));
+                    // round 6 Low-3: bare catch を InvalidOperationException に絞る (UseShellExecute=true で
+                    // PID 取得不能なケースが docs 明記、これだけ swallow して NullReferenceException 等の
+                    // bug 由来例外は逃がさない)。
+                    try { pid = proc.Id; }
+                    catch (InvalidOperationException) { /* PID 取得不能、best-effort で続行 */ }
+                    Logger.Info($"Manager spawn 成功 (PID={(pid.HasValue ? pid.Value.ToString() : "取得不能")})、early-crash check (500ms)");
+
+                    // early-crash check
+                    bool earlyExited = false;
+                    int? exitCode = null;
+                    try
+                    {
+                        if (proc.WaitForExit(500))
+                        {
+                            earlyExited = true;
+                            try { exitCode = proc.ExitCode; }
+                            catch (InvalidOperationException) { /* ExitCode 取得不能、HasExited だけ trust */ }
+                        }
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // WaitForExit 自体不能 (UseShellExecute=true 経由 + handle 未紐付けの極稀ケース)
+                        // → early-crash 検出不能、生存とみなして続行 (false-positive を避ける)
+                        Logger.Warn("early-crash check 不能 (handle access 不可)、生存とみなして続行");
+                    }
+
+                    if (earlyExited)
+                    {
+                        Logger.Error($"新 Manager が spawn 直後に exit (ExitCode={(exitCode.HasValue ? exitCode.Value.ToString() : "取得不能")})。DLL load 失敗 / 即 crash 等の可能性");
+                        return RollbackAndReturn6(args.ManagerTargetDir, "early-crash detected");
+                    }
+                    Logger.Info($"Manager 起動完了: {args.RestartExe} (early-crash check 通過)");
                 }
             }
             catch (Exception ex)
             {
                 Logger.Error($"Manager 起動失敗", ex);
-                return 6;
+                return RollbackAndReturn6(args.ManagerTargetDir, $"Process.Start throw: {ex.GetType().Name}");
             }
+
+            // ----- Step 4: .bak 削除 (起動成功確認後、Codex P1 で round 6 で本位置に移動) -----
+            // best-effort、失敗してもアップデート自体は成功扱い (.bak 残骸は手動削除 or 次回 Replace で
+            // 自動掃除)
+            FileReplacer.CleanupBak(args.ManagerTargetDir);
 
             Logger.Info("============================================================");
             Logger.Info("Updater 全工程完了");
             Logger.Info("============================================================");
             return 0;
+        }
+
+        /// <summary>
+        /// round 6 Codex P1 + Medium-5: Step 3 で Manager 起動失敗 (null / throw / early-crash) を
+        /// 検出した場合に `.bak` から旧 Manager を復元するヘルパー。
+        ///
+        /// 失敗時の挙動:
+        ///   - rollback 成功 → exit 6 (起動失敗、旧 Manager 復元済、次回 Updater spawn で正常 path)
+        ///   - rollback も失敗 (致命的状態) → exit 5 (`.bak` から手動復元要、Logger に詳細記録済)
+        /// </summary>
+        private static int RollbackAndReturn6(string managerTargetDir, string reason)
+        {
+            Logger.Warn($"旧 Manager を .bak から復元します (理由: {reason})...");
+            try
+            {
+                FileReplacer.RollbackFromBak(managerTargetDir);
+                Logger.Warn("旧 Manager 復元完了。Manager UI 側で原因 (release packaging / runtime 依存欠落 等) を調査後、再度アップデートしてください。");
+                return 6;
+            }
+            catch (InvalidOperationException ex)
+            {
+                Logger.Error($"FATAL: 起動失敗時の rollback も失敗 (`.bak` から手動復元要)", ex);
+                return 5;
+            }
         }
     }
 }

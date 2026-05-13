@@ -213,14 +213,14 @@ namespace GCTonePrism.Updater
                 "                            (同 PC の他 install Manager を巻き添えにしない)。未指定時は\n" +
                 "                            system-wide GetProcessesByName fallback。\n" +
                 "\n" +
-                "Exit codes (round 4 H-1 + M-1 で 3 を 3/7/8 に分割 + 1 を追記、Phase 4 Manager UI の再試行分岐用):\n" +
+                "Exit codes (SPEC §3.7.4 / Program.cs docstring / CHANGELOG ## Updater v0.1.0 / PR #152 body と **5 者同期**、round 4 H-1+M-1 で 3 分割 + 1 追記、round 6 で 6 失敗時 rollback 仕様化):\n" +
                 "  0  成功\n" +
-                "  1  予期しない実行時例外 (Logger に stack trace、bug report 対象)\n" +
-                "  2  引数エラー / 必須引数不足 / --restart-exe が --manager-target 外 等\n" +
+                "  1  予期しない実行時例外 (Logger に stack trace、bug report 対象。parse 段階の例外は stderr のみ)\n" +
+                "  2  引数エラー / 必須引数不足 / --restart-exe が --manager-target 外 等 (parse 段階のため Logger 未初期化、stderr のみ。round 6 Medium-4)\n" +
                 "  3  Manager プロセスが timeout 内に終了しなかった (--force-kill 未指定、--force-kill 付与か手動 close で再試行可)\n" +
-                "  4  ファイル置換に失敗 (rollback 実施済、旧 Manager 復元)\n" +
+                "  4  ファイル置換に失敗 (rollback 実施済、旧 Manager 復元。auto-recovery 経路も同 code)\n" +
                 "  5  rollback にも失敗した致命的状態 (`.bak` から手動復元要)\n" +
-                "  6  新 Manager.exe の起動に失敗 (Process.Start null/throw、restart-exe 不在 等)\n" +
+                "  6  新 Manager.exe の起動に失敗 (Process.Start null/throw、spawn 直後 early-crash、restart-exe 不在 等。失敗時は .bak から旧 Manager を自動復元、round 6 Codex P1 + Medium-5)\n" +
                 "  7  force-kill 試行が bounded retry (3 回) 上限超過 (permission denied 等、機械的再試行は無意味)\n" +
                 "  8  process enumeration 連続失敗 (5 回、IPC/WMI 一時障害、短時間後の再試行で回復見込み)\n";
         }

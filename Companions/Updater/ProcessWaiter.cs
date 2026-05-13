@@ -124,7 +124,12 @@ namespace GCTonePrism.Updater
                     {
                         if (iter == 0)
                         {
-                            Logger.Info($"Manager プロセス {procs.Length} 件検出、終了待機 (timeout {timeoutSeconds}s)");
+                            // round 6 Low-2: `--wait-timeout 0 = 無制限待機` は UsageText / XML doc /
+                            // SPEC §3.7.4 で公式仕様化済だが、ランタイムログには反映されておらず
+                            // 「timeout 0s」と表示されると「0 秒待ち = 即 timeout」と誤読される
+                            // 可能性。三項演算で表記分岐。
+                            string timeoutDisplay = timeoutSeconds == 0 ? "無制限" : $"{timeoutSeconds}s";
+                            Logger.Info($"Manager プロセス {procs.Length} 件検出、終了待機 (timeout {timeoutDisplay})");
                         }
                         else if (iter % LogEveryNIter == 0)
                         {
