@@ -132,7 +132,8 @@ $OutputEncoding = $script:Utf8NoBomEncoding
 # `Invoke-NativeWithCapture` ヘルパー (System.Diagnostics.Process 直叩き) に
 # 一本化、`&` 系の patterns は「success exit が確証できる場合のみ」に格下げ。
 #
-# 採用ガイドライン (call site では「pattern: 名前」で参照):
+# 採用ガイドライン (call site では `# pattern: <NAME>` 1 行で catalog 参照、catalog 既述の
+# 一般則は per-site から削除して固有理由のみ残す形式):
 #
 #   1. Invoke-NativeWithCapture (RECOMMENDED for any failable command)
 #      $result = Invoke-NativeWithCapture -FilePath 'gh' -Arguments @('release','view','v1.0','--json','id')
@@ -577,7 +578,7 @@ function Invoke-DownloadWithRetry {
 # Godot 解決: project.godot 読み取り → patch lookup → DL + キャッシュ
 # ============================================================================
 
-function Read-GodotMinorFromProject {
+function Assert-GodotMinorFromProject {
     $projectGodot = Join-Path $LauncherDir 'project.godot'
     if (-not (Test-Path $projectGodot)) {
         Fail "project.godot が見つかりません: $projectGodot"
@@ -595,7 +596,7 @@ function Resolve-Godot {
     Write-Step "Godot 実行ファイルを解決"
 
     # project.godot から major.minor を取得し、patch を決定（-GodotExe 指定時も templates 確認のため必要）
-    $minor = Read-GodotMinorFromProject
+    $minor = Assert-GodotMinorFromProject
     Write-Info "project.godot 由来の Godot: $minor 系"
 
     $patch = $null
@@ -832,12 +833,11 @@ function Resolve-Nuget {
 # ============================================================================
 
 function Assert-WorkingTreeClean {
-    param([string]$Context)
-    # pattern: CAPTURE_STDOUT_PASS_STDERR (冒頭集約コメント参照)
-    # stdout (--porcelain の差分行) は変数に capture、stderr (git の通常 error
-    # メッセージ) は console 直書きでユーザーに見せる
-    # redirect を外しただけだと git 失敗時に $gitStatus が空文字になり「working
-    # tree clean」と誤判定されるため、exit code チェックが必須
+    param(
+        [string]$Context,    # phase identifier (Fail / Warn message にも含まれる、user-facing diagnostic)
+        [switch]$PostSync    # 特例メッセージ (Set-ManifestVersions が書き換えた旨) のトリガ
+    )
+    # pattern: CAPTURE_STDOUT_PASS_STDERR
     $gitStatus = & git -C $RepoRoot status --porcelain
     if ($LASTEXITCODE -ne 0) {
         Fail "git status の実行に失敗しました (exit code: $LASTEXITCODE, context: $Context)"
@@ -850,7 +850,7 @@ function Assert-WorkingTreeClean {
             Write-Host ""
             Write-Host "    uncommitted change が検出されました ($Context):" -ForegroundColor Yellow
             ($gitStatus -split "`n") | ForEach-Object { Write-Host "        $_" -ForegroundColor Yellow }
-            if ($Context -like '*sync 後*') {
+            if ($PostSync) {
                 Fail "Set-ManifestVersions が tracked files を書き換えました。差分をコミットしてから再実行してください (一度書き換えれば idempotent なので次回 sync は no-op)。-Force でバイパス可能。"
             } else {
                 Fail "コミットしてから再実行するか、-Force で続行してください。"
@@ -1212,7 +1212,7 @@ function Assert-ChangelogLinkDefs {
 # Phase 1: Component versions 読み取り
 # ============================================================================
 
-function Read-LauncherVersion {
+function Assert-LauncherVersion {
     $versionGd = Join-Path $LauncherDir 'version.gd'
     if (-not (Test-Path $versionGd)) {
         Fail "version.gd が見つかりません: $versionGd"
@@ -1227,7 +1227,7 @@ function Read-LauncherVersion {
     return "$major.$minor.$patch"
 }
 
-function Read-ManagerVersion {
+function Assert-ManagerVersion {
     $assemblyInfo = Join-Path $ManagerDir 'Properties\AssemblyInfo.cs'
     if (-not (Test-Path $assemblyInfo)) {
         Fail "AssemblyInfo.cs が見つかりません: $assemblyInfo"
@@ -1240,10 +1240,10 @@ function Read-ManagerVersion {
     return $m.Groups[1].Value
 }
 
-function Read-ComponentVersions {
+function Assert-ComponentVersions {
     Write-Step "コンポーネント version を読み取り"
-    $script:LauncherVersion = Read-LauncherVersion
-    $script:ManagerVersion = Read-ManagerVersion
+    $script:LauncherVersion = Assert-LauncherVersion
+    $script:ManagerVersion = Assert-ManagerVersion
     Write-Ok "Launcher: v$script:LauncherVersion"
     Write-Ok "Manager:  v$script:ManagerVersion"
 }
@@ -1853,12 +1853,12 @@ if ($Offline)    { Write-Host "Mode: OFFLINE" -ForegroundColor Yellow }
 
 Assert-Preflight
 Assert-ChangelogLinkDefs
-Read-ComponentVersions
+Assert-ComponentVersions
 Resolve-Godot
 Resolve-MsBuild
 Resolve-Nuget
 Set-ManifestVersions
-Assert-WorkingTreeClean -Context "manifest sync 後"
+Assert-WorkingTreeClean -Context "manifest sync 後" -PostSync
 Clear-Staging
 Build-Launcher
 Build-Manager
