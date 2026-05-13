@@ -18,6 +18,7 @@
 
 - **トップレベル dir 名 (リポジトリ構造) = 短縮**: `Launcher/` / `Manager/` / `Monitor/` / `Companions/`。リポジトリ全体が GCTonePrism なので prefix は冗長。`Companions/` 配下のサブツール dir も `Companions/Updater/` / `Companions/WindowProbe/` と短縮。
 - **csproj / アセンブリ名 / exe ファイル名 = `GCTonePrism_<Name>`**: `GCTonePrism_Manager.exe` / `GCTonePrism_Updater.exe` / 将来 `GCTonePrism_WindowProbe.exe`。**理由: 実機 OS との接点 (tasklist / `Process.GetProcessesByName` / Windows のショートカット / プロセス管理 UI) で `Manager.exe` / `Updater.exe` のような汎用名は他アプリと衝突する。特に Chrome / Edge / 各種 Updater など多くのアプリが `Updater.exe` を使う**。prefix 維持で uniqueness を担保。
+  - **例外**: `Common` / `Core` / `Shared` 等の **汎用すぎる名前** は assembly 衝突 (= GCTonePrism 内の他コンポーネントが同名 `Common` を持つ可能性、または他アプリの `Common.dll` との namespace 衝突) を避けるため `GCTonePrism_<Parent><Name>` の形式で disambiguation を許容。例: `Companions/Common/` (dir 短縮) → `GCTonePrism_CompanionsCommon.csproj` (Parent=Companions を含めて衝突回避)。SPEC §2.4 参照。
 - **C# namespace = `GCTonePrism.<Name>`**: `GCTonePrism.Manager` / `GCTonePrism.Updater`。namespace 衝突は実害が小さいが、コード読みやすさのため exe 名と一貫させる。
 
 主要 vs サポートの分類:

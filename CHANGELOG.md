@@ -52,6 +52,19 @@
 - **PathManager.cs / path_manager.gd の self-reference 修正**: Manager / Launcher 自身が runtime で `"GCTonePrism_Manager"` / `"GCTonePrism_Launcher"` という親 dir 名を検出してプロジェクトルートを解決していたロジックを `"Manager"` / `"Launcher"` に置換。新 install 構造で正しく動く
 - **README.md ディレクトリ構成図を新 dir 名で更新** + 命名規約への参照を追加
 
+#### Fixed (PR #150 シニアレビュー round 7)
+
+- **[M1] migration `move` の stderr 抑制で失敗原因が user に届かない**: 旧 `move ... >nul` は stdout のみリダイレクト、stderr 経由の失敗詳細 (アクセス拒否 / 別プロセス使用中 / ファイルロック等) が握り潰されていた。round 3 M2 の `show_folder_dialog` 呼び出しで確立した「stdout/stderr 分離キャプチャ + 失敗時 type 表示」規約から逸脱していた catalog/call-site mismatch。修正: `move ... >"%TEMP_MV_OUT%" 2>&1` で stdout+stderr 両方を tmp file にキャプチャ、`:migrate_failed_manager` / `:migrate_failed_launcher` でそれぞれ `type "%TEMP_MV_OUT%"` して move コマンドの実出力 (= 失敗理由の詳細) を user に表示。tmp file は 2 段階 move で共有、各失敗 path と success 経路 (`:migrate_done`) で cleanup
+- **[L5] PathManager priority-3 detection に Manager/Launcher sibling 同時存在検証を追加**: round 1 L2 で acknowledged されていた priority-3 false-match 余地 (`<install>/Manager/` 単独 dir で起動した場合に他アプリ等の Manager dir と誤マッチする path) を構造的に解消。我々の install 構造は Manager と Launcher が必ず同一の親 dir 配下にセットで配置される (SPEC §3.7.1 / §7.5.1) ため、priority-3 で「Manager/ AND Launcher/ の両方が currentPath 直下に存在」を確認する形に強化。Manager 側 `PathManager.cs` + Launcher 側 `path_manager.gd` 両側に対称的に追加。issue #151 (priority-3 detection 強化) の主要 scope を本 PR で close 可能に
+
+#### Changed (PR #150 シニアレビュー round 7)
+
+- **[L1] AGENTS.md "Naming Conventions" に Common 系 csproj 命名例外を追記**: 旧記述は「csproj 名 = `GCTonePrism_<Name>`」と例外なしで書いていたが、SPEC §2.4 の `Common/GCTonePrism_CompanionsCommon.csproj` (= csproj 名に Parent prefix を含める形) が catalog 内矛盾だった。「`Common` / `Core` / `Shared` 等の汎用すぎる名前は assembly 衝突回避のため `GCTonePrism_<Parent><Name>` 例外を許容 (例: `Companions/Common/` → `GCTonePrism_CompanionsCommon.csproj`)」と 1 行例外規約を追記、SPEC §2.4 と AGENTS.md の整合を回復
+- **[L2] robocopy 共通フラグを `ROBOCOPY_COMMON` 変数化**: overwrite path (`/E /XF prism.db /XD games backups responses logs /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1`) と new_install path (`/E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1`) で共通フラグが重複していて、片方修正時にもう片方が乖離する事故 path があった。`set "ROBOCOPY_COMMON=/E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1"` で共通化、overwrite 側は `%ROBOCOPY_COMMON% /XF ... /XD ...` を追加する形に統一
+- **[L3] `:overwrite_set_mode` 直下のコメント flow 記述を `:copy_shortcuts` dispatcher に集約**: 旧コメントは「migration / mkdir → ...」と両 path の flow を `:overwrite_set_mode` (overwrite 専用ラベル) の直下で議論していて、構造的に読みづらかった。`:copy_shortcuts` dispatcher 直下に「overwrite path: migration → shortcut → robocopy」「new_install path: mkdir → robocopy → shortcut」と path-specific に整理、`:overwrite_set_mode` 側はリンクのみ
+- **[L4] `:migrate_conflict_launcher` に MANAGER_MIGRATED 状態案内追加**: Manager 移行成功 + Launcher 側で新旧 dir 並存ケースで「Manager 側はすでに移行済」を案内しない問題を解消 (`:migrate_failed_launcher` / `:shortcut_failed` と同パターン、catalog/call-site uniformity)。user が「両方ある = まだ移行されていない、全部一旦戻そう」と Manager 側も旧 dir に戻す誤対処 path を防ぐ
+- **[L6] CHANGELOG `## Manager v0.8.10` / `## Launcher v0.5.17` を Release Tooling 参照のみに圧縮**: 各 component entry に begins_with 修正 / sibling guard 等の技術詳細が重複記述されていた (AGENTS.md「重複記述は避ける」規約違反)。両 entry を「PR #150 で dir rename 連動、詳細は Release Tooling v0.1.10 参照」の 2 行に圧縮、SoT を Release Tooling v0.1.10 に集約
+
 #### Fixed (PR #150 Codex bot round 6 後追い)
 
 - **[Codex P2] new_install path で robocopy 失敗時に broken shortcut bat が残る regression**: round 3 L3 で「shortcut copy を robocopy の前に統一移動」した時、overwrite path の partial-failure 対策 (migration 後の robocopy 中断で shortcut bat 旧 path 残存問題) を解消するためだったが、`INSTALL_MODE=new` の場合に **副作用 regression** を導入していた。新規 install で shortcut copy 成功 + robocopy 失敗 (権限 / disk full / Ctrl+C) のとき、partial / 空の `<install>/GCTonePrism/` を指す `<親>/Launcher.bat` / `<親>/Manager.bat` が壊れた状態で残る path。修正: `INSTALL_MODE` で順序分岐:
@@ -545,17 +558,9 @@
 
 ### [Launcher v0.5.17] - 2026-05-13
 
-**bump 判断**: 配布構造の変更 (旧 `GCTonePrism_Launcher/` → 新 `Launcher/`) を含むため SemVer 厳密だと minor (= breaking) 寄りだが、Install.bat の v0.2.0 → 新構造 migration ロジックが自動で吸収するため **エンドユーザー視点では invisible**。0.x 系の慣習で「migration で吸収されるリリース構造変更」は patch bump として扱う (PR #150 round 6 L4)。次の major 区切り (v1.0 リリース時) では本変更も accumulated changelog として記述する。
+PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して `scripts/path_manager.gd` の self-reference リテラル + priority-3 detection ロジック (begins_with 二段比較 + Launcher/Manager sibling 同時存在検証) を修正。配布構造変更を含むため SemVer 厳密だと minor 寄りだが、Install.bat の v0.2.0 → 新構造 migration で自動吸収されエンドユーザー視点では invisible のため patch bump 扱い。
 
-#### Changed (#108 Phase 3 着手準備 / dir rename 連動、PR #150)
-
-- **`scripts/path_manager.gd` の self-reference リテラル修正**: 旧 dir 名 `"GCTonePrism_Launcher"` を新 dir 名 `"Launcher"` に置換 (7 箇所、コメント / エラー message / detection ロジック内)。`_find_base_directory_from_executable()` の priority-3 fallback で「実行ファイルが Launcher フォルダ内にある場合、親をプロジェクトルートとする」判定が新構造 `<install>/Launcher/GCTonePrism_Launcher.exe` で正しく動くようにする。
-- **priority-3 detection の begins_with 比較ロジックを強化**: 旧コードは `exe_path.begins_with(launcher_folder_check)` で末尾区切り無しの prefix 比較だったため `MyLauncher` / `LauncherStudio` 等の兄弟 dir 名に誤マッチする path があった。「等値 OR separator 付き begins_with」の二段比較 (`exe_path == folder OR exe_path.begins_with(folder + "/")`) に変更、Godot の `OS.get_executable_path().get_base_dir()` が末尾 "/" を持たない仕様にも対応 (詳細は Release Tooling v0.1.10 round 4 H1 / round 2 M2 参照)
-- **editor 起動 fallback の `ends_with` に NOTE 追記**: `_find_base_directory()` 編集時 path の `ends_with("Launcher")` / `ends_with("GCTonePrism")` も文字列 prefix collision の余地があるが、editor 専用 fallback (project.godot 経由 + prism.db 未生成初期) で発火するため実害低。意図を明文化、長期的には issue #151 (priority-3 detection 強化) で対応予定
-- **runtime 動作の変更点**: v0.5.16 までの binary は旧 install 構造 (`<install>/GCTonePrism_Launcher/`) を期待していたが、v0.5.17 以降は新構造 (`<install>/Launcher/`) を期待する。Install.bat の v0.2.0 → 新構造 migration ロジック (`templates/Install.bat`) と組み合わせて、上書きインストール時に旧 → 新 dir リネームが自動で行われる前提。
-- **配布構造変更**: Launcher exe は今後 `<install>/Launcher/GCTonePrism_Launcher.exe` に配置される (旧: `<install>/GCTonePrism_Launcher/GCTonePrism_Launcher.exe`)。exe ファイル名 `GCTonePrism_Launcher.exe` 自体は維持 (process 検知 uniqueness のため、AGENTS.md "Naming Conventions" 参照)。
-
-詳細は Release Tooling v0.1.10 entry および SPEC §2.4 / §3.7.x 変更履歴 v1.10.9 を参照。
+**詳細は [Release Tooling v0.1.10](#release-tooling-v0110---2026-05-13) entry および SPEC §2.4 / §3.7.x 変更履歴 v1.10.9 を参照** (AGENTS.md「重複記述は避ける」規約準拠、round 7 L6)。
 
 ### [Launcher v0.5.16] - 2026-05-11
 
@@ -988,16 +993,9 @@
 
 ### [Manager v0.8.10] - 2026-05-13
 
-**bump 判断**: 配布構造の変更 (旧 `GCTonePrism_Manager/` → 新 `Manager/`) を含むため SemVer 厳密だと minor (= breaking) 寄りだが、Install.bat の v0.2.0 → 新構造 migration ロジックが自動で吸収するため **エンドユーザー視点では invisible**。0.x 系の慣習で「migration で吸収されるリリース構造変更」は patch bump として扱う (PR #150 round 6 L4)。次の major 区切り (v1.0 リリース時) では本変更も accumulated changelog として記述する。
+PR #150 で dir rename (`GCTonePrism_Manager/` → `Manager/`) に連動して `PathManager.cs` の self-reference リテラル + priority-3 detection ロジック (StartsWith 二段比較 + Manager/Launcher sibling 同時存在検証) + csproj `<RootNamespace>` を修正。配布構造変更を含むため SemVer 厳密だと minor 寄りだが、Install.bat の v0.2.0 → 新構造 migration で自動吸収されエンドユーザー視点では invisible のため patch bump 扱い。
 
-#### Changed (#108 Phase 3 着手準備 / dir rename 連動、PR #150)
-
-- **`PathManager.cs` の self-reference リテラル修正**: 旧 dir 名 `"GCTonePrism_Manager"` を新 dir 名 `"Manager"` に置換 (4 箇所、コメント / エラー message / detection ロジック内)。`FindBaseDirectory()` の priority-3 fallback で「実行ファイルが Manager フォルダ内にある場合、親をプロジェクトルートとする」判定が新構造 `<install>/Manager/GCTonePrism_Manager.exe` で正しく動くようにする。
-- **priority-3 detection の StartsWith 比較ロジックを強化**: 旧コードは `exePath.StartsWith(Path.Combine(currentPath, "Manager"))` で末尾区切り無しの prefix 比較だったため `ManagerStudio` 等の兄弟 dir 名に誤マッチする path があった。「等値 OR separator 付き StartsWith」の二段比較に変更 (Launcher 側との対称化 + 将来 .NET ランタイムの BaseDirectory が末尾 `\` を外した場合の future-proofing。詳細は Release Tooling v0.1.10 round 4 H1 / round 2 M2 参照)
-- **runtime 動作の変更点**: v0.8.9 までの binary は旧 install 構造 (`<install>/GCTonePrism_Manager/`) を期待していたが、v0.8.10 以降は新構造 (`<install>/Manager/`) を期待する。Install.bat の v0.2.0 → 新構造 migration ロジック (`templates/Install.bat`) と組み合わせて、上書きインストール時に旧 → 新 dir リネームが自動で行われる前提。
-- **配布構造変更**: Manager exe は今後 `<install>/Manager/GCTonePrism_Manager.exe` に配置される (旧: `<install>/GCTonePrism_Manager/GCTonePrism_Manager.exe`)。exe ファイル名 `GCTonePrism_Manager.exe` 自体は維持 (process 検知 uniqueness のため、AGENTS.md "Naming Conventions" 参照)。
-
-詳細は Release Tooling v0.1.10 entry および SPEC §2.4 / §3.7.x 変更履歴 v1.10.9 を参照。
+**詳細は [Release Tooling v0.1.10](#release-tooling-v0110---2026-05-13) entry および SPEC §2.4 / §3.7.x 変更履歴 v1.10.9 を参照** (AGENTS.md「重複記述は避ける」規約準拠、round 7 L6)。
 
 ### [Manager v0.8.9] - 2026-05-11
 

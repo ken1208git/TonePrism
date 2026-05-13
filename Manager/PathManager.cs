@@ -104,13 +104,23 @@ namespace GCTonePrism.Manager
                 //     ため equality 比較が必須で、対称性のため Manager 側も同じパターンに揃える。
                 //   - separator 付き StartsWith は "Manager" prefix が "ManagerStudio" 等の
                 //     兄弟 dir 名にも誤マッチするのを防ぐため依然必要。
+                //
+                // 追加 guard (issue #151 で言及した sibling 同時存在検証):
+                //   - 我々の install 構造は Manager と Launcher が必ず同一の親 dir 配下に
+                //     セットで配置される (SPEC §3.7.1 / §7.5.1)。Launcher/ も同 currentPath
+                //     直下に存在することを確認することで、`<install>/Manager/` 単独 dir
+                //     (= 他アプリ等で偶然存在する Manager dir) との誤マッチを構造的に排除する。
+                //     priority-1 (prism.db) / priority-2 (.git) が hit しない極限状況での
+                //     false-match を低減 (round 7 L5)。
                 string managerCandidate = Path.Combine(currentPath, "Manager");
                 string managerCandidateWithSep = managerCandidate + Path.DirectorySeparatorChar;
+                string siblingLauncher = Path.Combine(currentPath, "Launcher");
                 if (Directory.Exists(managerCandidate) &&
+                    Directory.Exists(siblingLauncher) &&
                     (exePath.Equals(managerCandidate, StringComparison.OrdinalIgnoreCase) ||
                      exePath.StartsWith(managerCandidateWithSep, StringComparison.OrdinalIgnoreCase)))
                 {
-                    Console.WriteLine($"[PathManager] Managerフォルダを検出: {currentPath}");
+                    Console.WriteLine($"[PathManager] Manager + Launcher 兄弟フォルダを検出: {currentPath}");
                     detectedBaseDirectory = currentPath;
                     break;
                 }

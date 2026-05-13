@@ -110,12 +110,21 @@ static func _find_base_directory_from_executable() -> String:
 		#   - separator 付き begins_with は "Launcher" prefix が "LauncherStudio" 等の
 		#     兄弟 dir 名にも誤マッチするのを防ぐため依然必要。
 		# Godot の path_join / get_base_dir は "/" separated を返す。
+		#
+		# 追加 guard (issue #151 で言及した sibling 同時存在検証):
+		#   - 我々の install 構造は Manager と Launcher が必ず同一の親 dir 配下にセットで
+		#     配置される (SPEC §3.7.1 / §7.5.1)。Manager/ も同 current_dir_path 直下に存在
+		#     することを確認することで、`<install>/Launcher/` 単独 dir (= 他アプリ等で
+		#     偶然存在する Launcher dir) との誤マッチを構造的に排除する。priority-1
+		#     (prism.db) / priority-2 (.git) が hit しない極限状況での false-match を低減
+		#     (round 7 L5)。
 		var launcher_folder_check = current_dir_path.path_join("Launcher")
 		var launcher_folder_check_with_sep = launcher_folder_check + "/"
-		if dir.dir_exists(launcher_folder_check):
+		var sibling_manager = current_dir_path.path_join("Manager")
+		if dir.dir_exists(launcher_folder_check) and dir.dir_exists(sibling_manager):
 			# 実行ファイルがLauncherフォルダ内にあるか確認 (等値 OR separator 付き prefix)
 			if exe_path == launcher_folder_check or exe_path.begins_with(launcher_folder_check_with_sep):
-				print("[PathManager] Launcherフォルダを検出: ", current_dir_path)
+				print("[PathManager] Launcher + Manager 兄弟フォルダを検出: ", current_dir_path)
 				detected_base_directory = current_dir_path
 				break
 		
