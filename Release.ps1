@@ -268,6 +268,13 @@ $FilesDir     = Join-Path $StagingDir 'files'
 $ZipPath      = Join-Path $StagingRoot "GCTonePrism_v$Version.zip"
 $ChangelogPath = Join-Path $RepoRoot 'CHANGELOG.md'
 
+# round 3 Low-3: GitHub repo slug を SoT 化。本 script は ken1208git/GCTonePrism 専用前提
+# (Assert-ChangelogLinkDefs で release tag URL を組み立てる用途)。fork / repo rename / org
+# transfer 時は本定数 1 箇所の修正で全箇所追随する形に集約。他の gh CLI 呼び出しは `gh` の
+# repo 自動検出に依拠していて hardcode していないので、本定数は本 script 内で 1 箇所のみで
+# 参照される (将来別箇所で必要になれば本定数を使う規約)。
+$GitHubRepoSlug = 'ken1208git/GCTonePrism'
+
 $script:ResolvedGodot       = $null
 $script:ResolvedMsBuild     = $null
 $script:ResolvedNuget       = $null
@@ -1019,6 +1026,107 @@ function Resolve-TagConflict {
 }
 
 # ============================================================================
+# Phase 0.5: CHANGELOG 末尾 Bundle 参照リンク定義の検証
+# ============================================================================
+# Markdown reference-style link を resolve するためには CHANGELOG 末尾に
+# `[Bundle vX.Y.Z]: https://github.com/.../releases/tag/vX.Y.Z` の定義が要る。
+# Bundle entry 追加時に手で同時追加するのが AGENTS.md "Release and Versioning" 規約だが、
+# 人間 / Claude いずれもミスする可能性があるため、Release.ps1 release 実行前にこの定義の
+# 存在を verify して未追加なら Fail で停止する fence を設ける。
+#
+# 配置: Phase 0.5 (= Assert-Preflight の直後、Build 群より前)
+#   round 1 Medium-1: 初版は Assert-ExpectedFiles の **後** (build 完了後) に置いていたが、
+#   link def 忘れを「数分のフル build を捨ててから検出」する fail-fast 違反だった。本 Assert
+#   は $Version + CHANGELOG.md のみに依存し build 結果を見ない → Preflight 直後に配置する
+#   ことで「実行直後 (build 前) に物理的に検知」を実現。AGENTS.md 「実行直後の Assert」
+#   記述とも整合化。
+#
+# 自動 mutation (Release.ps1 が末尾を書き換える) は採らない:
+#   - commit/staging のタイミングと干渉する
+#   - dry-run と本番で挙動分岐が複雑化する
+#   - SoT (CHANGELOG) を script が書き換える形は git 履歴の追跡性を悪くする
+# 「検証だけ」で止めれば、リリース直前に手追加忘れに気づいて修正 → 再 Release.bat で済む。
+
+function Assert-ChangelogLinkDefs {
+    # round 2 L2: Write-Step convention に揃え (position メタは header コメント側で伝達)。
+    Write-Step "CHANGELOG 末尾 Bundle 参照リンク定義の検証"
+
+    # round 2 M2: -SkipUpload 時は publish しない → 参照リンク URL (releases/tag/vX.Y.Z) の
+    # resolution 自体が無意味、CHANGELOG 完備の強制契約も緩める。既存 Preflight が CHANGELOG
+    # `### [Bundle v$Version]` セクション検証で同じ pattern を採っている (Release.ps1:919
+    # `if (-not $SkipUpload) {...Fail} else {Write-Warn}`)、AGENTS.md「release 実行時に verify」
+    # 文言とも整合。
+    #
+    # 注: `-DryRun` / `-Offline` は Release.ps1:208-210 で `$SkipUpload = $true` に
+    # **auto-promote** される (Codex P2 #137 経緯)。本 gate は DryRun/Offline 経由でも skip path
+    # に流れる = 既存 Preflight と完全同期。実 fence の動作確認は本番 publish 経路 (= flag
+    # なしで `.\Release.bat -NoPause -Force`) で初発火を verify する流れ。
+    if ($SkipUpload) {
+        Write-Warn "Bundle 参照リンク定義の検証を skip (-SkipUpload or -DryRun/-Offline 経由 auto-promote、publish しないので URL resolution 不要)"
+        # round 4 Low: 本番 publish 時には Fail で停止することを明示、開発者が DryRun 中に link def
+        # 追加を忘れ続けて初回 publish 時に「DryRun では通ってたのに publish で Fail」と混乱する
+        # path を防ぐ。
+        Write-Warn "  → 本番 publish (flag なし Release.bat -NoPause -Force) では本検証が enforce されます。Bundle entry 追加と同時に link def も追加してください"
+        return
+    }
+
+    # round 6 Low-2: 既存 module-level $ChangelogPath (script 冒頭 paths section、SoT) を参照、
+    # local 変数の shadow 排除。
+    # round 1 Low-3: Get-Content -Raw は PS 5.1 で BOM 無し UTF-8 を CP932 として読む既知挙動
+    # あり。script 冒頭 ($_changelogContent) と同じ ReadAllText で統一して UTF-8 明示 read。
+    $changelogContent = [System.IO.File]::ReadAllText($ChangelogPath, [System.Text.Encoding]::UTF8)
+
+    # footer block を切り出してその範囲内のみ match。
+    #   line anchor `(?m)^...\s*$` だけでファイル全体に対して match した場合、release notes 内の
+    #   fenced code block で `[Bundle v0.5.0]: ...` を例示行として **独立行** で書いた case で
+    #   false-positive で素通りする path があった (footer 不在でも check 緑 → dangling Bundle
+    #   heading link で release)。
+    #
+    #   修正履歴:
+    #     (1) round 3 Codex P2: `LastIndexOf('-->')` で「ファイル中で最後の HTML comment 閉じ」
+    #         を footer block の先頭とみなしていたが、将来 link def の **下** に別の HTML comment
+    #         (例: markdownlint directive) が追加された瞬間に footer block が link def 群を含ま
+    #         ない範囲に切り出されて normal publish で false "同期忘れ" Fail が起きる脆弱性。
+    #     (2) round 5 Codex P2: 明示 sentinel `footer-link-defs-begin` を埋め込み `IndexOf` で
+    #         位置取得 → 即 round 5 commit で本文中に sentinel literal を書いてしまい、
+    #         `IndexOf` が body 内の最初の出現を拾って footer block が CHANGELOG 99% に再拡大
+    #         する **自爆** が発生 (= round 6 Codex P2 + シニア Critical-1 で発覚)。
+    #     (3) round 6 で二重防御に再設計 (現在):
+    #         - **sentinel を unique 文字列** `GCTONEPRISM-CHANGELOG-FOOTER-BEGIN-V1` に変更
+    #           (ALL CAPS + hyphen + V1 suffix、human writing で偶発出現しない pattern)
+    #         - **`LastIndexOf` を採用**: 万一 body 中で sentinel が引用された場合でも末尾の
+    #           本物の sentinel を選ぶ。CHANGELOG 構造上「上 = 新エントリ、末尾 = HTML comment
+    #           + link def」で本物 sentinel は常にファイル中最後の出現になる前提。
+    $FooterSentinel = 'GCTONEPRISM-CHANGELOG-FOOTER-BEGIN-V1'
+    $sentinelIdx = $changelogContent.LastIndexOf($FooterSentinel)
+    if ($sentinelIdx -lt 0) {
+        Fail "CHANGELOG.md に footer marker sentinel '$FooterSentinel' が見つかりません。CHANGELOG 末尾 HTML comment 内に sentinel を追加してください。"
+    }
+    $footerBlock = $changelogContent.Substring($sentinelIdx + $FooterSentinel.Length)
+
+    # round 3 Low-3: GitHub repo URL は $GitHubRepoSlug 定数 (script 冒頭 SoT) を参照。
+    $expectedUrl = "https://github.com/$GitHubRepoSlug/releases/tag/v$Version"
+    # 正規表現: `(?m)` (multiline) + `^` (行頭) + `[Bundle v<Version>]: <URL>` + `\s*$` (行末)
+    $linePattern = '(?m)^' + [regex]::Escape("[Bundle v$Version]: $expectedUrl") + '\s*$'
+    $expectedDefDisplay = "[Bundle v$Version]: $expectedUrl"
+
+    if ([regex]::IsMatch($footerBlock, $linePattern)) {
+        Write-Ok "Bundle v$Version の参照リンク定義 OK"
+        return
+    }
+
+    # round 3 Low-2: backtick escape を削除、PS double-quoted string で意図しない文字消費を排除。
+    Write-Host ""
+    Write-Host "    CHANGELOG.md 末尾 footer block に Bundle v$Version の参照リンク定義が見つかりません" -ForegroundColor Red
+    Write-Host "    (CHANGELOG 末尾 sentinel '$FooterSentinel' 以降の独立行のみ認識、本文中の例示は false-positive 排除)" -ForegroundColor DarkGray
+    Write-Host "    以下を CHANGELOG.md 末尾の参照リンク定義ブロックに追加してから再実行してください:" -ForegroundColor Yellow
+    Write-Host "      $expectedDefDisplay" -ForegroundColor Cyan
+    Write-Host "    追加位置: 既存 [Bundle vX.Y.Z]: 行群の先頭 (降順を維持、CHANGELOG 末尾 HTML comment ブロック直下)" -ForegroundColor Yellow
+    Write-Host "    (AGENTS.md 'Release and Versioning' 規約参照)" -ForegroundColor Yellow
+    Fail "CHANGELOG 末尾参照リンク定義の同期忘れ"
+}
+
+# ============================================================================
 # Phase 1: Component versions 読み取り
 # ============================================================================
 
@@ -1662,6 +1770,7 @@ if ($Force)      { Write-Host "Mode: FORCE" -ForegroundColor Yellow }
 if ($Offline)    { Write-Host "Mode: OFFLINE" -ForegroundColor Yellow }
 
 Assert-Preflight
+Assert-ChangelogLinkDefs
 Read-ComponentVersions
 Resolve-Godot
 Resolve-MsBuild
