@@ -49,6 +49,13 @@
   - **Release.ps1**: `Assert-ChangelogLinkDefs` 関数を追加 (Phase 0.5 = Preflight 直後、round 1 Medium-1 で位置調整)、main flow に組み込み。release 実行前に該当 Bundle version の参照リンク定義が末尾にあるか verify し、無ければ `Fail` で停止する fence。自動 mutation (script が CHANGELOG 末尾を書き換える) は採らず、規約遵守を物理的に強制する形 (人間 / Claude いずれのミスも release.bat 実行直後 = build 前に物理的に検知される、fail-fast)
 - **DRY-RUN 検証**: 本 PR 内で「リンク定義が存在する case」(PASS) を確認、別 fixture で「未追加 case」を `Assert-ChangelogLinkDefs` が `Fail` するか動作確認 (= fence 機能の実証)
 
+#### Changed (PR #153 シニアレビュー round 4)
+
+- **[Low] Release.ps1 内 Fail message の backtick escape 漏れを解消 (round 3 Low-2 の取りこぼし)**: round 3 Low-2 で Fail message から backtick を削除する作業を行ったが、本 PR で新規追加した別の Fail message (`Fail "CHANGELOG.md 末尾の HTML comment marker (\`<!-- ... -->\`) が見つかりません..."`) に backtick が残置していた。同 round 内で全体に展開する作業漏れを補完
+- **[Low] CHANGELOG.md 内の Release.ps1 行番号参照を現状値に同期**: round 1 / 2 / 3 の commit を重ねるうちに Release.ps1 内の line 番号が drift していた (Phase 0.5 header: 1022 → 1029、`$expectedUrl` hardcode 箇所: 1077 → 1089 を経て現在 `Assert-ChangelogLinkDefs` 全体は line 1093 近辺)。CHANGELOG entry 内の line 番号参照を実態に追従、または「(現 line 1029)」形式で書き換えて drift の表面化を抑える
+- **[Low] SkipUpload skip 時の Warn message にリマインダー 1 行追加**: round 2 M2 で `-SkipUpload` (DryRun/Offline 経由 auto-promote 含む) 時の skip + warn 挙動を導入したが、「**本番 publish (flag なし `Release.bat -NoPause -Force`) では本検証が enforce される、Bundle entry 追加と同時に link def も追加してください**」というリマインダーが無く、DryRun を繰り返している開発者が初回 publish 時に「DryRun では通ってたのに publish で Fail」と混乱する path があった。Warn を 2 行構成にして 2 行目で本番挙動を予告
+- **[scope 外 / 別 issue 登録]** ordering check (Bundle 行群の降順 enforce、現状の fence は presence のみ check で順序は AGENTS.md convention 任せ) は別 issue として記録、本 PR では実装しない (incremental hardening、本 PR の core は presence check 導入)
+
 #### Changed (PR #153 Codex round 2 後追い + シニアレビュー round 3)
 
 - **[Codex P2] Bundle link 検証を footer block 限定 match に補強**: round 1 Low-1 で line anchor `(?m)^...\s*$` を導入したが、ファイル全体に対して match していたため、release notes 本文の fenced code block 内に同形式の独立行 (例:「link def の追加例」を release notes で説明) が紛れた場合に footer 不在でも check 緑で素通りする path があった (= dangling Bundle heading link で release)。修正: CHANGELOG 末尾の **最後の HTML comment marker** (`<!-- ... -->`) を footer block の開始 sentinel とみなし、`$changelogContent.LastIndexOf('-->')` 以降の部分文字列だけを match 対象に。footer marker 不在時は明示 Fail で停止 (sentinel 必須化)
@@ -57,9 +64,9 @@
   - **fixture A** (link def 存在 + Release.ps1:208-210 の auto-promote 一時 comment out + DryRun): `[OK] Bundle v0.2.0 の参照リンク定義 OK` → fence PASS path で build まで進む **動作確認 OK**
   - **fixture B** (link def 削除 + auto-promote 一時 comment out + DryRun): `CHANGELOG.md 末尾 footer block に Bundle v0.2.0 の参照リンク定義が見つかりません` + `追加位置: 既存 [Bundle vX.Y.Z]: 行群の先頭 (降順を維持、CHANGELOG 末尾 HTML comment ブロック直下)` 表示 → **1.7 秒で Fail で停止** (fail-fast 維持) **動作確認 OK**
   - 案 A (検証専用 flag 新設) / 案 B (verify-only mode) と比較して案 C 採用、scope creep ゼロで merge 前確度を担保。Phase 4 完成時の本番 Bundle release では本検証済の fence ロジックが初発火する想定
-- **[Low-1] Release.ps1:1022 Phase 0.5 header コメントから `(fix/changelog-link-sync)` 削除**: round 2 L1 で AGENTS.md から PR 識別子を削除した理由 (「forward-looking な規約に履歴情報を埋め込む」「2 年後の読者にとって PR 名は意味を失う」) は Release.ps1 関数 header にも同じく適用される。同 PR の同 critique を半分にしか適用していなかった自己矛盾を解消。経緯は git blame / CHANGELOG で追える
+- **[Low-1] Release.ps1 Phase 0.5 header コメント (現 line 1029) から `(fix/changelog-link-sync)` 削除**: round 2 L1 で AGENTS.md から PR 識別子を削除した理由 (「forward-looking な規約に履歴情報を埋め込む」「2 年後の読者にとって PR 名は意味を失う」) は Release.ps1 関数 header にも同じく適用される。同 PR の同 critique を半分にしか適用していなかった自己矛盾を解消。経緯は git blame / CHANGELOG で追える
 - **[Low-2] Fail message の backtick escape を削除**: `Write-Host "... 既存 `[Bundle vX.Y.Z]:` 行群..."` の backtick は PowerShell double-quoted string で escape 文字として消費 (`` `[ `` → `[`、`` `<space> `` → space) → console 出力で意図した code-formatting 表記が消えていた。backtick 削除して直接 `既存 [Bundle vX.Y.Z]: 行群の先頭 (...)` に簡略化 (現在の出力と等価で保守者の混乱なし)
-- **[Low-3] GitHub repo URL を `$GitHubRepoSlug` 定数に集約**: round 1 で `https://github.com/ken1208git/GCTonePrism/releases/tag/v$Version` を Release.ps1 内に hardcode していた (Release.ps1:1077、本 script 内初登場、他箇所は `gh` CLI の repo 自動検出に依拠) ため、fork / repo rename / org transfer 時に検証ロジックだけ古い URL を見るリスクがあった。script 冒頭の paths section に `$GitHubRepoSlug = 'ken1208git/GCTonePrism'` を定義 (SoT)、`Assert-ChangelogLinkDefs` で参照
+- **[Low-3] GitHub repo URL を `$GitHubRepoSlug` 定数に集約**: round 1 で `https://github.com/ken1208git/GCTonePrism/releases/tag/v$Version` を Release.ps1 内に hardcode していた (本 script 内初登場、他箇所は `gh` CLI の repo 自動検出に依拠) ため、fork / repo rename / org transfer 時に検証ロジックだけ古い URL を見るリスクがあった。script 冒頭の paths section に `$GitHubRepoSlug = 'ken1208git/GCTonePrism'` を定義 (SoT)、`Assert-ChangelogLinkDefs` (現 line 1093) で参照
 - **[Low-4] AGENTS.md の追加 bullet を sub-bullet に分割**: round 2 L1 で複数主張 (規約 / Markdown 形式 / 追加位置 / fence の存在 / `-SkipUpload` 時の挙動 / SPEC §3.7.7 整合) を 1 文に統合した結果、bullet が ~280 文字に膨らみ release 直前の急ぎ lookup で各情報を素早く拾えない問題があった。同 AGENTS.md 内他 bullet (`Major / Minor / Patch` 列挙) に揃えて sub-bullet 分割 (Markdown 形式 / 追加位置 / 強制 fence / SkipUpload 時の挙動 / Bundle 移行前後の規約) で情報量変えず lookup 性改善
 
 #### Changed (PR #153 シニアレビュー round 2)

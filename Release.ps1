@@ -1063,6 +1063,10 @@ function Assert-ChangelogLinkDefs {
     # なしで `.\Release.bat -NoPause -Force`) で初発火を verify する流れ。
     if ($SkipUpload) {
         Write-Warn "Bundle 参照リンク定義の検証を skip (-SkipUpload or -DryRun/-Offline 経由 auto-promote、publish しないので URL resolution 不要)"
+        # round 4 Low: 本番 publish 時には Fail で停止することを明示、開発者が DryRun 中に link def
+        # 追加を忘れ続けて初回 publish 時に「DryRun では通ってたのに publish で Fail」と混乱する
+        # path を防ぐ。
+        Write-Warn "  → 本番 publish (flag なし `Release.bat -NoPause -Force`) では本検証が enforce されます。Bundle entry 追加と同時に link def も追加してください"
         return
     }
 
@@ -1081,7 +1085,7 @@ function Assert-ChangelogLinkDefs {
     #   「ファイル中で最後の HTML comment 閉じ」を見つける = 末尾 footer block の先頭。
     $footerMarkerEnd = $changelogContent.LastIndexOf('-->')
     if ($footerMarkerEnd -lt 0) {
-        Fail "CHANGELOG.md 末尾の HTML comment marker (`<!-- ... -->`) が見つかりません。footer block 開始の sentinel が必要 (round 3 Codex P2)。"
+        Fail "CHANGELOG.md 末尾の HTML comment marker (<!-- ... -->) が見つかりません。footer block 開始の sentinel が必要 (round 3 Codex P2)。"
     }
     $footerBlock = $changelogContent.Substring($footerMarkerEnd + 3)
 
