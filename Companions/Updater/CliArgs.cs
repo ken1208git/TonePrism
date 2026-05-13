@@ -159,8 +159,24 @@ namespace GCTonePrism.Updater
             {
                 throw new ArgumentException($"{key} に値が指定されていません");
             }
+            // round 5 M-2: 次トークンが `--` で始まる場合は別の引数なので value としては不正。
+            //   旧実装は `--staging --manager-target D:\Manager\ ...` のような value 1 つ忘れ
+            //   パターンで `--manager-target` を `--staging` の値として吸収 → 次 iter で
+            //   `D:\Manager\` が「未知の引数」として throw する misleading な error path に
+            //   流れていた。Phase 4 で Manager UI が `--restart-exe "$emptyVar"` のような
+            //   引数を組み立てて変数が空展開する case も同じ症状なので、明示 check で
+            //   user-facing error をまっとうな「値が指定されていません (次トークンが別の
+            //   引数)」に倒す。
+            //   なお負数や `--` 単独 token を value として渡すケースは現状なし
+            //   (--wait-timeout / --caller-pid は正の整数のみ受理)。将来のためには
+            //   `--` (POSIX-style end-of-options) を別途 handling すれば拡張可能。
+            string next = args[i + 1];
+            if (next.StartsWith("--", StringComparison.Ordinal))
+            {
+                throw new ArgumentException($"{key} の値が指定されていません (次トークンが別の引数 '{next}'、value 忘れ疑い)");
+            }
             i++;
-            return args[i];
+            return next;
         }
 
         private static void ValidateRequired(CliArgs a)

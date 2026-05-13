@@ -196,16 +196,25 @@ namespace GCTonePrism.Updater
                     UseShellExecute = true,
                     WorkingDirectory = Path.GetDirectoryName(args.RestartExe) ?? string.Empty
                 };
-                Process proc = Process.Start(psi);
-                if (proc == null)
+                // round 5 M-4: Process.Start の戻り値を using で wrap (handle leak 防止)。
+                //   旧実装は `Process proc = Process.Start(psi);` で受けたまま Dispose せず、
+                //   finalizer 任せで OS handle (SafeProcessHandle) を release していた。本 CLI は
+                //   ~1 秒で exit するので OS が cleanup する想定だが、`proc.Id` アクセス時の
+                //   InvalidOperationException 等で finally に入る path で handle leak する。
+                //   round 4 まで「silent path 全部塞ぐ」方針で揃えてきた整合性に合わせ最後の
+                //   leak を埋める。using は IDisposable パターンに従い null 安全。
+                using (Process proc = Process.Start(psi))
                 {
-                    Logger.Error($"Process.Start が null を返却 (起動が実体として走らず、shell association reuse / OS による起動抑止 等の可能性): {args.RestartExe}");
-                    return 6;
+                    if (proc == null)
+                    {
+                        Logger.Error($"Process.Start が null を返却 (起動が実体として走らず、shell association reuse / OS による起動抑止 等の可能性): {args.RestartExe}");
+                        return 6;
+                    }
+                    // PID は best-effort で記録 (取得失敗しても起動自体は成功扱い)
+                    int? pid = null;
+                    try { pid = proc.Id; } catch { /* swallow */ }
+                    Logger.Info($"Manager 起動完了: {args.RestartExe}" + (pid.HasValue ? $" (PID={pid.Value})" : ""));
                 }
-                // PID は best-effort で記録 (取得失敗しても起動自体は成功扱い)
-                int? pid = null;
-                try { pid = proc.Id; } catch { /* swallow */ }
-                Logger.Info($"Manager 起動完了: {args.RestartExe}" + (pid.HasValue ? $" (PID={pid.Value})" : ""));
             }
             catch (Exception ex)
             {

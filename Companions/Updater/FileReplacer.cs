@@ -63,9 +63,21 @@ namespace GCTonePrism.Updater
             // Program.cs:64 の log-dir 計算と同じ pattern。CliArgs の Path.GetFullPath は trailing
             // slash を保持するため、ここで明示 TrimEnd しないと bug 化する。
             string parentDir = Path.GetDirectoryName(managerTargetDir.TrimEnd('\\', '/'));
-            if (string.IsNullOrEmpty(parentDir) || !Directory.Exists(parentDir))
+            // round 5 L-1: 2 branch に分けてエラーメッセージを区別。旧実装は両 case で
+            //   "manager-target の親 dir が存在しません: {parentDir}" 一括だったため、
+            //   `parentDir` が null/empty (drive root `C:\` 等の病的入力で
+            //   Path.GetDirectoryName が null/empty を返す) の場合に log が末尾切れ
+            //   ("...存在しません: ") になり障害解析しづらかった。round 3 M5 で
+            //   「drive root 病的入力は defensive fallback として明示化する」方針が
+            //   確立済なので、ここの障害ログも同レベルの明示性に揃える。
+            if (string.IsNullOrEmpty(parentDir))
             {
-                Logger.Error($"manager-target の親 dir が存在しません: {parentDir}");
+                Logger.Error($"manager-target から親 dir を計算できません (drive root 等の病的入力疑い): {managerTargetDir}");
+                return false;
+            }
+            if (!Directory.Exists(parentDir))
+            {
+                Logger.Error($"manager-target の親 dir が存在しません: {parentDir} (manager-target: {managerTargetDir})");
                 return false;
             }
 

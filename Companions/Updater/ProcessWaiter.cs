@@ -19,7 +19,7 @@ namespace GCTonePrism.Updater
         TimedOutNoForceKill,
         /// <summary>`--force-kill` 指定下で MaxForceKillAttempts (3 回) 連続で kill 失敗 (→ exit 7、permission denied 等の構造的問題、機械的再試行は無意味)</summary>
         ForceKillExhausted,
-        /// <summary>process enumeration が MaxEnumerationFailures (5 回) 連続で throw (→ exit 8、IPC/WMI 一時障害、短時間後再試行に意味あり)</summary>
+        /// <summary>process enumeration が MaxEnumerationFailures (5 回) 連続で throw (→ exit 8、IPC/WMI 一時障害、短時間後再試行に意味あり)。round 5 M-3 で「連続 N 回失敗の早期 abort path 専用」に限定、timeout 経路では使わない (両者排他)</summary>
         EnumerationFailed,
     }
 
@@ -151,13 +151,21 @@ namespace GCTonePrism.Updater
                         }
                         else
                         {
-                            // round 4 H-1: timeout 経路の中でも「enumeration 失敗で force-kill 経路に
-                            // 入れなかった」のと「単に --force-kill 未指定」を区別。Phase 4 Manager UI が
-                            // 「短時間後に再試行する価値あり (WMI 一時不調等)」と「user 介入が必要
-                            // (--force-kill 忘れ or 手動 close 要請)」を分けるための情報。
-                            string reason = enumerationFailed ? "enumeration 失敗継続中" : $"{procs.Length} 件残存";
+                            // round 5 M-3: timeout 経路は **常に** TimedOutNoForceKill (exit 3) を返す。
+                            //
+                            // round 4 H-1 では「timeout 時に enumerationFailed なら EnumerationFailed
+                            // (exit 8)」と分岐していたが、`enumerationFailed` 単独 (1 回でも失敗) で exit 8
+                            // を返すと「偶発的 1 回失敗 + timeout コインシデンス」が exit 8 になり、Phase 4
+                            // Manager UI が「短時間後再試行する価値あり」と誤判定 → 同じ timeout で再度
+                            // exit 8 → 無限ループ化する path があった (round 5 M-3)。
+                            //
+                            // 修正方針: timeout 経路は常に TimedOutNoForceKill (exit 3) で、user 介入経路
+                            // (--force-kill 付与 or 手動 close 後 retry) に倒す。EnumerationFailed (exit 8)
+                            // は **`consecutiveEnumerationFailures >= MaxEnumerationFailures` の早期 abort
+                            // path 専用** に限定 (line 100 付近)、両者排他。
+                            string reason = enumerationFailed ? "enumeration 失敗中" : $"{procs.Length} 件残存";
                             Logger.Error($"timeout {timeoutSeconds}s 経過 ({reason})。--force-kill 未指定 or enumeration 失敗のため中止。");
-                            return enumerationFailed ? WaitResult.EnumerationFailed : WaitResult.TimedOutNoForceKill;
+                            return WaitResult.TimedOutNoForceKill;
                         }
                     }
                 }

@@ -1022,7 +1022,7 @@ Windows のファイルロック制約「実行中のプロセスは自分自身
   - `1`: 予期しない実行時例外（Logger に stack trace 残る、運用上 bug report 対象）
   - `2`: 引数エラー（必須引数不足 / path 解析失敗 / `--restart-exe` が `--manager-target` 配下でない 等）
   - `3`: Manager プロセスが timeout 内に終了しなかった（`--force-kill` 未指定）。Manager UI は `--force-kill` 付与か手動 close 後に再試行可能
-  - `4`: ファイル置換に失敗（rollback 実施済、旧 Manager 復元）
+  - `4`: ファイル置換に失敗（rollback 実施済、旧 Manager 復元）。Codex round 2 P1 #3 で導入した **前回 run の rollback 失敗状態からの auto-recovery 経路**（target 不在 + `.bak` 存在を検出 → `.bak` を target に rename 戻し）も本 code を返す（旧 Manager は復元済、Phase 4 Manager UI は本 code を受信したら **即 retry が次回 run で正常 path に乗る** ことを期待できる、ログメッセージで両 case を区別可能）
   - `5`: rollback にも失敗した致命的状態（`.bak` から手動復元が必要、ログ参照）
   - `6`: 新 Manager.exe の起動に失敗（`Process.Start` が null / throw、`restart-exe` が target 配下に不在 等）
   - `7`: force-kill 試行が bounded retry（3 回）上限超過。permission denied 等の構造的問題、機械的再試行は無意味

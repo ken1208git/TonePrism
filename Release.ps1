@@ -1371,6 +1371,15 @@ function Build-Updater {
     if ($exeCount -lt 1) {
         Fail "Updater ビルド出力に .exe が見つかりません ($binRelease 内): msbuild は exit 0 だが成果物が生成されていない可能性"
     }
+    # シニアレビュー round 5 L-2: 任意の .exe 1 件ではなく、**特定の exe 名**
+    # (`GCTonePrism_Updater.exe`) の存在も check。csproj の AssemblyName を将来誰かが変更して
+    # 別名の .exe を生成しても round 4 L-3 だけだと build step green (任意の .exe で pass)、後段
+    # Assert-ExpectedFiles で初めて検出。特定名 check で「msbuild 成功 + 期待 exe 名生成」まで
+    # Build-Updater レベルで担保する。csproj 仕様変更時の早期検出。
+    $expectedExe = Join-Path $binRelease 'GCTonePrism_Updater.exe'
+    if (-not (Test-Path $expectedExe)) {
+        Fail "Updater ビルド出力に GCTonePrism_Updater.exe が見つかりません: csproj の AssemblyName が変更された可能性 (期待 path: $expectedExe)"
+    }
     $outDir = Join-Path $FilesDir 'Companions\Updater'
     New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 

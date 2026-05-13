@@ -41,6 +41,19 @@
 
 ### [Release Tooling v0.1.11] - 2026-05-13
 
+#### Fixed (PR #152 シニアレビュー round 5)
+
+- **[H-1] CHANGELOG `## Updater v0.1.0` Exit codes 列挙が 6 件のままで他 3 者 (SPEC §3.7.4 / Program.cs class docstring / CliArgs.UsageText) の 9 件と乖離していた自己撞着**: round 4 H-1 entry が明示的に「Exit codes 表を 4 箇所で三者同期」と主張していたが、4 箇所目に該当する CHANGELOG `## Updater v0.1.0` の Exit codes セクション (`0/2/3/4/5/6` の 6 件) が round 4 で更新されておらず、round 4 で追加された exit 1 (M-1) / 7 / 8 (H-1 分割) が抜けていた。Phase 4 Manager UI 実装者が CHANGELOG `## Updater` entry をリファレンスにすると 7/8 への分岐が漏れる misleading な lookup path。修正: CHANGELOG entry を 9 件版に同期 + 「round 5 H-1 で本 entry を 6 件→9 件同期」と経緯記述。あわせて round 5 M-3 で auto-recovery 経路の exit 4 仕様化 (SPEC L-3) と timeout 経路の exit 8 排他化も entry に反映。**5 者同期チェック** (SPEC / Program docstring / UsageText / CHANGELOG / PR body) を以降の review 完了基準として固定化
+
+#### Changed (PR #152 シニアレビュー round 5)
+
+- **[M-2] `CliArgs.ReadValue` が次の `--` 引数を値として消費する silent path を解消**: 旧実装は `--staging --manager-target D:\Manager\ ...` のような value 1 つ忘れパターンで `--manager-target` を `--staging` の値として吸収 → 次 iter で `D:\Manager\` が「未知の引数」として throw する misleading な error path に流れていた。Phase 4 で Manager UI が `--restart-exe "$emptyVar"` のような引数を空変数展開する case も同じ症状なので、明示 check で user-facing error をまっとうな「値が指定されていません (次トークンが別の引数 '...'、value 忘れ疑い)」に倒す。`StartsWith("--", Ordinal)` で判定、負数 / `--` 単独 token は現状の `--wait-timeout` / `--caller-pid` が正整数のみ受理なので副作用なし
+- **[M-3] `ProcessWaiter` の timeout 経路で `enumerationFailed` 単独でも `EnumerationFailed` (exit 8) を返していた too-eager 分岐を排除**: round 4 H-1 では「timeout 時に `enumerationFailed` なら exit 8」と分岐していたが、`consecutiveEnumerationFailures` を check せず **1 回でも失敗** すれば exit 8 を返していたため、「偶発的 1 回失敗 + timeout コインシデンス」が exit 8 になり Phase 4 Manager UI が「短時間後再試行」を選んで同じ timeout で再度 exit 8 → 無限ループ化する path があった。修正: timeout 経路は **常に** `TimedOutNoForceKill` (exit 3) を返し、`EnumerationFailed` (exit 8) は `consecutiveEnumerationFailures >= MaxEnumerationFailures` の早期 abort path **専用** に限定 (両者排他)。enum docstring + Logger メッセージ + SPEC §3.7.4 / CHANGELOG Updater v0.1.0 / Program.cs docstring / CliArgs.UsageText 5 者同期で「8 は連続失敗 path 専用」を明文化
+- **[M-4] `Process.Start` の戻り値 `Process` インスタンスを `using` で wrap (handle leak 防止)**: 旧実装は `Process proc = Process.Start(psi);` で受けたまま Dispose せず finalizer 任せで OS handle (SafeProcessHandle) を release していた。本 CLI は ~1 秒で exit するので OS が cleanup する想定だが、`proc.Id` アクセス時の InvalidOperationException 等で finally に入る path で handle leak する可能性。round 4 まで「silent path 全部塞ぐ」防御方針で揃えてきた整合性に合わせ、`using (Process proc = Process.Start(psi))` パターンで最後の leak を埋める
+- **[L-1] FileReplacer.Replace の親 dir check エラーメッセージを 2 branch に分割**: 旧実装は `parentDir` が null/empty (drive root `C:\` 等の病的入力で `Path.GetDirectoryName` が null/empty を返す) と「親 dir 不在」の両 case で `"manager-target の親 dir が存在しません: {parentDir}"` 一括だったため、前者で log が末尾切れ ("...存在しません: ") になり障害解析しづらかった。round 3 M5 で「drive root 病的入力は defensive fallback として明示化」方針が確立済なので、ここの障害ログも同レベルの明示性に揃える。`IsNullOrEmpty(parentDir)` 時は「親 dir を計算できません (drive root 等の病的入力疑い): {managerTargetDir}」、`!Directory.Exists` 時は現行メッセージ + `{managerTargetDir}` 併記
+- **[L-2] Release.ps1 Build-Updater で「任意の .exe」ではなく **特定 exe 名** (`GCTonePrism_Updater.exe`) の存在 check を追加**: round 4 L-3 で追加した `.exe` 1 件以上の check は、csproj の `AssemblyName` を将来誰かが変更して別名 .exe を生成しても build step が green になる (任意の .exe で pass) → 後段 Assert-ExpectedFiles で初めて検出する遠回り。特定名 check を `Test-Path (Join-Path $binRelease 'GCTonePrism_Updater.exe')` で追加、csproj 仕様変更時の早期検出に倒す
+- **[L-3] SPEC §3.7.4 の exit 4 に「auto-recovery 経路も同 code を返す」を 1 行明文化**: Codex round 2 P1 #3 で導入した「target 不在 + `.bak` 存在 → `.bak` を target に rename 戻して abort」auto-recovery path は Program.cs で exit 4 を返すが、SPEC 上「単純な replace 失敗 + rollback」と区別できない記述だった。Phase 4 Manager UI が「即 retry が次回 run で正常 path に乗る」(auto-recovery 経路) と「同じ操作を即 retry してもまた fail」(単純失敗経路) を区別する判断材料として、SPEC §3.7.4 に「auto-recovery 経路も本 code を返す、ログメッセージで両 case を区別可能」を 1 行追記。両 case を別 exit code に分けるかは scope creep のため Phase 4 retry policy ガイド執筆時に再検討
+
 #### Fixed (PR #152 シニアレビュー round 4)
 
 - **[H-1] exit code 3 が 3 種類の異なる失敗を一括していて Phase 4 retry 戦略の障壁になっていた**: round 2 Codex P2 #2 (force-kill bounded retry exhausted) + Codex P2 #4 (enumeration 連続失敗) の追加で、`WaitForManagerExit` が `false` を返すパスが「(a) timeout + `--force-kill` 未指定」「(b) `--force-kill` 指定下で MaxForceKillAttempts (3) 超過」「(c) MaxEnumerationFailures (5) 連続失敗」の 3 種に分岐していたが、Program.cs はすべて exit 3 に倒していた。Phase 4 Manager UI が exit 3 を見て「単に `--force-kill` 指定忘れ」と誤判定 → permission denied (構造的問題、(b)) で `--force-kill` 付与 retry を組まれて無限再試行する silent bug 化リスク。修正: ProcessWaiter を `bool` 返しから `WaitResult` enum 返し (`Success` / `TimedOutNoForceKill` / `ForceKillExhausted` / `EnumerationFailed`) に変更、Program.cs で switch して exit 3 / 7 / 8 に分岐。SPEC §3.7.4 / Program.cs class docstring / CliArgs.UsageText の Exit codes 表を 4 箇所で三者同期 (現在は SPEC + 実装 2 箇所の三者同期)
@@ -650,13 +663,17 @@
 - `Logger.cs` — Manager の `Services/Logger.cs` を簡略化、`Console.SetOut` フック無しの直接書込み式、出力先 `<install>/logs/updater/updater_<PCname>_<YYYY-MM-DD_HHmmss>.log`
 - csproj / App.config / AssemblyInfo.cs
 
-**Exit codes** (`CliArgs.UsageText()` 参照):
+**Exit codes** (`CliArgs.UsageText()` / SPEC §3.7.4 と 5 者同期、round 4 H-1 で 3 を分割 + M-1 で 1 を追記、round 5 H-1 で本 entry を 6 件→9 件同期):
 - `0` 成功
-- `2` 引数エラー / 必須引数不足
-- `3` Manager プロセスが timeout 内に終了せず (`--force-kill` 未指定)
-- `4` ファイル置換に失敗 (rollback 実施済)
-- `5` rollback にも失敗した致命的状態
-- `6` 新 Manager.exe の起動に失敗
+- `1` 予期しない実行時例外 (Logger に stack trace、bug report 対象)
+- `2` 引数エラー / 必須引数不足 / `--restart-exe` が `--manager-target` 外 等
+- `3` Manager プロセスが timeout 内に終了せず (`--force-kill` 未指定、付与か手動 close で再試行可)
+- `4` ファイル置換に失敗 (rollback 実施済、auto-recovery 経路も同 code、SPEC §3.7.4 参照)
+- `5` rollback にも失敗した致命的状態 (`.bak` から手動復元要)
+- `6` 新 Manager.exe の起動に失敗 (Process.Start null/throw 等)
+- `7` force-kill 試行が bounded retry (3 回) 超過 (permission denied 等、機械的再試行は無意味)
+- `8` process enumeration が連続 5 回失敗 (IPC/WMI 一時障害、短時間後の再試行で回復見込み)
+  - round 5 M-3 で timeout 経路は常に `3`、本 code 8 は「連続 N 回失敗で早期 abort」path 専用に限定 (両者排他)
 
 **呼出し前提**: Manager UI (Phase 4) が事前に download / staging / Launcher / Companions / shortcut bat / Updater 自身の置換まで完了させた後、Manager が `Process.Start("Companions\Updater\GCTonePrism_Updater.exe", "--staging ... --manager-target ... --restart-exe ...")` で spawn する。Manager は spawn 直後に graceful 終了、Updater は ProcessWaiter で完全終了を確認してから Manager 置換に進む。
 
