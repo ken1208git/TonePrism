@@ -18,9 +18,9 @@
           (`-SkipUpload` で confirm prompt 自体を skip。CI 等の non-interactive 運用向け)
 
     Phase 2 (#108) 完成: templates/Install.bat / INSTALL_README.txt / Launcher.bat / Manager.bat 同梱
-    TODO Phase 3 (#108): GCTonePrism_Updater/ の dotnet publish を追加
-    TODO #101:           GCTonePrism_Launcher/Companions/ のループを追加
-    TODO Monitor:        GCTonePrism_Monitor/ 追加時にビルドステップ追加
+    TODO Phase 3 (#108): Companions/Updater/ の build + staging を追加 (次 PR `feature/updater-phase3` で着手予定)
+    TODO #101:           Companions/WindowProbe/ のループを追加 (#30 PauseOverlay 等が増えたら配列化)
+    TODO Monitor:        Monitor/ 追加時にビルドステップ追加
 
     依存ツールのバージョン管理方針:
         - Godot: project.godot の config/features から major.minor を読み取り、$GodotPatchTable で patch をピン留め
@@ -258,8 +258,8 @@ $NugetPinnedVersion = '6.10.0'
 # ============================================================================
 
 $RepoRoot     = $PSScriptRoot
-$LauncherDir  = Join-Path $RepoRoot 'GCTonePrism_Launcher'
-$ManagerDir   = Join-Path $RepoRoot 'GCTonePrism_Manager'
+$LauncherDir  = Join-Path $RepoRoot 'Launcher'
+$ManagerDir   = Join-Path $RepoRoot 'Manager'
 $ToolsDir     = Join-Path $RepoRoot 'tools'
 $ToolsGodot   = Join-Path $ToolsDir 'godot'
 $StagingRoot  = Join-Path $RepoRoot 'release'
@@ -1180,7 +1180,7 @@ function Invoke-ExternalProcess {
 function Build-Launcher {
     Write-Step "Launcher を Godot CLI でエクスポート"
 
-    $outDir = Join-Path $FilesDir 'GCTonePrism_Launcher'
+    $outDir = Join-Path $FilesDir 'Launcher'
     New-Item -ItemType Directory -Path $outDir | Out-Null
     $outExe = Join-Path $outDir 'GCTonePrism_Launcher.exe'
 
@@ -1290,7 +1290,7 @@ function Build-Manager {
     Write-Ok "msbuild 完了"
 
     # bin/Release/ から staging へコピー（*.pdb 除外）
-    $outDir = Join-Path $FilesDir 'GCTonePrism_Manager'
+    $outDir = Join-Path $FilesDir 'Manager'
     New-Item -ItemType Directory -Path $outDir | Out-Null
     if (-not (Test-Path $binRelease)) {
         Fail "Manager ビルド出力が見つかりません: $binRelease"
@@ -1404,14 +1404,14 @@ function Assert-ExpectedFiles {
         'Launcher.bat',
         'Manager.bat',
         # files/ 配下 = インストール後の <親>\GCTonePrism\ に展開される payload
-        'files\GCTonePrism_Launcher\GCTonePrism_Launcher.exe',
-        'files\GCTonePrism_Manager\GCTonePrism_Manager.exe',
-        'files\GCTonePrism_Manager\GCTonePrism_Manager.exe.config',
-        'files\GCTonePrism_Manager\System.Data.SQLite.dll',
-        'files\GCTonePrism_Manager\Microsoft.WindowsAPICodePack.dll',
-        'files\GCTonePrism_Manager\Microsoft.WindowsAPICodePack.Shell.dll',
-        'files\GCTonePrism_Manager\x64\SQLite.Interop.dll',
-        'files\GCTonePrism_Manager\x86\SQLite.Interop.dll'
+        'files\Launcher\GCTonePrism_Launcher.exe',
+        'files\Manager\GCTonePrism_Manager.exe',
+        'files\Manager\GCTonePrism_Manager.exe.config',
+        'files\Manager\System.Data.SQLite.dll',
+        'files\Manager\Microsoft.WindowsAPICodePack.dll',
+        'files\Manager\Microsoft.WindowsAPICodePack.Shell.dll',
+        'files\Manager\x64\SQLite.Interop.dll',
+        'files\Manager\x86\SQLite.Interop.dll'
     )
 
     $missing = @()

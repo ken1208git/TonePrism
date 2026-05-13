@@ -39,6 +39,115 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
+### [Release Tooling v0.1.10] - 2026-05-13
+
+#### Changed (主変更: ディレクトリ命名規約 + Companions 再定義、SPEC v1.10.9 連動、#108 Phase 3 着手準備)
+
+- **トップレベル dir rename**: `GCTonePrism_Launcher/` → `Launcher/`、`GCTonePrism_Manager/` → `Manager/`。リポジトリ全体が GCTonePrism なので prefix 冗長、Folder 名は短縮の方が視覚的にスッキリ。csproj / アセンブリ / exe 名は `GCTonePrism_<Name>` prefix を維持 (process 検知 uniqueness のため、`tasklist` / `Process.GetProcessesByName` で他アプリの `Manager.exe` / `Updater.exe` と衝突を避ける)。AGENTS.md に新規 `## Naming Conventions` セクションを追加して命名規約を明文化
+- **Companions 概念再定義** (SPEC §2.4): 旧仕様「Launcher 専用サブコンポーネント、`GCTonePrism_Launcher/Companions/` 配下」を「主要 (Launcher / Manager / Monitor) を補助する独立 exe 群、リポジトリルート `Companions/` 配下、dev/runtime 一貫配置」に拡張。Updater (Phase 3) もこのカテゴリに含まれる。Launcher 補助 Companion (#101 WindowProbe / #30 PauseOverlay) も runtime で `<install>/Companions/<Name>/` 配置に変更 (旧仕様の「Launcher exe と同じ dir に同梱」を廃止)
+- **§3.7.3 / §3.7.4 Updater 役割を Manager-heavy + minimal Updater に再定義**: 旧仕様の fat Updater 設計 (Updater が全 component 置換) を改め、「Manager 自身の置換だけが Updater を必須とする」(Launcher / Companions は外部プロセスで Manager から kill + 直接置換可能、shortcut bat / Updater.exe 自体は稼働していないので Manager から直接置換可能) に整理。Updater のスコープ大幅縮小 (50-150 行の最小 CLI)、Phase 4 Manager UI が大半の責務 (download / 各 component 置換 / progress バー) を持つ形に
+- **Release.ps1 path 更新**: `$LauncherDir` / `$ManagerDir` / `$FilesDir` 配下の staging path / `ExpectedFiles` の path 全て新 dir 名 (`Launcher/` / `Manager/`) で更新。`Build-Launcher` / `Build-Manager` の中身 logic は不変 (csproj / exe 名は prefix 付き維持なので変更不要)
+- **templates path 更新**: `Launcher.bat` / `Manager.bat` の `%~dp0GCTonePrism\GCTonePrism_<X>\GCTonePrism_<X>.exe` → `%~dp0GCTonePrism\<X>\GCTonePrism_<X>.exe` (dir 短縮、exe 名 prefix 維持)。Install.bat の `tasklist` 引数は exe 名 (`GCTonePrism_Manager.exe`) なので変更不要
+- **Install.bat に v0.2.0 旧構造 migration 追加**: 既存検出 + Y 経路で `<install>/GCTonePrism_Manager/` / `<install>/GCTonePrism_Launcher/` を検出したら `<install>/Manager/` / `<install>/Launcher/` に `move` でリネームしてから robocopy 実行。`move` で dir 名のみ変更 = 中身そのまま carry-over。一度移行すれば以降はリネーム不要 (旧 dir 不在で skip)。top-level goto pattern に従って `:migrate_legacy_manager` / `:migrate_legacy_launcher` / `:migrate_conflict_*` / `:migrate_failed` / `:do_robocopy` の独立ラベルで構造化
+- **PathManager.cs / path_manager.gd の self-reference 修正**: Manager / Launcher 自身が runtime で `"GCTonePrism_Manager"` / `"GCTonePrism_Launcher"` という親 dir 名を検出してプロジェクトルートを解決していたロジックを `"Manager"` / `"Launcher"` に置換。新 install 構造で正しく動く
+- **README.md ディレクトリ構成図を新 dir 名で更新** + 命名規約への参照を追加
+
+#### Fixed (PR #150 シニアレビュー round 7)
+
+- **[M1] migration `move` の stderr 抑制で失敗原因が user に届かない**: 旧 `move ... >nul` は stdout のみリダイレクト、stderr 経由の失敗詳細 (アクセス拒否 / 別プロセス使用中 / ファイルロック等) が握り潰されていた。round 3 M2 の `show_folder_dialog` 呼び出しで確立した「stdout/stderr 分離キャプチャ + 失敗時 type 表示」規約から逸脱していた catalog/call-site mismatch。修正: `move ... >"%TEMP_MV_OUT%" 2>&1` で stdout+stderr 両方を tmp file にキャプチャ、`:migrate_failed_manager` / `:migrate_failed_launcher` でそれぞれ `type "%TEMP_MV_OUT%"` して move コマンドの実出力 (= 失敗理由の詳細) を user に表示。tmp file は 2 段階 move で共有、各失敗 path と success 経路 (`:migrate_done`) で cleanup
+- **[L5] PathManager priority-3 detection に Manager/Launcher sibling 同時存在検証を追加**: round 1 L2 で acknowledged されていた priority-3 false-match 余地 (`<install>/Manager/` 単独 dir で起動した場合に他アプリ等の Manager dir と誤マッチする path) を構造的に解消。我々の install 構造は Manager と Launcher が必ず同一の親 dir 配下にセットで配置される (SPEC §3.7.1 / §7.5.1) ため、priority-3 で「Manager/ AND Launcher/ の両方が currentPath 直下に存在」を確認する形に強化。Manager 側 `PathManager.cs` + Launcher 側 `path_manager.gd` 両側に対称的に追加。issue #151 (priority-3 detection 強化) の主要 scope を本 PR で close 可能に
+
+#### Changed (PR #150 シニアレビュー round 7)
+
+- **[L1] AGENTS.md "Naming Conventions" に Common 系 csproj 命名例外を追記**: 旧記述は「csproj 名 = `GCTonePrism_<Name>`」と例外なしで書いていたが、SPEC §2.4 の `Common/GCTonePrism_CompanionsCommon.csproj` (= csproj 名に Parent prefix を含める形) が catalog 内矛盾だった。「`Common` / `Core` / `Shared` 等の汎用すぎる名前は assembly 衝突回避のため `GCTonePrism_<Parent><Name>` 例外を許容 (例: `Companions/Common/` → `GCTonePrism_CompanionsCommon.csproj`)」と 1 行例外規約を追記、SPEC §2.4 と AGENTS.md の整合を回復
+- **[L2] robocopy 共通フラグを `ROBOCOPY_COMMON` 変数化**: overwrite path (`/E /XF prism.db /XD games backups responses logs /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1`) と new_install path (`/E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1`) で共通フラグが重複していて、片方修正時にもう片方が乖離する事故 path があった。`set "ROBOCOPY_COMMON=/E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1"` で共通化、overwrite 側は `%ROBOCOPY_COMMON% /XF ... /XD ...` を追加する形に統一
+- **[L3] `:overwrite_set_mode` 直下のコメント flow 記述を `:copy_shortcuts` dispatcher に集約**: 旧コメントは「migration / mkdir → ...」と両 path の flow を `:overwrite_set_mode` (overwrite 専用ラベル) の直下で議論していて、構造的に読みづらかった。`:copy_shortcuts` dispatcher 直下に「overwrite path: migration → shortcut → robocopy」「new_install path: mkdir → robocopy → shortcut」と path-specific に整理、`:overwrite_set_mode` 側はリンクのみ
+- **[L4] `:migrate_conflict_launcher` に MANAGER_MIGRATED 状態案内追加**: Manager 移行成功 + Launcher 側で新旧 dir 並存ケースで「Manager 側はすでに移行済」を案内しない問題を解消 (`:migrate_failed_launcher` / `:shortcut_failed` と同パターン、catalog/call-site uniformity)。user が「両方ある = まだ移行されていない、全部一旦戻そう」と Manager 側も旧 dir に戻す誤対処 path を防ぐ
+- **[L6] CHANGELOG `## Manager v0.8.10` / `## Launcher v0.5.17` を Release Tooling 参照のみに圧縮**: 各 component entry に begins_with 修正 / sibling guard 等の技術詳細が重複記述されていた (AGENTS.md「重複記述は避ける」規約違反)。両 entry を「PR #150 で dir rename 連動、詳細は Release Tooling v0.1.10 参照」の 2 行に圧縮、SoT を Release Tooling v0.1.10 に集約
+
+#### Fixed (PR #150 Codex bot round 6 後追い)
+
+- **[Codex P2] new_install path で robocopy 失敗時に broken shortcut bat が残る regression**: round 3 L3 で「shortcut copy を robocopy の前に統一移動」した時、overwrite path の partial-failure 対策 (migration 後の robocopy 中断で shortcut bat 旧 path 残存問題) を解消するためだったが、`INSTALL_MODE=new` の場合に **副作用 regression** を導入していた。新規 install で shortcut copy 成功 + robocopy 失敗 (権限 / disk full / Ctrl+C) のとき、partial / 空の `<install>/GCTonePrism/` を指す `<親>/Launcher.bat` / `<親>/Manager.bat` が壊れた状態で残る path。修正: `INSTALL_MODE` で順序分岐:
+  - overwrite: shortcut → robocopy (round 3 L3 維持、migration partial-failure 対策)
+  - new:       robocopy → shortcut (shortcut bat は完全インストール成功後にのみ作成、broken shortcut の regression 解消)
+  - `call :do_shortcut_copy` / `call :do_robocopy` の subroutine 風実装 (`exit /b N` で成否伝播) で共通 shortcut copy ロジックを 1 箇所に集約
+  - `:copy_failed` メッセージも `INSTALL_MODE` で条件分岐 (「shortcut bat はすでに新版で配置済み」(overwrite) vs 「shortcut bat はまだ配置されていません」(new))
+
+#### Changed (PR #150 シニアレビュー round 6)
+
+- **[M1/M2] AGENTS.md / SPEC §3.7.3 / §3.7.6 / §2.2 機能13 の「Updater / Companions」並列列挙を包含関係に整理**: 本 PR 自身が §2.4 で「Updater は Companions の一員」と再定義したのに、4 箇所 (AGENTS.md L30, SPEC L584/L939/L1040) で並列列挙が残っていた catalog (§2.4) vs call site の矛盾。「Launcher / Manager / 各 Companion (Updater / WindowProbe 等、§2.4)」形式に統一して包含関係を反映。1 PR 内の自己矛盾を解消
+- **[M3] SPEC §3.7.6 step [2] の `dotnet publish` を `msbuild /p:Configuration=Release` に修正**: Manager / Companions は `.NET Framework 4.8` で `dotnet publish` 不可 (`.NET Core / .NET 5+` 向け cmd)、実装の Release.ps1 は `msbuild` を使っている。§3.7.4 で「Build-Updater が個別に msbuild」と明記してるのに §3.7.6 では `dotnet publish` 表記が残っていた同 PR 内の自己矛盾。「`msbuild /p:Configuration=Release` で個別ビルド (`.NET Framework 4.8` 系は `dotnet publish` 不可、`msbuild` 直叩き)」と正確化
+- **[L1] `:shortcut_failed_with_migration_note` に shortcut bat ダブルクリック回避警告追加**: 2 段階 `copy /Y` (Launcher.bat → Manager.bat) で 1 段目成功 + 2 段目失敗の partial-state では、Launcher.bat は新 path / Manager.bat は旧 path の不揃いになる (migration 後なので旧 path 壊れている)。再実行までの間 user が壊れた bat をダブルクリックする path を防ぐため、「Install.bat 再実行までは Launcher.bat / Manager.bat をダブルクリックしないでください」と注意書きを追加 (round 3 L3 の精神「user の操作が破綻状態の dir 構造を見ない」を貫徹)
+- **[L2] SPEC §7.5.1 runtime 構造の `Companions/` に「Phase 3 以降」注記追加**: 本 PR では Updater 実装なし、`Build-Updater` も `ExpectedFiles` の `Companions/...` 項目もない。次の publish (v0.3.0) では `<install>/GCTonePrism/Companions/` は作られない。読者が「Companions/ がすでにある」前提で書き始める path を防ぐため「Phase 3 以降で Updater 配布開始、それまでは dir 自体が存在しない」と明記
+- **[L3] SPEC §2.4 構成方針表の `CompanionsCommon/` を `Common/` に rename**: AGENTS.md 「`Companions/` 配下のサブツール dir は短縮」規約 (`Companions/Updater/` / `Companions/WindowProbe/`) と一貫させるため、`Common/` に短縮 (`Companions/` 配下に居る dir 名に再度 `Companions` を含めるのは冗長)。csproj 名 `GCTonePrism_CompanionsCommon` は disambiguation のため prefix 維持
+- **[L4] CHANGELOG `## Manager v0.8.10` / `## Launcher v0.5.17` 冒頭に patch bump 判断根拠追記**: 配布構造変更を含むため SemVer 厳密だと minor 寄りだが、Install.bat の自動 migration で吸収するため user 視点で invisible → 0.x 系慣習で patch bump 扱い、と CHANGELOG 冒頭で根拠を明示
+- **[L5 sentinel align] `:shortcut_failed_with_migration_note` の `if defined VAR echo` 空白を統一**: VAR 名長さに依存した手動 align (`MANAGER_MIGRATED` 2 個 vs `LAUNCHER_MIGRATED` 1 個) を空白 1 個に統一 + 「将来 sentinel 追加時に align が崩れる」リスクをコメントで明文化
+
+#### Fixed (PR #150 シニアレビュー round 5)
+
+- **[M1] `:shortcut_failed` ラベルが migration 完了状態を案内しない**: overwrite 経路で migration 成功 + shortcut copy 失敗のケースで、user が「shortcut が壊れたから手動で旧 dir 名でフォルダ作り直そう」と誤対処して migration を巻き戻す path があった。`:copy_failed` には「shortcut bat はすでに新版で配置済み」hint があるのに `:shortcut_failed` は非対称で「書き込み権限確認」だけだった。修正: round 3 M1 (`:migrate_failed_launcher` の `MANAGER_MIGRATED` sentinel 条件付き案内) と同パターンで、`:shortcut_failed` に `MANAGER_MIGRATED` / `LAUNCHER_MIGRATED` sentinel を確認する `:shortcut_failed_with_migration_note` 経路を追加。両 sentinel のいずれかが立っていれば「dir rename は完了済、旧 dir 名に戻さないこと」「Install.bat 再実行で続行可能、migration は冪等」を案内。`LAUNCHER_MIGRATED` sentinel も新規追加 (`:migrate_legacy_launcher` 成功時に set)
+
+#### Changed (PR #150 シニアレビュー round 5)
+
+- **[L1] `set INSTALL_MODE=overwrite` / `set INSTALL_MODE=new` を quoted set に統一**: Install.bat 冒頭 line 47-55 の規約「numeric sentinels だけが unquoted、path / user-input は quoted」に対し、`INSTALL_MODE` は `"overwrite"` / `"new"` の string sentinel で numeric ではないため quoted 形式が一貫する。実害は限定的だが、行末空白が紛れた場合に trailing space で `if "%INSTALL_MODE%"=="overwrite"` が false になる silent bug 余地。`set "INSTALL_MODE=overwrite"` / `set "INSTALL_MODE=new"` の quoted 形に修正
+- **[L2] `:do_robocopy` ラベルを `:overwrite_set_mode` に rename**: ラベル名は「robocopy を実行する」と読めるが実体は `set INSTALL_MODE=overwrite` + `goto :copy_shortcuts` だけで、実際の robocopy は `:do_robocopy_overwrite` で行われる。round 3 L3 の flow 並び替え (migration / mkdir → copy_shortcuts → robocopy) で生じた名前と実態の乖離。`:overwrite_set_mode` に rename して「overwrite 経路の終端 sentinel」であることを明示
+- **[L3] Manager csproj `<RootNamespace>` を `Manager` → `GCTonePrism.Manager` に**: AGENTS.md "Naming Conventions" で明文化した「C# namespace = `GCTonePrism.<Name>`」規約と csproj 設定が不一致だった。既存 30+ ファイルは全て `namespace GCTonePrism.Manager` 明示宣言なので実害なしだが、VS で新規ファイル scaffolding すると namespace 候補が `Manager` で出てきて新規 contributor が誤った namespace で書く余地があった。csproj 修正で scaffolding default も規約準拠に。msbuild Release で既存ビルド成功確認済 (既存 .cs は明示 namespace 宣言で影響なし)
+- **[L4] SPEC §マイルストーン1 line 2604 を新 dir 名に**: 完了済 milestone の技術的達成項目に旧 dir 名 `GCTonePrism_Launcher/` / `GCTonePrism_Manager/` がそのまま残っていた pre-existing inconsistency。本 PR の dir rename sweep の一環で「Launcher/フォルダとManager/フォルダの作成 (旧 dir 名 ... から v1.10.9 でリネーム)」に更新
+
+#### Acknowledged (PR #150 シニアレビュー round 5 L5)
+
+- **PR #149 由来の「シニアレビュー round X LY」識別子の残存**: round 4 L3 で本 PR 由来の round tag を削除する catalog を出したが、PR #149 由来 (Phase 2 PR、`templates/Install.bat:98/101/116/488` および `templates/show_folder_dialog.ps1:34/49/64`) は本 PR scope 外として未 sweep。**意図的判断**: 本 PR の責務は dir rename + Companions 再定義 + Updater 役割再定義であり、過去 PR 由来のコメントスタイル sweep は別 cleanup PR の scope。本 PR では PR #150 由来分のみ削除 (round 4 L3) + 過去 PR 由来は据え置きで static inconsistency が意図的であることを明記
+
+#### Fixed (PR #150 シニアレビュー round 4)
+
+- **[H1] round 2 M2 の Launcher 側 begins_with regression**: `exe_path.begins_with(launcher_folder_check + "/")` 形式に変更したが、`exe_path = OS.get_executable_path().get_base_dir()` は **末尾 "/" を持たない** ため、正規 install 構造 (`<install>/GCTonePrism/Launcher/GCTonePrism_Launcher.exe` で base_dir = `.../Launcher`) で `begins_with(".../Launcher/")` が **常に false** を返す regression があった。priority-1 (prism.db) で base_directory は正しく取れているのに post-loop validation で false にひっかかり、Launcher 起動時に毎回 `push_error("実行ファイルが Launcher フォルダ内にありません")` が走る path。Manager 側 (.NET の `AppDomain.CurrentDomain.BaseDirectory` が末尾 `\` 付き) は偶然動いていたため round 2 では発覚せず。修正: 「等値 OR separator 付き begins_with」の二段比較 (`exe_path == folder OR exe_path.begins_with(folder + "/")`) に変更、Godot get_base_dir の trailing slash 無し仕様に対応。Manager 側も対称性 + .NET ランタイムの BaseDirectory 仕様変更への future-proofing のため同じ二段比較に揃えた。**今後 path_manager 系を編集する場合は実機 Launcher 起動でエラー出ないことを必ず確認すること** (DRY-RUN だけでは検出不能、本 PR で見落としたのと同じパターンを避けるため)
+- **[M1] `:migrate_failed_launcher` メッセージが Manager 未存在ケースで誤情報**: 「Manager 側はすでに移行済」を無条件案内していたが、Manager 不在 case (旧 install で Manager 系のみ削除済 / partial extract 状態) では誤情報。`MANAGER_MIGRATED=1` sentinel を `:migrate_legacy_manager` 成功時にセット、`:migrate_failed_launcher` で `if defined MANAGER_MIGRATED echo ...` で条件付き化、3 状態 (skip / 成功 / fail [別経路]) を正しく分岐
+
+#### Changed (PR #150 シニアレビュー round 4)
+
+- **[L1] `:migrate_conflict_*` メッセージに「通常は新側を残す」推奨を追記**: 旧記述では「新側を残す」「旧側を残す」を対等選択肢として並べていたが、「旧側を残す」は実質ダウングレード操作で、Install.bat 再実行で結局 v0.3.0+ binary が上書きされるためデフォルトでは無効。「推奨: 新側を残す (通常はこちら)」「旧側を残す (v0.2.0 にダウングレードしたい場合のみ)」と推奨を明示、ダウングレードの結果も「結局 v0.3.0+ binary が入るので、v0.2.0 で運用したい場合は zip も v0.2.0 を使うこと」と明記。round 2 M1 で「user data merge 案内」を削除したのと同じ精神
+- **[L2] CHANGELOG `## Launcher v0.5.17` / `## Manager v0.8.10` entry を round 2/3 内容含む形に拡張**: 旧記述は「self-reference リテラル修正」だけで、round 2 M2 (begins_with/StartsWith separator fix) や round 3 L1 (ends_with NOTE) の中身が CHANGELOG エンドユーザー側からは見えなかった。component 別エントリは「いつ何が入ったか」のインデックスとしても機能するため、ロジック改良の概要 + Release Tooling entry への参照を 1 行ずつ追加。Manager 側にも同様の begins_with → StartsWith 二段比較化追記
+- **[L3] コメント内「PR #150 round X MY」識別子を削除**: コードコメントから「(PR #150 round 2 M2)」「(シニアレビュー round 3 L1)」等のタスク識別子を削除。WHY 説明 (sibling dir 名と prefix collision する等) は残し、識別子は CHANGELOG / git log / PR description 側で履歴を辿れるよう一方向参照に。コメントの rot を防ぐ
+- **[L4] Release.ps1 TODO #101 の `<Launcher 補助 Companion>` を具体名 `WindowProbe` に**: SPEC §2.4 / #101 で具体名が確定済みなので generic placeholder のまま放置する必要なし。「#30 PauseOverlay 等が増えたら配列化」のコメント追記でスケール時の方針も明示
+- **[L5] SPEC §3.7.6 step [6] の `release_notes/v<version>.md` 言及を CHANGELOG パースに修正**: v1.10.6 で `release_notes/` ディレクトリ廃止 → CHANGELOG を SoT 化したが、§3.7.6 step リストの該当行が更新漏れで残っていた pre-existing inconsistency。「`CHANGELOG.md` の `## Bundle` セクションから該当 Bundle entry をパース (旧仕様の `release_notes/` ディレクトリは v1.10.6 で廃止、§3.7.7 参照)」に修正
+
+#### Fixed (PR #150 シニアレビュー round 3)
+
+- **[M1] `:migrate_failed` 共通ラベルが partial-failure 時に不正確な手動復旧手順を案内していた**: Manager 移行成功 + Launcher 移行失敗のケースでも、`:migrate_failed` のメッセージが両方の rename 手順を案内していた。この時点で `<install>/GCTonePrism_Manager/` は既に rename 済 → 移動元が存在しないため user が指示通り作業すると「移動元が無い」と混乱する path。修正: `:migrate_failed_manager` / `:migrate_failed_launcher` の独立ラベルに分離、`:migrate_legacy_manager` の `if errorlevel 1` は `:migrate_failed_manager` に、`:migrate_legacy_launcher` の `if errorlevel 1` は `:migrate_failed_launcher` に飛ぶ形に変更。各ラベルは失敗側だけの手動 rename 手順を案内し、Launcher 失敗時は「Manager はすでに移行済」と状況も明示。round 1 M2 (`:migrate_conflict_*` 独立ラベル化) の精神と一貫
+- **[L3] Install.bat: migration / mkdir → robocopy の間に partial-failure 窓があった**: 旧 flow は「migration / mkdir → robocopy → copy_shortcuts」順だったが、robocopy が partial failure (Ctrl+C / OS reboot / 権限エラー等) で中断されると、shortcut bat (`<親>/Launcher.bat` / `Manager.bat`) は旧 path `%~dp0GCTonePrism\GCTonePrism_Launcher\...` のままで実体は `<install>/Launcher/` に既に移動済 → user が Launcher.bat ダブルクリックで「ファイルが見つかりません」エラーになる経路があった。修正: shortcut copy を robocopy の前に統一移動し、両 path (overwrite / new_install) で「migration/mkdir → copy_shortcuts → robocopy → install_done」順に整理。`INSTALL_MODE` sentinel + `:do_robocopy_dispatch` で overwrite (`/XF /XD` 付き) と new_install (除外なし) を分岐させる構造に。`:copy_failed` メッセージにも「shortcut bat は新版で配置済み、Install.bat 再実行で復旧可能」を案内する hint を追記
+
+#### Changed (PR #150 シニアレビュー round 3)
+
+- **[L2] SPEC §3.7.3 step [10] + §3.7.4 Updater 自身の更新に判定方針を明文化**: 「変更ありの場合のみ Updater 置換」という記述に対して判定方法 (hash / manifest / version 比較 / 常に置換) が一切書かれていなかったため、Phase 4 Manager UI 実装時に手戻りリスクがあった。「**実装上は常に staging の新 Updater で置換する** (バージョン比較 / hash 確認による diff 検出は実装簡素化のため省略、Updater は 1〜2 ファイルの小規模 dir なので毎回 copy しても無視できるコスト)」と 1 文追加、両セクションで整合
+
+#### Added (PR #150 シニアレビュー round 3)
+
+- **[L1] `Launcher/scripts/path_manager.gd:56` の `ends_with` に NOTE comment 追加**: editor 起動時の fallback path で `ends_with("Launcher")` / `ends_with("GCTonePrism")` を使っており、文字列 prefix collision の余地はあるが、本 path は editor 専用 (`project.godot` 起動時の prism.db 未生成初期状態) で発火するため、実機 install 経路 (round 2 M2 で separator 付き begins_with に修正済) とは別。NOTE で「editor 文脈での false-match は project.godot の位置で project_root が自動決まるため実害低」と意図を明文化、issue #151 (priority-3 detection 強化) の scope に将来統合検討する旨を記載
+
+#### Fixed (PR #150 シニアレビュー round 2)
+
+- **[M1] `:migrate_conflict_*` メッセージが round 1 H1 で明文化した user data 実態と矛盾していた**: 「中身を merge → 手動で安全な方をベースに必要ファイルだけコピー」という選択肢を案内していたが、実際 `<install>/Manager/` / `<install>/Launcher/` 配下には binary しか入らず、merge すべき user data は存在しない (user data は `<install>/` 直下、§3.7.3「保護の仕組み」)。同 PR 内 H1 の趣旨 (誤った carry-over コードを書く失敗経路を防ぐ) と矛盾するため、Install.bat メッセージから merge 案内を削除、「どちらか一方を削除すれば足りる」「user data は `<install>/` 直下にあるので Manager/Launcher dir の削除と無関係に維持される」と明示する形に書き換え
+- **[M2] PathManager priority-3 detection の `StartsWith` がパス区切り無しで prefix collision する bug**: `exePath.StartsWith(Path.Combine(currentPath, "Manager"))` (Manager) / `exe_path.begins_with(launcher_folder_check)` (Launcher) において末尾区切り (`Path.DirectorySeparatorChar` / `"/"`) を付与せずに比較していた。dir 名短縮で `"Manager"` / `"Launcher"` という generic 名になった本 PR では、`<install>/ManagerStudio/bin/...` のような兄弟 dir 名を誤検知する path が生じていた (round 1 L2 で acknowledged されていた priority-3 false-positive 余地の具体実装バグ)。修正: priority-3 fallback の StartsWith 比較を `managerCandidate + Path.DirectorySeparatorChar` / `launcher_folder_check + "/"` で行う形に変更 (Manager 内部の下流バリデーション `exePath.StartsWith(managerFolderPath, ...)` も同様)。issue #151 (priority-3 detection の汎用名化リスク) は引き続き複合 guard 追加の余地として残るが、本 round 2 M2 で StartsWith bug は閉じた
+
+#### Changed (PR #150 シニアレビュー round 2)
+
+- **[L1] Release.ps1 TODO コメントの曖昧な指示語を明確化**: 旧「`TODO Phase 3 (#108): Companions/Updater/ の build + staging を追加 (本 PR で着手予定)`」の「本 PR」が PR #150 と次 PR (`feature/updater-phase3`) のどちらを指すか曖昧で、将来 reviewer が「本 PR で着手と書いてあるが実装されていない、レビュー漏れ?」と誤読する余地があった。「次 PR `feature/updater-phase3` で着手予定」に書き換え
+- **[L2] CHANGELOG v0.1.10 entry のセクション順を「主変更 → review fix」に並び替え**: 旧順は `Fixed (round 1)` → `Changed (round 1 M1)` → `Acknowledged (round 1 L2)` → `Changed (主変更)` で、エンドユーザーが「v0.1.10 は何が変わったの?」と確認する時に最初に目に入るのが副次的な review fix で本筋の主変更が下に隠れていた。「Changed (主変更)」を先頭に、その下に review fix 群を続ける順に整理 (本 round 2 で他 PR との order 一貫性も担保)
+
+#### Fixed (PR #150 シニアレビュー round 1)
+
+- **[H1] SPEC §3.7.3 / §3.7.4 の user data 保護記述が実態と乖離していた**: 「Manager 側 / Updater 側ともに rename-rollback の `.bak` から保護対象を新 dir に carry-over する形で保護を実現」と記述していたが、実際の user data (`prism.db` / `games/` / `backups/` / `responses/` / `logs/`) は `<install>/` 直下に配置されていて Manager / Launcher dir の外。`Manager/` を `.bak` にリネームしても `.bak/prism.db` は存在せず carry-over 対象自体がない。**実際の保護機構は構造的なもの** (user data が component dir の外にあるので、各 component dir の置換と無関係に残る)。Phase 3 / Phase 4 の実装者がこの誤った記述を信じて余計な carry-over コードを書くと no-op になるか Manager 内部の設定ファイル等を user data と勘違いする path があった。修正: §3.7.3 step [13] のコメントを「user data は `<install>/` 直下にあるので置換と無関係に残る」に書き換え、「**保護されるユーザーデータ**」段落に「保護の仕組み」サブ項目を追加して「`<install>/` 直下配置による構造的保護 vs `.bak` (binary atomic rollback 用) の役割分離」を明文化。§3.7.4 Updater 責務 (3) も同期
+- **[M2] Install.bat migration が「新 dir も既存」のケースで silent failure する path**: Windows の `move srcdir dstdir` は dst が既存ディレクトリの場合、エラーで失敗するのではなく **src を dst の中にネスト移動** (`dst\src\` を作る) する挙動を取るバージョン / シェル組合せがある。errorlevel 0 で済んで `:migrate_failed` には飛ばず、`<install>/Manager/GCTonePrism_Manager/` の壊れたネスト構造ができたまま `:do_robocopy` が走り、ユーザーに見えにくいゴミが堆積する path。発生シナリオは v0.3.0 install + 過去 zip バックアップ復元 / partial install 再試行など theoretical だが silent 性が高い。修正: `move` の前に `if exist "<new>\" goto :migrate_conflict_<name>` の事前 destination-exists ガードを追加、両 dir 並存時は user に手動判断を促す `:migrate_conflict_manager` / `:migrate_conflict_launcher` ラベルで `:fail` に倒す
+- **[L1] SPEC 変更履歴 v1.10.9 の旧仕様引用 path ミス**: (b) 項で「旧仕様「Launcher 専用サブコンポーネント、`Launcher/Companions/` 配下」」と書いていたが、旧仕様 (v1.10.3〜v1.10.8) の実 path は `GCTonePrism_Launcher/Companions/`。§2.4 「旧仕様との差分」段落とも不一致だった。修正
+
+#### Changed (PR #150 シニアレビュー round 1)
+
+- **[M1] Manager v0.8.10 + Launcher v0.5.17 への version bump**: PR #150 の PathManager.cs / path_manager.gd の self-reference リテラル変更は **runtime 動作変更** (新 binary は旧 install 構造を正しく解決できない / 逆も同様)。AGENTS.md 「Release and Versioning」§ の「コミット直前に各 binary version 番号を上げるべきかを必ず提案する」規約に従い、Manager / Launcher 共に patch bump + CHANGELOG `## Manager` / `## Launcher` 各セクションに entry 追加
+
+#### Acknowledged (PR #150 シニアレビュー round 1 L2)
+
+- **PathManager priority-3 detection の汎用名化による false-positive 余地** (issue #151): dir 名短縮で `"Manager"` / `"Launcher"` は他アプリ / 他配置でも一般的な名前になり、priority-1 (`prism.db`) / priority-2 (`.git`) がともに hit しない極限状況での誤判定余地が増えた。round 1 時点では `exe_path.StartsWith(...)` ガードで実害は限定的としていたが、round 2 M2 でその StartsWith 自体に separator 不付与の prefix collision bug が発見され同 PR で fix 済。残る issue (#151) のスコープは複合 guard (sibling `Launcher/` + `Manager/` の同時存在検証 / prism.db への parent 一致等) による強化
+
 ### [Release Tooling v0.1.9] - 2026-05-12
 
 #### Fixed (PR #149 シニアレビュー round 5)
@@ -446,6 +555,12 @@
 ---
 
 ## Launcher（ランチャー本体）
+
+### [Launcher v0.5.17] - 2026-05-13
+
+PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して `scripts/path_manager.gd` の self-reference リテラル + priority-3 detection ロジック (begins_with 二段比較 + Launcher/Manager sibling 同時存在検証) を修正。配布構造変更を含むため SemVer 厳密だと minor 寄りだが、Install.bat の v0.2.0 → 新構造 migration で自動吸収されエンドユーザー視点では invisible のため patch bump 扱い。
+
+**詳細は [Release Tooling v0.1.10](#release-tooling-v0110---2026-05-13) entry および SPEC §2.4 / §3.7.x 変更履歴 v1.10.9 を参照** (AGENTS.md「重複記述は避ける」規約準拠、round 7 L6)。
 
 ### [Launcher v0.5.16] - 2026-05-11
 
@@ -875,6 +990,12 @@
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.8.10] - 2026-05-13
+
+PR #150 で dir rename (`GCTonePrism_Manager/` → `Manager/`) に連動して `PathManager.cs` の self-reference リテラル + priority-3 detection ロジック (StartsWith 二段比較 + Manager/Launcher sibling 同時存在検証) + csproj `<RootNamespace>` を修正。配布構造変更を含むため SemVer 厳密だと minor 寄りだが、Install.bat の v0.2.0 → 新構造 migration で自動吸収されエンドユーザー視点では invisible のため patch bump 扱い。
+
+**詳細は [Release Tooling v0.1.10](#release-tooling-v0110---2026-05-13) entry および SPEC §2.4 / §3.7.x 変更履歴 v1.10.9 を参照** (AGENTS.md「重複記述は避ける」規約準拠、round 7 L6)。
 
 ### [Manager v0.8.9] - 2026-05-11
 

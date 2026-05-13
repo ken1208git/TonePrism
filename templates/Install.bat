@@ -59,6 +59,15 @@ REM Exit code sentinel: failure paths goto :fail to set 1.
 REM (numeric per L1 rule — unquoted, matches :fail's `set EXIT_CODE=1`)
 set EXIT_CODE=0
 
+REM ----- robocopy 共通フラグ (round 7 L2): overwrite / new_install 両 path で共通する -----
+REM  /E       recursive incl. empty dirs
+REM  /NFL /NDL /NJH /NJS /NC /NS /NP  minimal output
+REM  /R:1 /W:1                        retry 1 回 / 待機 1 秒
+REM `/XF` `/XD` の差は :do_robocopy_overwrite / :do_robocopy で個別管理 (overwrite のみ user data
+REM 保護の defense-in-depth として `/XF /XD` を追加)。共通フラグを変数化することで「片方修正時に
+REM もう片方が乖離する」事故を防ぐ。
+set "ROBOCOPY_COMMON=/E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1"
+
 REM ---- files/ existence check (top-level, no Japanese echo inside block) ----
 if exist "%FILES_DIR%" goto :files_ok
 echo [FAIL] files/ ディレクトリが見つかりません: "%FILES_DIR%"
@@ -161,7 +170,7 @@ REM ---- Nest check ----
 REM If the selected parent path ends in GCTonePrism (with or without trailing \),
 REM we'd create <parent>\GCTonePrism\GCTonePrism\ which is nested. Warn + abort.
 REM
-REM Edge cases for the leaf extraction (シニアレビュー round 4 L3):
+REM Edge cases for the leaf extraction:
 REM   - Drive root `D:\`        -> strip trailing \ leaves `D:` ->
 REM                                `%%~nxF` returns empty string -> leaf = "" ->
 REM                                nest check passes (empty != "GCTonePrism") ->
@@ -265,6 +274,200 @@ goto :checkprocess
 :do_overwrite
 echo.
 echo [INFO] 上書きインストールを開始します...
+goto :migrate_legacy_manager
+
+REM ---- v0.2.0 → v0.3.0+ 旧構造 migration (シニアレビュー / ディレクトリ rename 整理対応) ----
+REM v0.2.0 までは `<install>/GCTonePrism_Manager/` / `<install>/GCTonePrism_Launcher/` 配置。
+REM v0.3.0 から `<install>/Manager/` / `<install>/Launcher/` + `<install>/Companions/Updater/` に変更。
+REM 旧構造を検出したらリネームしてからロボコピーする (`move` で dir 名のみ変更 = 中身そのまま carry-over)。
+REM 一度移行すれば以降はリネーム不要 (旧 dir 不在で skip)。
+REM
+REM Destination-exists guard:
+REM   Windows の `move srcdir dstdir` は dst が既存ディレクトリの場合、エラーで失敗するのではなく
+REM   src を dst の中にネスト移動 (`dst\src\` を作る) する挙動を取るバージョン / シェル組合せがある。
+REM   errorlevel 0 で済んでしまうと `:migrate_failed` には飛ばず、`<install>/Manager/GCTonePrism_Manager/`
+REM   という壊れたネスト構造ができたまま `:do_robocopy` が走り、ユーザーに見えにくいゴミが堆積する
+REM   silent failure path だった。事前 `if exist <new>\` チェックで両 dir 並存を検出し、
+REM   `:migrate_conflict` で user に手動判断を促す形に変更。並存ケースは theoretical だが、
+REM   v0.3.0 install + 過去 zip バックアップ復元 / partial install の再試行で発生し得る。
+REM
+REM top-level goto pattern: 日本語 echo を if-block 内に置くと cmd parser cascade するため
+REM (構造規約 1)、各 step を独立ラベルにしている。
+REM ----- migration 出力を tmp file にキャプチャ (round 7 M1) -----
+REM 旧 `move ... >nul` は stdout のみ抑制で、stderr 経由の失敗詳細 (アクセス拒否 / 別プロセス
+REM 使用中 等) が握り潰される。show_folder_dialog 呼び出し (line 91-105) と同じ
+REM 「stdout/stderr 分離キャプチャ + 失敗時に type 表示」規約に揃える。
+REM 2 段階 move (Manager / Launcher) で同 tmp を上書き使用し、失敗時はその時点の内容を表示。
+set "TEMP_MV_OUT=%TEMP%\gctone_install_mv_%RANDOM%%RANDOM%.tmp"
+
+:migrate_legacy_manager
+if not exist "%INSTALL_TARGET%\GCTonePrism_Manager\" goto :migrate_legacy_launcher
+if exist "%INSTALL_TARGET%\Manager\" goto :migrate_conflict_manager
+echo [INFO] 旧構造 (v0.2.0) 検出: GCTonePrism_Manager\ → Manager\ に移行
+move "%INSTALL_TARGET%\GCTonePrism_Manager" "%INSTALL_TARGET%\Manager" >"%TEMP_MV_OUT%" 2>&1
+if errorlevel 1 goto :migrate_failed_manager
+REM Sentinel: Manager 移行成功時にセット。:migrate_failed_launcher が「Manager 移行済」を
+REM 案内する条件として使う (Manager 不在で skip された場合は未 set なので誤情報を避ける)。
+set MANAGER_MIGRATED=1
+:migrate_legacy_launcher
+if not exist "%INSTALL_TARGET%\GCTonePrism_Launcher\" goto :migrate_done
+if exist "%INSTALL_TARGET%\Launcher\" goto :migrate_conflict_launcher
+echo [INFO] 旧構造 (v0.2.0) 検出: GCTonePrism_Launcher\ → Launcher\ に移行
+move "%INSTALL_TARGET%\GCTonePrism_Launcher" "%INSTALL_TARGET%\Launcher" >"%TEMP_MV_OUT%" 2>&1
+if errorlevel 1 goto :migrate_failed_launcher
+REM Sentinel: Launcher 移行成功時にセット。:shortcut_failed が「Launcher 移行済」を
+REM 案内する条件として使う (:migrate_failed_launcher / :shortcut_failed 共通の状態案内)。
+set LAUNCHER_MIGRATED=1
+:migrate_done
+REM Migration tmp ファイルは success 時に cleanup (失敗 path 側は失敗ラベルで表示後 cleanup)
+del "%TEMP_MV_OUT%" 2>nul
+goto :overwrite_set_mode
+
+:migrate_conflict_manager
+echo.
+echo [FAIL] 旧 dir と新 dir が両方存在しています:
+echo          "%INSTALL_TARGET%\GCTonePrism_Manager"  [旧、v0.2.0 配置]
+echo          "%INSTALL_TARGET%\Manager"              [新、v0.3.0+ 配置]
+echo.
+echo        Install.bat は自動でどちらを残すか判断できません。手動でどちらか一方を削除してから再実行:
+echo          - 推奨: 新側を残す → 旧 "%INSTALL_TARGET%\GCTonePrism_Manager" を削除
+echo            [通常はこちら。Install.bat 再実行で v0.3.0+ binary が上書きインストールされます]
+echo          - 旧側を残す → 新 "%INSTALL_TARGET%\Manager" を削除 [v0.2.0 にダウングレードしたい場合のみ]
+echo            [Install.bat 再実行で旧 dir が "Manager" にリネーム → 同じ v0.3.0+ binary で robocopy 上書き、
+echo             結局 v0.3.0+ binary が入るので、本当に v0.2.0 のまま運用したい場合は zip も v0.2.0 を使うこと]
+echo.
+echo        どちらを選んでもユーザーデータ [prism.db / games / backups / responses / logs] は失われません。
+echo        これらは "%INSTALL_TARGET%\" 直下にあり Manager dir の外なので、Manager dir の削除と無関係に維持されます。
+goto :fail
+
+:migrate_conflict_launcher
+echo.
+echo [FAIL] 旧 dir と新 dir が両方存在しています:
+echo          "%INSTALL_TARGET%\GCTonePrism_Launcher"  [旧、v0.2.0 配置]
+echo          "%INSTALL_TARGET%\Launcher"              [新、v0.3.0+ 配置]
+echo.
+REM Manager 側が先に移行成功している case を case-aware に明示 (:migrate_failed_launcher / :shortcut_failed
+REM と同パターン、round 7 L4)。user が「両方ある = まだ移行されていない、全部一旦戻そう」と
+REM 誤判断して "%INSTALL_TARGET%\Manager" を旧 GCTonePrism_Manager に手動 rename し直す path を防ぐ。
+if defined MANAGER_MIGRATED echo        [注意] Manager 側はすでに移行済 ["%INSTALL_TARGET%\Manager" が新版]。
+if defined MANAGER_MIGRATED echo               Launcher dir の整理に合わせて Manager 側も旧 dir に戻すと整合性が崩れます。
+if defined MANAGER_MIGRATED echo.
+echo        Install.bat は自動でどちらを残すか判断できません。手動でどちらか一方を削除してから再実行:
+echo          - 推奨: 新側を残す → 旧 "%INSTALL_TARGET%\GCTonePrism_Launcher" を削除
+echo            [通常はこちら。Install.bat 再実行で v0.3.0+ binary が上書きインストールされます]
+echo          - 旧側を残す → 新 "%INSTALL_TARGET%\Launcher" を削除 [v0.2.0 にダウングレードしたい場合のみ]
+echo            [Install.bat 再実行で旧 dir が "Launcher" にリネーム → 同じ v0.3.0+ binary で robocopy 上書き、
+echo             結局 v0.3.0+ binary が入るので、本当に v0.2.0 のまま運用したい場合は zip も v0.2.0 を使うこと]
+echo.
+echo        どちらを選んでもユーザーデータ [prism.db / games / backups / responses / logs] は失われません。
+echo        これらは "%INSTALL_TARGET%\" 直下にあり Launcher dir の外なので、Launcher dir の削除と無関係に維持されます。
+goto :fail
+
+REM :migrate_failed_manager と :migrate_failed_launcher は独立ラベル。
+REM 旧 `:migrate_failed` 共通ラベルだと、Manager 移行成功 + Launcher 移行失敗のケースで
+REM 「Manager の rename が必要」と案内してしまい (実際は完了済)、user が「移動元が無い」と
+REM 混乱する path があった。失敗側だけの手動 rename 手順を案内する形に分離。
+:migrate_failed_manager
+echo.
+echo [FAIL] 旧構造 (v0.2.0) → 新構造への Manager フォルダ移行に失敗しました。
+echo        フォルダロック / 書き込み権限を確認してください。
+echo        手動で以下のリネームを行えば回避可能:
+echo          "%INSTALL_TARGET%\GCTonePrism_Manager"  → "%INSTALL_TARGET%\Manager"
+echo        Launcher 側は本実行ではまだ移行を試みていないので、現状維持で OK。
+echo        Install.bat 再実行で Launcher 側の移行が走ります。
+if not exist "%TEMP_MV_OUT%" goto :migrate_failed_manager_cleanup
+echo.
+echo move コマンド出力:
+type "%TEMP_MV_OUT%"
+:migrate_failed_manager_cleanup
+del "%TEMP_MV_OUT%" 2>nul
+goto :fail
+
+:migrate_failed_launcher
+echo.
+echo [FAIL] 旧構造 (v0.2.0) → 新構造への Launcher フォルダ移行に失敗しました。
+REM Manager 移行は skip / 成功 / fail (= 別経路) の 3 通り。fail はここに来る前に止まるので、
+REM 残るは skip (Manager 不在) と 成功。sentinel で「成功時のみ案内」する形に絞る。
+if defined MANAGER_MIGRATED echo        Manager 側はすでに移行済 ["%INSTALL_TARGET%\Manager" が新版]、Launcher 側のみ rename 失敗。
+echo        フォルダロック / 書き込み権限を確認してください。
+echo        手動で以下のリネームを行えば回避可能:
+echo          "%INSTALL_TARGET%\GCTonePrism_Launcher" → "%INSTALL_TARGET%\Launcher"
+if not exist "%TEMP_MV_OUT%" goto :migrate_failed_launcher_cleanup
+echo.
+echo move コマンド出力:
+type "%TEMP_MV_OUT%"
+:migrate_failed_launcher_cleanup
+del "%TEMP_MV_OUT%" 2>nul
+goto :fail
+
+:overwrite_set_mode
+REM Overwrite 経路の終端: INSTALL_MODE sentinel を立てて :copy_shortcuts dispatcher に合流。
+REM (両 path 共通の flow 順序方針議論は :copy_shortcuts 直下を参照、round 7 L3 で集約)
+set "INSTALL_MODE=overwrite"
+goto :copy_shortcuts
+
+:new_install
+echo [INFO] 新規インストールを開始します...
+mkdir "%INSTALL_TARGET%" 2>nul
+if exist "%INSTALL_TARGET%\" goto :new_mkdir_ok
+echo.
+echo [FAIL] インストール先フォルダを作成できませんでした: "%INSTALL_TARGET%"
+echo        書き込み権限を確認してください。
+goto :fail
+:new_mkdir_ok
+set "INSTALL_MODE=new"
+goto :copy_shortcuts
+
+:copy_shortcuts
+REM ============================================================================
+REM Dispatch for shortcut copy + robocopy ordering by INSTALL_MODE.
+REM
+REM Flow 順序方針 (round 3 L3 + Codex P2 で確定):
+REM   overwrite path: migration → shortcut → robocopy → install_done
+REM     - 理由: robocopy partial failure 時に shortcut bat が旧 path
+REM       (`%~dp0GCTonePrism\GCTonePrism_Launcher\...`) のまま実体が新 dir
+REM       `<install>/Launcher/` に移動済 → user が Launcher.bat ダブルクリックで
+REM       「ファイルが見つかりません」窓を防ぐため、shortcut を先に新 path で書く。
+REM       Install.bat 再実行で robocopy リトライ → 復旧可能。
+REM   new_install path: mkdir → robocopy → shortcut → install_done
+REM     - 理由: 新規 install で旧 shortcut bat が無いため「先に書く必要」がない。
+REM       robocopy 失敗時に broken `<install>/GCTonePrism/` を指す shortcut bat が
+REM       `<親>/` に残ると user が混乱する (Codex P2)。完全成功時にのみ shortcut。
+REM ============================================================================
+if "%INSTALL_MODE%"=="overwrite" goto :overwrite_shortcut_then_robocopy
+goto :new_robocopy_then_shortcut
+
+:overwrite_shortcut_then_robocopy
+call :do_shortcut_copy
+if errorlevel 1 goto :shortcut_failed
+goto :do_robocopy_overwrite
+
+:new_robocopy_then_shortcut
+call :do_robocopy
+if errorlevel 1 goto :copy_failed
+call :do_shortcut_copy
+if errorlevel 1 goto :shortcut_failed
+goto :install_done
+
+REM ----- Subroutine: shortcut bat copy (Launcher.bat / Manager.bat → <parent>/) -----
+REM `call :do_shortcut_copy` で呼び出し、ERRORLEVEL で成否伝播。SPEC §3.7.1 のルート
+REM ショートカット規約に従って <親>/ 直下に配置。
+:do_shortcut_copy
+copy /Y "%SCRIPT_DIR%Launcher.bat" "%INSTALL_PARENT_NO_TRAIL%\Launcher.bat" >nul
+if errorlevel 1 exit /b 1
+copy /Y "%SCRIPT_DIR%Manager.bat" "%INSTALL_PARENT_NO_TRAIL%\Manager.bat" >nul
+if errorlevel 1 exit /b 1
+exit /b 0
+
+REM ----- Subroutine: robocopy for new_install (no /XF /XD because no user data yet) -----
+REM new_install path 用。overwrite 用は :do_robocopy_overwrite で独立 (`/XF /XD` defense-in-depth 必要)。
+:do_robocopy
+robocopy "%FILES_DIR%" "%INSTALL_TARGET%" %ROBOCOPY_COMMON%
+REM robocopy exit code is a bitfield, < 8 = success (0 no change, 1 files copied, etc.).
+if errorlevel 8 exit /b 1
+exit /b 0
+
+:do_robocopy_overwrite
 REM ============================================================================
 REM USER DATA PROTECTION — read this carefully before modifying robocopy flags.
 REM ============================================================================
@@ -296,44 +499,49 @@ REM so future components containing a `games/` or `backups/` subfolder would be
 REM silently excluded. Safe today (no such names in files/) but worth flagging
 REM if a future component adds one.
 REM ============================================================================
-robocopy "%FILES_DIR%" "%INSTALL_TARGET%" /E /XF prism.db /XD games backups responses logs /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1
+robocopy "%FILES_DIR%" "%INSTALL_TARGET%" %ROBOCOPY_COMMON% /XF prism.db /XD games backups responses logs
 REM robocopy exit code is a bitfield, < 8 = success (0 no change, 1 files copied, etc.).
 if errorlevel 8 goto :copy_failed
-goto :copy_shortcuts
-
-:new_install
-echo [INFO] 新規インストールを開始します...
-mkdir "%INSTALL_TARGET%" 2>nul
-if exist "%INSTALL_TARGET%\" goto :new_mkdir_ok
-echo.
-echo [FAIL] インストール先フォルダを作成できませんでした: "%INSTALL_TARGET%"
-echo        書き込み権限を確認してください。
-goto :fail
-:new_mkdir_ok
-robocopy "%FILES_DIR%" "%INSTALL_TARGET%" /E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1
-if errorlevel 8 goto :copy_failed
-goto :copy_shortcuts
+goto :install_done
 
 :copy_failed
 echo.
 echo [FAIL] ファイルコピーに失敗しました [robocopy exit %ERRORLEVEL%]。
+REM Install.bat 再実行で復旧可能だが、shortcut bat の状態は INSTALL_MODE で異なる:
+REM - overwrite: shortcut copy 先行成功 → robocopy 失敗 (shortcut は新 path、Codex P2 関連)
+REM - new:       robocopy 失敗 → shortcut copy 未到達 (shortcut bat 不在、broken shortcut の regression なし)
+if "%INSTALL_MODE%"=="overwrite" echo        Install.bat 再実行で復旧可能です [shortcut bat はすでに新版で配置済み]。
+if "%INSTALL_MODE%"=="new"       echo        Install.bat 再実行で復旧可能です [shortcut bat はまだ配置されていません]。
 goto :fail
-
-:copy_shortcuts
-REM Copy parent-level shortcuts (Launcher.bat / Manager.bat) from zip root to
-REM <parent>/ (= one level above GCTonePrism/). This places daily-use shortcuts
-REM directly under the user's selected parent folder for easier discovery.
-REM See SPEC §3.7.1.
-copy /Y "%SCRIPT_DIR%Launcher.bat" "%INSTALL_PARENT_NO_TRAIL%\Launcher.bat" >nul
-if errorlevel 1 goto :shortcut_failed
-copy /Y "%SCRIPT_DIR%Manager.bat" "%INSTALL_PARENT_NO_TRAIL%\Manager.bat" >nul
-if errorlevel 1 goto :shortcut_failed
-goto :install_done
 
 :shortcut_failed
 echo.
 echo [FAIL] ショートカット bat のコピーに失敗しました ["%INSTALL_PARENT_NO_TRAIL%"]。
 echo        書き込み権限を確認してください。
+REM Migration が走った場合は user に「dir rename は完了済」を案内 (:migrate_failed_launcher と
+REM 同パターン、:copy_failed の「shortcut bat はすでに新版」hint との対称性)。user が
+REM 「shortcut が壊れたから手動で旧 dir 名に戻そう」と誤対処して migration を巻き戻す path
+REM を防ぐ。両 sentinel (Manager/Launcher) が立つのは「両方の rename 成功時」、片方のみは
+REM 「片方 skip (= 元から不在) + もう片方 rename 成功」のケース。
+if defined MANAGER_MIGRATED goto :shortcut_failed_with_migration_note
+if defined LAUNCHER_MIGRATED goto :shortcut_failed_with_migration_note
+goto :fail
+
+:shortcut_failed_with_migration_note
+echo.
+echo  [注意] 旧構造 (v0.2.0) → 新構造への dir rename はすでに完了しています:
+REM 空白は echo の前に 1 個固定 (round 6 L5: VAR 名長さに依存した手動 align は将来 sentinel 追加時に崩れる)
+if defined MANAGER_MIGRATED echo          "%INSTALL_TARGET%\Manager"   [旧 GCTonePrism_Manager から rename 済]
+if defined LAUNCHER_MIGRATED echo          "%INSTALL_TARGET%\Launcher"  [旧 GCTonePrism_Launcher から rename 済]
+echo         旧 dir 名 ["%INSTALL_TARGET%\GCTonePrism_*"] に戻さないでください。
+echo         書き込み権限を解消してから Install.bat を再実行すれば、shortcut bat だけ
+echo         再書き込みされて続行可能です [migration は冪等、再走しても影響なし]。
+echo.
+echo  [警告] Install.bat 再実行までは、"%INSTALL_PARENT_NO_TRAIL%\Launcher.bat" /
+echo         "%INSTALL_PARENT_NO_TRAIL%\Manager.bat" をダブルクリックしないでください。
+echo         2 段階 copy で 1 段目成功 + 2 段目失敗の場合、片方が新 path / もう片方が
+echo         旧 path (壊れた状態) の不揃いになっている可能性があります。再実行で
+echo         両方とも新版に上書きされます。
 goto :fail
 
 :install_done

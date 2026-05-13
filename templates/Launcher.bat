@@ -15,5 +15,5 @@ REM   looking consistency choice rather than a bug fix observed here.
 REM   Trade-off: if a future caller uses `call Launcher.bat` instead of `start`/
 REM   double-click, this `exit` would terminate the caller too. Acceptable since
 REM   Launcher.bat is intentionally a leaf shortcut, not a building block.
-start "" "%~dp0GCTonePrism\GCTonePrism_Launcher\GCTonePrism_Launcher.exe"
+start "" "%~dp0GCTonePrism\Launcher\GCTonePrism_Launcher.exe"
 exit

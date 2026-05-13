@@ -14,5 +14,5 @@ REM   cmd to terminate, closing the window uniformly.
 REM   Trade-off: if a future caller uses `call Manager.bat` instead of `start`/
 REM   double-click, this `exit` would terminate the caller too. Acceptable since
 REM   Manager.bat is a leaf shortcut, not a building block called from other bats.
-start "" "%~dp0GCTonePrism\GCTonePrism_Manager\GCTonePrism_Manager.exe"
+start "" "%~dp0GCTonePrism\Manager\GCTonePrism_Manager.exe"
 exit
