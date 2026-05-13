@@ -268,6 +268,13 @@ $FilesDir     = Join-Path $StagingDir 'files'
 $ZipPath      = Join-Path $StagingRoot "GCTonePrism_v$Version.zip"
 $ChangelogPath = Join-Path $RepoRoot 'CHANGELOG.md'
 
+# round 3 Low-3: GitHub repo slug を SoT 化。本 script は ken1208git/GCTonePrism 専用前提
+# (Assert-ChangelogLinkDefs で release tag URL を組み立てる用途)。fork / repo rename / org
+# transfer 時は本定数 1 箇所の修正で全箇所追随する形に集約。他の gh CLI 呼び出しは `gh` の
+# repo 自動検出に依拠していて hardcode していないので、本定数は本 script 内で 1 箇所のみで
+# 参照される (将来別箇所で必要になれば本定数を使う規約)。
+$GitHubRepoSlug = 'ken1208git/GCTonePrism'
+
 $script:ResolvedGodot       = $null
 $script:ResolvedMsBuild     = $null
 $script:ResolvedNuget       = $null
@@ -1019,7 +1026,7 @@ function Resolve-TagConflict {
 }
 
 # ============================================================================
-# Phase 0.5: CHANGELOG 末尾 Bundle 参照リンク定義の検証 (fix/changelog-link-sync)
+# Phase 0.5: CHANGELOG 末尾 Bundle 参照リンク定義の検証
 # ============================================================================
 # Markdown reference-style link を resolve するためには CHANGELOG 末尾に
 # `[Bundle vX.Y.Z]: https://github.com/.../releases/tag/vX.Y.Z` の定義が要る。
@@ -1061,35 +1068,41 @@ function Assert-ChangelogLinkDefs {
 
     $changelogPath = Join-Path $RepoRoot 'CHANGELOG.md'
     # round 1 Low-3: Get-Content -Raw は PS 5.1 で BOM 無し UTF-8 を CP932 として読む既知挙動
-    # あり。script 冒頭 (Release.ps1:222 付近) の $_changelogContent と同じ ReadAllText で
-    # 統一して UTF-8 明示 read。本件 match 対象は ASCII で実害ゼロだが、保守ノイズ + 将来
-    # defensive のため統一。
+    # あり。script 冒頭 ($_changelogContent) と同じ ReadAllText で統一して UTF-8 明示 read。
     $changelogContent = [System.IO.File]::ReadAllText($changelogPath, [System.Text.Encoding]::UTF8)
 
-    # round 1 Low-1: 単純 substring match は本文中のコードブロック / 引用に同形式文字列が
-    # 紛れた場合に false-positive で素通りする path があった。Markdown 仕様上 reference link
-    # 定義はどこにあっても resolve するので rendering 上は問題ないが、運用規約「末尾参照
-    # ブロックに集約」と乖離する。行 anchor で「行頭から URL 末尾 + 行末まで」固定の正規
-    # 表現に変える: 末尾の link def ブロック内で 1 行として独立している行のみ match する。
-    #
+    # round 3 Codex P2: footer block を切り出してその範囲内のみ match。
+    #   round 1 Low-1 で line anchor 化 `(?m)^...\s*$` で本文中のコードブロック内文字列を
+    #   排除する想定だったが、release notes 内の fenced code block で `[Bundle v0.5.0]: ...`
+    #   を例示行として 独立行 で書いた場合、line anchor だけでは false-positive で素通り
+    #   していた (= footer 不在でも check 緑 → dangling Bundle heading link で release)。
+    #   修正: CHANGELOG 末尾の最後の HTML comment marker (`<!-- ... -->`) を footer block の
+    #   開始 sentinel とみなし、それ以降の text だけを match 対象に。LastIndexOf('-->') で
+    #   「ファイル中で最後の HTML comment 閉じ」を見つける = 末尾 footer block の先頭。
+    $footerMarkerEnd = $changelogContent.LastIndexOf('-->')
+    if ($footerMarkerEnd -lt 0) {
+        Fail "CHANGELOG.md 末尾の HTML comment marker (`<!-- ... -->`) が見つかりません。footer block 開始の sentinel が必要 (round 3 Codex P2)。"
+    }
+    $footerBlock = $changelogContent.Substring($footerMarkerEnd + 3)
+
+    # round 3 Low-3: GitHub repo URL は $GitHubRepoSlug 定数 (script 冒頭 SoT) を参照。
+    $expectedUrl = "https://github.com/$GitHubRepoSlug/releases/tag/v$Version"
     # 正規表現: `(?m)` (multiline) + `^` (行頭) + `[Bundle v<Version>]: <URL>` + `\s*$` (行末)
-    # `<Version>` と `<URL>` 内の `.` などは [regex]::Escape で escape。
-    $expectedUrl = "https://github.com/ken1208git/GCTonePrism/releases/tag/v$Version"
     $linePattern = '(?m)^' + [regex]::Escape("[Bundle v$Version]: $expectedUrl") + '\s*$'
     $expectedDefDisplay = "[Bundle v$Version]: $expectedUrl"
 
-    if ([regex]::IsMatch($changelogContent, $linePattern)) {
+    if ([regex]::IsMatch($footerBlock, $linePattern)) {
         Write-Ok "Bundle v$Version の参照リンク定義 OK"
         return
     }
 
+    # round 3 Low-2: backtick escape を削除、PS double-quoted string で意図しない文字消費を排除。
     Write-Host ""
-    Write-Host "    CHANGELOG.md 末尾に Bundle v$Version の参照リンク定義が見つかりません" -ForegroundColor Red
-    Write-Host "    (行頭 anchor で末尾 reference link block 内の行を探しています、" -ForegroundColor DarkGray
-    Write-Host "     本文中のコードブロック内文字列は false-positive 排除のため認識しません)" -ForegroundColor DarkGray
+    Write-Host "    CHANGELOG.md 末尾 footer block に Bundle v$Version の参照リンク定義が見つかりません" -ForegroundColor Red
+    Write-Host "    (CHANGELOG 末尾 HTML comment marker 以降の独立行のみ認識、本文中の例示は false-positive 排除)" -ForegroundColor DarkGray
     Write-Host "    以下を CHANGELOG.md 末尾の参照リンク定義ブロックに追加してから再実行してください:" -ForegroundColor Yellow
     Write-Host "      $expectedDefDisplay" -ForegroundColor Cyan
-    Write-Host "    追加位置: 既存 `[Bundle vX.Y.Z]:` 行群の先頭 (降順を維持、CHANGELOG 末尾 HTML comment ブロック直下)" -ForegroundColor Yellow
+    Write-Host "    追加位置: 既存 [Bundle vX.Y.Z]: 行群の先頭 (降順を維持、CHANGELOG 末尾 HTML comment ブロック直下)" -ForegroundColor Yellow
     Write-Host "    (AGENTS.md 'Release and Versioning' 規約参照)" -ForegroundColor Yellow
     Fail "CHANGELOG 末尾参照リンク定義の同期忘れ"
 }
