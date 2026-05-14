@@ -51,6 +51,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Force UTF-8 for console output. PS 5.1 + JP locale defaults to CP932, so
+# violation messages that interpolate a non-ASCII $Path (e.g.
+# Companions/<日本語>/foo.bat) would otherwise mojibake on stdout even though
+# our internal git output decoding (Invoke-GitCapture, StandardOutputEncoding=
+# UTF8) is already UTF-8. Symmetric with Install-Hooks.ps1's same override
+# (added in PR #159 round 3 [Claude M-2]).
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
 function Invoke-GitCapture {
     # Run git via System.Diagnostics.Process. Captures stdout / stderr / exit
     # code without involving `2>&1` (= PS 5.1 NativeCommandError trap, see
@@ -193,6 +201,15 @@ function Test-WorkingTreeCrlf {
     # In `-Mode All` on a fresh CI checkout, the working tree has already
     # been smudged through `eol=crlf` so this check is effectively a no-op;
     # it stays for defence-in-depth (self-hosted runner without smudge etc).
+    #
+    # Rationale (PR #159 round 4 [Claude L-4]): even when this check FAILS
+    # in Mode Staged, the *committed* blob is still LF (= `.gitattributes
+    # eol=crlf` already normalised) and `git checkout` on any other machine
+    # will smudge back to CRLF, so the commit content itself is not bad.
+    # The real value of this check is an early signal that the contributor's
+    # editor saves with LF endings -- that habit will produce a broken file
+    # the moment `.gitattributes` coverage misses (e.g. a new extension not
+    # listed). Treat it as editor-config lint, not as a commit-content guard.
     param([string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) {
         return @()

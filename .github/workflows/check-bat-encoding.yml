@@ -31,6 +31,7 @@ on:
       - '**/*.bat'
       - '**/*.cmd'
       - '.githooks/check-bat-encoding.ps1'
+      - '.githooks/pre-commit'
       - '.github/workflows/check-bat-encoding.yml'
       - '.gitattributes'
   pull_request:
@@ -38,6 +39,7 @@ on:
       - '**/*.bat'
       - '**/*.cmd'
       - '.githooks/check-bat-encoding.ps1'
+      - '.githooks/pre-commit'
       - '.github/workflows/check-bat-encoding.yml'
       # Include .gitattributes so a PR that weakens or removes the
       # *.bat eol=crlf rule (= upstream of the smudge our hook relies on)
