@@ -88,7 +88,11 @@ namespace GCTonePrism.Manager.Controls
             this.lblDash.ForeColor = System.Drawing.Color.Gray;
 
             // txtSuffix
+            // (#158 round 6 L-2) MaxLength=32: SemVer 2.0.0 自体は suffix 長制限なしだが本 project の
+            // 運用想定 (#133 ガイドラインの「rc1 / beta.2 程度」) に合わせた reasonable 上限。長文
+            // suffix は folder 名肥大化 / UI 視認性低下を招くので構造的排除に揃える。
             this.txtSuffix.Location = new System.Drawing.Point(215, 2);
+            this.txtSuffix.MaxLength = 32;
             this.txtSuffix.Name = "txtSuffix";
             this.txtSuffix.Size = new System.Drawing.Size(80, 22);
             this.txtSuffix.TabIndex = 3;

@@ -625,17 +625,66 @@ namespace GCTonePrism.Manager
                     "バージョン未入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
+
+            // (#158 round 6 M-1) LoadVersions の集約警告 MessageBox は notice であって block ではない。
+            // user がそれを dismiss してそのまま OK を押すと、まだ dropdown で選択されていない (=
+            // SaveGameDataToVersion で clamp 上書きされていない) malformed version は raw value のまま
+            // dbManager.UpdateGameVersion(v) で書き戻る → user 視点では「警告は出たけど結局何も対処
+            // しなくて済んだ」状態。ここで TryNormalize 全件 scan + block で「修正してから OK」を
+            // 強制する (= 最終防衛線、suffix の H-1 全件 scan と同 pattern)。
+            //
+            // 既知の残存 path: currently-displayed の malformed は前段の dup-check 直前
+            // SaveGameDataToVersion(currentSelected) で v.Version が clamp 値 (例: "v0.0.0" or "v99.0.0")
+            // に上書き済 → TryNormalize は succeed → 本 scan では catch できない。LoadVersions 警告での
+            // user 認知 + UI の clamp 表示 visibility に頼る (= 表示中の version を user は見ているはず)。
+            var malformedNumericVersions = new List<string>();
+            foreach (var item in cmbVersionList.Items)
+            {
+                if (!(item is GameVersion vChk2)) continue;
+                string normIgnored;
+                if (!SemverInputControl.TryNormalize(vChk2.Version ?? "", out normIgnored))
+                {
+                    malformedNumericVersions.Add("  - id=" + vChk2.Id + ": '" + (vChk2.Version ?? "(null)") + "'");
+                }
+            }
+            if (malformedNumericVersions.Count > 0)
+            {
+                MessageBox.Show(this,
+                    "以下のバージョンの数値部 (Major/Minor/Patch) または書式が SemVer として parse 不能" +
+                    "です。Manager の dropdown で該当バージョンを選択して有効な値に修正してから OK を" +
+                    "押してください (= このまま OK すると不正値が DB に書き戻されます)。\n\n" +
+                    string.Join("\n", malformedNumericVersions),
+                    "バージョン形式エラー (" + malformedNumericVersions.Count + " 件)",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            // (#158 round 6 codex P2) GroupBy のキーを TryNormalize 結果に変える。旧実装は raw v.Version
+            // で比較していたため、過去 DB の "v1.0.0" / "1.0.0" / "V1.0.0" を別 key として素通しして
+            // semantic 上は重複なのに通る silent danger があった (= Q2 fix の裏口再オープン状態)。
+            // TryNormalize 失敗 (= malformed) は raw value を key に fallback、別 malformed 同士は raw
+            // 一致時のみ重複扱い (= 「形式不明」同士の意図せぬ collapse を避ける、片方は M-1 全件 scan
+            // で別途 block される)。
             var versionDups = cmbVersionList.Items
                 .OfType<GameVersion>()
                 .Where(v => !string.IsNullOrEmpty(v.Version))
-                .GroupBy(v => v.Version)
+                .GroupBy(v =>
+                {
+                    string normalized;
+                    return SemverInputControl.TryNormalize(v.Version, out normalized) ? normalized : v.Version;
+                })
                 .Where(g => g.Count() > 1)
-                .Select(g => g.Key)
+                .Select(g =>
+                {
+                    // 重複 key + 重複した raw 値群を表示 (normalize 後同じだが原型は違う場合の手がかり)
+                    var raws = g.Select(v => v.Version).Distinct().ToList();
+                    return raws.Count == 1 ? g.Key : g.Key + " (生値: " + string.Join(" / ", raws) + ")";
+                })
                 .ToList();
             if (versionDups.Count > 0)
             {
                 MessageBox.Show(
-                    "以下のバージョン名が複数のエントリで重複しています:\n\n  " +
+                    "以下のバージョン名が複数のエントリで重複しています (SemVer 正規化後の比較、" +
+                    "v 大文字/小文字・leading v 有無は同一視):\n\n  " +
                     string.Join("\n  ", versionDups) +
                     "\n\nバージョン管理ドロップダウンで該当の項目を選択し、別の名前に変更してください。",
                     "バージョン重複エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -780,10 +829,13 @@ namespace GCTonePrism.Manager
                 }
                 else
                 {
-                    // (#158 L-2) ここでの SaveGameDataToVersion(selectedVersion) は dup-check 直前
-                    // (line 497 付近) で同 selectedVersion に対して既に呼ばれており、間の処理 (gameId
-                    // rename / folder rename) は selectedVersion のフィールドを変えないため二重実行
-                    // だった。削除して dup-check 経路の 1 回呼び出しに統一。
+                    // (#158 L-2 + round 6 M-3) ここでの SaveGameDataToVersion(selectedVersion) 呼び出しは
+                    // dup-check 直前の `SaveGameDataToVersion(currentSelected)` (= 上の dup-check ブロックの
+                    // すぐ前にある) で同 selectedVersion に対して既に呼ばれており、間の処理 (gameId
+                    // rename / folder rename) は selectedVersion のフィールドを変えないため二重実行だった。
+                    // 削除して dup-check 経路の 1 回呼び出しに統一。
+                    // (round 6 M-3 で「line 497 付近」hardcoded 行番号参照をシンボル参照に書き換え、
+                    // refactor / 行ずれで rot しない形に。)
 
                     // パス関連: 相対パス化ロジック (現在の選択中バージョンに対してのみ適用)
                     // 他のバージョンは既にロード済みまたは編集済みで、その時点でパスは保持されているはず
@@ -812,6 +864,21 @@ namespace GCTonePrism.Manager
                     // 走らない) の drift で launcher が「rename 後 disk」「rename 前 DB」を見て該当
                     // version の起動失敗 silent corruption が発生していた。
                     var renamePlan = new List<RenamePlan>();
+                    // (#158 round 6 M-2) Phase 1 衝突 check は disk 現在状態だけ見ると、同 OK 内で
+                    // chained rename (例: A→B + B→C を同時) の場合に A→B 計画が「B が既存 disk に
+                    // ある」で abort される。実際 B は B→C 計画で空く予定 → 順序付ければ成立。
+                    // 全件の oldDir を「予約済み slot (rename で空く予定)」HashSet として除外してから
+                    // 衝突判定する。さらに循環 (A→B + B→A) は両方の oldDir が両方の newDir でもあるので
+                    // 互いに skip してしまう → 後の Phase 2 で先に Move した方の newDir が衝突して fail
+                    // する経路に流れるが、その時の rollback path は既に整備済 (CX-1) のため許容。
+                    var reservedOldDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var item in cmbVersionList.Items)
+                    {
+                        if (!(item is GameVersion vR)) continue;
+                        if (!_originalVersionByDbId.TryGetValue(vR.Id, out string origR)) continue;
+                        if (string.Equals(origR, vR.Version, StringComparison.OrdinalIgnoreCase)) continue;
+                        reservedOldDirs.Add(System.IO.Path.Combine(gameFolder, ToVersionLeaf(origR)));
+                    }
                     foreach (var item in cmbVersionList.Items)
                     {
                         if (!(item is GameVersion v)) continue;
@@ -831,12 +898,16 @@ namespace GCTonePrism.Manager
                         string oldDir = System.IO.Path.Combine(gameFolder, oldLeaf);
                         string newDir = System.IO.Path.Combine(gameFolder, newLeaf);
 
-                        if (System.IO.Directory.Exists(newDir))
+                        // (#158 round 6 M-2) reservedOldDirs に含まれる newDir は他 plan の oldDir、
+                        // = rename 実行で空く予定なので衝突 skip。それ以外 (= 純粋に既存 disk フォルダ)
+                        // のみ真の衝突として block する。
+                        if (System.IO.Directory.Exists(newDir) && !reservedOldDirs.Contains(newDir))
                         {
                             MessageBox.Show(
                                 "バージョンフォルダのリネームに失敗しました:\n" +
                                 "  " + oldDir + " → " + newDir + "\n\n" +
-                                "  移動先フォルダが既に存在します。別のバージョン番号を指定してください。",
+                                "  移動先フォルダが既に存在します (他の rename 計画でも空く予定なし)。" +
+                                "別のバージョン番号を指定してください。",
                                 "フォルダ衝突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                             return;
                         }
@@ -969,7 +1040,13 @@ namespace GCTonePrism.Manager
                                 "DB と disk の不整合が残っている version は手動で再編集してください。",
                                 "DB 部分更新失敗 (要手動確認)", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         }
-                        throw;
+                        // (#158 round 6 H-1) 旧実装は `throw;` で外側 catch (System.Data.SQLite.SQLiteException
+                        // / Exception) に再投していたため、本 catch で出した詳細 MessageBox の直後に
+                        // 「ゲームの更新に失敗しました\n\n{ex.Message}」の汎用 MessageBox が必ず 2 枚目
+                        // として出る UX bug があった (= partial commit / 安全 rollback 両 path で必発)。
+                        // ここで return すれば form は閉じず DialogResult は default の None のまま、user は
+                        // 状態を見て手動で Cancel するか修正リトライできる。
+                        return;
                     }
                     
                     // 3. メインのゲーム情報を更新（選択中バージョンの全フィールドを反映）

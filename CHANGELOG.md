@@ -1548,6 +1548,19 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 **Codex round 5 false positive 4 件**: CX-2 / CX-3 / round 3 M-4 / round 4 codex P1 を re-flag されたもの、いずれも fix 済でコードに変更なし。
 
+**Round 6 review fix (codex P2 NEW + senior H/M/L 系)** — version bump なし、本 entry に統合:
+
+- **Senior H-1 (M-4 catch 二重 MessageBox)**: round 5 codex P1 で追加した M-4 catch ブロック末尾の `throw;` が outer `catch (SQLiteException) / catch (Exception)` に再投され、partial-commit / 安全 rollback 両 path で必ず汎用「ゲームの更新に失敗しました」MessageBox が 2 枚目として表示される UX bug があった。`throw;` を `return;` に変更、form は閉じず DialogResult は default (None) のまま、user に修正リトライ / Cancel 選択肢を残す形に。
+- **Round 6 codex P2 (dup check 正規化欠如)**: 旧 `GroupBy(v => v.Version)` は raw 文字列 key で過去 DB の `v1.0.0` / `1.0.0` / `V1.0.0` を別 key 扱い → semantic 上は重複なのに通る silent danger (= Q2 fix の裏口再オープン)。`GroupBy` キーを `SemverInputControl.TryNormalize` の正規化結果に変更、parse 失敗 (= malformed) は raw value を fallback key として別扱い (M-1 全件 scan で別途 block されるため重複 collapse は不要)。MessageBox 文言にも「v 大文字/小文字・leading v 有無は同一視」を明記、生値群も併記して原因を見せる。
+- **Senior M-1 (LoadVersions 警告 non-blocking で silent v0.0.0 corruption)**: LoadVersions 集約警告 MessageBox は notice であって block ではないため、user dismiss → そのまま OK で raw malformed v.Version が DB に書き戻る silent path があった。`btnOK_Click` に `TryNormalize` 全件 scan + block を追加 (= H-1 全件 suffix scan と同 pattern、最終防衛線)。**既知の残存 path** として「currently-displayed の malformed が dup-check 直前 SaveGameDataToVersion で clamp 値に上書き済 → TryNormalize succeed → 本 scan で catch できない」を comment 明記、LoadVersions 警告での user 認知 + UI clamp 表示 visibility に頼る (= 表示中 version は user の目に入っているはず)。
+- **Senior M-2 (Phase 1 衝突 check が chained rename 非対応)**: 旧 `Directory.Exists(newDir)` は disk 現在状態だけ見ていたため、同 OK 内で chained rename (例: A→B / B→C) があると A→B 計画が「B が既存」で abort、user は「B→C で B が空くこと」を発見不能で詰む。renamePlan 全件の oldDir を `reservedOldDirs: HashSet<string>` (OrdinalIgnoreCase) で「予約済み slot」扱いに集約、`Directory.Exists(newDir) && !reservedOldDirs.Contains(newDir)` で真の衝突のみ block。循環 rename (A→B / B→A) は両方の oldDir が両方の newDir でもあるため互いに skip → Phase 2 で先行 Move の newDir 衝突で fail する経路に流れる (rollback 経路は CX-1 で整備済のため許容)。
+- **Senior M-3 (コメント line drift)**: `// (#158 L-2) ... (line 497 付近) ...` の hardcoded 行番号が実際の call site (約 80 行ずれ) と乖離していた。round 2 H-1 と同 pattern でシンボル参照「`SaveGameDataToVersion(currentSelected)` 呼び出し (dup-check ブロックの直前)」に書き換え。
+- **Senior L-1 (Console.WriteLine vs Logger)**: 本 PR で新規追加した `RollbackCompletedRenames` rollback 失敗 log + rename skip 警告が `Console.WriteLine` 直書き、AGENTS.md「Cross-component Standards」違反。pre-existing の同型 Console.WriteLine も Manager 全体に複数あり sweep 範囲が広いため follow-up [#166](https://github.com/ken1208git/GCTonePrism/issues/166) で別途消化。
+- **Senior L-2 (txtSuffix MaxLength)**: SemverInputControl.Designer の `txtSuffix` に `MaxLength = 32` 追加。SemVer 2.0.0 自体は suffix 長制限なしだが本 project 運用想定 (#133 ガイドラインの「rc1 / beta.2 程度」) に合わせた reasonable 上限、長文 suffix の folder 名肥大化 / UI 視認性低下を構造的排除に揃える。
+- **Senior L-3 (Suffix setter validation bypass)**: `Suffix` setter は `txtSuffix.Text` 直代入で `IsSuffixValid` 等の事前 check を持たない (= caller responsibility)。本 PR 内で setter を使う caller は無いが、将来 footgun を防ぐため docstring で「caller は事前に `IsSuffixValid(value)` で書式確認する責務を負う」「防御 setter にしたい場合は `TrySetSuffix` API 追加を検討」を明示。
+
+**Codex round 6 false positive 3 件**: CX-2 / round 3 M-4 / round 4 codex P1 を re-flag されたもの、いずれも fix 済でコードに変更なし。
+
 ### [Manager v0.8.10] - 2026-05-13
 
 PR #150 で dir rename (`GCTonePrism_Manager/` → `Manager/`) に連動して `PathManager.cs` の self-reference リテラル + priority-3 detection ロジック (StartsWith 二段比較 + Manager/Launcher sibling 同時存在検証) + csproj `<RootNamespace>` を修正。配布構造変更を含むため SemVer 厳密だと minor 寄りだが、Install.bat の v0.2.0 → 新構造 migration で自動吸収されエンドユーザー視点では invisible のため patch bump 扱い。

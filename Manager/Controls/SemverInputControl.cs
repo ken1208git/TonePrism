@@ -238,6 +238,15 @@ namespace GCTonePrism.Manager.Controls
             set { numPatch.Value = Clamp(value, numPatch.Minimum, numPatch.Maximum); }
         }
 
+        /// <summary>
+        /// pre-release suffix (`-rc1` 等の `-` の後ろ部分)。
+        ///
+        /// **注意 (#158 round 6 L-3)**: setter は `txtSuffix.Text` に直接代入するだけで内部 validation
+        /// を持たない (= `IsSuffixValid` などの check を bypass)。caller は事前に `IsSuffixValid(value)`
+        /// で書式 (英数字 + ハイフン + ピリオド区切り、空 identifier 不可) を確認する責務を負う。
+        /// 本 PR 内で setter を使う caller は無いが、将来の caller が footgun を踏まないよう明示。
+        /// 防御 setter にしたい場合は `TrySetSuffix(value, out error)` パターンへの API 追加を検討。
+        /// </summary>
         public string Suffix
         {
             get { return (txtSuffix.Text ?? "").Trim(); }
