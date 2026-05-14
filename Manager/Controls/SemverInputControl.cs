@@ -11,8 +11,10 @@ namespace GCTonePrism.Manager.Controls
     /// 設計意図:
     /// - 単一 TextBox の自由入力だと `1.0.0` / `v1.0.0` / `1.0` / 全角ピリオド / 空白混入 等のフォーマット
     ///   ゆれを silent に DB に入れてしまう。NumericUpDown × 3 で構造的に typo / ゆれを排除。
-    /// - SemVer 知識のない部員が「Major って何?」と迷わないよう、別途 SemverHelpControl で解説 panel を
-    ///   並べる運用を想定。
+    /// - SemVer 知識のない部員が「Major って何?」と迷う対策は、本 control では UI 解説を持たず、
+    ///   #133 ゲーム制作ガイドライン (GAME_SUBMISSION_GUIDE.md) で文書として解説する方針 (round 3 で
+    ///   collapsible help panel + bump button を撤去、ガイドライン doc に集約)。本 control は SemVer
+    ///   形式の入力 UI に専念。
     /// - pre-release suffix (`-rc1` 等) は通常運用では使わないため optional。AGENTS.md / SPEC でも
     ///   pre-release suffix 付き Bundle version は skip warn する旨記載済 (= 想定外運用)。
     /// </summary>
@@ -38,7 +40,17 @@ namespace GCTonePrism.Manager.Controls
             txtSuffix.TextChanged += (s, e) => OnSuffixChanged();
         }
 
-        /// <summary>v prefix 付きの SemVer 文字列 (例: "v1.2.3" / "v1.2.3-rc1")。setter は v 有無両方受理、null/空文字で v0.0.0 にリセット。</summary>
+        /// <summary>
+        /// v prefix 付きの SemVer 文字列 (例: "v1.2.3" / "v1.2.3-rc1")。setter は v 有無両方受理、
+        /// null/空文字 / parse 失敗で v0.0.0 にリセット (silent fallback)。
+        ///
+        /// **重要 (#158 H2)**: setter は parse 失敗時 silent に v0.0.0 にする。caller-knows-valid な
+        /// 用途 (= AddGameForm の hardcoded "v1.0.0" default 等) のみで使うこと。DB 等の **外部由来の
+        /// 値** を流し込む場合は <see cref="TryParseAndSet"/> を使い、parse 失敗を caller 側で警告
+        /// 表示すること (= LoadGameDataForVersion / VersionUpForm ctor)。setter で silent fallback
+        /// すると malformed DB 値が user 操作なしに v0.0.0 に化けて DB に書き戻る silent corruption が
+        /// 発生する。
+        /// </summary>
         public string VersionString
         {
             get
@@ -49,25 +61,49 @@ namespace GCTonePrism.Manager.Controls
             }
             set
             {
-                int major = 0, minor = 0, patch = 0;
-                string suffix = "";
-                if (!string.IsNullOrEmpty(value))
-                {
-                    var m = VersionRegex.Match(value.Trim());
-                    if (m.Success)
-                    {
-                        int.TryParse(m.Groups["major"].Value, out major);
-                        int.TryParse(m.Groups["minor"].Value, out minor);
-                        int.TryParse(m.Groups["patch"].Value, out patch);
-                        suffix = m.Groups["suffix"].Success ? m.Groups["suffix"].Value : "";
-                    }
-                    // parse 失敗時は 0.0.0 にフォールバック (silent danger 排除のため警告は caller が出す)
-                }
-                numMajor.Value = Clamp(major, numMajor.Minimum, numMajor.Maximum);
-                numMinor.Value = Clamp(minor, numMinor.Minimum, numMinor.Maximum);
-                numPatch.Value = Clamp(patch, numPatch.Minimum, numPatch.Maximum);
-                txtSuffix.Text = suffix;
+                string ignored;
+                TryParseAndSet(value, out ignored);
             }
+        }
+
+        /// <summary>
+        /// VersionString setter と同じ parse 動作だが、parse 成否を bool で返し、失敗時は error
+        /// メッセージを out 引数で受け取れる版 (#158 H2 fix)。caller が外部由来の version 文字列
+        /// (例: DB から read した malformed value) を流し込む際は本 method を使い、false が返れば
+        /// MessageBox / Logger で警告を出すこと。値自体は失敗時も v0.0.0 に強制設定される (= UI の
+        /// 整合性のため)、戻り値で「fallback が走った」事実を caller に伝えるのが本 API の責務。
+        /// </summary>
+        public bool TryParseAndSet(string value, out string error)
+        {
+            error = null;
+            int major = 0, minor = 0, patch = 0;
+            string suffix = "";
+            bool ok = false;
+            if (string.IsNullOrEmpty(value))
+            {
+                error = "バージョン文字列が空です";
+            }
+            else
+            {
+                var m = VersionRegex.Match(value.Trim());
+                if (m.Success)
+                {
+                    int.TryParse(m.Groups["major"].Value, out major);
+                    int.TryParse(m.Groups["minor"].Value, out minor);
+                    int.TryParse(m.Groups["patch"].Value, out patch);
+                    suffix = m.Groups["suffix"].Success ? m.Groups["suffix"].Value : "";
+                    ok = true;
+                }
+                else
+                {
+                    error = "バージョン文字列が SemVer 形式ではありません: '" + value + "'";
+                }
+            }
+            numMajor.Value = Clamp(major, numMajor.Minimum, numMajor.Maximum);
+            numMinor.Value = Clamp(minor, numMinor.Minimum, numMinor.Maximum);
+            numPatch.Value = Clamp(patch, numPatch.Minimum, numPatch.Maximum);
+            txtSuffix.Text = suffix;
+            return ok;
         }
 
         public int Major

@@ -57,9 +57,23 @@ namespace GCTonePrism.Manager
             lblCurrentVersion.Text = currentVersion;
             NewVersion = null;
 
-            // semverNext を currentVersion で初期化 + Patch を auto-bump (= 「迷ったら Patch」default)
-            // (#158) ユーザーは bump button で Major/Minor を選び直すか、numeric を直接編集するか選択
-            semverNext.VersionString = currentVersion;
+            // semverNext を currentVersion で初期化 + Patch を auto-bump (= 「迷ったら Patch」default)。
+            // (#158 H2) currentVersion が malformed (= DB に "1.0" / "alpha" 等が残っていた場合) の
+            // silent v0.0.0 fallback で「気づかれずに 0.0.1 として書き戻される」silent corruption を
+            // 防ぐため TryParseAndSet で成否取得、失敗時は MessageBox 警告。caller (= 呼び出し側
+            // GameSectionPanel 等) がそもそも malformed をフィルタするのが理想だが、本 form 単独でも
+            // 防御線を張る。
+            string semverParseErr;
+            if (!semverNext.TryParseAndSet(currentVersion, out semverParseErr))
+            {
+                MessageBox.Show(
+                    "現在の version 文字列が SemVer 形式ではありません。\n\n" +
+                    "  値: '" + (currentVersion ?? "(null)") + "'\n" +
+                    "  解析エラー: " + (semverParseErr ?? "(unknown)") + "\n\n" +
+                    "v0.0.0 + Patch+1 = v0.0.1 にフォールバック表示しています。意図した version に" +
+                    "修正してから OK を押してください。",
+                    "バージョン読み込み警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
             semverNext.BumpPatch();
         }
 
@@ -385,8 +399,10 @@ namespace GCTonePrism.Manager
 
             if (semverNext.VersionString == currentVersion)
             {
+                // (#158 H3) bump button は round 3 で削除済 (#133 ガイドライン doc に移管予定)、
+                // その案内を撤去。NumericUpDown を直接操作する旨だけ案内。
                 MessageBox.Show("現在のバージョンと同じバージョンは指定できません。\n\n" +
-                    "「Major+1」「Minor+1」「Patch+1」のボタンで bump するか、数値を直接編集してください。",
+                    "Major / Minor / Patch のいずれかの数値を直接編集してください (= ▲ で +1、▼ で -1)。",
                     "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 semverNext.Focus();
                 return false;

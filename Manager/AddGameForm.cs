@@ -70,8 +70,8 @@ namespace GCTonePrism.Manager
             // リリース年の初期値を今年に設定
             numReleaseYear.Value = DateTime.Now.Year;
 
-            // バージョンの初期値を設定 (#158: SemverInputControl の default は v1.0.0)
-            semverInput.VersionString = "v1.0.0";
+            // (#158 L2) バージョンの初期値は Designer (`semverInput.VersionString = "v1.0.0";`)
+            // で設定済なので Load では再代入しない (= Designer を SoT に統一、二重初期化のノイズ排除)。
 
             // 製作者情報のDataGridViewを初期化
             InitializeDevelopersGrid();
