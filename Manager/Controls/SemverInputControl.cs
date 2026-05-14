@@ -30,20 +30,27 @@ namespace GCTonePrism.Manager.Controls
         public const int MaxPatch = 999;
         public const int MinComponent = 0;
 
-        // suffix 用 regex: SemVer 2.0.0 §9 strict 準拠 = ドット区切り identifier 列、各 identifier は
+        // suffix 用 regex: SemVer 2.0.0 §9 を概ね準拠 = ドット区切り identifier 列、各 identifier は
         // 英数字 + ハイフンのみ・空 identifier 不可。"foo" / "rc1" / "alpha.2" / "rc-1" は OK、"foo.."
         // / ".foo" / "foo." / ".." / "" は reject (空 identifier 含む)。空 suffix の場合は IsValid 側
         // で別判定 (= suffix 入力なし時はそもそも regex match 不要)。(#158 L-3)
-        private static readonly Regex SuffixRegex = new Regex(
-            @"^[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*$", RegexOptions.Compiled);
+        // (#158 round 5 M-2) docstring 訂正: 厳密には SemVer 2.0.0 §2 の数値 identifier leading zero
+        // 禁止 (= "v1.0.0-01" reject) も strict 要件だが本 regex はそこまで check しない (= round 4 L-4
+        // で見送り判断)。"§9 strict 準拠" だと完全 strict と誤読されるため「概ね準拠」表現に弱める。
+        private const string SuffixRegexPattern = @"^[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*$";
+        private static readonly Regex SuffixRegex = new Regex(SuffixRegexPattern, RegexOptions.Compiled);
 
         // 入力済み version 全体を parse する regex (setter 用)。
         // (#158 CX-3) IgnoreCase: 過去 DB / 手書きで `V1.2.3` (大文字 V) が入った値を malformed
         // 扱いで silent v0.0.0 fallback すると edit/save 経路で意図せず別 version に化けるため、
         // 大文字 V も受理する (= regex は case-insensitive、出力側 (VersionString getter) は常に
         // 小文字 v で正規化する)。
+        // (#158 round 5 M-1) suffix 部分は SuffixRegex の inner pattern と同じ「空 identifier 不可」
+        // ルールに揃える。旧 `[a-zA-Z0-9.\-]+` だと `v1.0.0-..foo` 等を VersionRegex は受理して
+        // SuffixRegex は reject、Load 警告 vs OK 警告で 2 段検出のずれが生じていた (= 同じ規則で
+        // 一段で弾く方が UX 一貫)。
         private static readonly Regex VersionRegex = new Regex(
-            @"^v?(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:-(?<suffix>[a-zA-Z0-9.\-]+))?$",
+            @"^v?(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:-(?<suffix>[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*))?$",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         /// <summary>VersionString が変更された時 (= Major / Minor / Patch / Suffix のいずれかが更新)</summary>
@@ -178,17 +185,20 @@ namespace GCTonePrism.Manager.Controls
                     // fallback が走った事実を caller (= MessageBox 表示経路) に伝える。
                     // (#158 round 3 M-1) 文言を 3 軸別々に組み立て (Designer 側で Major=99 / Minor=999
                     // / Patch=999 と Maximum が異なるため、共通文言だと user に誤った範囲を伝える)。
-                    else if (majorOk && (major < numMajor.Minimum || major > numMajor.Maximum))
+                    // (#158 round 5 L-3) 上の if で `!majorOk || !minorOk || !patchOk` を error path に
+                    // 流しているため、ここに到達した時点で 3 つとも true 確定 → `majorOk &&` のような
+                    // defensive condition は dead code、削除して可読性を上げる。
+                    else if (major < numMajor.Minimum || major > numMajor.Maximum)
                     {
                         error = "Major (= " + major + ") は " + (int)numMajor.Minimum + "-" +
                             (int)numMajor.Maximum + " の範囲です: '" + value + "'";
                     }
-                    else if (minorOk && (minor < numMinor.Minimum || minor > numMinor.Maximum))
+                    else if (minor < numMinor.Minimum || minor > numMinor.Maximum)
                     {
                         error = "Minor (= " + minor + ") は " + (int)numMinor.Minimum + "-" +
                             (int)numMinor.Maximum + " の範囲です: '" + value + "'";
                     }
-                    else if (patchOk && (patch < numPatch.Minimum || patch > numPatch.Maximum))
+                    else if (patch < numPatch.Minimum || patch > numPatch.Maximum)
                     {
                         error = "Patch (= " + patch + ") は " + (int)numPatch.Minimum + "-" +
                             (int)numPatch.Maximum + " の範囲です: '" + value + "'";

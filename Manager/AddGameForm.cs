@@ -72,10 +72,13 @@ namespace GCTonePrism.Manager
 
             // (#158 L2) バージョンの初期値は AddGameForm.Designer.cs の `semverInput.VersionString = "v1.0.0";`
             // 設定が SoT。Load では再代入しない (= 二重初期化のノイズ排除)。
-            // (#158 round 4 L-5) ただし SemverInputControl.Designer.cs 側にも `numMajor.Value = 1`
-            // (Minor/Patch=0 default) があるため、AddGameForm.Designer.cs の VersionString 設定を
-            // 削除しても結果的に v1.0.0 になる (= 偶然の二段保険)。SoT は AddGameForm.Designer.cs 側で
-            // あり、SemverInputControl.Designer の Major=1 default に依存しないこと。
+            // (#158 round 4 L-5 + round 5 L-2) 構造的には:
+            //   - SemverInputControl.Designer の `numMajor.Value = 1` (Minor/Patch は明示なしで
+            //     NumericUpDown.Value class default = 0)
+            //   - AddGameForm.Designer の `semverInput.VersionString = "v1.0.0"` (上書き)
+            // の二段で v1.0.0 が確定する (Major は二段保険、Minor/Patch は class default に一段依存)。
+            // SoT は AddGameForm.Designer 側であり、SemverInputControl.Designer の Major=1 / Minor/Patch
+            // class default のいずれにも依存しない設計を維持すること。
 
             // 製作者情報のDataGridViewを初期化
             InitializeDevelopersGrid();

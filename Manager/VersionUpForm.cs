@@ -75,17 +75,24 @@ namespace GCTonePrism.Manager
             // caller (= 呼び出し側 GameSectionPanel 等) がそもそも malformed をフィルタするのが理想
             // だが、本 form 単独でも防御線を張る。
             string semverParseErr;
-            if (!semverNext.TryParseAndSet(currentVersion, out semverParseErr))
+            bool semverOk = semverNext.TryParseAndSet(currentVersion, out semverParseErr);
+            semverNext.BumpPatch();
+            if (!semverOk)
             {
+                // (#158 round 5 H-1) 旧文言は "v0.0.0 + Patch+1 = v0.0.1 にフォールバック" 固定だったが
+                // round 4 H-1 で TryParseAndSet が NumericUpDown 範囲外を parse 失敗扱いにした結果、
+                // range overflow ケース (例: v500.0.0) では Clamp で UI が上限値 (例: v99.0.0) に張り付く
+                // ため固定文言だと UI 表示と矛盾する。BumpPatch 後の semverNext.VersionString を本文に
+                // 動的挿入して「現在の表示値: vX.Y.Z」と書く。
                 MessageBox.Show(this,
                     "現在の version 文字列が SemVer 形式ではありません。\n\n" +
                     "  値: '" + (currentVersion ?? "(null)") + "'\n" +
                     "  解析エラー: " + (semverParseErr ?? "(unknown)") + "\n\n" +
-                    "v0.0.0 + Patch+1 = v0.0.1 にフォールバック表示しています。意図した version に" +
-                    "修正してから OK を押してください。",
+                    "現在の表示値: " + semverNext.VersionString + "\n" +
+                    "  (parse 失敗のため数値部は v0.0.0 / 上限値に clamp されています)\n\n" +
+                    "意図した version に修正してから OK を押してください。",
                     "バージョン読み込み警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
-            semverNext.BumpPatch();
 
             // コンボボックスを初期化（選択値はbaseVersion読み込み時に設定）
             GameFormHelper.InitializeDifficultyCombo(cmbDifficulty);

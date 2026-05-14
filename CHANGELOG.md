@@ -1534,6 +1534,20 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 **Codex round 4 false positive 3 件**: CX-2 / CX-3 (round 2 で fix 済) と round 3 M-4 (rollback) を re-flag されたもの、コードに変更なし。
 
+**Round 5 review fix (codex P1 NEW + senior H/M/L 系)** — version bump なし、本 entry に統合:
+
+- **Round 5 codex P1 (partial DB commit drift)**: `VersionRepository.Update` は call ごとに独立 transaction で commit するため、M-4 ループで N 件目失敗時に 0..N-1 件目は既に DB commit 済の状態で `RollbackCompletedRenames` を呼ぶと commit 済 row が指す新 folder 名を消失させて drift 拡大。`dbSucceededCount` を track し、(a) `==0` なら従来通り disk + in-memory rollback、(b) `>0` なら disk rollback skip + 「partial commit 状態」の詳細 MessageBox + Manager 再起動を促す形に分岐。
+- **Senior H-1 (MessageBox 文言と clamp 結果の矛盾)**: round 4 H-1 で `TryParseAndSet` が NumericUpDown 範囲外を parse 失敗扱いにした結果、range overflow ケースは UI 値が `v0.0.0` ではなく Clamp で上限値 (例: `v99.0.0`) に張り付くが、VersionUpForm / EditGameForm の警告 MessageBox は「v0.0.0 にフォールバック」固定文言で残っていた。VersionUpForm 側は `BumpPatch` 後の `semverNext.VersionString` を本文に動的挿入「現在の表示値: vX.Y.Z」に変更、EditGameForm 側 (LoadVersions 集約警告) は「v0.0.0 または上限値に clamp」表現で UI 確認を促す形に変更。
+- **Senior M-1 (VersionRegex / SuffixRegex の規則乖離)**: round 3 L-3 で `SuffixRegex` を SemVer §9 strict 寄せにしたが `VersionRegex` の suffix capture `[a-zA-Z0-9.\-]+` は緩いまま放置されていたため、`v1.0.0-..foo` が LoadVersions 時の `TryNormalize` 全件 scan は素通し、OK 時の `IsSuffixValid` 全件 scan で初めて reject される 2 段検出のずれがあった。VersionRegex の suffix capture を SuffixRegex の inner pattern (`[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*`) と揃えて Load/OK で同規則に統一。
+- **Senior M-2 (docstring 誇大表記)**: SuffixRegex の docstring「SemVer 2.0.0 §9 strict 準拠」は厳密には §2 leading zero check を満たさず誇大。「概ね準拠 (round 4 L-4 で leading zero 見送り判断)」表現に弱める。
+- **Senior L-1 (dead using 削除)**: `EditGameForm.cs` の `using System.Text.RegularExpressions;` は本 PR で suffix 検証を `SemverInputControl` に寄せた結果 unused、削除。
+- **Senior L-2 (SoT コメント精度向上)**: round 4 L-5 のコメントが Major=1 default のみ言及していて Minor/Patch も `NumericUpDown.Value` class default (=0) に依存している事実を隠していたため、両者を明示する wording に修正。
+- **Senior L-3 (dead defensive condition)**: `TryParseAndSet` の `else if (majorOk && (major < ...))` の `majorOk &&` は直前の `if (!majorOk || ...)` で false 確定経路を弾いた後なので到達不能、削除して可読性向上。
+- **Senior L-4 (field 宣言位置)**: `currentDisplayingVersion` field がメソッド直後に挿入されてフィールド集約規約を破っていたため、`_originalVersionByDbId` の隣に移動。
+- **Senior L-5 (SourceExists=false 経路の rollback 対称性)**: `SourceExists=false` ブランチでも path/snapshot mutation はするが `completedRenames` に追加されず `RollbackCompletedRenames` の対象外だった。`RenamePlan.MoveDone` flag を導入、SourceExists=false でも `MoveDone=false` として `completedRenames.Add(p)` し、`RollbackCompletedRenames` は `MoveDone=true` のみ disk Move を試行 + in-memory revert は全 entry で実行する形に統一。
+
+**Codex round 5 false positive 4 件**: CX-2 / CX-3 / round 3 M-4 / round 4 codex P1 を re-flag されたもの、いずれも fix 済でコードに変更なし。
+
 ### [Manager v0.8.10] - 2026-05-13
 
 PR #150 で dir rename (`GCTonePrism_Manager/` → `Manager/`) に連動して `PathManager.cs` の self-reference リテラル + priority-3 detection ロジック (StartsWith 二段比較 + Manager/Launcher sibling 同時存在検証) + csproj `<RootNamespace>` を修正。配布構造変更を含むため SemVer 厳密だと minor 寄りだが、Install.bat の v0.2.0 → 新構造 migration で自動吸収されエンドユーザー視点では invisible のため patch bump 扱い。

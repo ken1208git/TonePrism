@@ -4,7 +4,6 @@ using System.Data;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using GCTonePrism.Manager.Controls;
@@ -30,11 +29,19 @@ namespace GCTonePrism.Manager
         // OK 押下時に「version 文字列が変わった」を検出して per-version folder rename する判定に使う。
         private Dictionary<int, string> _originalVersionByDbId = new Dictionary<int, string>();
 
+        // (#158 round 5 L-4) cmbVersionList の現在表示中 GameVersion を保持。dropdown 切替時に
+        // SaveGameDataToVersion でこの値に対して in-memory commit してから新しい version を Load する。
+        // 旧実装は cmbVersionList_SelectedIndexChanged 直後に宣言されてフィールド集約規約を破っていた。
+        private GameVersion currentDisplayingVersion = null;
+
         // (#158 CX-1) folder rename を 2-phase 化するための plan 単位 (Phase 1 で構築 / Phase 2 で実行)。
         // (#158 round 4 codex P1) Old{Executable,Thumbnail,Background}Path: in-memory state rollback 用に
         // path 書き換え前の値を capture。disk Move を rollback しても in-memory が NEW のままだと、同
         // dialog で再 OK 押下時に diff check が false (originalVer も snapshot 経由で NEW 化済) で
         // rename skip → DB に NEW 値 + 旧 disk folder 名で書き込む silent drift が再発する。
+        // (#158 round 5 L-5) MoveDone: SourceExists=false 経路 (旧 folder 不在で Move skip) でも
+        // path/snapshot mutation は行うので rollback 対象としては記録しつつ、disk Move 戻しは skip
+        // させる flag。Move を実行した entry のみ true。
         private class RenamePlan
         {
             public GameVersion Version;
@@ -42,17 +49,25 @@ namespace GCTonePrism.Manager
             public string NewDir;
             public string OriginalVer;
             public bool SourceExists;
+            public bool MoveDone;
             public string OldExecutablePath;
             public string OldThumbnailPath;
             public string OldBackgroundPath;
         }
 
         /// <summary>
-        /// (#158 round 4 codex P1) rename rollback の共通処理: completedRenames を逆順に disk Move を
-        /// 戻し、各エントリの in-memory state (_originalVersionByDbId snapshot + GameVersion の path 群)
-        /// も capture 前の値に restore する。CX-1 (Phase 2 中の Move 失敗) と M-4 (UpdateGameVersion
-        /// 失敗) 両方の catch 経路で呼び出される。disk Move の失敗は console log + count、in-memory
-        /// 復元は失敗しない (= 単純代入)。
+        /// (#158 round 4 codex P1 + round 5 L-5) rename rollback の共通処理: completedRenames を逆順に
+        /// disk Move を戻し (MoveDone=true のみ)、各エントリの in-memory state (_originalVersionByDbId
+        /// snapshot + GameVersion の path 群) を capture 前の値に restore する。CX-1 (Phase 2 中の Move
+        /// 失敗) と M-4 (UpdateGameVersion 失敗) 両方の catch 経路で呼び出される。disk Move の失敗は
+        /// console log + count、in-memory 復元は失敗しない (= 単純代入)。
+        ///
+        /// **注意 (#158 round 5 codex P1)**: 本 method は「DB が一切 commit されていない」前提でのみ
+        /// 安全に呼べる。`VersionRepository.Update` は call ごとに独立 transaction で commit するため、
+        /// M-4 の UpdateGameVersion ループで N 件目で失敗しても 0..N-1 件目は既に DB commit 済。その
+        /// 状態で本 method を呼ぶと commit 済 row が指す path/folder 名が disk rollback で消失して
+        /// drift する。M-4 catch は dbSucceededCount を track して、>0 なら本 method を呼ばずに別経路
+        /// (ユーザーに partial commit 状態を通知 + Manager 再起動を促す) で処理すること。
         /// </summary>
         private void RollbackCompletedRenames(List<RenamePlan> completedRenames, out int rolledBack, out int rollbackFailures)
         {
@@ -61,17 +76,21 @@ namespace GCTonePrism.Manager
             for (int i = completedRenames.Count - 1; i >= 0; i--)
             {
                 var done = completedRenames[i];
-                try
+                if (done.MoveDone)
                 {
-                    System.IO.Directory.Move(done.NewDir, done.OldDir);
-                    rolledBack++;
+                    try
+                    {
+                        System.IO.Directory.Move(done.NewDir, done.OldDir);
+                        rolledBack++;
+                    }
+                    catch (Exception rbEx)
+                    {
+                        rollbackFailures++;
+                        Console.WriteLine("[EditGameForm] (#158 rollback) disk rename 戻し失敗: " + done.NewDir + " → " + done.OldDir + ": " + rbEx.Message);
+                    }
                 }
-                catch (Exception rbEx)
-                {
-                    rollbackFailures++;
-                    Console.WriteLine("[EditGameForm] (#158 rollback) disk rename 戻し失敗: " + done.NewDir + " → " + done.OldDir + ": " + rbEx.Message);
-                }
-                // in-memory 復元 (disk Move 成否に関わらず、UI/DB drift を最小化するため必ず実行)。
+                // in-memory 復元 (disk Move 成否 / SourceExists=false に関わらず、UI/DB drift を最小化
+                // するため必ず実行)。
                 _originalVersionByDbId[done.Version.Id] = done.OriginalVer;
                 done.Version.ExecutablePath = done.OldExecutablePath;
                 done.Version.ThumbnailPath = done.OldThumbnailPath;
@@ -224,11 +243,17 @@ namespace GCTonePrism.Manager
                 }
                 if (malformedVersions.Count > 0)
                 {
+                    // (#158 round 5 H-1) 旧文言は "v0.0.0 にフォールバック" 固定だったが round 4 H-1 で
+                    // TryParseAndSet が NumericUpDown 範囲外を parse 失敗扱いにしたため、range overflow
+                    // (例: v500.0.0) では Clamp で UI が上限値 (例: v99.0.0) に張り付く。LoadVersions の
+                    // 集約 MessageBox は per-version の clamp 結果を全件列挙すると長大になるため、文言を
+                    // 「v0.0.0 または上限値に clamp」と幅広く書いて user に「該当 version を選択して
+                    // UI 表示値を確認」する flow を促す形にする。
                     MessageBox.Show(this,
                         "DB に保存されている version 文字列のうち " + malformedVersions.Count + " 件が " +
-                        "SemVer 形式ではありません。該当バージョンを選択すると v0.0.0 にフォールバック表示" +
-                        "されるので、意図した version 番号に修正してから OK を押してください (= 修正せず OK " +
-                        "するとこの値が DB に書き戻されます)。\n\n" +
+                        "SemVer 形式ではありません。該当バージョンを選択すると v0.0.0 または上限値に " +
+                        "clamp されて表示されるので、UI で実表示値を確認 → 意図した version 番号に修正して " +
+                        "から OK を押してください (= 修正せず OK するとこの clamp 値が DB に書き戻されます)。\n\n" +
                         string.Join("\n", malformedVersions),
                         "バージョン読み込み警告 (" + malformedVersions.Count + " 件)",
                         MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -292,8 +317,6 @@ namespace GCTonePrism.Manager
                 LoadGameDataForVersion(selectedVersion);
             }
         }
-
-        private GameVersion currentDisplayingVersion = null;
 
         /// <summary>
         /// バージョンオブジェクトのパスを相対パスに変換・適用する
@@ -833,20 +856,27 @@ namespace GCTonePrism.Manager
                     }
 
                     // Phase 2: 計画通り rename 実行。例外時は完了済を逆順 rollback。
+                    // (#158 round 5 L-5) SourceExists=false の entry も path/snapshot mutation するため
+                    // completedRenames に追加 (MoveDone=false で disk Move skip flag)。これで
+                    // RollbackCompletedRenames が in-memory revert の対象として拾える。
                     var completedRenames = new List<RenamePlan>();
                     foreach (var p in renamePlan)
                     {
                         if (!p.SourceExists)
                         {
                             // 旧 folder 不在: AddGameForm 経由で作成されなかった version (= DB のみ存在) 等。
-                            // DB 更新だけ続けて警告ログのみ。rollback 対象外 (Move していないので)。
+                            // DB 更新だけ続けて警告ログのみ。disk Move 自体は skip するが path/snapshot
+                            // mutation はやるため completedRenames に MoveDone=false で記録。
                             Console.WriteLine("[EditGameForm] (#158 Q3) version '" + p.OriginalVer + "' のフォルダが見つかりません、rename skip: " + p.OldDir);
+                            p.MoveDone = false;
+                            completedRenames.Add(p);
                         }
                         else
                         {
                             try
                             {
                                 System.IO.Directory.Move(p.OldDir, p.NewDir);
+                                p.MoveDone = true;
                                 completedRenames.Add(p);
                             }
                             catch (Exception ex)
@@ -855,14 +885,15 @@ namespace GCTonePrism.Manager
                                 // 戻し + in-memory state (_originalVersionByDbId snapshot + GameVersion の
                                 // path 群) も capture 前に復元。同 dialog で再 OK 押下時に diff check が
                                 // 正しく triggered されて rename retry できる状態に戻す。
+                                // ここは DB write が一切走っていない (UpdateGameVersion ループより前) ため
+                                // RollbackCompletedRenames は安全に呼べる (round 5 codex P1 の制約該当なし)。
                                 int rolledBack, rollbackFailures;
                                 RollbackCompletedRenames(completedRenames, out rolledBack, out rollbackFailures);
                                 MessageBox.Show(
                                     "バージョンフォルダのリネームに失敗しました:\n" +
                                     "  " + p.OldDir + "\n  → " + p.NewDir + "\n\n" +
                                     "  " + ex.Message + "\n\n" +
-                                    "  完了済の rename " + completedRenames.Count + " 件のうち " +
-                                    rolledBack + " 件を元の名前に rollback しました" +
+                                    "  完了済の rename " + rolledBack + " 件を元の名前に rollback しました" +
                                     (rollbackFailures > 0 ? " (rollback 失敗 " + rollbackFailures + " 件、Console ログ参照)" : "") +
                                     "。\n  DB は更新していないので OK 押下前の状態に戻ります。\n\n" +
                                     "Launcher / 別プロセスが該当フォルダを使用していないか確認してください。",
@@ -884,10 +915,15 @@ namespace GCTonePrism.Manager
                         _originalVersionByDbId[p.Version.Id] = p.Version.Version;
                     }
 
-                    // (#158 round 3 M-4) UpdateGameVersion ループも try/catch で囲み、DB 例外時は
-                    // Phase 2 で完了済の rename を逆順 rollback。CX-1 で fix した「rename 中失敗 →
-                    // disk/DB drift」と同型の「rename 完了 → DB update 失敗 → disk は新名 / DB は
-                    // 旧名」silent corruption が、SQLite 一時的失敗等で再発しうるため塞ぐ。
+                    // (#158 round 3 M-4 + round 5 codex P1) UpdateGameVersion ループ。
+                    // VersionRepository.Update は call ごとに独立 transaction で commit するため、N 件目で
+                    // 失敗しても 0..N-1 件目は既に DB commit 済 (per-call transaction)。
+                    // - dbSucceededCount == 0: DB 未 commit、disk rollback で OK 押下前状態に戻せる安全
+                    //   path → 従来の RollbackCompletedRenames を呼ぶ。
+                    // - dbSucceededCount  > 0: 一部 DB commit 済、disk rollback すると commit 済 row が
+                    //   指す新 folder 名を消失させて drift 拡大。disk は NEW のままにして user に partial
+                    //   commit 状態 + Manager 再起動 + 手動修復を促す。
+                    int dbSucceededCount = 0;
                     try
                     {
                         foreach (var item in cmbVersionList.Items)
@@ -895,24 +931,44 @@ namespace GCTonePrism.Manager
                             if (item is GameVersion v)
                             {
                                 dbManager.UpdateGameVersion(v);
+                                dbSucceededCount++;
                             }
                         }
                     }
                     catch (Exception dbEx)
                     {
-                        // (#158 round 3 M-4 + round 4 codex P1) disk rollback + in-memory state restore。
-                        int rolledBack, rollbackFailures;
-                        RollbackCompletedRenames(completedRenames, out rolledBack, out rollbackFailures);
-                        MessageBox.Show(
-                            "バージョン情報の DB 更新に失敗しました:\n" +
-                            "  " + dbEx.Message + "\n\n" +
-                            "  完了済の rename " + completedRenames.Count + " 件のうち " +
-                            rolledBack + " 件を元の名前に rollback しました" +
-                            (rollbackFailures > 0
-                                ? " (rollback 失敗 " + rollbackFailures + " 件、Console ログ参照、手動で元に戻してください)"
-                                : "") +
-                            "。\n  DB は途中まで更新済の可能性があります。Manager を一度再起動して状態を確認してください。",
-                            "DB 更新失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        if (dbSucceededCount == 0)
+                        {
+                            // DB 一切 commit なし: disk + in-memory rollback で OK 押下前に戻す。
+                            int rolledBack, rollbackFailures;
+                            RollbackCompletedRenames(completedRenames, out rolledBack, out rollbackFailures);
+                            MessageBox.Show(
+                                "バージョン情報の DB 更新に失敗しました:\n" +
+                                "  " + dbEx.Message + "\n\n" +
+                                "  完了済の rename " + rolledBack + " 件を元の名前に rollback しました" +
+                                (rollbackFailures > 0
+                                    ? " (rollback 失敗 " + rollbackFailures + " 件、Console ログ参照、手動で元に戻してください)"
+                                    : "") +
+                                "。\n  DB は更新前なので OK 押下前の状態に戻ります。",
+                                "DB 更新失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                        else
+                        {
+                            // (#158 round 5 codex P1) 部分 commit 状態: disk rollback 不可 (commit 済 row
+                            // が指す新 folder を消すと drift 拡大)。disk は NEW のまま、user に partial
+                            // commit を通知 + Manager 再起動を促す。in-memory は結局 OK Form 終了で破棄
+                            // されるので revert 不要。
+                            MessageBox.Show(
+                                "バージョン情報の DB 更新が途中で失敗しました:\n" +
+                                "  " + dbEx.Message + "\n\n" +
+                                "  ・ DB 更新成功: " + dbSucceededCount + " 件\n" +
+                                "  ・ disk フォルダは新しい名前のまま (rename を rollback しません = 既に commit\n" +
+                                "    済の DB row を壊さないため)\n" +
+                                "  ・ 残りの version は DB が古い名前のまま、disk は新しい名前で drift 状態\n\n" +
+                                "Manager を一度終了して再起動し、該当ゲームの version 一覧を確認してください。" +
+                                "DB と disk の不整合が残っている version は手動で再編集してください。",
+                                "DB 部分更新失敗 (要手動確認)", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
                         throw;
                     }
                     
