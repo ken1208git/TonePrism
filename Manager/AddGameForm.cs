@@ -361,7 +361,7 @@ namespace GCTonePrism.Manager
                     IsVisible = true, // 新規追加のゲームは常にランチャーに表示
                     Controls = null, // 後で実装
                     KeyMapping = null, // 後で実装
-                    Version = semverInput.VersionString // 初期バージョンを設定 (#158)
+                    Version = version // (#158, round 3 L-2: line 282 でキャプチャ済の local を使い回し)
                 };
 
                 // ジャンルを処理
@@ -377,7 +377,7 @@ namespace GCTonePrism.Manager
                 var initialVersion = new GameVersion
                 {
                     GameId = game.GameId,
-                    Version = semverInput.VersionString, // (#158)
+                    Version = version, // (#158, round 3 L-2: 同上)
                     ExecutablePath = game.ExecutablePath,
                     Description = "初期バージョン",
                     RegisteredAt = DateTime.Now

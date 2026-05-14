@@ -1504,6 +1504,21 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **L-5 (CX-3 で自然解消)**: `ReplaceVersionPrefix` の case 不整合は CX-3 の上流 fix (= IgnoreCase 受理 → 入力時点で大文字 V を吸収) で実用上カバー。
 - **M-3 副産物として #163 dead button cleanup を本 PR に取り込み**: `btnApplyVersion` / `btnVersionUp` の `Visible=false` + Designer dead declaration + `// Deprecated` event handler stub + 方針不明 leftover コメントを完全削除 (Round 1 で別 issue 化した判断を撤回)。
 
+**Round 3 review fix (codex P2 NEW + senior H/M/L 系)** — version bump なし、本 entry に統合:
+
+- **H-1 (silent path) 全 version の suffix を OK 時に事前 scan**: 旧実装の `semverVersionName.IsValid` は **現在 dropdown で表示中の 1 個** しか検証しておらず、ユーザーが version A の txtSuffix に「鈴木」等の不正値入力 → dropdown を version B に切替 (= `cmbVersionList_SelectedIndexChanged` 経由で `SaveGameDataToVersion(A)` により A.Version が in-memory commit) → そのまま OK 押下、で末尾の `dbManager.UpdateGameVersion(v)` で bad value が DB に流れ込む silent path があった。`SemverInputControl.IsSuffixValid(string)` static helper 新規追加、`btnOK_Click` で `cmbVersionList.Items` 全件を suffix scan + 不正があれば id 一覧で 1 つの MessageBox に集約 block (M-3 と同 pattern)。
+- **H-2 (CX-3 regression) 大文字 V → 小文字 v rename 衝突 abort 解消**: round 2 CX-3 で `VersionRegex` を IgnoreCase 受理にした副作用で、DB に `V1.2.3` があった version は `SaveGameDataToVersion` で `v.Version = "v1.2.3"` に正規化 → rename loop の `string.Equals(originalVer, v.Version, Ordinal)` が false → `Directory.Move("vV1.2.3" → "v1.2.3")` を試みるが Windows FS は case-insensitive で同フォルダを hit → "移動先フォルダが既に存在します" abort。比較を `OrdinalIgnoreCase` に変更、case-only 差は rename skip + DB は normalized 値で書き戻す形に。
+- **M-1 (overflow 文言) 3 軸別々の Min/Max を表示**: `TryParseAndSet` の overflow エラー文言が `numMajor` の Min/Max (= 0-99) を 3 component 全部の範囲として表示していた誤記。Designer は Major=99 / Minor=999 / Patch=999 と異なるため、軸ごとに「Major (= X) は 0-99 の範囲です」のような個別文言に変更。
+- **M-2 (docstring dangling) `<summary>` 順序整理**: round 2 で `TryNormalize` を `TryParseAndSet` の上に挿入した際、元 docstring が dangling して `TryNormalize` の hover doc に紛れ込んでいた状態を解消。両 method の上にそれぞれ正しい `<summary>` を配置。
+- **M-3 (PR doc 同期)**: PR description の H2 fix 段落を round 2 M-3 の警告位置移動 (per-version → LoadVersions 集約) を反映する形に書き換え (= 別途 PR description 編集で対応、コード変更なし)。
+- **M-4 (UpdateGameVersion 失敗で rename rollback)**: CX-1 の rename 2-phase は rename 失敗だけ rollback 対象にしていたため、Phase 2 全件成功 → `UpdateGameVersion` が SQLite 一時的失敗等で例外 → disk は新 version 名 / DB は旧名のまま、の silent drift が再発しうる経路があった。`UpdateGameVersion` ループも try/catch で囲み、DB 例外時は完了済 rename を逆順 `Directory.Move` で rollback + MessageBox + rethrow。
+- **CX-4 (P2 NEW) `int.TryParse` 戻り値 check**: regex の `\d+` は Int32 範囲外も match するため、`v999999999999.1.0` 等を流すと `int.TryParse` が false 返却 + major=0 のまま range check `0 in [0,99]` を pass → `ok=true` で「parse 成功 + 値 0」silent corruption。`TryParseAndSet` / `TryNormalize` 両方で `int.TryParse` 戻り値を check、false なら overflow 同様 parse 失敗扱い。
+- **L-1 snapshot コメントの `(#158 L4)` ID 撤去**: コメントの "L4" が CHANGELOG 上の L-4 (= #164 follow-up issue) と意味衝突していたため、ID 撤去 + 内容主導 wording に書き換え。
+- **L-2 AddGameForm の `version` ローカル使い回し統一**: line 282 で local キャプチャ後、line 364 / 380 で再度 getter 呼び出しになっていた可読性 / 変更ぶれ防止違反を、3 箇所すべて local 経由に統一。
+- **L-3 `SuffixRegex` を SemVer 2.0.0 §9 strict 準拠に**: 旧 regex `^[a-zA-Z0-9.\-]*$` は `..` / `.foo` / `foo.` 等の空 identifier を許容して仕様コメント (= 「SemVer 2.0.0 仕様準拠」) と乖離していた。`^[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*$` に変更で空 identifier 不可。エラー文言も「空の identifier (`..`, `.foo`, `foo.` 等) は使えません」を追記。
+
+**Codex round 3 false positive 2 件**: CX-2 (overflow clamp) / CX-3 (大文字 V) は round 2 で fix 済の内容を re-flag されたもの。コードに変更なし、無視 (= codex は本 PR の commit 履歴をたどらず最新 snapshot のみ見る挙動のため、CHANGELOG entry 内に CX-2 / CX-3 の記述があると再検出する模様)。
+
 ### [Manager v0.8.10] - 2026-05-13
 
 PR #150 で dir rename (`GCTonePrism_Manager/` → `Manager/`) に連動して `PathManager.cs` の self-reference リテラル + priority-3 detection ロジック (StartsWith 二段比較 + Manager/Launcher sibling 同時存在検証) + csproj `<RootNamespace>` を修正。配布構造変更を含むため SemVer 厳密だと minor 寄りだが、Install.bat の v0.2.0 → 新構造 migration で自動吸収されエンドユーザー視点では invisible のため patch bump 扱い。

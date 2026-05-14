@@ -497,6 +497,38 @@ namespace GCTonePrism.Manager
             {
                 SaveGameDataToVersion(currentSelected);
             }
+
+            // (#158 round 3 H-1) 上の semverVersionName.IsValid は表示中 1 個の suffix しか check
+            // していないため、ユーザーが version A の txtSuffix に「鈴木」等の不正値を入力 → dropdown
+            // を version B に切替 (= cmbVersionList_SelectedIndexChanged 経由で SaveGameDataToVersion(A)
+            // により A.Version = "v...-鈴木" を in-memory commit) → そのまま OK 押下、で末尾の
+            // dbManager.UpdateGameVersion(v) で bad value が DB に流れ込む silent path があった。
+            // cmbVersionList.Items 全件の suffix を SemverInputControl.IsSuffixValid で事前 scan、
+            // 不正があれば id 一覧で 1 つの MessageBox に集約して block (M-3 と同 pattern)。
+            var malformedSuffixVersions = new List<string>();
+            foreach (var item in cmbVersionList.Items)
+            {
+                if (!(item is GameVersion vChk)) continue;
+                // v.Version の suffix 部分を切り出して check。"v1.0.0-鈴木" → "鈴木"。
+                string ver = vChk.Version ?? "";
+                int dashIdx = ver.IndexOf('-');
+                string sfx = dashIdx >= 0 ? ver.Substring(dashIdx + 1) : "";
+                if (!SemverInputControl.IsSuffixValid(sfx))
+                {
+                    malformedSuffixVersions.Add("  - id=" + vChk.Id + ": '" + ver + "' (suffix 部分: '" + sfx + "')");
+                }
+            }
+            if (malformedSuffixVersions.Count > 0)
+            {
+                MessageBox.Show(this,
+                    "以下のバージョンの suffix 部分が SemVer 形式ではありません (英数字とハイフンの " +
+                    "identifier をピリオドで区切る形式のみ可、例: rc1 / beta.2)。dropdown でそれぞれ" +
+                    "選択して suffix 欄を修正してから再度 OK を押してください。\n\n" +
+                    string.Join("\n", malformedSuffixVersions),
+                    "バージョン入力エラー (" + malformedSuffixVersions.Count + " 件)",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
             // (#158 M4) 空文字 / null version は「重複」ではなく「未入力」として別ハンドリング。
             // GroupBy で ?? "" 正規化したまま重複扱いすると、空文字 version が複数あった場合に
             // MessageBox に空行が並んで意味不明になる + H2 silent fallback 経路で複数 version が同時に
@@ -704,7 +736,14 @@ namespace GCTonePrism.Manager
                     {
                         if (!(item is GameVersion v)) continue;
                         if (!_originalVersionByDbId.TryGetValue(v.Id, out string originalVer)) continue;
-                        if (string.Equals(originalVer, v.Version, StringComparison.Ordinal)) continue;
+                        // (#158 round 3 H-2) CX-3 で大文字 V を regex IgnoreCase 受理にした副作用で、DB に
+                        // "V1.2.3" があった version は SaveGameDataToVersion で v.Version = "v1.2.3" に
+                        // 正規化される (= getter が常に小文字 v 出力)。case-only な差は disk 上 (Windows
+                        // FS は case-insensitive) で同じフォルダなので rename 不要、`OrdinalIgnoreCase`
+                        // で skip して DB 側だけ normalized 値で書き戻す。生 `Ordinal` 比較だと case-only
+                        // 差で rename path に入り、`Directory.Exists(newDir)` が同フォルダを hit して
+                        // "移動先フォルダが既に存在します" abort で詰む regression が発生していた。
+                        if (string.Equals(originalVer, v.Version, StringComparison.OrdinalIgnoreCase)) continue;
 
                         string oldLeaf = (originalVer != null && originalVer.StartsWith("v")) ? originalVer : "v" + (originalVer ?? "");
                         string newLeaf = (v.Version != null && v.Version.StartsWith("v")) ? v.Version : "v" + (v.Version ?? "");
@@ -789,18 +828,54 @@ namespace GCTonePrism.Manager
                         p.Version.ThumbnailPath = ReplaceVersionPrefix(p.Version.ThumbnailPath, p.OriginalVer, p.Version.Version);
                         p.Version.BackgroundPath = ReplaceVersionPrefix(p.Version.BackgroundPath, p.OriginalVer, p.Version.Version);
 
-                        // (#158 L4) 同 OK 内の二重処理は構造上ありえない (cmbVersionList.Items は一意 id)
-                        // が、将来 LoadVersions を OK 内で呼び直す path に変わった時のため snapshot を最新化。
+                        // _originalVersionByDbId snapshot を最新化 (将来 LoadVersions を OK 内で呼び直す
+                        // path への保険、現状は cmbVersionList.Items 一意 id で同 OK 内の二重処理は
+                        // 構造上ありえない、(#158 round 3 L-1) で review label 衝突を避けるため ID 撤去)。
                         _originalVersionByDbId[p.Version.Id] = p.Version.Version;
                     }
 
-                    // これにより、切り替えた別のバージョンの変更も保存される
-                    foreach (var item in cmbVersionList.Items)
+                    // (#158 round 3 M-4) UpdateGameVersion ループも try/catch で囲み、DB 例外時は
+                    // Phase 2 で完了済の rename を逆順 rollback。CX-1 で fix した「rename 中失敗 →
+                    // disk/DB drift」と同型の「rename 完了 → DB update 失敗 → disk は新名 / DB は
+                    // 旧名」silent corruption が、SQLite 一時的失敗等で再発しうるため塞ぐ。
+                    try
                     {
-                        if (item is GameVersion v)
+                        foreach (var item in cmbVersionList.Items)
                         {
-                            dbManager.UpdateGameVersion(v);
+                            if (item is GameVersion v)
+                            {
+                                dbManager.UpdateGameVersion(v);
+                            }
                         }
+                    }
+                    catch (Exception dbEx)
+                    {
+                        int rolledBack = 0, rollbackFailures = 0;
+                        for (int i = completedRenames.Count - 1; i >= 0; i--)
+                        {
+                            var done = completedRenames[i];
+                            try
+                            {
+                                System.IO.Directory.Move(done.NewDir, done.OldDir);
+                                rolledBack++;
+                            }
+                            catch (Exception rbEx)
+                            {
+                                rollbackFailures++;
+                                Console.WriteLine("[EditGameForm] (#158 round 3 M-4) rollback 失敗: " + done.NewDir + " → " + done.OldDir + ": " + rbEx.Message);
+                            }
+                        }
+                        MessageBox.Show(
+                            "バージョン情報の DB 更新に失敗しました:\n" +
+                            "  " + dbEx.Message + "\n\n" +
+                            "  完了済の rename " + completedRenames.Count + " 件のうち " +
+                            rolledBack + " 件を元の名前に rollback しました" +
+                            (rollbackFailures > 0
+                                ? " (rollback 失敗 " + rollbackFailures + " 件、Console ログ参照、手動で元に戻してください)"
+                                : "") +
+                            "。\n  DB は途中まで更新済の可能性があります。Manager を一度再起動して状態を確認してください。",
+                            "DB 更新失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        throw;
                     }
                     
                     // 3. メインのゲーム情報を更新（選択中バージョンの全フィールドを反映）

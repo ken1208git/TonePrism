@@ -20,8 +20,12 @@ namespace GCTonePrism.Manager.Controls
     /// </summary>
     public partial class SemverInputControl : UserControl
     {
-        // suffix 用 regex: `-` の後に英数字 / ピリオド / ハイフンのみ (SemVer 2.0.0 仕様準拠)
-        private static readonly Regex SuffixRegex = new Regex(@"^[a-zA-Z0-9.\-]*$", RegexOptions.Compiled);
+        // suffix 用 regex: SemVer 2.0.0 §9 strict 準拠 = ドット区切り identifier 列、各 identifier は
+        // 英数字 + ハイフンのみ・空 identifier 不可。"foo" / "rc1" / "alpha.2" / "rc-1" は OK、"foo.."
+        // / ".foo" / "foo." / ".." / "" は reject (空 identifier 含む)。空 suffix の場合は IsValid 側
+        // で別判定 (= suffix 入力なし時はそもそも regex match 不要)。(#158 L-3)
+        private static readonly Regex SuffixRegex = new Regex(
+            @"^[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*$", RegexOptions.Compiled);
 
         // 入力済み version 全体を parse する regex (setter 用)。
         // (#158 CX-3) IgnoreCase: 過去 DB / 手書きで `V1.2.3` (大文字 V) が入った値を malformed
@@ -71,16 +75,12 @@ namespace GCTonePrism.Manager.Controls
         }
 
         /// <summary>
-        /// VersionString setter と同じ parse 動作だが、parse 成否を bool で返し、失敗時は error
-        /// メッセージを out 引数で受け取れる版 (#158 H2 fix)。caller が外部由来の version 文字列
-        /// (例: DB から read した malformed value) を流し込む際は本 method を使い、false が返れば
-        /// MessageBox / Logger で警告を出すこと。値自体は失敗時も v0.0.0 に強制設定される (= UI の
-        /// 整合性のため)、戻り値で「fallback が走った」事実を caller に伝えるのが本 API の責務。
-        /// </summary>
-        /// <summary>
         /// 外部 (DB / 手書き等) の version 文字列を正規化形 (`v<Major>.<Minor>.<Patch>[-suffix]`、
-        /// 小文字 v 強制) に変換する。`TryParseAndSet` と同じ regex / 同じ範囲 check を共有するため、
-        /// 「control に流し込んだ後の VersionString getter が返す形」と一致する。
+        /// 小文字 v 強制) に変換する。`TryParseAndSet` と同じ regex を共有し、「control に流し込んだ
+        /// 後の VersionString getter が返す形」と一致する。範囲外 (NumericUpDown Min/Max 超 / Int32
+        /// overflow) は parse 失敗扱い (= UI に流し込まないので range check は本 method 側にも入れる
+        /// 必要なし、ただし Int32 overflow は Major/Minor/Patch すべて 0 化して別 version に化ける
+        /// silent corruption になるため check)。
         ///
         /// 主用途 (#158 M-1): VersionUpForm の重複バージョン dup check で「`semverNext.VersionString`
         /// (= 常に `vX.Y.Z` 形式) と DB 由来の生 `currentVersion` (= 過去の "1.0.0" / "V1.0.0" 等の
@@ -93,16 +93,31 @@ namespace GCTonePrism.Manager.Controls
             if (string.IsNullOrEmpty(value)) return false;
             var m = VersionRegex.Match(value.Trim());
             if (!m.Success) return false;
+            // (#158 CX-4) int.TryParse 戻り値 check: regex 自体は `\d+` だけなので Int32 範囲外
+            // (例: `v999999999999.0.0`) も match してしまう。TryParse が false を返した場合 major
+            // は 0 のままになるため caller には silent 0 化として観測される。check しないと
+            // TryParseAndSet と同型の silent corruption が本 method 経由でも発生する。
             int major, minor, patch;
-            int.TryParse(m.Groups["major"].Value, out major);
-            int.TryParse(m.Groups["minor"].Value, out minor);
-            int.TryParse(m.Groups["patch"].Value, out patch);
+            if (!int.TryParse(m.Groups["major"].Value, out major)) return false;
+            if (!int.TryParse(m.Groups["minor"].Value, out minor)) return false;
+            if (!int.TryParse(m.Groups["patch"].Value, out patch)) return false;
             string suffix = m.Groups["suffix"].Success ? m.Groups["suffix"].Value : "";
             string core = "v" + major + "." + minor + "." + patch;
             normalized = string.IsNullOrEmpty(suffix) ? core : core + "-" + suffix;
             return true;
         }
 
+        /// <summary>
+        /// VersionString setter と同じ parse 動作だが、parse 成否を bool で返し、失敗時は error
+        /// メッセージを out 引数で受け取れる版 (#158 H2 fix)。caller が外部由来の version 文字列
+        /// (例: DB から read した malformed value) を流し込む際は本 method を使い、false が返れば
+        /// MessageBox / Logger で警告を出すこと。値自体は失敗時も v0.0.0 に強制設定される (= UI の
+        /// 整合性のため)、戻り値で「fallback が走った」事実を caller に伝えるのが本 API の責務。
+        ///
+        /// 失敗判定パターン: (a) null/空文字、(b) regex 非 match、(c) Int32 overflow (CX-4)、
+        /// (d) NumericUpDown Min/Max 超 (CX-2)。(c)(d) は値自体は Clamp で UI 整合のため強制設定するが
+        /// 戻り値で fallback を caller に伝える。
+        /// </summary>
         public bool TryParseAndSet(string value, out string error)
         {
             error = null;
@@ -118,22 +133,37 @@ namespace GCTonePrism.Manager.Controls
                 var m = VersionRegex.Match(value.Trim());
                 if (m.Success)
                 {
-                    int.TryParse(m.Groups["major"].Value, out major);
-                    int.TryParse(m.Groups["minor"].Value, out minor);
-                    int.TryParse(m.Groups["patch"].Value, out patch);
+                    // (#158 CX-4) int.TryParse 戻り値 check。regex の `\d+` は Int32 範囲外も match する
+                    // ため、TryParse 戻り値を見ないと huge number で silent 0 化する。
+                    bool majorOk = int.TryParse(m.Groups["major"].Value, out major);
+                    bool minorOk = int.TryParse(m.Groups["minor"].Value, out minor);
+                    bool patchOk = int.TryParse(m.Groups["patch"].Value, out patch);
                     suffix = m.Groups["suffix"].Success ? m.Groups["suffix"].Value : "";
+                    if (!majorOk || !minorOk || !patchOk)
+                    {
+                        error = "バージョン番号が Int32 範囲を超えています: '" + value + "'";
+                    }
                     // (#158 CX-2) NumericUpDown の Min/Max を超える値は silent clamp で「parse 成功 +
                     // 値だけ別物」になり、後続 save で全く違う version に化ける silent corruption が
                     // 発生するため、overflow も parse 失敗扱いにして caller に通知する。値自体は
                     // 下記 Clamp で UI 整合のため依然 v0.0.0 / 上限値に強制設定するが、戻り値で
                     // fallback が走った事実を caller (= MessageBox 表示経路) に伝える。
-                    if (major < numMajor.Minimum || major > numMajor.Maximum
-                        || minor < numMinor.Minimum || minor > numMinor.Maximum
-                        || patch < numPatch.Minimum || patch > numPatch.Maximum)
+                    // (#158 round 3 M-1) 文言を 3 軸別々に組み立て (Designer 側で Major=99 / Minor=999
+                    // / Patch=999 と Maximum が異なるため、共通文言だと user に誤った範囲を伝える)。
+                    else if (majorOk && (major < numMajor.Minimum || major > numMajor.Maximum))
                     {
-                        error = "バージョン番号が許容範囲外です (Major/Minor/Patch は "
-                            + (int)numMajor.Minimum + "-" + (int)numMajor.Maximum + " の整数のみ): '"
-                            + value + "'";
+                        error = "Major (= " + major + ") は " + (int)numMajor.Minimum + "-" +
+                            (int)numMajor.Maximum + " の範囲です: '" + value + "'";
+                    }
+                    else if (minorOk && (minor < numMinor.Minimum || minor > numMinor.Maximum))
+                    {
+                        error = "Minor (= " + minor + ") は " + (int)numMinor.Minimum + "-" +
+                            (int)numMinor.Maximum + " の範囲です: '" + value + "'";
+                    }
+                    else if (patchOk && (patch < numPatch.Minimum || patch > numPatch.Maximum))
+                    {
+                        error = "Patch (= " + patch + ") は " + (int)numPatch.Minimum + "-" +
+                            (int)numPatch.Maximum + " の範囲です: '" + value + "'";
                     }
                     else
                     {
@@ -185,12 +215,27 @@ namespace GCTonePrism.Manager.Controls
             string suffix = Suffix;
             if (!string.IsNullOrEmpty(suffix) && !SuffixRegex.IsMatch(suffix))
             {
-                errorMessage = "pre-release suffix は英数字・ピリオド・ハイフンのみ使用できます (例: rc1 / beta.2)。\n" +
-                               "現在の入力: '" + suffix + "'";
+                // (#158 L-3) SemVer 2.0.0 §9 strict 準拠の文言: 各 identifier は英数字 + ハイフンのみ、
+                // ドット区切り、空 identifier 不可 (= "..", ".foo", "foo." は reject)。
+                errorMessage = "pre-release suffix は英数字とハイフンの identifier をピリオドで区切る形式のみ" +
+                               "使用できます (例: rc1 / beta.2 / rc-1)。空の identifier (`..`, `.foo`, `foo.` 等) は" +
+                               "使えません。\n現在の入力: '" + suffix + "'";
                 return false;
             }
             errorMessage = null;
             return true;
+        }
+
+        /// <summary>
+        /// 任意の suffix 文字列が IsValid の suffix 規則 (= SemVer 2.0.0 §9) を満たすかを static で
+        /// check する版 (#158 H-1)。EditGameForm.btnOK_Click が cmbVersionList.Items 全件の suffix を
+        /// 事前 scan する用途。本 control の表示中 1 個だけでなく「dropdown 切替で in-memory commit
+        /// された別 version の suffix」も漏れなく検出するため。空文字 suffix は OK 扱い (= suffix なし)。
+        /// </summary>
+        public static bool IsSuffixValid(string suffix)
+        {
+            if (string.IsNullOrEmpty(suffix)) return true;
+            return SuffixRegex.IsMatch(suffix);
         }
 
         /// <summary>
