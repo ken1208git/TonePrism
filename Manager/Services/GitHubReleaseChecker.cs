@@ -197,16 +197,23 @@ namespace GCTonePrism.Manager.Services
                 info.PublishedAt = publishedAt;
             }
 
-            // assets[] から `GCTonePrism_v<X.Y.Z>.zip` を探す
+            // assets[] から `GCTonePrism_v<X.Y.Z>.zip` を探す。
+            //
+            // JavaScriptSerializer の nested array 表現は .NET version / context で `object[]` /
+            // `ArrayList` / `List<object>` のいずれかになる仕様揺らぎがある (実機検証で
+            // `Deserialize<Dictionary<string, object>>` 経由の nested array が `ArrayList` で
+            // 返るケースを確認、#108 Phase 4 debug)。同じく nested object も `Dictionary<string, object>`
+            // ではなく非 generic `IDictionary` (Hashtable / OrderedDictionary 等) で返る変種に
+            // 備える。両方 IEnumerable / IDictionary で defensive に拾う。
             object assetsObj;
-            if (dict.TryGetValue("assets", out assetsObj))
+            if (dict.TryGetValue("assets", out assetsObj) && assetsObj != null)
             {
-                var assets = assetsObj as object[];
-                if (assets != null)
+                var assetEnumerable = assetsObj as System.Collections.IEnumerable;
+                if (assetEnumerable != null && !(assetsObj is string))
                 {
-                    foreach (var a in assets)
+                    foreach (var a in assetEnumerable)
                     {
-                        var assetDict = a as Dictionary<string, object>;
+                        var assetDict = ToStringObjectDict(a);
                         if (assetDict == null) continue;
                         string name = AsString(assetDict, "name");
                         if (string.IsNullOrEmpty(name)) continue;
@@ -219,6 +226,26 @@ namespace GCTonePrism.Manager.Services
                 }
             }
             return info;
+        }
+
+        /// <summary>
+        /// JavaScriptSerializer が返す nested object を統一的に `Dictionary&lt;string, object&gt;` に
+        /// 変換する helper。`Dictionary&lt;string, object&gt;` ならそのまま、非 generic `IDictionary`
+        /// (Hashtable / OrderedDictionary 等) なら copy。それ以外 (null / 文字列等) は null。
+        /// </summary>
+        private static Dictionary<string, object> ToStringObjectDict(object obj)
+        {
+            var typed = obj as Dictionary<string, object>;
+            if (typed != null) return typed;
+            var nonGen = obj as System.Collections.IDictionary;
+            if (nonGen == null) return null;
+            var result = new Dictionary<string, object>();
+            foreach (var key in nonGen.Keys)
+            {
+                if (key == null) continue;
+                result[key.ToString()] = nonGen[key];
+            }
+            return result;
         }
 
         /// <summary>
