@@ -15,6 +15,12 @@
 
 name: Check .bat/.cmd encoding
 
+# Least-privilege: the workflow only needs to read repo contents to run the
+# encoding check. No write access (no commenting, no merging, no releasing)
+# is granted to minimise supply-chain blast radius.
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
