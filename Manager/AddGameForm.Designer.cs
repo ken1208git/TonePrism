@@ -151,7 +151,7 @@ namespace GCTonePrism.Manager
             // lblVersion
             //
             this.lblVersion.AutoSize = true;
-            this.lblVersion.Location = new System.Drawing.Point(305, 54);
+            this.lblVersion.Location = new System.Drawing.Point(9, 80);
             this.lblVersion.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblVersion.Name = "lblVersion";
             this.lblVersion.Size = new System.Drawing.Size(50, 12);
@@ -160,7 +160,7 @@ namespace GCTonePrism.Manager
             //
             // semverInput (#158: NumericUpDown × 3 で SemVer 入力、txtVersion 置換)
             //
-            this.semverInput.Location = new System.Drawing.Point(365, 48);
+            this.semverInput.Location = new System.Drawing.Point(110, 78);
             this.semverInput.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.semverInput.Name = "semverInput";
             this.semverInput.Size = new System.Drawing.Size(300, 28);
@@ -170,7 +170,7 @@ namespace GCTonePrism.Manager
             // lblTitle
             //
             this.lblTitle.AutoSize = true;
-            this.lblTitle.Location = new System.Drawing.Point(9, 78);
+            this.lblTitle.Location = new System.Drawing.Point(9, 110);
             this.lblTitle.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblTitle.Name = "lblTitle";
             this.lblTitle.Size = new System.Drawing.Size(46, 12);
@@ -179,7 +179,7 @@ namespace GCTonePrism.Manager
             //
             // txtTitle
             //
-            this.txtTitle.Location = new System.Drawing.Point(110, 75);
+            this.txtTitle.Location = new System.Drawing.Point(110, 107);
             this.txtTitle.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtTitle.Name = "txtTitle";
             this.txtTitle.Size = new System.Drawing.Size(355, 19);
@@ -188,7 +188,7 @@ namespace GCTonePrism.Manager
             // lblDescription
             //
             this.lblDescription.AutoSize = true;
-            this.lblDescription.Location = new System.Drawing.Point(9, 100);
+            this.lblDescription.Location = new System.Drawing.Point(9, 132);
             this.lblDescription.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblDescription.Name = "lblDescription";
             this.lblDescription.Size = new System.Drawing.Size(41, 12);
@@ -197,7 +197,7 @@ namespace GCTonePrism.Manager
             //
             // txtDescription
             //
-            this.txtDescription.Location = new System.Drawing.Point(110, 98);
+            this.txtDescription.Location = new System.Drawing.Point(110, 130);
             this.txtDescription.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtDescription.Multiline = true;
             this.txtDescription.Name = "txtDescription";
@@ -208,7 +208,7 @@ namespace GCTonePrism.Manager
             // lblGenre
             //
             this.lblGenre.AutoSize = true;
-            this.lblGenre.Location = new System.Drawing.Point(9, 168);
+            this.lblGenre.Location = new System.Drawing.Point(9, 200);
             this.lblGenre.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblGenre.Name = "lblGenre";
             this.lblGenre.Size = new System.Drawing.Size(42, 12);
@@ -219,7 +219,7 @@ namespace GCTonePrism.Manager
             //
             this.clbGenre.CheckOnClick = true;
             this.clbGenre.FormattingEnabled = true;
-            this.clbGenre.Location = new System.Drawing.Point(110, 165);
+            this.clbGenre.Location = new System.Drawing.Point(110, 197);
             this.clbGenre.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.clbGenre.Name = "clbGenre";
             this.clbGenre.Size = new System.Drawing.Size(355, 158);
@@ -228,7 +228,7 @@ namespace GCTonePrism.Manager
             // lblReleaseYear
             //
             this.lblReleaseYear.AutoSize = true;
-            this.lblReleaseYear.Location = new System.Drawing.Point(9, 332);
+            this.lblReleaseYear.Location = new System.Drawing.Point(9, 364);
             this.lblReleaseYear.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblReleaseYear.Name = "lblReleaseYear";
             this.lblReleaseYear.Size = new System.Drawing.Size(50, 12);
@@ -237,7 +237,7 @@ namespace GCTonePrism.Manager
             //
             // numReleaseYear
             //
-            this.numReleaseYear.Location = new System.Drawing.Point(110, 330);
+            this.numReleaseYear.Location = new System.Drawing.Point(110, 362);
             this.numReleaseYear.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.numReleaseYear.Maximum = new decimal(new int[] {
             2100,
@@ -261,7 +261,7 @@ namespace GCTonePrism.Manager
             // lblMinPlayers
             //
             this.lblMinPlayers.AutoSize = true;
-            this.lblMinPlayers.Location = new System.Drawing.Point(9, 358);
+            this.lblMinPlayers.Location = new System.Drawing.Point(9, 390);
             this.lblMinPlayers.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblMinPlayers.Name = "lblMinPlayers";
             this.lblMinPlayers.Size = new System.Drawing.Size(88, 12);
@@ -270,7 +270,7 @@ namespace GCTonePrism.Manager
             //
             // numMinPlayers
             //
-            this.numMinPlayers.Location = new System.Drawing.Point(110, 356);
+            this.numMinPlayers.Location = new System.Drawing.Point(110, 388);
             this.numMinPlayers.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.numMinPlayers.Minimum = new decimal(new int[] {
             1,
@@ -289,7 +289,7 @@ namespace GCTonePrism.Manager
             // lblMaxPlayers
             //
             this.lblMaxPlayers.AutoSize = true;
-            this.lblMaxPlayers.Location = new System.Drawing.Point(225, 358);
+            this.lblMaxPlayers.Location = new System.Drawing.Point(225, 390);
             this.lblMaxPlayers.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblMaxPlayers.Name = "lblMaxPlayers";
             this.lblMaxPlayers.Size = new System.Drawing.Size(88, 12);
@@ -298,7 +298,7 @@ namespace GCTonePrism.Manager
             //
             // numMaxPlayers
             //
-            this.numMaxPlayers.Location = new System.Drawing.Point(325, 356);
+            this.numMaxPlayers.Location = new System.Drawing.Point(325, 388);
             this.numMaxPlayers.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.numMaxPlayers.Minimum = new decimal(new int[] {
             1,
@@ -317,7 +317,7 @@ namespace GCTonePrism.Manager
             // lblDifficulty
             //
             this.lblDifficulty.AutoSize = true;
-            this.lblDifficulty.Location = new System.Drawing.Point(9, 384);
+            this.lblDifficulty.Location = new System.Drawing.Point(9, 416);
             this.lblDifficulty.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblDifficulty.Name = "lblDifficulty";
             this.lblDifficulty.Size = new System.Drawing.Size(41, 12);
@@ -328,7 +328,7 @@ namespace GCTonePrism.Manager
             //
             this.cmbDifficulty.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbDifficulty.FormattingEnabled = true;
-            this.cmbDifficulty.Location = new System.Drawing.Point(110, 381);
+            this.cmbDifficulty.Location = new System.Drawing.Point(110, 413);
             this.cmbDifficulty.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.cmbDifficulty.Name = "cmbDifficulty";
             this.cmbDifficulty.Size = new System.Drawing.Size(135, 20);
@@ -337,7 +337,7 @@ namespace GCTonePrism.Manager
             // lblPlayTime
             //
             this.lblPlayTime.AutoSize = true;
-            this.lblPlayTime.Location = new System.Drawing.Point(255, 384);
+            this.lblPlayTime.Location = new System.Drawing.Point(255, 416);
             this.lblPlayTime.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblPlayTime.Name = "lblPlayTime";
             this.lblPlayTime.Size = new System.Drawing.Size(56, 12);
@@ -348,7 +348,7 @@ namespace GCTonePrism.Manager
             //
             this.cmbPlayTime.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbPlayTime.FormattingEnabled = true;
-            this.cmbPlayTime.Location = new System.Drawing.Point(325, 381);
+            this.cmbPlayTime.Location = new System.Drawing.Point(325, 413);
             this.cmbPlayTime.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.cmbPlayTime.Name = "cmbPlayTime";
             this.cmbPlayTime.Size = new System.Drawing.Size(140, 20);
@@ -357,7 +357,7 @@ namespace GCTonePrism.Manager
             // chkControllerSupport
             //
             this.chkControllerSupport.AutoSize = true;
-            this.chkControllerSupport.Location = new System.Drawing.Point(11, 410);
+            this.chkControllerSupport.Location = new System.Drawing.Point(11, 442);
             this.chkControllerSupport.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.chkControllerSupport.Name = "chkControllerSupport";
             this.chkControllerSupport.Size = new System.Drawing.Size(124, 16);
@@ -368,7 +368,7 @@ namespace GCTonePrism.Manager
             // lblSupportedConnection
             //
             this.lblSupportedConnection.AutoSize = true;
-            this.lblSupportedConnection.Location = new System.Drawing.Point(9, 436);
+            this.lblSupportedConnection.Location = new System.Drawing.Point(9, 468);
             this.lblSupportedConnection.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblSupportedConnection.Name = "lblSupportedConnection";
             this.lblSupportedConnection.Size = new System.Drawing.Size(80, 12);
@@ -379,7 +379,7 @@ namespace GCTonePrism.Manager
             //
             this.cmbSupportedConnection.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbSupportedConnection.FormattingEnabled = true;
-            this.cmbSupportedConnection.Location = new System.Drawing.Point(110, 433);
+            this.cmbSupportedConnection.Location = new System.Drawing.Point(110, 465);
             this.cmbSupportedConnection.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.cmbSupportedConnection.Name = "cmbSupportedConnection";
             this.cmbSupportedConnection.Size = new System.Drawing.Size(225, 20);
