@@ -67,6 +67,15 @@ namespace GCTonePrism.Manager.Controls
         {
             if (string.IsNullOrEmpty(_logsRoot)) return;
 
+            // 更新前に選択されていた entry の FilePath を保持し、再表示後に同 file を再選択する。
+            // (1) refresh で grid 全行を Clear → Add し直すと DataGridViewRow オブジェクトが入れ替わり、
+            //     selection は失われる。デフォルト挙動で先頭が auto-selected になることはあるが、
+            //     SelectionChanged event は「変化があった時だけ」発火する仕様で、Clear 直後の自動先頭
+            //     選択時は発火しない path がある (= 内容描画されず空のまま、本 bug の原因)。
+            // (2) 元々選択していた log がユーザーの意図と違う行に化けるとさらに混乱するため、
+            //     FilePath で identify して同じ entry を再選択する。
+            string prevSelectedPath = _currentEntry == null ? null : _currentEntry.FilePath;
+
             try
             {
                 _allEntries = ScanLogFiles(_logsRoot)
@@ -90,12 +99,32 @@ namespace GCTonePrism.Manager.Controls
                 UpdateRowGreyout();
                 UpdateFileCountLabel();
 
-                // 本文クリア + 先頭を選択
-                txtContent.Clear();
-                _currentEntry = null;
-                if (gridFiles.Rows.Count > 0)
+                // 元の選択 entry を FilePath で再 identify、見つからなければ先頭に fallback。
+                int targetRow = -1;
+                if (!string.IsNullOrEmpty(prevSelectedPath))
                 {
-                    gridFiles.Rows[0].Selected = true;
+                    for (int i = 0; i < gridFiles.Rows.Count; i++)
+                    {
+                        var e = gridFiles.Rows[i].Tag as LogFileEntry;
+                        if (e != null && string.Equals(e.FilePath, prevSelectedPath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            targetRow = i;
+                            break;
+                        }
+                    }
+                }
+                if (targetRow == -1 && gridFiles.Rows.Count > 0) targetRow = 0;
+
+                // SelectionChanged event は selection が変化しないと発火しない (= Rows.Clear 後の自動
+                // 先頭選択 case で event 不発 → 内容空 path) ため、選択 + 直接 RenderContent 両方を行う。
+                _currentEntry = null;
+                txtContent.Clear();
+                if (targetRow >= 0)
+                {
+                    gridFiles.ClearSelection();
+                    gridFiles.Rows[targetRow].Selected = true;
+                    _currentEntry = gridFiles.Rows[targetRow].Tag as LogFileEntry;
+                    RenderContent();
                 }
             }
             catch (Exception ex)
