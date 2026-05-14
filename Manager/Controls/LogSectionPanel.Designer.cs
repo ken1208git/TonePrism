@@ -79,13 +79,12 @@ namespace GCTonePrism.Manager.Controls
             this.btnRefresh.UseVisualStyleBackColor = true;
             this.btnRefresh.Click += new System.EventHandler(this.btnRefresh_Click);
             //
-            // btnOpenLogFolder (右側、lblFileCount の左に右アンカーで配置)
+            // btnOpenLogFolder (btnRefresh の隣、checkboxes の左、左寄せ)
             //
-            this.btnOpenLogFolder.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnOpenLogFolder.Location = new System.Drawing.Point(740, 8);
+            this.btnOpenLogFolder.Location = new System.Drawing.Point(84, 8);
             this.btnOpenLogFolder.Name = "btnOpenLogFolder";
-            this.btnOpenLogFolder.Size = new System.Drawing.Size(160, 26);
-            this.btnOpenLogFolder.TabIndex = 7;
+            this.btnOpenLogFolder.Size = new System.Drawing.Size(150, 26);
+            this.btnOpenLogFolder.TabIndex = 1;
             this.btnOpenLogFolder.Text = "ログフォルダを開く";
             this.btnOpenLogFolder.UseVisualStyleBackColor = true;
             this.btnOpenLogFolder.Click += new System.EventHandler(this.btnOpenLogFolder_Click);
@@ -95,7 +94,7 @@ namespace GCTonePrism.Manager.Controls
             this.chkInfo.AutoSize = true;
             this.chkInfo.Checked = true;
             this.chkInfo.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.chkInfo.Location = new System.Drawing.Point(90, 12);
+            this.chkInfo.Location = new System.Drawing.Point(240, 12);
             this.chkInfo.Name = "chkInfo";
             this.chkInfo.Size = new System.Drawing.Size(56, 19);
             this.chkInfo.TabIndex = 1;
@@ -108,7 +107,7 @@ namespace GCTonePrism.Manager.Controls
             this.chkWarn.AutoSize = true;
             this.chkWarn.Checked = true;
             this.chkWarn.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.chkWarn.Location = new System.Drawing.Point(152, 12);
+            this.chkWarn.Location = new System.Drawing.Point(302, 12);
             this.chkWarn.Name = "chkWarn";
             this.chkWarn.Size = new System.Drawing.Size(64, 19);
             this.chkWarn.TabIndex = 2;
@@ -121,7 +120,7 @@ namespace GCTonePrism.Manager.Controls
             this.chkError.AutoSize = true;
             this.chkError.Checked = true;
             this.chkError.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.chkError.Location = new System.Drawing.Point(222, 12);
+            this.chkError.Location = new System.Drawing.Point(372, 12);
             this.chkError.Name = "chkError";
             this.chkError.Size = new System.Drawing.Size(64, 19);
             this.chkError.TabIndex = 3;
@@ -134,7 +133,7 @@ namespace GCTonePrism.Manager.Controls
             this.chkManager.AutoSize = true;
             this.chkManager.Checked = true;
             this.chkManager.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.chkManager.Location = new System.Drawing.Point(308, 12);
+            this.chkManager.Location = new System.Drawing.Point(458, 12);
             this.chkManager.Name = "chkManager";
             this.chkManager.Size = new System.Drawing.Size(80, 19);
             this.chkManager.TabIndex = 4;
@@ -147,7 +146,7 @@ namespace GCTonePrism.Manager.Controls
             this.chkLauncher.AutoSize = true;
             this.chkLauncher.Checked = true;
             this.chkLauncher.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.chkLauncher.Location = new System.Drawing.Point(394, 12);
+            this.chkLauncher.Location = new System.Drawing.Point(544, 12);
             this.chkLauncher.Name = "chkLauncher";
             this.chkLauncher.Size = new System.Drawing.Size(80, 19);
             this.chkLauncher.TabIndex = 5;
