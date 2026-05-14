@@ -203,7 +203,10 @@ function Test-WorkingTreeCrlf {
     for ($i = 0; $i -lt $bytes.Length; $i++) {
         if ($bytes[$i] -eq 0x0A) {
             if ($i -eq 0 -or $bytes[$i - 1] -ne 0x0D) {
-                $violations += "[FAIL] LF-only line ending detected in working tree: $Path (line $line, must be CRLF)"
+                # Report only the first occurrence to keep the output bounded;
+                # editors that mis-save line endings usually do so for the
+                # whole file, so listing every line would just be noise.
+                $violations += "[FAIL] LF-only line ending detected in working tree: $Path (line $line, must be CRLF; this is the first occurrence -- if your editor saved the whole file as LF, fix once and re-stage)"
                 break
             }
             $line++

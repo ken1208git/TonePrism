@@ -41,6 +41,21 @@
 
 ### [Release Tooling v0.1.15] - 2026-05-14
 
+#### Changed (PR #159 シニアレビュー round 3)
+
+- **[Claude M-1] SPEC §3.7.9.7 prose の claim-vs-impl 乖離解消 (CRLF 検査 source 明示)**: round 2 で hybrid 設計 (BOM/UTF-8 = blob、CRLF = working tree) を script docstring と CHANGELOG entry に書いたが、SPEC §3.7.9.7 本文は「バイト列は **git index の blob から** ... で取得」と前置きしてから 3 種検査 (BOM / LF / UTF-8) を箇条書きする構造で、reader は 3 種全部が blob 検査と自然解釈する path が残っていた (= round 2 [Claude H-1] と同型の整合化漏れ、CI 側は doc 同期したが Mode Staged 側の SPEC 本文に未着手)。SPEC §3.7.9.7 prose を 2 source 分岐記述に修正、`.gitattributes eol=crlf` で blob が常時 LF 化される事実が CRLF blob 検査を原理的に成り立たせない事も明記
+- **[Claude M-2] Install-Hooks.ps1 の console encoding 明示 (JP locale + 日本語 path mojibake 防止)**: 本 repo worktree root が `C:\【ゲームセンターTONE】\GCTonePrism\` で Japanese を含み、PS 5.1 + JP locale で `& git rev-parse --show-toplevel` の stdout が CP932 として decode → mojibake → `Set-Location` が `PathNotFoundException` で abort する path があった。`check-bat-encoding.ps1` 側は round 2 [Claude H-2] で `Invoke-GitCapture` (`StandardOutputEncoding=UTF8`) で対応済だったが、`Install-Hooks.ps1` 側は同 PR scope 外として残存。冒頭に `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8` + `$OutputEncoding = [System.Text.Encoding]::UTF8` を 2 行追加。`check-bat-encoding.ps1` のような Process ベース helper まで担ぐ必要は無く global override で十分 (helper は `&` 直呼び数行のみ)
+- **[Codex P2 / pwsh fallback] `.githooks/pre-commit` shell wrapper を pwsh 優先 fallback 化**: `powershell.exe` hardcode は Windows 上では問題ないが、theoretical に macOS / Linux で hook が「not found」で all commit を hard block する path が残っていた (`core.hooksPath = .githooks` を別環境で適用した case 等)。`command -v pwsh` で先に PowerShell 7+ を探し、無ければ `powershell.exe`、両方不在なら friendly `[FAIL]` + bypass guide で exit 1。Windows-only project の方針は変えないが、defensive UX として hard block path を排除
+- **[Claude L-4] `Test-WorkingTreeCrlf` violation message に first-occurrence hint 追加**: 旧 message「LF-only line ending detected: $Path (line $line, must be CRLF)」は最初の 1 件で `break` する設計だが、reader にはエディタ全体 LF 設定の case で「line $line だけ直して再 commit → 次の line で同 message」と勘違いする path があった。「(this is the first occurrence -- if your editor saved the whole file as LF, fix once and re-stage)」を追記、break 維持で出力 bounded のまま UX 改善
+- **[Claude L-6] `Install-Hooks.ps1` の "Active hooks" filter を whitelist 化**: 旧実装 `Where-Object { $_.Name -notmatch '\.(ps1|md)$' }` は blacklist で、将来 `.githooks/` に `.psm1` / `.py` / `.txt` 等の補助 file を追加した時に誤って「Active hooks」として表示される。`Where-Object { $_.Extension -eq '' }` (= 拡張子なし = git hook 名の convention) に変更、whitelist 化で将来拡張耐性を獲得
+
+#### 受容 (本 PR scope では対応せず、次 sweep 候補として明示)
+
+- **[Claude L-3] `Invoke-GitCapture` の stdout/stderr 直列読みによる理論 deadlock**: 現 git subcommand (`diff --cached --name-only` / `ls-files` / `cat-file -p`) は stderr 出力がほぼゼロのため実害なし。将来 hook が他の git subcommand を増やすなら `BeginOutputReadLine` + `BeginErrorReadLine` の async pair に書き換え。理論既知 anti-pattern として記録のみ
+- **[Claude L-5] SPEC version bump 3 連 (1.10.17 / 1.10.18 / 1.10.19) → 本 PR で 1.10.20 を更に重ねる結果に**: SPEC 側の「1 PR 1 bump」規定が AGENTS.md に無いため違反ではないが、review iteration の self-correction が SPEC table に永続化される pattern。CHANGELOG 側の「1 PR 1 bump」ルールと並行運用するなら merge 後の専用 PR で 1.10.17 を最新 state で書き直して 1.10.18-20 を rebase 集約する案も検討余地、本 PR scope 外
+- **[Claude L-7] CR-only (classic Mac) line ending 未検出**: SPEC §3.7.9.1「UTF-8 (no BOM) + CRLF 厳守」を物理 fence するなら CR-only も reject すべきだが、2026 年現代の Windows editor が CR-only を吐く path は皆無、defensive 価値小。別 issue 候補
+- **[Codex stale finding]** `.gitattributes` を pull_request paths に追加せよ: 本 finding は round 2 [Codex P2] と同一内容で、本 PR の `.github/workflows/check-bat-encoding.yml:45` で既に追加済。Codex review が古い snapshot を見ている stale report と判断、code 修正なし
+
 #### Changed (PR #159 シニアレビュー round 2)
 
 - **[Claude H-2 (Critical)] non-ASCII path 対応 (`core.quotepath=false` 全 invocation 適用)**: 本 repo root が `C:\【ゲームセンターTONE】\GCTonePrism` で Japanese path を含み、将来 `Companions/<日本語>/foo.bat` 等の追加で `core.quotepath` default true が C-style quoted (`"\343\203\206...bat"`) を返す → `Where-Object` regex は quoted 末尾 `"` も拡張子 match で拾う → `git cat-file -p ":\343..."` が解決不能 (exit 128) → round 1 [M-2] fail-closed で **primary fence 全体が dead-lock** する path があった。全 git invocation に `-c core.quotepath=false` を付与 + StandardOutputEncoding を UTF-8 に明示、non-ASCII path を raw UTF-8 で受け取る形に

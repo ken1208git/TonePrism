@@ -21,5 +21,22 @@ if [ ! -f "$SCRIPT" ]; then
     exit 1
 fi
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT" -Mode Staged
-exit $?
+# Prefer cross-platform PowerShell 7+ (`pwsh`) when available, fall back to
+# Windows PowerShell (`powershell.exe`) which always ships with Windows.
+# Both accept `-NoProfile -ExecutionPolicy Bypass -File`. macOS / Linux
+# contributors are not the primary audience (this project is a Windows-only
+# Godot game), but the fallback prevents the hook from hard-blocking commits
+# on environments where neither `powershell.exe` nor `pwsh` would otherwise
+# be reachable -- without resorting to silent pass.
+if command -v pwsh >/dev/null 2>&1; then
+    pwsh -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT" -Mode Staged
+    exit $?
+fi
+if command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT" -Mode Staged
+    exit $?
+fi
+echo "[FAIL] pre-commit: neither pwsh nor powershell.exe found on PATH." >&2
+echo "       Install PowerShell 7+ (pwsh) or use a Windows shell to run encoding checks." >&2
+echo "       Bypass: git commit --no-verify  (NOT recommended for .bat / .cmd)" >&2
+exit 1

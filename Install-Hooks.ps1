@@ -28,6 +28,18 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Force UTF-8 for decoding native command stdout (e.g. `git rev-parse`).
+# Windows PowerShell 5.1 + JP locale defaults to CP932, so when git emits a
+# UTF-8 path that contains Japanese (this repo's worktree root is literally
+# `C:\【ゲームセンターTONE】\GCTonePrism\`), `& git rev-parse --show-toplevel`
+# would otherwise mojibake the result and `Set-Location` would fail with
+# PathNotFoundException. The check-bat-encoding.ps1 side handles this via
+# `Invoke-GitCapture` with `StandardOutputEncoding=UTF8`; here a simple
+# global override is sufficient because the helper does only a couple of
+# `&` calls.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 # Verify we are inside a git repository
 $repoRoot = git rev-parse --show-toplevel 2>$null
 if ($LASTEXITCODE -ne 0) {
@@ -102,7 +114,10 @@ if ($isSet -and $currentHooksPath -eq '.githooks') {
 }
 
 Write-Host "     Active hooks:"
-Get-ChildItem .githooks -File | Where-Object { $_.Name -notmatch '\.(ps1|md)$' } | ForEach-Object {
+# Whitelist by "extensionless filename" = git hook name convention. Auxiliary
+# files (check-bat-encoding.ps1, future .psm1 / .py / README.md etc.) are
+# inert from git's standpoint and should not appear in this listing.
+Get-ChildItem .githooks -File | Where-Object { $_.Extension -eq '' } | ForEach-Object {
     Write-Host "       - $($_.Name)"
 }
 Write-Host ""
