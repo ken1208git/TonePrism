@@ -59,8 +59,6 @@ namespace GCTonePrism.Manager
             this.txtBackgroundPath = new System.Windows.Forms.TextBox();
             this.lblVersionManagement = new System.Windows.Forms.Label();
             this.cmbVersionList = new System.Windows.Forms.ComboBox();
-            this.btnApplyVersion = new System.Windows.Forms.Button();
-            this.btnVersionUp = new System.Windows.Forms.Button();
             this.btnSelectBackground = new System.Windows.Forms.Button();
             this.lblExecutablePath = new System.Windows.Forms.Label();
             this.txtExecutablePath = new System.Windows.Forms.TextBox();
@@ -565,28 +563,6 @@ namespace GCTonePrism.Manager
             this.cmbVersionList.TabIndex = 44;
             this.cmbVersionList.SelectedIndexChanged += new System.EventHandler(this.cmbVersionList_SelectedIndexChanged);
             //
-            // btnApplyVersion
-            //
-            this.btnApplyVersion.Location = new System.Drawing.Point(800, 381);
-            this.btnApplyVersion.Margin = new System.Windows.Forms.Padding(2);
-            this.btnApplyVersion.Name = "btnApplyVersion";
-            this.btnApplyVersion.Size = new System.Drawing.Size(50, 20);
-            this.btnApplyVersion.TabIndex = 45;
-            this.btnApplyVersion.Text = "適用";
-            this.btnApplyVersion.UseVisualStyleBackColor = true;
-            this.btnApplyVersion.Click += new System.EventHandler(this.btnApplyVersion_Click);
-            //
-            // btnVersionUp
-            //
-            this.btnVersionUp.Location = new System.Drawing.Point(855, 381);
-            this.btnVersionUp.Margin = new System.Windows.Forms.Padding(2);
-            this.btnVersionUp.Name = "btnVersionUp";
-            this.btnVersionUp.Size = new System.Drawing.Size(80, 20);
-            this.btnVersionUp.TabIndex = 46;
-            this.btnVersionUp.Text = "バージョン追加";
-            this.btnVersionUp.UseVisualStyleBackColor = true;
-            this.btnVersionUp.Click += new System.EventHandler(this.btnVersionUp_Click);
-            //
             // lblVersionDescription
             //
             this.lblVersionDescription.AutoSize = true;
@@ -725,8 +701,6 @@ namespace GCTonePrism.Manager
             this.Controls.Add(this.btnSelectThumbnail);
             this.Controls.Add(this.txtThumbnailPath);
             this.Controls.Add(this.lblThumbnailPath);
-            this.Controls.Add(this.btnVersionUp);
-            this.Controls.Add(this.btnApplyVersion);
             this.Controls.Add(this.cmbVersionList);
             this.Controls.Add(this.lblVersionManagement);
             this.Controls.Add(this.chkIsVisible);
@@ -805,8 +779,6 @@ namespace GCTonePrism.Manager
         private System.Windows.Forms.TextBox txtBackgroundPath;
         private System.Windows.Forms.Label lblVersionManagement;
         private System.Windows.Forms.ComboBox cmbVersionList;
-        private System.Windows.Forms.Button btnApplyVersion;
-        private System.Windows.Forms.Button btnVersionUp;
         private System.Windows.Forms.Button btnSelectBackground;
         private System.Windows.Forms.Label lblExecutablePath;
         private System.Windows.Forms.TextBox txtExecutablePath;

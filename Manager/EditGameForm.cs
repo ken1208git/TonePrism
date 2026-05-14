@@ -143,13 +143,6 @@ namespace GCTonePrism.Manager
 
             // バージョン情報を読み込み
             LoadVersions();
-
-            // 旧ボタンを非表示
-            btnApplyVersion.Visible = false;
-            btnVersionUp.Visible = false;
-
-            // ラベルのテキスト変更（適宜）
-            // lblVersionUp.Visible = false; など
         }
 
         /// <summary>
@@ -895,16 +888,6 @@ namespace GCTonePrism.Manager
         private void btnAddDeveloper_Click(object sender, EventArgs e) => devListManager.Add();
         private void btnEditDeveloper_Click(object sender, EventArgs e) => devListManager.Edit();
         private void btnDeleteDeveloper_Click(object sender, EventArgs e) => devListManager.Delete();
-
-        private void btnVersionUp_Click(object sender, EventArgs e)
-        {
-             // Deprecated
-        }
-
-        private void btnApplyVersion_Click(object sender, EventArgs e)
-        {
-             // Deprecated
-        }
 
         private void UpdateThumbnailPreview() => ImagePreviewHelper.UpdatePreview(picThumbnailPreview, txtThumbnailPath.Text, gameFolder);
         private void UpdateBackgroundPreview() => ImagePreviewHelper.UpdatePreview(picBackgroundPreview, txtBackgroundPath.Text, gameFolder);
