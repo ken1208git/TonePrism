@@ -111,27 +111,11 @@ namespace GCTonePrism.Manager.Controls
             return true;
         }
 
-        /// <summary>Major bump (Minor / Patch を 0 にリセット)。</summary>
-        public void BumpMajor()
-        {
-            int newMajor = Major + 1;
-            if (newMajor > (int)numMajor.Maximum) newMajor = (int)numMajor.Maximum;
-            // NumericUpDown.ValueChanged が個別に発火しないようまとめて変更
-            numMajor.Value = newMajor;
-            numMinor.Value = 0;
-            numPatch.Value = 0;
-        }
-
-        /// <summary>Minor bump (Patch を 0 にリセット)。</summary>
-        public void BumpMinor()
-        {
-            int newMinor = Minor + 1;
-            if (newMinor > (int)numMinor.Maximum) newMinor = (int)numMinor.Maximum;
-            numMinor.Value = newMinor;
-            numPatch.Value = 0;
-        }
-
-        /// <summary>Patch bump。</summary>
+        /// <summary>
+        /// Patch bump。VersionUpForm の Form_Load で「現在 vX.Y.Z + Patch+1 = 暗黙の "迷ったら Patch" default」
+        /// として使う。Major / Minor 系の bump は #158 round 3 で UI から削除したため API 側も提供しない
+        /// (= 復活させたい時は再追加可能、現状 YAGNI)。
+        /// </summary>
         public void BumpPatch()
         {
             int newPatch = Patch + 1;

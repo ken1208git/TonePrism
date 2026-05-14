@@ -370,28 +370,6 @@ namespace GCTonePrism.Manager
             Close();
         }
 
-        /// <summary>
-        /// (#158) bump button: 「迷ったら Patch」semantic を UI で実現。各 button は SemverInputControl の
-        /// 対応 method を呼ぶだけで、ユーザーは SemVer 知識を「暗算」→「ラベル選択」に変換できる。
-        /// 現状を起点に毎回 bump するため、まず currentVersion を再 set してから bump (= 「現在 +1」)。
-        /// </summary>
-        private void btnBumpMajor_Click(object sender, EventArgs e)
-        {
-            semverNext.VersionString = currentVersion;
-            semverNext.BumpMajor();
-        }
-
-        private void btnBumpMinor_Click(object sender, EventArgs e)
-        {
-            semverNext.VersionString = currentVersion;
-            semverNext.BumpMinor();
-        }
-
-        private void btnBumpPatch_Click(object sender, EventArgs e)
-        {
-            semverNext.VersionString = currentVersion;
-            semverNext.BumpPatch();
-        }
 
         private bool ValidateInput()
         {

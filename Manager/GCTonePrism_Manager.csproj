@@ -156,12 +156,6 @@
     <Compile Include="Controls\SemverInputControl.Designer.cs">
       <DependentUpon>SemverInputControl.cs</DependentUpon>
     </Compile>
-    <Compile Include="Controls\SemverHelpControl.cs">
-      <SubType>UserControl</SubType>
-    </Compile>
-    <Compile Include="Controls\SemverHelpControl.Designer.cs">
-      <DependentUpon>SemverHelpControl.cs</DependentUpon>
-    </Compile>
     <Compile Include="BackupSettingsForm.cs">
       <SubType>Form</SubType>
     </Compile>
