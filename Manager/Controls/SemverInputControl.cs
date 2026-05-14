@@ -20,11 +20,12 @@ namespace GCTonePrism.Manager.Controls
     /// </summary>
     public partial class SemverInputControl : UserControl
     {
-        // (#158 round 4 H-1) NumericUpDown の Min/Max と同期した range constants。`TryNormalize` は
-        // static method で NumericUpDown インスタンスにアクセスできないため定数で持つ。Designer.cs
-        // (`numMajor.Maximum=99` / `numMinor.Maximum=999` / `numPatch.Maximum=999`) とずれると range
-        // check が UI と一貫しなくなるため、Designer 値を変える時は本定数も合わせて更新すること
-        // (ctor で defensive assert あり、ずれていれば即座に検出される)。
+        // (#158 round 4 H-1 + round 7 M-3) NumericUpDown の Min/Max と同期した range constants。
+        // `TryNormalize` は static method で NumericUpDown インスタンスにアクセスできないため定数で持つ。
+        // round 7 M-3: 本定数を SoT (single source of truth) として ctor 内で `numMajor.Maximum =
+        // MaxMajor` 等を上書き設定 (= Designer.cs の値が drift しても無視される、defensive assert
+        // 不要)。WinForms Designer は static expression を持てないため逆方向 (Designer から const
+        // 参照) は不可、「本定数を変える → ctor 上書きが効く」一方向の SoT。
         public const int MaxMajor = 99;
         public const int MaxMinor = 999;
         public const int MaxPatch = 999;
@@ -59,17 +60,19 @@ namespace GCTonePrism.Manager.Controls
         public SemverInputControl()
         {
             InitializeComponent();
-            // (#158 round 4 H-1) Designer.cs と本クラスの const がずれていないか defensive assert。
-            // ずれていると TryNormalize の range check (LoadVersions の事前 scan 経路) が UI と
-            // 不整合になり silent corruption を再導入するため起動時に即 fail させる。
-            if ((int)numMajor.Maximum != MaxMajor || (int)numMinor.Maximum != MaxMinor || (int)numPatch.Maximum != MaxPatch)
-            {
-                throw new InvalidOperationException(
-                    "SemverInputControl: Designer.cs の NumericUpDown.Maximum と const 定義がずれています。" +
-                    "Major designer=" + (int)numMajor.Maximum + " const=" + MaxMajor + ", " +
-                    "Minor designer=" + (int)numMinor.Maximum + " const=" + MaxMinor + ", " +
-                    "Patch designer=" + (int)numPatch.Maximum + " const=" + MaxPatch);
-            }
+            // (#158 round 7 M-3) const を真の SoT 化: Designer.cs の Min/Max を上書きする。
+            // 旧実装は ctor で `InvalidOperationException` の defensive assert を投げて drift 検出
+            // していたが、3 form すべてが本 control を Designer.InitializeComponent 経由で new する
+            // ため、drift があると Manager 起動直後の dialog 表示で例外伝播 → user は generic exception
+            // しか見えず操作不能、の cost が過大だった。const を SoT にして上書き設定すれば drift
+            // 自体が観測不能になり assert が不要になる。
+            numMajor.Minimum = MinComponent;
+            numMajor.Maximum = MaxMajor;
+            numMinor.Minimum = MinComponent;
+            numMinor.Maximum = MaxMinor;
+            numPatch.Minimum = MinComponent;
+            numPatch.Maximum = MaxPatch;
+
             numMajor.ValueChanged += (s, e) => OnVersionStringChanged();
             numMinor.ValueChanged += (s, e) => OnVersionStringChanged();
             numPatch.ValueChanged += (s, e) => OnVersionStringChanged();
@@ -283,6 +286,38 @@ namespace GCTonePrism.Manager.Controls
         {
             if (string.IsNullOrEmpty(suffix)) return true;
             return SuffixRegex.IsMatch(suffix);
+        }
+
+        /// <summary>
+        /// version 文字列を「core 部分 (`v?<X>.<Y>.<Z>`) と suffix 部分」に分割する static helper
+        /// (#158 round 7 L-3)。caller 側で `IndexOf('-')` 直書きすると `v-1.0.0` のような malformed
+        /// (数値が `-` 始まり) で suffix を `1.0.0` と誤判定する余地があるため、本 method 経由で
+        /// VersionRegex の named capture を使った構造的な split を提供する。
+        ///
+        /// parse 失敗時は false 返却 + core/suffix=null。caller は raw 文字列で fallback 表示すれば
+        /// よい。VersionRegex は CX-3 で IgnoreCase 受理済のため大文字 V も OK、Int32 overflow / range
+        /// 外も match 自体は通るので caller が別途 TryNormalize で整合性 check すること。
+        /// </summary>
+        public static bool TrySplit(string version, out string core, out string suffix)
+        {
+            core = null;
+            suffix = null;
+            if (string.IsNullOrEmpty(version)) return false;
+            string trimmed = version.Trim();
+            var m = VersionRegex.Match(trimmed);
+            if (!m.Success) return false;
+            if (m.Groups["suffix"].Success)
+            {
+                int suffixStart = m.Groups["suffix"].Index;
+                core = trimmed.Substring(0, suffixStart - 1);
+                suffix = m.Groups["suffix"].Value;
+            }
+            else
+            {
+                core = trimmed;
+                suffix = "";
+            }
+            return true;
         }
 
         /// <summary>

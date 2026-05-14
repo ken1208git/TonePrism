@@ -1561,6 +1561,21 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 **Codex round 6 false positive 3 件**: CX-2 / round 3 M-4 / round 4 codex P1 を re-flag されたもの、いずれも fix 済でコードに変更なし。
 
+**Round 7 review fix (codex P2 NEW = senior H-1 同件 + senior H-2/M/L 系 + L-4 inline 取り込み)** — version bump なし、本 entry に統合:
+
+- **Senior H-1 (= codex P2 NEW) Phase 2 topological sort**: round 6 M-2 で `reservedOldDirs` を導入して Phase 1 衝突 check は chained rename (A→B + B→C) を通すようになったが、Phase 2 は UI 順 (= cmbVersionList.Items の DB 由来 row 順) のまま `Directory.Move` 連発で、A→B が先に走ると B disk 残存で fail → 「同じ操作が成功したり rollback になったりする」非決定挙動が残っていた。greedy topological sort (`pendingOldDirs` に含まれない `NewDir` を持つ plan を優先) で並べ替え、cycle (A↔B 等) は UI 順 fall through で CX-1 rollback 経路に流す形に。
+- **Senior H-2 (UpdateGame 失敗 drift)**: round 5 codex P1 / round 3 M-4 で `UpdateGameVersion` ループ内の partial commit は塞いだが、その直後の `dbManager.UpdateGame(game)` (games table 更新) が SQLite 一時失敗等で例外を投げると「version 群は新値 commit 済 / games 行は旧値 / disk folder は新名」の drift が外側 generic catch で生 MessageBox に流れていた。`UpdateGame` を try/catch で囲み、round 5 codex P1 と同 wording で「partial commit 通知 + Manager 再起動案内」を出して `return;` (round 6 H-1 と同様 throw せず form 留め)。
+- **Senior M-1 (dup-check fallback コメント wording)**: round 6 codex P2 で導入した `TryNormalize` 失敗時の `: v.Version` fallback は、round 7 L-2 で事前 scan を 1 ループ集約 + return 化したため到達不能 dead path になった。「fallback path は事実上 dead だが defensive guard rail として残す (= silent regression 防止)」を comment 訂正。
+- **Senior M-2 (LoadVersions selection OrdinalIgnoreCase)**: `v.Version == originalGame.Version` の生 `==` 比較は CX-3 の大文字 V 受理導入後 `games.version="V1.0.0"` / `game_versions.version="v1.0.0"` 共存で false → fallback で先頭選択され「user が active と思っていた version と違うものが表示される」silent UX drift があった。`string.Equals(..., OrdinalIgnoreCase)` に変更、dup-check / rename 比較と同規則に揃える。
+- **Senior M-3 (ctor InvalidOperationException 過大)**: const と Designer.cs の同期 drift を ctor で `InvalidOperationException` で fail-fast にしていたが、3 form すべてが本 control を Designer 経由で new するため drift で全部詰む cost 過大だった。const を真の SoT 化: ctor 内で `numMajor.Maximum = MaxMajor` 等を上書き設定 → Designer drift しても無視される → assert 自体不要に。一方向 SoT (本定数を変える → ctor 上書き)、WinForms Designer は static expression 不可のため逆方向 (Designer から const 参照) は構造的に不可能。
+- **Senior L-1 (VersionUpForm BumpPatch on parse fail で文言矛盾)**: 旧実装は無条件 `TryParseAndSet → BumpPatch` で、失敗時 clamp 値 (v0.0.0 / v99.0.0) を更に +1 すると warning MessageBox の「v0.0.0 / 上限値に clamp」表記と矛盾する (= `clamp` と書いてるのに `v0.0.1` が表示されて user 混乱)。parse 失敗時は BumpPatch skip + 文言「Patch+1 default は適用なし」追記。
+- **Senior L-2 (3 段 MessageBox 統合)**: 旧実装は (a) suffix scan / (b) 空文字 scan / (c) 数値 scan の 3 段 return で、1 つの version が複数違反を持つと user は 2-3 巡 OK 押させられる UX。1 ループで classification → empty / malformed-suffix / malformed-numeric の 3 リストに分けて 1 つの MessageBox で全件まとめて表示する形に集約 (= round 2 M-3 / round 3 H-1 の集約方針と統一)。
+- **Senior L-3 (SemverInputControl.TrySplit helper)**: caller (EditGameForm.btnOK_Click の suffix scan) が `IndexOf('-')` 直書きで suffix 切り出していたため `v-1.0.0` 等の malformed (数値 negative 始まり) で suffix を `1.0.0` と誤判定する余地があった。`SemverInputControl.TrySplit(version, out core, out suffix)` static helper を新規追加、VersionRegex の named capture 経由で構造的に分割 → caller 側 IndexOf 排除。
+- **Senior L-4 (gameId rename newFolder 単独 check、inline 取り込み)**: 当初 follow-up issue 化を検討したが、本 PR の silent disk/DB drift 系列 fix と同テーマで 1 行 fix のため inline 取り込み。旧 `oldFolder.Exists && newFolder.Exists` 両方存在のみ throw だったのを `newFolder.Exists` 単独で throw に変更、「oldFolder 不在 + newFolder のみ存在」(= 別 user が手動で newGameId 配下を作った等) で DB だけ rename / disk noop の drift 経路を closure。
+- **Senior L-5 (AGENTS.md 規約確認)**: Bundle 移行後 (2026-05-11 以降) の個別 component link 定義不要 / dangling reference 許容の規約と本 entry の `### [Manager v0.8.11] - 2026-05-14` 構成は整合、no action。
+
+**Codex round 7 false positive 3 件**: CX-2 / round 3 M-4 / round 4 codex P1 を re-flag されたもの、コードに変更なし。
+
 ### [Manager v0.8.10] - 2026-05-13
 
 PR #150 で dir rename (`GCTonePrism_Manager/` → `Manager/`) に連動して `PathManager.cs` の self-reference リテラル + priority-3 detection ロジック (StartsWith 二段比較 + Manager/Launcher sibling 同時存在検証) + csproj `<RootNamespace>` を修正。配布構造変更を含むため SemVer 厳密だと minor 寄りだが、Install.bat の v0.2.0 → 新構造 migration で自動吸収されエンドユーザー視点では invisible のため patch bump 扱い。

@@ -261,10 +261,14 @@ namespace GCTonePrism.Manager
 
                 if (originalGame.Version != null)
                 {
-                    // アクティブなバージョンを選択
+                    // (#158 round 7 M-2) `==` (= Ordinal) ではなく OrdinalIgnoreCase 比較。CX-3 で大文字
+                    // V を regex 受理にした副作用で、games.version="V1.0.0" / game_versions.version="v1.0.0"
+                    // (どこかの normalize 経由で書き戻された) が共存しうる。生 == 比較だと false →
+                    // fallback で先頭 (= 最新版) が選択され「user が active と思っていた version と違う
+                    // ものが表示される」silent UX drift になる。dup-check / rename 比較と同じ規則に揃える。
                     foreach (var item in cmbVersionList.Items)
                     {
-                        if (item is GameVersion v && v.Version == originalGame.Version)
+                        if (item is GameVersion v && string.Equals(v.Version, originalGame.Version, StringComparison.OrdinalIgnoreCase))
                         {
                             cmbVersionList.SelectedItem = item;
                             break;
@@ -578,92 +582,82 @@ namespace GCTonePrism.Manager
                 SaveGameDataToVersion(currentSelected);
             }
 
-            // (#158 round 3 H-1) 上の semverVersionName.IsValid は表示中 1 個の suffix しか check
-            // していないため、ユーザーが version A の txtSuffix に「鈴木」等の不正値を入力 → dropdown
-            // を version B に切替 (= cmbVersionList_SelectedIndexChanged 経由で SaveGameDataToVersion(A)
-            // により A.Version = "v...-鈴木" を in-memory commit) → そのまま OK 押下、で末尾の
-            // dbManager.UpdateGameVersion(v) で bad value が DB に流れ込む silent path があった。
-            // cmbVersionList.Items 全件の suffix を SemverInputControl.IsSuffixValid で事前 scan、
-            // 不正があれば id 一覧で 1 つの MessageBox に集約して block (M-3 と同 pattern)。
-            var malformedSuffixVersions = new List<string>();
+            // (#158 round 7 L-2 + L-3) 旧実装は (a) suffix scan / (b) 空文字 scan / (c) 数値 scan の
+            // 3 段 return で、1 つの version が複数違反を持つと user は 2-3 巡 OK を押させられる UX。
+            // 1 ループで classification → empty / malformed-suffix / malformed-numeric の 3 リストに
+            // 分けて 1 つの MessageBox で全件まとめて表示する形に集約。
+            // suffix 切り出しは TrySplit static helper 経由 (round 7 L-3、IndexOf('-') 直書きの
+            // "v-1.0.0" 誤判定余地を排除)。
+            var emptyIds = new List<string>();
+            var malformedSuffixEntries = new List<string>();
+            var malformedNumericEntries = new List<string>();
             foreach (var item in cmbVersionList.Items)
             {
                 if (!(item is GameVersion vChk)) continue;
-                // v.Version の suffix 部分を切り出して check。"v1.0.0-鈴木" → "鈴木"。
-                string ver = vChk.Version ?? "";
-                int dashIdx = ver.IndexOf('-');
-                string sfx = dashIdx >= 0 ? ver.Substring(dashIdx + 1) : "";
-                if (!SemverInputControl.IsSuffixValid(sfx))
+                string ver = vChk.Version;
+                if (string.IsNullOrEmpty(ver))
                 {
-                    malformedSuffixVersions.Add("  - id=" + vChk.Id + ": '" + ver + "' (suffix 部分: '" + sfx + "')");
+                    emptyIds.Add("(id=" + vChk.Id + ")");
+                    continue;
                 }
-            }
-            if (malformedSuffixVersions.Count > 0)
-            {
-                MessageBox.Show(this,
-                    "以下のバージョンの suffix 部分が SemVer 形式ではありません (英数字とハイフンの " +
-                    "identifier をピリオドで区切る形式のみ可、例: rc1 / beta.2)。dropdown でそれぞれ" +
-                    "選択して suffix 欄を修正してから再度 OK を押してください。\n\n" +
-                    string.Join("\n", malformedSuffixVersions),
-                    "バージョン入力エラー (" + malformedSuffixVersions.Count + " 件)",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-            // (#158 M4) 空文字 / null version は「重複」ではなく「未入力」として別ハンドリング。
-            // GroupBy で ?? "" 正規化したまま重複扱いすると、空文字 version が複数あった場合に
-            // MessageBox に空行が並んで意味不明になる + H2 silent fallback 経路で複数 version が同時に
-            // v0.0.0 化した場合の誤検出回避にもなる。
-            var versionsWithEmpty = cmbVersionList.Items.OfType<GameVersion>()
-                .Where(v => string.IsNullOrEmpty(v.Version))
-                .ToList();
-            if (versionsWithEmpty.Count > 0)
-            {
-                MessageBox.Show(
-                    "以下のエントリで version 文字列が空または未設定です:\n\n  " +
-                    string.Join("\n  ", versionsWithEmpty.Select(v => "(id=" + v.Id + ")")) +
-                    "\n\nバージョン管理ドロップダウンで該当の項目を選択し、有効な version 番号を入力してください。",
-                    "バージョン未入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            // (#158 round 6 M-1) LoadVersions の集約警告 MessageBox は notice であって block ではない。
-            // user がそれを dismiss してそのまま OK を押すと、まだ dropdown で選択されていない (=
-            // SaveGameDataToVersion で clamp 上書きされていない) malformed version は raw value のまま
-            // dbManager.UpdateGameVersion(v) で書き戻る → user 視点では「警告は出たけど結局何も対処
-            // しなくて済んだ」状態。ここで TryNormalize 全件 scan + block で「修正してから OK」を
-            // 強制する (= 最終防衛線、suffix の H-1 全件 scan と同 pattern)。
-            //
-            // 既知の残存 path: currently-displayed の malformed は前段の dup-check 直前
-            // SaveGameDataToVersion(currentSelected) で v.Version が clamp 値 (例: "v0.0.0" or "v99.0.0")
-            // に上書き済 → TryNormalize は succeed → 本 scan では catch できない。LoadVersions 警告での
-            // user 認知 + UI の clamp 表示 visibility に頼る (= 表示中の version を user は見ているはず)。
-            var malformedNumericVersions = new List<string>();
-            foreach (var item in cmbVersionList.Items)
-            {
-                if (!(item is GameVersion vChk2)) continue;
+                string core, sfx;
+                if (SemverInputControl.TrySplit(ver, out core, out sfx))
+                {
+                    if (!SemverInputControl.IsSuffixValid(sfx))
+                    {
+                        malformedSuffixEntries.Add("  - id=" + vChk.Id + ": '" + ver + "' (suffix 部分: '" + sfx + "')");
+                    }
+                }
                 string normIgnored;
-                if (!SemverInputControl.TryNormalize(vChk2.Version ?? "", out normIgnored))
+                if (!SemverInputControl.TryNormalize(ver, out normIgnored))
                 {
-                    malformedNumericVersions.Add("  - id=" + vChk2.Id + ": '" + (vChk2.Version ?? "(null)") + "'");
+                    malformedNumericEntries.Add("  - id=" + vChk.Id + ": '" + ver + "'");
                 }
             }
-            if (malformedNumericVersions.Count > 0)
+            if (emptyIds.Count > 0 || malformedSuffixEntries.Count > 0 || malformedNumericEntries.Count > 0)
             {
-                MessageBox.Show(this,
-                    "以下のバージョンの数値部 (Major/Minor/Patch) または書式が SemVer として parse 不能" +
-                    "です。Manager の dropdown で該当バージョンを選択して有効な値に修正してから OK を" +
-                    "押してください (= このまま OK すると不正値が DB に書き戻されます)。\n\n" +
-                    string.Join("\n", malformedNumericVersions),
-                    "バージョン形式エラー (" + malformedNumericVersions.Count + " 件)",
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("以下のバージョンに修正が必要です。Manager の dropdown で該当 version を" +
+                    "選択して入力欄を直してから再度 OK を押してください (= このまま OK すると DB に" +
+                    "書き戻されます)。");
+                sb.AppendLine();
+                if (emptyIds.Count > 0)
+                {
+                    sb.AppendLine("● バージョン文字列が空 / 未設定 (" + emptyIds.Count + " 件):");
+                    sb.AppendLine("  " + string.Join("\n  ", emptyIds));
+                    sb.AppendLine();
+                }
+                if (malformedSuffixEntries.Count > 0)
+                {
+                    sb.AppendLine("● suffix 部分が SemVer 形式ではない (" + malformedSuffixEntries.Count +
+                        " 件、英数字とハイフンの identifier をピリオドで区切る形式のみ可、例: rc1 / beta.2):");
+                    sb.AppendLine(string.Join("\n", malformedSuffixEntries));
+                    sb.AppendLine();
+                }
+                if (malformedNumericEntries.Count > 0)
+                {
+                    sb.AppendLine("● 数値部 (Major/Minor/Patch) または書式が parse 不能 (" +
+                        malformedNumericEntries.Count + " 件):");
+                    sb.AppendLine(string.Join("\n", malformedNumericEntries));
+                    sb.AppendLine();
+                }
+                int total = emptyIds.Count + malformedSuffixEntries.Count + malformedNumericEntries.Count;
+                MessageBox.Show(this, sb.ToString().TrimEnd(),
+                    "バージョン入力エラー (" + total + " 件)",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
+            // 既知の残存 path (#158 round 6 M-1): currently-displayed の malformed は前段 dup-check 直前
+            // SaveGameDataToVersion(currentSelected) で v.Version が clamp 値 (例: "v0.0.0" or "v99.0.0")
+            // に上書き済 → 上の TryNormalize は succeed → 本 scan では catch できない。LoadVersions
+            // 警告での user 認知 + UI clamp 表示 visibility に頼る (= 表示中 version は user の目に入る)。
             // (#158 round 6 codex P2) GroupBy のキーを TryNormalize 結果に変える。旧実装は raw v.Version
             // で比較していたため、過去 DB の "v1.0.0" / "1.0.0" / "V1.0.0" を別 key として素通しして
             // semantic 上は重複なのに通る silent danger があった (= Q2 fix の裏口再オープン状態)。
-            // TryNormalize 失敗 (= malformed) は raw value を key に fallback、別 malformed 同士は raw
-            // 一致時のみ重複扱い (= 「形式不明」同士の意図せぬ collapse を避ける、片方は M-1 全件 scan
-            // で別途 block される)。
+            // (#158 round 7 M-1) 上の事前 scan (空文字 / malformed-suffix / malformed-numeric の 3 段
+            // 集約) で全 malformed を弾いて return しているため、ここに到達する時点で全件 TryNormalize
+            // 成功確定。三項の `: v.Version` fallback path は事実上 dead code だが defensive に残す
+            // (= 万一上の scan が緩められた場合の guard rail として機能、silent regression 防止)。
             var versionDups = cmbVersionList.Items
                 .OfType<GameVersion>()
                 .Where(v => !string.IsNullOrEmpty(v.Version))
@@ -704,7 +698,13 @@ namespace GCTonePrism.Manager
                     string oldFolder = PathManager.GetGameFolder(oldGameId);
                     string newFolder = PathManager.GetGameFolder(newGameId);
 
-                    if (System.IO.Directory.Exists(oldFolder) && System.IO.Directory.Exists(newFolder))
+                    // (#158 round 7 L-4) 旧実装は `oldFolder.Exists && newFolder.Exists` で両方存在のみ
+                    // throw だったが、「oldFolder 不在 + newFolder のみ存在」(= 別 user が手動で
+                    // newGameId 配下を作っていた等) を素通しして DB だけ rename / disk noop の drift が
+                    // 発生する経路があった。newFolder 単独存在で即 throw、disk-DB drift を手前で塞ぐ。
+                    // pre-existing path だが本 PR の silent disk/DB drift 系列 fix と同テーマなので inline
+                    // 取り込み。
+                    if (System.IO.Directory.Exists(newFolder))
                     {
                         throw new InvalidOperationException($"フォルダ「{newFolder}」が既に存在します。");
                     }
@@ -926,12 +926,39 @@ namespace GCTonePrism.Manager
                         });
                     }
 
+                    // (#158 round 7 H-1 = codex P2) Phase 2 を topological sort で並べ替え。chained
+                    // rename (例: A→B + B→C) は Phase 1 の reservedOldDirs check で衝突 skip 通すが、
+                    // Phase 2 の実行順序を UI 順 (= cmbVersionList.Items の DB 由来 row 順) のままにすると
+                    // A→B が先に走った時点で B disk 残存で Move 失敗 → rollback、と「user 視点で同じ
+                    // 操作が成功したり失敗したりする」非決定挙動になる。
+                    // greedy sort: 「newDir が他 plan の oldDir でない」plan を優先実行 → destination
+                    // が空く plan を先に潰す。cycle (A↔B 等) があれば pickIdx<0 で fall through、残り
+                    // を UI 順で append (Phase 2 で先行 Move の newDir 衝突 → CX-1 rollback で安全)。
+                    var orderedPlan = new List<RenamePlan>();
+                    var pendingPlan = new List<RenamePlan>(renamePlan);
+                    while (pendingPlan.Count > 0)
+                    {
+                        var pendingOldDirs = new HashSet<string>(
+                            pendingPlan.Select(pp => pp.OldDir), StringComparer.OrdinalIgnoreCase);
+                        int pickIdx = pendingPlan.FindIndex(pp => !pendingOldDirs.Contains(pp.NewDir));
+                        if (pickIdx < 0)
+                        {
+                            // cycle 検出: 残りを UI 順で append、Phase 2 で先行 Move が newDir 衝突して
+                            // 通常の CX-1 rollback path に流れる (rollback 経路は整備済 + in-memory revert
+                            // も round 4 codex P1 + L-5 で対応済のため安全)。
+                            orderedPlan.AddRange(pendingPlan);
+                            break;
+                        }
+                        orderedPlan.Add(pendingPlan[pickIdx]);
+                        pendingPlan.RemoveAt(pickIdx);
+                    }
+
                     // Phase 2: 計画通り rename 実行。例外時は完了済を逆順 rollback。
                     // (#158 round 5 L-5) SourceExists=false の entry も path/snapshot mutation するため
                     // completedRenames に追加 (MoveDone=false で disk Move skip flag)。これで
                     // RollbackCompletedRenames が in-memory revert の対象として拾える。
                     var completedRenames = new List<RenamePlan>();
-                    foreach (var p in renamePlan)
+                    foreach (var p in orderedPlan)
                     {
                         if (!p.SourceExists)
                         {
@@ -1064,8 +1091,30 @@ namespace GCTonePrism.Manager
                     game.BackgroundPath = selectedVersion.BackgroundPath;
                     game.Arguments = selectedVersion.Arguments;
                     game.Version = selectedVersion.Version;
-                    
-                    dbManager.UpdateGame(game);
+
+                    // (#158 round 7 H-2) UpdateGame は UpdateGameVersion 群が全件成功した後に呼ばれる
+                    // が、ここで一時的 SQLite 失敗等で例外が出ると「version 群 (= per-call commit 済) は
+                    // 新値 / games 行は旧値 / disk folder は新名」という drift で残る。round 5 codex P1
+                    // の partial commit pattern と同型なので同 wording で user に通知 + return (= round 6
+                    // H-1 の二重 MessageBox 防止のため throw せず form 留める)。disk rollback は行わない
+                    // (= UpdateGameVersion が既に commit 済の row が disk 新名を指しているため)。
+                    try
+                    {
+                        dbManager.UpdateGame(game);
+                    }
+                    catch (Exception gameEx)
+                    {
+                        MessageBox.Show(
+                            "ゲーム本体情報 (games table) の DB 更新に失敗しました:\n" +
+                            "  " + gameEx.Message + "\n\n" +
+                            "  ・ バージョン情報 (game_versions table) の更新は既に完了しています\n" +
+                            "  ・ disk フォルダは新しい名前のまま\n" +
+                            "  ・ games 行のみ古い値で残っており drift 状態\n\n" +
+                            "Manager を一度終了して再起動し、該当ゲームを開いて UpdateGame の項目 (タイトル / " +
+                            "ジャンル / 人数等) が想定通りか確認、必要なら手動で再編集してください。",
+                            "DB 部分更新失敗 (要手動確認)", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
                 }
 
                 EditedGame = game;
