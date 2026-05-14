@@ -31,6 +31,10 @@ namespace GCTonePrism.Manager
         private Dictionary<int, string> _originalVersionByDbId = new Dictionary<int, string>();
 
         // (#158 CX-1) folder rename を 2-phase 化するための plan 単位 (Phase 1 で構築 / Phase 2 で実行)。
+        // (#158 round 4 codex P1) Old{Executable,Thumbnail,Background}Path: in-memory state rollback 用に
+        // path 書き換え前の値を capture。disk Move を rollback しても in-memory が NEW のままだと、同
+        // dialog で再 OK 押下時に diff check が false (originalVer も snapshot 経由で NEW 化済) で
+        // rename skip → DB に NEW 値 + 旧 disk folder 名で書き込む silent drift が再発する。
         private class RenamePlan
         {
             public GameVersion Version;
@@ -38,6 +42,41 @@ namespace GCTonePrism.Manager
             public string NewDir;
             public string OriginalVer;
             public bool SourceExists;
+            public string OldExecutablePath;
+            public string OldThumbnailPath;
+            public string OldBackgroundPath;
+        }
+
+        /// <summary>
+        /// (#158 round 4 codex P1) rename rollback の共通処理: completedRenames を逆順に disk Move を
+        /// 戻し、各エントリの in-memory state (_originalVersionByDbId snapshot + GameVersion の path 群)
+        /// も capture 前の値に restore する。CX-1 (Phase 2 中の Move 失敗) と M-4 (UpdateGameVersion
+        /// 失敗) 両方の catch 経路で呼び出される。disk Move の失敗は console log + count、in-memory
+        /// 復元は失敗しない (= 単純代入)。
+        /// </summary>
+        private void RollbackCompletedRenames(List<RenamePlan> completedRenames, out int rolledBack, out int rollbackFailures)
+        {
+            rolledBack = 0;
+            rollbackFailures = 0;
+            for (int i = completedRenames.Count - 1; i >= 0; i--)
+            {
+                var done = completedRenames[i];
+                try
+                {
+                    System.IO.Directory.Move(done.NewDir, done.OldDir);
+                    rolledBack++;
+                }
+                catch (Exception rbEx)
+                {
+                    rollbackFailures++;
+                    Console.WriteLine("[EditGameForm] (#158 rollback) disk rename 戻し失敗: " + done.NewDir + " → " + done.OldDir + ": " + rbEx.Message);
+                }
+                // in-memory 復元 (disk Move 成否に関わらず、UI/DB drift を最小化するため必ず実行)。
+                _originalVersionByDbId[done.Version.Id] = done.OriginalVer;
+                done.Version.ExecutablePath = done.OldExecutablePath;
+                done.Version.ThumbnailPath = done.OldThumbnailPath;
+                done.Version.BackgroundPath = done.OldBackgroundPath;
+            }
         }
 
         /// <summary>
@@ -272,6 +311,19 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
+        /// (#158 round 4 M-1) version 文字列から folder leaf 形式 (`v<X>.<Y>.<Z>[-suffix]`、必ず
+        /// 小文字 v prefix) を作る。CX-3 で大文字 V を regex 受理にした副作用で、`oldVer="V1.2.3"`
+        /// の場合に旧実装の `StartsWith("v")` が case-sensitive で false → `"v" + "V1.2.3" = "vV1.2.3"`
+        /// と二重 prefix の歪な leaf になる経路があった。`TrimStart('v', 'V')` で先頭 v/V を一度
+        /// 剥がしてから小文字 v を被せ直す形に統一。
+        /// </summary>
+        private static string ToVersionLeaf(string ver)
+        {
+            if (ver == null) return "v";
+            return "v" + ver.TrimStart('v', 'V');
+        }
+
+        /// <summary>
         /// (#158 Q3) 相対パス先頭の `v<oldVer>/` (or `v<oldVer>\`) prefix を `v<newVer>/` に置換する。
         /// AddGameForm が「<gameFolder> 起点で相対化」する関係上、executable_path 等は
         /// 「v<version>/main.exe」のような形で DB 保存されている。version rename 時にこれらも
@@ -280,8 +332,9 @@ namespace GCTonePrism.Manager
         private static string ReplaceVersionPrefix(string relPath, string oldVer, string newVer)
         {
             if (string.IsNullOrEmpty(relPath)) return relPath;
-            string oldLeaf = (oldVer != null && oldVer.StartsWith("v")) ? oldVer : "v" + (oldVer ?? "");
-            string newLeaf = (newVer != null && newVer.StartsWith("v")) ? newVer : "v" + (newVer ?? "");
+            // (#158 round 4 M-1) ToVersionLeaf 経由で大文字 V も leaf 構築可能に統一。
+            string oldLeaf = ToVersionLeaf(oldVer);
+            string newLeaf = ToVersionLeaf(newVer);
             string oldPrefixFwd = oldLeaf + "/";
             string newPrefixFwd = newLeaf + "/";
             string oldPrefixBack = oldLeaf + "\\";
@@ -334,8 +387,8 @@ namespace GCTonePrism.Manager
             // 事前 scan + 1 回まとめて表示するため per-version では出さない (= dropdown 切替ごとに
             // 同警告を連発させない、M-3)。fallback 入力自体は依然必要 (semverVersionName が前 version
             // の入力値を保持したまま OK 押下されると別 version に化けるため)。
-            string semverParseErr;
-            semverVersionName.TryParseAndSet(version.Version ?? "", out semverParseErr);
+            // (#158 round 4 L-1) 戻り値 / out error は意図的に discard。`out _` で意図を明示。
+            semverVersionName.TryParseAndSet(version.Version ?? "", out _);
             txtTitle.Text = version.Title ?? "";
             txtDescription.Text = version.Description ?? "";
             txtVersionDescription.Text = version.UpdateNote ?? "";
@@ -478,6 +531,10 @@ namespace GCTonePrism.Manager
 
             // (#158) semverVersionName の suffix 文字種を validate (= 数値部は NumericUpDown で構造的に safe)。
             // 不正 suffix (例: 日本語) を含む VersionString が DB に流れ込むのを block。
+            // (#158 round 4 L-3) 直後の H-1 全件 scan (cmbVersionList.Items 全体) と意図的に重複させて
+            // いる: 本 check は「現在表示中の 1 個」が対象で Focus() で UI を該当 control に戻し、
+            // 後の全件 scan (line ~520) は dropdown 切替で in-memory commit された別 version の suffix
+            // を集約報告する役割。両者は UX 用途が違うので片方削除しないこと。
             string semverErr;
             if (!semverVersionName.IsValid(out semverErr))
             {
@@ -745,8 +802,9 @@ namespace GCTonePrism.Manager
                         // "移動先フォルダが既に存在します" abort で詰む regression が発生していた。
                         if (string.Equals(originalVer, v.Version, StringComparison.OrdinalIgnoreCase)) continue;
 
-                        string oldLeaf = (originalVer != null && originalVer.StartsWith("v")) ? originalVer : "v" + (originalVer ?? "");
-                        string newLeaf = (v.Version != null && v.Version.StartsWith("v")) ? v.Version : "v" + (v.Version ?? "");
+                        // (#158 round 4 M-1) ToVersionLeaf で大文字 V も小文字 v leaf に正規化。
+                        string oldLeaf = ToVersionLeaf(originalVer);
+                        string newLeaf = ToVersionLeaf(v.Version);
                         string oldDir = System.IO.Path.Combine(gameFolder, oldLeaf);
                         string newDir = System.IO.Path.Combine(gameFolder, newLeaf);
 
@@ -767,6 +825,10 @@ namespace GCTonePrism.Manager
                             NewDir = newDir,
                             OriginalVer = originalVer,
                             SourceExists = System.IO.Directory.Exists(oldDir),
+                            // (#158 round 4 codex P1) in-memory rollback 用に path 書き換え前の値を capture。
+                            OldExecutablePath = v.ExecutablePath,
+                            OldThumbnailPath = v.ThumbnailPath,
+                            OldBackgroundPath = v.BackgroundPath,
                         });
                     }
 
@@ -789,24 +851,12 @@ namespace GCTonePrism.Manager
                             }
                             catch (Exception ex)
                             {
-                                // (#158 CX-1) rollback: 完了済 rename を逆順で元の名前に戻す。
-                                // rollback 自体が失敗した場合は console log のみ (これ以上できることなし、
-                                // user に最大限情報を残して abort する選択)。
-                                int rolledBack = 0, rollbackFailures = 0;
-                                for (int i = completedRenames.Count - 1; i >= 0; i--)
-                                {
-                                    var done = completedRenames[i];
-                                    try
-                                    {
-                                        System.IO.Directory.Move(done.NewDir, done.OldDir);
-                                        rolledBack++;
-                                    }
-                                    catch (Exception rbEx)
-                                    {
-                                        rollbackFailures++;
-                                        Console.WriteLine("[EditGameForm] (#158 CX-1) rollback 失敗: " + done.NewDir + " → " + done.OldDir + ": " + rbEx.Message);
-                                    }
-                                }
+                                // (#158 CX-1 + round 4 codex P1) rollback: 完了済 rename を逆順で disk Move
+                                // 戻し + in-memory state (_originalVersionByDbId snapshot + GameVersion の
+                                // path 群) も capture 前に復元。同 dialog で再 OK 押下時に diff check が
+                                // 正しく triggered されて rename retry できる状態に戻す。
+                                int rolledBack, rollbackFailures;
+                                RollbackCompletedRenames(completedRenames, out rolledBack, out rollbackFailures);
                                 MessageBox.Show(
                                     "バージョンフォルダのリネームに失敗しました:\n" +
                                     "  " + p.OldDir + "\n  → " + p.NewDir + "\n\n" +
@@ -850,21 +900,9 @@ namespace GCTonePrism.Manager
                     }
                     catch (Exception dbEx)
                     {
-                        int rolledBack = 0, rollbackFailures = 0;
-                        for (int i = completedRenames.Count - 1; i >= 0; i--)
-                        {
-                            var done = completedRenames[i];
-                            try
-                            {
-                                System.IO.Directory.Move(done.NewDir, done.OldDir);
-                                rolledBack++;
-                            }
-                            catch (Exception rbEx)
-                            {
-                                rollbackFailures++;
-                                Console.WriteLine("[EditGameForm] (#158 round 3 M-4) rollback 失敗: " + done.NewDir + " → " + done.OldDir + ": " + rbEx.Message);
-                            }
-                        }
+                        // (#158 round 3 M-4 + round 4 codex P1) disk rollback + in-memory state restore。
+                        int rolledBack, rollbackFailures;
+                        RollbackCompletedRenames(completedRenames, out rolledBack, out rollbackFailures);
                         MessageBox.Show(
                             "バージョン情報の DB 更新に失敗しました:\n" +
                             "  " + dbEx.Message + "\n\n" +

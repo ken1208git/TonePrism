@@ -20,6 +20,16 @@ namespace GCTonePrism.Manager.Controls
     /// </summary>
     public partial class SemverInputControl : UserControl
     {
+        // (#158 round 4 H-1) NumericUpDown の Min/Max と同期した range constants。`TryNormalize` は
+        // static method で NumericUpDown インスタンスにアクセスできないため定数で持つ。Designer.cs
+        // (`numMajor.Maximum=99` / `numMinor.Maximum=999` / `numPatch.Maximum=999`) とずれると range
+        // check が UI と一貫しなくなるため、Designer 値を変える時は本定数も合わせて更新すること
+        // (ctor で defensive assert あり、ずれていれば即座に検出される)。
+        public const int MaxMajor = 99;
+        public const int MaxMinor = 999;
+        public const int MaxPatch = 999;
+        public const int MinComponent = 0;
+
         // suffix 用 regex: SemVer 2.0.0 §9 strict 準拠 = ドット区切り identifier 列、各 identifier は
         // 英数字 + ハイフンのみ・空 identifier 不可。"foo" / "rc1" / "alpha.2" / "rc-1" は OK、"foo.."
         // / ".foo" / "foo." / ".." / "" は reject (空 identifier 含む)。空 suffix の場合は IsValid 側
@@ -42,6 +52,17 @@ namespace GCTonePrism.Manager.Controls
         public SemverInputControl()
         {
             InitializeComponent();
+            // (#158 round 4 H-1) Designer.cs と本クラスの const がずれていないか defensive assert。
+            // ずれていると TryNormalize の range check (LoadVersions の事前 scan 経路) が UI と
+            // 不整合になり silent corruption を再導入するため起動時に即 fail させる。
+            if ((int)numMajor.Maximum != MaxMajor || (int)numMinor.Maximum != MaxMinor || (int)numPatch.Maximum != MaxPatch)
+            {
+                throw new InvalidOperationException(
+                    "SemverInputControl: Designer.cs の NumericUpDown.Maximum と const 定義がずれています。" +
+                    "Major designer=" + (int)numMajor.Maximum + " const=" + MaxMajor + ", " +
+                    "Minor designer=" + (int)numMinor.Maximum + " const=" + MaxMinor + ", " +
+                    "Patch designer=" + (int)numPatch.Maximum + " const=" + MaxPatch);
+            }
             numMajor.ValueChanged += (s, e) => OnVersionStringChanged();
             numMinor.ValueChanged += (s, e) => OnVersionStringChanged();
             numPatch.ValueChanged += (s, e) => OnVersionStringChanged();
@@ -76,11 +97,14 @@ namespace GCTonePrism.Manager.Controls
 
         /// <summary>
         /// 外部 (DB / 手書き等) の version 文字列を正規化形 (`v<Major>.<Minor>.<Patch>[-suffix]`、
-        /// 小文字 v 強制) に変換する。`TryParseAndSet` と同じ regex を共有し、「control に流し込んだ
-        /// 後の VersionString getter が返す形」と一致する。範囲外 (NumericUpDown Min/Max 超 / Int32
-        /// overflow) は parse 失敗扱い (= UI に流し込まないので range check は本 method 側にも入れる
-        /// 必要なし、ただし Int32 overflow は Major/Minor/Patch すべて 0 化して別 version に化ける
-        /// silent corruption になるため check)。
+        /// 小文字 v 強制) に変換する。`TryParseAndSet` と同じ regex + 同じ range/overflow check を
+        /// 共有し、「control に流し込んだ後の VersionString getter が返す形」と完全一致する (= 本
+        /// method が true を返す = control に流し込んでも UI 上 silent clamp されない、を保証)。
+        ///
+        /// 失敗判定: (a) null/空文字、(b) regex 非 match、(c) Int32 overflow、(d) NumericUpDown
+        /// Min/Max 超 (#158 round 4 H-1)。(d) を含めるのは LoadVersions の事前 scan が本 method を
+        /// 唯一の検証手段として使うため、`v120.0.0` 等を素通しすると後段 LoadGameDataForVersion で
+        /// silent clamp されて DB 上書きの corruption になるため。
         ///
         /// 主用途 (#158 M-1): VersionUpForm の重複バージョン dup check で「`semverNext.VersionString`
         /// (= 常に `vX.Y.Z` 形式) と DB 由来の生 `currentVersion` (= 過去の "1.0.0" / "V1.0.0" 等の
@@ -101,6 +125,10 @@ namespace GCTonePrism.Manager.Controls
             if (!int.TryParse(m.Groups["major"].Value, out major)) return false;
             if (!int.TryParse(m.Groups["minor"].Value, out minor)) return false;
             if (!int.TryParse(m.Groups["patch"].Value, out patch)) return false;
+            // (#158 round 4 H-1) NumericUpDown Min/Max range check (上記 docstring (d) 参照)。
+            if (major < MinComponent || major > MaxMajor) return false;
+            if (minor < MinComponent || minor > MaxMinor) return false;
+            if (patch < MinComponent || patch > MaxPatch) return false;
             string suffix = m.Groups["suffix"].Success ? m.Groups["suffix"].Value : "";
             string core = "v" + major + "." + minor + "." + patch;
             normalized = string.IsNullOrEmpty(suffix) ? core : core + "-" + suffix;
