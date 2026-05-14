@@ -22,15 +22,19 @@ namespace GCTonePrism.Manager
 
         #region Windows Form Designer generated code
 
-        private System.Windows.Forms.Label lblVersionHint;
+        private System.Windows.Forms.Label lblBumpHint;
 
         private void InitializeComponent()
         {
             this.lblCurrentVersionLabel = new System.Windows.Forms.Label();
             this.lblCurrentVersion = new System.Windows.Forms.Label();
             this.lblNextVersion = new System.Windows.Forms.Label();
-            this.txtNextVersion = new System.Windows.Forms.TextBox();
-            this.lblVersionHint = new System.Windows.Forms.Label();
+            this.semverNext = new GCTonePrism.Manager.Controls.SemverInputControl();
+            this.btnBumpMajor = new System.Windows.Forms.Button();
+            this.btnBumpMinor = new System.Windows.Forms.Button();
+            this.btnBumpPatch = new System.Windows.Forms.Button();
+            this.lblBumpHint = new System.Windows.Forms.Label();
+            this.semverHelp = new GCTonePrism.Manager.Controls.SemverHelpControl();
             this.lblGameFolder = new System.Windows.Forms.Label();
             this.txtGameFolder = new System.Windows.Forms.TextBox();
             this.btnSelectGameFolder = new System.Windows.Forms.Button();
@@ -117,31 +121,71 @@ namespace GCTonePrism.Manager
             this.lblNextVersion.TabIndex = 2;
             this.lblNextVersion.Text = "新バージョン*";
             //
-            // txtNextVersion
+            // semverNext (#158: NumericUpDown × 3 で SemVer 入力、txtNextVersion 置換)
             //
-            this.txtNextVersion.Location = new System.Drawing.Point(110, 36);
-            this.txtNextVersion.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
-            this.txtNextVersion.Name = "txtNextVersion";
-            this.txtNextVersion.Size = new System.Drawing.Size(114, 19);
-            this.txtNextVersion.TabIndex = 3;
-            this.txtNextVersion.Text = "v";
+            this.semverNext.Location = new System.Drawing.Point(110, 32);
+            this.semverNext.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.semverNext.Name = "semverNext";
+            this.semverNext.Size = new System.Drawing.Size(300, 28);
+            this.semverNext.TabIndex = 3;
             //
-            // lblVersionHint
+            // bump UI 群 (#158): 新バージョン行 (y=32) の下に新 row を追加して bump button 3 個 +
+            // hint label + 解説 panel を配置 (= 左カラムを +90px シフトしてスペース確保)。
+            // 元案 (新バージョン行と同 y=32) は右側のサムネイル column (x ≈ 1080+) と物理 overlap
+            // していたため、純粋に下方向に行を追加する形で対処 (round 2 fix)。
             //
-            this.lblVersionHint.AutoSize = true;
-            this.lblVersionHint.Font = new System.Drawing.Font("MS UI Gothic", 8F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(128)));
-            this.lblVersionHint.ForeColor = System.Drawing.Color.Gray;
-            this.lblVersionHint.Location = new System.Drawing.Point(228, 40);
-            this.lblVersionHint.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
-            this.lblVersionHint.Name = "lblVersionHint";
-            this.lblVersionHint.Size = new System.Drawing.Size(244, 11);
-            this.lblVersionHint.TabIndex = 4;
-            this.lblVersionHint.Text = "※セマンティックバージョニング（例: v1.0.0）がおすすめです";
+            // btnBumpMajor (#158: Major +1 で Minor/Patch を 0 リセット)
+            this.btnBumpMajor.Location = new System.Drawing.Point(110, 66);
+            this.btnBumpMajor.Name = "btnBumpMajor";
+            this.btnBumpMajor.Size = new System.Drawing.Size(75, 26);
+            this.btnBumpMajor.TabIndex = 4;
+            this.btnBumpMajor.Text = "Major+1";
+            this.btnBumpMajor.UseVisualStyleBackColor = true;
+            this.btnBumpMajor.Click += new System.EventHandler(this.btnBumpMajor_Click);
+            //
+            // btnBumpMinor (#158: Minor +1 で Patch を 0 リセット)
+            //
+            this.btnBumpMinor.Location = new System.Drawing.Point(190, 66);
+            this.btnBumpMinor.Name = "btnBumpMinor";
+            this.btnBumpMinor.Size = new System.Drawing.Size(75, 26);
+            this.btnBumpMinor.TabIndex = 5;
+            this.btnBumpMinor.Text = "Minor+1";
+            this.btnBumpMinor.UseVisualStyleBackColor = true;
+            this.btnBumpMinor.Click += new System.EventHandler(this.btnBumpMinor_Click);
+            //
+            // btnBumpPatch (#158: Patch +1)
+            //
+            this.btnBumpPatch.Location = new System.Drawing.Point(270, 66);
+            this.btnBumpPatch.Name = "btnBumpPatch";
+            this.btnBumpPatch.Size = new System.Drawing.Size(75, 26);
+            this.btnBumpPatch.TabIndex = 6;
+            this.btnBumpPatch.Text = "Patch+1";
+            this.btnBumpPatch.UseVisualStyleBackColor = true;
+            this.btnBumpPatch.Click += new System.EventHandler(this.btnBumpPatch_Click);
+            //
+            // lblBumpHint (#158: bump button の説明、迷ったら Patch を強調)
+            //
+            this.lblBumpHint.AutoSize = true;
+            this.lblBumpHint.Font = new System.Drawing.Font("Meiryo UI", 8F, System.Drawing.FontStyle.Regular);
+            this.lblBumpHint.ForeColor = System.Drawing.Color.Gray;
+            this.lblBumpHint.Location = new System.Drawing.Point(355, 72);
+            this.lblBumpHint.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
+            this.lblBumpHint.Name = "lblBumpHint";
+            this.lblBumpHint.Size = new System.Drawing.Size(120, 11);
+            this.lblBumpHint.TabIndex = 7;
+            this.lblBumpHint.Text = "← 迷ったら Patch+1";
+            //
+            // semverHelp (#158: collapsible で SemVer 解説、default 折り畳み = 28px)
+            //
+            this.semverHelp.Location = new System.Drawing.Point(110, 98);
+            this.semverHelp.Name = "semverHelp";
+            this.semverHelp.Size = new System.Drawing.Size(540, 28);
+            this.semverHelp.TabIndex = 8;
             //
             // lblGameFolder
             //
             this.lblGameFolder.AutoSize = true;
-            this.lblGameFolder.Location = new System.Drawing.Point(9, 64);
+            this.lblGameFolder.Location = new System.Drawing.Point(9, 154);
             this.lblGameFolder.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblGameFolder.Name = "lblGameFolder";
             this.lblGameFolder.Size = new System.Drawing.Size(76, 12);
@@ -150,7 +194,7 @@ namespace GCTonePrism.Manager
             //
             // txtGameFolder
             //
-            this.txtGameFolder.Location = new System.Drawing.Point(110, 62);
+            this.txtGameFolder.Location = new System.Drawing.Point(110, 152);
             this.txtGameFolder.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtGameFolder.Name = "txtGameFolder";
             this.txtGameFolder.ReadOnly = true;
@@ -159,7 +203,7 @@ namespace GCTonePrism.Manager
             //
             // btnSelectGameFolder
             //
-            this.btnSelectGameFolder.Location = new System.Drawing.Point(400, 61);
+            this.btnSelectGameFolder.Location = new System.Drawing.Point(400, 151);
             this.btnSelectGameFolder.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.btnSelectGameFolder.Name = "btnSelectGameFolder";
             this.btnSelectGameFolder.Size = new System.Drawing.Size(65, 20);
@@ -173,7 +217,7 @@ namespace GCTonePrism.Manager
             this.lblGameFolderHint.AutoSize = true;
             this.lblGameFolderHint.Font = new System.Drawing.Font("MS UI Gothic", 8F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(128)));
             this.lblGameFolderHint.ForeColor = System.Drawing.Color.Gray;
-            this.lblGameFolderHint.Location = new System.Drawing.Point(110, 84);
+            this.lblGameFolderHint.Location = new System.Drawing.Point(110, 174);
             this.lblGameFolderHint.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblGameFolderHint.Name = "lblGameFolderHint";
             this.lblGameFolderHint.Size = new System.Drawing.Size(356, 11);
@@ -183,7 +227,7 @@ namespace GCTonePrism.Manager
             // lblTitle
             //
             this.lblTitle.AutoSize = true;
-            this.lblTitle.Location = new System.Drawing.Point(9, 104);
+            this.lblTitle.Location = new System.Drawing.Point(9, 194);
             this.lblTitle.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblTitle.Name = "lblTitle";
             this.lblTitle.Size = new System.Drawing.Size(46, 12);
@@ -192,7 +236,7 @@ namespace GCTonePrism.Manager
             //
             // txtTitle
             //
-            this.txtTitle.Location = new System.Drawing.Point(110, 102);
+            this.txtTitle.Location = new System.Drawing.Point(110, 192);
             this.txtTitle.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtTitle.Name = "txtTitle";
             this.txtTitle.Size = new System.Drawing.Size(355, 19);
@@ -201,7 +245,7 @@ namespace GCTonePrism.Manager
             // lblDescription
             //
             this.lblDescription.AutoSize = true;
-            this.lblDescription.Location = new System.Drawing.Point(9, 128);
+            this.lblDescription.Location = new System.Drawing.Point(9, 218);
             this.lblDescription.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblDescription.Name = "lblDescription";
             this.lblDescription.Size = new System.Drawing.Size(41, 12);
@@ -210,7 +254,7 @@ namespace GCTonePrism.Manager
             //
             // txtDescription
             //
-            this.txtDescription.Location = new System.Drawing.Point(110, 126);
+            this.txtDescription.Location = new System.Drawing.Point(110, 216);
             this.txtDescription.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtDescription.Multiline = true;
             this.txtDescription.Name = "txtDescription";
@@ -221,7 +265,7 @@ namespace GCTonePrism.Manager
             // lblGenre
             //
             this.lblGenre.AutoSize = true;
-            this.lblGenre.Location = new System.Drawing.Point(9, 196);
+            this.lblGenre.Location = new System.Drawing.Point(9, 286);
             this.lblGenre.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblGenre.Name = "lblGenre";
             this.lblGenre.Size = new System.Drawing.Size(42, 12);
@@ -232,7 +276,7 @@ namespace GCTonePrism.Manager
             //
             this.clbGenre.CheckOnClick = true;
             this.clbGenre.FormattingEnabled = true;
-            this.clbGenre.Location = new System.Drawing.Point(110, 193);
+            this.clbGenre.Location = new System.Drawing.Point(110, 283);
             this.clbGenre.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.clbGenre.Name = "clbGenre";
             this.clbGenre.Size = new System.Drawing.Size(355, 158);
@@ -241,7 +285,7 @@ namespace GCTonePrism.Manager
             // lblMinPlayers
             //
             this.lblMinPlayers.AutoSize = true;
-            this.lblMinPlayers.Location = new System.Drawing.Point(9, 360);
+            this.lblMinPlayers.Location = new System.Drawing.Point(9, 450);
             this.lblMinPlayers.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblMinPlayers.Name = "lblMinPlayers";
             this.lblMinPlayers.Size = new System.Drawing.Size(88, 12);
@@ -250,7 +294,7 @@ namespace GCTonePrism.Manager
             //
             // numMinPlayers
             //
-            this.numMinPlayers.Location = new System.Drawing.Point(110, 358);
+            this.numMinPlayers.Location = new System.Drawing.Point(110, 448);
             this.numMinPlayers.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.numMinPlayers.Maximum = new decimal(new int[] {
             99,
@@ -274,7 +318,7 @@ namespace GCTonePrism.Manager
             // lblMaxPlayers
             //
             this.lblMaxPlayers.AutoSize = true;
-            this.lblMaxPlayers.Location = new System.Drawing.Point(225, 360);
+            this.lblMaxPlayers.Location = new System.Drawing.Point(225, 450);
             this.lblMaxPlayers.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblMaxPlayers.Name = "lblMaxPlayers";
             this.lblMaxPlayers.Size = new System.Drawing.Size(88, 12);
@@ -283,7 +327,7 @@ namespace GCTonePrism.Manager
             //
             // numMaxPlayers
             //
-            this.numMaxPlayers.Location = new System.Drawing.Point(325, 358);
+            this.numMaxPlayers.Location = new System.Drawing.Point(325, 448);
             this.numMaxPlayers.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.numMaxPlayers.Maximum = new decimal(new int[] {
             99,
@@ -307,7 +351,7 @@ namespace GCTonePrism.Manager
             // lblDifficulty
             //
             this.lblDifficulty.AutoSize = true;
-            this.lblDifficulty.Location = new System.Drawing.Point(9, 386);
+            this.lblDifficulty.Location = new System.Drawing.Point(9, 476);
             this.lblDifficulty.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblDifficulty.Name = "lblDifficulty";
             this.lblDifficulty.Size = new System.Drawing.Size(41, 12);
@@ -318,7 +362,7 @@ namespace GCTonePrism.Manager
             //
             this.cmbDifficulty.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbDifficulty.FormattingEnabled = true;
-            this.cmbDifficulty.Location = new System.Drawing.Point(110, 383);
+            this.cmbDifficulty.Location = new System.Drawing.Point(110, 473);
             this.cmbDifficulty.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.cmbDifficulty.Name = "cmbDifficulty";
             this.cmbDifficulty.Size = new System.Drawing.Size(135, 20);
@@ -327,7 +371,7 @@ namespace GCTonePrism.Manager
             // lblPlayTime
             //
             this.lblPlayTime.AutoSize = true;
-            this.lblPlayTime.Location = new System.Drawing.Point(255, 386);
+            this.lblPlayTime.Location = new System.Drawing.Point(255, 476);
             this.lblPlayTime.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblPlayTime.Name = "lblPlayTime";
             this.lblPlayTime.Size = new System.Drawing.Size(56, 12);
@@ -338,7 +382,7 @@ namespace GCTonePrism.Manager
             //
             this.cmbPlayTime.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbPlayTime.FormattingEnabled = true;
-            this.cmbPlayTime.Location = new System.Drawing.Point(325, 383);
+            this.cmbPlayTime.Location = new System.Drawing.Point(325, 473);
             this.cmbPlayTime.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.cmbPlayTime.Name = "cmbPlayTime";
             this.cmbPlayTime.Size = new System.Drawing.Size(140, 20);
@@ -347,7 +391,7 @@ namespace GCTonePrism.Manager
             // chkControllerSupport
             //
             this.chkControllerSupport.AutoSize = true;
-            this.chkControllerSupport.Location = new System.Drawing.Point(11, 412);
+            this.chkControllerSupport.Location = new System.Drawing.Point(11, 502);
             this.chkControllerSupport.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.chkControllerSupport.Name = "chkControllerSupport";
             this.chkControllerSupport.Size = new System.Drawing.Size(124, 16);
@@ -358,7 +402,7 @@ namespace GCTonePrism.Manager
             // lblSupportedConnection
             //
             this.lblSupportedConnection.AutoSize = true;
-            this.lblSupportedConnection.Location = new System.Drawing.Point(9, 438);
+            this.lblSupportedConnection.Location = new System.Drawing.Point(9, 528);
             this.lblSupportedConnection.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.lblSupportedConnection.Name = "lblSupportedConnection";
             this.lblSupportedConnection.Size = new System.Drawing.Size(80, 12);
@@ -369,7 +413,7 @@ namespace GCTonePrism.Manager
             //
             this.cmbSupportedConnection.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbSupportedConnection.FormattingEnabled = true;
-            this.cmbSupportedConnection.Location = new System.Drawing.Point(110, 435);
+            this.cmbSupportedConnection.Location = new System.Drawing.Point(110, 525);
             this.cmbSupportedConnection.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.cmbSupportedConnection.Name = "cmbSupportedConnection";
             this.cmbSupportedConnection.Size = new System.Drawing.Size(225, 20);
@@ -703,9 +747,13 @@ namespace GCTonePrism.Manager
             this.Controls.Add(this.btnSelectGameFolder);
             this.Controls.Add(this.txtGameFolder);
             this.Controls.Add(this.lblGameFolder);
-            this.Controls.Add(this.txtNextVersion);
+            this.Controls.Add(this.semverNext);
+            this.Controls.Add(this.btnBumpMajor);
+            this.Controls.Add(this.btnBumpMinor);
+            this.Controls.Add(this.btnBumpPatch);
             this.Controls.Add(this.lblNextVersion);
-            this.Controls.Add(this.lblVersionHint);
+            this.Controls.Add(this.lblBumpHint);
+            this.Controls.Add(this.semverHelp);
             this.Controls.Add(this.lblCurrentVersion);
             this.Controls.Add(this.lblCurrentVersionLabel);
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
@@ -731,7 +779,11 @@ namespace GCTonePrism.Manager
         private System.Windows.Forms.Label lblCurrentVersionLabel;
         private System.Windows.Forms.Label lblCurrentVersion;
         private System.Windows.Forms.Label lblNextVersion;
-        private System.Windows.Forms.TextBox txtNextVersion;
+        private GCTonePrism.Manager.Controls.SemverInputControl semverNext;
+        private System.Windows.Forms.Button btnBumpMajor;
+        private System.Windows.Forms.Button btnBumpMinor;
+        private System.Windows.Forms.Button btnBumpPatch;
+        private GCTonePrism.Manager.Controls.SemverHelpControl semverHelp;
         private System.Windows.Forms.Label lblGameFolder;
         private System.Windows.Forms.TextBox txtGameFolder;
         private System.Windows.Forms.Button btnSelectGameFolder;

@@ -56,6 +56,11 @@ namespace GCTonePrism.Manager
             
             lblCurrentVersion.Text = currentVersion;
             NewVersion = null;
+
+            // semverNext を currentVersion で初期化 + Patch を auto-bump (= 「迷ったら Patch」default)
+            // (#158) ユーザーは bump button で Major/Minor を選び直すか、numeric を直接編集するか選択
+            semverNext.VersionString = currentVersion;
+            semverNext.BumpPatch();
         }
 
         private void VersionUpForm_Load(object sender, EventArgs e)
@@ -272,7 +277,7 @@ namespace GCTonePrism.Manager
                 NewVersion = new GameVersion
                 {
                     GameId = gameId,
-                    Version = txtNextVersion.Text.Trim(),
+                    Version = semverNext.VersionString,  // (#158)
                     ExecutablePath = "", // コピー後に設定
                     Arguments = txtArguments.Text.Trim(),
                     Description = txtDescription.Text.Trim(), // 説明文
@@ -365,19 +370,47 @@ namespace GCTonePrism.Manager
             Close();
         }
 
+        /// <summary>
+        /// (#158) bump button: 「迷ったら Patch」semantic を UI で実現。各 button は SemverInputControl の
+        /// 対応 method を呼ぶだけで、ユーザーは SemVer 知識を「暗算」→「ラベル選択」に変換できる。
+        /// 現状を起点に毎回 bump するため、まず currentVersion を再 set してから bump (= 「現在 +1」)。
+        /// </summary>
+        private void btnBumpMajor_Click(object sender, EventArgs e)
+        {
+            semverNext.VersionString = currentVersion;
+            semverNext.BumpMajor();
+        }
+
+        private void btnBumpMinor_Click(object sender, EventArgs e)
+        {
+            semverNext.VersionString = currentVersion;
+            semverNext.BumpMinor();
+        }
+
+        private void btnBumpPatch_Click(object sender, EventArgs e)
+        {
+            semverNext.VersionString = currentVersion;
+            semverNext.BumpPatch();
+        }
+
         private bool ValidateInput()
         {
-            if (string.IsNullOrWhiteSpace(txtNextVersion.Text))
+            // (#158) SemverInputControl は NumericUpDown 構造的に空にできないので「空文字」check は不要、
+            // suffix の文字種だけ IsValid で確認する。
+            string semverError;
+            if (!semverNext.IsValid(out semverError))
             {
-                MessageBox.Show("新しいバージョンを入力してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                txtNextVersion.Focus();
+                MessageBox.Show(semverError, "バージョン入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                semverNext.Focus();
                 return false;
             }
 
-            if (txtNextVersion.Text.Trim() == currentVersion)
+            if (semverNext.VersionString == currentVersion)
             {
-                MessageBox.Show("現在のバージョンと同じバージョンは指定できません。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                txtNextVersion.Focus();
+                MessageBox.Show("現在のバージョンと同じバージョンは指定できません。\n\n" +
+                    "「Major+1」「Minor+1」「Patch+1」のボタンで bump するか、数値を直接編集してください。",
+                    "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                semverNext.Focus();
                 return false;
             }
 

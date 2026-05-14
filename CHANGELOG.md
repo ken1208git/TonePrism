@@ -1468,6 +1468,25 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.8.11] - 2026-05-14
+
+#### Added (#158)
+
+- **`SemverInputControl` (新規 UserControl)**: SemVer 形式バージョンを `[Major] . [Minor] . [Patch] -[suffix]` の 3 NumericUpDown + 任意 suffix TextBox で入力する共通 control を `Manager/Controls/` に追加。単一 TextBox 自由入力で起こりがちなフォーマットゆれ (`1.0.0` / `v1.0.0` / `1.0` / 全角ピリオド / 空白混入 等) を **数値入力で構造的に排除**。`VersionString` getter は常に `v<X>.<Y>.<Z>[-<suffix>]` 形式を返すので呼出側は trim / 正規化不要。`BumpMajor` / `BumpMinor` / `BumpPatch` public method で programmatic な bump をサポート (= VersionUpForm の bump button 用)。
+- **`SemverHelpControl` (新規 UserControl)**: SemVer (Major/Minor/Patch) の意味を初心者向けに解説する collapsible help panel。default 折り畳み (28px、ヘッダのみ)、ヘッダ click で 230px に展開。文化祭ゲーム向けの具体例を含む文言 (「ステージ 1 つだけ → 5 ステージ + ストーリーモード」等) で SemVer 知識のない部員が「Major って何?」と迷わないようにする。
+
+#### Changed (#158)
+
+- **`AddGameForm` の version 入力**: `txtVersion` (TextBox 100×19) を `semverInput` (`SemverInputControl` 300×28) に置換。OK 押下時に `SemverInputControl.IsValid` で suffix の文字種を検証 (= 数値部は NumericUpDown で構造的に正しい)。default 値 v1.0.0 は維持。
+- **`VersionUpForm` の version 入力 + bump UI**: `txtNextVersion` (TextBox) + `lblVersionHint` (静的文言) を `semverNext` (SemverInputControl) + 3 つの **bump button** (`Major+1` / `Minor+1` / `Patch+1`) + `lblBumpHint` (1 行の bump 指針) + `semverHelp` (collapsible 解説 panel) に置換。Form 起動時は currentVersion + Patch +1 を default で表示 (= 「迷ったら Patch」default を UI に埋め込み)、bump button click で対応 bump を呼んで semverNext を即時更新 (Major+1 で Minor/Patch=0 reset、Minor+1 で Patch=0 reset、Patch+1 は単純加算)。SemVer 知識を「暗算」→「ラベル選択」に変換、部員でも迷わない形に。
+
+#### Fixed (#158 Q2 / Q3 — pre-existing UX hazards in EditGameForm)
+
+- **EditGameForm でバージョン重複検出** (Q2): `game_versions` table が `(game_id, version)` UNIQUE 制約を持たないため、ユーザーが EditGameForm の `txtVersionName` で 2 つの version を同名にすると DB に同 (gameId, version) row が並ぶ silent danger があった (= Launcher 側で「どちらの version か」決定不能)。`btnOK_Click` 冒頭に **app-level 重複 check** を追加: `cmbVersionList` 全 item の Version 文字列を GroupBy で重複検出 → 重複あれば MessageBox + return で block。表示中 version が未 commit の場合に備えて `SaveGameDataToVersion(currentSelected)` を check 前に呼んで最新値で判定。schema migration による物理的 UNIQUE 制約追加は別 issue 候補 (= 既存 DB 内に既に重複が眠っている可能性、migration 失敗 path を別途検討要)。
+- **EditGameForm でバージョン変更時の per-version folder rename** (Q3): `PathManager.GetVersionFolder(gameId, version)` 規約 (= `<install>/games/<gameId>/v<version>/`) で per-version folder が物理存在するが、EditGameForm でユーザーが `txtVersionName` を v1.0.0 → v1.0.1 に変更しても **DB の version 文字列だけ書き換わって disk 上の folder 名は古いまま** という drift があった (= Launcher が新 version で起動を試みて「ファイルが見つからない」エラー path)。`LoadVersions` 時に `_originalVersionByDbId: Dictionary<int, string>` snapshot を capture、`btnOK_Click` で各 version の Version 文字列が変わっていれば対応する `<gameFolder>/v<old>/` → `<gameFolder>/v<new>/` を `Directory.Move` で rename。同名衝突 (新 dir 既存) は abort、旧 dir 不在は警告ログのみで DB 更新継続 (= AddGameForm 経由しなかった version 等の防御)。あわせて DB の relative path (`executable_path` / `thumbnail_path` / `background_path`) の `v<old>/` prefix を `v<new>/` に新規 helper `ReplaceVersionPrefix` で書き換え (前方一致のみ、conservative)。
+
+**スコープ**: SemVer 入力 UI hardening (= ユーザー視点の新機能なし、入力 UI の安全性 / 学習コスト改善) + EditGameForm の pre-existing silent corruption fix 2 件 (Q2 / Q3、本 PR レビュー中に user 質問で発覚)。SemVer 厳密だと **新規 UserControl 2 個 + 新 button 3 個 + 重複検出 + folder rename** で minor 寄りだが、並行 PR (#161 #108 Phase 4) も Manager v0.9.0 に bump 中で 衝突回避のため **patch 扱い** (= 配布構造変更込みの過去 v0.8.10 patch bump pattern と同 spirit)。`AddGameForm` / `VersionUpForm` の caller (= MainForm 経由のゲーム追加 / バージョンアップ flow) は変更なし、入力 UI と OK 押下時の挙動のみ拡張。
+
 ### [Manager v0.8.10] - 2026-05-13
 
 PR #150 で dir rename (`GCTonePrism_Manager/` → `Manager/`) に連動して `PathManager.cs` の self-reference リテラル + priority-3 detection ロジック (StartsWith 二段比較 + Manager/Launcher sibling 同時存在検証) + csproj `<RootNamespace>` を修正。配布構造変更を含むため SemVer 厳密だと minor 寄りだが、Install.bat の v0.2.0 → 新構造 migration で自動吸収されエンドユーザー視点では invisible のため patch bump 扱い。

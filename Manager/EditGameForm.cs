@@ -25,6 +25,11 @@ namespace GCTonePrism.Manager
         private DeveloperListManager devListManager;
         private Label lblArgumentsPlaceholder;
 
+        // (#158) LoadVersions 時に DB から取得したまま (= ユーザー編集前) の version 文字列を id で記録。
+        // OK 押下時に「version 文字列が変わった」を検出して per-version folder rename する判定に使う。
+        private System.Collections.Generic.Dictionary<int, string> _originalVersionByDbId
+            = new System.Collections.Generic.Dictionary<int, string>();
+
         /// <summary>
         /// 編集されたゲーム情報（OKボタンがクリックされた場合のみ設定される）
         /// </summary>
@@ -152,6 +157,8 @@ namespace GCTonePrism.Manager
         /// </summary>
         private void LoadVersions()
         {
+            // (#158) original version の snapshot を取り直す (再 load 対応)
+            _originalVersionByDbId.Clear();
             try
             {
                 var versions = dbManager.GetGameVersions(originalGame.GameId);
@@ -159,6 +166,8 @@ namespace GCTonePrism.Manager
                 foreach (var v in versions)
                 {
                     cmbVersionList.Items.Add(v);
+                    // (#158) DB-fetched 時点の version 文字列を id key で記録、OK 押下時の rename 検出に使う
+                    _originalVersionByDbId[v.Id] = v.Version;
                 }
                 
                 if (originalGame.Version != null)
@@ -235,6 +244,28 @@ namespace GCTonePrism.Manager
                 ? PathConversionHelper.ToRelativePath(gameFolder, txtThumbnailPath.Text) : "";
             version.BackgroundPath = !string.IsNullOrEmpty(txtBackgroundPath.Text)
                 ? PathConversionHelper.ToRelativePath(gameFolder, txtBackgroundPath.Text) : "";
+        }
+
+        /// <summary>
+        /// (#158 Q3) 相対パス先頭の `v<oldVer>/` (or `v<oldVer>\`) prefix を `v<newVer>/` に置換する。
+        /// AddGameForm が「<gameFolder> 起点で相対化」する関係上、executable_path 等は
+        /// 「v<version>/main.exe」のような形で DB 保存されている。version rename 時にこれらも
+        /// 連動して書き換える。前方一致のみ (中間に v<old>/ が登場するケースは触らない、保守的)。
+        /// </summary>
+        private static string ReplaceVersionPrefix(string relPath, string oldVer, string newVer)
+        {
+            if (string.IsNullOrEmpty(relPath)) return relPath;
+            string oldLeaf = (oldVer != null && oldVer.StartsWith("v")) ? oldVer : "v" + (oldVer ?? "");
+            string newLeaf = (newVer != null && newVer.StartsWith("v")) ? newVer : "v" + (newVer ?? "");
+            string oldPrefixFwd = oldLeaf + "/";
+            string newPrefixFwd = newLeaf + "/";
+            string oldPrefixBack = oldLeaf + "\\";
+            string newPrefixBack = newLeaf + "\\";
+            if (relPath.StartsWith(oldPrefixFwd, StringComparison.OrdinalIgnoreCase))
+                return newPrefixFwd + relPath.Substring(oldPrefixFwd.Length);
+            if (relPath.StartsWith(oldPrefixBack, StringComparison.OrdinalIgnoreCase))
+                return newPrefixBack + relPath.Substring(oldPrefixBack.Length);
+            return relPath;
         }
 
         private void SaveGameDataToVersion(GameVersion version)
@@ -416,6 +447,33 @@ namespace GCTonePrism.Manager
                 return;
             }
 
+            // (#158 Q2) cmbVersionList 内で version 文字列の重複が無いか check。
+            // game_versions table は (game_id, version) UNIQUE 制約を持たないので、ユーザーが
+            // EditGameForm でうっかり 2 つの version を同じ名前にすると DB に同 (gameId, version)
+            // の row が並ぶ silent danger があった (= Launcher 側で「どちらの version か」決定不能)。
+            // app-level check で OK 押下時に block する形で fix。
+            // 現在編集中の表示内容も反映させるため、選択中 version に対して SaveGameDataToVersion
+            // を 1 回呼んでから判定する (= まだ commit してない最新 version 文字列も拾う)。
+            if (cmbVersionList.SelectedItem is GameVersion currentSelected)
+            {
+                SaveGameDataToVersion(currentSelected);
+            }
+            var versionDups = cmbVersionList.Items
+                .OfType<GameVersion>()
+                .GroupBy(v => v.Version ?? "")
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)
+                .ToList();
+            if (versionDups.Count > 0)
+            {
+                MessageBox.Show(
+                    "以下のバージョン名が複数のエントリで重複しています:\n\n  " +
+                    string.Join("\n  ", versionDups) +
+                    "\n\nバージョン管理ドロップダウンで該当の項目を選択し、別の名前に変更してください。",
+                    "バージョン重複エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             try
             {
                 // ゲームID変更処理
@@ -562,6 +620,64 @@ namespace GCTonePrism.Manager
                     ApplyRelativePaths(selectedVersion);
 
                     // 2. 全てのバージョンをデータベースに保存
+                    // (#158 Q3) version 文字列が変わった version について、per-version folder を rename。
+                    // PathManager.GetVersionFolder の規約 = `<gameFolder>/v<version>/`。
+                    // _originalVersionByDbId に LoadVersions 時の DB-fetched version を保存済なので、
+                    // 現 v.Version との差分で rename 必要かを判定。同名衝突 / 旧 folder 不在は
+                    // メッセージ表示で abort or 警告継続。relative path にも v<version>/ prefix が
+                    // 含まれているため、同じく書き換える (= AddGameForm が `<gameFolder>` 起点で
+                    // 相対化する関係上、prefix に v<version>/ が乗る)。
+                    foreach (var item in cmbVersionList.Items)
+                    {
+                        if (!(item is GameVersion v)) continue;
+                        if (!_originalVersionByDbId.TryGetValue(v.Id, out string originalVer)) continue;
+                        if (string.Equals(originalVer, v.Version, StringComparison.Ordinal)) continue;
+
+                        string oldDir = PathManager.GetVersionFolder(originalGame.GameId, originalVer);
+                        string newDir = PathManager.GetVersionFolder(originalGame.GameId, v.Version);
+
+                        if (System.IO.Directory.Exists(newDir))
+                        {
+                            MessageBox.Show(
+                                "バージョンフォルダのリネームに失敗しました:\n" +
+                                "  " + oldDir + " → " + newDir + "\n\n" +
+                                "  移動先フォルダが既に存在します。別のバージョン番号を指定してください。",
+                                "フォルダ衝突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            return;
+                        }
+                        if (!System.IO.Directory.Exists(oldDir))
+                        {
+                            // 旧 folder 不在: AddGameForm 経由で作成されなかった version (= DB のみ存在) 等。
+                            // DB 更新だけ続けて警告ログのみ。
+                            Console.WriteLine("[EditGameForm] (#158 Q3) version '" + originalVer + "' のフォルダが見つかりません、rename skip: " + oldDir);
+                        }
+                        else
+                        {
+                            try
+                            {
+                                System.IO.Directory.Move(oldDir, newDir);
+                            }
+                            catch (Exception ex)
+                            {
+                                MessageBox.Show(
+                                    "バージョンフォルダのリネームに失敗しました:\n" +
+                                    "  " + oldDir + "\n  → " + newDir + "\n\n" +
+                                    "  " + ex.Message + "\n\n" +
+                                    "Launcher / 別プロセスが該当フォルダを使用していないか確認してください。",
+                                    "フォルダリネーム失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                return;
+                            }
+                        }
+
+                        // version 文字列を含む相対パス (`v<old>/...` 形式) を新 prefix に置換
+                        v.ExecutablePath = ReplaceVersionPrefix(v.ExecutablePath, originalVer, v.Version);
+                        v.ThumbnailPath = ReplaceVersionPrefix(v.ThumbnailPath, originalVer, v.Version);
+                        v.BackgroundPath = ReplaceVersionPrefix(v.BackgroundPath, originalVer, v.Version);
+
+                        // _originalVersionByDbId を更新 (= 同 OK で同一 rename を再試行しないため、防御的)
+                        _originalVersionByDbId[v.Id] = v.Version;
+                    }
+
                     // これにより、切り替えた別のバージョンの変更も保存される
                     foreach (var item in cmbVersionList.Items)
                     {

@@ -70,8 +70,8 @@ namespace GCTonePrism.Manager
             // リリース年の初期値を今年に設定
             numReleaseYear.Value = DateTime.Now.Year;
 
-            // バージョンの初期値を設定
-            txtVersion.Text = "v1.0.0";
+            // バージョンの初期値を設定 (#158: SemverInputControl の default は v1.0.0)
+            semverInput.VersionString = "v1.0.0";
 
             // 製作者情報のDataGridViewを初期化
             InitializeDevelopersGrid();
@@ -277,8 +277,14 @@ namespace GCTonePrism.Manager
 
             try
             {
-                // 初期バージョン番号
-                string version = txtVersion.Text.Trim();
+                // 初期バージョン番号 (#158: SemverInputControl で typo / フォーマットゆれを構造的に排除)
+                string semverError;
+                if (!semverInput.IsValid(out semverError))
+                {
+                    MessageBox.Show(semverError, "バージョン入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                string version = semverInput.VersionString;
 
                 // ProcessingDialog を使用して非同期コピー
                 var processingDialog = new ProcessingDialog((IProgress<ProgressInfo> progress, CancellationToken token) =>
@@ -360,7 +366,7 @@ namespace GCTonePrism.Manager
                     IsVisible = true, // 新規追加のゲームは常にランチャーに表示
                     Controls = null, // 後で実装
                     KeyMapping = null, // 後で実装
-                    Version = txtVersion.Text.Trim() // 初期バージョンを設定
+                    Version = semverInput.VersionString // 初期バージョンを設定 (#158)
                 };
 
                 // ジャンルを処理
@@ -376,7 +382,7 @@ namespace GCTonePrism.Manager
                 var initialVersion = new GameVersion
                 {
                     GameId = game.GameId,
-                    Version = txtVersion.Text.Trim(),
+                    Version = semverInput.VersionString, // (#158)
                     ExecutablePath = game.ExecutablePath,
                     Description = "初期バージョン",
                     RegisteredAt = DateTime.Now

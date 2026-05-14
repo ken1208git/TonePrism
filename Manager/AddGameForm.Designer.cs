@@ -30,7 +30,7 @@ namespace GCTonePrism.Manager
         {
             this.lblGameFolder = new System.Windows.Forms.Label();
             this.lblVersion = new System.Windows.Forms.Label();
-            this.txtVersion = new System.Windows.Forms.TextBox();
+            this.semverInput = new GCTonePrism.Manager.Controls.SemverInputControl();
             this.txtGameFolder = new System.Windows.Forms.TextBox();
             this.btnSelectGameFolder = new System.Windows.Forms.Button();
             this.lblGameFolderHint = new System.Windows.Forms.Label();
@@ -158,14 +158,14 @@ namespace GCTonePrism.Manager
             this.lblVersion.TabIndex = 6;
             this.lblVersion.Text = "バージョン";
             //
-            // txtVersion
+            // semverInput (#158: NumericUpDown × 3 で SemVer 入力、txtVersion 置換)
             //
-            this.txtVersion.Location = new System.Drawing.Point(365, 51);
-            this.txtVersion.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
-            this.txtVersion.Name = "txtVersion";
-            this.txtVersion.Size = new System.Drawing.Size(100, 19);
-            this.txtVersion.TabIndex = 7;
-            this.txtVersion.Text = "v1.0.0";
+            this.semverInput.Location = new System.Drawing.Point(365, 48);
+            this.semverInput.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.semverInput.Name = "semverInput";
+            this.semverInput.Size = new System.Drawing.Size(300, 28);
+            this.semverInput.TabIndex = 7;
+            this.semverInput.VersionString = "v1.0.0";
             //
             // lblTitle
             //
@@ -691,7 +691,7 @@ namespace GCTonePrism.Manager
             this.Controls.Add(this.txtGameFolder);
             this.Controls.Add(this.lblGameFolder);
             this.Controls.Add(this.lblVersion);
-            this.Controls.Add(this.txtVersion);
+            this.Controls.Add(this.semverInput);
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
             this.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.MaximizeBox = false;
@@ -757,7 +757,7 @@ namespace GCTonePrism.Manager
         private System.Windows.Forms.Button btnOK;
         private System.Windows.Forms.Button btnCancel;
         private System.Windows.Forms.Label lblVersion;
-        private System.Windows.Forms.TextBox txtVersion;
+        private GCTonePrism.Manager.Controls.SemverInputControl semverInput;
         private System.Windows.Forms.PictureBox picThumbnailPreview;
         private System.Windows.Forms.PictureBox picBackgroundPreview;
         private System.Windows.Forms.Button btnTestRun;
