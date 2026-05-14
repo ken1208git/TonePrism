@@ -278,12 +278,7 @@ namespace GCTonePrism.Manager
             try
             {
                 // 初期バージョン番号 (#158: SemverInputControl で typo / フォーマットゆれを構造的に排除)
-                string semverError;
-                if (!semverInput.IsValid(out semverError))
-                {
-                    MessageBox.Show(semverError, "バージョン入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return;
-                }
+                // suffix 文字種チェックは ValidateInput に移動済 (L-3)。
                 string version = semverInput.VersionString;
 
                 // ProcessingDialog を使用して非同期コピー
@@ -561,6 +556,18 @@ namespace GCTonePrism.Manager
             {
                 MessageBox.Show("このゲームIDは既に使用されています。別のIDを入力してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtGameId.Focus();
+                return false;
+            }
+
+            // (#158 L-3) suffix の文字種チェックは旧実装で「古いデータ確認」MessageBox の後に
+            // 置かれていたため、不正 suffix 入力時にユーザーが先に長文の確認 MessageBox を読まされ
+            // てから「やっぱバージョン入力エラー」に戻される UX だった。本 ValidateInput の末尾に
+            // 統合して既存 validation と同じタイミングで弾く。
+            string semverError;
+            if (!semverInput.IsValid(out semverError))
+            {
+                MessageBox.Show(semverError, "バージョン入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                semverInput.Focus();
                 return false;
             }
 

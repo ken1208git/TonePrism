@@ -1487,6 +1487,23 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 **スコープ**: SemVer 入力 UI hardening (= ユーザー視点の新機能なし、入力 UI の安全性 / 学習コスト改善) + EditGameForm の pre-existing silent corruption fix 2 件 (Q2 / Q3、本 PR レビュー中に user 質問で発覚)。並行 PR (#161 #108 Phase 4) も Manager v0.9.0 に bump 中で 衝突回避のため **patch 扱い** (= 配布構造変更込みの過去 v0.8.10 patch bump pattern と同 spirit)。`AddGameForm` / `VersionUpForm` の caller (= MainForm 経由のゲーム追加 / バージョンアップ flow) は変更なし、入力 UI と OK 押下時の挙動のみ拡張。Round 3 で SemverHelpControl (collapsible 解説 panel) と bump button × 3 を削除して minimal な構成にした (= 解説は #133 ガイドラインに移管する設計判断)。
 
+**Round 2 review fix (codex P1×1 + senior H/M/L 系)** — version bump なし、本 entry に統合:
+
+- **CX-1 (P1) folder rename を 2-phase 化**: 旧実装は「N 件目で `Directory.Move` 失敗 → return」で disk 上に部分 rename 残存 + DB 未更新の drift で launcher が「rename 後 disk」「rename 前 DB」を見て該当 version 起動失敗の silent corruption が起きていた。Phase 1 で全件衝突 check + `RenamePlan` 計画作成、Phase 2 で順次 rename + 例外時は完了済を逆順 `Directory.Move` で rollback、rollback 失敗は console log のみで継続して MessageBox に集約報告 (DB は touch しないので OK 押下前状態に戻る)。
+- **CX-2 (P2) `TryParseAndSet` overflow 検出**: NumericUpDown Min/Max 超 (例: `v120.0.0`) を silent clamp で `v99.0.0` に化けて `ok=true` 返却していた問題。範囲外を parse 失敗扱いに変更し caller (= MessageBox 警告経路) に通知、値自体は依然 UI 整合のため Clamp で v0.0.0 / 上限値強制設定。
+- **CX-3 (P2) 大文字 `V` 受理**: `VersionRegex` が `^v?` で小文字限定だったため `V1.2.3` 等が malformed → silent v0.0.0 fallback で別 version 化していた。`RegexOptions.IgnoreCase` 追加で受理、`VersionString` getter は常に小文字 `v` で正規化出力。
+- **H-1 行番号 drift 解消**: `EditGameForm.cs` の rename loop コメントに残っていた `(line 559)` 参照 (実際は 583) を `(直前の gameIdChanged block で `gameFolder = newFolder` に上書き済)` のシンボル参照に書き換え。今後の行ずれで rot しないように。
+- **H-2 `VersionUpForm` ctor MessageBox を `Form_Load` に移動**: ctor 中に MessageBox を出すと Form 未 Show で owner=null → 別 window の裏に隠れる / DPI 再計算前で表示崩れ / ctor 例外を caller が握り潰すと silent skip、の risk があった。Show 後の Load タイミングに統一し EditGameForm 側の per-version 警告と一貫性確保。
+- **M-1 dup check を構造比較に**: `semverNext.VersionString == currentVersion` の生比較は DB の `1.0.0` (v 無し) / `V1.0.0` (大文字) を素通しして同義 version の重複登録を許していた。`SemverInputControl.TryNormalize(string, out string)` static helper を新規追加、両辺を正規化形 (`v<X>.<Y>.<Z>[-suffix]`) に変換してから比較。
+- **M-2 `BumpPatch` saturate を doc 明記**: `Patch=999` で呼ぶと値が変わらず VersionUpForm 側の dup check で蹴られる挙動を XML doc に追記 (silent corruption ではないが API 利用者への明示)。
+- **M-3 malformed version 警告を `LoadVersions` で 1 回まとめ表示**: 旧実装は `LoadGameDataForVersion` で per-version 表示時に MessageBox 発火、DB に複数 malformed があると dropdown 切替ごと OK 連打させられる UX。`LoadVersions` 段階で全件事前 scan → 1 個の MessageBox に id 一覧で集約、per-version 警告は撤去 (fallback 入力自体は残置)。
+- **L-1 `(L3)` review-round 識別子コメント削除**: 外部参照不能な internal review note の漏れ、対象コメントごと削除 (内容は自明な `using` 指摘)。
+- **L-2 `SaveGameDataToVersion` 二重呼び出し削除**: dup-check 直前 (line 497) と後段 (line 671) で同 selectedVersion に対して 2 回呼ばれていたが、間の処理 (gameId / folder rename) は selectedVersion フィールドを変えないため後者を削除して 1 回呼び出しに統一。
+- **L-3 `AddGameForm.IsValid` を `ValidateInput` に統合**: 旧実装は「古いゲームデータの確認」MessageBox 後に suffix check が来ていたため、不正 suffix 入力時に長文確認を読まされてからエラーに戻される UX だった。`ValidateInput` 末尾に統合して既存 validation と同タイミングで弾く。
+- **L-4 (#164 として follow-up issue 化)**: `LoadGameDataForVersion` の pre-existing 二重代入 (`txtDescription.Text` / `txtVersionDescription.Text`) は本 PR で touch しないため別 issue で消化。
+- **L-5 (CX-3 で自然解消)**: `ReplaceVersionPrefix` の case 不整合は CX-3 の上流 fix (= IgnoreCase 受理 → 入力時点で大文字 V を吸収) で実用上カバー。
+- **M-3 副産物として #163 dead button cleanup を本 PR に取り込み**: `btnApplyVersion` / `btnVersionUp` の `Visible=false` + Designer dead declaration + `// Deprecated` event handler stub + 方針不明 leftover コメントを完全削除 (Round 1 で別 issue 化した判断を撤回)。
+
 ### [Manager v0.8.10] - 2026-05-13
 
 PR #150 で dir rename (`GCTonePrism_Manager/` → `Manager/`) に連動して `PathManager.cs` の self-reference リテラル + priority-3 detection ロジック (StartsWith 二段比較 + Manager/Launcher sibling 同時存在検証) + csproj `<RootNamespace>` を修正。配布構造変更を含むため SemVer 厳密だと minor 寄りだが、Install.bat の v0.2.0 → 新構造 migration で自動吸収されエンドユーザー視点では invisible のため patch bump 扱い。

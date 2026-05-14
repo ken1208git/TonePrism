@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
+using GCTonePrism.Manager.Controls;
 using GCTonePrism.Manager.Models;
 using GCTonePrism.Manager.Services;
 using Microsoft.WindowsAPICodePack.Dialogs;
@@ -27,8 +28,17 @@ namespace GCTonePrism.Manager
 
         // (#158) LoadVersions 時に DB から取得したまま (= ユーザー編集前) の version 文字列を id で記録。
         // OK 押下時に「version 文字列が変わった」を検出して per-version folder rename する判定に使う。
-        // (L3) using System.Collections.Generic は file 冒頭で宣言済なので Dictionary は短縮形でよい。
         private Dictionary<int, string> _originalVersionByDbId = new Dictionary<int, string>();
+
+        // (#158 CX-1) folder rename を 2-phase 化するための plan 単位 (Phase 1 で構築 / Phase 2 で実行)。
+        private class RenamePlan
+        {
+            public GameVersion Version;
+            public string OldDir;
+            public string NewDir;
+            public string OriginalVer;
+            public bool SourceExists;
+        }
 
         /// <summary>
         /// 編集されたゲーム情報（OKボタンがクリックされた場合のみ設定される）
@@ -156,13 +166,35 @@ namespace GCTonePrism.Manager
             {
                 var versions = dbManager.GetGameVersions(originalGame.GameId);
                 cmbVersionList.Items.Clear();
+                // (#158 M-3) malformed version を per-version SelectedIndexChanged で警告すると、
+                // DB に複数 malformed あった場合に切替ごと OK を連打させられる UX になるため、
+                // LoadVersions 段階で全件 scan し 1 個の MessageBox にまとめる。LoadGameDataForVersion
+                // 側の TryParseAndSet は値の流し込み (= UI 整合のための v0.0.0 fallback) は引き続き
+                // 行うが per-version MessageBox は出さない (M-3 対応)。
+                var malformedVersions = new List<string>();
                 foreach (var v in versions)
                 {
                     cmbVersionList.Items.Add(v);
                     // (#158) DB-fetched 時点の version 文字列を id key で記録、OK 押下時の rename 検出に使う
                     _originalVersionByDbId[v.Id] = v.Version;
+                    string normIgnored;
+                    if (!SemverInputControl.TryNormalize(v.Version ?? "", out normIgnored))
+                    {
+                        malformedVersions.Add("  - id=" + v.Id + ": '" + (v.Version ?? "(null)") + "'");
+                    }
                 }
-                
+                if (malformedVersions.Count > 0)
+                {
+                    MessageBox.Show(this,
+                        "DB に保存されている version 文字列のうち " + malformedVersions.Count + " 件が " +
+                        "SemVer 形式ではありません。該当バージョンを選択すると v0.0.0 にフォールバック表示" +
+                        "されるので、意図した version 番号に修正してから OK を押してください (= 修正せず OK " +
+                        "するとこの値が DB に書き戻されます)。\n\n" +
+                        string.Join("\n", malformedVersions),
+                        "バージョン読み込み警告 (" + malformedVersions.Count + " 件)",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+
                 if (originalGame.Version != null)
                 {
                     // アクティブなバージョンを選択
@@ -297,21 +329,13 @@ namespace GCTonePrism.Manager
             if (version == null) return;
 
             // 基本情報の読み込み
-            // (#158 H2) DB から読んだ malformed version (例: "1.0" / "alpha" / null) の silent v0.0.0
-            // fallback で書き戻し時に既存データを破壊しないよう、TryParseAndSet で parse 成否を取り、
-            // 失敗時は MessageBox で user に通知する。fallback 値 v0.0.0 は UI 整合のため強制設定済、
-            // user が修正せず OK を押した場合の DB 破壊を「気づかれずに発生」させない狙い。
+            // (#158 H2 → M-3) DB から読んだ malformed version (例: "1.0" / "alpha" / null) は v0.0.0
+            // fallback 入力する (= UI 整合)。malformed の警告 MessageBox は LoadVersions で全件
+            // 事前 scan + 1 回まとめて表示するため per-version では出さない (= dropdown 切替ごとに
+            // 同警告を連発させない、M-3)。fallback 入力自体は依然必要 (semverVersionName が前 version
+            // の入力値を保持したまま OK 押下されると別 version に化けるため)。
             string semverParseErr;
-            if (!semverVersionName.TryParseAndSet(version.Version ?? "", out semverParseErr))
-            {
-                MessageBox.Show(
-                    "DB に保存されている version 文字列が SemVer 形式ではありません。\n\n" +
-                    "  DB 値: '" + (version.Version ?? "(null)") + "'\n" +
-                    "  解析エラー: " + (semverParseErr ?? "(unknown)") + "\n\n" +
-                    "v0.0.0 にフォールバック表示しています。OK を押すとこの値が DB に書き戻されるので、" +
-                    "意図した version 番号に修正してから OK を押してください。",
-                    "バージョン読み込み警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
+            semverVersionName.TryParseAndSet(version.Version ?? "", out semverParseErr);
             txtTitle.Text = version.Title ?? "";
             txtDescription.Text = version.Description ?? "";
             txtVersionDescription.Text = version.UpdateNote ?? "";
@@ -644,9 +668,11 @@ namespace GCTonePrism.Manager
                 }
                 else
                 {
-                    // 1. 現在表示中の内容を、選択中のバージョンオブジェクトに反映
-                    SaveGameDataToVersion(selectedVersion);
-                    
+                    // (#158 L-2) ここでの SaveGameDataToVersion(selectedVersion) は dup-check 直前
+                    // (line 497 付近) で同 selectedVersion に対して既に呼ばれており、間の処理 (gameId
+                    // rename / folder rename) は selectedVersion のフィールドを変えないため二重実行
+                    // だった。削除して dup-check 経路の 1 回呼び出しに統一。
+
                     // パス関連: 相対パス化ロジック (現在の選択中バージョンに対してのみ適用)
                     // 他のバージョンは既にロード済みまたは編集済みで、その時点でパスは保持されているはず
                     ApplyRelativePaths(selectedVersion);
@@ -654,19 +680,26 @@ namespace GCTonePrism.Manager
                     // 2. 全てのバージョンをデータベースに保存
                     // (#158 Q3) version 文字列が変わった version について、per-version folder を rename。
                     // _originalVersionByDbId に LoadVersions 時の DB-fetched version を保存済なので、
-                    // 現 v.Version との差分で rename 必要かを判定。同名衝突 / 旧 folder 不在は
-                    // メッセージ表示で abort or 警告継続。relative path にも v<version>/ prefix が
-                    // 含まれているため、同じく書き換える (= EditGameForm 経路で保存された path のみ
-                    // `<gameFolder>` 基準で v<version>/ prefix が乗る、AddGameForm 経路は
-                    // version folder 基準なので prefix なし。M2 で誤記訂正、ReplaceVersionPrefix は
-                    // 前者の prefix のみ書き換える保守的処理)。
+                    // 現 v.Version との差分で rename 必要かを判定。relative path にも v<version>/
+                    // prefix が含まれているため、rename 後同じく書き換える (= EditGameForm 経路で保存
+                    // された path のみ `<gameFolder>` 基準で v<version>/ prefix が乗る、AddGameForm
+                    // 経路は version folder 基準なので prefix なし。M2 で誤記訂正、ReplaceVersionPrefix
+                    // は前者の prefix のみ書き換える保守的処理)。
                     //
-                    // (#158 H1 fix): folder path は `gameFolder` (line 559 の gameIdChanged block で
-                    // 新 path に更新済) を base にする。`PathManager.GetVersionFolder(originalGame.GameId, ...)`
-                    // を使うと gameId と version を同 OK で同時変更したケースで old gameId の path を
-                    // 返してしまい、disk は手前で `<newGameFolder>` 配下に既に移動済 → oldDir.Exists =
-                    // false で silent skip + DB は v<new> に更新、という silent drift が発生していた。
-                    // gameFolder 変数を直接使うことで gameIdChanged の効果を取り込む。
+                    // (#158 H1 fix): folder path は `gameFolder` (直前の gameIdChanged block で
+                    // `gameFolder = newFolder` に上書き済) を base にする。`PathManager.GetVersionFolder(
+                    // originalGame.GameId, ...)` を使うと gameId と version を同 OK で同時変更した
+                    // ケースで old gameId の path を返してしまい、disk は手前で `<newGameFolder>` 配下
+                    // に既に移動済 → oldDir.Exists = false で silent skip + DB は v<new> に更新、という
+                    // silent drift が発生していた。gameFolder 変数を直接使うことで gameIdChanged の
+                    // 効果を取り込む。
+                    //
+                    // (#158 CX-1): rename を 2-phase に分離。Phase 1 で全件衝突 check + 計画作成、
+                    // Phase 2 で順次 rename + 例外時は完了済を逆順 rollback。旧実装は「N 件目で失敗 →
+                    // return」で disk 上に部分 rename 残存 + DB 未更新 (= 後続の UpdateGameVersion 群が
+                    // 走らない) の drift で launcher が「rename 後 disk」「rename 前 DB」を見て該当
+                    // version の起動失敗 silent corruption が発生していた。
+                    var renamePlan = new List<RenamePlan>();
                     foreach (var item in cmbVersionList.Items)
                     {
                         if (!(item is GameVersion v)) continue;
@@ -687,24 +720,62 @@ namespace GCTonePrism.Manager
                                 "フォルダ衝突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                             return;
                         }
-                        if (!System.IO.Directory.Exists(oldDir))
+
+                        renamePlan.Add(new RenamePlan
+                        {
+                            Version = v,
+                            OldDir = oldDir,
+                            NewDir = newDir,
+                            OriginalVer = originalVer,
+                            SourceExists = System.IO.Directory.Exists(oldDir),
+                        });
+                    }
+
+                    // Phase 2: 計画通り rename 実行。例外時は完了済を逆順 rollback。
+                    var completedRenames = new List<RenamePlan>();
+                    foreach (var p in renamePlan)
+                    {
+                        if (!p.SourceExists)
                         {
                             // 旧 folder 不在: AddGameForm 経由で作成されなかった version (= DB のみ存在) 等。
-                            // DB 更新だけ続けて警告ログのみ。
-                            Console.WriteLine("[EditGameForm] (#158 Q3) version '" + originalVer + "' のフォルダが見つかりません、rename skip: " + oldDir);
+                            // DB 更新だけ続けて警告ログのみ。rollback 対象外 (Move していないので)。
+                            Console.WriteLine("[EditGameForm] (#158 Q3) version '" + p.OriginalVer + "' のフォルダが見つかりません、rename skip: " + p.OldDir);
                         }
                         else
                         {
                             try
                             {
-                                System.IO.Directory.Move(oldDir, newDir);
+                                System.IO.Directory.Move(p.OldDir, p.NewDir);
+                                completedRenames.Add(p);
                             }
                             catch (Exception ex)
                             {
+                                // (#158 CX-1) rollback: 完了済 rename を逆順で元の名前に戻す。
+                                // rollback 自体が失敗した場合は console log のみ (これ以上できることなし、
+                                // user に最大限情報を残して abort する選択)。
+                                int rolledBack = 0, rollbackFailures = 0;
+                                for (int i = completedRenames.Count - 1; i >= 0; i--)
+                                {
+                                    var done = completedRenames[i];
+                                    try
+                                    {
+                                        System.IO.Directory.Move(done.NewDir, done.OldDir);
+                                        rolledBack++;
+                                    }
+                                    catch (Exception rbEx)
+                                    {
+                                        rollbackFailures++;
+                                        Console.WriteLine("[EditGameForm] (#158 CX-1) rollback 失敗: " + done.NewDir + " → " + done.OldDir + ": " + rbEx.Message);
+                                    }
+                                }
                                 MessageBox.Show(
                                     "バージョンフォルダのリネームに失敗しました:\n" +
-                                    "  " + oldDir + "\n  → " + newDir + "\n\n" +
+                                    "  " + p.OldDir + "\n  → " + p.NewDir + "\n\n" +
                                     "  " + ex.Message + "\n\n" +
+                                    "  完了済の rename " + completedRenames.Count + " 件のうち " +
+                                    rolledBack + " 件を元の名前に rollback しました" +
+                                    (rollbackFailures > 0 ? " (rollback 失敗 " + rollbackFailures + " 件、Console ログ参照)" : "") +
+                                    "。\n  DB は更新していないので OK 押下前の状態に戻ります。\n\n" +
                                     "Launcher / 別プロセスが該当フォルダを使用していないか確認してください。",
                                     "フォルダリネーム失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
                                 return;
@@ -714,13 +785,13 @@ namespace GCTonePrism.Manager
                         // version 文字列を含む相対パス (`v<old>/...` 形式) を新 prefix に置換
                         // (EditGameForm 経路で保存された path のみ対象、AddGameForm 経路は prefix なしで
                         // 影響を受けない、M2)
-                        v.ExecutablePath = ReplaceVersionPrefix(v.ExecutablePath, originalVer, v.Version);
-                        v.ThumbnailPath = ReplaceVersionPrefix(v.ThumbnailPath, originalVer, v.Version);
-                        v.BackgroundPath = ReplaceVersionPrefix(v.BackgroundPath, originalVer, v.Version);
+                        p.Version.ExecutablePath = ReplaceVersionPrefix(p.Version.ExecutablePath, p.OriginalVer, p.Version.Version);
+                        p.Version.ThumbnailPath = ReplaceVersionPrefix(p.Version.ThumbnailPath, p.OriginalVer, p.Version.Version);
+                        p.Version.BackgroundPath = ReplaceVersionPrefix(p.Version.BackgroundPath, p.OriginalVer, p.Version.Version);
 
                         // (#158 L4) 同 OK 内の二重処理は構造上ありえない (cmbVersionList.Items は一意 id)
                         // が、将来 LoadVersions を OK 内で呼び直す path に変わった時のため snapshot を最新化。
-                        _originalVersionByDbId[v.Id] = v.Version;
+                        _originalVersionByDbId[p.Version.Id] = p.Version.Version;
                     }
 
                     // これにより、切り替えた別のバージョンの変更も保存される

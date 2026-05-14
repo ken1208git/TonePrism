@@ -4,6 +4,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
+using GCTonePrism.Manager.Controls;
 using GCTonePrism.Manager.Models;
 using GCTonePrism.Manager.Services;
 using Microsoft.WindowsAPICodePack.Dialogs;
@@ -57,16 +58,26 @@ namespace GCTonePrism.Manager
             lblCurrentVersion.Text = currentVersion;
             NewVersion = null;
 
-            // semverNext を currentVersion で初期化 + Patch を auto-bump (= 「迷ったら Patch」default)。
-            // (#158 H2) currentVersion が malformed (= DB に "1.0" / "alpha" 等が残っていた場合) の
-            // silent v0.0.0 fallback で「気づかれずに 0.0.1 として書き戻される」silent corruption を
-            // 防ぐため TryParseAndSet で成否取得、失敗時は MessageBox 警告。caller (= 呼び出し側
-            // GameSectionPanel 等) がそもそも malformed をフィルタするのが理想だが、本 form 単独でも
-            // 防御線を張る。
+            // (#158 H-2) semverNext の初期化 + malformed 警告は VersionUpForm_Load に移動済。
+            // ctor 中に MessageBox を出すと (a) Form 未 Show で owner=null → 別 window の裏に隠れる
+            // (b) DPI / fonts が Load 前で再計算未完 → 表示崩れ (c) ctor 例外を caller が握り潰すと
+            // silent skip、の 3 risk があるため Show 後の Load タイミングに統一。EditGameForm 側
+            // (LoadGameDataForVersion) が SelectedIndexChanged 経由 = 既に Show 後で出している
+            // のと一貫させる狙いも兼ねる。
+        }
+
+        private void VersionUpForm_Load(object sender, EventArgs e)
+        {
+            // (#158 H-2) ctor から移動: semverNext を currentVersion で初期化 + Patch を auto-bump
+            // (= 「迷ったら Patch」default)。currentVersion が malformed (= DB に "1.0" / "alpha"
+            // 等が残っていた場合) の silent v0.0.0 fallback で「気づかれずに 0.0.1 として書き戻される」
+            // silent corruption を防ぐため TryParseAndSet で成否取得、失敗時は MessageBox 警告。
+            // caller (= 呼び出し側 GameSectionPanel 等) がそもそも malformed をフィルタするのが理想
+            // だが、本 form 単独でも防御線を張る。
             string semverParseErr;
             if (!semverNext.TryParseAndSet(currentVersion, out semverParseErr))
             {
-                MessageBox.Show(
+                MessageBox.Show(this,
                     "現在の version 文字列が SemVer 形式ではありません。\n\n" +
                     "  値: '" + (currentVersion ?? "(null)") + "'\n" +
                     "  解析エラー: " + (semverParseErr ?? "(unknown)") + "\n\n" +
@@ -75,10 +86,7 @@ namespace GCTonePrism.Manager
                     "バージョン読み込み警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             semverNext.BumpPatch();
-        }
 
-        private void VersionUpForm_Load(object sender, EventArgs e)
-        {
             // コンボボックスを初期化（選択値はbaseVersion読み込み時に設定）
             GameFormHelper.InitializeDifficultyCombo(cmbDifficulty);
             GameFormHelper.InitializePlayTimeCombo(cmbPlayTime);
@@ -397,7 +405,16 @@ namespace GCTonePrism.Manager
                 return false;
             }
 
-            if (semverNext.VersionString == currentVersion)
+            // (#158 M-1) currentVersion は DB 由来で過去の "1.0.0" / "V1.0.0" 等のゆれを含みうる。
+            // semverNext.VersionString は常に "v<X>.<Y>.<Z>[-suffix]" の正規化形なので、生比較すると
+            // 同義値 ("v1.0.0" vs "1.0.0") をすり抜けて Launcher 側で 2 つの version が並ぶ silent
+            // danger になる。両辺を SemverInputControl.TryNormalize で正規化してから比較する。
+            // currentVersion 自体が malformed (= TryNormalize が false) のケースは ctor / Form_Load で
+            // 既に MessageBox 警告済 + v0.0.0 fallback 入力済なので、ここでは「正規化できなければ dup
+            // 判定対象外 = 続行」とする (= H-2 警告で user は修正済の前提)。
+            string currentNormalized;
+            if (SemverInputControl.TryNormalize(currentVersion, out currentNormalized)
+                && semverNext.VersionString == currentNormalized)
             {
                 // (#158 H3) bump button は round 3 で削除済 (#133 ガイドライン doc に移管予定)、
                 // その案内を撤去。NumericUpDown を直接操作する旨だけ案内。

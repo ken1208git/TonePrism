@@ -23,10 +23,14 @@ namespace GCTonePrism.Manager.Controls
         // suffix 用 regex: `-` の後に英数字 / ピリオド / ハイフンのみ (SemVer 2.0.0 仕様準拠)
         private static readonly Regex SuffixRegex = new Regex(@"^[a-zA-Z0-9.\-]*$", RegexOptions.Compiled);
 
-        // 入力済み version 全体を parse する regex (setter 用)
+        // 入力済み version 全体を parse する regex (setter 用)。
+        // (#158 CX-3) IgnoreCase: 過去 DB / 手書きで `V1.2.3` (大文字 V) が入った値を malformed
+        // 扱いで silent v0.0.0 fallback すると edit/save 経路で意図せず別 version に化けるため、
+        // 大文字 V も受理する (= regex は case-insensitive、出力側 (VersionString getter) は常に
+        // 小文字 v で正規化する)。
         private static readonly Regex VersionRegex = new Regex(
             @"^v?(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:-(?<suffix>[a-zA-Z0-9.\-]+))?$",
-            RegexOptions.Compiled);
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         /// <summary>VersionString が変更された時 (= Major / Minor / Patch / Suffix のいずれかが更新)</summary>
         public event EventHandler VersionStringChanged;
@@ -73,6 +77,32 @@ namespace GCTonePrism.Manager.Controls
         /// MessageBox / Logger で警告を出すこと。値自体は失敗時も v0.0.0 に強制設定される (= UI の
         /// 整合性のため)、戻り値で「fallback が走った」事実を caller に伝えるのが本 API の責務。
         /// </summary>
+        /// <summary>
+        /// 外部 (DB / 手書き等) の version 文字列を正規化形 (`v<Major>.<Minor>.<Patch>[-suffix]`、
+        /// 小文字 v 強制) に変換する。`TryParseAndSet` と同じ regex / 同じ範囲 check を共有するため、
+        /// 「control に流し込んだ後の VersionString getter が返す形」と一致する。
+        ///
+        /// 主用途 (#158 M-1): VersionUpForm の重複バージョン dup check で「`semverNext.VersionString`
+        /// (= 常に `vX.Y.Z` 形式) と DB 由来の生 `currentVersion` (= 過去の "1.0.0" / "V1.0.0" 等の
+        /// ゆれを含みうる)」を直接 string 比較するとすり抜けて重複登録されるため、両辺を本 method
+        /// で正規化してから比較する。parse 失敗時は false 返却 + normalized=null。
+        /// </summary>
+        public static bool TryNormalize(string value, out string normalized)
+        {
+            normalized = null;
+            if (string.IsNullOrEmpty(value)) return false;
+            var m = VersionRegex.Match(value.Trim());
+            if (!m.Success) return false;
+            int major, minor, patch;
+            int.TryParse(m.Groups["major"].Value, out major);
+            int.TryParse(m.Groups["minor"].Value, out minor);
+            int.TryParse(m.Groups["patch"].Value, out patch);
+            string suffix = m.Groups["suffix"].Success ? m.Groups["suffix"].Value : "";
+            string core = "v" + major + "." + minor + "." + patch;
+            normalized = string.IsNullOrEmpty(suffix) ? core : core + "-" + suffix;
+            return true;
+        }
+
         public bool TryParseAndSet(string value, out string error)
         {
             error = null;
@@ -92,7 +122,23 @@ namespace GCTonePrism.Manager.Controls
                     int.TryParse(m.Groups["minor"].Value, out minor);
                     int.TryParse(m.Groups["patch"].Value, out patch);
                     suffix = m.Groups["suffix"].Success ? m.Groups["suffix"].Value : "";
-                    ok = true;
+                    // (#158 CX-2) NumericUpDown の Min/Max を超える値は silent clamp で「parse 成功 +
+                    // 値だけ別物」になり、後続 save で全く違う version に化ける silent corruption が
+                    // 発生するため、overflow も parse 失敗扱いにして caller に通知する。値自体は
+                    // 下記 Clamp で UI 整合のため依然 v0.0.0 / 上限値に強制設定するが、戻り値で
+                    // fallback が走った事実を caller (= MessageBox 表示経路) に伝える。
+                    if (major < numMajor.Minimum || major > numMajor.Maximum
+                        || minor < numMinor.Minimum || minor > numMinor.Maximum
+                        || patch < numPatch.Minimum || patch > numPatch.Maximum)
+                    {
+                        error = "バージョン番号が許容範囲外です (Major/Minor/Patch は "
+                            + (int)numMajor.Minimum + "-" + (int)numMajor.Maximum + " の整数のみ): '"
+                            + value + "'";
+                    }
+                    else
+                    {
+                        ok = true;
+                    }
                 }
                 else
                 {
@@ -151,6 +197,12 @@ namespace GCTonePrism.Manager.Controls
         /// Patch bump。VersionUpForm の Form_Load で「現在 vX.Y.Z + Patch+1 = 暗黙の "迷ったら Patch" default」
         /// として使う。Major / Minor 系の bump は #158 round 3 で UI から削除したため API 側も提供しない
         /// (= 復活させたい時は再追加可能、現状 YAGNI)。
+        ///
+        /// **注意 (#158 M-2)**: Patch が NumericUpDown 上限 (numPatch.Maximum) に達している場合は
+        /// silent に saturate する (= 値は変わらず元のまま)。VersionUpForm 側では bump 後の値が
+        /// 元と同じ場合は dup check (重複バージョン) で蹴られるため silent corruption にはならないが、
+        /// 上限到達時に「Patch+1 されない」のは挙動として明示しておく。Patch=999 を超える運用が
+        /// 必要になった場合は Maximum 引き上げか Minor ロールオーバーを検討。
         /// </summary>
         public void BumpPatch()
         {
