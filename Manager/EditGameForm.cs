@@ -279,11 +279,9 @@ namespace GCTonePrism.Manager
             // UpdateNote
             version.UpdateNote = string.IsNullOrWhiteSpace(txtVersionDescription.Text) ? null : txtVersionDescription.Text.Trim();
             
-            // Version Name (Rename)
-            if (!string.IsNullOrWhiteSpace(txtVersionName.Text))
-            {
-                version.Version = txtVersionName.Text.Trim();
-            }
+            // Version Name (Rename) — (#158) SemverInputControl は NumericUpDown 構造的に常に値を持つので
+            // 「空白なら更新しない」旧 guard は不要。VersionString は常に v<X>.<Y>.<Z>[-<suffix>] 形式。
+            version.Version = semverVersionName.VersionString;
             
             version.Genre = GameFormHelper.GetSelectedGenres(clbGenre);
             
@@ -306,7 +304,7 @@ namespace GCTonePrism.Manager
             if (version == null) return;
 
             // 基本情報の読み込み
-            txtVersionName.Text = version.Version ?? ""; // バージョン名を表示
+            semverVersionName.VersionString = version.Version ?? ""; // バージョン名を表示 (#158)
             txtTitle.Text = version.Title ?? "";
             txtDescription.Text = version.Description ?? "";
             txtVersionDescription.Text = version.UpdateNote ?? "";
@@ -444,6 +442,16 @@ namespace GCTonePrism.Manager
             // バリデーション
             if (!ValidateInput())
             {
+                return;
+            }
+
+            // (#158) semverVersionName の suffix 文字種を validate (= 数値部は NumericUpDown で構造的に safe)。
+            // 不正 suffix (例: 日本語) を含む VersionString が DB に流れ込むのを block。
+            string semverErr;
+            if (!semverVersionName.IsValid(out semverErr))
+            {
+                MessageBox.Show(semverErr, "バージョン入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                semverVersionName.Focus();
                 return;
             }
 

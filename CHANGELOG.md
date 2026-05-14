@@ -1478,6 +1478,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 - **`AddGameForm` の version 入力**: `txtVersion` (TextBox 100×19) を `semverInput` (`SemverInputControl` 300×28) に置換。OK 押下時に `SemverInputControl.IsValid` で suffix の文字種を検証 (= 数値部は NumericUpDown で構造的に正しい)。default 値 v1.0.0 は維持。
 - **`VersionUpForm` の version 入力**: `txtNextVersion` (TextBox) + `lblVersionHint` (静的文言) を `semverNext` (SemverInputControl) に置換。Form 起動時は `currentVersion + BumpPatch()` で「次は Patch+1 が default」表示 (= 部員はそのまま OK で patch bump 完了、別の bump が要るなら数値を直接編集する flow)。SemVer 概念解説 / Major/Minor/Patch 使い分け / bump button 等の learn-by-UI 機構は **本 PR では実装せず、#133 ゲーム制作ガイドライン (GAME_SUBMISSION_GUIDE.md) で文書として用意する方針** (= 部員は新規ゲーム制作時に同 doc を読む前提、UI を minimal に保つ)。
+- **`EditGameForm` の バージョン番号 入力**: `txtVersionName` (TextBox 225×19、ゲーム情報編集タブ右側の `バージョン番号` 入力欄) を `semverVersionName` (SemverInputControl 300×28) に置換。LoadGameDataForVersion で `version.Version` を SemverInputControl に流し込み (`VersionString` setter が `v?(\d+)\.(\d+)\.(\d+)(-...)?` regex で parse)、SaveGameDataToVersion で `semverVersionName.VersionString` を `version.Version` に書き戻す。OK 押下時に `IsValid` check (suffix 文字種、Q2 重複 check の前) を追加して不正 suffix を block。これで AddGameForm / VersionUpForm / EditGameForm 全 3 form の version 入力が同じ NumericUpDown × 3 + suffix UI に統一される。
 
 #### Fixed (#158 Q2 / Q3 — pre-existing UX hazards in EditGameForm)
 

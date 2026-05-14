@@ -82,7 +82,7 @@ namespace GCTonePrism.Manager
             this.lblThumbnailHint = new System.Windows.Forms.Label();
             this.lblBackgroundHint = new System.Windows.Forms.Label();
             this.lblVersionName = new System.Windows.Forms.Label();
-            this.txtVersionName = new System.Windows.Forms.TextBox();
+            this.semverVersionName = new GCTonePrism.Manager.Controls.SemverInputControl();
             ((System.ComponentModel.ISupportInitialize)(this.numReleaseYear)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numMinPlayers)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numMaxPlayers)).BeginInit();
@@ -537,13 +537,13 @@ namespace GCTonePrism.Manager
             this.lblVersionName.TabIndex = 41;
             this.lblVersionName.Text = "バージョン番号";
             //
-            // txtVersionName
+            // semverVersionName (#158: NumericUpDown × 3 + suffix で SemVer 形式の typo 排除、txtVersionName 置換)
             //
-            this.txtVersionName.Location = new System.Drawing.Point(595, 350);
-            this.txtVersionName.Margin = new System.Windows.Forms.Padding(2);
-            this.txtVersionName.Name = "txtVersionName";
-            this.txtVersionName.Size = new System.Drawing.Size(225, 19);
-            this.txtVersionName.TabIndex = 42;
+            this.semverVersionName.Location = new System.Drawing.Point(595, 346);
+            this.semverVersionName.Margin = new System.Windows.Forms.Padding(2);
+            this.semverVersionName.Name = "semverVersionName";
+            this.semverVersionName.Size = new System.Drawing.Size(300, 28);
+            this.semverVersionName.TabIndex = 42;
             //
             // lblVersionManagement
             //
@@ -698,7 +698,7 @@ namespace GCTonePrism.Manager
             this.AutoScroll = true;
             this.CancelButton = this.btnCancel;
             this.ClientSize = new System.Drawing.Size(950, 645);
-            this.Controls.Add(this.txtVersionName);
+            this.Controls.Add(this.semverVersionName);
             this.Controls.Add(this.lblVersionName);
             this.Controls.Add(this.picThumbnailPreview);
             this.Controls.Add(this.lblThumbnailHint);
@@ -823,7 +823,7 @@ namespace GCTonePrism.Manager
         private System.Windows.Forms.Label lblVersionDescription;
         private System.Windows.Forms.TextBox txtVersionDescription;
         private System.Windows.Forms.Label lblVersionName;
-        private System.Windows.Forms.TextBox txtVersionName;
+        private GCTonePrism.Manager.Controls.SemverInputControl semverVersionName;
         private System.Windows.Forms.PictureBox picThumbnailPreview;
         private System.Windows.Forms.PictureBox picBackgroundPreview;
         private System.Windows.Forms.Button btnTestRun;
