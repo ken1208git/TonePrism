@@ -19,6 +19,7 @@ namespace GCTonePrism.Manager
         private SettingsSectionPanel _settingsSectionPanel;
         private BackupSectionPanel _backupSectionPanel;
         private LogSectionPanel _logSectionPanel;
+        private UpdateSectionPanel _updateSectionPanel;
 
         public MainForm()
         {
@@ -30,6 +31,7 @@ namespace GCTonePrism.Manager
             _settingsSectionPanel = new SettingsSectionPanel { Dock = DockStyle.Fill };
             _backupSectionPanel = new BackupSectionPanel { Dock = DockStyle.Fill };
             _logSectionPanel = new LogSectionPanel { Dock = DockStyle.Fill };
+            _updateSectionPanel = new UpdateSectionPanel { Dock = DockStyle.Fill };
 
             _gameSectionPanel.StatusChanged += (msg) => UpdateStatusBar(msg);
             _settingsSectionPanel.DatabaseReset += OnDatabaseReset;
@@ -39,6 +41,7 @@ namespace GCTonePrism.Manager
             tabStore.Controls.Add(_storeSectionPanel);
             tabBackup.Controls.Add(_backupSectionPanel);
             tabLog.Controls.Add(_logSectionPanel);
+            tabUpdate.Controls.Add(_updateSectionPanel);
             tabSettings.Controls.Add(_settingsSectionPanel);
         }
 
@@ -120,12 +123,128 @@ namespace GCTonePrism.Manager
 
             _backupSectionPanel.Initialize(dbManager);
             _logSectionPanel.Initialize(PathManager.BaseDirectory);
+            _updateSectionPanel.Initialize(dbManager);
 
             _gameSectionPanel.LoadGames();
             UpdateStatusBar();
 
             // 起動時に自動バックアップが必要なら走らせる（バックグラウンドで非ブロッキング）
             StartAutoBackupIfDue();
+
+            // 起動時に zombie staging dir (前回 update 失敗の残骸) を cleanup (#108 Phase 4)
+            CleanupZombieStagings();
+
+            // 起動時にバックグラウンドで GitHub Releases API を叩いてアップデート check (#108 Phase 4)
+            // cache TTL 内なら HTTP を叩かない、起動を遅延させない fire-and-forget pattern
+            StartBackgroundUpdateCheckIfDue();
+        }
+
+        /// <summary>
+        /// 過去 run の失敗 / cancel で残った staging dir を起動時に best-effort 削除する (#108 Phase 4)。
+        /// `%TEMP%/GCTonePrism_update_*` を全部削除。今 update 中 (= Manager 起動中に Updater spawn 直後)
+        /// は normally 走らないので race condition なし。
+        /// </summary>
+        private void CleanupZombieStagings()
+        {
+            try
+            {
+                foreach (string dir in PathManager.EnumerateZombieStagings())
+                {
+                    try
+                    {
+                        System.IO.Directory.Delete(dir, recursive: true);
+                        Console.WriteLine("[MainForm] zombie staging 削除: " + dir);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("[MainForm] zombie staging 削除失敗: " + dir + " (" + ex.Message + ")");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[MainForm] zombie staging cleanup エラー: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 起動時の background アップデート check (#108 Phase 4)。SettingsRepository の cache を参照し、
+        /// TTL 超過なら GitHub Releases API を叩く。fire-and-forget で UI を遮らず、完了したら
+        /// `_updateSectionPanel.OnCheckCompleted` で UI thread に marshal して反映。
+        /// 新版検出 (Status=UpdateAvailable) 時は MessageBox で部員に通知してアップデートタブに誘導。
+        /// 既にスキップ済 (Status=Skipped) / 最新 (UpToDate) / network 失敗時は通知しない。
+        /// </summary>
+        private async void StartBackgroundUpdateCheckIfDue()
+        {
+            try
+            {
+                if (dbManager == null) return;
+                var checker = new Services.UpdateChecker(dbManager.SettingsRepository);
+                Models.UpdateCheckResult result = await Task.Run(() =>
+                    checker.CheckAsync(System.Threading.CancellationToken.None));
+                if (result == null || _updateSectionPanel == null) return;
+                _updateSectionPanel.OnCheckCompleted(result);
+                if (result.Status == Models.UpdateCheckStatus.UpdateAvailable
+                    && result.Latest != null
+                    && !string.IsNullOrEmpty(result.Latest.TagName))
+                {
+                    ShowUpdateAvailableNotification(result);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[MainForm] BackgroundUpdateCheck エラー: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 新バージョン検出時に MessageBox で通知して「アップデート」タブに誘導する (#108 Phase 4)。
+        /// `Status=UpdateAvailable` の case でのみ呼ばれる (Skipped / UpToDate / 失敗時は呼ばれない、
+        /// = 「スキップしたバージョンが新 release で更新されるまで再通知しない」semantic を上位で保証)。
+        /// </summary>
+        private void ShowUpdateAvailableNotification(Models.UpdateCheckResult result)
+        {
+            if (InvokeRequired)
+            {
+                try
+                {
+                    BeginInvoke(new Action<Models.UpdateCheckResult>(ShowUpdateAvailableNotification), result);
+                }
+                catch (InvalidOperationException) { /* form 破棄済み */ }
+                return;
+            }
+
+            string currentLabel = result.Current == null ? "(不明)" : "v" + result.Current.ToString(3);
+            string latestLabel = result.Latest.TagName;
+            string message =
+                "新しいバージョンが利用可能です。\n\n" +
+                "現在のバージョン: " + currentLabel + "\n" +
+                "最新のバージョン: " + latestLabel + "\n\n" +
+                "「アップデート」タブを開いてリリースノートを確認しますか？\n" +
+                "(あとで確認する場合は「いいえ」、このバージョンを無視するには「アップデート」タブの「このバージョンをスキップ」を押してください)";
+
+            DialogResult dr;
+            try
+            {
+                dr = MessageBox.Show(this, message, "アップデートの通知",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Information, MessageBoxDefaultButton.Button1);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[MainForm] ShowUpdateAvailableNotification エラー: " + ex.Message);
+                return;
+            }
+            if (dr == DialogResult.Yes && tabControl1 != null)
+            {
+                try
+                {
+                    tabControl1.SelectedTab = tabUpdate;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("[MainForm] tabUpdate 切替失敗: " + ex.Message);
+                }
+            }
         }
 
         private void RegisterUnknownSafetyFiles()

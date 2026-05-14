@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using Microsoft.Win32;
 using GCTonePrism.Manager.Services;
 
 namespace GCTonePrism.Manager
@@ -16,6 +17,11 @@ namespace GCTonePrism.Manager
         [STAThread]
         static void Main()
         {
+            // WebBrowser コントロール (UpdateSectionPanel のリリースノート表示で使用、Phase 4 #108) は
+            // default で IE7 quirks mode で動作するため、render 崩れ + CSS 制限あり。HKCU レジストリで
+            // 自プロセス名を IE11 emulation に登録する (best-effort、失敗してもアプリは起動可能)。
+            TrySetIE11EmulationMode();
+
             // ログ機構を最初に初期化することで、PathManager 以降のすべての Console.WriteLine が
             // 自動的にファイル (logs/manager_YYYY-MM-DD.log) にも残る (#116)
             Logger.Initialize();
@@ -52,6 +58,39 @@ namespace GCTonePrism.Manager
             finally
             {
                 Logger.Shutdown();
+            }
+        }
+
+        /// <summary>
+        /// WebBrowser コントロール (System.Windows.Forms.WebBrowser) を IE11 mode で動作させるための
+        /// HKCU レジストリ設定。Phase 4 (#108) で UpdateSectionPanel のリリースノート表示に使う。
+        ///
+        /// レジストリ key: `HKCU\Software\Microsoft\Internet Explorer\Main\FeatureControl\FEATURE_BROWSER_EMULATION`
+        ///   value name: 自 exe のファイル名 (= "GCTonePrism_Manager.exe")
+        ///   value (DWORD): 11001 = IE11 Edge mode (latest)
+        /// 詳細: https://docs.microsoft.com/en-us/previous-versions/windows/internet-explorer/ie-developer/general-info/ee330730
+        ///
+        /// HKCU を使うので管理者権限不要。失敗 (RegOpenKeyEx denied / disk 不調) しても
+        /// Logger に warn を残してアプリ起動は続行 (WebBrowser は IE7 mode の見た目になるが操作は可能)。
+        /// </summary>
+        private static void TrySetIE11EmulationMode()
+        {
+            try
+            {
+                string exeName = Path.GetFileName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+                if (string.IsNullOrEmpty(exeName)) return;
+                using (var key = Registry.CurrentUser.CreateSubKey(
+                    @"Software\Microsoft\Internet Explorer\Main\FeatureControl\FEATURE_BROWSER_EMULATION"))
+                {
+                    if (key == null) return;
+                    object current = key.GetValue(exeName);
+                    if (current is int && (int)current == 11001) return; // 既に設定済
+                    key.SetValue(exeName, 11001, RegistryValueKind.DWord);
+                }
+            }
+            catch
+            {
+                // best-effort、失敗しても起動継続
             }
         }
     }

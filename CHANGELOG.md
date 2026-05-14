@@ -39,6 +39,13 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
+### [Release Tooling v0.1.16] - 2026-05-14
+
+#### Changed (#108 Phase 4 関連)
+
+- **`Release.ps1` の `Copy-Templates` で `CHANGELOG.md` を `files/CHANGELOG.md` に zip 同梱**: Phase 4 (#108) で Manager UI が「現在の Bundle version」を抽出するための SoT として、repo root の CHANGELOG.md を install dir 直下に同梱する。配置: zip 内 `files/CHANGELOG.md` → Install.bat の `robocopy files/* <install>/` で `<install>/CHANGELOG.md` 直下 (= `Launcher/` `Manager/` 等と同階層)。配置選定根拠: (a) project 全体の SoT semantic に整合 (CHANGELOG は Launcher / Manager / Companions / Bundle / Release Tooling を横断、Manager 専属ではない)、(b) File Explorer から install dir を開いたユーザーから直接見える位置 (Manager dir の中に埋もれない)、(c) 累積更新時に staging CHANGELOG.md を信頼できる accurate source として再利用 (DL 後の「適用直前確認」UI で API 経由より staging を信頼)。検討した代替案 (`bundle_version.txt` 新設 / `<install>/Manager/CHANGELOG.md` 配置) と比較して、本案 (`<install>/` 直下) は semantic 的にクリーン + ユーザー可視性が高い + Manager UI Phase 4 の Phase 4 update flow に single-file copy 1 行追加で対応可能 (shortcut bat = `Launcher.bat` / `Manager.bat` 置換と同 pattern、Updater は `<install>/` 直下を touch しないため Manager UI 責務に置く)。
+- **`Assert-ExpectedFiles` に `files\CHANGELOG.md` を追加**: 上記同梱の structural fence として、CHANGELOG.md が staging に正しくコピーされなかった場合 Release.ps1 を fail-fast で停止する。
+
 ### [Release Tooling v0.1.15] - 2026-05-14
 
 #### Changed (PR #159 シニアレビュー round 4)
@@ -1467,6 +1474,22 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.9.0] - 2026-05-14
+
+#### Added (#108 Phase 4)
+
+- **Manager UI に「アップデート」タブを追加**: Bundle / Manager / Launcher / Updater / DB schema の 5 component version を 1 画面で表示、起動時にバックグラウンドで GitHub Releases API を叩いて新版検出 (6 時間 cache、`update_check_*` settings key 経由で永続化)、累積更新ノート (v0.2.0 → v0.5.0 のような飛び越え更新で v0.3.0 / v0.4.0 / v0.5.0 全部の release notes を WebBrowser + Markdig HTML render で表示)、「このバージョンをスキップ」(`update_skipped_version` settings key、次 release が出るまで黙る)、「ブラウザで詳細を見る」(GitHub Releases ページ直リンク) を実装。`MainForm.cs:CleanupZombieStagings` で前回失敗 staging (`%TEMP%/GCTonePrism_update_*`) を起動時に best-effort 削除。
+- **Manager メイン画面表示時の新版検出 → MessageBox 通知**: 起動時 background check で `Status == UpdateAvailable` の場合 `MainForm.ShowUpdateAvailableNotification` が「新しいバージョンが利用可能です」+ 「現在 vX.Y.Z / 最新 vA.B.C」+ 「『アップデート』タブを開いてリリースノートを確認しますか？」MessageBox を `MessageBoxButtons.YesNo` で表示、Yes で `tabControl1.SelectedTab = tabUpdate` 自動切替、No で「あとで」(次回起動時 cache TTL 内なら再通知抑止、TTL 超過なら再表示)。「このバージョンをスキップ」(タブ内 button) を押されている場合は上位で `Status = Skipped` に変わるため本通知はそもそも呼ばれない (= 「次 release が出るまでダイアログ出ない」semantic を `UpdateChecker.ShouldNotify` の `latest > skipped` 判定で構造的に保証)。MessageBox は `BeginInvoke` で UI thread に marshal、form 破棄済み時の `InvalidOperationException` を握り潰す fault tolerance。
+- **「今すぐアップデート」フロー完全実装** (SPEC §3.7.3 [4]〜[11]): button click で `ProcessingDialog` 経由 worker (`UpdateSectionPanel.RunUpdateWorker`) が以下を順次実行。(1) 起動中プロセス (Launcher / Companions) 検出 + 手動 close 待機 (自動 kill しない、`MessageBox.RetryCancel`)、(2) ディスク容量 pre-check (zip サイズ × 3)、(3) zip DL with `IProgress<DownloadProgress>` (5-40%、cancellable)、(4) staging 展開 to `%TEMP%/GCTonePrism_update_<ver>/` (40-50%)、(5) ExpectedFiles 検証 (50-55%、`UpdateDownloader.ValidateStaging`)、(6) staging CHANGELOG.md の Bundle ver 一致検証 (55-60%、zip 改竄 / 取り違え検出)、(7) ここから cancel 無効 (half-state 防止): Launcher dir rename-rollback 置換 (60-67%、`DirReplacer.Replace + CleanupBak`)、(8) Companions/<Updater 以外>/ dir 列挙置換 (67-70%、現状対象なし、将来 WindowProbe / PauseOverlay 用)、(9) `<install_parent>/Launcher.bat` / `Manager.bat` shortcut bat 単体 file 置換 (70-72%、`FileReplacer.ReplaceFile`)、(10) `<install>/CHANGELOG.md` 単体 file 置換 (73-75%)、(11) Companions/Updater dir 置換 (77-82%、常に staging の新 Updater で置換、SPEC §3.7.3 [10])、(12) Updater spawn with `--caller-pid Process.GetCurrentProcess().Id` (85-95%、`UpdaterClient.Spawn`)、(13) `Application.Exit()` で Manager 自身終了 → Updater が Manager dir 置換 + 新 Manager.exe 起動を引き継ぐ。
+- **開発環境ガード** (`<install>/.git` 検出): repo 内で動いている場合 (= dev 環境) は適用前に MessageBox で stop、ソース dir (Launcher/ / Manager/ / Companions/) の物理上書きによる事故を防ぐ。本番 install (Install.bat 展開後) には `.git` は存在しないので通常運用に影響なし。
+- **新規 services**: `Services/GitHubReleaseChecker.cs` (HTTP client、TLS 1.2 明示、UA / Accept / X-GitHub-Api-Version header)、`Services/UpdateChecker.cs` (cache + skip + force refresh のオーケストレーション)、`Services/ChangelogParser.cs` (Release.ps1 `Get-BundleReleaseNotes` の論理同型 C# 移植、`### [Bundle vX.Y.Z]` 抽出 + 累積 entry 抽出 `GetBundleEntriesBetween`)、`Services/VersionInventory.cs` (5 component version 採取 + fail-soft null)、`Services/MarkdownRenderer.cs` (Markdig wrapper、`UseAdvancedExtensions` 無効 + `DisableHtml` でセキュリティ、累積 HTML 結合 `BuildCumulativeHtml`)、`Services/DirReplacer.cs` (Updater `FileReplacer.cs` の round 7-8 改善版を論理同型で写経、Launcher / Companion dir 置換用)、`Services/FileReplacer.cs` (shortcut bat 用単体 file 置換)、`Services/ProcessTerminator.cs` (Launcher / Companion 起動中 process 検出 + 待機 + kill)、`Services/UpdateDownloader.cs` (zip DL with `IProgress<DownloadProgress>` + staging 展開 + ExpectedFiles 検証 + Bundle version 一致検証)、`Services/UpdaterClient.cs` (Updater spawn with `--caller-pid` + `RedirectStandardError=true` + `StandardErrorEncoding=UTF8` + `BeginErrorReadLine` で 4KB deadlock 回避 + exit code 0-8 dispatch)、`Services/SettingsKeys.cs` (settings key 定数集約、typo 防止)。
+- **新規 models**: `Models/ReleaseInfo.cs` (GitHub API `tag_name` / `body` / `published_at` / `assets[]` の POCO)、`Models/UpdateCheckResult.cs` (`UpdateCheckStatus` enum + 結果 wrapper)。
+- **WebBrowser コントロール IE11 mode 設定**: `Program.cs:TrySetIE11EmulationMode` で HKCU registry `FEATURE_BROWSER_EMULATION` に自 exe を IE11 (11001) で登録、リリースノート HTML が default IE7 quirks mode で render 崩れする問題を回避 (best-effort、失敗してもアプリ起動継続)。
+- **PathManager 拡張**: `LauncherDir` / `ManagerDir` / `UpdaterExePath` / `UpdaterDir` / `CompanionsDir` / `UpdaterLogDir` / `InstallParentDir` (`<install_parent>/Launcher.bat` 等の shortcut bat 用) / `BundleChangelogPath` (= `<install>/Manager/CHANGELOG.md`、Phase 4 SoT) / `StagingRootForUpdate(version)` / `EnumerateZombieStagings` を追加。
+- **csproj 変更**: `<Reference Include="System.Web.Extensions" />` (JavaScriptSerializer for GitHub API JSON parse) + `<Reference Include="System.IO.Compression" />` + `<Reference Include="System.IO.Compression.FileSystem" />` (zip 展開) + Markdig 0.37.0 (NuGet)。
+
+**詳細仕様は [SPECIFICATION.md §3.7.3 / §3.7.7 / §7.5.1](SPECIFICATION.md) 参照**。Updater 側は本 PR で改修なし (Phase 3 v0.1.0 をそのまま `--caller-pid` 含む既存規約で呼び出す)。
 
 ### [Manager v0.8.10] - 2026-05-13
 

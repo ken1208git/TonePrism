@@ -1615,8 +1615,18 @@ function Copy-Templates {
         @{ Src = 'templates\Launcher.bat';           Dest = 'Launcher.bat';           Label = 'Launcher.bat (shortcut, parent-level)' },
         @{ Src = 'templates\Manager.bat';            Dest = 'Manager.bat';            Label = 'Manager.bat (shortcut, parent-level)' }
     )
-    # files/ 配下配置: 現状なし (component 本体は Build フェーズで配置済み)
-    $filesTemplates = @()
+    # files/ 配下配置:
+    #   - CHANGELOG.md: Phase 4 (#108) で Manager UI が「現在の Bundle version」を抽出するために
+    #     `<install>/CHANGELOG.md` から parse する。SPEC §3.7.7「CHANGELOG.md は zip 同梱規約」に
+    #     従い、repo root の CHANGELOG.md を `files/CHANGELOG.md` として同梱する (= `<install>/`
+    #     直下、`Launcher/` `Manager/` 等と同階層)。Project 全体の SoT という semantic に整合し、
+    #     File Explorer から install dir を開いたユーザーから直接見える位置。
+    #     Install.bat の `robocopy files/* <install>/` で自動展開される。Manager UI Phase 4 の
+    #     アップデートフロー [7]〜[10] では `FileReplacer.ReplaceFile` の単体 file copy で更新
+    #     (Launcher.bat / Manager.bat の shortcut bat 置換と同 pattern)。
+    $filesTemplates = @(
+        @{ Src = 'CHANGELOG.md'; Dest = 'files\CHANGELOG.md'; Label = 'CHANGELOG.md (Bundle SoT for Manager UI, Phase 4 #108)' }
+    )
 
     foreach ($tpl in ($rootTemplates + $filesTemplates)) {
         $src = Join-Path $RepoRoot $tpl.Src
@@ -1691,7 +1701,10 @@ function Assert-ExpectedFiles {
         'files\Manager\x86\SQLite.Interop.dll',
         # Updater (Phase 3、SPEC §3.7.4): Manager 置換 + 再起動の最小 CLI、Companions/ 配下に配置
         'files\Companions\Updater\GCTonePrism_Updater.exe',
-        'files\Companions\Updater\GCTonePrism_Updater.exe.config'
+        'files\Companions\Updater\GCTonePrism_Updater.exe.config',
+        # CHANGELOG.md (Phase 4 #108、SPEC §3.7.7): Manager UI が installed Bundle version 抽出に使う SoT、
+        # `<install>/CHANGELOG.md` 直下配置で `Launcher/` `Manager/` 等と同階層 (project-wide な SoT semantic)
+        'files\CHANGELOG.md'
     )
 
     $missing = @()

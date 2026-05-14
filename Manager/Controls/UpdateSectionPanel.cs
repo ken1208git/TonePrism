@@ -1,0 +1,553 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using GCTonePrism.Manager.Models;
+using GCTonePrism.Manager.Services;
+
+namespace GCTonePrism.Manager.Controls
+{
+    /// <summary>
+    /// 「アップデート」タブの UI 本体。Phase 4 (#108)。
+    ///
+    /// 責務:
+    ///   - 5 + 1 component version の表示 (Bundle / Manager / Launcher / Updater / DB schema、+ 最新 Bundle)
+    ///   - GitHub Releases API 経由でのバージョン check (UpdateChecker 経由、cache + skip 対応)
+    ///   - リリースノートの WebBrowser + Markdig 表示
+    ///   - 「今すぐアップデート」フロー (SPEC §3.7.3 [4]〜[11]) のトリガー
+    ///
+    /// 既存 SectionPanel pattern と同じく `Initialize(dbManager)` で DB 注入、`StatusChanged` event なし
+    /// (アップデート操作中の status は ProcessingDialog の中で完結する)。
+    /// </summary>
+    public partial class UpdateSectionPanel : UserControl
+    {
+        private DatabaseManager _dbManager;
+        private UpdateChecker _updateChecker;
+        private UpdateCheckResult _currentResult;
+        private CancellationTokenSource _checkCts;
+
+        public UpdateSectionPanel()
+        {
+            InitializeComponent();
+        }
+
+        public void Initialize(DatabaseManager dbManager)
+        {
+            _dbManager = dbManager;
+            _updateChecker = new UpdateChecker(dbManager.SettingsRepository);
+
+            // 起動時 hydrate (cache から「前回確認時の状態」を即時表示)
+            RefreshVersionLabels();
+            UpdateCheckResult cached = _updateChecker.LoadCacheOnly();
+            ApplyResult(cached);
+
+            // 「前回アップデート結果」バナーがあれば表示
+            int? lastExit = UpdaterClient.TryLoadLastExitCode();
+            if (lastExit.HasValue)
+            {
+                ShowPreviousUpdateBanner(lastExit.Value);
+            }
+        }
+
+        /// <summary>MainForm の background check (StartBackgroundUpdateCheckIfDue) から完了通知。UI thread に marshal。</summary>
+        internal void OnCheckCompleted(UpdateCheckResult result)
+        {
+            if (InvokeRequired)
+            {
+                try
+                {
+                    BeginInvoke(new Action<UpdateCheckResult>(OnCheckCompleted), result);
+                }
+                catch (InvalidOperationException) { /* form 破棄済み */ }
+                return;
+            }
+            ApplyResult(result);
+        }
+
+        private void RefreshVersionLabels()
+        {
+            int dbSchema = 0;
+            try { dbSchema = _dbManager.GetTargetDatabaseVersion(); } catch { dbSchema = 0; }
+            InventorySnapshot snap = VersionInventory.Snapshot(dbSchema > 0 ? (int?)dbSchema : null);
+            lblBundleVersion.Text = FormatVersion(snap.Bundle);
+            lblManagerVersion.Text = FormatVersion(snap.Manager);
+            lblLauncherVersion.Text = FormatVersion(snap.Launcher);
+            lblUpdaterVersion.Text = FormatVersion(snap.Updater);
+            lblDbSchemaVersion.Text = snap.DbSchema.HasValue ? "v" + snap.DbSchema.Value : "不明";
+        }
+
+        private static string FormatVersion(Version v)
+        {
+            return v == null ? "不明" : "v" + v.ToString(3);
+        }
+
+        private void ApplyResult(UpdateCheckResult result)
+        {
+            _currentResult = result;
+            if (result == null)
+            {
+                lblLatestVersion.Text = "未確認";
+                lblLatestDate.Text = string.Empty;
+                lblStatusMessage.Text = string.Empty;
+                btnUpdateNow.Enabled = false;
+                btnSkip.Enabled = false;
+                webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument("<p>「更新を確認」を押してください。</p>");
+                return;
+            }
+
+            // 最新 ver / 日付
+            if (result.Latest != null)
+            {
+                lblLatestVersion.Text = result.Latest.TagName ?? "不明";
+                lblLatestDate.Text = result.Latest.PublishedAt.HasValue
+                    ? "(公開: " + result.Latest.PublishedAt.Value.ToLocalTime().ToString("yyyy-MM-dd") + ")"
+                    : string.Empty;
+            }
+            else
+            {
+                lblLatestVersion.Text = result.Status == UpdateCheckStatus.UnknownBundle ? "(Bundle 不明)" : "—";
+                lblLatestDate.Text = string.Empty;
+            }
+
+            // status メッセージ + button 有効化
+            //
+            // cache fallback (FromCache=true + LastError あり) の場合は、Status は cache の元 Status
+            // (UpToDate/Available/Skipped/UnknownBundle) を保持しているのでそのまま主メッセージに使い、
+            // LastError は別行で grey の sub-text として軽く注記 (= データが見えてるのに「失敗」赤字で
+            // alarming にしない設計、UpdateChecker.cs の fallback path 参照)。
+            switch (result.Status)
+            {
+                case UpdateCheckStatus.UpToDate:
+                    lblStatusMessage.Text = "最新版を実行中です。";
+                    lblStatusMessage.ForeColor = System.Drawing.Color.DarkGreen;
+                    btnUpdateNow.Enabled = false;
+                    btnSkip.Enabled = false;
+                    break;
+                case UpdateCheckStatus.UpdateAvailable:
+                    lblStatusMessage.Text = "新しいバージョンが利用可能です。";
+                    lblStatusMessage.ForeColor = System.Drawing.Color.DarkOrange;
+                    btnUpdateNow.Enabled = true;
+                    btnSkip.Enabled = true;
+                    break;
+                case UpdateCheckStatus.Skipped:
+                    lblStatusMessage.Text = "このバージョンはスキップ済みです。";
+                    lblStatusMessage.ForeColor = System.Drawing.Color.Gray;
+                    btnUpdateNow.Enabled = true;
+                    btnSkip.Enabled = false;
+                    break;
+                case UpdateCheckStatus.NetworkError:
+                    // cache 無しで API 失敗 → 赤字エラー (データが見えていない alarming 状態)
+                    lblStatusMessage.Text = "ネットワーク確認に失敗: " + (result.LastError ?? "");
+                    lblStatusMessage.ForeColor = System.Drawing.Color.DarkRed;
+                    btnUpdateNow.Enabled = false;
+                    btnSkip.Enabled = false;
+                    break;
+                case UpdateCheckStatus.ParseError:
+                    lblStatusMessage.Text = "API 応答の解析失敗: " + (result.LastError ?? "");
+                    lblStatusMessage.ForeColor = System.Drawing.Color.DarkRed;
+                    btnUpdateNow.Enabled = false;
+                    btnSkip.Enabled = false;
+                    break;
+                case UpdateCheckStatus.UnknownBundle:
+                    lblStatusMessage.Text = "現在の Bundle バージョンを判定できません (CHANGELOG.md 不在)。開発環境では正常な表示です。本番環境でこの表示が出る場合は Install.bat で再 install してください。";
+                    lblStatusMessage.ForeColor = System.Drawing.Color.Gray;
+                    btnUpdateNow.Enabled = false;
+                    btnSkip.Enabled = false;
+                    break;
+            }
+
+            // cache 表示中 + 再確認 API 失敗の sub-text 注記 (grey、alarming を下げる)
+            //   Status が NetworkError/ParseError 以外 (= cache に意味あるデータがある場合) かつ
+            //   LastError が乗っているケース。cache の元データを main message でそのまま表示し、
+            //   sub-text で「再確認はエラー」を grey で軽く伝える。
+            if (result.FromCache && !string.IsNullOrEmpty(result.LastError)
+                && result.Status != UpdateCheckStatus.NetworkError
+                && result.Status != UpdateCheckStatus.ParseError)
+            {
+                string elapsed = FormatElapsedSince(result.CheckedAtUnixMs);
+                string subText = "(最終確認: " + elapsed + " 前、再確認エラー: " + result.LastError + ")";
+                lblStatusMessage.Text = lblStatusMessage.Text + "\n" + subText;
+            }
+
+            // リリースノート表示の使い分け (#108 Phase 4):
+            //   UpdateAvailable / Skipped (= current < latest、累積データあり)
+            //       → 「これから適用される変更」ヘッダ + 累積 release notes (v0.3.0 → v0.4.0 → ...)
+            //   UpToDate (= current == latest、累積データなし)
+            //       → 「現在実行中: vX.Y.Z の内容」ヘッダ + latest 1 個 (= 今動いてる version の振り返り)
+            //   データなし → 「リリースノートはありません」
+            // アップデート完了後は current == latest になるため自然と UpToDate 表示に切り替わる
+            // (ユーザーが期待した「アプデできたら最新版だけ表示」semantic)。
+            try
+            {
+                if (result.CumulativeReleases != null && result.CumulativeReleases.Count > 0)
+                {
+                    webReleaseNotes.DocumentText = MarkdownRenderer.BuildCumulativeHtml(
+                        result.CumulativeReleases, topHeading: "これから適用される変更");
+                }
+                else if (result.Latest != null && !string.IsNullOrEmpty(result.Latest.Body))
+                {
+                    string bodyHtml = MarkdownRenderer.MarkdownToHtml(result.Latest.Body);
+                    string heading = "現在実行中: " + (result.Latest.TagName ?? "");
+                    webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument(
+                        "<h1>" + System.Web.HttpUtility.HtmlEncode(heading) + "</h1>" + bodyHtml);
+                }
+                else
+                {
+                    webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument("<p>リリースノートはありません。</p>");
+                }
+            }
+            catch
+            {
+                webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument("<p>リリースノートの表示に失敗しました。</p>");
+            }
+        }
+
+        /// <summary>cache の `CheckedAtUnixMs` から経過時間を「3 分」「5 時間」等の人間可読な短文に。</summary>
+        private static string FormatElapsedSince(long unixMs)
+        {
+            if (unixMs <= 0L) return "不明";
+            long nowMs = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            long elapsedMs = nowMs - unixMs;
+            if (elapsedMs < 0L) return "不明";
+            long sec = elapsedMs / 1000L;
+            if (sec < 60) return sec + " 秒";
+            long min = sec / 60L;
+            if (min < 60) return min + " 分";
+            long hour = min / 60L;
+            if (hour < 24) return hour + " 時間";
+            long day = hour / 24L;
+            return day + " 日";
+        }
+
+        private void ShowPreviousUpdateBanner(int exitCode)
+        {
+            ExitCodeDispatch dispatch = UpdaterClient.DispatchExitCode(exitCode);
+            if (dispatch.Severity == ExitSeverity.Success)
+            {
+                lblPreviousResult.Text = "前回のアップデートに成功しました。";
+                lblPreviousResult.ForeColor = System.Drawing.Color.DarkGreen;
+            }
+            else
+            {
+                lblPreviousResult.Text = "前回のアップデート結果: " + dispatch.Title;
+                lblPreviousResult.ForeColor = System.Drawing.Color.DarkRed;
+            }
+            lblPreviousResult.Visible = true;
+        }
+
+        // ----- button handlers -----
+
+        private async void btnCheckNow_Click(object sender, EventArgs e)
+        {
+            if (_updateChecker == null) return;
+            btnCheckNow.Enabled = false;
+            try
+            {
+                if (_checkCts != null) _checkCts.Cancel();
+                _checkCts = new CancellationTokenSource();
+                lblStatusMessage.Text = "確認中...";
+                lblStatusMessage.ForeColor = System.Drawing.Color.Black;
+                UpdateCheckResult result = await _updateChecker.ForceRefreshAsync(_checkCts.Token).ConfigureAwait(true);
+                ApplyResult(result);
+            }
+            catch (OperationCanceledException)
+            {
+                lblStatusMessage.Text = "確認をキャンセルしました。";
+            }
+            catch (Exception ex)
+            {
+                lblStatusMessage.Text = "確認失敗: " + ex.Message;
+                lblStatusMessage.ForeColor = System.Drawing.Color.DarkRed;
+            }
+            finally
+            {
+                btnCheckNow.Enabled = true;
+            }
+        }
+
+        private void btnUpdateNow_Click(object sender, EventArgs e)
+        {
+            if (_currentResult == null || _currentResult.Latest == null) return;
+            if (_currentResult.Latest.Version == null) return;
+            if (string.IsNullOrEmpty(_currentResult.Latest.ZipAssetUrl))
+            {
+                MessageBox.Show("zip asset URL が取得できません (リリースに同梱されていない可能性)。",
+                    "アップデート中止", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // 開発環境ガード: `<install>/.git` が存在する = git repo 内で動いている。本フローは
+            // Launcher / Manager / Companions / shortcut bat / CHANGELOG.md を **物理上書き** するため、
+            // 誤って repo のソースを破壊する事故を物理的に防ぐ (リカバリは git reset --hard で可能だが
+            // 未 commit の改変が消失する)。本番 install (Install.bat 展開後) には .git は存在しないので
+            // 通常運用に影響なし。
+            if (System.IO.Directory.Exists(System.IO.Path.Combine(PathManager.BaseDirectory, ".git")))
+            {
+                MessageBox.Show(
+                    "開発環境 (.git リポジトリ直下) ではアップデート適用を実行できません。\n\n" +
+                    "本フローは Launcher / Manager / Companions / shortcut bat / CHANGELOG.md を物理上書きするため、" +
+                    "ソースコードを破壊する事故を防ぐためです。\n\n" +
+                    "実環境での動作確認は Install.bat で展開した install dir で行ってください。",
+                    "開発環境ガード", MessageBoxButtons.OK, MessageBoxIcon.Stop);
+                return;
+            }
+
+            // [A] 事前確認ダイアログ
+            DialogResult confirm = MessageBox.Show(
+                "アップデートを開始します。\n\n" +
+                "  現在: v" + (_currentResult.Current == null ? "(不明)" : _currentResult.Current.ToString(3)) + "\n" +
+                "  最新: " + _currentResult.Latest.TagName + "\n\n" +
+                "・ダウンロード + 置換中、Manager が再起動します。\n" +
+                "・進行中に Launcher や常駐ツールが動いていれば事前に閉じる必要があります。\n" +
+                "・ゲームデータ (prism.db / games/ / backups/ / responses/ / logs/) は保護されます。\n\n" +
+                "続行してよろしいですか？",
+                "アップデート開始確認",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+            if (confirm != DialogResult.Yes) return;
+
+            // [A.5] 起動中プロセスチェック (Launcher / Companions、Updater は除外)
+            var running = ProcessTerminator.EnumerateRunning();
+            while (running.Count > 0)
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("以下のプロセスが起動中です。手動で閉じてから「再試行」を押してください。");
+                sb.AppendLine();
+                foreach (var p in running)
+                {
+                    sb.AppendLine("  - " + p.DisplayLabel + " (" + p.InstanceCount + " 件)");
+                }
+                sb.AppendLine();
+                sb.AppendLine("中止する場合は「キャンセル」を押してください。");
+                DialogResult dr = MessageBox.Show(sb.ToString(),
+                    "起動中プロセスあり", MessageBoxButtons.RetryCancel, MessageBoxIcon.Warning);
+                if (dr != DialogResult.Retry)
+                {
+                    return;
+                }
+                running = ProcessTerminator.EnumerateRunning();
+            }
+
+            // [B] 実行 (ProcessingDialog の worker は Task.Run 内で同期呼出、async DL は GetAwaiter で待つ)
+            Version targetVersion = _currentResult.Latest.Version;
+            string zipUrl = _currentResult.Latest.ZipAssetUrl;
+            long zipSizeBytes = _currentResult.Latest.ZipSizeBytes;
+            string versionStr = targetVersion.ToString(3);
+            string stagingDir = PathManager.StagingRootForUpdate(versionStr);
+
+            bool spawnedUpdater = false;
+            using (var dialog = new ProcessingDialog((progress, token) =>
+            {
+                spawnedUpdater = RunUpdateWorker(progress, token, zipUrl, zipSizeBytes, targetVersion, stagingDir);
+            }))
+            {
+                dialog.AllowCancel = true;
+                dialog.Text = "アップデート";
+                dialog.ShowDialog(this);
+
+                if (dialog.DialogResult == DialogResult.OK && spawnedUpdater)
+                {
+                    // Updater は spawn 済、Manager プロセスの終了待機を開始している。Application.Exit で
+                    // message loop を抜けると `finally Logger.Shutdown` 経由で正常 exit、Updater の Step 1/4
+                    // polling が抜けて Manager dir 置換 + 新 Manager.exe 起動に進む。
+                    System.Windows.Forms.Application.Exit();
+                }
+            }
+        }
+
+        /// <summary>
+        /// アップデート worker (`ProcessingDialog` の Task.Run 内で同期実行)。
+        /// SPEC §3.7.3 [4]〜[11] の Manager UI 側責務を順番に実行:
+        ///   - zip DL → staging 展開 → ExpectedFiles 検証 → Bundle ver 一致検証 → Launcher / Companions
+        ///     置換 → shortcut bat 置換 → CHANGELOG.md 置換 → Updater dir 置換 → Updater spawn。
+        ///   - 「置換境界」より前 (検証フェーズまで) は CancellationToken で abort 可能、それ以降は
+        ///     half-state 防止のため cancel チェックを外して完走させる。
+        /// </summary>
+        /// <returns>true: Updater spawn 成功 (caller は Application.Exit を呼ぶ責務) / false: ありえない (例外で抜ける)</returns>
+        private bool RunUpdateWorker(System.IProgress<ProgressInfo> progress, System.Threading.CancellationToken ct,
+            string zipUrl, long zipSizeBytes, Version targetVersion, string stagingDir)
+        {
+            // staging dir clean (前回 zombie がある場合に備えて削除してから作り直す)
+            if (System.IO.Directory.Exists(stagingDir))
+            {
+                System.IO.Directory.Delete(stagingDir, recursive: true);
+            }
+            System.IO.Directory.CreateDirectory(stagingDir);
+
+            string zipPath = System.IO.Path.Combine(stagingDir, "GCTonePrism_v" + targetVersion.ToString(3) + ".zip");
+
+            // ディスク容量 pre-check (zip + 展開 + buffer = ~3 倍想定)
+            try
+            {
+                long needed = System.Math.Max(zipSizeBytes, 100L * 1024L * 1024L) * 3L;
+                string root = System.IO.Path.GetPathRoot(stagingDir);
+                if (!string.IsNullOrEmpty(root))
+                {
+                    var drive = new System.IO.DriveInfo(root);
+                    if (drive.AvailableFreeSpace < needed)
+                    {
+                        throw new System.IO.IOException(
+                            "ディスク容量不足: 必要 " + (needed / 1024 / 1024) + " MB、空き " +
+                            (drive.AvailableFreeSpace / 1024 / 1024) + " MB");
+                    }
+                }
+            }
+            catch (System.IO.DriveNotFoundException) { /* path resolve 失敗時は skip */ }
+
+            ct.ThrowIfCancellationRequested();
+
+            // [1] zip DL (5-40%)
+            progress.Report(new ProgressInfo(5, "ダウンロード中...", zipUrl));
+            var dlProgress = new System.Progress<DownloadProgress>(dp =>
+            {
+                int pct = 5 + (int)(dp.Percent * 0.35);  // 5-40%
+                progress.Report(new ProgressInfo(pct, "ダウンロード中...",
+                    string.Format("{0:N0} / {1:N0} bytes", dp.BytesDownloaded, dp.TotalBytes)));
+            });
+            UpdateDownloader.DownloadAsync(zipUrl, zipPath, dlProgress, ct).GetAwaiter().GetResult();
+            ct.ThrowIfCancellationRequested();
+
+            // [2] 展開 (40-50%)
+            progress.Report(new ProgressInfo(42, "展開中...", stagingDir));
+            UpdateDownloader.Extract(zipPath, stagingDir);
+            ct.ThrowIfCancellationRequested();
+
+            // [3] ExpectedFiles 検証 (50-55%)
+            progress.Report(new ProgressInfo(50, "ファイル検証中..."));
+            var missing = UpdateDownloader.ValidateStaging(stagingDir);
+            if (missing.Count > 0)
+            {
+                throw new System.IO.InvalidDataException(
+                    "staging に必要ファイルが不足しています:\n  " + string.Join("\n  ", missing));
+            }
+
+            // [4] Bundle version 一致検証 (55-60%)
+            progress.Report(new ProgressInfo(55, "バージョン一致を検証中..."));
+            if (!UpdateDownloader.ValidateBundleVersion(stagingDir, targetVersion))
+            {
+                throw new System.IO.InvalidDataException(
+                    "staging の CHANGELOG.md 最新 Bundle が target version (" + targetVersion.ToString(3) +
+                    ") と一致しません。zip 改竄 / 取り違え疑い。");
+            }
+
+            // ===== ここから「置換境界」: 以降の cancel は half-state を生むので無効化 =====
+
+            // [5] Launcher dir 置換 (60-67%)
+            progress.Report(new ProgressInfo(60, "Launcher を更新中...", PathManager.LauncherDir));
+            string stagingLauncher = System.IO.Path.Combine(stagingDir, "files", "Launcher");
+            if (!DirReplacer.Replace(stagingLauncher, PathManager.LauncherDir))
+            {
+                throw new System.IO.IOException("Launcher dir の置換に失敗しました。");
+            }
+            DirReplacer.CleanupBak(PathManager.LauncherDir);
+
+            // [6] Companions (Updater 以外) 置換 — 現状 dir 列挙で対象なし、将来 WindowProbe / PauseOverlay 用
+            progress.Report(new ProgressInfo(67, "Companions を更新中..."));
+            string stagingCompanionsRoot = System.IO.Path.Combine(stagingDir, "files", "Companions");
+            if (System.IO.Directory.Exists(stagingCompanionsRoot))
+            {
+                foreach (string stagingComp in System.IO.Directory.EnumerateDirectories(stagingCompanionsRoot))
+                {
+                    string compName = System.IO.Path.GetFileName(stagingComp.TrimEnd('\\', '/'));
+                    if (string.IsNullOrEmpty(compName)) continue;
+                    if (string.Equals(compName, "Updater", System.StringComparison.OrdinalIgnoreCase)) continue;
+                    string targetComp = System.IO.Path.Combine(PathManager.CompanionsDir, compName);
+                    if (!DirReplacer.Replace(stagingComp, targetComp))
+                    {
+                        throw new System.IO.IOException("Companion '" + compName + "' の置換に失敗しました。");
+                    }
+                    DirReplacer.CleanupBak(targetComp);
+                }
+            }
+
+            // [7] shortcut bat 置換 (single-file、`<install_parent>/Launcher.bat` と `Manager.bat`)
+            progress.Report(new ProgressInfo(70, "ショートカットを更新中..."));
+            string parentDir = PathManager.InstallParentDir;
+            if (!string.IsNullOrEmpty(parentDir))
+            {
+                FileReplacer.ReplaceFile(
+                    System.IO.Path.Combine(stagingDir, "Launcher.bat"),
+                    System.IO.Path.Combine(parentDir, "Launcher.bat"));
+                FileReplacer.ReplaceFile(
+                    System.IO.Path.Combine(stagingDir, "Manager.bat"),
+                    System.IO.Path.Combine(parentDir, "Manager.bat"));
+            }
+
+            // [8] CHANGELOG.md 置換 (single-file、`<install>/CHANGELOG.md` 直下)
+            progress.Report(new ProgressInfo(73, "CHANGELOG を更新中..."));
+            FileReplacer.ReplaceFile(
+                System.IO.Path.Combine(stagingDir, "files", "CHANGELOG.md"),
+                PathManager.BundleChangelogPath);
+
+            // [9] Companions/Updater 置換 (SPEC §3.7.3 [10]、常に staging の新 Updater で置換)
+            progress.Report(new ProgressInfo(77, "Updater を更新中...", PathManager.UpdaterDir));
+            string stagingUpdater = System.IO.Path.Combine(stagingDir, "files", "Companions", "Updater");
+            if (!DirReplacer.Replace(stagingUpdater, PathManager.UpdaterDir))
+            {
+                throw new System.IO.IOException("Updater dir の置換に失敗しました。");
+            }
+            DirReplacer.CleanupBak(PathManager.UpdaterDir);
+
+            // [10] Updater spawn (Manager の終了を待機 + Manager dir 置換 + 新 Manager.exe 起動を引き継ぐ)
+            progress.Report(new ProgressInfo(85, "Updater を起動中..."));
+            if (!UpdaterClient.Spawn(stagingDir, forceKill: false, logSink: null))
+            {
+                throw new System.IO.IOException("Updater spawn に失敗しました。");
+            }
+            progress.Report(new ProgressInfo(95, "Manager を終了中..."));
+            // worker 終了 → ProcessingDialog が DialogResult.OK で抜ける → caller が Application.Exit()
+            return true;
+        }
+
+        private void btnSkip_Click(object sender, EventArgs e)
+        {
+            if (_currentResult == null || _currentResult.Latest == null || _currentResult.Latest.Version == null) return;
+            _updateChecker.Skip(_currentResult.Latest.Version);
+            ApplyResult(new UpdateCheckResult
+            {
+                Status = UpdateCheckStatus.Skipped,
+                Current = _currentResult.Current,
+                Latest = _currentResult.Latest,
+                CumulativeReleases = _currentResult.CumulativeReleases,
+                CheckedAtUnixMs = _currentResult.CheckedAtUnixMs,
+                FromCache = _currentResult.FromCache,
+            });
+        }
+
+        private void btnOpenBrowser_Click(object sender, EventArgs e)
+        {
+            string url = (_currentResult != null && _currentResult.Latest != null && !string.IsNullOrEmpty(_currentResult.Latest.HtmlUrl))
+                ? _currentResult.Latest.HtmlUrl
+                : "https://github.com/" + GitHubReleaseChecker.Owner + "/" + GitHubReleaseChecker.Repo + "/releases";
+            try
+            {
+                Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("ブラウザを開けませんでした: " + ex.Message,
+                    "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void webReleaseNotes_Navigating(object sender, WebBrowserNavigatingEventArgs e)
+        {
+            // 内部 about:blank はそのまま許可、外部 URL は cancel して既定ブラウザに委譲
+            string url = e.Url == null ? string.Empty : e.Url.ToString();
+            if (string.IsNullOrEmpty(url) || url.StartsWith("about:", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+            e.Cancel = true;
+            try
+            {
+                Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+            }
+            catch { }
+        }
+    }
+}
