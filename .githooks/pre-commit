@@ -1,0 +1,25 @@
+#!/bin/sh
+# ============================================================================
+# pre-commit hook (BOM reject + CRLF enforce for .bat / .cmd)
+#
+# Delegates the actual check to check-bat-encoding.ps1 because reliable
+# binary-level encoding inspection in POSIX shell is fragile across Git Bash
+# / MSYS / Cygwin (od / hexdump availability varies). PowerShell ships with
+# every Windows since PS 5.1 and gives us [System.IO.File]::ReadAllBytes.
+#
+# Activation: run ./Install-Hooks.ps1 once (sets core.hooksPath = .githooks).
+# See SPECIFICATION.md section 3.7.9.1 (encoding rationale) and section
+# 3.7.9.7 (fence implementation) for context.
+# ============================================================================
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+SCRIPT="$REPO_ROOT/.githooks/check-bat-encoding.ps1"
+
+if [ ! -f "$SCRIPT" ]; then
+    echo "[FAIL] pre-commit: $SCRIPT not found." >&2
+    echo "       Re-run ./Install-Hooks.ps1 or restore the file from git." >&2
+    exit 1
+fi
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT" -Mode Staged
+exit $?

@@ -39,6 +39,24 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
+### [Release Tooling v0.1.15] - 2026-05-14
+
+#### Added (#157)
+
+- **`.bat` / `.cmd` 用 encoding fence (pre-commit hook + CI 安全網)**: SPEC §3.7.9.1 の規約「UTF-8 (no BOM) + CRLF 厳守」を **物理 fence** として 2 段実装。PR #156 開発過程で Write ツールが Release.bat に UTF-8 BOM を付与し `@echo off` 自体が機能不全 → DryRun 実行時に `'t' is not recognized` 等の cmd.exe parse error 多発 → 手動 incident response が必要だった事故の再発防止が目的。`.gitattributes` の `*.bat eol=crlf` だけでは BOM 侵入を防げない (LF 半分対応のみ) ため、commit 前 + push 後の 2 段で encoding 違反を catch:
+  - **1 段目 (pre-commit hook)**: `.githooks/pre-commit` (POSIX shell wrapper) + `.githooks/check-bat-encoding.ps1` (PowerShell 本体ロジック、`[System.IO.File]::ReadAllBytes` でバイト列を直接検査)。staged `.bat` / `.cmd` (Added / Modified、Deleted は対象外) を逐次検証、先頭 3 byte `EF BB BF` で BOM 違反、任意 `\n` の直前が `\r` でなければ LF-only 違反として exit 1。失敗時は `[FAIL]` prefix message + 復旧 PowerShell one-liner を ASCII で表示。bypass: `git commit --no-verify` (推奨しない、AGENTS.md 「hooks を `--no-verify` で skip しない」原則と整合)
+  - **2 段目 (GitHub Actions safety net)**: `.github/workflows/check-bat-encoding.yml` で `windows-latest` runner + `pwsh` で同 `check-bat-encoding.ps1` を `-Mode All` で再実行。`main` への push + `**/*.bat` / `**/*.cmd` / hook script 自身を含む PR を trigger、pre-commit hook を install していない contributor の push を catch する **安全網** (primary fence は hook 側、CI は二重チェック)
+- **`Install-Hooks.ps1` (1 回 setup helper)**: 各 contributor が repo clone 後に 1 度実行する idempotent helper。`git config core.hooksPath .githooks` を設定するだけのシンプル実装。`-Uninstall` switch で `git config --unset core.hooksPath` の reversal も提供。`.git/hooks/` への copy 方式 (Husky 等) を採らない理由は (a) hook 自体が version control 下、(b) 更新は `git pull` で自動伝播、(c) `.git/hooks/` との drift 源を排除、の 3 点
+- **対象拡張子**: `*.bat` + `*.cmd` のみ。`*.ps1` は PowerShell parser が BOM 寛容 + LF 許容のため fence 対象外
+- **動作 verify** (本 PR 内で完了): (a) 既存 4 件の tracked `.bat` (Release.bat / Install.bat / Launcher.bat / Manager.bat) で `-Mode All` PASS、(b) BOM 付き `.bat` を一時 stage → `-Mode Staged` で `[FAIL] BOM detected: ...` 出力 + exit 1、(c) LF-only `.bat` を一時 stage → `[FAIL] LF-only line ending detected: ...` 出力 + exit 1、(d) `.githooks/pre-commit` shell wrapper の delegation も exit code 0 で通過
+- 詳細仕様は **SPECIFICATION.md §3.7.9.7「encoding fence (pre-commit hook + CI 安全網)」** を参照
+
+#### Notes (contributor 向け運用)
+
+- **初回 clone 後** または **本 PR を merge した main を pull 後**: `.\Install-Hooks.ps1` を 1 度実行して `core.hooksPath` を有効化。以降の `git commit` で BOM / LF-only の `.bat` / `.cmd` は自動 reject
+- **incident response**: `[FAIL]` 出力された場合、message 内の PowerShell one-liner で UTF-8 no BOM + CRLF に矯正してから再 commit
+- **CI 失敗時** (hook 未 install で push してしまった等): 同じく PowerShell one-liner で修正 + force push
+
 ### [Release Tooling v0.1.14] - 2026-05-14
 
 **TL;DR**: small cleanup 4 件 (#142 / #143 / #144 / #146) を 1 PR で消化。本来の deliverable は entry 末尾の **`#### Changed (refactor/release-tooling-cleanup、#142 / #143 / #144 / #146)`** セクション参照。以下に並ぶ round 1〜8 の `#### Changed (PR #156 シニアレビュー round N)` は review iteration 中の self-correction 履歴 (forward-looking text からの PR/round 番号 embed 自己違反 sweep、規約境界明確化、cross-reference 修正、CHANGELOG / PR body / SPEC / Release.bat の整合性同期、`Release.bat` の自己違反 ASCII 境界 sweep + AGENTS / SPEC の境界曖昧化 fence、SPEC SoT と code 状態の REM/echo 非対称扱い同期 等)。

@@ -1,0 +1,37 @@
+# ============================================================================
+# Check .bat / .cmd encoding (BOM reject + CRLF enforce)
+#
+# Safety net for contributors who have not installed the pre-commit hook
+# (i.e. did not run Install-Hooks.ps1). The pre-commit hook is the primary
+# fence; this workflow catches violations post-push.
+#
+# Reuses .githooks/check-bat-encoding.ps1 with -Mode All. windows-latest is
+# used so we can call PowerShell exactly the way local Git Bash + the hook
+# does, with no separate Linux implementation to keep in sync.
+#
+# See SPECIFICATION.md section 3.7.9.1 (encoding rationale) and section
+# 3.7.9.7 (fence implementation).
+# ============================================================================
+
+name: Check .bat/.cmd encoding
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - '**/*.bat'
+      - '**/*.cmd'
+      - '.githooks/check-bat-encoding.ps1'
+      - '.github/workflows/check-bat-encoding.yml'
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run encoding check on all tracked .bat / .cmd files
+        shell: pwsh
+        run: .\.githooks\check-bat-encoding.ps1 -Mode All
