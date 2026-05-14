@@ -61,6 +61,7 @@
 
 ## Specification Management
 - `SPECIFICATION.md` の議論・追記・修正が一段落したら、変更履歴セクションへの追記（日付・バージョン・変更内容・変更者）を必ず提案する。バージョン番号は既存最新からインクリメント。
+- **1 PR 内の SPEC 変更履歴 bump も原則 1 回のみ** (CHANGELOG「1 PR 1 bump」原則を SPEC にも準用)。PR 初コミットで version 行を確定させ、レビュー対応コミットでは既存行の description を加筆・修正する形にする。本ルールは PR #159 round 4 以降に適用、それ以前の連続 bump は移行前履歴として残置。
 
 ## Database Schema Management
 - スキーマ変更時のワークフロー（マイグレーション関数・`CurrentDbVersion` 増分・`sqlite3.exe` 検証・`ExpectedSchema` ↔ SPEC §7.3 同期）は **SPECIFICATION.md §7.6** を参照のこと。
