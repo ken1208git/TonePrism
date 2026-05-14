@@ -208,22 +208,44 @@ namespace GCTonePrism.Manager.Services
             object assetsObj;
             if (dict.TryGetValue("assets", out assetsObj) && assetsObj != null)
             {
+                Logger.Info("[GitHubReleaseChecker] assets type: " + assetsObj.GetType().FullName);
                 var assetEnumerable = assetsObj as System.Collections.IEnumerable;
                 if (assetEnumerable != null && !(assetsObj is string))
                 {
+                    int idx = 0;
                     foreach (var a in assetEnumerable)
                     {
+                        idx++;
+                        Logger.Info("[GitHubReleaseChecker] asset[" + idx + "] type: " + (a == null ? "(null)" : a.GetType().FullName));
                         var assetDict = ToStringObjectDict(a);
-                        if (assetDict == null) continue;
+                        if (assetDict == null)
+                        {
+                            Logger.Warn("[GitHubReleaseChecker]   ToStringObjectDict returned null, skip");
+                            continue;
+                        }
                         string name = AsString(assetDict, "name");
+                        Logger.Info("[GitHubReleaseChecker]   name: '" + (name ?? "(null)") + "'");
                         if (string.IsNullOrEmpty(name)) continue;
                         if (!name.StartsWith("GCTonePrism_v", StringComparison.OrdinalIgnoreCase)) continue;
                         if (!name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) continue;
                         info.ZipAssetUrl = AsString(assetDict, "browser_download_url");
                         info.ZipSizeBytes = AsLong(assetDict, "size");
+                        Logger.Info("[GitHubReleaseChecker]   matched! ZipAssetUrl='" + info.ZipAssetUrl + "' size=" + info.ZipSizeBytes);
                         break;
                     }
+                    if (idx == 0)
+                    {
+                        Logger.Warn("[GitHubReleaseChecker] assets enumerable was empty");
+                    }
                 }
+                else
+                {
+                    Logger.Warn("[GitHubReleaseChecker] assets is not IEnumerable (or is string)");
+                }
+            }
+            else
+            {
+                Logger.Warn("[GitHubReleaseChecker] 'assets' key missing from response");
             }
             return info;
         }

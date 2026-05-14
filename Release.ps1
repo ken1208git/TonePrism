@@ -1624,8 +1624,14 @@ function Copy-Templates {
     #     Install.bat の `robocopy files/* <install>/` で自動展開される。Manager UI Phase 4 の
     #     アップデートフロー [7]〜[10] では `FileReplacer.ReplaceFile` の単体 file copy で更新
     #     (Launcher.bat / Manager.bat の shortcut bat 置換と同 pattern)。
+    #   - Launcher/version.gd: Phase 4 で Manager UI の VersionInventory が Launcher 版数を抽出
+    #     するのに使う。Godot エクスポート成果物 (`bin/GCTonePrism_Launcher.exe` + `.pck` 等) には
+    #     `.gd` source が含まれない (= `.pck` 内に compile されて隠匿) ため、`Launcher/version.gd`
+    #     を staging 段階で明示的に同梱して install dir 配下に置く。Manager は
+    #     `<install>/Launcher/version.gd` を直接 parse して MAJOR/MINOR/PATCH 定数を読み取る。
     $filesTemplates = @(
-        @{ Src = 'CHANGELOG.md'; Dest = 'files\CHANGELOG.md'; Label = 'CHANGELOG.md (Bundle SoT for Manager UI, Phase 4 #108)' }
+        @{ Src = 'CHANGELOG.md'; Dest = 'files\CHANGELOG.md'; Label = 'CHANGELOG.md (Bundle SoT for Manager UI, Phase 4 #108)' },
+        @{ Src = 'Launcher\version.gd'; Dest = 'files\Launcher\version.gd'; Label = 'Launcher/version.gd (Launcher SoT for Manager UI VersionInventory, Phase 4 #108)' }
     )
 
     foreach ($tpl in ($rootTemplates + $filesTemplates)) {
@@ -1704,7 +1710,9 @@ function Assert-ExpectedFiles {
         'files\Companions\Updater\GCTonePrism_Updater.exe.config',
         # CHANGELOG.md (Phase 4 #108、SPEC §3.7.7): Manager UI が installed Bundle version 抽出に使う SoT、
         # `<install>/CHANGELOG.md` 直下配置で `Launcher/` `Manager/` 等と同階層 (project-wide な SoT semantic)
-        'files\CHANGELOG.md'
+        'files\CHANGELOG.md',
+        # Launcher/version.gd (Phase 4 #108): Manager UI の VersionInventory が Launcher 版数を抽出する SoT
+        'files\Launcher\version.gd'
     )
 
     $missing = @()

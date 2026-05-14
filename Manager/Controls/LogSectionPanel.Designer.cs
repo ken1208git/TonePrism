@@ -23,6 +23,7 @@ namespace GCTonePrism.Manager.Controls
             this.lblSearch = new System.Windows.Forms.Label();
             this.row1Panel = new System.Windows.Forms.Panel();
             this.btnRefresh = new System.Windows.Forms.Button();
+            this.btnOpenLogFolder = new System.Windows.Forms.Button();
             this.chkInfo = new System.Windows.Forms.CheckBox();
             this.chkWarn = new System.Windows.Forms.CheckBox();
             this.chkError = new System.Windows.Forms.CheckBox();
@@ -55,6 +56,7 @@ namespace GCTonePrism.Manager.Controls
             // row1Panel (Dock=Top でフィルタ群を 1 行目に配置)
             //
             this.row1Panel.Controls.Add(this.btnRefresh);
+            this.row1Panel.Controls.Add(this.btnOpenLogFolder);
             this.row1Panel.Controls.Add(this.chkInfo);
             this.row1Panel.Controls.Add(this.chkWarn);
             this.row1Panel.Controls.Add(this.chkError);
@@ -76,6 +78,17 @@ namespace GCTonePrism.Manager.Controls
             this.btnRefresh.Text = "更新";
             this.btnRefresh.UseVisualStyleBackColor = true;
             this.btnRefresh.Click += new System.EventHandler(this.btnRefresh_Click);
+            //
+            // btnOpenLogFolder (右側、lblFileCount の左に右アンカーで配置)
+            //
+            this.btnOpenLogFolder.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnOpenLogFolder.Location = new System.Drawing.Point(740, 8);
+            this.btnOpenLogFolder.Name = "btnOpenLogFolder";
+            this.btnOpenLogFolder.Size = new System.Drawing.Size(160, 26);
+            this.btnOpenLogFolder.TabIndex = 7;
+            this.btnOpenLogFolder.Text = "ログフォルダを開く";
+            this.btnOpenLogFolder.UseVisualStyleBackColor = true;
+            this.btnOpenLogFolder.Click += new System.EventHandler(this.btnOpenLogFolder_Click);
             //
             // chkInfo
             //
@@ -255,6 +268,7 @@ namespace GCTonePrism.Manager.Controls
         private System.Windows.Forms.Panel row1Panel;
         private System.Windows.Forms.Panel row2Panel;
         private System.Windows.Forms.Button btnRefresh;
+        private System.Windows.Forms.Button btnOpenLogFolder;
         private System.Windows.Forms.CheckBox chkInfo;
         private System.Windows.Forms.CheckBox chkWarn;
         private System.Windows.Forms.CheckBox chkError;

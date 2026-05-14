@@ -506,6 +506,15 @@ namespace GCTonePrism.Manager.Controls
         private void btnSkip_Click(object sender, EventArgs e)
         {
             if (_currentResult == null || _currentResult.Latest == null || _currentResult.Latest.Version == null) return;
+            DialogResult dr = MessageBox.Show(
+                "「" + _currentResult.Latest.TagName + "」をスキップしますか？\n\n" +
+                "・起動時の通知ダイアログのみ抑制されます (= 黙る効果)。\n" +
+                "・このタブの「今すぐアップデート」ボタンはそのまま使えるので、自分のタイミングで適用できます。\n" +
+                "・次のリリース (例: 次バージョン) が出れば自動で通知が再開されます。",
+                "スキップ確認",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+            if (dr != DialogResult.Yes) return;
             _updateChecker.Skip(_currentResult.Latest.Version);
             ApplyResult(new UpdateCheckResult
             {
