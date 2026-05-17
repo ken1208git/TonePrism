@@ -199,8 +199,20 @@ namespace GCTonePrism.Manager
                     }
                     else
                     {
-                        ShowUpdateAvailableNotification(result);
-                        checker.MarkNotified(result.Latest.TagName);
+                        // (#108 Phase 4 round 4 codex P2 NEW) MarkNotified は MessageBox 表示成功時のみ。
+                        // 旧実装は無条件 marker 更新で、UI error (BeginInvoke 失敗 / MessageBox 例外) で
+                        // dialog 表示されなかった case でも marker set → 次回起動以降 永久 suppress に
+                        // なる path があった。ShowUpdateAvailableNotification を bool 返却に変更、
+                        // success のみ MarkNotified 経路に流す。
+                        bool shown = ShowUpdateAvailableNotification(result);
+                        if (shown)
+                        {
+                            checker.MarkNotified(result.Latest.TagName);
+                        }
+                        else
+                        {
+                            Services.Logger.Warn("[MainForm] UpdateAvailable 通知 dialog 表示に失敗、marker 更新 skip (次回起動で再通知)");
+                        }
                     }
                 }
             }
@@ -214,17 +226,27 @@ namespace GCTonePrism.Manager
         /// 新バージョン検出時に MessageBox で通知して「アップデート」タブに誘導する (#108 Phase 4)。
         /// `Status=UpdateAvailable` の case でのみ呼ばれる (Skipped / UpToDate / 失敗時は呼ばれない、
         /// = 「スキップしたバージョンが新 release で更新されるまで再通知しない」semantic を上位で保証)。
+        ///
+        /// **戻り値 (round 4 codex P2 NEW)**: dialog が **実際に user に表示された** ら true、
+        /// UI error (BeginInvoke 失敗 / MessageBox 例外 / form 破棄) で表示前に early return した場合は
+        /// false。caller (StartBackgroundUpdateCheckIfDue) は true 時のみ MarkNotified を呼ぶ責務、
+        /// false 時は marker 更新 skip で次回起動で再通知する。BeginInvoke 経由の再帰呼出経路では
+        /// 非同期完了結果を直接 caller に返せないため楽観的に true 返却 (= async path も「表示成功」
+        /// 扱い、UI thread での再呼出が catch (Exception) で false 返却するならその時に reset される)。
         /// </summary>
-        private void ShowUpdateAvailableNotification(Models.UpdateCheckResult result)
+        private bool ShowUpdateAvailableNotification(Models.UpdateCheckResult result)
         {
             if (InvokeRequired)
             {
                 try
                 {
-                    BeginInvoke(new Action<Models.UpdateCheckResult>(ShowUpdateAvailableNotification), result);
+                    BeginInvoke(new Action<Models.UpdateCheckResult>(r => ShowUpdateAvailableNotification(r)), result);
+                    return true; // BeginInvoke 成功 = UI thread に投函成功、楽観的 success 扱い
                 }
-                catch (InvalidOperationException) { /* form 破棄済み */ }
-                return;
+                // (round 4 M-3) ObjectDisposedException : InvalidOperationException 派生関係のため
+                // specific を先に置いて意図明示。
+                catch (ObjectDisposedException) { return false; /* form 完全 Dispose 済 */ }
+                catch (InvalidOperationException) { return false; /* form 破棄済み */ }
             }
 
             string currentLabel = result.Current == null ? "(不明)" : "v" + result.Current.ToString(3);
@@ -245,7 +267,7 @@ namespace GCTonePrism.Manager
             catch (Exception ex)
             {
                 Services.Logger.Error("[MainForm] ShowUpdateAvailableNotification エラー", ex);
-                return;
+                return false;
             }
             if (dr == DialogResult.Yes && tabControl1 != null)
             {
@@ -258,6 +280,7 @@ namespace GCTonePrism.Manager
                     Services.Logger.Warn("[MainForm] tabUpdate 切替失敗: " + ex.Message);
                 }
             }
+            return true; // (round 4 codex P2 NEW) dialog 表示完了 = success
         }
 
         private void RegisterUnknownSafetyFiles()

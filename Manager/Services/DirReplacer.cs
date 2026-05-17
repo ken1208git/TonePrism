@@ -248,6 +248,9 @@ namespace GCTonePrism.Manager.Services
             // (#108 Phase 4 round 3 L-3) 空 dir も保持。EnumerateFiles だけだと空の subdir (例:
             // `<Companion>/cache/` 等の placeholder) が target に作られない silent drop があった。
             // 現状の Launcher / Updater は空 dir を含まないが将来 Companion で発生しうるため事前対応。
+            // (#108 Phase 4 round 4 L-1) 注: 「ファイルを含む subtree」は下の file copy loop の
+            // `Directory.CreateDirectory(destParent)` で自動作成されるため、本ループの効果は
+            // 「leaf 含めて完全に空の subdir」のみ。redundant 気味だが将来の placeholder dir 用 defensive。
             foreach (string subDir in Directory.EnumerateDirectories(sourceDir, "*", SearchOption.AllDirectories))
             {
                 string relative = subDir.Substring(sourceDir.Length).TrimStart('\\', '/');

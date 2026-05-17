@@ -62,7 +62,12 @@ namespace GCTonePrism.Manager.Controls
                 {
                     BeginInvoke(new Action<UpdateCheckResult>(OnCheckCompleted), result);
                 }
-                catch (InvalidOperationException) { /* form 破棄済み */ }
+                // (#108 Phase 4 round 4 M-3) form 破棄経路の cosmetic 例外は両方握り潰す。
+                // `ObjectDisposedException : InvalidOperationException` の派生関係のため `catch
+                // (InvalidOperationException)` 単独で両方拾えるが、reviewer に「ObjectDisposedException
+                // も明示的に意図している」を伝えるため specific (= ObjectDisposedException) を先に置く。
+                catch (ObjectDisposedException) { /* form 完全 Dispose 済 */ }
+                catch (InvalidOperationException) { /* form 破棄経路 */ }
                 return;
             }
             ApplyResult(result);
@@ -490,6 +495,13 @@ namespace GCTonePrism.Manager.Controls
                 Services.Logger.Info("[UpdateSectionPanel] [Step 5/10] Launcher dir 置換 (SPEC §3.7.3 [7])");
                 progress.Report(new ProgressInfo(60, "Launcher を更新中...", PathManager.LauncherDir));
                 string stagingLauncher = System.IO.Path.Combine(stagingDir, "files", "Launcher");
+                // (#108 Phase 4 round 4 codex P1 NEW) CleanupBak は Step 10 後にまとめて実行する。
+                // 旧実装は各 Step 完了直後に CleanupBak していたため、Step 6-10 で failure 時に旧
+                // Launcher 復元不能 mixed-version state に陥っていた (例: Launcher 置換成功 → Companion
+                // 置換失敗で abort、Launcher の .bak は既に消えてる → user は旧 Launcher を取り戻せない)。
+                // 置換した dir リスト (`replacedDirs`) を track して、Step 10 Updater spawn 成功後に
+                // まとめて Cleanup する形に変更。
+                var replacedDirs = new System.Collections.Generic.List<string>();
                 var launcherResult = DirReplacer.Replace(stagingLauncher, PathManager.LauncherDir, allowInitialDeploy: false);
                 if (launcherResult == DirReplacer.ReplaceResult.RecoveredAbort)
                 {
@@ -502,7 +514,7 @@ namespace GCTonePrism.Manager.Controls
                 {
                     throw new System.IO.IOException("Launcher dir の置換に失敗しました (詳細は log 参照)。");
                 }
-                DirReplacer.CleanupBak(PathManager.LauncherDir);
+                replacedDirs.Add(PathManager.LauncherDir);
 
                 // [6] Companions (Updater 以外) 置換 — 現状 dir 列挙で対象なし、将来 WindowProbe / PauseOverlay 用
                 Services.Logger.Info("[UpdateSectionPanel] [Step 6/10] Companions (Updater 以外) 置換 (SPEC §3.7.3 [8])");
@@ -531,8 +543,9 @@ namespace GCTonePrism.Manager.Controls
                         {
                             throw new System.IO.IOException("Companion '" + compName + "' の置換に失敗しました (詳細は log 参照)。");
                         }
-                        // InitialDeploy 経路では .bak が存在しないため CleanupBak no-op (内部で Exists check 済)
-                        DirReplacer.CleanupBak(targetComp);
+                        // InitialDeploy 経路では .bak が存在しないが、CleanupBak は内部 Exists check
+                        // で no-op になるため defer list に追加して問題なし。
+                        replacedDirs.Add(targetComp);
                     }
                 }
 
@@ -589,7 +602,7 @@ namespace GCTonePrism.Manager.Controls
                 {
                     throw new System.IO.IOException("Updater dir の置換に失敗しました (詳細は log 参照)。");
                 }
-                DirReplacer.CleanupBak(PathManager.UpdaterDir);
+                replacedDirs.Add(PathManager.UpdaterDir);
 
                 // [10] Updater spawn (Manager の終了を待機 + Manager dir 置換 + 新 Manager.exe 起動を引き継ぐ)
                 Services.Logger.Info("[UpdateSectionPanel] [Step 10/10] Updater spawn (SPEC §3.7.3 [11])");
@@ -598,6 +611,20 @@ namespace GCTonePrism.Manager.Controls
                 {
                     throw new System.IO.IOException("Updater spawn に失敗しました。");
                 }
+
+                // (#108 Phase 4 round 4 codex P1 NEW) Updater spawn 成功 = ここまで来れば Application.Exit
+                // 直前で「すべての置換が完了 + Updater が引き継ぎ待機中」状態。**ここで初めて** 各
+                // 置換 dir の .bak を一括 cleanup する。途中 Step で throw されると本ブロックに到達せず
+                // .bak は残ったまま、次回起動時の DirReplacer.Replace 冒頭の zombie .bak detection で
+                // 「target 存在 + .bak 存在 → 前回 partial state、target を正として .bak 削除」path に
+                // 自然に流れて消化される (= 旧 version 復元の余地は失われるが、user は Manager 再起動
+                // 時に new Manager から再 update 実行可能、半端 mixed-version 維持よりも安全)。
+                Services.Logger.Info("[UpdateSectionPanel] 全置換成功、.bak " + replacedDirs.Count + " 件をまとめて cleanup");
+                foreach (string repDir in replacedDirs)
+                {
+                    DirReplacer.CleanupBak(repDir);
+                }
+
                 progress.Report(new ProgressInfo(95, "Manager を終了中..."));
                 Services.Logger.Info("[UpdateSectionPanel] RunUpdateWorker 全 Step 完了、Application.Exit へ");
                 // worker 終了 → ProcessingDialog が DialogResult.OK で抜ける → caller が Application.Exit()
@@ -628,6 +655,8 @@ namespace GCTonePrism.Manager.Controls
                 MessageBoxIcon.Question);
             if (dr != DialogResult.Yes) return;
             _updateChecker.Skip(_currentResult.Latest.Version);
+            // (#108 Phase 4 round 4 L-5) LastError も carry。Skip 直前に「再確認エラー: ...」grey sub-text
+            // が出ていた case で Skip 後に context が消えると UX surprise になるため明示的に維持。
             ApplyResult(new UpdateCheckResult
             {
                 Status = UpdateCheckStatus.Skipped,
@@ -636,6 +665,7 @@ namespace GCTonePrism.Manager.Controls
                 CumulativeReleases = _currentResult.CumulativeReleases,
                 CheckedAtUnixMs = _currentResult.CheckedAtUnixMs,
                 FromCache = _currentResult.FromCache,
+                LastError = _currentResult.LastError,
             });
         }
 

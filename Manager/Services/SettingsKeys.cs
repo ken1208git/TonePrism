@@ -24,6 +24,9 @@ namespace GCTonePrism.Manager.Services
         /// UpdateChecker.ShouldNotify は `latest > skipped` で再通知判定する (累積 skip ではない、
         /// = 次の release が出るまで黙る意味)。空文字 / 不在 = skip 履歴なし。
         /// </summary>
+        // (#108 Phase 4 round 3 L-5) 判定は `latest != skipped` の厳密一致 (旧 `latest > skipped` から変更、
+        // downgrade release 時の「すでに skip 済」誤表示解消)。同 tag のみ通知抑止、新 tag が出れば
+        // 通知再開する自然な挙動。
         public const string UpdateSkippedVersion = "update_skipped_version";
 
         /// <summary>

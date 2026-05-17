@@ -30,6 +30,11 @@ namespace GCTonePrism.Manager.Services
         // Task.Run) で並行発火しうる。SettingsRepository は SQLite-backed K/V、内部 lock 持つかは
         // 本 PR scope 外で確認しきれていないため defensive に process-wide lock を被せて serialize する。
         // 競合 window は数 ms オーダーなので throughput 影響は無視可。
+        // (#108 Phase 4 round 4 L-4) **片手落ち明示**: 本 lock は **write のみ** 保護する。
+        // `ShouldNotify` / `TryLoadCache` / `IsCacheFresh` 等の read 経路は lock 外で `_settings.GetString`
+        // を直接呼ぶ (= SQLite K/V の単一 key read は SQLite 側 atomic 前提)。`SettingsRepository` 自体が
+        // thread-safe なら本 lock 全体撤去可、非 thread-safe なら read もまとめて lock 内に入れる必要あり。
+        // 次回 PR で SettingsRepository の thread-safety を確認して片付ける。
         private static readonly object _settingsWriteLock = new object();
 
         public UpdateChecker(SettingsRepository settings)
@@ -119,10 +124,6 @@ namespace GCTonePrism.Manager.Services
         }
 
         /// <summary>
-        /// 「このバージョンをスキップ」button からの呼出。`latest` の version 文字列を settings に書き、
-        /// 次回 check 以降で `latest > skipped` になるまで通知抑止する。
-        /// </summary>
-        /// <summary>
         /// (#108 Phase 4 round 3 M-1) 起動時通知 dialog を出した tag を記録 (`UpdateNotifiedTag`)。
         /// MainForm.StartBackgroundUpdateCheckIfDue から呼ぶ。round 1 M4 で立てた settings 書込み
         /// invariant (process-wide `_settingsWriteLock` で serialize) を維持するため UpdateChecker 内に
@@ -161,6 +162,12 @@ namespace GCTonePrism.Manager.Services
             }
         }
 
+        /// <summary>
+        /// 「このバージョンをスキップ」button からの呼出。`latest` の version 文字列を settings に書く。
+        /// (#108 Phase 4 round 3 L-5) 次回 check 以降は `latest != skipped` の **厳密一致比較** で通知判定
+        /// (= `latest > skipped` だけでなく `latest < skipped` = downgrade release も「同 tag でなければ
+        /// 新 release 扱いで通知」、maintainer downgrade 時の自然 UX に倒す、Skipped 判定は厳密一致のみ)。
+        /// </summary>
         public void Skip(Version latest)
         {
             if (latest == null) return;
@@ -197,7 +204,10 @@ namespace GCTonePrism.Manager.Services
         }
 
         /// <summary>
-        /// `latest > skipped` で通知すべきか判定する。skip が空 / null なら常に通知。
+        /// (#108 Phase 4 round 3 L-5) `latest != skipped` の厳密一致比較で通知すべきか判定する。
+        /// skip が空 / null なら常に通知。同一 tag = Skipped 扱い、それ以外 (`latest > skipped` も
+        /// `latest < skipped` も) は通知可。downgrade release 時の不自然 UX を解消するため round 3 L-5 で
+        /// `latest > skipped` から変更。
         /// </summary>
         public bool ShouldNotify(Version latest)
         {

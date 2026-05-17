@@ -118,6 +118,11 @@ namespace GCTonePrism.Manager.Services
                 Services.Logger.Info("[UpdaterClient] Updater spawn 成功 (PID=" + proc.Id + ")。Manager は終了します。");
                 // proc.Dispose() しない: child process が exit 前に handle close すると stream redirect が
                 // 切れる。Manager が Application.Exit で抜けると process tree が綺麗に分離するので問題なし。
+                // (#108 Phase 4 round 4 L-3) **caller 不変式**: 本 method の return true は「caller が即
+                // Application.Exit を呼ぶこと」を前提とする trade-off (= proc handle を intentional leak、
+                // GC finalizer 経由 Dispose で stdout redirect 切断する path を避けるため)。
+                // Application.Exit が何らかの理由で抜けない / 遅延する場合 (modal dialog 重ね開き等) は
+                // 不変式違反、SPEC §3.7.3 [11] の不可分性に依存する。
                 return true;
             }
             catch (Exception ex)
