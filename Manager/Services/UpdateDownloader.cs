@@ -157,6 +157,15 @@ namespace GCTonePrism.Manager.Services
         ///   - manifest あれば `bundleRoot = <staging>/bundle` (新構造)
         ///   - manifest 無ければ `bundleRoot = <staging>` (旧構造 = legacy fallback)
         ///
+        /// (#175 Phase 4.1 round 1 Medium-2) **manifest 検出 logic の SoT 集約**: 旧実装は本 helper と
+        /// `ValidateStaging` で同じ predicate (`File.Exists(<staging>/bundle/bundle_manifest.json)`)
+        /// を literal duplication していたが、ValidateStaging も冒頭で本 helper を呼んで
+        /// `bundleRoot != stagingDir` で経路分岐する形に集約済 (= manifest path 名 / 位置を変えた時に
+        /// 片方だけ更新する drift bug の温床を closure)。
+        ///
+        /// (#175 Phase 4.1 round 1 Low-2) v0.3.0 install からの self-validate は正常 path のため log
+        /// level を Warn → Info に降格 (旧実装は alarm が日常 self-update でも出ていた)。
+        ///
         /// 注意: legacy fallback path (= v0.3.0 install の Manager から v0.3.0 zip を取得する path)
         /// は v0.3.1 以降の zip 構造変更には対応できない (= 旧 Manager が新 zip 構造を validate
         /// できず手動 install 必要)。Phase 4.1 (#175) の trade-off。
@@ -170,7 +179,7 @@ namespace GCTonePrism.Manager.Services
                 Logger.Info("[UpdateDownloader] ResolveBundleRoot: manifest 検出 (新構造) → " + bundleRoot);
                 return bundleRoot;
             }
-            Logger.Warn("[UpdateDownloader] ResolveBundleRoot: manifest 不在 (旧構造 v0.3.0 fallback) → " + stagingDir);
+            Logger.Info("[UpdateDownloader] ResolveBundleRoot: manifest 不在 (旧構造 v0.3.0 fallback) → " + stagingDir);
             return stagingDir;
         }
 
@@ -178,65 +187,105 @@ namespace GCTonePrism.Manager.Services
         /// 展開後の staging dir に期待ファイルが揃っているか検証する。
         /// 不足があれば missing list を返す (空 list = OK)。
         ///
-        /// (#175 Phase 4.1) 検証 source は 2 経路:
-        ///   (a) **manifest 経由** (新構造、v0.3.1+): `<staging>/bundle/bundle_manifest.json` を読み
-        ///       「list 通り存在するか」を check。**zip ごとに新 manifest = 新 file 構造を表現する**
-        ///       ので、Manager 側コード変更なしに dir 構造変更を吸収できる forward compat 経路。
-        ///   (b) **legacy hardcoded list** (旧構造、v0.3.0): manifest 不在時の fallback。Phase 4 PR #161
-        ///       で確立した hardcoded list (Release.ps1 `Assert-ExpectedFiles` と SPEC §3.7.8 で
-        ///       同期 fence) をそのまま使用。**path 変更には対応不可** (= v0.3.0 install の Manager
-        ///       から v0.3.1 への update path で再発するため、Phase 4.1 release で v0.3.0 install
-        ///       からの自動 update flow は破綻、手動 install が必要)。
+        /// (#175 Phase 4.1) 3 経路で分岐:
+        ///   (a) **新構造 (manifest 検出)** (v0.3.1+): `<staging>/bundle/bundle_manifest.json` を読み
+        ///       「list 通り存在するか」を check。**zip ごとに新 manifest が新 file 構造を表現する**
+        ///       ので、Manager 側 `ValidateStaging` の validate fence の drift を closure する
+        ///       (= zip 構造変更時に Manager 側 hardcoded list を同期更新する規約が不要になる)。
+        ///       ⚠ **apply 側 (`UpdateSectionPanel.RunUpdateWorker` Step 5-9) は依然 path hardcoded**
+        ///       のため、将来 `bundle/files/Launcher/` を別 dir 名に変えると validate は通るが apply
+        ///       で fail する partial-state を生む。「Manager コード変更ゼロで全 dir 構造変更を吸収」
+        ///       は overstated、apply 側の同期は別途必要 (round 1 High-1、別 issue 化想定)。
+        ///   (b) **broken release (manifest なしだが bundle/ あり)** (v0.3.1+ 想定だが zip 同梱漏れ /
+        ///       manifest parse 失敗等): legacy fallback は staging 直下に `Launcher.bat` 等を期待
+        ///       するため必ず 3 件 missing で fail、user 体験が悪い。明示 missing sentinel を返却
+        ///       して「broken release 疑い、再 DL 推奨」を上位 UI に伝える (round 1 High-2 + Medium-3)。
+        ///   (c) **legacy hardcoded list (manifest なし + bundle/ なし)** (v0.3.0): Phase 4 PR #161
+        ///       で確立した hardcoded list で fallback。**path 変更には対応不可** (= v0.3.0 install
+        ///       の Manager から v0.3.1 への update path で再発するため、Phase 4.1 release で
+        ///       v0.3.0 install からの自動 update flow は破綻、手動 install が必要)。
         /// </summary>
         public static IReadOnlyList<string> ValidateStaging(string stagingDir)
         {
             Logger.Info("[UpdateDownloader] ValidateStaging 開始: " + stagingDir);
-            var missing = new List<string>();
-            string manifestPath = Path.Combine(stagingDir, "bundle", "bundle_manifest.json");
-            if (File.Exists(manifestPath))
+            // (#175 Phase 4.1 round 1 Medium-2) manifest 検出 logic は ResolveBundleRoot に集約。
+            // bundleRoot != stagingDir なら新構造 (manifest あり)、== なら manifest なし (旧構造 or broken)。
+            string bundleRoot = ResolveBundleRoot(stagingDir);
+            if (!string.Equals(bundleRoot, stagingDir, StringComparison.OrdinalIgnoreCase))
             {
-                // (#175 Phase 4.1) 新 path: manifest 経由検証。manifest 内 files は `bundle/` からの
-                // 相対 path で記録されている (= `Path.Combine(stagingDir, "bundle", manifestFile)` で
-                // staging 内 full path)。
+                // 新構造 (manifest 検出済)、manifest 経由検証
                 Logger.Info("[UpdateDownloader] ValidateStaging: manifest 経由 (新構造、forward compat path)");
-                try
-                {
-                    BundleManifest manifest = ReadBundleManifest(manifestPath);
-                    if (manifest == null || manifest.Files == null)
-                    {
-                        Logger.Warn("[UpdateDownloader] ValidateStaging: manifest parse 失敗、legacy fallback に降格");
-                        return ValidateStagingLegacy(stagingDir);
-                    }
-                    string bundleRoot = Path.Combine(stagingDir, "bundle");
-                    foreach (string rel in manifest.Files)
-                    {
-                        // JSON 上は `/` separator で記録されているので Windows 用に変換
-                        string relWin = rel.Replace('/', Path.DirectorySeparatorChar);
-                        string full = Path.Combine(bundleRoot, relWin);
-                        if (!File.Exists(full) && !Directory.Exists(full))
-                        {
-                            missing.Add(Path.Combine("bundle", relWin));
-                        }
-                    }
-                    if (missing.Count > 0)
-                    {
-                        Logger.Warn("[UpdateDownloader] ValidateStaging 不足 " + missing.Count + " 件 (manifest 経由): " + string.Join(", ", missing));
-                    }
-                    else
-                    {
-                        Logger.Info("[UpdateDownloader] ValidateStaging OK (manifest 経由、全 " + manifest.Files.Count + " ファイル存在)");
-                    }
-                    return missing;
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn("[UpdateDownloader] ValidateStaging: manifest 経由検証で例外、legacy fallback に降格: " + ex.Message);
-                    return ValidateStagingLegacy(stagingDir);
-                }
+                return ValidateStagingViaManifest(bundleRoot);
             }
-            // manifest 不在 = 旧構造 (v0.3.0)、legacy hardcoded list で fallback
-            Logger.Warn("[UpdateDownloader] ValidateStaging: manifest 不在 (旧構造 v0.3.0 fallback、forward compat 制限あり)");
+            // bundleRoot == stagingDir = manifest 不在。ただし `bundle/` dir だけある case は broken
+            // release (v0.3.1+ zip で manifest 同梱漏れ等) として legacy fallback に流さず明示 abort。
+            // (#175 Phase 4.1 round 1 High-2 + Medium-3)
+            if (Directory.Exists(Path.Combine(stagingDir, "bundle")))
+            {
+                Logger.Error("[UpdateDownloader] ValidateStaging: bundle/ あり + manifest なし、broken release 疑い (再 DL 推奨)");
+                return new List<string>
+                {
+                    "bundle/bundle_manifest.json (broken release 疑い: bundle/ dir はあるが manifest 不在、zip 同梱漏れの可能性。再 DL を試してください)",
+                };
+            }
+            // (#175 Phase 4.1 round 1 Low-2) 旧構造 self-update は正常 path、Warn → Info 降格。
+            Logger.Info("[UpdateDownloader] ValidateStaging: 旧構造 v0.3.0 legacy fallback (forward compat 制限あり)");
             return ValidateStagingLegacy(stagingDir);
+        }
+
+        /// <summary>
+        /// (#175 Phase 4.1 round 1 Medium-2 で抽出) manifest 経由検証の本体。`ValidateStaging` の
+        /// 新構造分岐から呼ばれる。manifest parse 失敗 / 例外時は broken release 扱いで abort sentinel
+        /// を返却し、legacy fallback には降格しない (= v0.3.1+ 構造で legacy が必ず fail する path を
+        /// 物理的に避ける、round 1 High-2)。
+        /// </summary>
+        private static IReadOnlyList<string> ValidateStagingViaManifest(string bundleRoot)
+        {
+            string manifestPath = Path.Combine(bundleRoot, "bundle_manifest.json");
+            try
+            {
+                BundleManifest manifest = ReadBundleManifest(manifestPath);
+                if (manifest == null || manifest.Files == null)
+                {
+                    // (#175 Phase 4.1 round 1 High-2) parse 失敗 = broken/corrupted manifest。
+                    // legacy fallback は staging 直下 `Launcher.bat` を期待するが新構造では bundle/
+                    // 配下にしかないため必ず 3 件 missing で fail。silent な誤判定を防ぐため明示 abort。
+                    Logger.Error("[UpdateDownloader] ValidateStaging: manifest parse 失敗、broken release 疑い (再 DL 推奨)");
+                    return new List<string>
+                    {
+                        "bundle/bundle_manifest.json (broken release 疑い: parse 失敗、zip 破損 / schema 不一致の可能性。再 DL を試してください)",
+                    };
+                }
+                var missing = new List<string>();
+                foreach (string rel in manifest.Files)
+                {
+                    // JSON 上は `/` separator で記録されているので Windows 用に変換
+                    string relWin = rel.Replace('/', Path.DirectorySeparatorChar);
+                    string full = Path.Combine(bundleRoot, relWin);
+                    if (!File.Exists(full) && !Directory.Exists(full))
+                    {
+                        missing.Add(Path.Combine("bundle", relWin));
+                    }
+                }
+                if (missing.Count > 0)
+                {
+                    Logger.Warn("[UpdateDownloader] ValidateStaging 不足 " + missing.Count + " 件 (manifest 経由): " + string.Join(", ", missing));
+                }
+                else
+                {
+                    Logger.Info("[UpdateDownloader] ValidateStaging OK (manifest 経由、全 " + manifest.Files.Count + " ファイル存在)");
+                }
+                return missing;
+            }
+            catch (Exception ex)
+            {
+                // (#175 Phase 4.1 round 1 High-2) 例外時も broken release 扱いで abort sentinel
+                Logger.Error("[UpdateDownloader] ValidateStaging: manifest 検証で例外、broken release 疑い (再 DL 推奨): " + ex.Message);
+                return new List<string>
+                {
+                    "bundle/bundle_manifest.json (broken release 疑い: 検証中に例外、" + ex.GetType().Name + ": " + ex.Message + "。再 DL を試してください)",
+                };
+            }
         }
 
         /// <summary>
@@ -297,6 +346,8 @@ namespace GCTonePrism.Manager.Services
         /// (#175 Phase 4.1) `bundle/bundle_manifest.json` を読み込んで `BundleManifest` POCO に変換。
         /// schema_version 1 を想定。失敗時は null を返す (caller は legacy fallback に降格)。
         /// </summary>
+        private const int SupportedManifestSchemaVersion = 1;
+
         private static BundleManifest ReadBundleManifest(string manifestPath)
         {
             try
@@ -315,6 +366,17 @@ namespace GCTonePrism.Manager.Services
                 {
                     int parsed;
                     if (int.TryParse(sv.ToString(), out parsed)) manifest.SchemaVersion = parsed;
+                }
+                // (#175 Phase 4.1 round 1 Medium-1) schema_version 検査。将来 schema_version 2 で
+                // field semantics が変わった (例: files が {name, sha256} object 配列に拡張) 場合、
+                // 旧 Manager は `as object[]` cast で偶然 null を取って silent な validate skip →
+                // broken release 誤判定の path がある。unknown schema は明示的に parse 不可と扱い、
+                // caller (ValidateStagingViaManifest) で broken sentinel 経路に倒す。
+                if (manifest.SchemaVersion != SupportedManifestSchemaVersion)
+                {
+                    Logger.Warn("[UpdateDownloader] ReadBundleManifest: 未対応 schema_version=" + manifest.SchemaVersion +
+                        " (本 Manager は v" + SupportedManifestSchemaVersion + " のみ対応)、parse 失敗扱いに降格");
+                    return null;
                 }
                 object filesObj;
                 if (dict.TryGetValue("files", out filesObj))

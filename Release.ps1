@@ -1770,9 +1770,16 @@ function New-BundleManifest {
     #   }
     # 将来 schema 拡張時 (size / sha256 等の追加) は schema_version を bump、Manager 側で version
     # 分岐させる。
+    # (#175 Phase 4.1 round 1 Critical-1) `generated_at` は `[DateTime]::UtcNow.ToString(...)` 直接代入。
+    # 旧実装の `Get-Date -Format "..." -AsUTC -ErrorAction SilentlyContinue` + fallback block は PS 5.1
+    # では `-AsUTC` が **NamedParameterNotFound** terminating error として `$ErrorActionPreference='Stop'`
+    # (Release.ps1 冒頭設定) で abort、hashtable construction 自体が止まって fallback block 永久不到達。
+    # `-ErrorAction SilentlyContinue` は parameter binding error には効かない (parameter scope に到達する
+    # 前に発生する error のため)。`[DateTime]::UtcNow.ToString(...)` は PS 5.1 / 7.x 両対応 + fallback
+    # 不要 + 同等の ISO 8601 UTC 出力 (例: `2026-05-18T16:30:00Z`) で代替。
     $manifest = [ordered]@{
         bundle_version = $Version
-        generated_at   = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ" -AsUTC -ErrorAction SilentlyContinue)
+        generated_at   = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
         schema_version = 1
         # files list: bundle/ からの相対 path (= bundle dir 名変更時に manifest 触らず済む自己完結性)
         # JSON で `/` separator に統一 (Windows path separator `\` は JSON 中 escape 必須 + non-Windows
@@ -1780,10 +1787,6 @@ function New-BundleManifest {
         # `Path.Combine` 渡す前に platform-specific separator に変換する想定 (.NET の Path.Combine は
         # `/` separator も受理するので実用上は変換不要、defensive 同期のため明示)。
         files          = @($script:BundleManifestFiles | ForEach-Object { $_ -replace '\\', '/' })
-    }
-    # PS 5.1 では `-AsUTC` 未対応のため fallback (`Get-Date` の default は local time)
-    if ([string]::IsNullOrEmpty($manifest.generated_at)) {
-        $manifest.generated_at = ([DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"))
     }
 
     # bundle dir 存在 check (Copy-Templates が既に作成済の想定、defensive で再作成)
