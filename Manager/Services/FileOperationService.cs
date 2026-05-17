@@ -96,11 +96,11 @@ namespace GCTonePrism.Manager.Services
                 }
                 catch (PathTooLongException)
                 {
-                    Console.WriteLine($"[警告] パスが長すぎるためスキップ: {file}");
+                    Logger.Warn($"[警告] パスが長すぎるためスキップ: {file}");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[警告] ファイルのコピーに失敗: {file} - {ex.Message}");
+                    Logger.Error($"[警告] ファイルのコピーに失敗: {file}", ex);
                 }
             }
 
@@ -130,7 +130,7 @@ namespace GCTonePrism.Manager.Services
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[警告] サブフォルダのコピーに失敗: {subDir} - {ex.Message}");
+                    Logger.Error($"[警告] サブフォルダのコピーに失敗: {subDir}", ex);
                 }
             }
         }

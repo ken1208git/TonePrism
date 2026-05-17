@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Text.RegularExpressions;
 using GCTonePrism.Manager.Models;
+using GCTonePrism.Manager.Services;
 
 namespace GCTonePrism.Manager.Repositories
 {
@@ -294,7 +295,7 @@ namespace GCTonePrism.Manager.Repositories
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[BackupLogRepository] フォルダスキャン失敗: {ex.Message}");
+                Logger.Error($"[BackupLogRepository] フォルダスキャン失敗", ex);
                 return 0;
             }
             if (fileMap.Count == 0) return 0;

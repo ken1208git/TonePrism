@@ -70,8 +70,15 @@ namespace GCTonePrism.Manager
             // リリース年の初期値を今年に設定
             numReleaseYear.Value = DateTime.Now.Year;
 
-            // バージョンの初期値を設定
-            txtVersion.Text = "v1.0.0";
+            // (#158 L2) バージョンの初期値は AddGameForm.Designer.cs の `semverInput.VersionString = "v1.0.0";`
+            // 設定が SoT。Load では再代入しない (= 二重初期化のノイズ排除)。
+            // (#158 round 4 L-5 + round 5 L-2) 構造的には:
+            //   - SemverInputControl.Designer の `numMajor.Value = 1` (Minor/Patch は明示なしで
+            //     NumericUpDown.Value class default = 0)
+            //   - AddGameForm.Designer の `semverInput.VersionString = "v1.0.0"` (上書き)
+            // の二段で v1.0.0 が確定する (Major は二段保険、Minor/Patch は class default に一段依存)。
+            // SoT は AddGameForm.Designer 側であり、SemverInputControl.Designer の Major=1 / Minor/Patch
+            // class default のいずれにも依存しない設計を維持すること。
 
             // 製作者情報のDataGridViewを初期化
             InitializeDevelopersGrid();
@@ -277,8 +284,9 @@ namespace GCTonePrism.Manager
 
             try
             {
-                // 初期バージョン番号
-                string version = txtVersion.Text.Trim();
+                // 初期バージョン番号 (#158: SemverInputControl で typo / フォーマットゆれを構造的に排除)
+                // suffix 文字種チェックは ValidateInput に移動済 (L-3)。
+                string version = semverInput.VersionString;
 
                 // ProcessingDialog を使用して非同期コピー
                 var processingDialog = new ProcessingDialog((IProgress<ProgressInfo> progress, CancellationToken token) =>
@@ -321,10 +329,10 @@ namespace GCTonePrism.Manager
                 string backgroundAbsolutePath = string.IsNullOrWhiteSpace(txtBackgroundPath.Text) ? null : PathConversionHelper.ConvertSourceToDestination(txtBackgroundPath.Text.Trim(), sourceGameFolder, destinationGameFolder);
 
                 // デバッグログ（開発時のみ）
-                Console.WriteLine($"[AddGameForm] コピー先フォルダ: {destinationGameFolder}");
-                Console.WriteLine($"[AddGameForm] 実行ファイル絶対パス: {executableAbsolutePath}");
-                Console.WriteLine($"[AddGameForm] サムネイル絶対パス: {thumbnailAbsolutePath}");
-                Console.WriteLine($"[AddGameForm] 背景絶対パス: {backgroundAbsolutePath}");
+                Logger.Info($"[AddGameForm] コピー先フォルダ: {destinationGameFolder}");
+                Logger.Info($"[AddGameForm] 実行ファイル絶対パス: {executableAbsolutePath}");
+                Logger.Info($"[AddGameForm] サムネイル絶対パス: {thumbnailAbsolutePath}");
+                Logger.Info($"[AddGameForm] 背景絶対パス: {backgroundAbsolutePath}");
 
                 // コピー後にコピー先フォルダ（games/{game_id}/）からの相対パスに変換
                 string executablePath = PathConversionHelper.ToRelativePathAfterCopy(executableAbsolutePath, destinationGameFolder);
@@ -332,9 +340,9 @@ namespace GCTonePrism.Manager
                 string backgroundPath = PathConversionHelper.ToRelativePathAfterCopy(backgroundAbsolutePath, destinationGameFolder);
 
                 // デバッグログ（開発時のみ）
-                Console.WriteLine($"[AddGameForm] 実行ファイル相対パス: {executablePath}");
-                Console.WriteLine($"[AddGameForm] サムネイル相対パス: {thumbnailPath}");
-                Console.WriteLine($"[AddGameForm] 背景相対パス: {backgroundPath}");
+                Logger.Info($"[AddGameForm] 実行ファイル相対パス: {executablePath}");
+                Logger.Info($"[AddGameForm] サムネイル相対パス: {thumbnailPath}");
+                Logger.Info($"[AddGameForm] 背景相対パス: {backgroundPath}");
 
                 // 起動オプション
                 string arguments = txtArguments.Text;
@@ -360,7 +368,7 @@ namespace GCTonePrism.Manager
                     IsVisible = true, // 新規追加のゲームは常にランチャーに表示
                     Controls = null, // 後で実装
                     KeyMapping = null, // 後で実装
-                    Version = txtVersion.Text.Trim() // 初期バージョンを設定
+                    Version = version // (#158, round 3 L-2: line 282 でキャプチャ済の local を使い回し)
                 };
 
                 // ジャンルを処理
@@ -376,7 +384,7 @@ namespace GCTonePrism.Manager
                 var initialVersion = new GameVersion
                 {
                     GameId = game.GameId,
-                    Version = txtVersion.Text.Trim(),
+                    Version = version, // (#158, round 3 L-2: 同上)
                     ExecutablePath = game.ExecutablePath,
                     Description = "初期バージョン",
                     RegisteredAt = DateTime.Now
@@ -555,6 +563,18 @@ namespace GCTonePrism.Manager
             {
                 MessageBox.Show("このゲームIDは既に使用されています。別のIDを入力してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtGameId.Focus();
+                return false;
+            }
+
+            // (#158 L-3) suffix の文字種チェックは旧実装で「古いデータ確認」MessageBox の後に
+            // 置かれていたため、不正 suffix 入力時にユーザーが先に長文の確認 MessageBox を読まされ
+            // てから「やっぱバージョン入力エラー」に戻される UX だった。本 ValidateInput の末尾に
+            // 統合して既存 validation と同じタイミングで弾く。
+            string semverError;
+            if (!semverInput.IsValid(out semverError))
+            {
+                MessageBox.Show(semverError, "バージョン入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                semverInput.Focus();
                 return false;
             }
 

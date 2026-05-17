@@ -22,15 +22,12 @@ namespace GCTonePrism.Manager
 
         #region Windows Form Designer generated code
 
-        private System.Windows.Forms.Label lblVersionHint;
-
         private void InitializeComponent()
         {
             this.lblCurrentVersionLabel = new System.Windows.Forms.Label();
             this.lblCurrentVersion = new System.Windows.Forms.Label();
             this.lblNextVersion = new System.Windows.Forms.Label();
-            this.txtNextVersion = new System.Windows.Forms.TextBox();
-            this.lblVersionHint = new System.Windows.Forms.Label();
+            this.semverNext = new GCTonePrism.Manager.Controls.SemverInputControl();
             this.lblGameFolder = new System.Windows.Forms.Label();
             this.txtGameFolder = new System.Windows.Forms.TextBox();
             this.btnSelectGameFolder = new System.Windows.Forms.Button();
@@ -117,26 +114,18 @@ namespace GCTonePrism.Manager
             this.lblNextVersion.TabIndex = 2;
             this.lblNextVersion.Text = "新バージョン*";
             //
-            // txtNextVersion
+            // semverNext (#158: NumericUpDown × 3 で SemVer 入力、txtNextVersion 置換)
             //
-            this.txtNextVersion.Location = new System.Drawing.Point(110, 36);
-            this.txtNextVersion.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
-            this.txtNextVersion.Name = "txtNextVersion";
-            this.txtNextVersion.Size = new System.Drawing.Size(114, 19);
-            this.txtNextVersion.TabIndex = 3;
-            this.txtNextVersion.Text = "v";
+            this.semverNext.Location = new System.Drawing.Point(110, 32);
+            this.semverNext.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.semverNext.Name = "semverNext";
+            this.semverNext.Size = new System.Drawing.Size(300, 28);
+            this.semverNext.TabIndex = 3;
             //
-            // lblVersionHint
-            //
-            this.lblVersionHint.AutoSize = true;
-            this.lblVersionHint.Font = new System.Drawing.Font("MS UI Gothic", 8F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(128)));
-            this.lblVersionHint.ForeColor = System.Drawing.Color.Gray;
-            this.lblVersionHint.Location = new System.Drawing.Point(228, 40);
-            this.lblVersionHint.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
-            this.lblVersionHint.Name = "lblVersionHint";
-            this.lblVersionHint.Size = new System.Drawing.Size(244, 11);
-            this.lblVersionHint.TabIndex = 4;
-            this.lblVersionHint.Text = "※セマンティックバージョニング（例: v1.0.0）がおすすめです";
+            // (#158 round 3: bump button + 解説 panel は削除し、SemverInputControl の単純置換のみに留める。
+            //  SemVer 概念解説は #133 ゲーム制作ガイドラインに移管。bump も同 doc で「Patch+1 推奨」を
+            //  説明する形にして、UI 上は default を currentVersion + Patch+1 にすることで暗黙の
+            //  「迷ったら Patch」UX を維持する)
             //
             // lblGameFolder
             //
@@ -703,9 +692,8 @@ namespace GCTonePrism.Manager
             this.Controls.Add(this.btnSelectGameFolder);
             this.Controls.Add(this.txtGameFolder);
             this.Controls.Add(this.lblGameFolder);
-            this.Controls.Add(this.txtNextVersion);
+            this.Controls.Add(this.semverNext);
             this.Controls.Add(this.lblNextVersion);
-            this.Controls.Add(this.lblVersionHint);
             this.Controls.Add(this.lblCurrentVersion);
             this.Controls.Add(this.lblCurrentVersionLabel);
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
@@ -731,7 +719,7 @@ namespace GCTonePrism.Manager
         private System.Windows.Forms.Label lblCurrentVersionLabel;
         private System.Windows.Forms.Label lblCurrentVersion;
         private System.Windows.Forms.Label lblNextVersion;
-        private System.Windows.Forms.TextBox txtNextVersion;
+        private GCTonePrism.Manager.Controls.SemverInputControl semverNext;
         private System.Windows.Forms.Label lblGameFolder;
         private System.Windows.Forms.TextBox txtGameFolder;
         private System.Windows.Forms.Button btnSelectGameFolder;

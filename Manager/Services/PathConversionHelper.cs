@@ -131,8 +131,8 @@ namespace GCTonePrism.Manager.Services
             }
 
             // コピー先フォルダ外のパスは警告を出して絶対パスのまま返す（フォールバック）
-            Console.WriteLine($"[警告] パスがコピー先フォルダ内にありません。絶対パスのまま保存します: {absolutePath}");
-            Console.WriteLine($"[警告] コピー先フォルダ: {destinationFolder}");
+            Logger.Warn($"[警告] パスがコピー先フォルダ内にありません。絶対パスのまま保存します: {absolutePath}");
+            Logger.Warn($"[警告] コピー先フォルダ: {destinationFolder}");
             return absolutePath;
         }
     }
