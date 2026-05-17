@@ -247,7 +247,14 @@ namespace GCTonePrism.Manager.Controls
             btnCheckNow.Enabled = false;
             try
             {
-                if (_checkCts != null) _checkCts.Cancel();
+                // (#108 Phase 4 round 1 L4 fix) 旧 CancellationTokenSource を Dispose してから新規生成。
+                // 旧実装は Cancel のみで Dispose 漏れ、CancellationTokenSource は内部 WaitHandle を持つ
+                // IDisposable のため連打で累積する。
+                if (_checkCts != null)
+                {
+                    _checkCts.Cancel();
+                    _checkCts.Dispose();
+                }
                 _checkCts = new CancellationTokenSource();
                 lblStatusMessage.Text = "確認中...";
                 lblStatusMessage.ForeColor = System.Drawing.Color.Black;
@@ -347,11 +354,16 @@ namespace GCTonePrism.Manager.Controls
             Services.Logger.Info("[UpdateSectionPanel] アップデート worker 起動準備: target=v" + versionStr + " zip=" + zipUrl + " size=" + zipSizeBytes + " staging=" + stagingDir);
 
             bool spawnedUpdater = false;
+            ProcessingDialog dialogRef = null;
             using (var dialog = new ProcessingDialog((progress, token) =>
             {
-                spawnedUpdater = RunUpdateWorker(progress, token, zipUrl, zipSizeBytes, targetVersion, stagingDir);
+                // (#108 Phase 4 round 1 M2 fix) worker から置換境界 entry で cancel ボタンを hide する
+                // ための callback。closure で dialogRef を capture して RunUpdateWorker に渡す。
+                Action disableCancelCb = () => { if (dialogRef != null) dialogRef.DisableCancelFromWorker(); };
+                spawnedUpdater = RunUpdateWorker(progress, token, zipUrl, zipSizeBytes, targetVersion, stagingDir, disableCancelCb);
             }))
             {
+                dialogRef = dialog;
                 dialog.AllowCancel = true;
                 dialog.Text = "アップデート";
                 dialog.ShowDialog(this);
@@ -382,7 +394,8 @@ namespace GCTonePrism.Manager.Controls
         /// </summary>
         /// <returns>true: Updater spawn 成功 (caller は Application.Exit を呼ぶ責務) / false: ありえない (例外で抜ける)</returns>
         private bool RunUpdateWorker(System.IProgress<ProgressInfo> progress, System.Threading.CancellationToken ct,
-            string zipUrl, long zipSizeBytes, Version targetVersion, string stagingDir)
+            string zipUrl, long zipSizeBytes, Version targetVersion, string stagingDir,
+            Action disableCancelCb)
         {
             // (#108 Phase 4 round 1 log) worker 全体を try/catch で囲み、例外時に stack trace を Logger.Error
             // に残してから rethrow (ProcessingDialog の generic MessageBox に流れる)。各 step は Logger.Info
@@ -461,6 +474,9 @@ namespace GCTonePrism.Manager.Controls
                 }
 
                 // ===== ここから「置換境界」: 以降の cancel は half-state を生むので無効化 =====
+                // (#108 Phase 4 round 1 M2 fix) UI 上も cancel ボタンを hide して整合させる
+                // (旧実装は AllowCancel=true 固定で「キャンセル押せるが無視」の misleading UX があった)。
+                if (disableCancelCb != null) disableCancelCb();
 
                 // [5] Launcher dir 置換 (60-67%)
                 Services.Logger.Info("[UpdateSectionPanel] [Step 5/10] Launcher dir 置換");
@@ -494,17 +510,27 @@ namespace GCTonePrism.Manager.Controls
                 }
 
                 // [7] shortcut bat 置換 (single-file、`<install_parent>/Launcher.bat` と `Manager.bat`)
+                // (#108 Phase 4 round 1 H1 fix) FileReplacer.ReplaceFile の戻り値を必ず check して
+                // 失敗時は throw、silent shortcut 置換失敗 → 旧 bat が `<install_parent>/` に残ったまま
+                // 新 Manager 起動して挙動不審、の path を closure。DirReplacer 系の throw pattern と
+                // 対称化。
                 Services.Logger.Info("[UpdateSectionPanel] [Step 7/10] shortcut bat 置換");
                 progress.Report(new ProgressInfo(70, "ショートカットを更新中..."));
                 string parentDir = PathManager.InstallParentDir;
                 if (!string.IsNullOrEmpty(parentDir))
                 {
-                    FileReplacer.ReplaceFile(
+                    if (!FileReplacer.ReplaceFile(
                         System.IO.Path.Combine(stagingDir, "Launcher.bat"),
-                        System.IO.Path.Combine(parentDir, "Launcher.bat"));
-                    FileReplacer.ReplaceFile(
+                        System.IO.Path.Combine(parentDir, "Launcher.bat")))
+                    {
+                        throw new System.IO.IOException("Launcher.bat の置換に失敗しました (詳細は log 参照)。");
+                    }
+                    if (!FileReplacer.ReplaceFile(
                         System.IO.Path.Combine(stagingDir, "Manager.bat"),
-                        System.IO.Path.Combine(parentDir, "Manager.bat"));
+                        System.IO.Path.Combine(parentDir, "Manager.bat")))
+                    {
+                        throw new System.IO.IOException("Manager.bat の置換に失敗しました (詳細は log 参照)。");
+                    }
                 }
                 else
                 {
@@ -514,9 +540,12 @@ namespace GCTonePrism.Manager.Controls
                 // [8] CHANGELOG.md 置換 (single-file、`<install>/CHANGELOG.md` 直下)
                 Services.Logger.Info("[UpdateSectionPanel] [Step 8/10] CHANGELOG.md 置換");
                 progress.Report(new ProgressInfo(73, "CHANGELOG を更新中..."));
-                FileReplacer.ReplaceFile(
+                if (!FileReplacer.ReplaceFile(
                     System.IO.Path.Combine(stagingDir, "files", "CHANGELOG.md"),
-                    PathManager.BundleChangelogPath);
+                    PathManager.BundleChangelogPath))
+                {
+                    throw new System.IO.IOException("CHANGELOG.md の置換に失敗しました (詳細は log 参照)。");
+                }
 
                 // [9] Companions/Updater 置換 (SPEC §3.7.3 [10]、常に staging の新 Updater で置換)
                 Services.Logger.Info("[UpdateSectionPanel] [Step 9/10] Companions/Updater 置換");
@@ -601,6 +630,16 @@ namespace GCTonePrism.Manager.Controls
                 return;
             }
             e.Cancel = true;
+            // (#108 Phase 4 round 1 L5 fix) scheme whitelist。Markdown の `[click](javascript:alert(1))`
+            // 形式 link を Process.Start に直接渡すと CommandLineToArgvW 経由で OS が解釈する path に
+            // なるため、http(s) のみ許可する defensive guard。release notes 著者は repo maintainer のみ
+            // で信頼境界内だが、安価な防御として whitelist 採用。
+            if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                && !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                Services.Logger.Warn("[UpdateSectionPanel] release notes 内の non-http URL を block: " + url);
+                return;
+            }
             try
             {
                 Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });

@@ -36,7 +36,9 @@ namespace GCTonePrism.Manager.Models
         /// <summary>zip asset のバイト数 (`assets[].size`)。ディスク容量 pre-check に使う。0 = サイズ情報なし。</summary>
         public long ZipSizeBytes { get; set; }
 
-        /// <summary>API レスポンスの `prerelease`。GitHubReleaseChecker は通常これが true の release を filter out するが、UI で意図的に表示する場合の保険として保持。</summary>
+        /// <summary>API レスポンスの `prerelease`。GetLatestAsync は `/releases/latest` endpoint (= GitHub
+        /// 側で prerelease を server-side 除外) を使うため filter 不要、GetReleasesBetweenAsync は client 側
+        /// で filter する。本 flag は UI で意図的に prerelease を表示する場合の保険として保持。(L3 訂正)</summary>
         public bool IsPrerelease { get; set; }
 
         /// <summary>API レスポンスの `draft`。通常 GitHub API は draft を返さないが、保険として保持。</summary>

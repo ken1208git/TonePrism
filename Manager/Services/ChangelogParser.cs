@@ -11,7 +11,7 @@ namespace GCTonePrism.Manager.Services
     /// Phase 4 (#108) で導入: SPEC §3.7.7 で「`CHANGELOG.md` の最新 `### [Bundle vX.Y.Z]` エントリ
     /// で Bundle 版数を管理」と規定されており、Release.ps1 の `Get-BundleReleaseNotes` 関数が
     /// 同 regex で抽出して GitHub Releases 本文に流している。本 class はその論理同型を C# で
-    /// 再実装し、Manager UI が installed CHANGELOG.md (`<install>/Manager/CHANGELOG.md`、zip 同梱)
+    /// 再実装し、Manager UI が installed CHANGELOG.md (`<install>/CHANGELOG.md`、zip 同梱)
     /// から:
     ///   (a) 「現在の Bundle version」を抽出 (= 最新 entry の version)
     ///   (b) staging CHANGELOG.md から「current &lt; X &le; latest」の累積 release notes を抽出

@@ -19,8 +19,14 @@ namespace GCTonePrism.Manager.Services
     /// 完全性検証:
     ///   - zip ルートに Install.bat / INSTALL_README.txt / Launcher.bat / Manager.bat / show_folder_dialog.ps1
     ///   - files/ 配下: Manager/GCTonePrism_Manager.exe / Launcher/GCTonePrism_Launcher.exe /
-    ///                  Companions/Updater/GCTonePrism_Updater.exe / Manager/CHANGELOG.md (Phase 4 新規)
+    ///                  Companions/Updater/GCTonePrism_Updater.exe / CHANGELOG.md (Phase 4 新規、
+    ///                  Bundle SoT として `files/` 直下に配置、SPEC §3.7.7)
     /// SPEC §3.7.3 の検証ステップを Manager UI 側で再実装 (Release.ps1 の Assert-ExpectedFiles と論理同型)。
+    ///
+    /// **重要**: 本クラスの ExpectedFiles リストは `Release.ps1` の `Assert-ExpectedFiles` と
+    /// **手動同期** する責務がある (M6)。release 側で追加 / 削除されたものは本クラスにも反映必須、
+    /// drift すると C1 系の bug (= 存在しないファイルを要求して apply が永久 abort or 存在するのに
+    /// missing 認識して通る) を生む。長期的には manifest (`expected_files.json` 同梱) で SoT 統一する。
     /// </summary>
     internal static class UpdateDownloader
     {
@@ -136,7 +142,9 @@ namespace GCTonePrism.Manager.Services
             {
                 Path.Combine("files", "Launcher", "GCTonePrism_Launcher.exe"),
                 Path.Combine("files", "Manager", "GCTonePrism_Manager.exe"),
-                Path.Combine("files", "Manager", "CHANGELOG.md"),
+                // (#108 Phase 4 C1 fix) CHANGELOG.md は `files/` 直下 (Bundle SoT、SPEC §3.7.7)、
+                // `files/Manager/` ではない。Release.ps1 の `Assert-ExpectedFiles` と同期。
+                Path.Combine("files", "CHANGELOG.md"),
                 Path.Combine("files", "Companions", "Updater", "GCTonePrism_Updater.exe"),
             };
 
@@ -172,7 +180,9 @@ namespace GCTonePrism.Manager.Services
                 Logger.Warn("[UpdateDownloader] ValidateBundleVersion: expectedVersion=null");
                 return false;
             }
-            string changelogPath = Path.Combine(stagingDir, "files", "Manager", "CHANGELOG.md");
+            // (#108 Phase 4 C1 fix) Bundle SoT は `files/CHANGELOG.md` (= Release.ps1 `Copy-Templates`
+            // と同期、SPEC §3.7.7)。旧 path `files/Manager/CHANGELOG.md` は drift 残骸。
+            string changelogPath = Path.Combine(stagingDir, "files", "CHANGELOG.md");
             Logger.Info("[UpdateDownloader] ValidateBundleVersion: expected=" + expectedVersion.ToString(3) + " changelog=" + changelogPath);
             BundleEntry latest = ChangelogParser.TryReadLatestFromFile(changelogPath);
             if (latest == null || latest.Version == null)

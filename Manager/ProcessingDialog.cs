@@ -33,11 +33,36 @@ namespace GCTonePrism.Manager
 
         /// <summary>
         /// キャンセル可能かどうか。途中で中断できない処理（Directory.Move 等）では false に設定する。
+        /// **注意 (M2)**: setter は UI thread でのみ呼ぶこと。worker thread から実行中に切り替える場合は
+        /// 代わりに <see cref="DisableCancelFromWorker"/> を使う (Invoke で UI thread に marshal)。
         /// </summary>
         public bool AllowCancel
         {
             get { return btnCancel.Visible; }
             set { btnCancel.Visible = value; }
+        }
+
+        /// <summary>
+        /// (#108 Phase 4 round 1 M2 fix) worker thread から「ここから先はキャンセル不可」に切り替える。
+        /// 旧実装は AllowCancel = true 固定で「置換境界より後」では cancel 押下が無視される設計だったが、
+        /// UI 上はボタンが見えてユーザに「キャンセル可能」と誤誘導する path があった。worker 内の置換境界
+        /// entry でこの method を呼んで btnCancel を hide すれば UI と実装が整合する。Invoke で UI thread
+        /// に marshal するので worker thread から安全に呼べる。
+        /// </summary>
+        public void DisableCancelFromWorker()
+        {
+            try
+            {
+                if (btnCancel.InvokeRequired)
+                {
+                    btnCancel.BeginInvoke(new Action(() => btnCancel.Visible = false));
+                }
+                else
+                {
+                    btnCancel.Visible = false;
+                }
+            }
+            catch (Exception) { /* form 破棄済み等は握り潰す、UX cosmetic のため致命的でない */ }
         }
 
         private async void ProcessingDialog_Shown(object sender, EventArgs e)

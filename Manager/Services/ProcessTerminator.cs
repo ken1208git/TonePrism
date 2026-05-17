@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
-using System.Threading;
 
 namespace GCTonePrism.Manager.Services
 {
@@ -14,9 +12,12 @@ namespace GCTonePrism.Manager.Services
     /// SPEC §3.7.3 [4] で「Launcher / 常駐 Companions 起動中なら閉じるよう案内」を Manager UI 側の責務と
     /// 定義。本 class は:
     ///   - <see cref="EnumerateRunning"/>: 起動中のプロセスをリストアップ (UI で「以下のプロセスを閉じてください」表示)
-    ///   - <see cref="WaitForExit"/>: 手動 close を一定時間 polling で待機
-    ///   - <see cref="KillAll"/>: timeout 後に user 明示同意の上で強制 kill
-    /// を提供する。
+    /// のみを提供。手動 close を retry loop で促す UX (UpdateSectionPanel.btnUpdateNow_Click) に統一済。
+    ///
+    /// (#108 Phase 4 round 1 M5 fix) 旧版は `WaitForExit` / `KillAll` も持っていたが、UI 側から呼ばれる
+    /// 配線がなく、`UpdaterClient.Spawn` の `forceKill` 引数も常に false 固定だったため dead code 化
+    /// していた。docstring と実装の乖離が「強制終了 path が動くように見える」誤読を生むため削除。
+    /// 将来 `--force-kill` UI を Manager UI 側に配線する場合は本 class に再導入する。
     ///
     /// process name 判定は AGENTS.md「Naming Conventions」の `GCTonePrism_<Name>` 命名規約に従う:
     ///   - Launcher: "GCTonePrism_Launcher"
@@ -26,7 +27,6 @@ namespace GCTonePrism.Manager.Services
     internal static class ProcessTerminator
     {
         public const string LauncherProcessName = "GCTonePrism_Launcher";
-        private const int PollIntervalMs = 500;
 
         /// <summary>
         /// 置換対象プロセス (Launcher + Companions/Updater 以外) で起動中のものを返す。
@@ -52,66 +52,6 @@ namespace GCTonePrism.Manager.Services
                 }
             }
             return list;
-        }
-
-        /// <summary>
-        /// 指定プロセス名すべての終了を polling で待機。timeout 経過時に false を返す。
-        /// `processNames` が空 / null なら即 true。
-        /// </summary>
-        public static bool WaitForExit(IReadOnlyList<string> processNames, TimeSpan timeout, CancellationToken ct)
-        {
-            if (processNames == null || processNames.Count == 0) return true;
-            var sw = Stopwatch.StartNew();
-            while (true)
-            {
-                ct.ThrowIfCancellationRequested();
-                bool anyRunning = false;
-                foreach (string n in processNames)
-                {
-                    if (CountRunning(n) > 0) { anyRunning = true; break; }
-                }
-                if (!anyRunning) return true;
-                if (sw.Elapsed >= timeout) return false;
-                Thread.Sleep(PollIntervalMs);
-            }
-        }
-
-        /// <summary>指定プロセス名すべてを強制終了 (user 明示同意 path のみで呼ぶこと)。</summary>
-        public static void KillAll(IReadOnlyList<string> processNames)
-        {
-            if (processNames == null) return;
-            foreach (string n in processNames)
-            {
-                Process[] procs;
-                try
-                {
-                    procs = Process.GetProcessesByName(n);
-                }
-                catch (Exception ex)
-                {
-                    Services.Logger.Warn("[ProcessTerminator] process enumeration 失敗 (" + n + "): " + ex.Message);
-                    continue;
-                }
-                foreach (var p in procs)
-                {
-                    try
-                    {
-                        if (!p.HasExited)
-                        {
-                            Services.Logger.Info("[ProcessTerminator] kill: " + n + " (PID=" + p.Id + ")");
-                            p.Kill();
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Services.Logger.Warn("[ProcessTerminator]   kill 失敗: " + ex.Message);
-                    }
-                    finally
-                    {
-                        try { p.Dispose(); } catch { }
-                    }
-                }
-            }
         }
 
         private static void AppendIfRunning(List<RunningProcessInfo> list, string processName, string displayLabel)

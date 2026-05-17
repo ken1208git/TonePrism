@@ -143,14 +143,20 @@ namespace GCTonePrism.Manager.Services
                 // ログ末尾近辺に Run() の各 Step 結果 / 例外を Logger が書いている。
                 // exit code 自体はログには直接書かない (return statement なので)、ただし「全工程完了」/
                 // 「予期しない例外で abort」/ 「[Step X/4] ... abort」等の言い回しから推測可能。
-                // 単純化: 最終行近辺に "Updater 全工程完了" があれば 0、それ以外は 1+ 不明扱いで null を
-                // 返す方針。詳細な exit code 取得は Phase 4 PR2 で event-driven 通知に置換予定。
+                // (#108 Phase 4 round 1 H3 fix) 旧実装は 0 か null のみ返却で 1-8 失敗 dispatch path が
+                // dead だった。defensive fallback: 末尾 20 行を scan して "Updater 全工程完了" 検出 → 0、
+                // それ以外で `[FATAL]` / `[ERROR]` 含む行があれば「不明だが失敗」として 1 を返す
+                // (DispatchExitCode(1) = "内部エラー、ログを確認" の汎用文言になり、少なくとも banner
+                // 自体は表示される)。詳細な exit code 取得は将来 event-driven 通知 (= Updater spawn 時に
+                // pipe 経由で exit code 受信) に置換予定、本 fallback は中間 measure。
                 string[] lines = File.ReadAllLines(latest.FullName);
+                bool sawFailure = false;
                 for (int i = lines.Length - 1; i >= 0 && i >= lines.Length - 20; i--)
                 {
                     if (lines[i].Contains("Updater 全工程完了")) return 0;
+                    if (lines[i].Contains("[FATAL]") || lines[i].Contains("[ERROR]")) sawFailure = true;
                 }
-                return null;
+                return sawFailure ? 1 : (int?)null;
             }
             catch
             {

@@ -10,7 +10,7 @@ namespace GCTonePrism.Manager.Services
     /// Manager UI Phase 4 (#108) で「アップデート」タブに表示する 5 + 1 component のバージョンを採取する。
     ///
     /// 対象:
-    ///   - **Bundle**: `<install>/Manager/CHANGELOG.md` の最新 `### [Bundle vX.Y.Z]` から抽出 (zip 同梱、§3.7.7)
+    ///   - **Bundle**: `<install>/CHANGELOG.md` の最新 `### [Bundle vX.Y.Z]` から抽出 (zip 同梱、§3.7.7)
     ///   - **Manager**: 自身の Assembly.GetName().Version (AssemblyInfo.cs)
     ///   - **Launcher**: `<install>/Launcher/version.gd` の `MAJOR / MINOR / PATCH` 定数を parse
     ///   - **Updater**: `<install>/Companions/Updater/GCTonePrism_Updater.exe` の FileVersionInfo
@@ -39,7 +39,7 @@ namespace GCTonePrism.Manager.Services
         }
 
         /// <summary>
-        /// `<install>/Manager/CHANGELOG.md` の最新 Bundle entry を読む。
+        /// `<install>/CHANGELOG.md` の最新 Bundle entry を読む。
         /// File 不在 (= pre-Phase 4 install) / 破損 / Bundle entry なしの場合は null。
         /// </summary>
         public static Version ReadBundleVersion()

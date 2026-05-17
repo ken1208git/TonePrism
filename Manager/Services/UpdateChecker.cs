@@ -26,6 +26,12 @@ namespace GCTonePrism.Manager.Services
     {
         private readonly SettingsRepository _settings;
 
+        // (#108 Phase 4 round 1 M4 fix) settings 書込みは Skip (UI thread) / SaveCache (background
+        // Task.Run) で並行発火しうる。SettingsRepository は SQLite-backed K/V、内部 lock 持つかは
+        // 本 PR scope 外で確認しきれていないため defensive に process-wide lock を被せて serialize する。
+        // 競合 window は数 ms オーダーなので throughput 影響は無視可。
+        private static readonly object _settingsWriteLock = new object();
+
         public UpdateChecker(SettingsRepository settings)
         {
             if (settings == null) throw new ArgumentNullException("settings");
@@ -119,13 +125,36 @@ namespace GCTonePrism.Manager.Services
         public void Skip(Version latest)
         {
             if (latest == null) return;
-            _settings.SetString(SettingsKeys.UpdateSkippedVersion, latest.ToString(3));
+            // (#108 Phase 4 round 1 M4 fix) lock 保護 + try/catch (旧実装は素通しで SQLite lock 競合時に
+            // 例外が user に直接見えていた)。失敗時は Logger.Warn のみで握り潰し (= skip 失敗は機能性に
+            // 影響あるが致命的でない、user は次の dialog でも再 skip 可能)。
+            lock (_settingsWriteLock)
+            {
+                try
+                {
+                    _settings.SetString(SettingsKeys.UpdateSkippedVersion, latest.ToString(3));
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("[UpdateChecker] Skip 書込み失敗: " + ex.Message);
+                }
+            }
         }
 
         /// <summary>skip を解除 (UI 上「スキップを解除」ボタンを将来出すなら使う、現状未配置)。</summary>
         public void ClearSkip()
         {
-            _settings.SetString(SettingsKeys.UpdateSkippedVersion, string.Empty);
+            lock (_settingsWriteLock)
+            {
+                try
+                {
+                    _settings.SetString(SettingsKeys.UpdateSkippedVersion, string.Empty);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("[UpdateChecker] ClearSkip 書込み失敗: " + ex.Message);
+                }
+            }
         }
 
         /// <summary>
@@ -241,8 +270,19 @@ namespace GCTonePrism.Manager.Services
                 FromCache = false,
             };
 
-            SaveCache(result);
-            _settings.SetInt64(SettingsKeys.UpdateCheckLastAtUnixMs, nowMs);
+            // (#108 Phase 4 round 1 M4 fix) Skip と並行発火しうるため lock 保護。
+            lock (_settingsWriteLock)
+            {
+                SaveCache(result);
+                try
+                {
+                    _settings.SetInt64(SettingsKeys.UpdateCheckLastAtUnixMs, nowMs);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("[UpdateChecker] UpdateCheckLastAtUnixMs 書込み失敗: " + ex.Message);
+                }
+            }
             return result;
         }
 

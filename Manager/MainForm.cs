@@ -153,17 +153,17 @@ namespace GCTonePrism.Manager
                     try
                     {
                         System.IO.Directory.Delete(dir, recursive: true);
-                        Console.WriteLine("[MainForm] zombie staging 削除: " + dir);
+                        Services.Logger.Info("[MainForm] zombie staging 削除: " + dir);
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine("[MainForm] zombie staging 削除失敗: " + dir + " (" + ex.Message + ")");
+                        Services.Logger.Warn("[MainForm] zombie staging 削除失敗: " + dir + " (" + ex.Message + ")");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine("[MainForm] zombie staging cleanup エラー: " + ex.Message);
+                Services.Logger.Error("[MainForm] zombie staging cleanup エラー", ex);
             }
         }
 
@@ -193,7 +193,7 @@ namespace GCTonePrism.Manager
             }
             catch (Exception ex)
             {
-                Console.WriteLine("[MainForm] BackgroundUpdateCheck エラー: " + ex.Message);
+                Services.Logger.Error("[MainForm] BackgroundUpdateCheck エラー", ex);
             }
         }
 
@@ -231,7 +231,7 @@ namespace GCTonePrism.Manager
             }
             catch (Exception ex)
             {
-                Console.WriteLine("[MainForm] ShowUpdateAvailableNotification エラー: " + ex.Message);
+                Services.Logger.Error("[MainForm] ShowUpdateAvailableNotification エラー", ex);
                 return;
             }
             if (dr == DialogResult.Yes && tabControl1 != null)
@@ -242,7 +242,7 @@ namespace GCTonePrism.Manager
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine("[MainForm] tabUpdate 切替失敗: " + ex.Message);
+                    Services.Logger.Warn("[MainForm] tabUpdate 切替失敗: " + ex.Message);
                 }
             }
         }
