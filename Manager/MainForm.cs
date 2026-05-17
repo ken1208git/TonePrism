@@ -180,8 +180,12 @@ namespace GCTonePrism.Manager
             {
                 if (dbManager == null) return;
                 var checker = new Services.UpdateChecker(dbManager.SettingsRepository);
-                Models.UpdateCheckResult result = await Task.Run(() =>
-                    checker.CheckAsync(System.Threading.CancellationToken.None));
+                // (#108 Phase 4 round 8 L-1) `Task.Run` 除去。`CheckAsync` は HttpClient.GetAsync 経由の
+                // 真の async で UI thread をブロックしないため、`Task.Run` で thread pool 1 つ消費 +
+                // 直ちに async state machine に戻る overhead が無駄だった。直接 await で同等動作 +
+                // thread pool 節約。`StartAutoBackupIfDue` 側は synchronous な `BackupService.RunAutoBackupIfDue`
+                // を呼ぶため `Task.Run` 必要で、対比的に本 path は不要。
+                Models.UpdateCheckResult result = await checker.CheckAsync(System.Threading.CancellationToken.None);
                 if (result == null || _updateSectionPanel == null) return;
                 _updateSectionPanel.OnCheckCompleted(result);
                 if (result.Status == Models.UpdateCheckStatus.UpdateAvailable
