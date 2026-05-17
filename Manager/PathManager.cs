@@ -41,6 +41,95 @@ namespace GCTonePrism.Manager
         {
             get { return Path.Combine(BaseDirectory, "prism.db"); }
         }
+
+        // ===== Phase 4 (#108) update flow 用 path 拡張 =====
+        // 既存の BaseDirectory = `<install>/` を起点に、各 component / shortcut bat / Updater /
+        // staging 領域の path を 1 箇所で導出する。Manager UI のアップデートフロー
+        // ([7]〜[10]) は本クラスから得た path だけを使い、ハードコードを散らさない。
+
+        /// <summary>Launcher dir (`<install>/Launcher/`)</summary>
+        public static string LauncherDir
+        {
+            get { return Path.Combine(BaseDirectory, "Launcher"); }
+        }
+
+        /// <summary>Manager dir (`<install>/Manager/`)。Updater が rename-rollback する対象。</summary>
+        public static string ManagerDir
+        {
+            get { return Path.Combine(BaseDirectory, "Manager"); }
+        }
+
+        /// <summary>Companions 集約 dir (`<install>/Companions/`)。SPEC §2.4。</summary>
+        public static string CompanionsDir
+        {
+            get { return Path.Combine(BaseDirectory, "Companions"); }
+        }
+
+        /// <summary>Updater dir (`<install>/Companions/Updater/`)。SPEC §3.7.4。</summary>
+        public static string UpdaterDir
+        {
+            get { return Path.Combine(CompanionsDir, "Updater"); }
+        }
+
+        /// <summary>Updater 実行 exe (`<install>/Companions/Updater/GCTonePrism_Updater.exe`)。</summary>
+        public static string UpdaterExePath
+        {
+            get { return Path.Combine(UpdaterDir, "GCTonePrism_Updater.exe"); }
+        }
+
+        /// <summary>Updater のログ出力先 (`<install>/logs/updater/`)。SPEC §3.7.4 default と一致。</summary>
+        public static string UpdaterLogDir
+        {
+            get { return Path.Combine(BaseDirectory, "logs", "updater"); }
+        }
+
+        /// <summary>
+        /// install 親 dir (`<install>/../`)。`<親>/Launcher.bat` / `<親>/Manager.bat` の置き場所。
+        /// SPEC §3.7.1 「ルート ショートカット規約」、Phase 2 で <親>/ 直下配置に変更済み。
+        /// </summary>
+        public static string InstallParentDir
+        {
+            get { return Path.GetDirectoryName(BaseDirectory.TrimEnd('\\', '/')); }
+        }
+
+        /// <summary>
+        /// 同梱 CHANGELOG.md (`<install>/CHANGELOG.md` 直下)。Phase 4 (#108) で zip 同梱、Install.bat
+        /// の robocopy で `<install>/` 直下に展開される (`Launcher/` `Manager/` 等と同階層、project
+        /// 全体の SoT semantic)。Manager は本 path を parse して「現在の installed Bundle version」を
+        /// 抽出する (SPEC §3.7.7)。Phase 4 アップデートフロー [7]〜[10] では single-file copy で更新
+        /// (Updater が touch しない領域なので Manager UI が `FileReplacer.ReplaceFile` で書き換える)。
+        /// </summary>
+        public static string BundleChangelogPath
+        {
+            get { return Path.Combine(BaseDirectory, "CHANGELOG.md"); }
+        }
+
+        /// <summary>
+        /// アップデート用 staging dir (`%TEMP%/GCTonePrism_update_<version>/`)。SPEC §3.7.3 [6]。
+        /// 失敗時の zombie staging を MainForm_Load 起動時に cleanup する。
+        /// </summary>
+        public static string StagingRootForUpdate(string version)
+        {
+            return Path.Combine(Path.GetTempPath(), "GCTonePrism_update_" + (version ?? "unknown"));
+        }
+
+        /// <summary>
+        /// 過去 run の zombie staging dir を列挙する (起動時 cleanup 用)。
+        /// `Path.GetTempPath()` 直下の `GCTonePrism_update_*` 全てを返す。
+        /// </summary>
+        public static System.Collections.Generic.IEnumerable<string> EnumerateZombieStagings()
+        {
+            string tempRoot = Path.GetTempPath();
+            if (!Directory.Exists(tempRoot)) return new string[0];
+            try
+            {
+                return Directory.EnumerateDirectories(tempRoot, "GCTonePrism_update_*");
+            }
+            catch
+            {
+                return new string[0];
+            }
+        }
         
         /// <summary>
         /// 指定したゲームのフォルダパス

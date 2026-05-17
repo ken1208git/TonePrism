@@ -42,7 +42,7 @@
   - **Patch**: bugfix のみ
 - バージョンを上げる場合は `CHANGELOG.md` に変更内容を記載する。
 - Bundle version の詳細仕様は **SPECIFICATION.md §3.7.7** を参照。
-- 新規クライアントコンポーネント追加時の更新チェックリストは **SPECIFICATION.md §3.7.8** を参照。
+- 新規クライアントコンポーネント追加時の更新チェックリストは **SPECIFICATION.md §3.7.8** を参照。`Release.ps1 Assert-ExpectedFiles` と `Manager/Services/UpdateDownloader.cs ValidateStaging` の同期は **必須** (drift すると Manager UI apply が永久 abort)。
 
 ## Release Tooling 命名規約
 

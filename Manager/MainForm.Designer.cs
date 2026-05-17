@@ -24,6 +24,7 @@ namespace GCTonePrism.Manager
             this.tabStore = new System.Windows.Forms.TabPage();
             this.tabBackup = new System.Windows.Forms.TabPage();
             this.tabLog = new System.Windows.Forms.TabPage();
+            this.tabUpdate = new System.Windows.Forms.TabPage();
             this.tabSettings = new System.Windows.Forms.TabPage();
             this.statusStrip1.SuspendLayout();
             this.tabControl1.SuspendLayout();
@@ -51,6 +52,7 @@ namespace GCTonePrism.Manager
             this.tabControl1.Controls.Add(this.tabStore);
             this.tabControl1.Controls.Add(this.tabBackup);
             this.tabControl1.Controls.Add(this.tabLog);
+            this.tabControl1.Controls.Add(this.tabUpdate);
             this.tabControl1.Controls.Add(this.tabSettings);
             this.tabControl1.Dock = System.Windows.Forms.DockStyle.Fill;
             this.tabControl1.Font = new System.Drawing.Font("Meiryo UI", 9.5F);
@@ -101,13 +103,23 @@ namespace GCTonePrism.Manager
             this.tabLog.Text = "ログ";
             this.tabLog.UseVisualStyleBackColor = true;
             //
+            // tabUpdate
+            //
+            this.tabUpdate.Location = new System.Drawing.Point(4, 28);
+            this.tabUpdate.Name = "tabUpdate";
+            this.tabUpdate.Padding = new System.Windows.Forms.Padding(3);
+            this.tabUpdate.Size = new System.Drawing.Size(1092, 596);
+            this.tabUpdate.TabIndex = 4;
+            this.tabUpdate.Text = "アップデート";
+            this.tabUpdate.UseVisualStyleBackColor = true;
+            //
             // tabSettings
             //
             this.tabSettings.Location = new System.Drawing.Point(4, 28);
             this.tabSettings.Name = "tabSettings";
             this.tabSettings.Padding = new System.Windows.Forms.Padding(3);
             this.tabSettings.Size = new System.Drawing.Size(1092, 596);
-            this.tabSettings.TabIndex = 4;
+            this.tabSettings.TabIndex = 5;
             this.tabSettings.Text = "設定";
             this.tabSettings.UseVisualStyleBackColor = true;
             //
@@ -138,6 +150,7 @@ namespace GCTonePrism.Manager
         private System.Windows.Forms.TabPage tabStore;
         private System.Windows.Forms.TabPage tabBackup;
         private System.Windows.Forms.TabPage tabLog;
+        private System.Windows.Forms.TabPage tabUpdate;
         private System.Windows.Forms.TabPage tabSettings;
     }
 }

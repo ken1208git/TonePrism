@@ -36,6 +36,26 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="CustomMarshalers" />
+    <Reference Include="Markdig">
+      <HintPath>packages\Markdig.0.37.0\lib\net462\Markdig.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Buffers">
+      <HintPath>packages\System.Buffers.4.5.1\lib\net461\System.Buffers.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Memory">
+      <HintPath>packages\System.Memory.4.5.5\lib\net461\System.Memory.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Numerics.Vectors">
+      <HintPath>packages\System.Numerics.Vectors.4.5.0\lib\net46\System.Numerics.Vectors.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Runtime.CompilerServices.Unsafe">
+      <HintPath>packages\System.Runtime.CompilerServices.Unsafe.4.5.3\lib\net461\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
     <Reference Include="Microsoft.WindowsAPICodePack, Version=1.1.5.0, Culture=neutral, PublicKeyToken=8985beaab7ea3f04, processorArchitecture=MSIL">
       <HintPath>packages\Microsoft-WindowsAPICodePack-Core.1.1.5\lib\net48\Microsoft.WindowsAPICodePack.dll</HintPath>
     </Reference>
@@ -51,6 +71,8 @@
       <Private>True</Private>
     </Reference>
     <Reference Include="System.Transactions" />
+    <Reference Include="System.Web" />
+    <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Xaml" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
@@ -58,6 +80,8 @@
     <Reference Include="System.Data" />
     <Reference Include="System.Deployment" />
     <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
@@ -150,6 +174,12 @@
     <Compile Include="Controls\LogSectionPanel.Designer.cs">
       <DependentUpon>LogSectionPanel.cs</DependentUpon>
     </Compile>
+    <Compile Include="Controls\UpdateSectionPanel.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Controls\UpdateSectionPanel.Designer.cs">
+      <DependentUpon>UpdateSectionPanel.cs</DependentUpon>
+    </Compile>
     <Compile Include="Controls\SemverInputControl.cs">
       <SubType>UserControl</SubType>
     </Compile>
@@ -197,6 +227,8 @@
     <Compile Include="Models\Settings.cs" />
     <Compile Include="Models\StoreSectionInfo.cs" />
     <Compile Include="Models\Survey.cs" />
+    <Compile Include="Models\ReleaseInfo.cs" />
+    <Compile Include="Models\UpdateCheckResult.cs" />
     <Compile Include="GenreList.cs" />
     <Compile Include="PathManager.cs" />
     <Compile Include="Services\BackupService.cs" />
@@ -208,7 +240,18 @@
     <Compile Include="Services\ImagePreviewHelper.cs" />
     <Compile Include="Services\Logger.cs" />
     <Compile Include="Services\PathConversionHelper.cs" />
+    <Compile Include="Services\ChangelogParser.cs" />
+    <Compile Include="Services\DirReplacer.cs" />
+    <Compile Include="Services\FileReplacer.cs" />
+    <Compile Include="Services\GitHubReleaseChecker.cs" />
+    <Compile Include="Services\MarkdownRenderer.cs" />
+    <Compile Include="Services\ProcessTerminator.cs" />
     <Compile Include="Services\RestoreService.cs" />
+    <Compile Include="Services\SettingsKeys.cs" />
+    <Compile Include="Services\UpdateChecker.cs" />
+    <Compile Include="Services\UpdateDownloader.cs" />
+    <Compile Include="Services\UpdaterClient.cs" />
+    <Compile Include="Services\VersionInventory.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="AddGameForm.resx">

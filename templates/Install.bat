@@ -210,8 +210,7 @@ echo ===========================================================================
 echo  [警告] 既存インストールを検出しました
 echo ============================================================================
 echo.
-echo  通常、アップデートは Manager UI から行うのを推奨します
-echo  [Phase 4 実装後、現在は未実装]。
+echo  通常のアップデートは Manager の「アップデート」タブから行うのを推奨します。
 echo.
 echo  Manager が壊れて起動できない / クリーンインストールしたい場合のみ Y を押してください。
 echo  Y を押した場合でも以下のゲームデータは維持されます:
@@ -274,6 +273,21 @@ goto :checkprocess
 :do_overwrite
 echo.
 echo [INFO] 上書きインストールを開始します...
+REM ----- migration 出力を tmp file にキャプチャ (round 7 M1) -----
+REM 旧 `move ... >nul` は stdout のみ抑制で、stderr 経由の失敗詳細 (アクセス拒否 / 別プロセス
+REM 使用中 等) が握り潰される。show_folder_dialog 呼び出し (line 91-105) と同じ
+REM 「stdout/stderr 分離キャプチャ + 失敗時に type 表示」規約に揃える。
+REM 2 段階 move (Manager / Launcher) で同 tmp を上書き使用し、失敗時はその時点の内容を表示。
+REM
+REM 配置 fix (#108 Phase 4 デバッグで発見): 以前は `:migrate_legacy_manager` ラベルより前の
+REM ブロック内 (`goto :migrate_legacy_manager` の後ろ) に配置されていた dead code 状態だった。
+REM `goto` がこの set 行を飛び越えるため TEMP_MV_OUT が空文字のまま `:migrate_done` の
+REM `del "%TEMP_MV_OUT%" 2>nul` (line ~328) に到達 → cmd が `del ""` を current dir wildcard
+REM (`del .\*` 相当) と解釈 → 「<SCRIPT_DIR>\*、よろしいですか (Y/N)?」prompt 発生 → Y で
+REM zip 展開 dir の top-level files (Install.bat 含む) が削除 → bat 実行が途絶 → cmd window
+REM 即閉じ。実害甚大の silent corruption path だった。`:do_overwrite` block 内 (goto より
+REM 前) に移動することで goto に関係なく必ず初期化される形に修正。
+set "TEMP_MV_OUT=%TEMP%\gctone_install_mv_%RANDOM%%RANDOM%.tmp"
 goto :migrate_legacy_manager
 
 REM ---- v0.2.0 → v0.3.0+ 旧構造 migration (シニアレビュー / ディレクトリ rename 整理対応) ----
@@ -293,12 +307,6 @@ REM   v0.3.0 install + 過去 zip バックアップ復元 / partial install の
 REM
 REM top-level goto pattern: 日本語 echo を if-block 内に置くと cmd parser cascade するため
 REM (構造規約 1)、各 step を独立ラベルにしている。
-REM ----- migration 出力を tmp file にキャプチャ (round 7 M1) -----
-REM 旧 `move ... >nul` は stdout のみ抑制で、stderr 経由の失敗詳細 (アクセス拒否 / 別プロセス
-REM 使用中 等) が握り潰される。show_folder_dialog 呼び出し (line 91-105) と同じ
-REM 「stdout/stderr 分離キャプチャ + 失敗時に type 表示」規約に揃える。
-REM 2 段階 move (Manager / Launcher) で同 tmp を上書き使用し、失敗時はその時点の内容を表示。
-set "TEMP_MV_OUT=%TEMP%\gctone_install_mv_%RANDOM%%RANDOM%.tmp"
 
 :migrate_legacy_manager
 if not exist "%INSTALL_TARGET%\GCTonePrism_Manager\" goto :migrate_legacy_launcher

@@ -221,7 +221,11 @@ if (-not (Test-Path $_changelogPathEarly)) {
     exit 1
 }
 $_changelogContent = [System.IO.File]::ReadAllText($_changelogPathEarly, [System.Text.Encoding]::UTF8)
-$_latestBundleMatch = [regex]::Match($_changelogContent, '(?m)^### \[Bundle v(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?)\]')
+# (#108 Phase 4 round 7 L-1) `\s+` 採用 = Manager の ChangelogParser.cs BundleEntryRegex と literal 一致
+# (SPEC §3.7.8 sync fence)。旧 literal space (` `) 表現は ChangelogParser 側 (`\s+`) より strict で、
+# `### [Bundle v0.3.0]` に tab が混入した瞬間 Release.ps1 だけが silent skip → version bump 検出不能
+# になる path があった。`\s+` で揃えて両 path 同 behavior に。
+$_latestBundleMatch = [regex]::Match($_changelogContent, '(?m)^###\s+\[Bundle\s+v(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?)\]')
 if (-not $_latestBundleMatch.Success) {
     Write-Host "[FAIL] CHANGELOG.md に '### [Bundle vX.Y.Z]' エントリが見つかりません" -ForegroundColor Red
     exit 1
@@ -872,9 +876,14 @@ function Get-BundleReleaseNotes {
         Fail "CHANGELOG.md が見つかりません: $ChangelogPath"
     }
     $content = [System.IO.File]::ReadAllText($ChangelogPath, [System.Text.Encoding]::UTF8)
-    # `### [Bundle v0.1.0] - YYYY-MM-DD` から次の `### ` / `---` / `## ` / EOF まで
-    # `\Z`: 後続セクション無しの初回 Bundle release だけが該当する保険
-    $pattern = '(?ms)^### \[Bundle v' + [regex]::Escape($Version) + '\][^\r\n]*\r?\n(.*?)(?=^### |^---|^## |\Z)'
+    # `### [Bundle v0.1.0] - YYYY-MM-DD` から次の `### ` / `^-{3,}\s*$` (= 3 文字以上の `-` 単独行) /
+    # `## ` / EOF まで。`\Z`: 後続セクション無しの初回 Bundle release だけが該当する保険。
+    # (#108 Phase 4 round 5 M-4) 旧 `^---` だと body 内 horizontal rule で silent truncation する path
+    # があったため `^-{3,}\s*$` に厳密化、Manager の ChangelogParser.cs と同型同期。
+    # (#108 Phase 4 round 7 L-1) heading の literal space を `\s+` に変更 = ChangelogParser.cs の
+    # BundleEntryRegex と literal 一致 (SPEC §3.7.8 sync fence)。tab 混入で Release.ps1 のみ silent
+    # skip する path 防止。
+    $pattern = '(?ms)^###\s+\[Bundle\s+v' + [regex]::Escape($Version) + '\][^\r\n]*\r?\n(.*?)(?=^### |^-{3,}\s*$|^## |\Z)'
     $m = [regex]::Match($content, $pattern)
     if (-not $m.Success) { return '' }
     return $m.Groups[1].Value.Trim()
@@ -1615,8 +1624,24 @@ function Copy-Templates {
         @{ Src = 'templates\Launcher.bat';           Dest = 'Launcher.bat';           Label = 'Launcher.bat (shortcut, parent-level)' },
         @{ Src = 'templates\Manager.bat';            Dest = 'Manager.bat';            Label = 'Manager.bat (shortcut, parent-level)' }
     )
-    # files/ 配下配置: 現状なし (component 本体は Build フェーズで配置済み)
-    $filesTemplates = @()
+    # files/ 配下配置:
+    #   - CHANGELOG.md: Phase 4 (#108) で Manager UI が「現在の Bundle version」を抽出するために
+    #     `<install>/CHANGELOG.md` から parse する。SPEC §3.7.7「CHANGELOG.md は zip 同梱規約」に
+    #     従い、repo root の CHANGELOG.md を `files/CHANGELOG.md` として同梱する (= `<install>/`
+    #     直下、`Launcher/` `Manager/` 等と同階層)。Project 全体の SoT という semantic に整合し、
+    #     File Explorer から install dir を開いたユーザーから直接見える位置。
+    #     Install.bat の `robocopy files/* <install>/` で自動展開される。Manager UI Phase 4 の
+    #     アップデートフロー [7]〜[10] では `FileReplacer.ReplaceFile` の単体 file copy で更新
+    #     (Launcher.bat / Manager.bat の shortcut bat 置換と同 pattern)。
+    #   - Launcher/version.gd: Phase 4 で Manager UI の VersionInventory が Launcher 版数を抽出
+    #     するのに使う。Godot エクスポート成果物 (`bin/GCTonePrism_Launcher.exe` + `.pck` 等) には
+    #     `.gd` source が含まれない (= `.pck` 内に compile されて隠匿) ため、`Launcher/version.gd`
+    #     を staging 段階で明示的に同梱して install dir 配下に置く。Manager は
+    #     `<install>/Launcher/version.gd` を直接 parse して MAJOR/MINOR/PATCH 定数を読み取る。
+    $filesTemplates = @(
+        @{ Src = 'CHANGELOG.md'; Dest = 'files\CHANGELOG.md'; Label = 'CHANGELOG.md (Bundle SoT for Manager UI, Phase 4 #108)' },
+        @{ Src = 'Launcher\version.gd'; Dest = 'files\Launcher\version.gd'; Label = 'Launcher/version.gd (Launcher SoT for Manager UI VersionInventory, Phase 4 #108)' }
+    )
 
     foreach ($tpl in ($rootTemplates + $filesTemplates)) {
         $src = Join-Path $RepoRoot $tpl.Src
@@ -1691,7 +1716,12 @@ function Assert-ExpectedFiles {
         'files\Manager\x86\SQLite.Interop.dll',
         # Updater (Phase 3、SPEC §3.7.4): Manager 置換 + 再起動の最小 CLI、Companions/ 配下に配置
         'files\Companions\Updater\GCTonePrism_Updater.exe',
-        'files\Companions\Updater\GCTonePrism_Updater.exe.config'
+        'files\Companions\Updater\GCTonePrism_Updater.exe.config',
+        # CHANGELOG.md (Phase 4 #108、SPEC §3.7.7): Manager UI が installed Bundle version 抽出に使う SoT、
+        # `<install>/CHANGELOG.md` 直下配置で `Launcher/` `Manager/` 等と同階層 (project-wide な SoT semantic)
+        'files\CHANGELOG.md',
+        # Launcher/version.gd (Phase 4 #108): Manager UI の VersionInventory が Launcher 版数を抽出する SoT
+        'files\Launcher\version.gd'
     )
 
     $missing = @()
