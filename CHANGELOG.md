@@ -49,6 +49,18 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
+### [Release Tooling v0.1.17] - 2026-05-18
+
+#### Changed (#175 Phase 4.1 — Bundle manifest 同梱 + zip 構造整理)
+
+- **zip 構造を `bundle/` 配下に集約**: 旧構造 (v0.3.0) は zip 直下に `Install.bat` / `INSTALL_README.txt` / `Launcher.bat` / `Manager.bat` / `show_folder_dialog.ps1` / `files/` の 5 file + 1 folder が並んでいて、新規ユーザーが zip 展開した時に「どれをダブルクリックすればいい?」と迷う UX 課題があった。新構造 (v0.3.1+): zip 直下 = `Install.bat` + `INSTALL_README.txt` の 2 file のみ、それ以外 (Launcher.bat / Manager.bat / show_folder_dialog.ps1 / bundle_manifest.json / files/) は `bundle/` 配下に集約。zip 直下が「ダブルクリックする 2 file」だけになり「Install.bat を押すだけ」が一目瞭然に。`Release.ps1 Copy-Templates` で `$rootTemplates` (2 件) + `$bundleTemplates` (3 件) + `$filesTemplates` (2 件) の 3 段配置に再構成、Install.bat 側も `set "BUNDLE_DIR=%SCRIPT_DIR%bundle"` + `set "FILES_DIR=%BUNDLE_DIR%\files"` 経由で参照する形に同期更新。
+- **`Release.ps1 New-BundleManifest` 関数を新設 (`bundle/bundle_manifest.json` 生成)**: Phase 7 (Assert-ExpectedFiles) の直前に新 Phase 6.5 として呼び出し、zip 化前に manifest を staging に書き出す。manifest schema (schema_version 1): `bundle_version` (String) + `generated_at` (ISO 8601 UTC) + `schema_version` (Int) + `files` (Array、bundle/ からの相対 path、`/` separator)。Manager 側 (`UpdateDownloader.ValidateStaging`) が manifest を読み込んで forward compat 検証する SoT (`## Manager v0.9.1` 参照)。
+- **`Release.ps1 $script:BundleManifestFiles` で SoT 1 箇所統一**: 旧設計は `Assert-ExpectedFiles` 内 local 配列 `$expected` (17 entries) で fence していたが、`New-BundleManifest` 追加で同じ list を 2 関数で持つと drift する risk。`$script:` scope で配列を 1 箇所に集約、両関数が同 SoT を参照する形に refactor。zip 構造変更時は本配列 1 箇所の更新で `Assert-ExpectedFiles` (staging 検証) + `New-BundleManifest` (manifest 生成) の両方が同期する。**SPEC §3.7.8 チェックリスト** の新規コンポーネント追加項目も「`$script:BundleManifestFiles` 配列に追加」に変更。
+- **`Release.ps1 Assert-ExpectedFiles` を 3 段検証に再構成**: zip 直下 (`Install.bat`, `INSTALL_README.txt`, `bundle\bundle_manifest.json`) + `bundle/` 直下 (`bundle\Launcher.bat`, `bundle\Manager.bat`, `bundle\show_folder_dialog.ps1`) + `bundle/files/` 配下 (12 件、`$script:BundleManifestFiles` から bundle/ prefix 付与で展開) の合計 17 件を staging で存在 check。`bundle_manifest.json` 自身も検証対象に含めることで「New-BundleManifest 生成失敗 → Assert で catch」の自己整合性 fence。
+- **`$FilesDir` を `<staging>\bundle\files` に変更 + 新規 `$BundleDir` `$ManifestPath` global var 追加**: Build-Launcher / Build-Manager / Build-Updater が `$FilesDir` 経由で配置先を決めているため、本変数 1 箇所の変更で Launcher / Manager / Companions/Updater の出力先が自動的に新構造 (`bundle/files/Launcher/...` 等) になる。
+
+**スコープ**: Phase 4 (#108 PR #161) Manager UI update flow の forward compat 機構が機能するための release 側 infrastructure。zip 構造変更による「面食らわない UX」改善 + manifest 同梱による「将来の dir 構造変更を Manager 側コード変更なしに吸収」forward compat 獲得の 2 件を 1 PR で。詳細は `## Manager v0.9.1` セクションと SPEC §3.7.7 / §3.7.8 参照。
+
 ### [Release Tooling v0.1.16] - 2026-05-14
 
 #### Changed (#108 Phase 4 関連)
@@ -1488,6 +1500,19 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.9.1] - 2026-05-18
+
+#### Changed (#175 Phase 4.1 — Bundle manifest 同梱 + zip 構造整理)
+
+- **`UpdateDownloader.ValidateStaging` を manifest 経由検証に変更 (forward compat 獲得)**: 旧設計 (#108 Phase 4) は Manager 側に hardcoded list (`rootExpected` / `filesExpected`) を持ち、SPEC §3.7.8 同期 fence で Release.ps1 `Assert-ExpectedFiles` と drift 防止していたが、新 release で zip 構造が変わると旧 Manager が新 zip を reject する forward compat 問題があった (PR #161 round 1 C1 で実発生、v0.3.0 → v0.3.1 移行時にも再発見)。新設計では `<staging>/bundle/bundle_manifest.json` を読んで「list 通り存在するか」だけ check、**zip ごとに新 manifest = 新 file 構造を表現** するので Manager 側コード変更なしに将来の dir 構造変更を吸収できる。manifest 不在 (v0.3.0 zip) は `ValidateStagingLegacy` で旧 hardcoded list fallback。schema_version 1 を想定、`BundleManifest` POCO で deserialize (`Services/UpdateDownloader.cs`)。
+- **`UpdateDownloader.ResolveBundleRoot` helper を新規追加 (staging path 解決の中央化)**: staging dir 内の bundle root を解決する helper。manifest あれば `<staging>/bundle` (新構造、v0.3.1+)、無ければ `<staging>` (旧構造 v0.3.0 fallback)。caller (`UpdateSectionPanel.RunUpdateWorker` + `UpdateDownloader.ValidateBundleVersion`) は本 helper で得た `bundleRoot` を経由して `Path.Combine(bundleRoot, "files", ...)` 等で path 解決、新旧両構造を同 code path で扱う forward compat 機構。
+- **`UpdateSectionPanel.RunUpdateWorker` の Step 5-9 + defer block + Updater spawn を `bundleRoot` 経由に書き換え**: 旧実装は全 staging path を `Path.Combine(stagingDir, "files", ...)` で hardcoded、v0.3.1 zip 構造 (`bundle/files/...`) で永久 fail する path だった。worker 冒頭で `string bundleRoot = UpdateDownloader.ResolveBundleRoot(stagingDir);` を呼び出し、Step 5 (Launcher) / Step 6 (Companions) / Step 7 (shortcut bat) / Step 9 (Updater) / Step 10 (Updater spawn) / Step 8 defer (CHANGELOG) 全 6 箇所の path 参照を `bundleRoot` 経由に統一。
+- **`UpdaterClient.Spawn` の引数を `stagingDir` から `bundleRoot` に rename**: caller (`UpdateSectionPanel`) が bundleRoot 解決の責務を持つ設計。Updater 側 (`Companions/Updater/FileReplacer.cs`) は `--staging <X>/files/Manager` を期待する設計のまま (= 引数の意味は維持、Updater 側コード変更不要で forward compat 獲得)。
+
+**スコープ**: Manager UI update flow の forward compat 獲得 (将来の zip 構造変更を manifest 経由で吸収) + zip 構造整理 (新規ユーザー UX 改善、`bundle/` 配下に集約) の 2 件を 1 PR で。詳細は `## Release Tooling v0.1.17` セクション参照。patch bump 判断: 既存機能の互換性改善 + zip 構造変更は Install.bat の overwrite path で吸収するため user 視点で invisible → 0.x 系慣習で patch bump 扱い (v0.8.10 / v0.8.11 の patch bump 判断と同 spirit)。**Phase 4.1 trade-off**: v0.3.0 install からの v0.3.1 update は新 dir 構造 (`bundle/files/`) を旧 Manager の legacy list が認識できず破綻、手動再 install (Install.bat) が必要。ただし v0.3.0 install は user の dev env (中間 Manager) のみで実 install 他人ゼロのため実害なし、v0.3.1 以降は manifest 経由で永久 forward compat。
+
+**詳細仕様は [SPECIFICATION.md §3.7.7 / §3.7.8](SPECIFICATION.md) 参照**。
 
 ### [Manager v0.9.0] - 2026-05-14
 

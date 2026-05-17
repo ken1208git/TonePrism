@@ -497,10 +497,18 @@ namespace GCTonePrism.Manager.Controls
                 // (旧実装は AllowCancel=true 固定で「キャンセル押せるが無視」の misleading UX があった)。
                 if (disableCancelCb != null) disableCancelCb();
 
+                // (#175 Phase 4.1) staging dir 内の bundle root を解決。manifest あれば新構造
+                // (`<staging>/bundle`)、無ければ legacy fallback (`<staging>`)。以降の Step 5-9 +
+                // defer block の path 参照 + Updater spawn 引数を bundleRoot 経由に統一して、
+                // 新旧両構造を同 code path で扱う forward compat 機構。詳細は
+                // UpdateDownloader.ResolveBundleRoot の docstring を参照。
+                string bundleRoot = UpdateDownloader.ResolveBundleRoot(stagingDir);
+                Services.Logger.Info("[UpdateSectionPanel] bundleRoot 解決: " + bundleRoot);
+
                 // [5] Launcher dir 置換 (60-67%)
                 Services.Logger.Info("[UpdateSectionPanel] [Step 5/10] Launcher dir 置換 (SPEC §3.7.3 [7])");
                 progress.Report(new ProgressInfo(60, "Launcher を更新中...", PathManager.LauncherDir));
-                string stagingLauncher = System.IO.Path.Combine(stagingDir, "files", "Launcher");
+                string stagingLauncher = System.IO.Path.Combine(bundleRoot, "files", "Launcher");
                 // (#108 Phase 4 round 4 codex P1 NEW) CleanupBak は Step 10 後にまとめて実行する。
                 // 旧実装は各 Step 完了直後に CleanupBak していたため、Step 6-10 で failure 時に旧
                 // Launcher 復元不能 mixed-version state に陥っていた (例: Launcher 置換成功 → Companion
@@ -525,7 +533,7 @@ namespace GCTonePrism.Manager.Controls
                 // [6] Companions (Updater 以外) 置換 — 現状 dir 列挙で対象なし、将来 WindowProbe / PauseOverlay 用
                 Services.Logger.Info("[UpdateSectionPanel] [Step 6/10] Companions (Updater 以外) 置換 (SPEC §3.7.3 [8])");
                 progress.Report(new ProgressInfo(67, "Companions を更新中..."));
-                string stagingCompanionsRoot = System.IO.Path.Combine(stagingDir, "files", "Companions");
+                string stagingCompanionsRoot = System.IO.Path.Combine(bundleRoot, "files", "Companions");
                 if (System.IO.Directory.Exists(stagingCompanionsRoot))
                 {
                     foreach (string stagingComp in System.IO.Directory.EnumerateDirectories(stagingCompanionsRoot))
@@ -566,13 +574,13 @@ namespace GCTonePrism.Manager.Controls
                 if (!string.IsNullOrEmpty(parentDir))
                 {
                     if (!FileReplacer.ReplaceFile(
-                        System.IO.Path.Combine(stagingDir, "Launcher.bat"),
+                        System.IO.Path.Combine(bundleRoot, "Launcher.bat"),
                         System.IO.Path.Combine(parentDir, "Launcher.bat")))
                     {
                         throw new System.IO.IOException("Launcher.bat の置換に失敗しました (詳細は log 参照)。");
                     }
                     if (!FileReplacer.ReplaceFile(
-                        System.IO.Path.Combine(stagingDir, "Manager.bat"),
+                        System.IO.Path.Combine(bundleRoot, "Manager.bat"),
                         System.IO.Path.Combine(parentDir, "Manager.bat")))
                     {
                         throw new System.IO.IOException("Manager.bat の置換に失敗しました (詳細は log 参照)。");
@@ -601,7 +609,7 @@ namespace GCTonePrism.Manager.Controls
                 // [9] Companions/Updater 置換 (SPEC §3.7.3 [10]、常に staging の新 Updater で置換)
                 Services.Logger.Info("[UpdateSectionPanel] [Step 9/10] Companions/Updater 置換 (SPEC §3.7.3 [10])");
                 progress.Report(new ProgressInfo(77, "Updater を更新中...", PathManager.UpdaterDir));
-                string stagingUpdater = System.IO.Path.Combine(stagingDir, "files", "Companions", "Updater");
+                string stagingUpdater = System.IO.Path.Combine(bundleRoot, "files", "Companions", "Updater");
                 var updaterResult = DirReplacer.Replace(stagingUpdater, PathManager.UpdaterDir, allowInitialDeploy: false);
                 if (updaterResult == DirReplacer.ReplaceResult.RecoveredAbort)
                 {
@@ -618,7 +626,7 @@ namespace GCTonePrism.Manager.Controls
                 // [10] Updater spawn (Manager の終了を待機 + Manager dir 置換 + 新 Manager.exe 起動を引き継ぐ)
                 Services.Logger.Info("[UpdateSectionPanel] [Step 10/10] Updater spawn (SPEC §3.7.3 [11])");
                 progress.Report(new ProgressInfo(85, "Updater を起動中..."));
-                if (!UpdaterClient.Spawn(stagingDir, forceKill: false, logSink: null))
+                if (!UpdaterClient.Spawn(bundleRoot, forceKill: false, logSink: null))
                 {
                     throw new System.IO.IOException("Updater spawn に失敗しました。");
                 }
@@ -648,7 +656,7 @@ namespace GCTonePrism.Manager.Controls
                 try
                 {
                     if (!FileReplacer.ReplaceFile(
-                        System.IO.Path.Combine(stagingDir, "files", "CHANGELOG.md"),
+                        System.IO.Path.Combine(bundleRoot, "files", "CHANGELOG.md"),
                         PathManager.BundleChangelogPath))
                     {
                         // CHANGELOG 置換失敗は致命的ではない (= VersionInventory が OLD のまま読むだけで

@@ -53,8 +53,14 @@ REM Note: numeric sentinels (MANAGER_FOUND / LAUNCHER_FOUND / MANAGER_STARTED /
 REM EXIT_CODE 等) are intentionally NOT quoted below — they only hold ERRORLEVEL
 REM (0/1) or `1` literals, so quoting adds noise without value. The quote rule
 REM applies to path / user-input values, not to numeric flags. (シニアレビュー L1)
+REM (#175 Phase 4.1) zip 構造整理: zip 直下 = Install.bat / INSTALL_README.txt のみ、
+REM それ以外 (Launcher.bat / Manager.bat / show_folder_dialog.ps1 / bundle_manifest.json /
+REM files/) は `bundle/` 配下に集約。本 Install.bat は `<SCRIPT_DIR>\bundle\...` 経由で
+REM bundle 内の各 file を参照する。ユーザー視点で zip 展開時に「Install.bat を押すだけ」が
+REM 一目瞭然になる UX 改善 + Manager UI Phase 4 update flow の forward compat 機構と一体。
 set "SCRIPT_DIR=%~dp0"
-set "FILES_DIR=%SCRIPT_DIR%files"
+set "BUNDLE_DIR=%SCRIPT_DIR%bundle"
+set "FILES_DIR=%BUNDLE_DIR%\files"
 REM Exit code sentinel: failure paths goto :fail to set 1.
 REM (numeric per L1 rule — unquoted, matches :fail's `set EXIT_CODE=1`)
 set EXIT_CODE=0
@@ -114,7 +120,7 @@ REM `cmd /c install.bat > log.txt 2>&1` で呼ぶ運用に入ったとき、stde
 REM 実際の失敗理由 (show_folder_dialog.ps1 catch メッセージ等) は log に残る一方、
 REM bat 内の `:dialog_fail` 表示と分離されて読みづらい。本実装では分離キャプチャで
 REM `:dialog_fail` の表示に "PS stderr の内容" として明示的に含める。
-powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "%SCRIPT_DIR%show_folder_dialog.ps1" > "%TEMP_DIALOG_OUT%" 2> "%TEMP_DIALOG_ERR%"
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "%BUNDLE_DIR%\show_folder_dialog.ps1" > "%TEMP_DIALOG_OUT%" 2> "%TEMP_DIALOG_ERR%"
 set "DIALOG_EXIT=%ERRORLEVEL%"
 
 if "%DIALOG_EXIT%"=="0" goto :dialog_ok
@@ -461,9 +467,10 @@ REM ----- Subroutine: shortcut bat copy (Launcher.bat / Manager.bat → <parent>
 REM `call :do_shortcut_copy` で呼び出し、ERRORLEVEL で成否伝播。SPEC §3.7.1 のルート
 REM ショートカット規約に従って <親>/ 直下に配置。
 :do_shortcut_copy
-copy /Y "%SCRIPT_DIR%Launcher.bat" "%INSTALL_PARENT_NO_TRAIL%\Launcher.bat" >nul
+REM (#175 Phase 4.1) shortcut bat は `bundle/` 配下に移動済、source path は %BUNDLE_DIR% 経由。
+copy /Y "%BUNDLE_DIR%\Launcher.bat" "%INSTALL_PARENT_NO_TRAIL%\Launcher.bat" >nul
 if errorlevel 1 exit /b 1
-copy /Y "%SCRIPT_DIR%Manager.bat" "%INSTALL_PARENT_NO_TRAIL%\Manager.bat" >nul
+copy /Y "%BUNDLE_DIR%\Manager.bat" "%INSTALL_PARENT_NO_TRAIL%\Manager.bat" >nul
 if errorlevel 1 exit /b 1
 exit /b 0
 

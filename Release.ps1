@@ -269,7 +269,13 @@ $ToolsDir     = Join-Path $RepoRoot 'tools'
 $ToolsGodot   = Join-Path $ToolsDir 'godot'
 $StagingRoot  = Join-Path $RepoRoot 'release'
 $StagingDir   = Join-Path $StagingRoot "v$Version"
-$FilesDir     = Join-Path $StagingDir 'files'
+# (#175 Phase 4.1) zip 構造整理: zip 直下 = Install.bat / INSTALL_README.txt のみ、
+# それ以外 (Launcher.bat / Manager.bat / show_folder_dialog.ps1 / bundle_manifest.json /
+# files/) は `bundle/` 配下に集約。ユーザーが zip 展開した時に「Install.bat を押すだけ」を
+# 一目瞭然にする UX 改善 + 将来の dir 構造変更を manifest 経由で forward compat に。
+$BundleDir    = Join-Path $StagingDir 'bundle'
+$FilesDir     = Join-Path $BundleDir 'files'
+$ManifestPath = Join-Path $BundleDir 'bundle_manifest.json'
 $ZipPath      = Join-Path $StagingRoot "GCTonePrism_v$Version.zip"
 $ChangelogPath = Join-Path $RepoRoot 'CHANGELOG.md'
 
@@ -1613,37 +1619,47 @@ function Build-Updater {
 function Copy-Templates {
     Write-Step "テンプレートを staging に同梱"
 
-    # zip ルート配置 (Install.bat / 設定 / dialog helper + ショートカット bat)
-    # Launcher.bat / Manager.bat は zip ルートに置き、Install.bat が <親>/ (=
-    # GCTonePrism/ の1つ上、選んだ親フォルダ直下) にコピーする規約 (Phase 2 で
-    # 階層変更、SPEC §3.7.1 参照)
+    # (#175 Phase 4.1) zip 構造整理: zip 直下 = Install.bat / INSTALL_README.txt のみ。
+    # Launcher.bat / Manager.bat / show_folder_dialog.ps1 / bundle_manifest.json / files/ は
+    # `bundle/` 配下に集約 (新規ユーザーが zip 展開した時の「面食らい」を解消、Install.bat
+    # を押すだけが一目瞭然になる)。Install.bat 自身は `<SCRIPT_DIR>\bundle\...` 経由で
+    # bundle 内の各 file を参照する形に同期更新 (templates/Install.bat 参照)。
+
+    # zip ルート配置 (ユーザーがダブルクリック / 説明 read する 2 file のみ)
     $rootTemplates = @(
         @{ Src = 'templates\Install.bat';            Dest = 'Install.bat';            Label = 'Install.bat' },
-        @{ Src = 'templates\INSTALL_README.txt';     Dest = 'INSTALL_README.txt';     Label = 'INSTALL_README.txt' },
-        @{ Src = 'templates\show_folder_dialog.ps1'; Dest = 'show_folder_dialog.ps1'; Label = 'show_folder_dialog.ps1 (Install.bat dialog helper)' },
-        @{ Src = 'templates\Launcher.bat';           Dest = 'Launcher.bat';           Label = 'Launcher.bat (shortcut, parent-level)' },
-        @{ Src = 'templates\Manager.bat';            Dest = 'Manager.bat';            Label = 'Manager.bat (shortcut, parent-level)' }
+        @{ Src = 'templates\INSTALL_README.txt';     Dest = 'INSTALL_README.txt';     Label = 'INSTALL_README.txt' }
     )
-    # files/ 配下配置:
+
+    # bundle/ 直下配置 (Install.bat が `<SCRIPT_DIR>\bundle\...` 経由で参照):
+    #   - show_folder_dialog.ps1: Install.bat の FolderBrowserDialog 起動 helper
+    #   - Launcher.bat / Manager.bat: Install.bat が <install_parent>/ (= 選んだ親フォルダ直下)
+    #     にコピーする shortcut bat、ダブルクリック起動規約 (SPEC §3.7.1)
+    $bundleTemplates = @(
+        @{ Src = 'templates\show_folder_dialog.ps1'; Dest = 'bundle\show_folder_dialog.ps1'; Label = 'show_folder_dialog.ps1 (Install.bat dialog helper)' },
+        @{ Src = 'templates\Launcher.bat';           Dest = 'bundle\Launcher.bat';           Label = 'Launcher.bat (shortcut, parent-level)' },
+        @{ Src = 'templates\Manager.bat';            Dest = 'bundle\Manager.bat';            Label = 'Manager.bat (shortcut, parent-level)' }
+    )
+
+    # bundle/files/ 配下配置:
     #   - CHANGELOG.md: Phase 4 (#108) で Manager UI が「現在の Bundle version」を抽出するために
     #     `<install>/CHANGELOG.md` から parse する。SPEC §3.7.7「CHANGELOG.md は zip 同梱規約」に
-    #     従い、repo root の CHANGELOG.md を `files/CHANGELOG.md` として同梱する (= `<install>/`
-    #     直下、`Launcher/` `Manager/` 等と同階層)。Project 全体の SoT という semantic に整合し、
-    #     File Explorer から install dir を開いたユーザーから直接見える位置。
-    #     Install.bat の `robocopy files/* <install>/` で自動展開される。Manager UI Phase 4 の
-    #     アップデートフロー [7]〜[10] では `FileReplacer.ReplaceFile` の単体 file copy で更新
-    #     (Launcher.bat / Manager.bat の shortcut bat 置換と同 pattern)。
+    #     従い、repo root の CHANGELOG.md を `bundle/files/CHANGELOG.md` として同梱する (= zip 展開後
+    #     Install.bat の `robocopy bundle\files\* <install>\` で `<install>/CHANGELOG.md` 直下に展開、
+    #     `Launcher/` `Manager/` 等と同階層)。Project 全体の SoT という semantic に整合。
+    #     Manager UI Phase 4 のアップデートフロー [7]〜[10] では `FileReplacer.ReplaceFile` の単体
+    #     file copy で更新 (Launcher.bat / Manager.bat の shortcut bat 置換と同 pattern)。
     #   - Launcher/version.gd: Phase 4 で Manager UI の VersionInventory が Launcher 版数を抽出
     #     するのに使う。Godot エクスポート成果物 (`bin/GCTonePrism_Launcher.exe` + `.pck` 等) には
     #     `.gd` source が含まれない (= `.pck` 内に compile されて隠匿) ため、`Launcher/version.gd`
     #     を staging 段階で明示的に同梱して install dir 配下に置く。Manager は
     #     `<install>/Launcher/version.gd` を直接 parse して MAJOR/MINOR/PATCH 定数を読み取る。
     $filesTemplates = @(
-        @{ Src = 'CHANGELOG.md'; Dest = 'files\CHANGELOG.md'; Label = 'CHANGELOG.md (Bundle SoT for Manager UI, Phase 4 #108)' },
-        @{ Src = 'Launcher\version.gd'; Dest = 'files\Launcher\version.gd'; Label = 'Launcher/version.gd (Launcher SoT for Manager UI VersionInventory, Phase 4 #108)' }
+        @{ Src = 'CHANGELOG.md'; Dest = 'bundle\files\CHANGELOG.md'; Label = 'CHANGELOG.md (Bundle SoT for Manager UI, Phase 4 #108)' },
+        @{ Src = 'Launcher\version.gd'; Dest = 'bundle\files\Launcher\version.gd'; Label = 'Launcher/version.gd (Launcher SoT for Manager UI VersionInventory, Phase 4 #108)' }
     )
 
-    foreach ($tpl in ($rootTemplates + $filesTemplates)) {
+    foreach ($tpl in ($rootTemplates + $bundleTemplates + $filesTemplates)) {
         $src = Join-Path $RepoRoot $tpl.Src
         $dst = Join-Path $StagingDir $tpl.Dest
         if (-not (Test-Path $src)) {
@@ -1694,35 +1710,108 @@ function Copy-Templates {
 # Phase 7: ExpectedFiles 検証
 # ============================================================================
 
+# (#175 Phase 4.1) Bundle manifest 同梱 + forward compatibility 機構の SoT list。
+# `Assert-ExpectedFiles` が staging 検証で参照し、`New-BundleManifest` が `bundle/bundle_manifest.json`
+# 生成時にも同 list を流用する (= drift fence の SoT 1 箇所維持、Phase 4 PR #161 で頻発した
+# expectedFiles 同期 drift を物理的に closure)。`$script:` scope で関数間共有。
+#
+# 新 zip 構造 (Phase 4.1):
+#   zip 直下 = Install.bat / INSTALL_README.txt のみ (ユーザー視点で「ダブルクリックする 2 file」)
+#   bundle/  = それ以外全部 (Launcher.bat / Manager.bat / show_folder_dialog.ps1 / bundle_manifest.json + files/)
+#
+# manifest files list は **`bundle/` prefix を含まない** = bundle 内の相対 path で表現する自己完結性
+# (= 将来 bundle/ → 他名に変えた時に manifest 中身を触らず済む)。`Assert-ExpectedFiles` 側は
+# zip root の Install.bat / INSTALL_README.txt + bundle_manifest.json + manifest 内 files
+# (それぞれ bundle/ prefix 付与) で staging 全体を検証する。
+$script:BundleManifestFiles = @(
+    # bundle/ 直下 (Install.bat が `<SCRIPT_DIR>\bundle\...` 経由で参照)
+    'show_folder_dialog.ps1',
+    'Launcher.bat',
+    'Manager.bat',
+    # bundle/files/ 配下 = インストール後の <親>\GCTonePrism\ に展開される payload
+    'files\Launcher\GCTonePrism_Launcher.exe',
+    'files\Launcher\version.gd',                # Phase 4 #108: Manager UI VersionInventory が parse する SoT
+    'files\Manager\GCTonePrism_Manager.exe',
+    'files\Manager\GCTonePrism_Manager.exe.config',
+    'files\Manager\System.Data.SQLite.dll',
+    'files\Manager\Microsoft.WindowsAPICodePack.dll',
+    'files\Manager\Microsoft.WindowsAPICodePack.Shell.dll',
+    'files\Manager\x64\SQLite.Interop.dll',
+    'files\Manager\x86\SQLite.Interop.dll',
+    # Updater (Phase 3、SPEC §3.7.4): Manager 置換 + 再起動の最小 CLI、Companions/ 配下に配置
+    'files\Companions\Updater\GCTonePrism_Updater.exe',
+    'files\Companions\Updater\GCTonePrism_Updater.exe.config',
+    # CHANGELOG.md (Phase 4 #108、SPEC §3.7.7): Manager UI が installed Bundle version 抽出に使う SoT、
+    # `<install>/CHANGELOG.md` 直下配置で `Launcher/` `Manager/` 等と同階層 (project-wide な SoT semantic)
+    'files\CHANGELOG.md'
+)
+
+# ============================================================================
+# Phase 6.5: Bundle manifest 生成 (#175 Phase 4.1)
+# ============================================================================
+# `bundle/bundle_manifest.json` を生成して zip 同梱する。Manager UI 側 (UpdateDownloader.ValidateStaging)
+# が apply 時に読み込んで「list 通り存在するか」だけ check することで、Manager 側の hardcoded
+# expectedFiles list を持たずに **zip 構造変更を自動追従** できる forward compat 機構を獲得する。
+#
+# 旧設計 (Phase 4 PR #161) は Manager に hardcoded list を持ち、Release.ps1 の `Assert-ExpectedFiles`
+# と SPEC §3.7.8 で同期 fence していたが、新 release で zip 構造が変わると旧 Manager が新 zip を
+# reject する (= 「v0.3.0 → v0.3.1 で `files/Manager/CHANGELOG.md` → `files/CHANGELOG.md` に path
+# 変更したら旧 Manager が新 zip を validate できず手動 install 必要」path)。manifest 同梱で本
+# silent failure を物理的に closure。
+function New-BundleManifest {
+    Write-Step "Bundle manifest を生成: $ManifestPath"
+
+    # manifest schema (schema_version 1):
+    #   {
+    #     "bundle_version": "0.3.1",
+    #     "generated_at": "2026-05-18T...Z" (ISO 8601),
+    #     "schema_version": 1,
+    #     "files": ["show_folder_dialog.ps1", "files/CHANGELOG.md", ...]  # bundle/ からの相対 path
+    #   }
+    # 将来 schema 拡張時 (size / sha256 等の追加) は schema_version を bump、Manager 側で version
+    # 分岐させる。
+    $manifest = [ordered]@{
+        bundle_version = $Version
+        generated_at   = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ" -AsUTC -ErrorAction SilentlyContinue)
+        schema_version = 1
+        # files list: bundle/ からの相対 path (= bundle dir 名変更時に manifest 触らず済む自己完結性)
+        # JSON で `/` separator に統一 (Windows path separator `\` は JSON 中 escape 必須 + non-Windows
+        # 環境からの読みやすさ低下のため避ける)。staging に書き出すときも `/` で記録し、Manager 側で
+        # `Path.Combine` 渡す前に platform-specific separator に変換する想定 (.NET の Path.Combine は
+        # `/` separator も受理するので実用上は変換不要、defensive 同期のため明示)。
+        files          = @($script:BundleManifestFiles | ForEach-Object { $_ -replace '\\', '/' })
+    }
+    # PS 5.1 では `-AsUTC` 未対応のため fallback (`Get-Date` の default は local time)
+    if ([string]::IsNullOrEmpty($manifest.generated_at)) {
+        $manifest.generated_at = ([DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"))
+    }
+
+    # bundle dir 存在 check (Copy-Templates が既に作成済の想定、defensive で再作成)
+    if (-not (Test-Path $BundleDir)) {
+        New-Item -ItemType Directory -Path $BundleDir -Force | Out-Null
+    }
+    $json = $manifest | ConvertTo-Json -Depth 5
+    # UTF-8 (no BOM) で書き出し (Manager 側 JavaScriptSerializer が BOM を含む / 含まない両対応の
+    # ため strict 制約ではないが、project 全体の JSON 出力規約と一貫させる)
+    [System.IO.File]::WriteAllText($ManifestPath, $json, $script:Utf8NoBomEncoding)
+
+    Write-Ok "Bundle manifest 生成完了 ($($script:BundleManifestFiles.Count) entries)"
+}
+
 function Assert-ExpectedFiles {
     Write-Step "ExpectedFiles 検証"
 
-    # 期待ファイル一覧 (zip ルート + files/ 配下、SPEC §3.7.1 正規構造)
-    $expected = @(
-        # zip ルート (Install.bat が <親>/ にコピーするショートカット bat 含む)
+    # (#175 Phase 4.1) 検証対象 = zip 直下 (Install.bat / INSTALL_README.txt) + bundle/bundle_manifest.json
+    # (New-BundleManifest が直前で生成) + bundle/<manifest files> (= staging 内に bundle/ prefix で揃ってる)。
+    # SoT は `$script:BundleManifestFiles` (= manifest と共通)、本関数では bundle/ prefix を付与して staging
+    # 全 path を検証。
+    $zipRootExpected = @(
         'Install.bat',
         'INSTALL_README.txt',
-        'show_folder_dialog.ps1',
-        'Launcher.bat',
-        'Manager.bat',
-        # files/ 配下 = インストール後の <親>\GCTonePrism\ に展開される payload
-        'files\Launcher\GCTonePrism_Launcher.exe',
-        'files\Manager\GCTonePrism_Manager.exe',
-        'files\Manager\GCTonePrism_Manager.exe.config',
-        'files\Manager\System.Data.SQLite.dll',
-        'files\Manager\Microsoft.WindowsAPICodePack.dll',
-        'files\Manager\Microsoft.WindowsAPICodePack.Shell.dll',
-        'files\Manager\x64\SQLite.Interop.dll',
-        'files\Manager\x86\SQLite.Interop.dll',
-        # Updater (Phase 3、SPEC §3.7.4): Manager 置換 + 再起動の最小 CLI、Companions/ 配下に配置
-        'files\Companions\Updater\GCTonePrism_Updater.exe',
-        'files\Companions\Updater\GCTonePrism_Updater.exe.config',
-        # CHANGELOG.md (Phase 4 #108、SPEC §3.7.7): Manager UI が installed Bundle version 抽出に使う SoT、
-        # `<install>/CHANGELOG.md` 直下配置で `Launcher/` `Manager/` 等と同階層 (project-wide な SoT semantic)
-        'files\CHANGELOG.md',
-        # Launcher/version.gd (Phase 4 #108): Manager UI の VersionInventory が Launcher 版数を抽出する SoT
-        'files\Launcher\version.gd'
+        'bundle\bundle_manifest.json'  # New-BundleManifest 直前生成、自己整合性 fence
     )
+    $bundleExpected = $script:BundleManifestFiles | ForEach-Object { Join-Path 'bundle' $_ }
+    $expected = $zipRootExpected + $bundleExpected
 
     $missing = @()
     foreach ($rel in $expected) {
@@ -1736,7 +1825,7 @@ function Assert-ExpectedFiles {
         $missing | ForEach-Object { Write-Host "        $_" -ForegroundColor Red }
         Fail "ExpectedFiles 検証で漏れを検出しました ($($missing.Count) 件)"
     }
-    Write-Ok "ExpectedFiles 全 $($expected.Count) 件 OK"
+    Write-Ok "ExpectedFiles 全 $($expected.Count) 件 OK (zip root $($zipRootExpected.Count) + bundle $($bundleExpected.Count))"
 }
 
 # ============================================================================
@@ -1894,6 +1983,7 @@ Build-Launcher
 Build-Manager
 Build-Updater
 Copy-Templates
+New-BundleManifest        # (#175 Phase 4.1) bundle/bundle_manifest.json 生成、Assert より前
 Assert-ExpectedFiles
 Clear-OldGodot
 

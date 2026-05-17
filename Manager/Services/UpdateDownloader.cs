@@ -145,14 +145,109 @@ namespace GCTonePrism.Manager.Services
         }
 
         /// <summary>
+        /// (#175 Phase 4.1) staging dir 内の **bundle root** を解決する helper。
+        ///
+        /// 新 zip 構造 (v0.3.1+): zip 直下 = `Install.bat` / `INSTALL_README.txt`、それ以外
+        /// (`Launcher.bat` / `Manager.bat` / `show_folder_dialog.ps1` / `bundle_manifest.json` /
+        /// `files/`) は `bundle/` 配下に集約。caller は staging dir 内の path 参照を `bundleRoot`
+        /// 経由 (`Path.Combine(bundleRoot, "files", ...)`) で行う。
+        ///
+        /// 後方互換: 旧 zip 構造 (v0.3.0) は zip 直下に全て配置されていた。本 helper は manifest
+        /// (`<staging>/bundle/bundle_manifest.json`) の存在で新/旧を判定し:
+        ///   - manifest あれば `bundleRoot = <staging>/bundle` (新構造)
+        ///   - manifest 無ければ `bundleRoot = <staging>` (旧構造 = legacy fallback)
+        ///
+        /// 注意: legacy fallback path (= v0.3.0 install の Manager から v0.3.0 zip を取得する path)
+        /// は v0.3.1 以降の zip 構造変更には対応できない (= 旧 Manager が新 zip 構造を validate
+        /// できず手動 install 必要)。Phase 4.1 (#175) の trade-off。
+        /// </summary>
+        public static string ResolveBundleRoot(string stagingDir)
+        {
+            string manifestPath = Path.Combine(stagingDir, "bundle", "bundle_manifest.json");
+            if (File.Exists(manifestPath))
+            {
+                string bundleRoot = Path.Combine(stagingDir, "bundle");
+                Logger.Info("[UpdateDownloader] ResolveBundleRoot: manifest 検出 (新構造) → " + bundleRoot);
+                return bundleRoot;
+            }
+            Logger.Warn("[UpdateDownloader] ResolveBundleRoot: manifest 不在 (旧構造 v0.3.0 fallback) → " + stagingDir);
+            return stagingDir;
+        }
+
+        /// <summary>
         /// 展開後の staging dir に期待ファイルが揃っているか検証する。
         /// 不足があれば missing list を返す (空 list = OK)。
+        ///
+        /// (#175 Phase 4.1) 検証 source は 2 経路:
+        ///   (a) **manifest 経由** (新構造、v0.3.1+): `<staging>/bundle/bundle_manifest.json` を読み
+        ///       「list 通り存在するか」を check。**zip ごとに新 manifest = 新 file 構造を表現する**
+        ///       ので、Manager 側コード変更なしに dir 構造変更を吸収できる forward compat 経路。
+        ///   (b) **legacy hardcoded list** (旧構造、v0.3.0): manifest 不在時の fallback。Phase 4 PR #161
+        ///       で確立した hardcoded list (Release.ps1 `Assert-ExpectedFiles` と SPEC §3.7.8 で
+        ///       同期 fence) をそのまま使用。**path 変更には対応不可** (= v0.3.0 install の Manager
+        ///       から v0.3.1 への update path で再発するため、Phase 4.1 release で v0.3.0 install
+        ///       からの自動 update flow は破綻、手動 install が必要)。
         /// </summary>
         public static IReadOnlyList<string> ValidateStaging(string stagingDir)
         {
             Logger.Info("[UpdateDownloader] ValidateStaging 開始: " + stagingDir);
             var missing = new List<string>();
-            // zip ルート (= stagingDir 直下)
+            string manifestPath = Path.Combine(stagingDir, "bundle", "bundle_manifest.json");
+            if (File.Exists(manifestPath))
+            {
+                // (#175 Phase 4.1) 新 path: manifest 経由検証。manifest 内 files は `bundle/` からの
+                // 相対 path で記録されている (= `Path.Combine(stagingDir, "bundle", manifestFile)` で
+                // staging 内 full path)。
+                Logger.Info("[UpdateDownloader] ValidateStaging: manifest 経由 (新構造、forward compat path)");
+                try
+                {
+                    BundleManifest manifest = ReadBundleManifest(manifestPath);
+                    if (manifest == null || manifest.Files == null)
+                    {
+                        Logger.Warn("[UpdateDownloader] ValidateStaging: manifest parse 失敗、legacy fallback に降格");
+                        return ValidateStagingLegacy(stagingDir);
+                    }
+                    string bundleRoot = Path.Combine(stagingDir, "bundle");
+                    foreach (string rel in manifest.Files)
+                    {
+                        // JSON 上は `/` separator で記録されているので Windows 用に変換
+                        string relWin = rel.Replace('/', Path.DirectorySeparatorChar);
+                        string full = Path.Combine(bundleRoot, relWin);
+                        if (!File.Exists(full) && !Directory.Exists(full))
+                        {
+                            missing.Add(Path.Combine("bundle", relWin));
+                        }
+                    }
+                    if (missing.Count > 0)
+                    {
+                        Logger.Warn("[UpdateDownloader] ValidateStaging 不足 " + missing.Count + " 件 (manifest 経由): " + string.Join(", ", missing));
+                    }
+                    else
+                    {
+                        Logger.Info("[UpdateDownloader] ValidateStaging OK (manifest 経由、全 " + manifest.Files.Count + " ファイル存在)");
+                    }
+                    return missing;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("[UpdateDownloader] ValidateStaging: manifest 経由検証で例外、legacy fallback に降格: " + ex.Message);
+                    return ValidateStagingLegacy(stagingDir);
+                }
+            }
+            // manifest 不在 = 旧構造 (v0.3.0)、legacy hardcoded list で fallback
+            Logger.Warn("[UpdateDownloader] ValidateStaging: manifest 不在 (旧構造 v0.3.0 fallback、forward compat 制限あり)");
+            return ValidateStagingLegacy(stagingDir);
+        }
+
+        /// <summary>
+        /// (#175 Phase 4.1) Legacy 旧構造 (v0.3.0) 用の hardcoded list 検証 path。
+        /// Phase 4 PR #161 round 1 C1 fix で確立した list をそのまま保持。新規 caller は使わず、
+        /// `ValidateStaging` 内の manifest fallback 経路としてのみ呼ばれる。
+        /// </summary>
+        private static IReadOnlyList<string> ValidateStagingLegacy(string stagingDir)
+        {
+            var missing = new List<string>();
+            // 旧 zip ルート (= stagingDir 直下、v0.3.0 構造)
             string[] rootExpected = new[]
             {
                 "Install.bat",
@@ -161,12 +256,7 @@ namespace GCTonePrism.Manager.Services
                 "Manager.bat",
                 "show_folder_dialog.ps1",
             };
-            // files/ 配下
-            // (#108 Phase 4 round 2 M7 / codex P1) Release.ps1 `Assert-ExpectedFiles` の `$expected` と
-            // **literal 一致** に拡張 (旧版は minimal subset で、`.exe.config` / 各 DLL / SQLite.Interop /
-            // version.gd 不在の broken release を素通しして apply 続行 → 新 install が起動失敗、の path
-            // があった)。AGENTS.md / SPEC §3.7.8 の「同期必須」規約を文字通り実装、broken release を
-            // pre-replacement で検出。
+            // 旧 files/ 配下 (v0.3.0 構造)
             string[] filesExpected = new[]
             {
                 Path.Combine("files", "Launcher", "GCTonePrism_Launcher.exe"),
@@ -178,11 +268,10 @@ namespace GCTonePrism.Manager.Services
                 Path.Combine("files", "Manager", "Microsoft.WindowsAPICodePack.Shell.dll"),
                 Path.Combine("files", "Manager", "x64", "SQLite.Interop.dll"),
                 Path.Combine("files", "Manager", "x86", "SQLite.Interop.dll"),
-                Path.Combine("files", "CHANGELOG.md"),  // C1 fix: `files/` 直下 (SPEC §3.7.7)
+                Path.Combine("files", "CHANGELOG.md"),
                 Path.Combine("files", "Companions", "Updater", "GCTonePrism_Updater.exe"),
                 Path.Combine("files", "Companions", "Updater", "GCTonePrism_Updater.exe.config"),
             };
-
             foreach (var rel in rootExpected)
             {
                 string full = Path.Combine(stagingDir, rel);
@@ -195,13 +284,60 @@ namespace GCTonePrism.Manager.Services
             }
             if (missing.Count > 0)
             {
-                Logger.Warn("[UpdateDownloader] ValidateStaging 不足 " + missing.Count + " 件: " + string.Join(", ", missing));
+                Logger.Warn("[UpdateDownloader] ValidateStagingLegacy 不足 " + missing.Count + " 件: " + string.Join(", ", missing));
             }
             else
             {
-                Logger.Info("[UpdateDownloader] ValidateStaging OK (全 " + (rootExpected.Length + filesExpected.Length) + " ファイル存在)");
+                Logger.Info("[UpdateDownloader] ValidateStagingLegacy OK (全 " + (rootExpected.Length + filesExpected.Length) + " ファイル存在)");
             }
             return missing;
+        }
+
+        /// <summary>
+        /// (#175 Phase 4.1) `bundle/bundle_manifest.json` を読み込んで `BundleManifest` POCO に変換。
+        /// schema_version 1 を想定。失敗時は null を返す (caller は legacy fallback に降格)。
+        /// </summary>
+        private static BundleManifest ReadBundleManifest(string manifestPath)
+        {
+            try
+            {
+                string json = File.ReadAllText(manifestPath, System.Text.Encoding.UTF8);
+                var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
+                var dict = ser.DeserializeObject(json) as System.Collections.Generic.IDictionary<string, object>;
+                if (dict == null) return null;
+                var manifest = new BundleManifest();
+                object bv;
+                if (dict.TryGetValue("bundle_version", out bv) && bv != null) manifest.BundleVersion = bv.ToString();
+                object ga;
+                if (dict.TryGetValue("generated_at", out ga) && ga != null) manifest.GeneratedAt = ga.ToString();
+                object sv;
+                if (dict.TryGetValue("schema_version", out sv) && sv != null)
+                {
+                    int parsed;
+                    if (int.TryParse(sv.ToString(), out parsed)) manifest.SchemaVersion = parsed;
+                }
+                object filesObj;
+                if (dict.TryGetValue("files", out filesObj))
+                {
+                    var arr = filesObj as object[];
+                    if (arr != null)
+                    {
+                        manifest.Files = new List<string>(arr.Length);
+                        foreach (var item in arr)
+                        {
+                            if (item != null) manifest.Files.Add(item.ToString());
+                        }
+                    }
+                }
+                Logger.Info("[UpdateDownloader] ReadBundleManifest OK: bundle_version=" + (manifest.BundleVersion ?? "(null)") +
+                    " schema_version=" + manifest.SchemaVersion + " files=" + (manifest.Files == null ? 0 : manifest.Files.Count));
+                return manifest;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[UpdateDownloader] ReadBundleManifest 失敗: " + manifestPath + " ex=" + ex.Message);
+                return null;
+            }
         }
 
         /// <summary>
@@ -226,7 +362,10 @@ namespace GCTonePrism.Manager.Services
             }
             // (#108 Phase 4 C1 fix) Bundle SoT は `files/CHANGELOG.md` (= Release.ps1 `Copy-Templates`
             // と同期、SPEC §3.7.7)。旧 path `files/Manager/CHANGELOG.md` は drift 残骸。
-            string changelogPath = Path.Combine(stagingDir, "files", "CHANGELOG.md");
+            // (#175 Phase 4.1) bundleRoot 経由に変更 (新構造で `<staging>/bundle/files/CHANGELOG.md`、
+            // 旧構造 fallback で `<staging>/files/CHANGELOG.md`)。
+            string bundleRoot = ResolveBundleRoot(stagingDir);
+            string changelogPath = Path.Combine(bundleRoot, "files", "CHANGELOG.md");
             Logger.Info("[UpdateDownloader] ValidateBundleVersion: expected=" + expectedVersion.ToString(3) + " changelog=" + changelogPath);
             BundleEntry latest = ChangelogParser.TryReadLatestFromFile(changelogPath);
             if (latest == null || latest.Version == null)
@@ -246,6 +385,23 @@ namespace GCTonePrism.Manager.Services
             }
             return match;
         }
+    }
+
+    /// <summary>
+    /// (#175 Phase 4.1) `bundle/bundle_manifest.json` の deserialize 結果 POCO。schema_version 1 を想定。
+    /// 将来 schema 拡張 (size / sha256 等) で field を追加する場合は schema_version も bump し、
+    /// `ReadBundleManifest` で version 分岐させる。
+    /// </summary>
+    internal sealed class BundleManifest
+    {
+        /// <summary>manifest 生成時の Bundle version 文字列 (例: "0.3.1")。</summary>
+        public string BundleVersion { get; set; }
+        /// <summary>manifest 生成時刻 (ISO 8601 UTC、例: "2026-05-18T01:30:00Z")。</summary>
+        public string GeneratedAt { get; set; }
+        /// <summary>schema バージョン (現状 1、将来拡張時 bump)。</summary>
+        public int SchemaVersion { get; set; }
+        /// <summary>bundle/ からの相対 file path リスト (JSON 上は `/` separator)。</summary>
+        public System.Collections.Generic.List<string> Files { get; set; }
     }
 
     internal sealed class DownloadProgress
