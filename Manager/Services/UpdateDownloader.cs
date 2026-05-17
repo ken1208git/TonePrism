@@ -78,17 +78,32 @@ namespace GCTonePrism.Manager.Services
             }
         }
 
-        /// <summary>zip を `extractDir` に展開する。事前に extractDir が存在する場合は削除する。</summary>
+        /// <summary>
+        /// zip を `extractDir` に展開する。caller (= RunUpdateWorker) が事前に `extractDir` を
+        /// clean state (既存 zombie 削除 + CreateDirectory) にしている前提なので本 method 内では
+        /// dir 削除しない。
+        ///
+        /// **重要 (Phase 4 bugfix)**: 旧実装は冒頭で `Directory.Delete(extractDir, recursive: true)`
+        /// していたが、zip ファイル自体が `extractDir` 内部 (= RunUpdateWorker の zipPath 設計) に
+        /// DL されているため、dir 削除で zip も一緒に消え、直後の `ZipFile.ExtractToDirectory` が
+        /// FileNotFoundException で落ちる自滅 path があった。caller の clean 責務に統一して解消。
+        /// </summary>
         public static void Extract(string zipPath, string extractDir)
         {
             Logger.Info("[UpdateDownloader] Extract 開始: zip=" + zipPath + " → " + extractDir);
             try
             {
-                if (Directory.Exists(extractDir))
+                if (!File.Exists(zipPath))
                 {
-                    Directory.Delete(extractDir, recursive: true);
+                    throw new FileNotFoundException(
+                        "zip ファイルが見つかりません: " + zipPath +
+                        " (DL 直後に消失している場合、アンチウイルスの quarantine 疑い)。",
+                        zipPath);
                 }
-                Directory.CreateDirectory(extractDir);
+                if (!Directory.Exists(extractDir))
+                {
+                    Directory.CreateDirectory(extractDir);
+                }
                 ZipFile.ExtractToDirectory(zipPath, extractDir);
                 Logger.Info("[UpdateDownloader] Extract 完了");
             }
