@@ -273,6 +273,22 @@ namespace GCTonePrism.Manager.Services
 
             long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
+            // (#108 Phase 4 round 8 M-3) `UpdateCheckLastAtUnixMs` stamp を成功/失敗 path 共通の上位に
+            // 移動。旧実装は success path 内 (SaveCache 直後) で stamp していたため、API 失敗 + fallback
+            // cache 経路で stamp が skip → TTL 切れ + 持続失敗で起動毎に CheckFromApiAsync → API 再ヒット
+            // → 失敗を loop する path があった。学校 LAN 50 PC 同時起動 + GitHub API down で 60 req/hour
+            // rate limit に集団自殺する path 防止 (= round 1 M4 で SettingsKeys docstring に書いた
+            // 「学校 LAN rate limit mitigation」を失敗 path でも有効化)。fallback cache の `FromCache=true`
+            // 表示時の「最後の確認」も nowMs ベースで進むので UI 上の整合性も改善。
+            try
+            {
+                _settings.SetInt64(SettingsKeys.UpdateCheckLastAtUnixMs, nowMs);
+            }
+            catch (Exception stampEx)
+            {
+                Logger.Warn("[UpdateChecker] UpdateCheckLastAtUnixMs 書込み失敗: " + stampEx.Message);
+            }
+
             // 失敗 case (lastError != null):
             //   - fallback cache あり → cache の Latest を保持しつつ、**現在の Current で Status を再評価**
             //     して FromCache=true + LastError を添付。UI は「cache 表示中 + 再確認失敗」を grey の
@@ -313,15 +329,9 @@ namespace GCTonePrism.Manager.Services
             };
 
             // (#108 Phase 4 round 1 M4 → round 5 M-3) lock 撤去 (SettingsRepository atomic 前提)。
+            // (#108 Phase 4 round 8 M-3) `UpdateCheckLastAtUnixMs` stamp は本 method 上位で実行済
+            // (失敗 path 共通化)、ここでは SaveCache のみ実施。
             SaveCache(result);
-            try
-            {
-                _settings.SetInt64(SettingsKeys.UpdateCheckLastAtUnixMs, nowMs);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn("[UpdateChecker] UpdateCheckLastAtUnixMs 書込み失敗: " + ex.Message);
-            }
             return result;
         }
 
@@ -414,9 +424,14 @@ namespace GCTonePrism.Manager.Services
                 string json = ser.Serialize(dto);
                 _settings.SetString(SettingsKeys.UpdateCheckCachedJson, json);
             }
-            catch
+            catch (Exception ex)
             {
-                // cache 失敗は致命ではない、無視
+                // (#108 Phase 4 round 8 L-2) cache 失敗は致命ではない (= 次回起動で hydrate なし →
+                // `ComputeStatus(current, null)` で `UpToDate` default に倒れる、API 失敗時の cache UX が
+                // 劣化するが alive)。round 6 M-2 sweep 規約 (silent path に Logger.Warn) と非対称
+                // だったため warn を追加、MaxJsonLength=1MB 超過 (累積 release notes 大量 + 画像 embed
+                // 等) / SQLite 書込み失敗等の診断 trail を残す。
+                Logger.Warn("[UpdateChecker] SaveCache 失敗 (cache 不更新、起動時 hydrate なし): " + ex.Message);
             }
         }
 

@@ -633,7 +633,12 @@ namespace GCTonePrism.Manager.Controls
                 // も OLD のまま (= UI は依然「アップデートあり」を正しく表示)、次回起動時の zombie .bak
                 // detection で 「target 存在 + .bak 存在 → 前回 partial state、target を正として .bak 削除」
                 // path に自然に流れて消化される。
-                Services.Logger.Info("[UpdateSectionPanel] 全 dir 置換成功、CHANGELOG.md 置換 + .bak cleanup");
+                // (#108 Phase 4 round 8 M-1) defer block にも `[Step 8/10]` 番号を割り当て、worker
+                // log の `[Step N/10]` 表記の 8 番欠番 (Step 7 → Step 9 の飛び) を埋める。旧実装は
+                // round 5 M-1 で旧 Step 8 を defer 化した際、log label の renumber を怠ったため
+                // log を読むユーザーから「Step 8 で abort してログが切れた?」と誤読される path があった
+                // (= round 2 M9 「code 内部 step 番号 = [N/10]」原則の self-violation)。
+                Services.Logger.Info("[UpdateSectionPanel] [Step 8/10] CHANGELOG.md 置換 + .bak cleanup (defer: Updater spawn 成功後、SPEC §3.7.3 [8] + round 5 M-1 で旧 Step 8 を本 defer に移動)");
                 // (#108 Phase 4 round 7 M-1) `FileReplacer.ReplaceFile` は round 2 H4 で rollback-fatal
                 // 経路に `InvalidOperationException` throw を導入したため、旧 `if (!ReplaceFile(...))`
                 // 形式では throw を外に逃がして worker catch (本 method 末尾) で rethrow →
@@ -754,7 +759,15 @@ namespace GCTonePrism.Manager.Controls
             {
                 Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
             }
-            catch { }
+            catch (Exception ex)
+            {
+                // (#108 Phase 4 round 8 L-6) 旧実装は `catch { }` 空握り潰しで「click したのに何も
+                // 起きない」UX + 診断 trail なし。同 class の他 catch (`btnOpenBrowser_Click` 等) は
+                // MessageBox + Logger 双方を残しているため非対称だった。release notes 内 URL click は
+                // 連続発火し得る (link hover→click の高頻度 path)、MessageBox dialog 連発で煩雑なため
+                // Logger.Warn のみで継続。
+                Services.Logger.Warn("[UpdateSectionPanel] release notes 内 URL の browser launch 失敗: url=" + url + " ex=" + ex.Message);
+            }
         }
     }
 }

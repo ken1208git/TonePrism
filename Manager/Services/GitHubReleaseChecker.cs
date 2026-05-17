@@ -112,6 +112,13 @@ namespace GCTonePrism.Manager.Services
                     if (latest != null && r.Version > latest) continue;
                     filtered.Add(r);
                 }
+                // (#108 Phase 4 round 8 L-5) 旧実装は API natural order (published_at desc) を信頼して
+                // 返却していたが、GitHub API spec 変更 / pagination cursor 変更で順序が異なった場合に
+                // 累積表示 (`MarkdownRenderer.BuildCumulativeHtml`) が予期せぬ順序になる risk があった。
+                // Manager 側で Version desc に明示 sort して SoT 化、API 順序非依存に。
+                // System.Version は IComparable で SemVer 3-part numeric 順比較、in-place List.Sort で
+                // allocation 削減 (LINQ OrderByDescending より microopt)。
+                filtered.Sort((a, b) => b.Version.CompareTo(a.Version));
                 return filtered;
             }
         }

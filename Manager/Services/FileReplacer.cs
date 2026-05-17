@@ -67,11 +67,17 @@ namespace GCTonePrism.Manager.Services
             catch (Exception ex)
             {
                 Services.Logger.Error("[FileReplacer] ファイル置換失敗 (" + targetPath + "): " + ex.Message);
-                // (#108 Phase 4 round 2 H4) rollback: .bak が残っていれば戻す。rollback **自体** が失敗
-                // した case は致命的状態 (target 不在 + .bak のみ存在、user の手動復旧が必要) のため
-                // InvalidOperationException で escalate、caller (= UpdateSectionPanel.RunUpdateWorker)
-                // 側で IOException と区別して MessageBox で「手動復旧要」を示せるようにする。
-                // DirReplacer.RollbackInternal の致命的 throw pattern と対称。
+                // (#108 Phase 4 round 2 H4 → round 8 M-2) rollback: .bak が残っていれば戻す。
+                // rollback **自体** が失敗した case は致命的状態 (target 不在 + .bak のみ存在、user の
+                // 手動復旧が必要) のため InvalidOperationException で escalate、致命的状態の手順を
+                // **exception の Message に embed** する形で caller 経由 user に到達させる
+                // (`手動復旧が必要です\n  target: ...\n  bak: ...\n手動で .bak を target にリネーム...`
+                // が ProcessingDialog の汎用 error MessageBox 経由で表示される設計)。
+                // round 2 H4 docstring の「caller が IOException と区別して専用 MessageBox」claim は
+                // 実装と乖離していた (Step 7 caller `if (!Replace) throw new IOException` 形式で type
+                // 区別なし、汎用 catch 経由) ため round 8 M-2 で Message embed 形式に表現訂正。
+                // 専用 catch (InvalidOperationException) + UX 別 dialog 化は round 9+ issue 候補。
+                // DirReplacer.RollbackInternal の致命的 throw pattern (同じく Message embed 形式) と対称。
                 if (renamed)
                 {
                     try

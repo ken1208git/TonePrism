@@ -174,8 +174,15 @@ namespace GCTonePrism.Manager.Services
                 bool sawFailure = false;
                 bool sawComplete = false;
                 // (#108 Phase 4 round 5 L-3) `[20` literal prefix は 2100 年問題、regex で世紀非依存化。
+                // (#108 Phase 4 round 8 L-7) `|FATAL` 分岐は dead code: Updater 側 Logger
+                // (`Companions/Updater/Logger.cs`) は `Logger.Fatal(...)` API を持たず INFO/WARN/ERROR の
+                // 3 レベルのみ。`Companions/Updater/FileReplacer.cs:260` の `Logger.Error("FATAL rollback: ...")`
+                // は `[ERROR]` レベルで Message body に "FATAL" 文字列を含む形のため `[ERROR]` 部分が
+                // 既にマッチして失敗判定に流れる。regex を `(ERROR)` に縮小して dead code 排除。
+                // 将来 Updater 側に `Logger.Fatal` を追加する場合は本 regex を `(ERROR|FATAL)` に戻す
+                // 対称同期 fence (Manager / Updater Logger の規約整合は SPEC §3.6 で管理)。
                 var logLevelRegex = new System.Text.RegularExpressions.Regex(
-                    @"^\[\d{4}-\d{2}-\d{2}.*\]\s*\[(ERROR|FATAL)\]");
+                    @"^\[\d{4}-\d{2}-\d{2}.*\]\s*\[ERROR\]");
                 for (int i = startIdx; i < lines.Length; i++)
                 {
                     string line = lines[i];
