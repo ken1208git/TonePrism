@@ -425,9 +425,12 @@ namespace GCTonePrism.Manager
             // currentVersion 自体が malformed (= TryNormalize が false) のケースは ctor / Form_Load で
             // 既に MessageBox 警告済 + v0.0.0 fallback 入力済なので、ここでは「正規化できなければ dup
             // 判定対象外 = 続行」とする (= H-2 警告で user は修正済の前提)。
+            // (#158 round 8 senior Low #6) 両辺は TryNormalize 経由で lowercase v 強制 + 数値部正規化済
+            // なので Ordinal `==` でも機能等価だが、本 PR の他経路 (EditGameForm rename / dup-check 等)
+            // は OrdinalIgnoreCase 統一なので規約整合のため string.Equals(... OrdinalIgnoreCase) に揃える。
             string currentNormalized;
             if (SemverInputControl.TryNormalize(currentVersion, out currentNormalized)
-                && semverNext.VersionString == currentNormalized)
+                && string.Equals(semverNext.VersionString, currentNormalized, StringComparison.OrdinalIgnoreCase))
             {
                 // (#158 H3) bump button は round 3 で削除済 (#133 ガイドライン doc に移管予定)、
                 // その案内を撤去。NumericUpDown を直接操作する旨だけ案内。

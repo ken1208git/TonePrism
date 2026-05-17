@@ -1576,6 +1576,20 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 **Codex round 7 false positive 3 件**: CX-2 / round 3 M-4 / round 4 codex P1 を re-flag されたもの、コードに変更なし。
 
+**Round 8 review fix (codex P1/P2 NEW + senior M/L 系)** — version bump なし、本 entry に統合:
+
+- **Round 8 codex P1 (version rename recovery)**: round 5 codex P1 partial-commit 後の「disk = 新版名 / DB row = 旧版名」状態で user が DB row を新版名に直して OK 押した時、Phase 1 collision check (`Directory.Exists(newDir) && !reservedOldDirs.Contains(newDir)`) が oldDir 不在を考慮せず block して永久詰みになっていた。先頭に `Directory.Exists(oldDir) &&` を追加、両方存在のみ block (= true collision)、oldDir 不在は SourceExists=false 経路で Phase 2 が Move skip + DB only update する recovery 動作に。version folder は gameFolder 配下に閉じるため cross-game silent merge risk なし。
+- **Round 8 codex P2 (gameId rename recovery、L-4 tension 解消)**: round 7 L-4 で newFolder 単独存在を一律 throw にしたが、partial-commit 後の「前回 rename interrupted で disk 既に新 ID + DB 旧 ID」recovery 経路を block していた。一方で「別 user が手動作成した unrelated folder」silent merge risk もあり区別不能のため、確認 dialog (OKCancel) を導入: OK で recovery (Move skip + DB only update)、Cancel で `OperationCanceledException` → 新規 catch で静かに return + form 留め。両方存在は引き続き collision throw。
+- **Senior Low #1 (UpdateGame MessageBox wording)**: gameIdChanged=true 経路では既に UpdateGameId で games.gameId は新値 / 他フィールドは旧値の混合状態だが、round 7 H-2 の文言「games 行のみ古い値で残っており drift 状態」は全 fields old と誤読される余地があった。gameIdChanged 有無で文言分岐、true 時は「部分更新状態 (gameId は新値で更新済み、title/ジャンル/人数等のフィールドは旧値の可能性あり)」に明示。
+- **Senior Med #2 (TryParseAndSet を const 参照に統一)**: `TryNormalize` は const (`MaxMajor` 等) 参照、`TryParseAndSet` は live property (`numMajor.Maximum` 等) 参照で SoT が乖離していた。ctor 上書きで現状は同値だが、将来 form 側で live property を sneak 書き換えると silent inconsistency が出る risk があるため両方 const 直書きに統一。range check 文言からも `(int)numMajor.Maximum` 等を排除、round 7 M-3 の「const = 真の SoT」方針と文法レベルで一貫。
+- **Senior Med #3 (TryGetValue silent skip)**: `reservedOldDirs build` + `renamePlan build` の両ループで `_originalVersionByDbId.TryGetValue` 失敗時に silent continue していた。現状 LoadVersions のみが populate するため到達不能だが、将来 form 内に「version 追加」ボタン等が入ると追加直後 item の snapshot 不在で rename 黙って skip → silent drift する死角になるため `Console.WriteLine` で defensive log を残置 (Logger 移行は #166 で sweep)。
+- **Senior Low #4 (dup-check Where dead に defensive comment)**: round 7 L-2 の事前 scan で空文字 version を return で弾いた後の `.Where(v => !string.IsNullOrEmpty(v.Version))` filter は dead path。round 7 M-1 の fallback コメントと同方針で「dead だが defensive guard rail として残す」を明記 (片方だけ defensive コメント付いて非対称だったため両方に注記)。
+- **Senior Low #5 (Designer.cs 逆参照 cross-ref comment)**: `SemverInputControl.Designer.cs` の `numMajor.Maximum = 99` 等は round 7 M-3 で ctor 上書きされるため実行時 dead だが Designer.cs 単独で読むと「99 を 200 に変えれば Max が上がる」と誤解される。一方向 SoT の逆参照ポインタ (= 「値を変えたい場合は SemverInputControl.cs の const を変えること」) を Designer.cs 先頭 numMajor ブロックに追記。
+- **Senior Low #6 (VersionUpForm dup OrdinalIgnoreCase)**: VersionUpForm.ValidateInput の `semverNext.VersionString == currentNormalized` は両辺 TryNormalize 経由で lowercase v 強制済のため機能等価だが、本 PR の他経路 (rename loop / dup-check) は OrdinalIgnoreCase 統一なので規約整合のため `string.Equals(..., OrdinalIgnoreCase)` に揃える。
+- **Senior Low #7 (VersionStringChanged 4 連発)**: TryParseAndSet 1 呼び出しで child event を最大 4 連発する API consistency 違反は scope 外、follow-up [#171](https://github.com/ken1208git/GCTonePrism/issues/171) で別途消化 (現状 caller 不在で無害)。
+
+**Codex round 8 false positive 4 件**: CX-2 / round 3 M-4 / round 4 codex P1 / round 7 H-1 (topo sort) を re-flag されたもの、コードに変更なし。
+
 ### [Manager v0.8.10] - 2026-05-13
 
 PR #150 で dir rename (`GCTonePrism_Manager/` → `Manager/`) に連動して `PathManager.cs` の self-reference リテラル + priority-3 detection ロジック (StartsWith 二段比較 + Manager/Launcher sibling 同時存在検証) + csproj `<RootNamespace>` を修正。配布構造変更を含むため SemVer 厳密だと minor 寄りだが、Install.bat の v0.2.0 → 新構造 migration で自動吸収されエンドユーザー視点では invisible のため patch bump 扱い。

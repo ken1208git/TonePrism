@@ -39,6 +39,11 @@ namespace GCTonePrism.Manager.Controls
             this.lblV.Font = new System.Drawing.Font("Meiryo UI", 9F, System.Drawing.FontStyle.Bold);
 
             // numMajor
+            // (#158 round 7 M-3 + round 8 senior Low #5) Maximum / Minimum はここでは Designer surface
+            // 用 (= デザイナで開いた時の見た目)。実行時は SemverInputControl.cs ctor で MaxMajor /
+            // MaxMinor / MaxPatch / MinComponent const に上書きされるため、値を変えたい場合は本ファイル
+            // ではなく SemverInputControl.cs の const を変えること (= 一方向 SoT、SemverInputControl.cs
+            // 24-32 行のコメント参照)。
             this.numMajor.Location = new System.Drawing.Point(15, 2);
             this.numMajor.Maximum = new decimal(new int[] { 99, 0, 0, 0 });
             this.numMajor.Minimum = new decimal(new int[] { 0, 0, 0, 0 });

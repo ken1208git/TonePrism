@@ -191,20 +191,26 @@ namespace GCTonePrism.Manager.Controls
                     // (#158 round 5 L-3) 上の if で `!majorOk || !minorOk || !patchOk` を error path に
                     // 流しているため、ここに到達した時点で 3 つとも true 確定 → `majorOk &&` のような
                     // defensive condition は dead code、削除して可読性を上げる。
-                    else if (major < numMajor.Minimum || major > numMajor.Maximum)
+                    // (#158 round 8 senior Med #2) 範囲 check + 文言を const 直書きに統一。旧実装は
+                    // `numMajor.Maximum` 等 instance live property を参照していたが、round 7 M-3 で
+                    // SoT を const にした方針と一貫させる。ctor で live property は const に上書きされる
+                    // ため現状値は同じだが、将来 form 側で sneak に live property を書き換えるような
+                    // path が入っても TryParseAndSet / TryNormalize が同じ閾値で判定するため silent
+                    // inconsistency が起きない。
+                    else if (major < MinComponent || major > MaxMajor)
                     {
-                        error = "Major (= " + major + ") は " + (int)numMajor.Minimum + "-" +
-                            (int)numMajor.Maximum + " の範囲です: '" + value + "'";
+                        error = "Major (= " + major + ") は " + MinComponent + "-" + MaxMajor +
+                            " の範囲です: '" + value + "'";
                     }
-                    else if (minor < numMinor.Minimum || minor > numMinor.Maximum)
+                    else if (minor < MinComponent || minor > MaxMinor)
                     {
-                        error = "Minor (= " + minor + ") は " + (int)numMinor.Minimum + "-" +
-                            (int)numMinor.Maximum + " の範囲です: '" + value + "'";
+                        error = "Minor (= " + minor + ") は " + MinComponent + "-" + MaxMinor +
+                            " の範囲です: '" + value + "'";
                     }
-                    else if (patch < numPatch.Minimum || patch > numPatch.Maximum)
+                    else if (patch < MinComponent || patch > MaxPatch)
                     {
-                        error = "Patch (= " + patch + ") は " + (int)numPatch.Minimum + "-" +
-                            (int)numPatch.Maximum + " の範囲です: '" + value + "'";
+                        error = "Patch (= " + patch + ") は " + MinComponent + "-" + MaxPatch +
+                            " の範囲です: '" + value + "'";
                     }
                     else
                     {

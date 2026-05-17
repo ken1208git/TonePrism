@@ -658,6 +658,10 @@ namespace GCTonePrism.Manager
             // 集約) で全 malformed を弾いて return しているため、ここに到達する時点で全件 TryNormalize
             // 成功確定。三項の `: v.Version` fallback path は事実上 dead code だが defensive に残す
             // (= 万一上の scan が緩められた場合の guard rail として機能、silent regression 防止)。
+            // (#158 round 8 senior Low #4) `.Where(v => !string.IsNullOrEmpty(v.Version))` filter は
+            // L-2 の事前 scan で空文字 version を return で弾いた後なので dead path、defensive guard
+            // rail として残す (round 7 M-1 の fallback コメントと同方針、片方だけ defensive コメント
+            // 付いて非対称だったため両方に注記)。
             var versionDups = cmbVersionList.Items
                 .OfType<GameVersion>()
                 .Where(v => !string.IsNullOrEmpty(v.Version))
@@ -698,15 +702,39 @@ namespace GCTonePrism.Manager
                     string oldFolder = PathManager.GetGameFolder(oldGameId);
                     string newFolder = PathManager.GetGameFolder(newGameId);
 
-                    // (#158 round 7 L-4) 旧実装は `oldFolder.Exists && newFolder.Exists` で両方存在のみ
-                    // throw だったが、「oldFolder 不在 + newFolder のみ存在」(= 別 user が手動で
-                    // newGameId 配下を作っていた等) を素通しして DB だけ rename / disk noop の drift が
-                    // 発生する経路があった。newFolder 単独存在で即 throw、disk-DB drift を手前で塞ぐ。
-                    // pre-existing path だが本 PR の silent disk/DB drift 系列 fix と同テーマなので inline
-                    // 取り込み。
-                    if (System.IO.Directory.Exists(newFolder))
+                    // (#158 round 7 L-4 + round 8 codex P2) collision 判定を 3 経路に分ける:
+                    //   (a) 両方存在: 真の collision、Move 不能 → throw
+                    //   (b) oldFolder 不在 + newFolder 存在: recovery 可能性 (前回 rename interrupted +
+                    //       disk 既に新名 + DB が旧 ID のまま) または別 user の手動作成 folder で silent
+                    //       merge risk。区別不能なので user に明示確認 dialog (OK = 既存使用 / Cancel = abort)
+                    //   (c) newFolder 不在: 通常 path (oldFolder Move or DB only update)
+                    // round 7 L-4 は (b) を一律 throw にしていたため legitimate recovery が永久 block
+                    // されていたが、確認 dialog で silent merge risk と recovery 両立。
+                    bool oldFolderExists = System.IO.Directory.Exists(oldFolder);
+                    bool newFolderExists = System.IO.Directory.Exists(newFolder);
+                    if (oldFolderExists && newFolderExists)
                     {
+                        // (a) 両方存在 = collision
                         throw new InvalidOperationException($"フォルダ「{newFolder}」が既に存在します。");
+                    }
+                    if (!oldFolderExists && newFolderExists)
+                    {
+                        // (b) recovery 可能性 / silent merge risk → user 確認
+                        var dr = MessageBox.Show(this,
+                            "指定された新しいゲーム ID のフォルダが既に存在しますが、旧 ID のフォルダは" +
+                            "見つかりません:\n  " + newFolder + "\n\n" +
+                            "これは前回の rename が DB 更新前に中断された残骸か、別目的で手動作成された" +
+                            "フォルダの可能性があります。\n\n" +
+                            "  ・ 前者なら「OK」で既存フォルダの中身を引き継いで DB のみ更新します\n" +
+                            "  ・ 後者なら「キャンセル」して中身を別の場所に退避してから再試行してください\n\n" +
+                            "既存フォルダの中身をそのまま使って DB を新 gameId に更新しますか?",
+                            "フォルダ同期確認", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
+                        if (dr != DialogResult.OK)
+                        {
+                            throw new OperationCanceledException("ユーザーがフォルダ同期をキャンセルしました。");
+                        }
+                        // OK: ProcessingDialog 内の `if (Directory.Exists(oldFolder)) { Move; folderRenamed=true; }`
+                        // で Move skip + folderRenamed=false のまま DB 更新が走る。
                     }
 
                     // ゲームフォルダのリネームは同一ボリュームでは一瞬だが、共有フォルダ越しや
@@ -875,14 +903,28 @@ namespace GCTonePrism.Manager
                     foreach (var item in cmbVersionList.Items)
                     {
                         if (!(item is GameVersion vR)) continue;
-                        if (!_originalVersionByDbId.TryGetValue(vR.Id, out string origR)) continue;
+                        if (!_originalVersionByDbId.TryGetValue(vR.Id, out string origR))
+                        {
+                            // (#158 round 8 senior Med #3) 現状 LoadVersions のみが snapshot を populate
+                            // するため cmbVersionList.Items の全 item は snapshot 有り = ここに到達は
+                            // 構造上ありえない。将来 form 内に「version 追加」ボタン等が入ると追加直後の
+                            // item が snapshot なし → rename loop が黙って skip → silent drift する死角に
+                            // なるため、defensive log を残しておく (Logger 移行は #166 で sweep)。
+                            Console.WriteLine("[EditGameForm] (#158 round 8 Med #3) reservedOldDirs build: snapshot 不在 version id=" + vR.Id + " ('" + (vR.Version ?? "(null)") + "')、rename plan skip");
+                            continue;
+                        }
                         if (string.Equals(origR, vR.Version, StringComparison.OrdinalIgnoreCase)) continue;
                         reservedOldDirs.Add(System.IO.Path.Combine(gameFolder, ToVersionLeaf(origR)));
                     }
                     foreach (var item in cmbVersionList.Items)
                     {
                         if (!(item is GameVersion v)) continue;
-                        if (!_originalVersionByDbId.TryGetValue(v.Id, out string originalVer)) continue;
+                        if (!_originalVersionByDbId.TryGetValue(v.Id, out string originalVer))
+                        {
+                            // (#158 round 8 senior Med #3) 同上、defensive log。
+                            Console.WriteLine("[EditGameForm] (#158 round 8 Med #3) renamePlan build: snapshot 不在 version id=" + v.Id + " ('" + (v.Version ?? "(null)") + "')、rename plan skip");
+                            continue;
+                        }
                         // (#158 round 3 H-2) CX-3 で大文字 V を regex IgnoreCase 受理にした副作用で、DB に
                         // "V1.2.3" があった version は SaveGameDataToVersion で v.Version = "v1.2.3" に
                         // 正規化される (= getter が常に小文字 v 出力)。case-only な差は disk 上 (Windows
@@ -901,7 +943,15 @@ namespace GCTonePrism.Manager
                         // (#158 round 6 M-2) reservedOldDirs に含まれる newDir は他 plan の oldDir、
                         // = rename 実行で空く予定なので衝突 skip。それ以外 (= 純粋に既存 disk フォルダ)
                         // のみ真の衝突として block する。
-                        if (System.IO.Directory.Exists(newDir) && !reservedOldDirs.Contains(newDir))
+                        // (#158 round 8 codex P1) `Directory.Exists(oldDir) &&` を先頭に追加。oldDir 不在
+                        // + newDir 存在は「partial-commit 後の recovery (= 前回 rename で disk は新版名に
+                        // なったが DB row が旧版名のまま残っている)」シナリオで、user が DB row を新版名に
+                        // 直して OK 押した時にこの check で永久 block されていた。oldDir 不在 = Move 自体
+                        // 走らない (Phase 2 で SourceExists=false 経路) のため衝突判定の対象外、両方存在
+                        // のみ block する形に絞る。version folder は gameFolder 配下に閉じているため cross-
+                        // game 混入の risk なし、silent merge concern は version layer では無視可。
+                        bool srcExistsV = System.IO.Directory.Exists(oldDir);
+                        if (srcExistsV && System.IO.Directory.Exists(newDir) && !reservedOldDirs.Contains(newDir))
                         {
                             MessageBox.Show(
                                 "バージョンフォルダのリネームに失敗しました:\n" +
@@ -918,7 +968,7 @@ namespace GCTonePrism.Manager
                             OldDir = oldDir,
                             NewDir = newDir,
                             OriginalVer = originalVer,
-                            SourceExists = System.IO.Directory.Exists(oldDir),
+                            SourceExists = srcExistsV,
                             // (#158 round 4 codex P1) in-memory rollback 用に path 書き換え前の値を capture。
                             OldExecutablePath = v.ExecutablePath,
                             OldThumbnailPath = v.ThumbnailPath,
@@ -1104,13 +1154,21 @@ namespace GCTonePrism.Manager
                     }
                     catch (Exception gameEx)
                     {
+                        // (#158 round 8 senior Low #1) gameIdChanged=true 経路では既に UpdateGameId で
+                        // games.gameId は新値、それ以外 (title/genre/people 等) は旧値の混合状態になる。
+                        // 「games 行のみ古い値」と言い切ると user が「全 fields old」と誤読する余地が
+                        // あるため、gameIdChanged 有無で文言分岐。
+                        string driftDetail = gameIdChanged
+                            ? "  ・ games 行は部分更新状態 (gameId は新値で更新済み、title / ジャンル / 人数等" +
+                              " のフィールドは旧値の可能性あり)\n"
+                            : "  ・ games 行のみ古い値で残っており drift 状態\n";
                         MessageBox.Show(
                             "ゲーム本体情報 (games table) の DB 更新に失敗しました:\n" +
                             "  " + gameEx.Message + "\n\n" +
                             "  ・ バージョン情報 (game_versions table) の更新は既に完了しています\n" +
                             "  ・ disk フォルダは新しい名前のまま\n" +
-                            "  ・ games 行のみ古い値で残っており drift 状態\n\n" +
-                            "Manager を一度終了して再起動し、該当ゲームを開いて UpdateGame の項目 (タイトル / " +
+                            driftDetail +
+                            "\nManager を一度終了して再起動し、該当ゲームを開いて UpdateGame の項目 (タイトル / " +
                             "ジャンル / 人数等) が想定通りか確認、必要なら手動で再編集してください。",
                             "DB 部分更新失敗 (要手動確認)", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         return;
@@ -1120,6 +1178,13 @@ namespace GCTonePrism.Manager
                 EditedGame = game;
                 DialogResult = DialogResult.OK;
                 Close();
+            }
+            catch (OperationCanceledException)
+            {
+                // (#158 round 8 codex P2) user が gameId rename の同期確認で Cancel を選んだ場合。
+                // 既に MessageBox は閉じているのでここでは何も表示しない (= 静かに OK 処理を中断、
+                // form 留めて user が編集を続けられる状態に戻す)。
+                return;
             }
             catch (System.Data.SQLite.SQLiteException ex)
             {
