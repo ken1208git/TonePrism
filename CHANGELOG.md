@@ -13,6 +13,16 @@
 
 リリース zip 全体に付与する独立バージョン。GitHub Releases の本文として `Release.ps1` がこのセクションを抜き出して使う。エンドユーザー（来場スタッフ / 顧問の先生 / 部員）向けの **summary** を書く。技術詳細は `## Launcher` / `## Manager` / `## Release Tooling` 等の別セクションを参照。詳細仕様は [SPECIFICATION.md §3.7.7](SPECIFICATION.md) を参照。
 
+### [Bundle v0.3.1] - 2026-05-18
+
+**zip の中身をシンプルに整理 + 将来の自動アップデート対応を強化** (#175)。zip を解凍した時に並ぶファイルが `Install.bat` / `INSTALL_README.txt` / `bundle/` フォルダ の 3 つだけになり、「どれを押せばいいか」が一目瞭然になりました。あわせて Manager の「アップデート」タブが将来の配布内容の変更に自動で追従できるように改良 — **次のリリース以降は zip を手動 DL する手間なく自動でアップデートできるように**なります。
+
+- Launcher: 変更なし (v0.5.17 同梱)
+- Manager: v0.9.0 → v0.9.1
+- Release Tooling: v0.1.16 → v0.1.17
+
+**ご注意 (v0.3.0 をインストール済みの方へ)**: 今回 1 回だけ、Manager の「アップデート」タブからは適用できません (今回の zip 構造変更を v0.3.0 の Manager は理解できないため)。お手数ですが [リリースページ](https://github.com/ken1208git/GCTonePrism/releases/tag/v0.3.1) から zip を DL → `Install.bat` ダブルクリック → 既存と同じ親フォルダを選択 → 上書きインストールしてください。**ゲームデータ (DB、ゲーム、バックアップ、回答、ログ) は自動で保護されます**。次回以降は自動アップデートが永久に効くようになります。
+
 ### [Bundle v0.3.0] - 2026-05-18
 
 **Phase 4 アップデート機能完成** (#108 Phase 4)。Manager の UI に「アップデート」タブが追加され、新バージョン検出 → リリースノート確認 → ボタン 1 つで適用、までの flow が完備された。今後は新版が出ると Manager 起動時に通知ダイアログが出て「はい」→ タブ自動切替 → 「今すぐアップデート」で適用できる (= zip 手動展開や Install.bat 再実行が不要に)。累積更新 (例: v0.3.0 を飛ばして v0.4.0 が出た場合に v0.3.0 / v0.4.0 両方のリリースノートを 1 画面で確認) にも対応。
@@ -2392,6 +2402,7 @@ Release.ps1 の $FooterSentinel 定数も同期更新すること。
 
 <!-- GCTONEPRISM-CHANGELOG-FOOTER-BEGIN-V1 -->
 
+[Bundle v0.3.1]: https://github.com/ken1208git/GCTonePrism/releases/tag/v0.3.1
 [Bundle v0.3.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/v0.3.0
 [Bundle v0.2.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/v0.2.0
 [Bundle v0.1.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/v0.1.0
