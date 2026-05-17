@@ -13,6 +13,16 @@
 
 リリース zip 全体に付与する独立バージョン。GitHub Releases の本文として `Release.ps1` がこのセクションを抜き出して使う。エンドユーザー（来場スタッフ / 顧問の先生 / 部員）向けの **summary** を書く。技術詳細は `## Launcher` / `## Manager` / `## Release Tooling` 等の別セクションを参照。詳細仕様は [SPECIFICATION.md §3.7.7](SPECIFICATION.md) を参照。
 
+### [Bundle v0.3.0] - 2026-05-18
+
+**Phase 4 アップデート機能完成** (#108 Phase 4)。Manager の UI に「アップデート」タブが追加され、新バージョン検出 → リリースノート確認 → ボタン 1 つで適用、までの flow が完備された。今後は新版が出ると Manager 起動時に通知ダイアログが出て「はい」→ タブ自動切替 → 「今すぐアップデート」で適用できる (= zip 手動展開や Install.bat 再実行が不要に)。累積更新 (例: v0.3.0 を飛ばして v0.4.0 が出た場合に v0.3.0 / v0.4.0 両方のリリースノートを 1 画面で確認) にも対応。
+
+- Launcher: 変更なし (v0.5.17 同梱)
+- Manager: v0.8.11 → v0.9.0 (Phase 4 update flow + UI、詳細は `## Manager` セクション参照)
+- Release Tooling: v0.1.15 → v0.1.16 (CHANGELOG.md zip 同梱 + `Install.bat` の `TEMP_MV_OUT` silent corruption fix、詳細は `## Release Tooling` セクション参照)
+
+**Notes**: Phase 4 完成版 = 「アップデートが UI ボタン 1 つで完結する」最初の version。Phase 5 (Launcher 通知バナー) / Phase 6 (統合テスト) は今後の release で順次実装予定。
+
 ### [Bundle v0.2.0] - 2026-05-13
 
 **Phase 2 配布フロー整備 + 初回インストーラ実装** (#108 Phase 2)。zip ダブルクリック展開 → `Install.bat` ダブルクリック → 親フォルダを GUI 選択 → インストール完了、までの 1 経路を提供。`<親>/Launcher.bat` / `<親>/Manager.bat` の親フォルダ直下ショートカットにより部員の日常起動も `<親>` を開けばダブルクリック 1 回で済む。再インストール時はゲームデータ (`prism.db` / `games/` / `backups/` / `responses/` / `logs/`) を自動保護。
@@ -2331,6 +2341,7 @@ Release.ps1 の $FooterSentinel 定数も同期更新すること。
 
 <!-- GCTONEPRISM-CHANGELOG-FOOTER-BEGIN-V1 -->
 
+[Bundle v0.3.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/v0.3.0
 [Bundle v0.2.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/v0.2.0
 [Bundle v0.1.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/v0.1.0
 [Launcher Unreleased]: https://github.com/ken1208git/GCTonePrism/compare/launcher-v0.1.0...HEAD
