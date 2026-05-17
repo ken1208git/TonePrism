@@ -41,41 +41,62 @@ namespace GCTonePrism.Manager.Services
         /// </summary>
         public static async Task DownloadAsync(string url, string targetPath, IProgress<DownloadProgress> progress, CancellationToken ct)
         {
+            Logger.Info("[UpdateDownloader] DownloadAsync 開始: url=" + url + " target=" + targetPath);
             string targetParent = Path.GetDirectoryName(targetPath);
             if (!string.IsNullOrEmpty(targetParent)) Directory.CreateDirectory(targetParent);
 
-            using (var resp = await _client.Value.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false))
+            try
             {
-                resp.EnsureSuccessStatusCode();
-                long total = resp.Content.Headers.ContentLength ?? 0L;
-                using (var input = await resp.Content.ReadAsStreamAsync().ConfigureAwait(false))
-                using (var output = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true))
+                using (var resp = await _client.Value.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false))
                 {
-                    var buffer = new byte[64 * 1024];
-                    long downloaded = 0L;
-                    int read;
-                    while ((read = await input.ReadAsync(buffer, 0, buffer.Length, ct).ConfigureAwait(false)) > 0)
+                    Logger.Info("[UpdateDownloader] HTTP response: status=" + (int)resp.StatusCode + " " + resp.StatusCode + " content-length=" + (resp.Content.Headers.ContentLength ?? -1L));
+                    resp.EnsureSuccessStatusCode();
+                    long total = resp.Content.Headers.ContentLength ?? 0L;
+                    using (var input = await resp.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                    using (var output = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true))
                     {
-                        await output.WriteAsync(buffer, 0, read, ct).ConfigureAwait(false);
-                        downloaded += read;
-                        if (progress != null)
+                        var buffer = new byte[64 * 1024];
+                        long downloaded = 0L;
+                        int read;
+                        while ((read = await input.ReadAsync(buffer, 0, buffer.Length, ct).ConfigureAwait(false)) > 0)
                         {
-                            progress.Report(new DownloadProgress { BytesDownloaded = downloaded, TotalBytes = total });
+                            await output.WriteAsync(buffer, 0, read, ct).ConfigureAwait(false);
+                            downloaded += read;
+                            if (progress != null)
+                            {
+                                progress.Report(new DownloadProgress { BytesDownloaded = downloaded, TotalBytes = total });
+                            }
                         }
+                        Logger.Info("[UpdateDownloader] DL 完了: " + downloaded + " bytes → " + targetPath);
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("[UpdateDownloader] DownloadAsync 失敗: url=" + url, ex);
+                throw;
             }
         }
 
         /// <summary>zip を `extractDir` に展開する。事前に extractDir が存在する場合は削除する。</summary>
         public static void Extract(string zipPath, string extractDir)
         {
-            if (Directory.Exists(extractDir))
+            Logger.Info("[UpdateDownloader] Extract 開始: zip=" + zipPath + " → " + extractDir);
+            try
             {
-                Directory.Delete(extractDir, recursive: true);
+                if (Directory.Exists(extractDir))
+                {
+                    Directory.Delete(extractDir, recursive: true);
+                }
+                Directory.CreateDirectory(extractDir);
+                ZipFile.ExtractToDirectory(zipPath, extractDir);
+                Logger.Info("[UpdateDownloader] Extract 完了");
             }
-            Directory.CreateDirectory(extractDir);
-            ZipFile.ExtractToDirectory(zipPath, extractDir);
+            catch (Exception ex)
+            {
+                Logger.Error("[UpdateDownloader] Extract 失敗: zip=" + zipPath, ex);
+                throw;
+            }
         }
 
         /// <summary>
@@ -84,6 +105,7 @@ namespace GCTonePrism.Manager.Services
         /// </summary>
         public static IReadOnlyList<string> ValidateStaging(string stagingDir)
         {
+            Logger.Info("[UpdateDownloader] ValidateStaging 開始: " + stagingDir);
             var missing = new List<string>();
             // zip ルート (= stagingDir 直下)
             string[] rootExpected = new[]
@@ -113,6 +135,14 @@ namespace GCTonePrism.Manager.Services
                 string full = Path.Combine(stagingDir, rel);
                 if (!File.Exists(full)) missing.Add(rel);
             }
+            if (missing.Count > 0)
+            {
+                Logger.Warn("[UpdateDownloader] ValidateStaging 不足 " + missing.Count + " 件: " + string.Join(", ", missing));
+            }
+            else
+            {
+                Logger.Info("[UpdateDownloader] ValidateStaging OK (全 " + (rootExpected.Length + filesExpected.Length) + " ファイル存在)");
+            }
             return missing;
         }
 
@@ -122,11 +152,29 @@ namespace GCTonePrism.Manager.Services
         /// </summary>
         public static bool ValidateBundleVersion(string stagingDir, Version expectedVersion)
         {
-            if (expectedVersion == null) return false;
+            if (expectedVersion == null)
+            {
+                Logger.Warn("[UpdateDownloader] ValidateBundleVersion: expectedVersion=null");
+                return false;
+            }
             string changelogPath = Path.Combine(stagingDir, "files", "Manager", "CHANGELOG.md");
+            Logger.Info("[UpdateDownloader] ValidateBundleVersion: expected=" + expectedVersion.ToString(3) + " changelog=" + changelogPath);
             BundleEntry latest = ChangelogParser.TryReadLatestFromFile(changelogPath);
-            if (latest == null || latest.Version == null) return false;
-            return latest.Version == expectedVersion;
+            if (latest == null || latest.Version == null)
+            {
+                Logger.Warn("[UpdateDownloader] ValidateBundleVersion: CHANGELOG から Bundle entry parse 失敗 (path=" + changelogPath + ")");
+                return false;
+            }
+            bool match = latest.Version == expectedVersion;
+            if (match)
+            {
+                Logger.Info("[UpdateDownloader] ValidateBundleVersion OK: staging=" + latest.Version.ToString(3));
+            }
+            else
+            {
+                Logger.Warn("[UpdateDownloader] ValidateBundleVersion 不一致: expected=" + expectedVersion.ToString(3) + " staging=" + latest.Version.ToString(3));
+            }
+            return match;
         }
     }
 

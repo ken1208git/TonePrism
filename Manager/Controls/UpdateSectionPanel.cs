@@ -271,10 +271,12 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnUpdateNow_Click(object sender, EventArgs e)
         {
-            if (_currentResult == null || _currentResult.Latest == null) return;
-            if (_currentResult.Latest.Version == null) return;
+            Services.Logger.Info("[UpdateSectionPanel] btnUpdateNow_Click");
+            if (_currentResult == null || _currentResult.Latest == null) { Services.Logger.Warn("[UpdateSectionPanel] _currentResult / Latest が null、abort"); return; }
+            if (_currentResult.Latest.Version == null) { Services.Logger.Warn("[UpdateSectionPanel] Latest.Version が null、abort"); return; }
             if (string.IsNullOrEmpty(_currentResult.Latest.ZipAssetUrl))
             {
+                Services.Logger.Warn("[UpdateSectionPanel] ZipAssetUrl 空、abort");
                 MessageBox.Show("zip asset URL が取得できません (リリースに同梱されていない可能性)。",
                     "アップデート中止", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
@@ -287,6 +289,7 @@ namespace GCTonePrism.Manager.Controls
             // 通常運用に影響なし。
             if (System.IO.Directory.Exists(System.IO.Path.Combine(PathManager.BaseDirectory, ".git")))
             {
+                Services.Logger.Warn("[UpdateSectionPanel] 開発環境ガード発火 (.git 検出): " + PathManager.BaseDirectory);
                 MessageBox.Show(
                     "開発環境 (.git リポジトリ直下) ではアップデート適用を実行できません。\n\n" +
                     "本フローは Launcher / Manager / Companions / shortcut bat / CHANGELOG.md を物理上書きするため、" +
@@ -308,7 +311,8 @@ namespace GCTonePrism.Manager.Controls
                 "アップデート開始確認",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question);
-            if (confirm != DialogResult.Yes) return;
+            if (confirm != DialogResult.Yes) { Services.Logger.Info("[UpdateSectionPanel] user が事前確認で No 選択、abort"); return; }
+            Services.Logger.Info("[UpdateSectionPanel] user が事前確認で Yes 選択、起動中プロセスチェックへ進む");
 
             // [A.5] 起動中プロセスチェック (Launcher / Companions、Updater は除外)
             var running = ProcessTerminator.EnumerateRunning();
@@ -323,10 +327,12 @@ namespace GCTonePrism.Manager.Controls
                 }
                 sb.AppendLine();
                 sb.AppendLine("中止する場合は「キャンセル」を押してください。");
+                Services.Logger.Warn("[UpdateSectionPanel] 起動中プロセスあり: " + running.Count + " 件");
                 DialogResult dr = MessageBox.Show(sb.ToString(),
                     "起動中プロセスあり", MessageBoxButtons.RetryCancel, MessageBoxIcon.Warning);
                 if (dr != DialogResult.Retry)
                 {
+                    Services.Logger.Info("[UpdateSectionPanel] user が起動中プロセス確認で Cancel、abort");
                     return;
                 }
                 running = ProcessTerminator.EnumerateRunning();
@@ -338,6 +344,7 @@ namespace GCTonePrism.Manager.Controls
             long zipSizeBytes = _currentResult.Latest.ZipSizeBytes;
             string versionStr = targetVersion.ToString(3);
             string stagingDir = PathManager.StagingRootForUpdate(versionStr);
+            Services.Logger.Info("[UpdateSectionPanel] アップデート worker 起動準備: target=v" + versionStr + " zip=" + zipUrl + " size=" + zipSizeBytes + " staging=" + stagingDir);
 
             bool spawnedUpdater = false;
             using (var dialog = new ProcessingDialog((progress, token) =>
@@ -349,12 +356,18 @@ namespace GCTonePrism.Manager.Controls
                 dialog.Text = "アップデート";
                 dialog.ShowDialog(this);
 
+                Services.Logger.Info("[UpdateSectionPanel] ProcessingDialog 結果: DialogResult=" + dialog.DialogResult + " spawnedUpdater=" + spawnedUpdater);
                 if (dialog.DialogResult == DialogResult.OK && spawnedUpdater)
                 {
+                    Services.Logger.Info("[UpdateSectionPanel] Updater spawn 成功、Application.Exit を呼ぶ");
                     // Updater は spawn 済、Manager プロセスの終了待機を開始している。Application.Exit で
                     // message loop を抜けると `finally Logger.Shutdown` 経由で正常 exit、Updater の Step 1/4
                     // polling が抜けて Manager dir 置換 + 新 Manager.exe 起動に進む。
                     System.Windows.Forms.Application.Exit();
+                }
+                else
+                {
+                    Services.Logger.Warn("[UpdateSectionPanel] アップデートは完走しませんでした (DialogResult=" + dialog.DialogResult + ")。staging dir はそのまま、次回起動時 zombie cleanup で削除されます。");
                 }
             }
         }
@@ -371,136 +384,172 @@ namespace GCTonePrism.Manager.Controls
         private bool RunUpdateWorker(System.IProgress<ProgressInfo> progress, System.Threading.CancellationToken ct,
             string zipUrl, long zipSizeBytes, Version targetVersion, string stagingDir)
         {
-            // staging dir clean (前回 zombie がある場合に備えて削除してから作り直す)
-            if (System.IO.Directory.Exists(stagingDir))
-            {
-                System.IO.Directory.Delete(stagingDir, recursive: true);
-            }
-            System.IO.Directory.CreateDirectory(stagingDir);
-
-            string zipPath = System.IO.Path.Combine(stagingDir, "GCTonePrism_v" + targetVersion.ToString(3) + ".zip");
-
-            // ディスク容量 pre-check (zip + 展開 + buffer = ~3 倍想定)
+            // (#108 Phase 4 round 1 log) worker 全体を try/catch で囲み、例外時に stack trace を Logger.Error
+            // に残してから rethrow (ProcessingDialog の generic MessageBox に流れる)。各 step は Logger.Info
+            // で進入トレースを残す。これで failure 時に「何段階目で何が起きたか」が log だけで再構成可能に。
             try
             {
-                long needed = System.Math.Max(zipSizeBytes, 100L * 1024L * 1024L) * 3L;
-                string root = System.IO.Path.GetPathRoot(stagingDir);
-                if (!string.IsNullOrEmpty(root))
+                Services.Logger.Info("[UpdateSectionPanel] RunUpdateWorker 開始: target=v" + targetVersion.ToString(3) + " staging=" + stagingDir);
+
+                // staging dir clean (前回 zombie がある場合に備えて削除してから作り直す)
+                if (System.IO.Directory.Exists(stagingDir))
                 {
-                    var drive = new System.IO.DriveInfo(root);
-                    if (drive.AvailableFreeSpace < needed)
+                    Services.Logger.Info("[UpdateSectionPanel] 既存 staging dir を削除: " + stagingDir);
+                    System.IO.Directory.Delete(stagingDir, recursive: true);
+                }
+                System.IO.Directory.CreateDirectory(stagingDir);
+
+                string zipPath = System.IO.Path.Combine(stagingDir, "GCTonePrism_v" + targetVersion.ToString(3) + ".zip");
+
+                // ディスク容量 pre-check (zip + 展開 + buffer = ~3 倍想定)
+                try
+                {
+                    long needed = System.Math.Max(zipSizeBytes, 100L * 1024L * 1024L) * 3L;
+                    string root = System.IO.Path.GetPathRoot(stagingDir);
+                    if (!string.IsNullOrEmpty(root))
                     {
-                        throw new System.IO.IOException(
-                            "ディスク容量不足: 必要 " + (needed / 1024 / 1024) + " MB、空き " +
-                            (drive.AvailableFreeSpace / 1024 / 1024) + " MB");
+                        var drive = new System.IO.DriveInfo(root);
+                        Services.Logger.Info("[UpdateSectionPanel] disk pre-check: root=" + root + " needed=" + (needed / 1024 / 1024) + "MB free=" + (drive.AvailableFreeSpace / 1024 / 1024) + "MB");
+                        if (drive.AvailableFreeSpace < needed)
+                        {
+                            throw new System.IO.IOException(
+                                "ディスク容量不足: 必要 " + (needed / 1024 / 1024) + " MB、空き " +
+                                (drive.AvailableFreeSpace / 1024 / 1024) + " MB");
+                        }
                     }
                 }
-            }
-            catch (System.IO.DriveNotFoundException) { /* path resolve 失敗時は skip */ }
+                catch (System.IO.DriveNotFoundException) { Services.Logger.Warn("[UpdateSectionPanel] disk pre-check skip: DriveNotFound"); }
 
-            ct.ThrowIfCancellationRequested();
+                ct.ThrowIfCancellationRequested();
 
-            // [1] zip DL (5-40%)
-            progress.Report(new ProgressInfo(5, "ダウンロード中...", zipUrl));
-            var dlProgress = new System.Progress<DownloadProgress>(dp =>
-            {
-                int pct = 5 + (int)(dp.Percent * 0.35);  // 5-40%
-                progress.Report(new ProgressInfo(pct, "ダウンロード中...",
-                    string.Format("{0:N0} / {1:N0} bytes", dp.BytesDownloaded, dp.TotalBytes)));
-            });
-            UpdateDownloader.DownloadAsync(zipUrl, zipPath, dlProgress, ct).GetAwaiter().GetResult();
-            ct.ThrowIfCancellationRequested();
-
-            // [2] 展開 (40-50%)
-            progress.Report(new ProgressInfo(42, "展開中...", stagingDir));
-            UpdateDownloader.Extract(zipPath, stagingDir);
-            ct.ThrowIfCancellationRequested();
-
-            // [3] ExpectedFiles 検証 (50-55%)
-            progress.Report(new ProgressInfo(50, "ファイル検証中..."));
-            var missing = UpdateDownloader.ValidateStaging(stagingDir);
-            if (missing.Count > 0)
-            {
-                throw new System.IO.InvalidDataException(
-                    "staging に必要ファイルが不足しています:\n  " + string.Join("\n  ", missing));
-            }
-
-            // [4] Bundle version 一致検証 (55-60%)
-            progress.Report(new ProgressInfo(55, "バージョン一致を検証中..."));
-            if (!UpdateDownloader.ValidateBundleVersion(stagingDir, targetVersion))
-            {
-                throw new System.IO.InvalidDataException(
-                    "staging の CHANGELOG.md 最新 Bundle が target version (" + targetVersion.ToString(3) +
-                    ") と一致しません。zip 改竄 / 取り違え疑い。");
-            }
-
-            // ===== ここから「置換境界」: 以降の cancel は half-state を生むので無効化 =====
-
-            // [5] Launcher dir 置換 (60-67%)
-            progress.Report(new ProgressInfo(60, "Launcher を更新中...", PathManager.LauncherDir));
-            string stagingLauncher = System.IO.Path.Combine(stagingDir, "files", "Launcher");
-            if (!DirReplacer.Replace(stagingLauncher, PathManager.LauncherDir))
-            {
-                throw new System.IO.IOException("Launcher dir の置換に失敗しました。");
-            }
-            DirReplacer.CleanupBak(PathManager.LauncherDir);
-
-            // [6] Companions (Updater 以外) 置換 — 現状 dir 列挙で対象なし、将来 WindowProbe / PauseOverlay 用
-            progress.Report(new ProgressInfo(67, "Companions を更新中..."));
-            string stagingCompanionsRoot = System.IO.Path.Combine(stagingDir, "files", "Companions");
-            if (System.IO.Directory.Exists(stagingCompanionsRoot))
-            {
-                foreach (string stagingComp in System.IO.Directory.EnumerateDirectories(stagingCompanionsRoot))
+                // [1] zip DL (5-40%)
+                Services.Logger.Info("[UpdateSectionPanel] [Step 1/10] zip DL 開始");
+                progress.Report(new ProgressInfo(5, "ダウンロード中...", zipUrl));
+                var dlProgress = new System.Progress<DownloadProgress>(dp =>
                 {
-                    string compName = System.IO.Path.GetFileName(stagingComp.TrimEnd('\\', '/'));
-                    if (string.IsNullOrEmpty(compName)) continue;
-                    if (string.Equals(compName, "Updater", System.StringComparison.OrdinalIgnoreCase)) continue;
-                    string targetComp = System.IO.Path.Combine(PathManager.CompanionsDir, compName);
-                    if (!DirReplacer.Replace(stagingComp, targetComp))
-                    {
-                        throw new System.IO.IOException("Companion '" + compName + "' の置換に失敗しました。");
-                    }
-                    DirReplacer.CleanupBak(targetComp);
+                    int pct = 5 + (int)(dp.Percent * 0.35);  // 5-40%
+                    progress.Report(new ProgressInfo(pct, "ダウンロード中...",
+                        string.Format("{0:N0} / {1:N0} bytes", dp.BytesDownloaded, dp.TotalBytes)));
+                });
+                UpdateDownloader.DownloadAsync(zipUrl, zipPath, dlProgress, ct).GetAwaiter().GetResult();
+                ct.ThrowIfCancellationRequested();
+
+                // [2] 展開 (40-50%)
+                Services.Logger.Info("[UpdateSectionPanel] [Step 2/10] zip 展開");
+                progress.Report(new ProgressInfo(42, "展開中...", stagingDir));
+                UpdateDownloader.Extract(zipPath, stagingDir);
+                ct.ThrowIfCancellationRequested();
+
+                // [3] ExpectedFiles 検証 (50-55%)
+                Services.Logger.Info("[UpdateSectionPanel] [Step 3/10] ExpectedFiles 検証");
+                progress.Report(new ProgressInfo(50, "ファイル検証中..."));
+                var missing = UpdateDownloader.ValidateStaging(stagingDir);
+                if (missing.Count > 0)
+                {
+                    throw new System.IO.InvalidDataException(
+                        "staging に必要ファイルが不足しています:\n  " + string.Join("\n  ", missing));
                 }
-            }
 
-            // [7] shortcut bat 置換 (single-file、`<install_parent>/Launcher.bat` と `Manager.bat`)
-            progress.Report(new ProgressInfo(70, "ショートカットを更新中..."));
-            string parentDir = PathManager.InstallParentDir;
-            if (!string.IsNullOrEmpty(parentDir))
-            {
+                // [4] Bundle version 一致検証 (55-60%)
+                Services.Logger.Info("[UpdateSectionPanel] [Step 4/10] Bundle version 一致検証");
+                progress.Report(new ProgressInfo(55, "バージョン一致を検証中..."));
+                if (!UpdateDownloader.ValidateBundleVersion(stagingDir, targetVersion))
+                {
+                    throw new System.IO.InvalidDataException(
+                        "staging の CHANGELOG.md 最新 Bundle が target version (" + targetVersion.ToString(3) +
+                        ") と一致しません。zip 改竄 / 取り違え疑い。");
+                }
+
+                // ===== ここから「置換境界」: 以降の cancel は half-state を生むので無効化 =====
+
+                // [5] Launcher dir 置換 (60-67%)
+                Services.Logger.Info("[UpdateSectionPanel] [Step 5/10] Launcher dir 置換");
+                progress.Report(new ProgressInfo(60, "Launcher を更新中...", PathManager.LauncherDir));
+                string stagingLauncher = System.IO.Path.Combine(stagingDir, "files", "Launcher");
+                if (!DirReplacer.Replace(stagingLauncher, PathManager.LauncherDir))
+                {
+                    throw new System.IO.IOException("Launcher dir の置換に失敗しました。");
+                }
+                DirReplacer.CleanupBak(PathManager.LauncherDir);
+
+                // [6] Companions (Updater 以外) 置換 — 現状 dir 列挙で対象なし、将来 WindowProbe / PauseOverlay 用
+                Services.Logger.Info("[UpdateSectionPanel] [Step 6/10] Companions (Updater 以外) 置換");
+                progress.Report(new ProgressInfo(67, "Companions を更新中..."));
+                string stagingCompanionsRoot = System.IO.Path.Combine(stagingDir, "files", "Companions");
+                if (System.IO.Directory.Exists(stagingCompanionsRoot))
+                {
+                    foreach (string stagingComp in System.IO.Directory.EnumerateDirectories(stagingCompanionsRoot))
+                    {
+                        string compName = System.IO.Path.GetFileName(stagingComp.TrimEnd('\\', '/'));
+                        if (string.IsNullOrEmpty(compName)) continue;
+                        if (string.Equals(compName, "Updater", System.StringComparison.OrdinalIgnoreCase)) continue;
+                        string targetComp = System.IO.Path.Combine(PathManager.CompanionsDir, compName);
+                        Services.Logger.Info("[UpdateSectionPanel]   Companion '" + compName + "' 置換");
+                        if (!DirReplacer.Replace(stagingComp, targetComp))
+                        {
+                            throw new System.IO.IOException("Companion '" + compName + "' の置換に失敗しました。");
+                        }
+                        DirReplacer.CleanupBak(targetComp);
+                    }
+                }
+
+                // [7] shortcut bat 置換 (single-file、`<install_parent>/Launcher.bat` と `Manager.bat`)
+                Services.Logger.Info("[UpdateSectionPanel] [Step 7/10] shortcut bat 置換");
+                progress.Report(new ProgressInfo(70, "ショートカットを更新中..."));
+                string parentDir = PathManager.InstallParentDir;
+                if (!string.IsNullOrEmpty(parentDir))
+                {
+                    FileReplacer.ReplaceFile(
+                        System.IO.Path.Combine(stagingDir, "Launcher.bat"),
+                        System.IO.Path.Combine(parentDir, "Launcher.bat"));
+                    FileReplacer.ReplaceFile(
+                        System.IO.Path.Combine(stagingDir, "Manager.bat"),
+                        System.IO.Path.Combine(parentDir, "Manager.bat"));
+                }
+                else
+                {
+                    Services.Logger.Warn("[UpdateSectionPanel]   InstallParentDir 空、shortcut bat 置換 skip");
+                }
+
+                // [8] CHANGELOG.md 置換 (single-file、`<install>/CHANGELOG.md` 直下)
+                Services.Logger.Info("[UpdateSectionPanel] [Step 8/10] CHANGELOG.md 置換");
+                progress.Report(new ProgressInfo(73, "CHANGELOG を更新中..."));
                 FileReplacer.ReplaceFile(
-                    System.IO.Path.Combine(stagingDir, "Launcher.bat"),
-                    System.IO.Path.Combine(parentDir, "Launcher.bat"));
-                FileReplacer.ReplaceFile(
-                    System.IO.Path.Combine(stagingDir, "Manager.bat"),
-                    System.IO.Path.Combine(parentDir, "Manager.bat"));
+                    System.IO.Path.Combine(stagingDir, "files", "CHANGELOG.md"),
+                    PathManager.BundleChangelogPath);
+
+                // [9] Companions/Updater 置換 (SPEC §3.7.3 [10]、常に staging の新 Updater で置換)
+                Services.Logger.Info("[UpdateSectionPanel] [Step 9/10] Companions/Updater 置換");
+                progress.Report(new ProgressInfo(77, "Updater を更新中...", PathManager.UpdaterDir));
+                string stagingUpdater = System.IO.Path.Combine(stagingDir, "files", "Companions", "Updater");
+                if (!DirReplacer.Replace(stagingUpdater, PathManager.UpdaterDir))
+                {
+                    throw new System.IO.IOException("Updater dir の置換に失敗しました。");
+                }
+                DirReplacer.CleanupBak(PathManager.UpdaterDir);
+
+                // [10] Updater spawn (Manager の終了を待機 + Manager dir 置換 + 新 Manager.exe 起動を引き継ぐ)
+                Services.Logger.Info("[UpdateSectionPanel] [Step 10/10] Updater spawn");
+                progress.Report(new ProgressInfo(85, "Updater を起動中..."));
+                if (!UpdaterClient.Spawn(stagingDir, forceKill: false, logSink: null))
+                {
+                    throw new System.IO.IOException("Updater spawn に失敗しました。");
+                }
+                progress.Report(new ProgressInfo(95, "Manager を終了中..."));
+                Services.Logger.Info("[UpdateSectionPanel] RunUpdateWorker 全 Step 完了、Application.Exit へ");
+                // worker 終了 → ProcessingDialog が DialogResult.OK で抜ける → caller が Application.Exit()
+                return true;
             }
-
-            // [8] CHANGELOG.md 置換 (single-file、`<install>/CHANGELOG.md` 直下)
-            progress.Report(new ProgressInfo(73, "CHANGELOG を更新中..."));
-            FileReplacer.ReplaceFile(
-                System.IO.Path.Combine(stagingDir, "files", "CHANGELOG.md"),
-                PathManager.BundleChangelogPath);
-
-            // [9] Companions/Updater 置換 (SPEC §3.7.3 [10]、常に staging の新 Updater で置換)
-            progress.Report(new ProgressInfo(77, "Updater を更新中...", PathManager.UpdaterDir));
-            string stagingUpdater = System.IO.Path.Combine(stagingDir, "files", "Companions", "Updater");
-            if (!DirReplacer.Replace(stagingUpdater, PathManager.UpdaterDir))
+            catch (System.OperationCanceledException)
             {
-                throw new System.IO.IOException("Updater dir の置換に失敗しました。");
+                Services.Logger.Warn("[UpdateSectionPanel] RunUpdateWorker: user が cancel");
+                throw;
             }
-            DirReplacer.CleanupBak(PathManager.UpdaterDir);
-
-            // [10] Updater spawn (Manager の終了を待機 + Manager dir 置換 + 新 Manager.exe 起動を引き継ぐ)
-            progress.Report(new ProgressInfo(85, "Updater を起動中..."));
-            if (!UpdaterClient.Spawn(stagingDir, forceKill: false, logSink: null))
+            catch (Exception ex)
             {
-                throw new System.IO.IOException("Updater spawn に失敗しました。");
+                Services.Logger.Error("[UpdateSectionPanel] RunUpdateWorker 中に例外発生", ex);
+                throw;
             }
-            progress.Report(new ProgressInfo(95, "Manager を終了中..."));
-            // worker 終了 → ProcessingDialog が DialogResult.OK で抜ける → caller が Application.Exit()
-            return true;
         }
 
         private void btnSkip_Click(object sender, EventArgs e)
