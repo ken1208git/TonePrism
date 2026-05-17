@@ -872,9 +872,11 @@ function Get-BundleReleaseNotes {
         Fail "CHANGELOG.md が見つかりません: $ChangelogPath"
     }
     $content = [System.IO.File]::ReadAllText($ChangelogPath, [System.Text.Encoding]::UTF8)
-    # `### [Bundle v0.1.0] - YYYY-MM-DD` から次の `### ` / `---` / `## ` / EOF まで
-    # `\Z`: 後続セクション無しの初回 Bundle release だけが該当する保険
-    $pattern = '(?ms)^### \[Bundle v' + [regex]::Escape($Version) + '\][^\r\n]*\r?\n(.*?)(?=^### |^---|^## |\Z)'
+    # `### [Bundle v0.1.0] - YYYY-MM-DD` から次の `### ` / `^-{3,}\s*$` (= 3 文字以上の `-` 単独行) /
+    # `## ` / EOF まで。`\Z`: 後続セクション無しの初回 Bundle release だけが該当する保険。
+    # (#108 Phase 4 round 5 M-4) 旧 `^---` だと body 内 horizontal rule で silent truncation する path
+    # があったため `^-{3,}\s*$` に厳密化、Manager の ChangelogParser.cs と同型同期。
+    $pattern = '(?ms)^### \[Bundle v' + [regex]::Escape($Version) + '\][^\r\n]*\r?\n(.*?)(?=^### |^-{3,}\s*$|^## |\Z)'
     $m = [regex]::Match($content, $pattern)
     if (-not $m.Success) { return '' }
     return $m.Groups[1].Value.Trim()

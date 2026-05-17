@@ -479,11 +479,17 @@ namespace GCTonePrism.Manager.Controls
                 // [4] Bundle version 一致検証 (55-60%)
                 Services.Logger.Info("[UpdateSectionPanel] [Step 4/10] Bundle version 一致検証 (SPEC §3.7.3 [6] 内容検証)");
                 progress.Report(new ProgressInfo(55, "バージョン一致を検証中..."));
-                if (!UpdateDownloader.ValidateBundleVersion(stagingDir, targetVersion))
+                Version stagingBundleVer;
+                if (!UpdateDownloader.ValidateBundleVersion(stagingDir, targetVersion, out stagingBundleVer))
                 {
+                    // (#108 Phase 4 round 5 L-5) error message に staging 側 version を含めて debug
+                    // ergonomics 改善 (旧実装は user が log を開かないと staging version を知れなかった)。
+                    string stagingDesc = stagingBundleVer == null
+                        ? "(staging CHANGELOG.md parse 失敗)"
+                        : "v" + stagingBundleVer.ToString(3);
                     throw new System.IO.InvalidDataException(
-                        "staging の CHANGELOG.md 最新 Bundle が target version (" + targetVersion.ToString(3) +
-                        ") と一致しません。zip 改竄 / 取り違え疑い。");
+                        "staging の CHANGELOG.md 最新 Bundle (" + stagingDesc + ") が target version (v" +
+                        targetVersion.ToString(3) + ") と一致しません。zip 改竄 / 取り違え疑い。");
                 }
 
                 // ===== ここから「置換境界」: 以降の cancel は half-state を生むので無効化 =====
@@ -577,15 +583,13 @@ namespace GCTonePrism.Manager.Controls
                     Services.Logger.Warn("[UpdateSectionPanel]   InstallParentDir 空、shortcut bat 置換 skip");
                 }
 
-                // [8] CHANGELOG.md 置換 (single-file、`<install>/CHANGELOG.md` 直下)
-                Services.Logger.Info("[UpdateSectionPanel] [Step 8/10] CHANGELOG.md 置換 (SPEC §3.7.7 Bundle SoT、§3.7.3 では [9] と同 phase)");
-                progress.Report(new ProgressInfo(73, "CHANGELOG を更新中..."));
-                if (!FileReplacer.ReplaceFile(
-                    System.IO.Path.Combine(stagingDir, "files", "CHANGELOG.md"),
-                    PathManager.BundleChangelogPath))
-                {
-                    throw new System.IO.IOException("CHANGELOG.md の置換に失敗しました (詳細は log 参照)。");
-                }
+                // (#108 Phase 4 round 5 M-1) CHANGELOG.md 置換は **Updater spawn 成功後** の defer
+                // block に移動 (= 旧 [Step 8] を Step 10 後に再配置)。旧順序は Step 9/10 (Updater dir
+                // 置換 + Updater spawn) で fail した場合、CHANGELOG が NEW で Manager 本体は OLD のまま
+                // → `VersionInventory.ReadBundleVersion` が NEW 返却 → `ComputeStatus` で `UpToDate`
+                // 判定 → 「最新版を実行中」誤表示 + btnUpdateNow disabled で user が再 update 不能
+                // partial-state に陥っていた。CHANGELOG は 1 file copy で side effect 極小、Updater
+                // spawn 成功確認後に動かせば fail tolerance を下げない。
 
                 // [9] Companions/Updater 置換 (SPEC §3.7.3 [10]、常に staging の新 Updater で置換)
                 Services.Logger.Info("[UpdateSectionPanel] [Step 9/10] Companions/Updater 置換 (SPEC §3.7.3 [10])");
@@ -612,14 +616,25 @@ namespace GCTonePrism.Manager.Controls
                     throw new System.IO.IOException("Updater spawn に失敗しました。");
                 }
 
-                // (#108 Phase 4 round 4 codex P1 NEW) Updater spawn 成功 = ここまで来れば Application.Exit
-                // 直前で「すべての置換が完了 + Updater が引き継ぎ待機中」状態。**ここで初めて** 各
-                // 置換 dir の .bak を一括 cleanup する。途中 Step で throw されると本ブロックに到達せず
-                // .bak は残ったまま、次回起動時の DirReplacer.Replace 冒頭の zombie .bak detection で
-                // 「target 存在 + .bak 存在 → 前回 partial state、target を正として .bak 削除」path に
-                // 自然に流れて消化される (= 旧 version 復元の余地は失われるが、user は Manager 再起動
-                // 時に new Manager から再 update 実行可能、半端 mixed-version 維持よりも安全)。
-                Services.Logger.Info("[UpdateSectionPanel] 全置換成功、.bak " + replacedDirs.Count + " 件をまとめて cleanup");
+                // (#108 Phase 4 round 4 codex P1 NEW + round 5 M-1) Updater spawn 成功 = ここまで来れば
+                // Application.Exit 直前で「すべての置換が完了 + Updater が引き継ぎ待機中」状態。
+                // **ここで初めて**:
+                //   (a) CHANGELOG.md 置換 (round 5 M-1: VersionInventory が partial-state で誤判定する
+                //       のを避けるため Updater spawn 成功後に動かす)
+                //   (b) 各置換 dir の .bak 一括 cleanup
+                // を実施。途中 Step で throw されると本ブロックに到達せず、.bak は残ったまま + CHANGELOG
+                // も OLD のまま (= UI は依然「アップデートあり」を正しく表示)、次回起動時の zombie .bak
+                // detection で 「target 存在 + .bak 存在 → 前回 partial state、target を正として .bak 削除」
+                // path に自然に流れて消化される。
+                Services.Logger.Info("[UpdateSectionPanel] 全 dir 置換成功、CHANGELOG.md 置換 + .bak cleanup");
+                if (!FileReplacer.ReplaceFile(
+                    System.IO.Path.Combine(stagingDir, "files", "CHANGELOG.md"),
+                    PathManager.BundleChangelogPath))
+                {
+                    // CHANGELOG 置換失敗は致命的ではない (= VersionInventory が OLD のまま読むだけで
+                    // installation は機能、user は次回 update で再試行可能)。Warn log のみで継続。
+                    Services.Logger.Warn("[UpdateSectionPanel] CHANGELOG.md 置換失敗 (Updater spawn は成功済、Application.Exit 続行)");
+                }
                 foreach (string repDir in replacedDirs)
                 {
                     DirReplacer.CleanupBak(repDir);

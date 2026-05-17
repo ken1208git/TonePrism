@@ -207,9 +207,13 @@ namespace GCTonePrism.Manager.Services
         /// <summary>
         /// staging CHANGELOG.md から最新 Bundle entry を取得して target version と一致するか検証。
         /// 不一致は zip 改竄 / 取り違え疑い、abort 経路 (Manager UI が UpdateDownloader 呼出後に check)。
+        /// (#108 Phase 4 round 5 L-5) `out Version stagingVer` で staging 側の parse 結果を caller に
+        /// 返す (error message に含めて UI に staging version を表示)。staging parse 失敗時は
+        /// `stagingVer = null`。
         /// </summary>
-        public static bool ValidateBundleVersion(string stagingDir, Version expectedVersion)
+        public static bool ValidateBundleVersion(string stagingDir, Version expectedVersion, out Version stagingVer)
         {
+            stagingVer = null;
             if (expectedVersion == null)
             {
                 Logger.Warn("[UpdateDownloader] ValidateBundleVersion: expectedVersion=null");
@@ -225,6 +229,7 @@ namespace GCTonePrism.Manager.Services
                 Logger.Warn("[UpdateDownloader] ValidateBundleVersion: CHANGELOG から Bundle entry parse 失敗 (path=" + changelogPath + ")");
                 return false;
             }
+            stagingVer = latest.Version;
             bool match = latest.Version == expectedVersion;
             if (match)
             {

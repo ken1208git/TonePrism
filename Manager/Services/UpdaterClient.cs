@@ -173,14 +173,17 @@ namespace GCTonePrism.Manager.Services
                 int startIdx = Math.Max(0, lines.Length - 20);
                 bool sawFailure = false;
                 bool sawComplete = false;
+                // (#108 Phase 4 round 5 L-3) `[20` literal prefix は 2100 年問題、regex で世紀非依存化。
+                var logLevelRegex = new System.Text.RegularExpressions.Regex(
+                    @"^\[\d{4}-\d{2}-\d{2}.*\]\s*\[(ERROR|FATAL)\]");
                 for (int i = startIdx; i < lines.Length; i++)
                 {
                     string line = lines[i];
                     if (line.Contains("Updater 全工程完了")) sawComplete = true;
-                    // 行頭 Logger format prefix (`[YYYY-MM-DD HH:mm:ss] [LEVEL]`) を確認してから level tag
-                    // を検出することで、message 本文に偶然 `[ERROR]` 文字列を含む log line (例:
-                    // `Logger.Info("[FOO] mode=ERROR_RECOVERY")`) を false positive しないように anchor 厳密化。
-                    if (line.StartsWith("[20") && (line.Contains("] [ERROR]") || line.Contains("] [FATAL]")))
+                    // 行頭 Logger format prefix (`[YYYY-MM-DD HH:mm:ss] [LEVEL]`) を regex で確認、
+                    // message 本文に偶然 `[ERROR]` 文字列を含む log line (例: `Logger.Info(
+                    // "[FOO] mode=ERROR_RECOVERY")`) を false positive しないように anchor 厳密化。
+                    if (logLevelRegex.IsMatch(line))
                     {
                         sawFailure = true;
                     }
@@ -298,6 +301,12 @@ namespace GCTonePrism.Manager.Services
         /// </summary>
         private static string Quote(string s)
         {
+            if (string.IsNullOrEmpty(s)) return "\"\"";
+            // (#108 Phase 4 round 5 L-6) trailing backslash defensive 正規化。`C:\foo\` を quote すると
+            // `"C:\foo\"` → CommandLineToArgvW が末尾 `\"` を escaped quote と解釈して次の引数まで
+            // 延長する known bug。caller が trailing backslash を含む path を渡しても安全に動くよう
+            // 先に TrimEnd で剥がす (path semantic は同等)。
+            s = s.TrimEnd('\\');
             if (string.IsNullOrEmpty(s)) return "\"\"";
             // 既に quote 付きならそのまま、含まない場合は囲む
             if (s.Contains(" ") || s.Contains("\t"))

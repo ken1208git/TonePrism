@@ -27,8 +27,12 @@ namespace GCTonePrism.Manager.Services
         // entry header の date 部分 (` - YYYY-MM-DD` 等) は optional に [^\r\n]* で吸収。
         // body は lazy で次の terminator anchor まで。`^[Bundle v` の link footer 行 (`[Bundle v0.2.0]: https://...`) は
         // `### ` ではなく `[` で始まるためマッチ対象外。
+        // (#108 Phase 4 round 5 M-4) `^---` を `^-{3,}\s*$` に厳密化。旧 pattern は markdown body 内に
+        // horizontal rule (`---` 行) を書いた瞬間に body 切断 + 後続 Bundle entry を捨てる silent
+        // truncation があった。3 文字以上の `-` 単独行を terminator として明示、`--foo` のような
+        // 通常 text は match しない。Release.ps1 `Get-BundleReleaseNotes` の同型 pattern も同期更新。
         private static readonly Regex BundleEntryRegex = new Regex(
-            @"^###\s+\[Bundle\s+v(?<ver>\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?)\][^\r\n]*\r?\n(?<body>.*?)(?=^### |^---|^## |\Z)",
+            @"^###\s+\[Bundle\s+v(?<ver>\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?)\][^\r\n]*\r?\n(?<body>.*?)(?=^### |^-{3,}\s*$|^## |\Z)",
             RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.Compiled);
 
         /// <summary>

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -26,16 +27,14 @@ namespace GCTonePrism.Manager.Services
     {
         private readonly SettingsRepository _settings;
 
-        // (#108 Phase 4 round 1 M4 fix) settings 書込みは Skip (UI thread) / SaveCache (background
-        // Task.Run) で並行発火しうる。SettingsRepository は SQLite-backed K/V、内部 lock 持つかは
-        // 本 PR scope 外で確認しきれていないため defensive に process-wide lock を被せて serialize する。
-        // 競合 window は数 ms オーダーなので throughput 影響は無視可。
-        // (#108 Phase 4 round 4 L-4) **片手落ち明示**: 本 lock は **write のみ** 保護する。
-        // `ShouldNotify` / `TryLoadCache` / `IsCacheFresh` 等の read 経路は lock 外で `_settings.GetString`
-        // を直接呼ぶ (= SQLite K/V の単一 key read は SQLite 側 atomic 前提)。`SettingsRepository` 自体が
-        // thread-safe なら本 lock 全体撤去可、非 thread-safe なら read もまとめて lock 内に入れる必要あり。
-        // 次回 PR で SettingsRepository の thread-safety を確認して片付ける。
-        private static readonly object _settingsWriteLock = new object();
+        // (#108 Phase 4 round 1 M4 → round 5 M-3 撤去) 旧実装は process-wide `_settingsWriteLock` で
+        // Skip / SaveCache 等の settings 書込みを serialize していたが、SettingsRepository は
+        //   - call ごとに `new SQLiteConnection` + ExecuteWithRetry で SQLITE_BUSY retry
+        //   - prism.db は WAL モード (PR #103) で multi-writer 安全
+        // のため SQLite 側で既に atomic、process-wide lock を被せるのは redundant な二重 lock だった。
+        // round 4 L-4 で「read は lock 外で片手落ち」と debt 明示していたが、本 round で SettingsRepository
+        // が atomic と確認できたため lock 自体撤去 + 各 method の try/catch + Logger.Warn の error
+        // handling は保持 (= SQLite 書込み失敗時の防御は依然必要)。
 
         public UpdateChecker(SettingsRepository settings)
         {
@@ -124,41 +123,35 @@ namespace GCTonePrism.Manager.Services
         }
 
         /// <summary>
-        /// (#108 Phase 4 round 3 M-1) 起動時通知 dialog を出した tag を記録 (`UpdateNotifiedTag`)。
-        /// MainForm.StartBackgroundUpdateCheckIfDue から呼ぶ。round 1 M4 で立てた settings 書込み
-        /// invariant (process-wide `_settingsWriteLock` で serialize) を維持するため UpdateChecker 内に
-        /// 集約、MainForm の直接書込みを排除。
+        /// (#108 Phase 4 round 3 M-1 + round 5 M-3) 起動時通知 dialog を出した tag を記録
+        /// (`UpdateNotifiedTag`)。MainForm.StartBackgroundUpdateCheckIfDue から呼ぶ。
+        /// round 5 M-3 で process-wide lock 撤去 (SettingsRepository atomic 前提)、settings 書込み集約
+        /// 自体は API 統一の責務として維持。
         /// </summary>
         public void MarkNotified(string tagName)
         {
             if (string.IsNullOrEmpty(tagName)) return;
-            lock (_settingsWriteLock)
+            try
             {
-                try
-                {
-                    _settings.SetString(SettingsKeys.UpdateNotifiedTag, tagName);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn("[UpdateChecker] MarkNotified 書込み失敗 (tag=" + tagName + "): " + ex.Message);
-                }
+                _settings.SetString(SettingsKeys.UpdateNotifiedTag, tagName);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[UpdateChecker] MarkNotified 書込み失敗 (tag=" + tagName + "): " + ex.Message);
             }
         }
 
-        /// <summary>同 lock で読み込み (`MarkNotified` と pair で使う)。</summary>
+        /// <summary>(round 5 M-3) lock 撤去 (SettingsRepository atomic 前提)。</summary>
         public string GetNotifiedTag()
         {
-            lock (_settingsWriteLock)
+            try
             {
-                try
-                {
-                    return _settings.GetString(SettingsKeys.UpdateNotifiedTag, string.Empty);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn("[UpdateChecker] GetNotifiedTag 読込失敗: " + ex.Message);
-                    return string.Empty;
-                }
+                return _settings.GetString(SettingsKeys.UpdateNotifiedTag, string.Empty);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[UpdateChecker] GetNotifiedTag 読込失敗: " + ex.Message);
+                return string.Empty;
             }
         }
 
@@ -171,35 +164,28 @@ namespace GCTonePrism.Manager.Services
         public void Skip(Version latest)
         {
             if (latest == null) return;
-            // (#108 Phase 4 round 1 M4 fix) lock 保護 + try/catch (旧実装は素通しで SQLite lock 競合時に
-            // 例外が user に直接見えていた)。失敗時は Logger.Warn のみで握り潰し (= skip 失敗は機能性に
-            // 影響あるが致命的でない、user は次の dialog でも再 skip 可能)。
-            lock (_settingsWriteLock)
+            // (#108 Phase 4 round 1 M4 → round 5 M-3) try/catch + Logger.Warn は保持 (SQLite 書込み失敗時の
+            // 防御は依然必要)、process-wide lock は撤去 (SettingsRepository atomic 前提)。
+            try
             {
-                try
-                {
-                    _settings.SetString(SettingsKeys.UpdateSkippedVersion, latest.ToString(3));
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn("[UpdateChecker] Skip 書込み失敗: " + ex.Message);
-                }
+                _settings.SetString(SettingsKeys.UpdateSkippedVersion, latest.ToString(3));
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[UpdateChecker] Skip 書込み失敗: " + ex.Message);
             }
         }
 
         /// <summary>skip を解除 (UI 上「スキップを解除」ボタンを将来出すなら使う、現状未配置)。</summary>
         public void ClearSkip()
         {
-            lock (_settingsWriteLock)
+            try
             {
-                try
-                {
-                    _settings.SetString(SettingsKeys.UpdateSkippedVersion, string.Empty);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn("[UpdateChecker] ClearSkip 書込み失敗: " + ex.Message);
-                }
+                _settings.SetString(SettingsKeys.UpdateSkippedVersion, string.Empty);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[UpdateChecker] ClearSkip 書込み失敗: " + ex.Message);
             }
         }
 
@@ -326,18 +312,15 @@ namespace GCTonePrism.Manager.Services
                 FromCache = false,
             };
 
-            // (#108 Phase 4 round 1 M4 fix) Skip と並行発火しうるため lock 保護。
-            lock (_settingsWriteLock)
+            // (#108 Phase 4 round 1 M4 → round 5 M-3) lock 撤去 (SettingsRepository atomic 前提)。
+            SaveCache(result);
+            try
             {
-                SaveCache(result);
-                try
-                {
-                    _settings.SetInt64(SettingsKeys.UpdateCheckLastAtUnixMs, nowMs);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn("[UpdateChecker] UpdateCheckLastAtUnixMs 書込み失敗: " + ex.Message);
-                }
+                _settings.SetInt64(SettingsKeys.UpdateCheckLastAtUnixMs, nowMs);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[UpdateChecker] UpdateCheckLastAtUnixMs 書込み失敗: " + ex.Message);
             }
             return result;
         }
@@ -367,7 +350,21 @@ namespace GCTonePrism.Manager.Services
                             : DateTimeOffset.Parse(dto.Latest.PublishedAt, System.Globalization.CultureInfo.InvariantCulture,
                                 System.Globalization.DateTimeStyles.RoundtripKind),
                     },
-                    CumulativeReleases = new List<ReleaseInfo>(), // 累積 list は cache 対象外 (size 抑制、再 fetch で取り直す)
+                    // (#108 Phase 4 round 5 M-2) cache から CumulativeReleases も hydrate。
+                    // null fallback で旧 cache schema (Cumulative 不在) との互換も維持。
+                    CumulativeReleases = dto.Cumulative == null ? new List<ReleaseInfo>() : dto.Cumulative
+                        .Select(c => new ReleaseInfo
+                        {
+                            TagName = c.TagName,
+                            Version = TryParse(c.TagName),
+                            Body = c.Body,
+                            HtmlUrl = c.HtmlUrl,
+                            ZipAssetUrl = c.ZipAssetUrl,
+                            ZipSizeBytes = c.ZipSizeBytes,
+                            PublishedAt = string.IsNullOrEmpty(c.PublishedAt) ? (DateTimeOffset?)null
+                                : DateTimeOffset.Parse(c.PublishedAt, System.Globalization.CultureInfo.InvariantCulture,
+                                    System.Globalization.DateTimeStyles.RoundtripKind),
+                        }).ToList<ReleaseInfo>(),
                     CheckedAtUnixMs = dto.CheckedAtUnixMs,
                 };
             }
@@ -397,6 +394,19 @@ namespace GCTonePrism.Manager.Services
                             ? result.Latest.PublishedAt.Value.ToString("o")
                             : null,
                     },
+                    // (#108 Phase 4 round 5 M-2) CumulativeReleases も serialize。
+                    Cumulative = result.CumulativeReleases == null ? null : result.CumulativeReleases
+                        .Select(r => new CacheReleaseDto
+                        {
+                            TagName = r.TagName,
+                            Body = r.Body,
+                            HtmlUrl = r.HtmlUrl,
+                            ZipAssetUrl = r.ZipAssetUrl,
+                            ZipSizeBytes = r.ZipSizeBytes,
+                            PublishedAt = r.PublishedAt.HasValue
+                                ? r.PublishedAt.Value.ToString("o")
+                                : null,
+                        }).ToList(),
                 };
                 var ser = new JavaScriptSerializer { MaxJsonLength = 1024 * 1024 };
                 string json = ser.Serialize(dto);
@@ -431,6 +441,11 @@ namespace GCTonePrism.Manager.Services
             public string CurrentVer { get; set; }
             public CacheReleaseDto Latest { get; set; }
             public long CheckedAtUnixMs { get; set; }
+            // (#108 Phase 4 round 5 M-2) CumulativeReleases も cache。旧設計は「size 抑制」で空 list
+            // hydrate していたが、fresh cache 経路 (= cache TTL 6h 以内の再起動) で UpdateAvailable / Skipped
+            // 表示時に release notes UI が「現在実行中: vLATEST」誤誘導する path があった。1 release
+            // あたり数 KB、典型 30 release で 100KB 程度、SQLite K/V に十分入る size。
+            public List<CacheReleaseDto> Cumulative { get; set; }
         }
         private sealed class CacheReleaseDto
         {

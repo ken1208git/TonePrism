@@ -227,21 +227,25 @@ namespace GCTonePrism.Manager
         /// `Status=UpdateAvailable` の case でのみ呼ばれる (Skipped / UpToDate / 失敗時は呼ばれない、
         /// = 「スキップしたバージョンが新 release で更新されるまで再通知しない」semantic を上位で保証)。
         ///
-        /// **戻り値 (round 4 codex P2 NEW)**: dialog が **実際に user に表示された** ら true、
-        /// UI error (BeginInvoke 失敗 / MessageBox 例外 / form 破棄) で表示前に early return した場合は
+        /// **戻り値 (round 4 codex P2 NEW + round 5 L-1)**: dialog が **実際に user に表示された** ら
+        /// true、UI error (Invoke 失敗 / MessageBox 例外 / form 破棄) で表示前に early return した場合は
         /// false。caller (StartBackgroundUpdateCheckIfDue) は true 時のみ MarkNotified を呼ぶ責務、
-        /// false 時は marker 更新 skip で次回起動で再通知する。BeginInvoke 経由の再帰呼出経路では
-        /// 非同期完了結果を直接 caller に返せないため楽観的に true 返却 (= async path も「表示成功」
-        /// 扱い、UI thread での再呼出が catch (Exception) で false 返却するならその時に reset される)。
+        /// false 時は marker 更新 skip で次回起動で再通知する。
+        ///
+        /// round 5 L-1: 旧実装は async recursive call (BeginInvoke) で楽観的 true return していたが、
+        /// 実際 caller `StartBackgroundUpdateCheckIfDue` は `await Task.Run` 後 SynchronizationContext
+        /// 経由で UI thread に戻るため `InvokeRequired = false` 確定の dead path だった。defensive
+        /// として残す場合は **synchronous Invoke** で recursive call の結果を caller に正確に返す形に。
         /// </summary>
         private bool ShowUpdateAvailableNotification(Models.UpdateCheckResult result)
         {
             if (InvokeRequired)
             {
+                // (round 5 L-1) defensive path: BeginInvoke の楽観 true は嘘になるため Invoke で
+                // synchronous に recursive call → result を caller に正確に返す。
                 try
                 {
-                    BeginInvoke(new Action<Models.UpdateCheckResult>(r => ShowUpdateAvailableNotification(r)), result);
-                    return true; // BeginInvoke 成功 = UI thread に投函成功、楽観的 success 扱い
+                    return (bool)Invoke(new Func<Models.UpdateCheckResult, bool>(ShowUpdateAvailableNotification), result);
                 }
                 // (round 4 M-3) ObjectDisposedException : InvalidOperationException 派生関係のため
                 // specific を先に置いて意図明示。
