@@ -14,7 +14,13 @@ namespace GCTonePrism.Updater
     ///     --log-dir "D:\Games\GCTonePrism\logs\updater\"
     ///
     /// 引数仕様 (SPEC §3.7.4):
-    ///   --staging          (必須) staging dir のルート。`&lt;staging&gt;/files/Manager/` を新 Manager のソースとする
+    ///   --staging          (必須) source dir のルート。`&lt;source&gt;/files/Manager/` を新 Manager のソースとする。
+    ///                      Phase 3 までは Manager UI が `--staging &lt;staging dir&gt;` を渡して Updater は
+    ///                      `&lt;staging&gt;/files/Manager` を見ていた。Phase 4.1 (#175) で Manager UI 側 zip
+    ///                      構造が `bundle/files/Manager` に変わったため、Manager UI は **bundle root**
+    ///                      (`&lt;staging&gt;/bundle`) を `--staging` 値として渡す形に。Updater 側 (本 CLI) は
+    ///                      flag 名 + 「`&lt;source&gt;/files/Manager` を見る」semantic を維持 (= caller 互換、
+    ///                      v0.3.0 install から spawn される旧 Updater も同 flag で動く)
     ///   --manager-target   (必須) 既存 Manager dir。rename-rollback で置換する dir
     ///   --restart-exe      (必須) 置換後に起動する Manager.exe フルパス
     ///   --log-dir          (任意) ログ出力先。省略時は `<install>/logs/updater/` (manager-target の親から導出、SPEC §3.7.4 準拠)
@@ -205,7 +211,8 @@ namespace GCTonePrism.Updater
                 "                          [--caller-pid <PID>]\n" +
                 "\n" +
                 "Required:\n" +
-                "  --staging <path>          staging dir のルート (中の files/Manager/ をソースに使う)\n" +
+                "  --staging <path>          source dir のルート (中の files/Manager/ をソースに使う)\n" +
+                "                            Phase 4.1 (#175): Manager UI は bundle root (<staging>/bundle) を渡す。\n" +
                 "  --manager-target <path>   置換先の既存 Manager dir\n" +
                 "  --restart-exe <path>      置換後に起動する Manager.exe のフルパス\n" +
                 "\n" +

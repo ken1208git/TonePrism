@@ -26,15 +26,22 @@ namespace GCTonePrism.Manager.Services
         /// <summary>
         /// Updater を spawn する。spawn 自体に失敗した場合は false を返す (= 起動失敗、Manager は終了しない)。
         /// 成功時 (true) は呼出元が即 Application.Exit() を呼んで Manager を終了させる責務。
+        ///
+        /// (#175 Phase 4.1) 引数を `stagingDir` から `bundleRoot` に rename。Updater 側
+        /// (`Companions/Updater/FileReplacer.cs`) は `--staging <X>/files/Manager` を期待する設計の
+        /// まま (= 引数の意味は維持、caller の Manager 側が `<X>` に bundleRoot を渡す形)。新構造では
+        /// `bundleRoot = <staging>/bundle`、旧構造 fallback では `bundleRoot = <staging>`。Updater 側
+        /// コード変更不要で forward compat 獲得 (caller が bundleRoot 解決の責務を持つ設計)。
         /// </summary>
-        /// <param name="stagingDir">展開済み staging dir (絶対 path)</param>
+        /// <param name="bundleRoot">展開済み staging 内の bundle root (= UpdateDownloader.ResolveBundleRoot 解決結果、絶対 path)。
+        ///     Updater 側で `<bundleRoot>/files/Manager` を source として使う。</param>
         /// <param name="forceKill">user が「強制終了して再試行」を選択している場合 true</param>
         /// <param name="logSink">Updater stdout/stderr の async 読取結果を流す sink (null 可)。各行が arrival 順で渡される</param>
-        public static bool Spawn(string stagingDir, bool forceKill, Action<string> logSink)
+        public static bool Spawn(string bundleRoot, bool forceKill, Action<string> logSink)
         {
-            if (string.IsNullOrEmpty(stagingDir) || !Directory.Exists(stagingDir))
+            if (string.IsNullOrEmpty(bundleRoot) || !Directory.Exists(bundleRoot))
             {
-                Services.Logger.Error("[UpdaterClient] staging dir が見つかりません: " + (stagingDir ?? "(null)"));
+                Services.Logger.Error("[UpdaterClient] bundle root が見つかりません: " + (bundleRoot ?? "(null)"));
                 return false;
             }
             string updaterExe = PathManager.UpdaterExePath;
@@ -63,7 +70,7 @@ namespace GCTonePrism.Manager.Services
             }
             var args = new List<string>
             {
-                "--staging",        Quote(stagingDir),
+                "--staging",        Quote(bundleRoot),
                 "--manager-target", Quote(PathManager.ManagerDir),
                 "--restart-exe",    Quote(managerExe),
                 "--log-dir",        Quote(PathManager.UpdaterLogDir),
