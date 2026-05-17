@@ -121,9 +121,12 @@ namespace GCTonePrism.Manager.Services
         }
 
         /// <summary>
-        /// `<install>/logs/updater/` 配下の直近 1 分以内のログから Updater の exit code を回収する。
+        /// `<install>/logs/updater/` 配下の直近 **2 分以内** のログから Updater の exit code を回収する。
         /// 新 Manager が起動した直後 (MainForm_Load) で呼んで「前回アップデート結果」を UI バナーに出す用途。
         /// 該当ログが見つからない / parse 失敗時は null。
+        ///
+        /// **注意 (round 2 M8)**: 旧 docstring は「1 分以内」と書いていたが実装は `AddMinutes(-2)` (= 2 分)、
+        /// round 1 H3 fix で書き直した際の追従漏れ。docstring を実装に揃えて訂正。
         /// </summary>
         public static int? TryLoadLastExitCode()
         {
@@ -153,8 +156,16 @@ namespace GCTonePrism.Manager.Services
                 bool sawFailure = false;
                 for (int i = lines.Length - 1; i >= 0 && i >= lines.Length - 20; i--)
                 {
-                    if (lines[i].Contains("Updater 全工程完了")) return 0;
-                    if (lines[i].Contains("[FATAL]") || lines[i].Contains("[ERROR]")) sawFailure = true;
+                    string line = lines[i];
+                    if (line.Contains("Updater 全工程完了")) return 0;
+                    // (#108 Phase 4 round 2 M8) 行頭 Logger format prefix (`[YYYY-MM-DD HH:mm:ss] [LEVEL]`)
+                    // を確認してから level tag を検出することで、message 本文に偶然 `[ERROR]` 文字列を
+                    // 含む log line (例: `Logger.Info("[FOO] mode=ERROR_RECOVERY")`) を false positive
+                    // しないように anchor を厳密化。
+                    if (line.StartsWith("[20") && (line.Contains("] [ERROR]") || line.Contains("] [FATAL]")))
+                    {
+                        sawFailure = true;
+                    }
                 }
                 return sawFailure ? 1 : (int?)null;
             }
@@ -255,7 +266,16 @@ namespace GCTonePrism.Manager.Services
             }
         }
 
-        /// <summary>Process.Start の Arguments 用に文字列を quote する (空白 path を扱う)。</summary>
+        /// <summary>
+        /// Process.Start の Arguments 用に文字列を quote する (空白 path を扱う)。
+        ///
+        /// **既知の制約 (round 1 L1 + round 2 L13)**: trailing backslash + `"` を含む path は厳密 escape
+        /// しない。例: `C:\foo\` を quote すると `"C:\foo\"` → CommandLineToArgvW は末尾 `\"` を escaped
+        /// quote と解釈して次の引数まで延長する。現状の caller (`PathManager.StagingRootForUpdate` /
+        /// `ManagerDir` / `Assembly.Location` / `UpdaterLogDir`) は全て trailing backslash 無しで実害なし、
+        /// trailing backslash 含む path を渡す path が将来出現する場合は `s.TrimEnd('\\')` で剥がすか
+        /// CommandLineToArgvW 規約に従って `\` → `\\` escape を入れること。
+        /// </summary>
         private static string Quote(string s)
         {
             if (string.IsNullOrEmpty(s)) return "\"\"";

@@ -138,14 +138,25 @@ namespace GCTonePrism.Manager.Services
                 "show_folder_dialog.ps1",
             };
             // files/ 配下
+            // (#108 Phase 4 round 2 M7 / codex P1) Release.ps1 `Assert-ExpectedFiles` の `$expected` と
+            // **literal 一致** に拡張 (旧版は minimal subset で、`.exe.config` / 各 DLL / SQLite.Interop /
+            // version.gd 不在の broken release を素通しして apply 続行 → 新 install が起動失敗、の path
+            // があった)。AGENTS.md / SPEC §3.7.8 の「同期必須」規約を文字通り実装、broken release を
+            // pre-replacement で検出。
             string[] filesExpected = new[]
             {
                 Path.Combine("files", "Launcher", "GCTonePrism_Launcher.exe"),
+                Path.Combine("files", "Launcher", "version.gd"),
                 Path.Combine("files", "Manager", "GCTonePrism_Manager.exe"),
-                // (#108 Phase 4 C1 fix) CHANGELOG.md は `files/` 直下 (Bundle SoT、SPEC §3.7.7)、
-                // `files/Manager/` ではない。Release.ps1 の `Assert-ExpectedFiles` と同期。
-                Path.Combine("files", "CHANGELOG.md"),
+                Path.Combine("files", "Manager", "GCTonePrism_Manager.exe.config"),
+                Path.Combine("files", "Manager", "System.Data.SQLite.dll"),
+                Path.Combine("files", "Manager", "Microsoft.WindowsAPICodePack.dll"),
+                Path.Combine("files", "Manager", "Microsoft.WindowsAPICodePack.Shell.dll"),
+                Path.Combine("files", "Manager", "x64", "SQLite.Interop.dll"),
+                Path.Combine("files", "Manager", "x86", "SQLite.Interop.dll"),
+                Path.Combine("files", "CHANGELOG.md"),  // C1 fix: `files/` 直下 (SPEC §3.7.7)
                 Path.Combine("files", "Companions", "Updater", "GCTonePrism_Updater.exe"),
+                Path.Combine("files", "Companions", "Updater", "GCTonePrism_Updater.exe.config"),
             };
 
             foreach (var rel in rootExpected)

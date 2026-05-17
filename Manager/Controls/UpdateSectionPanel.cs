@@ -185,6 +185,11 @@ namespace GCTonePrism.Manager.Controls
             {
                 if (result.CumulativeReleases != null && result.CumulativeReleases.Count > 0)
                 {
+                    // (#108 Phase 4 round 2 L12) cache hydrate 経路で CumulativeReleases=空 (size 抑制の
+                    // ため cache に入れない設計) のケースは、次行の BuildCumulativeHtml が単一 Latest
+                    // を fallback 表示するため UI semantics 上「最新 1 個のみ」になる short window あり。
+                    // OnCheckCompleted で fresh API fetch 結果が来たら自動上書きされる。 perceivable な
+                    // flash の対処は将来「累積データ取得中..." placeholder を出すこと検討。
                     webReleaseNotes.DocumentText = MarkdownRenderer.BuildCumulativeHtml(
                         result.CumulativeReleases, topHeading: "これから適用される変更");
                 }
@@ -436,7 +441,10 @@ namespace GCTonePrism.Manager.Controls
                 ct.ThrowIfCancellationRequested();
 
                 // [1] zip DL (5-40%)
-                Services.Logger.Info("[UpdateSectionPanel] [Step 1/10] zip DL 開始");
+                // (#108 Phase 4 round 2 M9) Logger trace の step 番号は code 内部の進捗 indicator として
+                // [N/10] のまま (= UI progress.Report の pct と対応)、対応する SPEC §3.7.3 のステップ番号
+                // も `(SPEC §3.7.3 [X])` で併記して 3 系統 (code / SPEC / CHANGELOG) の番号乱立を解消。
+                Services.Logger.Info("[UpdateSectionPanel] [Step 1/10] zip DL 開始 (SPEC §3.7.3 [5])");
                 progress.Report(new ProgressInfo(5, "ダウンロード中...", zipUrl));
                 var dlProgress = new System.Progress<DownloadProgress>(dp =>
                 {
@@ -448,13 +456,13 @@ namespace GCTonePrism.Manager.Controls
                 ct.ThrowIfCancellationRequested();
 
                 // [2] 展開 (40-50%)
-                Services.Logger.Info("[UpdateSectionPanel] [Step 2/10] zip 展開");
+                Services.Logger.Info("[UpdateSectionPanel] [Step 2/10] zip 展開 (SPEC §3.7.3 [6])");
                 progress.Report(new ProgressInfo(42, "展開中...", stagingDir));
                 UpdateDownloader.Extract(zipPath, stagingDir);
                 ct.ThrowIfCancellationRequested();
 
                 // [3] ExpectedFiles 検証 (50-55%)
-                Services.Logger.Info("[UpdateSectionPanel] [Step 3/10] ExpectedFiles 検証");
+                Services.Logger.Info("[UpdateSectionPanel] [Step 3/10] ExpectedFiles 検証 (SPEC §3.7.3 [6] 内容検証)");
                 progress.Report(new ProgressInfo(50, "ファイル検証中..."));
                 var missing = UpdateDownloader.ValidateStaging(stagingDir);
                 if (missing.Count > 0)
@@ -464,7 +472,7 @@ namespace GCTonePrism.Manager.Controls
                 }
 
                 // [4] Bundle version 一致検証 (55-60%)
-                Services.Logger.Info("[UpdateSectionPanel] [Step 4/10] Bundle version 一致検証");
+                Services.Logger.Info("[UpdateSectionPanel] [Step 4/10] Bundle version 一致検証 (SPEC §3.7.3 [6] 内容検証)");
                 progress.Report(new ProgressInfo(55, "バージョン一致を検証中..."));
                 if (!UpdateDownloader.ValidateBundleVersion(stagingDir, targetVersion))
                 {
@@ -479,7 +487,7 @@ namespace GCTonePrism.Manager.Controls
                 if (disableCancelCb != null) disableCancelCb();
 
                 // [5] Launcher dir 置換 (60-67%)
-                Services.Logger.Info("[UpdateSectionPanel] [Step 5/10] Launcher dir 置換");
+                Services.Logger.Info("[UpdateSectionPanel] [Step 5/10] Launcher dir 置換 (SPEC §3.7.3 [7])");
                 progress.Report(new ProgressInfo(60, "Launcher を更新中...", PathManager.LauncherDir));
                 string stagingLauncher = System.IO.Path.Combine(stagingDir, "files", "Launcher");
                 if (!DirReplacer.Replace(stagingLauncher, PathManager.LauncherDir))
@@ -489,7 +497,7 @@ namespace GCTonePrism.Manager.Controls
                 DirReplacer.CleanupBak(PathManager.LauncherDir);
 
                 // [6] Companions (Updater 以外) 置換 — 現状 dir 列挙で対象なし、将来 WindowProbe / PauseOverlay 用
-                Services.Logger.Info("[UpdateSectionPanel] [Step 6/10] Companions (Updater 以外) 置換");
+                Services.Logger.Info("[UpdateSectionPanel] [Step 6/10] Companions (Updater 以外) 置換 (SPEC §3.7.3 [8])");
                 progress.Report(new ProgressInfo(67, "Companions を更新中..."));
                 string stagingCompanionsRoot = System.IO.Path.Combine(stagingDir, "files", "Companions");
                 if (System.IO.Directory.Exists(stagingCompanionsRoot))
@@ -514,7 +522,7 @@ namespace GCTonePrism.Manager.Controls
                 // 失敗時は throw、silent shortcut 置換失敗 → 旧 bat が `<install_parent>/` に残ったまま
                 // 新 Manager 起動して挙動不審、の path を closure。DirReplacer 系の throw pattern と
                 // 対称化。
-                Services.Logger.Info("[UpdateSectionPanel] [Step 7/10] shortcut bat 置換");
+                Services.Logger.Info("[UpdateSectionPanel] [Step 7/10] shortcut bat 置換 (SPEC §3.7.3 [9])");
                 progress.Report(new ProgressInfo(70, "ショートカットを更新中..."));
                 string parentDir = PathManager.InstallParentDir;
                 if (!string.IsNullOrEmpty(parentDir))
@@ -538,7 +546,7 @@ namespace GCTonePrism.Manager.Controls
                 }
 
                 // [8] CHANGELOG.md 置換 (single-file、`<install>/CHANGELOG.md` 直下)
-                Services.Logger.Info("[UpdateSectionPanel] [Step 8/10] CHANGELOG.md 置換");
+                Services.Logger.Info("[UpdateSectionPanel] [Step 8/10] CHANGELOG.md 置換 (SPEC §3.7.7 Bundle SoT、§3.7.3 では [9] と同 phase)");
                 progress.Report(new ProgressInfo(73, "CHANGELOG を更新中..."));
                 if (!FileReplacer.ReplaceFile(
                     System.IO.Path.Combine(stagingDir, "files", "CHANGELOG.md"),
@@ -548,7 +556,7 @@ namespace GCTonePrism.Manager.Controls
                 }
 
                 // [9] Companions/Updater 置換 (SPEC §3.7.3 [10]、常に staging の新 Updater で置換)
-                Services.Logger.Info("[UpdateSectionPanel] [Step 9/10] Companions/Updater 置換");
+                Services.Logger.Info("[UpdateSectionPanel] [Step 9/10] Companions/Updater 置換 (SPEC §3.7.3 [10])");
                 progress.Report(new ProgressInfo(77, "Updater を更新中...", PathManager.UpdaterDir));
                 string stagingUpdater = System.IO.Path.Combine(stagingDir, "files", "Companions", "Updater");
                 if (!DirReplacer.Replace(stagingUpdater, PathManager.UpdaterDir))
@@ -558,7 +566,7 @@ namespace GCTonePrism.Manager.Controls
                 DirReplacer.CleanupBak(PathManager.UpdaterDir);
 
                 // [10] Updater spawn (Manager の終了を待機 + Manager dir 置換 + 新 Manager.exe 起動を引き継ぐ)
-                Services.Logger.Info("[UpdateSectionPanel] [Step 10/10] Updater spawn");
+                Services.Logger.Info("[UpdateSectionPanel] [Step 10/10] Updater spawn (SPEC §3.7.3 [11])");
                 progress.Report(new ProgressInfo(85, "Updater を起動中..."));
                 if (!UpdaterClient.Spawn(stagingDir, forceKill: false, logSink: null))
                 {

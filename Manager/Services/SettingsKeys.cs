@@ -49,5 +49,13 @@ namespace GCTonePrism.Manager.Services
         public const string UpdateCheckIntervalHours = "update_check_interval_hours";
 
         public const int DefaultUpdateCheckIntervalHours = 6;
+
+        /// <summary>
+        /// (#108 Phase 4 round 2 codex P2) 起動時通知 dialog を出した最後の tag 名。`UpdateAvailable`
+        /// 検出時にこの値と比較し、同 tag なら通知 skip (= user が「いいえ」で延期した直後の再起動で
+        /// 再度同じ dialog が出る UX を抑制)。新 release が出て tag が変われば自動的に notify 再開。
+        /// 空文字 / 不在 = 通知履歴なし (= 通知する)。
+        /// </summary>
+        public const string UpdateNotifiedTag = "update_notified_tag";
     }
 }

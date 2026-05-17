@@ -67,7 +67,11 @@ namespace GCTonePrism.Manager.Services
             catch (Exception ex)
             {
                 Services.Logger.Error("[FileReplacer] ファイル置換失敗 (" + targetPath + "): " + ex.Message);
-                // rollback: .bak が残っていれば戻す
+                // (#108 Phase 4 round 2 H4) rollback: .bak が残っていれば戻す。rollback **自体** が失敗
+                // した case は致命的状態 (target 不在 + .bak のみ存在、user の手動復旧が必要) のため
+                // InvalidOperationException で escalate、caller (= UpdateSectionPanel.RunUpdateWorker)
+                // 側で IOException と区別して MessageBox で「手動復旧要」を示せるようにする。
+                // DirReplacer.RollbackInternal の致命的 throw pattern と対称。
                 if (renamed)
                 {
                     try
@@ -77,7 +81,15 @@ namespace GCTonePrism.Manager.Services
                     }
                     catch (Exception rex)
                     {
-                        Services.Logger.Error("[FileReplacer]   rollback 失敗: " + rex.Message);
+                        Services.Logger.Error("[FileReplacer]   rollback 失敗 (致命的状態): " + rex.Message);
+                        Services.Logger.Error("[FileReplacer]     target: " + targetPath + " (不在 or 半端コピー)");
+                        Services.Logger.Error("[FileReplacer]     bak:    " + bakPath + " (存在、復元失敗)");
+                        throw new InvalidOperationException(
+                            "ファイル置換 rollback に失敗しました。手動復旧が必要です。\n" +
+                            "  target: " + targetPath + " (不在 or 半端コピー)\n" +
+                            "  bak:    " + bakPath + " (存在、復元失敗)\n\n" +
+                            "手動で `.bak` ファイルを target にリネームしてください。\n" +
+                            "原因: " + rex.Message, rex);
                     }
                 }
                 return false;

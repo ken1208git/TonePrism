@@ -6,9 +6,17 @@ namespace GCTonePrism.Manager.Controls
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing && (components != null))
+            if (disposing)
             {
-                components.Dispose();
+                if (components != null) components.Dispose();
+                // (#108 Phase 4 round 2 L8) _checkCts は連打時の中間 Cancel + Dispose で「最後の 1 個」
+                // だけ leak していたため Form 廃棄時にも Dispose を hook。CancellationTokenSource は
+                // 内部 WaitHandle を持つ IDisposable。
+                if (_checkCts != null)
+                {
+                    try { _checkCts.Dispose(); } catch { }
+                    _checkCts = null;
+                }
             }
             base.Dispose(disposing);
         }
