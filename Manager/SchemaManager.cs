@@ -4,6 +4,7 @@ using System.Data.SQLite;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using GCTonePrism.Manager.Services;
 
 namespace GCTonePrism.Manager
 {
@@ -76,7 +77,7 @@ namespace GCTonePrism.Manager
                         {
                             CreateTables(connection, transaction);
                             MigrateDevelopersTable(connection, transaction);
-                            Console.WriteLine("[DatabaseManager] Calling MigrateGamesTable...");
+                            Logger.Info("[DatabaseManager] Calling MigrateGamesTable...");
                             MigrateGamesTable(connection, transaction);
                             MigrateSurveysTable(connection, transaction);
                             MigrateGameVersionsTable(connection, transaction);
@@ -306,7 +307,7 @@ namespace GCTonePrism.Manager
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Migration failed (arguments): {ex.Message}");
+                Logger.Error($"Migration failed (arguments)", ex);
             }
 
             // game_versionsテーブル作成
@@ -491,7 +492,7 @@ namespace GCTonePrism.Manager
             if (hasKeyColumn) return;
 
             // 3. 古いスキーマ → リネームして新規作成
-            Console.WriteLine("[DatabaseManager] settings テーブルが古いスキーマです。KVS方式に移行します。");
+            Logger.Warn("[DatabaseManager] settings テーブルが古いスキーマです。KVS方式に移行します。");
 
             // 既に legacy テーブルが残っていたら削除（過去に失敗した移行の残骸を掃除）
             using (var cmd = new SQLiteCommand(
@@ -512,7 +513,7 @@ namespace GCTonePrism.Manager
                 cmd.ExecuteNonQuery();
             }
 
-            Console.WriteLine("[DatabaseManager] settings テーブルを KVS 方式で再作成しました。" +
+            Logger.Info("[DatabaseManager] settings テーブルを KVS 方式で再作成しました。" +
                               "旧データは settings_legacy_v8_or_earlier に保管されています。");
         }
 
@@ -621,29 +622,29 @@ namespace GCTonePrism.Manager
                 }
             }
 
-            Console.WriteLine($"[DatabaseManager] Current columns in games: {string.Join(", ", columns)}");
+            Logger.Info($"[DatabaseManager] Current columns in games: {string.Join(", ", columns)}");
 
             if (!columns.Contains("supported_connection"))
             {
-                Console.WriteLine("[DatabaseManager] 'supported_connection' column missing. Adding...");
+                Logger.Info("[DatabaseManager] 'supported_connection' column missing. Adding...");
                 using (var command = new SQLiteCommand("ALTER TABLE games ADD COLUMN supported_connection INTEGER DEFAULT 0", connection, transaction))
                 {
                     command.ExecuteNonQuery();
-                    Console.WriteLine("[DatabaseManager] 'supported_connection' column added successfully.");
+                    Logger.Info("[DatabaseManager] 'supported_connection' column added successfully.");
                 }
             }
             else
             {
-                Console.WriteLine("[DatabaseManager] 'supported_connection' column already exists.");
+                Logger.Info("[DatabaseManager] 'supported_connection' column already exists.");
             }
 
             if (!columns.Contains("version"))
             {
-                Console.WriteLine("[DatabaseManager] 'version' column missing. Adding...");
+                Logger.Info("[DatabaseManager] 'version' column missing. Adding...");
                 using (var command = new SQLiteCommand("ALTER TABLE games ADD COLUMN version TEXT", connection, transaction))
                 {
                     command.ExecuteNonQuery();
-                    Console.WriteLine("[DatabaseManager] 'version' column added successfully.");
+                    Logger.Info("[DatabaseManager] 'version' column added successfully.");
                 }
             }
         }
@@ -662,7 +663,7 @@ namespace GCTonePrism.Manager
                 var result = checkCommand.ExecuteScalar();
                 if (result == null)
                 {
-                    Console.WriteLine("[DatabaseManager] game_versions table does not exist. Skipping migration.");
+                    Logger.Warn("[DatabaseManager] game_versions table does not exist. Skipping migration.");
                     return;
                 }
             }
@@ -680,27 +681,27 @@ namespace GCTonePrism.Manager
                 }
             }
 
-            Console.WriteLine($"[DatabaseManager] Current columns in game_versions: {string.Join(", ", columns)}");
+            Logger.Info($"[DatabaseManager] Current columns in game_versions: {string.Join(", ", columns)}");
 
             if (!columns.Contains("arguments"))
             {
-                Console.WriteLine("[DatabaseManager] 'arguments' column missing in game_versions. Adding...");
+                Logger.Info("[DatabaseManager] 'arguments' column missing in game_versions. Adding...");
                 using (var command = new SQLiteCommand("ALTER TABLE game_versions ADD COLUMN arguments TEXT", connection, transaction))
                 {
                     command.ExecuteNonQuery();
-                    Console.WriteLine("[DatabaseManager] 'arguments' column added to game_versions successfully.");
+                    Logger.Info("[DatabaseManager] 'arguments' column added to game_versions successfully.");
                 }
             }
             else
             {
-                Console.WriteLine("[DatabaseManager] 'arguments' column already exists in game_versions.");
+                Logger.Info("[DatabaseManager] 'arguments' column already exists in game_versions.");
             }
         }
 
         private void CheckAndMigrateDatabase(SQLiteConnection connection, SQLiteTransaction transaction = null)
         {
             int currentVersion = GetDbVersion(connection, transaction);
-            Console.WriteLine($"[DatabaseManager] 現在のDBバージョン: {currentVersion}, 最新バージョン: {CurrentDbVersion}");
+            Logger.Info($"[DatabaseManager] 現在のDBバージョン: {currentVersion}, 最新バージョン: {CurrentDbVersion}");
 
             if (currentVersion == 0)
             {
@@ -710,7 +711,7 @@ namespace GCTonePrism.Manager
 
             if (currentVersion < CurrentDbVersion)
             {
-                Console.WriteLine($"[DatabaseManager] マイグレーションを開始します: v{currentVersion} -> v{CurrentDbVersion}");
+                Logger.Info($"[DatabaseManager] マイグレーションを開始します: v{currentVersion} -> v{CurrentDbVersion}");
 
                 bool localTransaction = (transaction == null);
                 SQLiteTransaction migTransaction = transaction;
@@ -807,7 +808,7 @@ namespace GCTonePrism.Manager
                         }
                         else
                         {
-                            Console.WriteLine("[DatabaseManager] v10→v11 が未完のため user_version は 10 のまま据え置き（v12 物理変更のみ先行適用）");
+                            Logger.Warn("[DatabaseManager] v10→v11 が未完のため user_version は 10 のまま据え置き（v12 物理変更のみ先行適用）");
                         }
                     }
 
@@ -821,7 +822,7 @@ namespace GCTonePrism.Manager
                         migTransaction.Commit();
                     }
 
-                    Console.WriteLine("[DatabaseManager] マイグレーションが完了しました");
+                    Logger.Info("[DatabaseManager] マイグレーションが完了しました");
                 }
                 catch (Exception ex)
                 {
@@ -830,7 +831,7 @@ namespace GCTonePrism.Manager
                         migTransaction.Rollback();
                     }
 
-                    Console.WriteLine($"[DatabaseManager] マイグレーションに失敗しました: {ex.Message}");
+                    Logger.Error($"[DatabaseManager] マイグレーションに失敗しました", ex);
                     throw;
                 }
             }
@@ -852,12 +853,12 @@ namespace GCTonePrism.Manager
             {
                 command.ExecuteNonQuery();
             }
-            Console.WriteLine($"[DatabaseManager] データベースバージョンを {version} に更新しました");
+            Logger.Info($"[DatabaseManager] データベースバージョンを {version} に更新しました");
         }
 
         private void MigrateV1ToV2(SQLiteConnection connection, SQLiteTransaction transaction)
         {
-            Console.WriteLine("[DatabaseManager] Executing migration V1 -> V2");
+            Logger.Info("[DatabaseManager] Executing migration V1 -> V2");
 
             string dropSurveys = "DROP TABLE IF EXISTS surveys";
             using (var command = new SQLiteCommand(dropSurveys, connection, transaction))
@@ -914,7 +915,7 @@ namespace GCTonePrism.Manager
                 command.ExecuteNonQuery();
             }
 
-            Console.WriteLine("[DatabaseManager] Migrating genres from games table to game_genres table...");
+            Logger.Info("[DatabaseManager] Migrating genres from games table to game_genres table...");
             string selectGames = "SELECT game_id, genre FROM games";
             using (var command = new SQLiteCommand(selectGames, connection, transaction))
             {
@@ -974,7 +975,7 @@ namespace GCTonePrism.Manager
 
         private void MigrateV2ToV3(SQLiteConnection connection, SQLiteTransaction transaction)
         {
-            Console.WriteLine("[DatabaseManager] Executing migration V2 -> V3");
+            Logger.Info("[DatabaseManager] Executing migration V2 -> V3");
 
             string[] newColumns = {
                 "title TEXT", "genre TEXT",
@@ -992,7 +993,7 @@ namespace GCTonePrism.Manager
                         command.ExecuteNonQuery();
                     }
                 } catch (Exception ex) {
-                    Console.WriteLine($"[DatabaseManager] Warning adding column to game_versions: {ex.Message}");
+                    Logger.Warn($"[DatabaseManager] Warning adding column to game_versions: {ex.Message}");
                 }
             }
 
@@ -1002,7 +1003,7 @@ namespace GCTonePrism.Manager
                     command.ExecuteNonQuery();
                 }
             } catch (Exception ex) {
-                Console.WriteLine($"[DatabaseManager] Warning adding version_id to developers: {ex.Message}");
+                Logger.Warn($"[DatabaseManager] Warning adding version_id to developers: {ex.Message}");
             }
 
             var versionsToUpdate = new List<dynamic>();
@@ -1058,12 +1059,12 @@ namespace GCTonePrism.Manager
                 }
             }
 
-            Console.WriteLine("[DatabaseManager] Migration V2 -> V3 completed.");
+            Logger.Info("[DatabaseManager] Migration V2 -> V3 completed.");
         }
 
         private void MigrateV3ToV4(SQLiteConnection connection, SQLiteTransaction transaction)
         {
-            Console.WriteLine("[DatabaseManager] Executing migration V3 -> V4 (Fixing missing versions)");
+            Logger.Info("[DatabaseManager] Executing migration V3 -> V4 (Fixing missing versions)");
 
             var gamesWithoutVersions = new List<string>();
             string findOrphanedGames = @"
@@ -1083,11 +1084,11 @@ namespace GCTonePrism.Manager
 
             if (gamesWithoutVersions.Count == 0)
             {
-                Console.WriteLine("[DatabaseManager] No orphaned games found. Skipping fix.");
+                Logger.Warn("[DatabaseManager] No orphaned games found. Skipping fix.");
                 return;
             }
 
-            Console.WriteLine($"[DatabaseManager] Found {gamesWithoutVersions.Count} games without versions. Creating default 1.0.0 versions...");
+            Logger.Info($"[DatabaseManager] Found {gamesWithoutVersions.Count} games without versions. Creating default 1.0.0 versions...");
 
             foreach (string gameId in gamesWithoutVersions)
             {
@@ -1120,7 +1121,7 @@ namespace GCTonePrism.Manager
 
         private void MigrateV4ToV5(SQLiteConnection connection, SQLiteTransaction transaction)
         {
-            Console.WriteLine("[DatabaseManager] Executing migration V4 -> V5 (Clearing description for v1.0.0)");
+            Logger.Info("[DatabaseManager] Executing migration V4 -> V5 (Clearing description for v1.0.0)");
 
             string clearDescriptionSql = @"
                 UPDATE game_versions
@@ -1130,13 +1131,13 @@ namespace GCTonePrism.Manager
             using (var command = new SQLiteCommand(clearDescriptionSql, connection, transaction))
             {
                 int rows = command.ExecuteNonQuery();
-                Console.WriteLine($"[DatabaseManager] Cleared description for {rows} version records (v1.0.0).");
+                Logger.Info($"[DatabaseManager] Cleared description for {rows} version records (v1.0.0).");
             }
         }
 
         private void MigrateV5ToV6(SQLiteConnection connection, SQLiteTransaction transaction)
         {
-            Console.WriteLine("[DatabaseManager] Executing migration V5 -> V6 (Adding update_note column)");
+            Logger.Info("[DatabaseManager] Executing migration V5 -> V6 (Adding update_note column)");
             string sql = "ALTER TABLE game_versions ADD COLUMN update_note TEXT";
             using (var command = new SQLiteCommand(sql, connection, transaction))
             {
@@ -1146,7 +1147,7 @@ namespace GCTonePrism.Manager
 
         private void MigrateV6ToV7(SQLiteConnection connection, SQLiteTransaction transaction)
         {
-            Console.WriteLine("[DatabaseManager] Executing migration V6 -> V7 (Adding store_sections and store_section_games tables)");
+            Logger.Info("[DatabaseManager] Executing migration V6 -> V7 (Adding store_sections and store_section_games tables)");
 
             string createStoreSectionsTable = @"
                 CREATE TABLE IF NOT EXISTS store_sections (
@@ -1183,7 +1184,7 @@ namespace GCTonePrism.Manager
 
         private void MigrateV7ToV8(SQLiteConnection connection, SQLiteTransaction transaction)
         {
-            Console.WriteLine("[DatabaseManager] Executing migration V7 -> V8 (Adding display_text to store_section_games)");
+            Logger.Info("[DatabaseManager] Executing migration V7 -> V8 (Adding display_text to store_section_games)");
 
             try
             {
@@ -1196,13 +1197,13 @@ namespace GCTonePrism.Manager
             catch (Exception ex)
             {
                 // カラムが既に存在する場合はスキップ
-                Console.WriteLine($"[DatabaseManager] Warning adding display_text: {ex.Message}");
+                Logger.Warn($"[DatabaseManager] Warning adding display_text: {ex.Message}");
             }
         }
 
         private void MigrateV8ToV9(SQLiteConnection connection, SQLiteTransaction transaction)
         {
-            Console.WriteLine("[DatabaseManager] Executing migration V8 -> V9 (Adding backup_log table and backup-related settings)");
+            Logger.Info("[DatabaseManager] Executing migration V8 -> V9 (Adding backup_log table and backup-related settings)");
 
             // backup_log テーブル作成（CreateTables 側でも IF NOT EXISTS で作成されるが、明示的に呼ぶ）
             CreateBackupLogTable(connection, transaction);
@@ -1210,12 +1211,12 @@ namespace GCTonePrism.Manager
             // バックアップ関連の設定デフォルトを投入
             InsertBackupDefaults(connection, transaction);
 
-            Console.WriteLine("[DatabaseManager] Migration V8 -> V9 completed.");
+            Logger.Info("[DatabaseManager] Migration V8 -> V9 completed.");
         }
 
         private void MigrateV9ToV10(SQLiteConnection connection, SQLiteTransaction transaction)
         {
-            Console.WriteLine("[DatabaseManager] Executing migration V9 -> V10 (Extending backup_log.trigger_type CHECK to allow 'safety')");
+            Logger.Info("[DatabaseManager] Executing migration V9 -> V10 (Extending backup_log.trigger_type CHECK to allow 'safety')");
 
             // SQLite の CHECK 制約は ALTER TABLE で変更できないため、テーブルを作り直す。
             // 既存行は trigger_type が 'manual' / 'auto' のみなので新CHECKに違反しない。
@@ -1258,7 +1259,7 @@ namespace GCTonePrism.Manager
                 cmd.ExecuteNonQuery();
             }
 
-            Console.WriteLine("[DatabaseManager] Migration V9 -> V10 completed.");
+            Logger.Info("[DatabaseManager] Migration V9 -> V10 completed.");
         }
 
         /// <summary>
@@ -1275,7 +1276,7 @@ namespace GCTonePrism.Manager
         /// <returns>全 drift fix が成功（または不要）なら true、データ残存でスキップしたら false</returns>
         private bool MigrateV10ToV11(SQLiteConnection connection, SQLiteTransaction transaction)
         {
-            Console.WriteLine("[DatabaseManager] Executing migration V10 -> V11 (Fix surveys/play_records schema drift from SPEC v1.5.1)");
+            Logger.Warn("[DatabaseManager] Executing migration V10 -> V11 (Fix surveys/play_records schema drift from SPEC v1.5.1)");
 
             bool surveysOk = FixSurveysSchemaDrift(connection, transaction);
             bool playRecordsOk = FixPlayRecordsSchemaDrift(connection, transaction);
@@ -1283,11 +1284,11 @@ namespace GCTonePrism.Manager
             bool allOk = surveysOk && playRecordsOk;
             if (allOk)
             {
-                Console.WriteLine("[DatabaseManager] Migration V10 -> V11 completed.");
+                Logger.Info("[DatabaseManager] Migration V10 -> V11 completed.");
             }
             else
             {
-                Console.WriteLine("[DatabaseManager] WARNING: Migration V10 -> V11 partially skipped (data exists in legacy-schema tables). user_version stays at 10. Next startup will retry.");
+                Logger.Warn("[DatabaseManager] WARNING: Migration V10 -> V11 partially skipped (data exists in legacy-schema tables). user_version stays at 10. Next startup will retry.");
             }
             return allOk;
         }
@@ -1307,12 +1308,12 @@ namespace GCTonePrism.Manager
 
             if (!isOldSchema)
             {
-                Console.WriteLine("[DatabaseManager] surveys は新スキーマです。マイグレーション不要。");
+                Logger.Info("[DatabaseManager] surveys は新スキーマです。マイグレーション不要。");
                 return true;
             }
 
             long rowCount = GetTableRowCount(connection, transaction, "surveys");
-            Console.WriteLine($"[DatabaseManager] surveys に旧スキーマを検出 (行数: {rowCount})");
+            Logger.Warn($"[DatabaseManager] surveys に旧スキーマを検出 (行数: {rowCount})");
 
             if (rowCount > 0)
             {
@@ -1320,7 +1321,7 @@ namespace GCTonePrism.Manager
                 // 不定でリスクが高いため未実装。Manager 起動は継続させ、警告ログで手動対応を促す。
                 // 呼び出し側の MigrateV10ToV11 が false を伝播し、user_version は 10 のまま維持される。
                 // 次回起動時にこの migration が再試行されるため、手動でデータを退避すれば次回 fix される。
-                Console.WriteLine(
+                Logger.Warn(
                     $"[DatabaseManager] WARNING: surveys に {rowCount} 行のデータが残存。自動マイグレーションをスキップします。" +
                     "tools/sqlite3/sqlite3.exe で旧データ（responses 列の JSON）を確認・退避してから手動で新スキーマへ移行してください。");
                 return false;
@@ -1331,7 +1332,7 @@ namespace GCTonePrism.Manager
                 cmd.ExecuteNonQuery();
             }
             CreateSurveysTable(connection, transaction);
-            Console.WriteLine("[DatabaseManager] surveys を新スキーマで再作成しました。");
+            Logger.Info("[DatabaseManager] surveys を新スキーマで再作成しました。");
             return true;
         }
 
@@ -1350,19 +1351,19 @@ namespace GCTonePrism.Manager
 
             if (!isOldSchema)
             {
-                Console.WriteLine("[DatabaseManager] play_records は新スキーマです。マイグレーション不要。");
+                Logger.Info("[DatabaseManager] play_records は新スキーマです。マイグレーション不要。");
                 return true;
             }
 
             long rowCount = GetTableRowCount(connection, transaction, "play_records");
-            Console.WriteLine($"[DatabaseManager] play_records に旧スキーマを検出 (行数: {rowCount})");
+            Logger.Warn($"[DatabaseManager] play_records に旧スキーマを検出 (行数: {rowCount})");
 
             if (rowCount > 0)
             {
                 // 旧累計方式 → 新イベントログ方式の自動変換は元情報が失われているため不可能。
                 // Manager 起動は継続させ、警告ログで手動対応を促す。
                 // 呼び出し側の MigrateV10ToV11 が false を伝播し、user_version は 10 のまま維持される。
-                Console.WriteLine(
+                Logger.Warn(
                     $"[DatabaseManager] WARNING: play_records に {rowCount} 行のデータが残存。自動マイグレーションをスキップします。" +
                     "tools/sqlite3/sqlite3.exe で累計値（play_count / total_play_time）を退避してから手動で新スキーマへ移行してください。");
                 return false;
@@ -1373,7 +1374,7 @@ namespace GCTonePrism.Manager
                 cmd.ExecuteNonQuery();
             }
             CreatePlayRecordsTable(connection, transaction);
-            Console.WriteLine("[DatabaseManager] play_records を新スキーマで再作成しました。");
+            Logger.Info("[DatabaseManager] play_records を新スキーマで再作成しました。");
             return true;
         }
 
@@ -1404,7 +1405,7 @@ namespace GCTonePrism.Manager
 
             if (alreadyExists)
             {
-                Console.WriteLine("[DatabaseManager] backup_log.relative_path は既に存在 → MigrateV11ToV12 をスキップ");
+                Logger.Warn("[DatabaseManager] backup_log.relative_path は既に存在 → MigrateV11ToV12 をスキップ");
                 return;
             }
 
@@ -1413,7 +1414,7 @@ namespace GCTonePrism.Manager
             {
                 cmd.ExecuteNonQuery();
             }
-            Console.WriteLine("[DatabaseManager] backup_log に relative_path 列を追加しました (v11 → v12)");
+            Logger.Info("[DatabaseManager] backup_log に relative_path 列を追加しました (v11 → v12)");
         }
 
         /// <summary>
@@ -1539,11 +1540,11 @@ namespace GCTonePrism.Manager
 
             if (driftCount > 0)
             {
-                Console.WriteLine($"[VerifySchema] {driftCount} 個のテーブルでスキーマ drift を検出しました。AGENTS.md の Database Schema Management セクションを参照して対応してください。");
+                Logger.Warn($"[VerifySchema] {driftCount} 個のテーブルでスキーマ drift を検出しました。AGENTS.md の Database Schema Management セクションを参照して対応してください。");
                 return false;
             }
 
-            Console.WriteLine($"[VerifySchema] 全 {ExpectedSchema.Count} テーブルのスキーマ整合性 OK");
+            Logger.Info($"[VerifySchema] 全 {ExpectedSchema.Count} テーブルのスキーマ整合性 OK");
             return true;
         }
 
@@ -1565,7 +1566,7 @@ namespace GCTonePrism.Manager
 
             if (actualColumns.Count == 0)
             {
-                Console.WriteLine($"[VerifySchema] WARNING: テーブル '{tableName}' が存在しません。");
+                Logger.Warn($"[VerifySchema] WARNING: テーブル '{tableName}' が存在しません。");
                 return false;
             }
 
@@ -1586,14 +1587,14 @@ namespace GCTonePrism.Manager
                 return true;
             }
 
-            Console.WriteLine($"[VerifySchema] WARNING: テーブル '{tableName}' のスキーマが期待値と一致しません");
+            Logger.Warn($"[VerifySchema] WARNING: テーブル '{tableName}' のスキーマが期待値と一致しません");
             if (missing.Count > 0)
             {
-                Console.WriteLine($"  期待されるが存在しない列: {string.Join(", ", missing)}");
+                Logger.Warn($"  期待されるが存在しない列: {string.Join(", ", missing)}");
             }
             if (extra.Count > 0)
             {
-                Console.WriteLine($"  期待されない余分な列: {string.Join(", ", extra)}");
+                Logger.Warn($"  期待されない余分な列: {string.Join(", ", extra)}");
             }
             return false;
         }

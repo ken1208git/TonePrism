@@ -1590,6 +1590,15 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 **Codex round 8 false positive 4 件**: CX-2 / round 3 M-4 / round 4 codex P1 / round 7 H-1 (topo sort) を re-flag されたもの、コードに変更なし。
 
+**Round 8.5: Manager 全 113 件の `Console.WriteLine` を Logger 経由に sweep (#166 取り込み・close)**:
+
+- 当初は #166 を follow-up issue として残す方針だったが、user 指摘「混在気持ち悪い、AGENTS にも書く」を受けて方針転換。Manager 全 13 ファイル (Logger.cs / Program.cs 除く) の `Console.WriteLine` 113 件を `Logger.Info` (59) / `Logger.Warn` (20) / `Logger.Error` (21) に振り分けて全件移行、Logger 初期化済前提で `using GCTonePrism.Manager.Services;` を 2 ファイル (PathManager / BackupLogRepository) に追加。
+- **判定基準**: メッセージに「失敗 / エラー / 例外 / Exception / Failed / Error」または `ex.Message` 後置 → `Error`、「警告 / Warn / 異常 / 不正 / skip / drift」→ `Warn`、それ以外 (情報・進捗・debug) → `Info`。`Error(string, Exception)` の 2-arg overload は例外オブジェクトを直接渡せるケースで採用、`ex.Message` を文字列に埋め込む形からスタックトレース完全保持に格上げ。
+- **対象ファイル別件数**: SchemaManager 59 (migration ログ中心)、PathManager 15 (検出 log)、MainForm 9、AddGameForm 7、BackupService 6、EditGameForm 5 (本 PR 新規分 4 + pre-existing 1)、BackupSectionPanel 3、FileOperationService 3、RestoreService 3、PathConversionHelper 2、BackupLogRepository 1。`Console.WriteLine` 自動取込 (`Console.SetOut` フック) はすべて INFO 扱いで WARN/ERROR の選別を放棄するため、明示 API に統一することで Manager のログビューア (#129) のレベルフィルタが本来の選別性能を発揮できる状態に。
+- **AGENTS.md「Cross-component Standards」更新**: 「新規実装は `Logger.Info / Warn / Error` を直接使うこと。`Console.WriteLine` (.NET) / `print` (Godot) は legacy」規約を追加、Console 自動転送はあくまで pre-existing 救済の役割と明示。
+- **SPECIFICATION.md §3.6 強化**: 「明示 API は推奨」→「**MUST**」に格上げ、変更履歴に v1.10.21 (2026-05-17) 追記。
+- **Follow-up**: Launcher 側の `print` / `printerr` 同型 sweep は #85 で別途対応予定 (本 PR は Manager 限定 scope)。
+
 ### [Manager v0.8.10] - 2026-05-13
 
 PR #150 で dir rename (`GCTonePrism_Manager/` → `Manager/`) に連動して `PathManager.cs` の self-reference リテラル + priority-3 detection ロジック (StartsWith 二段比較 + Manager/Launcher sibling 同時存在検証) + csproj `<RootNamespace>` を修正。配布構造変更を含むため SemVer 厳密だと minor 寄りだが、Install.bat の v0.2.0 → 新構造 migration で自動吸収されエンドユーザー視点では invisible のため patch bump 扱い。

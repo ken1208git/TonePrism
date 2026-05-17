@@ -104,12 +104,12 @@ namespace GCTonePrism.Manager
                     System.IO.Path.GetDirectoryName(PathManager.DatabasePath));
                 if (movedSafety > 0)
                 {
-                    Console.WriteLine($"[MainForm] 旧 safety ファイル {movedSafety} 件を backups/safety/ に移動しました");
+                    Logger.Info($"[MainForm] 旧 safety ファイル {movedSafety} 件を backups/safety/ に移動しました");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[MainForm] 旧 safety ファイル移動失敗: {ex.Message}");
+                Logger.Error("[MainForm] 旧 safety ファイル移動失敗", ex);
             }
 
             // 退避ファイルの未登録分を backup_log に登録（起動時に1回）
@@ -137,12 +137,12 @@ namespace GCTonePrism.Manager
                     Environment.MachineName);
                 if (added > 0)
                 {
-                    Console.WriteLine($"[MainForm] 退避ファイル {added} 件を backup_log に新規登録しました");
+                    Logger.Info($"[MainForm] 退避ファイル {added} 件を backup_log に新規登録しました");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[MainForm] 退避ファイル登録に失敗: {ex.Message}");
+                Logger.Error("[MainForm] 退避ファイル登録に失敗", ex);
             }
         }
 
@@ -156,12 +156,12 @@ namespace GCTonePrism.Manager
                     thresholdSeconds: 600);
                 if (success > 0 || failed > 0)
                 {
-                    Console.WriteLine($"[MainForm] 起動時リコンサイル: 成功化 {success} 件 / 失敗化 {failed} 件");
+                    Logger.Info($"[MainForm] 起動時リコンサイル: 成功化 {success} 件 / 失敗化 {failed} 件");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[MainForm] バックアップ履歴の掃除に失敗しました: {ex.Message}");
+                Logger.Error("[MainForm] バックアップ履歴の掃除に失敗しました", ex);
             }
         }
 
@@ -199,7 +199,7 @@ namespace GCTonePrism.Manager
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[MainForm] StartAutoBackupIfDue エラー: {ex.Message}");
+                Logger.Error("[MainForm] StartAutoBackupIfDue エラー", ex);
                 UpdateStatusBar($"自動バックアップエラー: {ex.Message}");
             }
         }
@@ -252,12 +252,12 @@ namespace GCTonePrism.Manager
                         "バックアップファイルが見つかりませんでした（バックアップから復元時の自己参照スナップショット由来で、実ファイルも残っていない）");
                     if (success > 0 || failed > 0)
                     {
-                        Console.WriteLine($"[MainForm] 復元後リコンサイル: 成功化 {success} 件 / 失敗化 {failed} 件");
+                        Logger.Info($"[MainForm] 復元後リコンサイル: 成功化 {success} 件 / 失敗化 {failed} 件");
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[MainForm] 復元後の履歴リコンサイルに失敗しました: {ex.Message}");
+                    Logger.Error("[MainForm] 復元後の履歴リコンサイルに失敗しました", ex);
                 }
 
                 _gameSectionPanel.LoadGames();

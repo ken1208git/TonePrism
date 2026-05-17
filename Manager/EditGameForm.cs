@@ -86,7 +86,7 @@ namespace GCTonePrism.Manager
                     catch (Exception rbEx)
                     {
                         rollbackFailures++;
-                        Console.WriteLine("[EditGameForm] (#158 rollback) disk rename 戻し失敗: " + done.NewDir + " → " + done.OldDir + ": " + rbEx.Message);
+                        Logger.Error("[EditGameForm] (#158 rollback) disk rename 戻し失敗: " + done.NewDir + " → " + done.OldDir, rbEx);
                     }
                 }
                 // in-memory 復元 (disk Move 成否 / SourceExists=false に関わらず、UI/DB drift を最小化
@@ -291,7 +291,7 @@ namespace GCTonePrism.Manager
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"バージョン情報の読み込みに失敗: {ex.Message}");
+                Logger.Error("バージョン情報の読み込みに失敗", ex);
             }
         }
 
@@ -910,7 +910,7 @@ namespace GCTonePrism.Manager
                             // 構造上ありえない。将来 form 内に「version 追加」ボタン等が入ると追加直後の
                             // item が snapshot なし → rename loop が黙って skip → silent drift する死角に
                             // なるため、defensive log を残しておく (Logger 移行は #166 で sweep)。
-                            Console.WriteLine("[EditGameForm] (#158 round 8 Med #3) reservedOldDirs build: snapshot 不在 version id=" + vR.Id + " ('" + (vR.Version ?? "(null)") + "')、rename plan skip");
+                            Logger.Warn("[EditGameForm] (#158 round 8 Med #3) reservedOldDirs build: snapshot 不在 version id=" + vR.Id + " ('" + (vR.Version ?? "(null)") + "')、rename plan skip");
                             continue;
                         }
                         if (string.Equals(origR, vR.Version, StringComparison.OrdinalIgnoreCase)) continue;
@@ -922,7 +922,7 @@ namespace GCTonePrism.Manager
                         if (!_originalVersionByDbId.TryGetValue(v.Id, out string originalVer))
                         {
                             // (#158 round 8 senior Med #3) 同上、defensive log。
-                            Console.WriteLine("[EditGameForm] (#158 round 8 Med #3) renamePlan build: snapshot 不在 version id=" + v.Id + " ('" + (v.Version ?? "(null)") + "')、rename plan skip");
+                            Logger.Warn("[EditGameForm] (#158 round 8 Med #3) renamePlan build: snapshot 不在 version id=" + v.Id + " ('" + (v.Version ?? "(null)") + "')、rename plan skip");
                             continue;
                         }
                         // (#158 round 3 H-2) CX-3 で大文字 V を regex IgnoreCase 受理にした副作用で、DB に
@@ -1015,7 +1015,7 @@ namespace GCTonePrism.Manager
                             // 旧 folder 不在: AddGameForm 経由で作成されなかった version (= DB のみ存在) 等。
                             // DB 更新だけ続けて警告ログのみ。disk Move 自体は skip するが path/snapshot
                             // mutation はやるため completedRenames に MoveDone=false で記録。
-                            Console.WriteLine("[EditGameForm] (#158 Q3) version '" + p.OriginalVer + "' のフォルダが見つかりません、rename skip: " + p.OldDir);
+                            Logger.Warn("[EditGameForm] (#158 Q3) version '" + p.OriginalVer + "' のフォルダが見つかりません、rename skip: " + p.OldDir);
                             p.MoveDone = false;
                             completedRenames.Add(p);
                         }

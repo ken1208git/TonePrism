@@ -132,17 +132,17 @@ namespace GCTonePrism.Manager.Services
                     try
                     {
                         f.Delete();
-                        Console.WriteLine($"[RestoreService] 古い退避ファイル削除: {f.Name}");
+                        Logger.Info($"[RestoreService] 古い退避ファイル削除: {f.Name}");
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[RestoreService] 退避ファイル削除失敗 {f.Name}: {ex.Message}");
+                        Logger.Error($"[RestoreService] 退避ファイル削除失敗 {f.Name}", ex);
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[RestoreService] 退避リテンション処理失敗: {ex.Message}");
+                Logger.Error($"[RestoreService] 退避リテンション処理失敗", ex);
             }
         }
 

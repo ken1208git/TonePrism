@@ -329,10 +329,10 @@ namespace GCTonePrism.Manager
                 string backgroundAbsolutePath = string.IsNullOrWhiteSpace(txtBackgroundPath.Text) ? null : PathConversionHelper.ConvertSourceToDestination(txtBackgroundPath.Text.Trim(), sourceGameFolder, destinationGameFolder);
 
                 // デバッグログ（開発時のみ）
-                Console.WriteLine($"[AddGameForm] コピー先フォルダ: {destinationGameFolder}");
-                Console.WriteLine($"[AddGameForm] 実行ファイル絶対パス: {executableAbsolutePath}");
-                Console.WriteLine($"[AddGameForm] サムネイル絶対パス: {thumbnailAbsolutePath}");
-                Console.WriteLine($"[AddGameForm] 背景絶対パス: {backgroundAbsolutePath}");
+                Logger.Info($"[AddGameForm] コピー先フォルダ: {destinationGameFolder}");
+                Logger.Info($"[AddGameForm] 実行ファイル絶対パス: {executableAbsolutePath}");
+                Logger.Info($"[AddGameForm] サムネイル絶対パス: {thumbnailAbsolutePath}");
+                Logger.Info($"[AddGameForm] 背景絶対パス: {backgroundAbsolutePath}");
 
                 // コピー後にコピー先フォルダ（games/{game_id}/）からの相対パスに変換
                 string executablePath = PathConversionHelper.ToRelativePathAfterCopy(executableAbsolutePath, destinationGameFolder);
@@ -340,9 +340,9 @@ namespace GCTonePrism.Manager
                 string backgroundPath = PathConversionHelper.ToRelativePathAfterCopy(backgroundAbsolutePath, destinationGameFolder);
 
                 // デバッグログ（開発時のみ）
-                Console.WriteLine($"[AddGameForm] 実行ファイル相対パス: {executablePath}");
-                Console.WriteLine($"[AddGameForm] サムネイル相対パス: {thumbnailPath}");
-                Console.WriteLine($"[AddGameForm] 背景相対パス: {backgroundPath}");
+                Logger.Info($"[AddGameForm] 実行ファイル相対パス: {executablePath}");
+                Logger.Info($"[AddGameForm] サムネイル相対パス: {thumbnailPath}");
+                Logger.Info($"[AddGameForm] 背景相対パス: {backgroundPath}");
 
                 // 起動オプション
                 string arguments = txtArguments.Text;
