@@ -45,14 +45,9 @@ namespace GCTonePrism.Manager.Services
 
         private static HttpClient CreateClient()
         {
-            try
-            {
-                ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-            }
-            catch
-            {
-                // 古い .NET / SecurityProtocol が定数として存在しない極端なケースは ignore (Win10/11 default で OK)
-            }
+            // (#108 Phase 4 round 3 L-1) SecurityProtocol 設定は AppDomain global で他 HttpClient consumer
+            // (BackupService 等) の動作と隠れ結合するため Program.cs の起動時 1 回設定に移動。本 method
+            // は HttpClient instance 作成のみに専念。
 
             var client = new HttpClient
             {
@@ -205,10 +200,12 @@ namespace GCTonePrism.Manager.Services
             // 返るケースを確認、#108 Phase 4 debug)。同じく nested object も `Dictionary<string, object>`
             // ではなく非 generic `IDictionary` (Hashtable / OrderedDictionary 等) で返る変種に
             // 備える。両方 IEnumerable / IDictionary で defensive に拾う。
+            // (#108 Phase 4 round 3 L-2) round 1 で「Phase 4 debug 用」として仕込んだ verbose Info 6 行を
+            // 削除 (assets type / asset[N] type / name 等を release fetch 毎に出力していた production
+            // noise)。Warning / matched ログのみ残置で、parse 失敗時の診断には十分。
             object assetsObj;
             if (dict.TryGetValue("assets", out assetsObj) && assetsObj != null)
             {
-                Logger.Info("[GitHubReleaseChecker] assets type: " + assetsObj.GetType().FullName);
                 var assetEnumerable = assetsObj as System.Collections.IEnumerable;
                 if (assetEnumerable != null && !(assetsObj is string))
                 {
@@ -216,21 +213,19 @@ namespace GCTonePrism.Manager.Services
                     foreach (var a in assetEnumerable)
                     {
                         idx++;
-                        Logger.Info("[GitHubReleaseChecker] asset[" + idx + "] type: " + (a == null ? "(null)" : a.GetType().FullName));
                         var assetDict = ToStringObjectDict(a);
                         if (assetDict == null)
                         {
-                            Logger.Warn("[GitHubReleaseChecker]   ToStringObjectDict returned null, skip");
+                            Logger.Warn("[GitHubReleaseChecker]   asset[" + idx + "] ToStringObjectDict returned null, skip");
                             continue;
                         }
                         string name = AsString(assetDict, "name");
-                        Logger.Info("[GitHubReleaseChecker]   name: '" + (name ?? "(null)") + "'");
                         if (string.IsNullOrEmpty(name)) continue;
                         if (!name.StartsWith("GCTonePrism_v", StringComparison.OrdinalIgnoreCase)) continue;
                         if (!name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) continue;
                         info.ZipAssetUrl = AsString(assetDict, "browser_download_url");
                         info.ZipSizeBytes = AsLong(assetDict, "size");
-                        Logger.Info("[GitHubReleaseChecker]   matched! ZipAssetUrl='" + info.ZipAssetUrl + "' size=" + info.ZipSizeBytes);
+                        Logger.Info("[GitHubReleaseChecker]   matched: " + name + " size=" + info.ZipSizeBytes);
                         break;
                     }
                     if (idx == 0)

@@ -490,9 +490,17 @@ namespace GCTonePrism.Manager.Controls
                 Services.Logger.Info("[UpdateSectionPanel] [Step 5/10] Launcher dir 置換 (SPEC §3.7.3 [7])");
                 progress.Report(new ProgressInfo(60, "Launcher を更新中...", PathManager.LauncherDir));
                 string stagingLauncher = System.IO.Path.Combine(stagingDir, "files", "Launcher");
-                if (!DirReplacer.Replace(stagingLauncher, PathManager.LauncherDir))
+                var launcherResult = DirReplacer.Replace(stagingLauncher, PathManager.LauncherDir, allowInitialDeploy: false);
+                if (launcherResult == DirReplacer.ReplaceResult.RecoveredAbort)
                 {
-                    throw new System.IO.IOException("Launcher dir の置換に失敗しました。");
+                    // (#108 Phase 4 round 3 L-4) auto-recover 経路: user に「再実行で完走する」旨を伝える。
+                    throw new System.IO.IOException(
+                        "Launcher dir の前回 rollback 失敗状態を自動復元しました。" +
+                        "もう一度「今すぐアップデート」を押すと適用が完走します。");
+                }
+                if (launcherResult != DirReplacer.ReplaceResult.Ok)
+                {
+                    throw new System.IO.IOException("Launcher dir の置換に失敗しました (詳細は log 参照)。");
                 }
                 DirReplacer.CleanupBak(PathManager.LauncherDir);
 
@@ -509,10 +517,21 @@ namespace GCTonePrism.Manager.Controls
                         if (string.Equals(compName, "Updater", System.StringComparison.OrdinalIgnoreCase)) continue;
                         string targetComp = System.IO.Path.Combine(PathManager.CompanionsDir, compName);
                         Services.Logger.Info("[UpdateSectionPanel]   Companion '" + compName + "' 置換");
-                        if (!DirReplacer.Replace(stagingComp, targetComp))
+                        // (#108 Phase 4 round 3 codex P1) Companion は新規追加で旧 install に target 不在の
+                        // ケースが正常 path、`allowInitialDeploy: true` で初回 deploy 経路を許可。
+                        var compResult = DirReplacer.Replace(stagingComp, targetComp, allowInitialDeploy: true);
+                        if (compResult == DirReplacer.ReplaceResult.RecoveredAbort)
                         {
-                            throw new System.IO.IOException("Companion '" + compName + "' の置換に失敗しました。");
+                            throw new System.IO.IOException(
+                                "Companion '" + compName + "' の前回 rollback 失敗状態を自動復元しました。" +
+                                "もう一度「今すぐアップデート」を押すと適用が完走します。");
                         }
+                        if (compResult != DirReplacer.ReplaceResult.Ok
+                            && compResult != DirReplacer.ReplaceResult.InitialDeploy)
+                        {
+                            throw new System.IO.IOException("Companion '" + compName + "' の置換に失敗しました (詳細は log 参照)。");
+                        }
+                        // InitialDeploy 経路では .bak が存在しないため CleanupBak no-op (内部で Exists check 済)
                         DirReplacer.CleanupBak(targetComp);
                     }
                 }
@@ -559,9 +578,16 @@ namespace GCTonePrism.Manager.Controls
                 Services.Logger.Info("[UpdateSectionPanel] [Step 9/10] Companions/Updater 置換 (SPEC §3.7.3 [10])");
                 progress.Report(new ProgressInfo(77, "Updater を更新中...", PathManager.UpdaterDir));
                 string stagingUpdater = System.IO.Path.Combine(stagingDir, "files", "Companions", "Updater");
-                if (!DirReplacer.Replace(stagingUpdater, PathManager.UpdaterDir))
+                var updaterResult = DirReplacer.Replace(stagingUpdater, PathManager.UpdaterDir, allowInitialDeploy: false);
+                if (updaterResult == DirReplacer.ReplaceResult.RecoveredAbort)
                 {
-                    throw new System.IO.IOException("Updater dir の置換に失敗しました。");
+                    throw new System.IO.IOException(
+                        "Updater dir の前回 rollback 失敗状態を自動復元しました。" +
+                        "もう一度「今すぐアップデート」を押すと適用が完走します。");
+                }
+                if (updaterResult != DirReplacer.ReplaceResult.Ok)
+                {
+                    throw new System.IO.IOException("Updater dir の置換に失敗しました (詳細は log 参照)。");
                 }
                 DirReplacer.CleanupBak(PathManager.UpdaterDir);
 

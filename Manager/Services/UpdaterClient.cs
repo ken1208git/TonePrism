@@ -54,13 +54,20 @@ namespace GCTonePrism.Manager.Services
                 return false;
             }
 
+            // (#108 Phase 4 round 3 M-2) Process.GetCurrentProcess() の Process handle は IDisposable、
+            // using で囲んで明示 Dispose。Spawn() 失敗時 (return false 経路) でも handle leak しない。
+            int callerPid;
+            using (var self = Process.GetCurrentProcess())
+            {
+                callerPid = self.Id;
+            }
             var args = new List<string>
             {
                 "--staging",        Quote(stagingDir),
                 "--manager-target", Quote(PathManager.ManagerDir),
                 "--restart-exe",    Quote(managerExe),
                 "--log-dir",        Quote(PathManager.UpdaterLogDir),
-                "--caller-pid",     Process.GetCurrentProcess().Id.ToString(),
+                "--caller-pid",     callerPid.ToString(),
             };
             if (forceKill) args.Add("--force-kill");
             string argLine = string.Join(" ", args);
@@ -152,22 +159,30 @@ namespace GCTonePrism.Manager.Services
                 // (DispatchExitCode(1) = "内部エラー、ログを確認" の汎用文言になり、少なくとも banner
                 // 自体は表示される)。詳細な exit code 取得は将来 event-driven 通知 (= Updater spawn 時に
                 // pipe 経由で exit code 受信) に置換予定、本 fallback は中間 measure。
+                // (#108 Phase 4 round 3 M-4) 順方向 scan に変更。旧 backward scan は「全工程完了」を
+                // 見つけた瞬間 return 0 する pattern だったが、log が `[早] 全工程完了 ... [遅] [ERROR]`
+                // (= Logger.Shutdown 周辺で後続 ERROR が出る path) のケースで失敗を見落とす false negative
+                // があった。順方向で `sawFailure` と `sawComplete` 両方を track、最終的に **failure 優先**
+                // (= 後続 ERROR が出てれば成功 marker を上書きする) で判定。
                 string[] lines = File.ReadAllLines(latest.FullName);
+                int startIdx = Math.Max(0, lines.Length - 20);
                 bool sawFailure = false;
-                for (int i = lines.Length - 1; i >= 0 && i >= lines.Length - 20; i--)
+                bool sawComplete = false;
+                for (int i = startIdx; i < lines.Length; i++)
                 {
                     string line = lines[i];
-                    if (line.Contains("Updater 全工程完了")) return 0;
-                    // (#108 Phase 4 round 2 M8) 行頭 Logger format prefix (`[YYYY-MM-DD HH:mm:ss] [LEVEL]`)
-                    // を確認してから level tag を検出することで、message 本文に偶然 `[ERROR]` 文字列を
-                    // 含む log line (例: `Logger.Info("[FOO] mode=ERROR_RECOVERY")`) を false positive
-                    // しないように anchor を厳密化。
+                    if (line.Contains("Updater 全工程完了")) sawComplete = true;
+                    // 行頭 Logger format prefix (`[YYYY-MM-DD HH:mm:ss] [LEVEL]`) を確認してから level tag
+                    // を検出することで、message 本文に偶然 `[ERROR]` 文字列を含む log line (例:
+                    // `Logger.Info("[FOO] mode=ERROR_RECOVERY")`) を false positive しないように anchor 厳密化。
                     if (line.StartsWith("[20") && (line.Contains("] [ERROR]") || line.Contains("] [FATAL]")))
                     {
                         sawFailure = true;
                     }
                 }
-                return sawFailure ? 1 : (int?)null;
+                if (sawFailure) return 1; // failure 優先
+                if (sawComplete) return 0;
+                return null;
             }
             catch
             {

@@ -110,6 +110,30 @@ namespace GCTonePrism.Manager.Services
                 {
                     Directory.CreateDirectory(extractDir);
                 }
+                // (#108 Phase 4 round 3 M-3) zip-slip pre-extract 検査。`ZipFile.ExtractToDirectory` は
+                // entry path を destination dir 直下に強制 normalize しないため、悪意ある zip
+                // (entry name = `..\..\Windows\System32\foo.exe`) で extract dir 外を書き換えうる。
+                // 信頼境界 (release は repo maintainer のみ) で実害確率は低いが、CI key 漏洩 / repo
+                // takeover 時に物理的に Manager dir 外 / system dir まで書き換え可能になる single point
+                // failure を、安価な pre-check で塞ぐ。
+                string extractDirFull = Path.GetFullPath(extractDir).TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
+                using (var archive = ZipFile.OpenRead(zipPath))
+                {
+                    foreach (var entry in archive.Entries)
+                    {
+                        // dir entry (FullName 末尾 `/`) は skip、file のみ check
+                        if (string.IsNullOrEmpty(entry.FullName)) continue;
+                        if (entry.FullName.EndsWith("/", StringComparison.Ordinal)
+                            || entry.FullName.EndsWith("\\", StringComparison.Ordinal)) continue;
+                        string entryFull = Path.GetFullPath(Path.Combine(extractDir, entry.FullName));
+                        if (!entryFull.StartsWith(extractDirFull, StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new InvalidDataException(
+                                "zip 内に extract dir 外を指す entry が含まれます (zip slip 疑い): " +
+                                entry.FullName + " → " + entryFull);
+                        }
+                    }
+                }
                 ZipFile.ExtractToDirectory(zipPath, extractDir);
                 Logger.Info("[UpdateDownloader] Extract 完了");
             }

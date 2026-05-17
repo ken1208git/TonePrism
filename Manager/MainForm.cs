@@ -188,11 +188,11 @@ namespace GCTonePrism.Manager
                     && result.Latest != null
                     && !string.IsNullOrEmpty(result.Latest.TagName))
                 {
-                    // (#108 Phase 4 round 2 codex P2) cache hit でも UpdateAvailable は出るため、
-                    // user が「いいえ」で延期した直後の再起動で同 dialog が永遠に出る UX があった。
-                    // per-tag marker (UpdateNotifiedTag) で「同 tag は 1 回 dialog 表示」に絞る。
-                    // 新 release が出て tag が変われば marker と不一致になり notify 再開する自然な挙動。
-                    string notifiedTag = dbManager.SettingsRepository.GetString(Services.SettingsKeys.UpdateNotifiedTag, string.Empty);
+                    // (#108 Phase 4 round 2 codex P2 / round 3 M-1) per-tag notified marker で「同 tag は 1 回
+                    // dialog 表示」に絞る。round 3 M-1 fix: 直接 SettingsRepository.SetString ではなく
+                    // UpdateChecker.MarkNotified / GetNotifiedTag 経由で _settingsWriteLock 内で書込み
+                    // (= M4 invariant 維持)。
+                    string notifiedTag = checker.GetNotifiedTag();
                     if (string.Equals(notifiedTag, result.Latest.TagName, StringComparison.Ordinal))
                     {
                         Services.Logger.Info("[MainForm] UpdateAvailable 検出 (tag=" + result.Latest.TagName + ") だが notified marker 一致、通知 skip");
@@ -200,21 +200,7 @@ namespace GCTonePrism.Manager
                     else
                     {
                         ShowUpdateAvailableNotification(result);
-                        // ShowUpdateAvailableNotification が DialogResult.No (= 「いいえ」) を返した場合のみ
-                        // marker を更新する。Yes (= タブ切替) の場合は user が今その release を見にいく
-                        // = まだ「未対応」扱いで marker 不要。
-                        // ※ 現実装では ShowUpdateAvailableNotification が結果を return しないので
-                        //   ここでは無条件に marker 更新する (= Yes / No 両方とも「通知済」扱い)。
-                        //   厳密には Yes 後の next session でも tab 自動切替されないため一度は marker
-                        //   set で OK。
-                        try
-                        {
-                            dbManager.SettingsRepository.SetString(Services.SettingsKeys.UpdateNotifiedTag, result.Latest.TagName);
-                        }
-                        catch (Exception sex)
-                        {
-                            Services.Logger.Warn("[MainForm] UpdateNotifiedTag 書込み失敗: " + sex.Message);
-                        }
+                        checker.MarkNotified(result.Latest.TagName);
                     }
                 }
             }

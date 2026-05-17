@@ -122,6 +122,45 @@ namespace GCTonePrism.Manager.Services
         /// 「このバージョンをスキップ」button からの呼出。`latest` の version 文字列を settings に書き、
         /// 次回 check 以降で `latest > skipped` になるまで通知抑止する。
         /// </summary>
+        /// <summary>
+        /// (#108 Phase 4 round 3 M-1) 起動時通知 dialog を出した tag を記録 (`UpdateNotifiedTag`)。
+        /// MainForm.StartBackgroundUpdateCheckIfDue から呼ぶ。round 1 M4 で立てた settings 書込み
+        /// invariant (process-wide `_settingsWriteLock` で serialize) を維持するため UpdateChecker 内に
+        /// 集約、MainForm の直接書込みを排除。
+        /// </summary>
+        public void MarkNotified(string tagName)
+        {
+            if (string.IsNullOrEmpty(tagName)) return;
+            lock (_settingsWriteLock)
+            {
+                try
+                {
+                    _settings.SetString(SettingsKeys.UpdateNotifiedTag, tagName);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("[UpdateChecker] MarkNotified 書込み失敗 (tag=" + tagName + "): " + ex.Message);
+                }
+            }
+        }
+
+        /// <summary>同 lock で読み込み (`MarkNotified` と pair で使う)。</summary>
+        public string GetNotifiedTag()
+        {
+            lock (_settingsWriteLock)
+            {
+                try
+                {
+                    return _settings.GetString(SettingsKeys.UpdateNotifiedTag, string.Empty);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("[UpdateChecker] GetNotifiedTag 読込失敗: " + ex.Message);
+                    return string.Empty;
+                }
+            }
+        }
+
         public void Skip(Version latest)
         {
             if (latest == null) return;
@@ -167,7 +206,14 @@ namespace GCTonePrism.Manager.Services
             if (string.IsNullOrEmpty(skipStr)) return true;
             Version skipped = ChangelogParser.TryParseTagVersion(skipStr);
             if (skipped == null) return true;
-            return latest > skipped;
+            // (#108 Phase 4 round 3 L-5) **厳密一致のみ Skipped 判定** に変更。旧実装は `latest > skipped`
+            // (= latest <= skipped で必ず Skipped) だったが、maintainer が release を手動 downgrade (= 後の
+            // release tag が v0.4.0 < skipped v0.5.0) した case、user の current=v0.3.0 でも UI が
+            // 「v0.4.0 はスキップ済み」と表示する不自然動作があった。`latest == skipped` のみ Skipped 扱い、
+            // それ以外 (`latest > skipped` も `latest < skipped` も) は notify 可とする。`latest < skipped`
+            // は ComputeStatus 上位で `latest <= current` なら UpToDate に倒れるため、実際に notify される
+            // のは「downgrade 後の latest > current」case のみ (= 自然な「新しい release が来た」UX)。
+            return !latest.Equals(skipped);
         }
 
         // ---------- internal ----------

@@ -26,6 +26,18 @@ namespace GCTonePrism.Manager
             // 自動的にファイル (logs/manager_YYYY-MM-DD.log) にも残る (#116)
             Logger.Initialize();
 
+            // (#108 Phase 4 round 3 L-1) AppDomain global の SecurityProtocol を起動時 1 回設定。
+            // GitHubReleaseChecker / BackupService 等 HttpClient 共有 consumer の SSL/TLS handshake が
+            // 起動順序で behavior 差を持たないように、process 起動直後に Tls12 を含む形に固定。
+            try
+            {
+                System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+            }
+            catch
+            {
+                // 古い .NET / SecurityProtocol 未定義の極端ケースは ignore (Win10/11 default で OK)
+            }
+
             try
             {
                 // パスの確認（デバッグ用）
