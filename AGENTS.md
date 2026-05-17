@@ -71,6 +71,7 @@
 - 新規クライアントコンポーネント（Launcher / Manager / Monitor 等）を追加・改修する際は、ファイルログ基盤を必ず実装する。仕様詳細は **SPECIFICATION.md §3.6** を参照。
 - 参照実装: [`Manager/Services/Logger.cs`](Manager/Services/Logger.cs), [`Launcher/scripts/logger.gd`](Launcher/scripts/logger.gd)
 - Logger 自体の障害は握り潰す（再帰ハング回避のため、Logger 内部例外はログにも書かない）。
+- **新規実装は `Logger.Info / Warn / Error` を直接使うこと。`Console.WriteLine` (.NET) / `print` (Godot) は legacy** — Manager は `Console.SetOut` フックで INFO 自動転送、Launcher は Godot 標準ログテール経由で自動転送されるため動作はするが、**レベル指定不能** で WARN/ERROR の選別を放棄することになる。レビュー時のレベルフィルタ追跡が効かなくなるため、新コードでは明示 API を使うこと。pre-existing の `Console.WriteLine` / `print` は段階的に移行する (PR #162 で Manager は全件 sweep 済、Launcher は #85 で対応予定)。
 
 ## Launcher Implementation
 - UI やレイアウトはなるべく `.tscn`（シーンファイル）で実装する。

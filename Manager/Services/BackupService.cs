@@ -203,17 +203,17 @@ namespace GCTonePrism.Manager.Services
                     try
                     {
                         f.Delete();
-                        Console.WriteLine($"[BackupService] 古いバックアップを削除: {f.Name}");
+                        Logger.Info($"[BackupService] 古いバックアップを削除: {f.Name}");
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[BackupService] 削除失敗 {f.Name}: {ex.Message}");
+                        Logger.Error($"[BackupService] 削除失敗 {f.Name}", ex);
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[BackupService] リテンション処理失敗: {ex.Message}");
+                Logger.Error($"[BackupService] リテンション処理失敗", ex);
             }
         }
 
@@ -259,16 +259,16 @@ namespace GCTonePrism.Manager.Services
                     string destPath = Path.Combine(safetyDir, file.Name);
                     if (File.Exists(destPath))
                     {
-                        Console.WriteLine($"[BackupService] スキップ（既存）: {file.Name}");
+                        Logger.Warn($"[BackupService] スキップ（既存）: {file.Name}");
                         continue;
                     }
                     file.MoveTo(destPath);
                     moved++;
-                    Console.WriteLine($"[BackupService] 退避ファイル移動: {file.Name} → backups/safety/");
+                    Logger.Info($"[BackupService] 退避ファイル移動: {file.Name} → backups/safety/");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[BackupService] 退避ファイル移動失敗 {file.Name}: {ex.Message}");
+                    Logger.Error($"[BackupService] 退避ファイル移動失敗 {file.Name}", ex);
                 }
             }
             return moved;

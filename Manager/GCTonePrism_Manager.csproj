@@ -180,6 +180,12 @@
     <Compile Include="Controls\UpdateSectionPanel.Designer.cs">
       <DependentUpon>UpdateSectionPanel.cs</DependentUpon>
     </Compile>
+    <Compile Include="Controls\SemverInputControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Controls\SemverInputControl.Designer.cs">
+      <DependentUpon>SemverInputControl.cs</DependentUpon>
+    </Compile>
     <Compile Include="BackupSettingsForm.cs">
       <SubType>Form</SubType>
     </Compile>

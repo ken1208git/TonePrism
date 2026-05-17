@@ -78,12 +78,12 @@ namespace GCTonePrism.Manager.Controls
                     int failedCleaned = CleanupFailedEntries();
                     if (recoveredSuccess > 0 || markedFailed > 0 || legacyRecovered > 0 || safetyAdded > 0 || failedCleaned > 0)
                     {
-                        Console.WriteLine($"[BackupSectionPanel] 更新時リコンサイル: 成功化 {recoveredSuccess} / 失敗化 {markedFailed} / 旧版救済 {legacyRecovered} / 退避新規 {safetyAdded} / 失敗自動掃除 {failedCleaned}");
+                        Logger.Info($"[BackupSectionPanel] 更新時リコンサイル: 成功化 {recoveredSuccess} / 失敗化 {markedFailed} / 旧版救済 {legacyRecovered} / 退避新規 {safetyAdded} / 失敗自動掃除 {failedCleaned}");
                     }
                 }
                 catch (Exception reconcileEx)
                 {
-                    Console.WriteLine($"[BackupSectionPanel] リコンサイル中にエラー: {reconcileEx.Message}");
+                    Logger.Error("[BackupSectionPanel] リコンサイル中にエラー", reconcileEx);
                 }
 
                 // 最終バックアップ表示
@@ -305,7 +305,7 @@ namespace GCTonePrism.Manager.Controls
                 // バックアップを誤って削除しないため）
                 if (!string.IsNullOrEmpty(path) && File.Exists(path))
                 {
-                    Console.WriteLine($"[BackupSectionPanel] failed だがファイル実在のため掃除スキップ (id={entry.Id}, path={path})");
+                    Logger.Warn($"[BackupSectionPanel] failed だがファイル実在のため掃除スキップ (id={entry.Id}, path={path})");
                     continue;
                 }
 

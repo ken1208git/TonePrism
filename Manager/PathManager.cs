@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using GCTonePrism.Manager.Services;
 
 namespace GCTonePrism.Manager
 {
@@ -168,7 +169,7 @@ namespace GCTonePrism.Manager
                 // 優先順位1: prism.db（データベースファイル）
                 if (File.Exists(Path.Combine(currentPath, "prism.db")))
                 {
-                    Console.WriteLine($"[PathManager] prism.db を検出: {currentPath}");
+                    Logger.Info($"[PathManager] prism.db を検出: {currentPath}");
                     detectedBaseDirectory = currentPath;
                     break;
                 }
@@ -176,7 +177,7 @@ namespace GCTonePrism.Manager
                 // 優先順位2: .git（Gitリポジトリのルート）
                 if (Directory.Exists(Path.Combine(currentPath, ".git")))
                 {
-                    Console.WriteLine($"[PathManager] .git フォルダを検出: {currentPath}");
+                    Logger.Info($"[PathManager] .git フォルダを検出: {currentPath}");
                     detectedBaseDirectory = currentPath;
                     break;
                 }
@@ -209,7 +210,7 @@ namespace GCTonePrism.Manager
                     (exePath.Equals(managerCandidate, StringComparison.OrdinalIgnoreCase) ||
                      exePath.StartsWith(managerCandidateWithSep, StringComparison.OrdinalIgnoreCase)))
                 {
-                    Console.WriteLine($"[PathManager] Manager + Launcher 兄弟フォルダを検出: {currentPath}");
+                    Logger.Info($"[PathManager] Manager + Launcher 兄弟フォルダを検出: {currentPath}");
                     detectedBaseDirectory = currentPath;
                     break;
                 }
@@ -224,10 +225,10 @@ namespace GCTonePrism.Manager
                 string errorMessage = $"エラー: プロジェクトルートが見つかりません。\n\n" +
                                      $"実行ファイルのパス: {exePath}\n\n" +
                                      $"このアプリケーションは、Managerフォルダ内から実行してください。";
-                Console.WriteLine($"[PathManager] {errorMessage}");
+                Logger.Error($"[PathManager] {errorMessage}");
                 throw new DirectoryNotFoundException(errorMessage);
             }
-            
+
             // Managerフォルダが存在し、実行ファイルがその中にあるか確認
             string managerFolderPath = Path.Combine(detectedBaseDirectory, "Manager");
             if (!Directory.Exists(managerFolderPath))
@@ -236,10 +237,10 @@ namespace GCTonePrism.Manager
                                      $"プロジェクトルート: {detectedBaseDirectory}\n" +
                                      $"実行ファイルのパス: {exePath}\n\n" +
                                      $"このアプリケーションは、Managerフォルダ内から実行してください。";
-                Console.WriteLine($"[PathManager] {errorMessage}");
+                Logger.Error($"[PathManager] {errorMessage}");
                 throw new DirectoryNotFoundException(errorMessage);
             }
-            
+
             // 「等値 OR separator 付き StartsWith」の二段比較。Launcher 側との対称化、および
             // 将来 .NET ランタイムの BaseDirectory が末尾 `\` を外した場合の future-proofing
             // (詳細は loop 内の同パターン NOTE を参照)。
@@ -252,10 +253,10 @@ namespace GCTonePrism.Manager
                                      $"Managerフォルダ: {managerFolderPath}\n" +
                                      $"実行ファイルのパス: {exePath}\n\n" +
                                      $"このアプリケーションは、Managerフォルダ内から実行してください。";
-                Console.WriteLine($"[PathManager] {errorMessage}");
+                Logger.Error($"[PathManager] {errorMessage}");
                 throw new DirectoryNotFoundException(errorMessage);
             }
-            
+
             return detectedBaseDirectory;
         }
         
@@ -264,15 +265,15 @@ namespace GCTonePrism.Manager
         /// </summary>
         public static void VerifyPaths()
         {
-            Console.WriteLine("=== PathManager - パス確認 ===");
-            Console.WriteLine($"実行ファイル: {AppDomain.CurrentDomain.BaseDirectory}");
-            Console.WriteLine($"プロジェクトルート: {BaseDirectory}");
-            Console.WriteLine($"Gamesフォルダ: {GamesFolder}");
-            Console.WriteLine($"データベース: {DatabasePath}");
-            Console.WriteLine($"");
-            Console.WriteLine($"Gamesフォルダ存在: {Directory.Exists(GamesFolder)}");
-            Console.WriteLine($"データベース存在: {File.Exists(DatabasePath)}");
-            Console.WriteLine("============================");
+            Logger.Info("=== PathManager - パス確認 ===");
+            Logger.Info($"実行ファイル: {AppDomain.CurrentDomain.BaseDirectory}");
+            Logger.Info($"プロジェクトルート: {BaseDirectory}");
+            Logger.Info($"Gamesフォルダ: {GamesFolder}");
+            Logger.Info($"データベース: {DatabasePath}");
+            Logger.Info($"");
+            Logger.Info($"Gamesフォルダ存在: {Directory.Exists(GamesFolder)}");
+            Logger.Info($"データベース存在: {File.Exists(DatabasePath)}");
+            Logger.Info("============================");
         }
         
         /// <summary>
