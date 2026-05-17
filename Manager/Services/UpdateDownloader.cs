@@ -145,6 +145,25 @@ namespace GCTonePrism.Manager.Services
         }
 
         /// <summary>
+        /// (#175 Phase 4.1) manifest filename const。Release.ps1 側 `$script:ManifestRelativePath`
+        /// と literal 一致が必要 (round 2 Low-3 で SoT 1 箇所統一)。filename を変えるときは両 SoT を
+        /// 同期更新すること。
+        /// </summary>
+        internal const string ManifestFileName = "bundle_manifest.json";
+
+        /// <summary>
+        /// (#175 Phase 4.1 round 2 Low-2) `ResolveBundleRoot` の解決結果を staging dir ごとに cache。
+        /// 旧実装は 1 update worker 実行中に `ValidateStaging` + `ValidateBundleVersion` +
+        /// `RunUpdateWorker` Step 5 直前の 3 箇所で再計算され、それぞれ File.Exists + Logger.Info を
+        /// 出していた log noise + 微小性能コスト。本 cache で worker 1 回あたり 1 回の解決に圧縮。
+        /// staging dir は worker 1 回ごとに新規 (`%TEMP%/GCTonePrism_update_<ver>/`) なので、process
+        /// が長時間生きても cache 肥大は最大数回 entries に留まる。
+        /// OrdinalIgnoreCase で Windows path comparison に揃える。
+        /// </summary>
+        private static readonly System.Collections.Generic.Dictionary<string, string> _bundleRootCache
+            = new System.Collections.Generic.Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
         /// (#175 Phase 4.1) staging dir 内の **bundle root** を解決する helper。
         ///
         /// 新 zip 構造 (v0.3.1+): zip 直下 = `Install.bat` / `INSTALL_README.txt`、それ以外
@@ -166,21 +185,37 @@ namespace GCTonePrism.Manager.Services
         /// (#175 Phase 4.1 round 1 Low-2) v0.3.0 install からの self-validate は正常 path のため log
         /// level を Warn → Info に降格 (旧実装は alarm が日常 self-update でも出ていた)。
         ///
+        /// (#175 Phase 4.1 round 2 Low-2) 同 stagingDir に対する複数回呼出は cache から返却、
+        /// File.Exists + Logger.Info の重複を回避。
+        ///
         /// 注意: legacy fallback path (= v0.3.0 install の Manager から v0.3.0 zip を取得する path)
         /// は v0.3.1 以降の zip 構造変更には対応できない (= 旧 Manager が新 zip 構造を validate
         /// できず手動 install 必要)。Phase 4.1 (#175) の trade-off。
         /// </summary>
         public static string ResolveBundleRoot(string stagingDir)
         {
-            string manifestPath = Path.Combine(stagingDir, "bundle", "bundle_manifest.json");
+            string cached;
+            lock (_bundleRootCache)
+            {
+                if (_bundleRootCache.TryGetValue(stagingDir, out cached)) return cached;
+            }
+            string manifestPath = Path.Combine(stagingDir, "bundle", ManifestFileName);
+            string bundleRoot;
             if (File.Exists(manifestPath))
             {
-                string bundleRoot = Path.Combine(stagingDir, "bundle");
+                bundleRoot = Path.Combine(stagingDir, "bundle");
                 Logger.Info("[UpdateDownloader] ResolveBundleRoot: manifest 検出 (新構造) → " + bundleRoot);
-                return bundleRoot;
             }
-            Logger.Info("[UpdateDownloader] ResolveBundleRoot: manifest 不在 (旧構造 v0.3.0 fallback) → " + stagingDir);
-            return stagingDir;
+            else
+            {
+                bundleRoot = stagingDir;
+                Logger.Info("[UpdateDownloader] ResolveBundleRoot: manifest 不在 (旧構造 v0.3.0 fallback) → " + stagingDir);
+            }
+            lock (_bundleRootCache)
+            {
+                _bundleRootCache[stagingDir] = bundleRoot;
+            }
+            return bundleRoot;
         }
 
         /// <summary>
@@ -223,9 +258,11 @@ namespace GCTonePrism.Manager.Services
             if (Directory.Exists(Path.Combine(stagingDir, "bundle")))
             {
                 Logger.Error("[UpdateDownloader] ValidateStaging: bundle/ あり + manifest なし、broken release 疑い (再 DL 推奨)");
+                // (#175 Phase 4.1 round 2 Low-5) Windows path separator 統一 (manifest 経路 missing と同じ
+                // backslash 表記、user 視点で「同じ string 表記の path」感を保つ)。
                 return new List<string>
                 {
-                    "bundle/bundle_manifest.json (broken release 疑い: bundle/ dir はあるが manifest 不在、zip 同梱漏れの可能性。再 DL を試してください)",
+                    Path.Combine("bundle", ManifestFileName) + " (broken release 疑い: bundle/ dir はあるが manifest 不在、zip 同梱漏れの可能性。再 DL を試してください)",
                 };
             }
             // (#175 Phase 4.1 round 1 Low-2) 旧構造 self-update は正常 path、Warn → Info 降格。
@@ -250,10 +287,11 @@ namespace GCTonePrism.Manager.Services
                     // (#175 Phase 4.1 round 1 High-2) parse 失敗 = broken/corrupted manifest。
                     // legacy fallback は staging 直下 `Launcher.bat` を期待するが新構造では bundle/
                     // 配下にしかないため必ず 3 件 missing で fail。silent な誤判定を防ぐため明示 abort。
+                    // (#175 Phase 4.1 round 2 Low-5) Windows path separator 統一 (`Path.Combine` 経由)。
                     Logger.Error("[UpdateDownloader] ValidateStaging: manifest parse 失敗、broken release 疑い (再 DL 推奨)");
                     return new List<string>
                     {
-                        "bundle/bundle_manifest.json (broken release 疑い: parse 失敗、zip 破損 / schema 不一致の可能性。再 DL を試してください)",
+                        Path.Combine("bundle", ManifestFileName) + " (broken release 疑い: parse 失敗、zip 破損 / schema 不一致の可能性。再 DL を試してください)",
                     };
                 }
                 var missing = new List<string>();
@@ -262,7 +300,11 @@ namespace GCTonePrism.Manager.Services
                     // JSON 上は `/` separator で記録されているので Windows 用に変換
                     string relWin = rel.Replace('/', Path.DirectorySeparatorChar);
                     string full = Path.Combine(bundleRoot, relWin);
-                    if (!File.Exists(full) && !Directory.Exists(full))
+                    // (#175 Phase 4.1 round 2 Low-4) schema_version 1 では manifest files は file path のみ
+                    // (dir entry なし、`ReadBundleManifest` docstring 参照)。旧実装の `Directory.Exists`
+                    // check は dead branch だったため削除して `File.Exists` 1 行に簡素化。将来 dir entry を
+                    // 許容する場合は本 check + schema_version bump で再導入する設計。
+                    if (!File.Exists(full))
                     {
                         missing.Add(Path.Combine("bundle", relWin));
                     }
@@ -280,10 +322,11 @@ namespace GCTonePrism.Manager.Services
             catch (Exception ex)
             {
                 // (#175 Phase 4.1 round 1 High-2) 例外時も broken release 扱いで abort sentinel
+                // (#175 Phase 4.1 round 2 Low-5) Windows path separator 統一
                 Logger.Error("[UpdateDownloader] ValidateStaging: manifest 検証で例外、broken release 疑い (再 DL 推奨): " + ex.Message);
                 return new List<string>
                 {
-                    "bundle/bundle_manifest.json (broken release 疑い: 検証中に例外、" + ex.GetType().Name + ": " + ex.Message + "。再 DL を試してください)",
+                    Path.Combine("bundle", ManifestFileName) + " (broken release 疑い: 検証中に例外、" + ex.GetType().Name + ": " + ex.Message + "。再 DL を試してください)",
                 };
             }
         }

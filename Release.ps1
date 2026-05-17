@@ -273,9 +273,13 @@ $StagingDir   = Join-Path $StagingRoot "v$Version"
 # それ以外 (Launcher.bat / Manager.bat / show_folder_dialog.ps1 / bundle_manifest.json /
 # files/) は `bundle/` 配下に集約。ユーザーが zip 展開した時に「Install.bat を押すだけ」を
 # 一目瞭然にする UX 改善 + 将来の dir 構造変更を manifest 経由で forward compat に。
+# (#175 Phase 4.1 round 2 Low-3) manifest filename を `$script:ManifestRelativePath` 1 箇所に SoT 集約
+# (`$ManifestPath` 計算 + `Assert-ExpectedFiles` の `$zipRootExpected` 両方で参照)。Manager 側
+# (`UpdateDownloader.ManifestFileName` const) との 2-layer 同期 fence は別 layer なので各別に管理。
+$script:ManifestRelativePath = 'bundle\bundle_manifest.json'
 $BundleDir    = Join-Path $StagingDir 'bundle'
 $FilesDir     = Join-Path $BundleDir 'files'
-$ManifestPath = Join-Path $BundleDir 'bundle_manifest.json'
+$ManifestPath = Join-Path $StagingDir $script:ManifestRelativePath
 $ZipPath      = Join-Path $StagingRoot "GCTonePrism_v$Version.zip"
 $ChangelogPath = Join-Path $RepoRoot 'CHANGELOG.md'
 
@@ -1811,7 +1815,7 @@ function Assert-ExpectedFiles {
     $zipRootExpected = @(
         'Install.bat',
         'INSTALL_README.txt',
-        'bundle\bundle_manifest.json'  # New-BundleManifest 直前生成、自己整合性 fence
+        $script:ManifestRelativePath  # (#175 round 2 Low-3) SoT 集約、line 280 周辺の定数参照
     )
     $bundleExpected = $script:BundleManifestFiles | ForEach-Object { Join-Path 'bundle' $_ }
     $expected = $zipRootExpected + $bundleExpected
