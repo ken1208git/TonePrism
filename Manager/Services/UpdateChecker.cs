@@ -92,9 +92,15 @@ namespace GCTonePrism.Manager.Services
                 cached.Status = ComputeStatus(current, cached.Latest);
                 return cached;
             }
+            // (#173) cache 不在 path: `ComputeStatus(current, null)` だと latest=null が UpToDate に倒れて
+            // 「最新版を実行中」緑文字 default 表示が出る silent UX 問題があった。cache hydrate 経路
+            // (L88-93) は cache 由来の latest があるため ComputeStatus 経由のままで OK、cache 不在 +
+            // API 未確認の場合のみ Initializing を直接代入する (= ComputeStatus は触らず、`CheckAsync`
+            // API 成功 path の `latest=null` UpToDate 挙動を壊さない設計)。
+            // `current == null` (UnknownBundle 経路) は従来通り UnknownBundle に倒す。
             return new UpdateCheckResult
             {
-                Status = ComputeStatus(current, null),
+                Status = current == null ? UpdateCheckStatus.UnknownBundle : UpdateCheckStatus.Initializing,
                 Current = current,
                 CheckedAtUnixMs = 0,
                 FromCache = false,

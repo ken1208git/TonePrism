@@ -8,6 +8,13 @@ namespace GCTonePrism.Manager.Models
     /// 受け取って表示状態を更新する。
     ///
     /// 失敗 case も含めて単一の戻り値型で表現するため、`Status` で分岐する設計:
+    /// - `Initializing`: cache 不在 + API 未確認 (= 起動直後で background check 未完了) の遷移状態。
+    ///   「最新版を確認中...」(灰色) + Update/Skip ボタン無効。`UpdateChecker.LoadCacheOnly` の cache 不在
+    ///   path のみが返す。`Current` は非 null (UnknownBundle 経路に倒れない case)、`Latest` は **null**
+    ///   (= まだ API 叩いていない)。CumulativeReleases / LastError も null / 空。background check 完了
+    ///   (`OnCheckCompleted`) で `UpToDate` / `UpdateAvailable` / `NetworkError` 等に上書きされる
+    ///   短命状態。`ComputeStatus` 経由ではなく `LoadCacheOnly` で直接代入する設計 (= `ComputeStatus`
+    ///   が `latest == null` を `UpToDate` に倒す挙動を維持しつつ、cache 不在経路だけ別状態に分離)。
     /// - `UpToDate`: 最新版 (= 現在の Bundle == latest)。「最新版を実行中」(緑文字) + Update/Skip ボタン無効。
     ///   Latest は **非 null とは限らない** ((#108 Phase 4 round 7 H-1) round 6 M-1 訂正の再訂正):
     ///   `UpdateChecker.ComputeStatus` は `latest == null || latest.Version == null || latest.Version <= current`
@@ -58,6 +65,8 @@ namespace GCTonePrism.Manager.Models
 
     internal enum UpdateCheckStatus
     {
+        /// <summary>(#173) cache 不在 + API 未確認の遷移状態。`LoadCacheOnly` cache 不在 path のみが返す。</summary>
+        Initializing,
         UpToDate,
         UpdateAvailable,
         Skipped,

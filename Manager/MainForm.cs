@@ -47,11 +47,17 @@ namespace GCTonePrism.Manager
 
         private void MainForm_Load(object sender, EventArgs e)
         {
-            MessageBox.Show(
-                "【重要】管理ソフトは必ず「1台のPC」だけで起動してください。\n\n複数のPCで同時に管理ソフトを開くと、データの保存に失敗したり、最悪の場合ファイルが破損して全てのデータが失われる可能性があります。\n（ランチャーは複数のPCで同時に動かしても大丈夫です）",
-                "同時起動に関する注意",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
+            // (#178 (b)) アップデート完了直後の起動 (= sentinel あり) は、通常の「同時起動に関する注意」
+            // MessageBox を「✓ アップデート完了」MessageBox に **置換** する設計。起動 dialog 数は変わらず 1 つ、
+            // user は完了 feedback を確実に受け取る。同時起動注意は次回 (sentinel なし) 起動から通常表示。
+            if (!TryShowUpdateCompletedDialog())
+            {
+                MessageBox.Show(
+                    "【重要】管理ソフトは必ず「1台のPC」だけで起動してください。\n\n複数のPCで同時に管理ソフトを開くと、データの保存に失敗したり、最悪の場合ファイルが破損して全てのデータが失われる可能性があります。\n（ランチャーは複数のPCで同時に動かしても大丈夫です）",
+                    "同時起動に関する注意",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
 
             bool dbReady = false;
 
@@ -448,6 +454,71 @@ namespace GCTonePrism.Manager
             string dbStatus = dbManager.DatabaseExists() ? "接続済み" : "未接続";
             string gameInfo = additionalInfo ?? $"ゲーム数: {_gameSectionPanel.GameCount}件";
             lblStatus.Text = $"データベース: {dbStatus} | {gameInfo}";
+        }
+
+        // ============================================================
+        // (#178 (b)) アップデート完了通知 dialog — sentinel ファイルによる post-update feedback
+        // ============================================================
+        //
+        // UpdateSectionPanel.RunUpdateWorker が完走時に <install>/.update_completed を書き出し、
+        // 自動再起動した新 Manager の MainForm_Load 冒頭で本 helper が sentinel を読んで完了 dialog 表示。
+        // sentinel は読込直後に必ず削除 (parse 成功 / 失敗を問わず) して、次回起動で再表示されるバグを防ぐ。
+        //
+        // dialog は通常の「同時起動に関する注意」MessageBox を **置換** する形 (= caller の MainForm_Load で
+        // `if (!TryShowUpdateCompletedDialog()) { 同時起動注意.Show() }` で gate)。起動 dialog 数は常に 1 つ、
+        // sentinel あり時は完了通知、sentinel なし時は同時起動注意、と排他切替する設計。
+        //
+        // 仕様詳細は SPECIFICATION.md §3.7.3 「sentinel ファイル仕様」参照。
+
+        /// <summary>
+        /// sentinel ファイル `<install>/.update_completed` を読んで完了 dialog を表示。
+        /// 表示した場合 true (caller は同時起動注意 MessageBox を skip)、表示しなかった場合 false。
+        /// </summary>
+        private bool TryShowUpdateCompletedDialog()
+        {
+            string sentinelPath = System.IO.Path.Combine(PathManager.BaseDirectory, ".update_completed");
+            if (!System.IO.File.Exists(sentinelPath)) return false;
+
+            string newVersion = null;
+            try
+            {
+                string json = System.IO.File.ReadAllText(sentinelPath, System.Text.Encoding.UTF8);
+                var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
+                var dto = ser.Deserialize<UpdateCompletedSentinel>(json);
+                if (dto != null) newVersion = dto.newVersion;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[MainForm] update_completed sentinel parse 失敗 (dialog 表示 skip): " + ex.Message);
+            }
+            finally
+            {
+                // 読込結果に関わらず sentinel は必ず削除する (永続 dialog 再表示バグ防止)。
+                try { System.IO.File.Delete(sentinelPath); }
+                catch (Exception delEx) { Logger.Warn("[MainForm] update_completed sentinel 削除失敗: " + delEx.Message); }
+            }
+
+            if (string.IsNullOrEmpty(newVersion))
+            {
+                // parse 失敗 / newVersion 不在は dialog 出さず終了、caller は通常の同時起動注意 MessageBox を表示。
+                return false;
+            }
+
+            Logger.Info("[MainForm] update_completed dialog 表示: v" + newVersion);
+            MessageBox.Show(
+                "アップデートが完了しました。\n\n" +
+                "  新しいバージョン: v" + newVersion + "\n\n" +
+                "新しい管理ソフトが起動しています。",
+                "✓ アップデート完了",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return true;
+        }
+
+        private sealed class UpdateCompletedSentinel
+        {
+            public string completedAt { get; set; }
+            public string newVersion { get; set; }
         }
     }
 }

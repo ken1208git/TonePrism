@@ -1511,6 +1511,30 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.9.2] - 2026-05-18
+
+#### Changed (#178 (a) — `[A]` 事前確認 dialog の警告色 + LAN 共有運用予告強化)
+
+- **`UpdateSectionPanel.btnUpdateNow_Click` の `[A]` 事前確認 MessageBox を警告色強化** (L320-336): `MessageBoxIcon.Question` → `MessageBoxIcon.Warning`、title 「アップデート開始確認」→ 「**アップデート開始 — 起動中アプリの確認をお願いします**」で意図明確化、body の「Launcher / 常駐ツールが動いていれば事前に閉じる必要があります」を **【重要】ブロック** に昇格 + **「閉じないとアップデートに失敗し、installation が破損する可能性があります」** を強調追記。文言は「**Launcher などシステムに関連するソフト**」と曖昧化 (= 部員に PauseOverlay 等の技術用語を意識させない、Launcher を閉じれば連鎖 cleanup される実装事実とも整合)、**「この PC を含む全ての PC で先に閉じてください」+ 「学校 LAN で共有運用している場合、他 PC で起動中の Launcher も対象です」** を明示 (= SPEC §3.7 で `\\学校サーバー\PCクラブ` SMB 配置運用が想定されており、他 PC で Launcher 実行中だと server 上の launcher.exe が file lock で書換え不能になる問題への暫定対応、user に予告)。button は `YesNo` のまま (= 事前確認の「はい / いいえ」が自然、`MessageBoxButtons.YesNo` は label カスタマイズ不可)。
+- **`[A.5]` 起動中プロセスあり MessageBox は本 PR では touch しない** (L350-360 付近、`MessageBoxIcon.Warning` + RetryCancel の現状維持): local file lock 物理安全網として独立した責務 (#179 LAN-wide 検出が完成しても local 同 PC 内の file lock 回避は別レイヤー)。`[A]` 強化で `[A.5]` にたどり着く頻度は激減する見込み。
+
+#### Changed (#178 (b) — アップデート完了 sentinel ファイル + 起動時 dialog 置換)
+
+- **`UpdateSectionPanel.RunUpdateWorker` 末尾で sentinel ファイル `<install>/.update_completed` を書出し**: Updater spawn 成功後、`Application.Exit` 直前 (= 既存の `progress.Report(95, "Manager を終了中...")` 直前) に `<install>/.update_completed` を JSON で書き込み (内容: `{ completedAt: ISO8601 UTC, newVersion: targetVersion.ToString(3) }`、serializer は既存 `UpdateChecker.CacheDto` と同じ `System.Web.Script.Serialization.JavaScriptSerializer`)。書込み失敗は `Logger.Warn` で握り潰し、Application.Exit は続行 (= dialog が出ないだけで installation 自体は完成しているため致命的でない)。
+- **`MainForm.TryShowUpdateCompletedDialog` helper を新規追加** (`MainForm.cs` 末尾、bool 返却): `MainForm_Load` 冒頭で呼ばれて sentinel ファイル存在チェック、存在すれば `JavaScriptSerializer.Deserialize<UpdateCompletedSentinel>` で parse → `MessageBox.Show("アップデートが完了しました。\n\n  新しいバージョン: v{newVersion}\n\n新しい管理ソフトが起動しています。", "✓ アップデート完了", OK, MessageBoxIcon.Information)` で完了通知を modal 表示。**設計のキモ**: 既存の「同時起動に関する注意」MessageBox を **置換** する形 (caller の `MainForm_Load` で `if (!TryShowUpdateCompletedDialog()) { 同時起動注意.Show() }` で gate)。起動時 dialog 数は常に 1 つに保たれ、sentinel あり時は完了通知、sentinel なし時は同時起動注意、と排他切替。**sentinel は読込直後の `finally` block で必ず削除** (parse 成功 / 失敗を問わず、永続 dialog 再表示バグ path を物理閉鎖)。`UpdateCompletedSentinel` は private nested class、`completedAt` / `newVersion` 2 field のみ。
+- **設計変遷ノート**: 当初 plan では Dock=Top の `pnlUpdateCompletedBanner` Panel + Label + × ボタンで永続 banner 表示する案を実装、smoke test で「消えるのが一瞬すぎ」→「× あるし永続でいい」→「アップデート完了表示はダイアログのつもりやった」とユーザーフィードバックを受けて、banner UI を撤廃して `MessageBox` 置換設計に転換。同時起動注意との二重 dialog を避けるため「同時起動注意の替わり (= 置換)」として 1 dialog 体制を採用。banner UI 関連の Designer 宣言 / Controls.Add / field / ハンドラはすべて新設せず、`MainForm.Designer.cs` への変更行数を最小化 (= 既存 form layout を一切変えない)。
+
+#### Changed (#173 — `Initializing` 状態追加で「最新版を実行中」silent 誤表示を解消)
+
+- **`UpdateCheckStatus` enum に `Initializing` 値を最上位に追加** (`Models/UpdateCheckResult.cs`): cache 不在 + API 未確認の遷移状態を表現する新 status。「最新版を実行中」緑文字 default 誤表示の根本解消。`UpdateChecker.LoadCacheOnly` の cache 不在 path のみが直接代入する設計 (= `ComputeStatus` 経由ではない)。
+- **`UpdateChecker.LoadCacheOnly` の cache 不在 path を修正**: 旧 `Status = ComputeStatus(current, null)` → 新 `Status = current == null ? UpdateCheckStatus.UnknownBundle : UpdateCheckStatus.Initializing`。`ComputeStatus` は **触らない** (= `CheckAsync` API 成功 path の `latest == null` を `UpToDate` に倒す既存挙動を維持、Initializing は `LoadCacheOnly` cache 不在 path のみが直接代入する設計)。cache hydrate 経路 (= cache に latest あり) は `ComputeStatus` 経由のままで OK (= cache 由来 latest があるため Initializing にならない)。`current == null` (= UnknownBundle 経路) は従来通り UnknownBundle に倒す。
+- **`UpdateSectionPanel.ApplyResult` switch case 追加**: `Initializing` case を `UpToDate` の前に挿入、文言「最新版を確認中...」、`ForeColor = Color.Gray`、`btnUpdateNow.Enabled = false` + `btnSkip.Enabled = false`。background check 完了 (`OnCheckCompleted` 経由 `ApplyResult` 再呼出) で `UpToDate` / `UpdateAvailable` / `NetworkError` 等に上書きされる短命状態。`btnCheckNow_Click` の動的文言「確認中...」と意味一致。
+- **`UpdateCheckResult.Status` docstring 更新** (`Models/UpdateCheckResult.cs`): 冒頭に `Initializing` の説明 1 段落を追加 (cache 不在 + API 未確認の遷移状態、`LoadCacheOnly` の cache 不在 path のみが返す、`Latest` は null、background check 完了で上書きされる短命状態、設計判断: `ComputeStatus` 経由ではなく `LoadCacheOnly` で直接代入)。
+
+**スコープ**: Bundle v0.3.0 / v0.3.1 で完成した Manager UI アップデートタブの E2E test 中に観察された 3 件の UX 課題を 1 PR で解消。`[A]` 事前確認の警告色強化 + LAN 共有運用予告 (#178 (a))、アップデート完了通知 banner (#178 (b))、初回起動経路の silent 誤表示解消 (#173)。banner UI 機構は将来 #179 (LAN-wide 同時起動検出) で動的状態切替 banner として再利用予定。**スコープ外**: 同時起動注意 MessageBox 改修 (#178 (c)、PR3 で #179 LAN-wide 検出と統合実装)、Launcher session tracking の自動検出 (#179 issue 本文 update + 実装は別 PR、本 PR は文言で「他 PC 含む」を予告する暫定対応)、Bundle bump (リリース直前のみ)、`[A.5]` 起動中プロセスあり MessageBox 改修 (= local file lock 物理安全網として現状維持、#179 LAN 検出と独立した責務)。patch bump 判断: 既存機能の改善 + 新規 UI 要素追加だが user 視点 invisible な拡張 (sentinel ファイルは next update で初めて意味を持つ) → 0.x 系慣習で patch bump。
+
+**詳細仕様は [SPECIFICATION.md §3.7.3](SPECIFICATION.md) (sentinel ファイル仕様) 参照**。
+
 ### [Manager v0.9.1] - 2026-05-18
 
 #### Changed (#175 Phase 4.1 — Bundle manifest 同梱 + zip 構造整理)

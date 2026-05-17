@@ -126,6 +126,14 @@ namespace GCTonePrism.Manager.Controls
             // alarming にしない設計、UpdateChecker.cs の fallback path 参照)。
             switch (result.Status)
             {
+                case UpdateCheckStatus.Initializing:
+                    // (#173) cache 不在 + background check 未完了の遷移状態。「最新版を実行中」緑文字 default
+                    // 誤表示を避けるため Initializing 灰色で「未確認」を視覚化、API 完了で上書きされる短命状態。
+                    lblStatusMessage.Text = "最新版を確認中...";
+                    lblStatusMessage.ForeColor = System.Drawing.Color.Gray;
+                    btnUpdateNow.Enabled = false;
+                    btnSkip.Enabled = false;
+                    break;
                 case UpdateCheckStatus.UpToDate:
                     lblStatusMessage.Text = "最新版を実行中です。";
                     lblStatusMessage.ForeColor = System.Drawing.Color.DarkGreen;
@@ -317,17 +325,26 @@ namespace GCTonePrism.Manager.Controls
             }
 
             // [A] 事前確認ダイアログ
+            // (#178 (a)) 警告色強化: MessageBoxIcon.Question → Warning、title に「起動中アプリの確認をお願いします」
+            // を入れて意図を明確化、body の Launcher 閉じ予告を【重要】ブロックに昇格 + LAN 共有運用時の他 PC 対象も
+            // 明示。SMB 配置運用 (SPECIFICATION.md §3.7、`\\学校サーバー\PCクラブ` 配置) では他 PC で起動中の
+            // Launcher も file lock 衝突源になるが、現状 LAN 検出機構未実装のため文言で予告する暫定対応。
+            // 自動検出への upgrade は #179 拡張 PR (Launcher session tracking 含む) で対応予定。
             DialogResult confirm = MessageBox.Show(
                 "アップデートを開始します。\n\n" +
                 "  現在: v" + (_currentResult.Current == null ? "(不明)" : _currentResult.Current.ToString(3)) + "\n" +
                 "  最新: " + _currentResult.Latest.TagName + "\n\n" +
+                "【重要】Launcher などシステムに関連するソフトを、\n" +
+                "        この PC を含む全ての PC で先に閉じてください。\n" +
+                "        学校 LAN で共有運用している場合、他 PC で起動中の\n" +
+                "        Launcher も対象です。閉じないとアップデートに失敗し、\n" +
+                "        installation が破損する可能性があります。\n\n" +
                 "・ダウンロード + 置換中、Manager が再起動します。\n" +
-                "・進行中に Launcher や常駐ツールが動いていれば事前に閉じる必要があります。\n" +
                 "・ゲームデータ (prism.db / games/ / backups/ / responses/ / logs/) は保護されます。\n\n" +
                 "続行してよろしいですか？",
-                "アップデート開始確認",
+                "アップデート開始 — 起動中アプリの確認をお願いします",
                 MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question);
+                MessageBoxIcon.Warning);
             if (confirm != DialogResult.Yes) { Services.Logger.Info("[UpdateSectionPanel] user が事前確認で No 選択、abort"); return; }
             Services.Logger.Info("[UpdateSectionPanel] user が事前確認で Yes 選択、起動中プロセスチェックへ進む");
 
@@ -682,6 +699,27 @@ namespace GCTonePrism.Manager.Controls
                     {
                         Services.Logger.Warn("[UpdateSectionPanel] CleanupBak 失敗 (継続): dir=" + repDir + " ex=" + cleanupEx.GetType().Name + ": " + cleanupEx.Message);
                     }
+                }
+
+                // (#178 (b)) アップデート完了 sentinel ファイル書出し。自動再起動した新 Manager の
+                // MainForm_Load 冒頭で読まれて緑 banner を表示する。書込み失敗は banner が出ないだけで
+                // installation 自体は完成しているため Warn log で握り潰し、Application.Exit は続行。
+                // 詳細: SPECIFICATION.md §3.7.3 「sentinel ファイル仕様」参照。
+                try
+                {
+                    string sentinelPath = System.IO.Path.Combine(PathManager.BaseDirectory, ".update_completed");
+                    var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
+                    string json = ser.Serialize(new
+                    {
+                        completedAt = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture),
+                        newVersion = targetVersion.ToString(3),
+                    });
+                    System.IO.File.WriteAllText(sentinelPath, json, System.Text.Encoding.UTF8);
+                    Services.Logger.Info("[UpdateSectionPanel] update_completed sentinel 書出し: " + sentinelPath);
+                }
+                catch (Exception sentEx)
+                {
+                    Services.Logger.Warn("[UpdateSectionPanel] update_completed sentinel 書出し失敗 (banner 出ないだけで続行): " + sentEx.Message);
                 }
 
                 progress.Report(new ProgressInfo(95, "Manager を終了中..."));
