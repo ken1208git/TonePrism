@@ -21,12 +21,15 @@ namespace GCTonePrism.Manager.Services
 
         /// <summary>
         /// 「このバージョンをスキップ」で記録される Bundle version (例: "0.3.0")。
-        /// UpdateChecker.ShouldNotify は `latest > skipped` で再通知判定する (累積 skip ではない、
-        /// = 次の release が出るまで黙る意味)。空文字 / 不在 = skip 履歴なし。
+        /// (#108 Phase 4 round 3 L-5 / round 6 H-1 docstring 反映) UpdateChecker.ShouldNotify は
+        /// `latest != skipped` の **厳密一致比較** で再通知判定する (同 tag のみ通知抑止、新 tag が
+        /// 出れば通知再開)。`latest < skipped` の downgrade release も「同 tag でなければ新 release
+        /// 扱い」で通知する自然な挙動。空文字 / 不在 = skip 履歴なし。
+        ///
+        /// 旧 docstring は `latest > skipped` の累積 skip semantic を主張していたが round 3 L-5 で実装
+        /// 変更済、本 round 6 H-1 で XML doc を実装と同期 (IntelliSense / hover tooltip が authoritative
+        /// な契約として読まれるため non-XML コメントだけでは不十分)。
         /// </summary>
-        // (#108 Phase 4 round 3 L-5) 判定は `latest != skipped` の厳密一致 (旧 `latest > skipped` から変更、
-        // downgrade release 時の「すでに skip 済」誤表示解消)。同 tag のみ通知抑止、新 tag が出れば
-        // 通知再開する自然な挙動。
         public const string UpdateSkippedVersion = "update_skipped_version";
 
         /// <summary>

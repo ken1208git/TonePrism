@@ -336,7 +336,8 @@ namespace GCTonePrism.Manager.Services
                 if (dto == null) return null;
                 return new UpdateCheckResult
                 {
-                    Status = dto.Status,
+                    // (#108 Phase 4 round 6 L-5) Status は ComputeStatus が caller 側で必ず上書きする
+                    // (LoadCacheOnly / CheckAsync) ため、ここでは default (UpToDate) で OK。
                     Current = TryParse(dto.CurrentVer),
                     Latest = dto.Latest == null ? null : new ReleaseInfo
                     {
@@ -380,7 +381,8 @@ namespace GCTonePrism.Manager.Services
             {
                 var dto = new CacheDto
                 {
-                    Status = result.Status,
+                    // (#108 Phase 4 round 6 L-5) Status は dead field のため Save しない (上記
+                    // CacheDto の docstring 参照)。
                     CurrentVer = result.Current == null ? null : result.Current.ToString(3),
                     CheckedAtUnixMs = result.CheckedAtUnixMs,
                     Latest = result.Latest == null ? null : new CacheReleaseDto
@@ -437,7 +439,10 @@ namespace GCTonePrism.Manager.Services
         // cache serialization 用 DTO (System.Version は JavaScriptSerializer がうまく扱えないので string 経由)
         private sealed class CacheDto
         {
-            public UpdateCheckStatus Status { get; set; }
+            // (#108 Phase 4 round 6 L-5) Status field 削除。SaveCache で書いて TryLoadCache で読んでも
+            // 全 hydrate 経路 (LoadCacheOnly / CheckAsync / CheckFromApiAsync) で
+            // `ComputeStatus(current, cached.Latest)` で必ず上書きされる dead data だった。
+            // SoT を ComputeStatus に集約 + cache size 微減 (round 5 M-2 Cumulative 追加と一緒に sweep)。
             public string CurrentVer { get; set; }
             public CacheReleaseDto Latest { get; set; }
             public long CheckedAtUnixMs { get; set; }

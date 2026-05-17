@@ -292,26 +292,30 @@ namespace GCTonePrism.Manager.Services
         /// <summary>
         /// Process.Start の Arguments 用に文字列を quote する (空白 path を扱う)。
         ///
-        /// **既知の制約 (round 1 L1 + round 2 L13)**: trailing backslash + `"` を含む path は厳密 escape
-        /// しない。例: `C:\foo\` を quote すると `"C:\foo\"` → CommandLineToArgvW は末尾 `\"` を escaped
-        /// quote と解釈して次の引数まで延長する。現状の caller (`PathManager.StagingRootForUpdate` /
-        /// `ManagerDir` / `Assembly.Location` / `UpdaterLogDir`) は全て trailing backslash 無しで実害なし、
-        /// trailing backslash 含む path を渡す path が将来出現する場合は `s.TrimEnd('\\')` で剥がすか
-        /// CommandLineToArgvW 規約に従って `\` → `\\` escape を入れること。
+        /// **既知の制約 (round 1 L1 + round 2 L13 + round 6 L-3)**: 内部 `"` の escape は
+        /// `s.Replace("\"", "\\\"")` の簡易実装で、CommandLineToArgvW 厳密規約 (`\` ペアと `"` escape
+        /// の interaction、preceding backslash 連続のとき偶数化が必要) は満たさない。現 caller は
+        /// path 内 `"` を含まないため実害なし、規約準拠が必要になった場合は `Process.Start` の
+        /// `ArgumentList` API (= .NET 5+、本 project 4.8 では未提供) 移行または自前 escape の整備が必要。
         /// </summary>
         private static string Quote(string s)
         {
             if (string.IsNullOrEmpty(s)) return "\"\"";
-            // (#108 Phase 4 round 5 L-6) trailing backslash defensive 正規化。`C:\foo\` を quote すると
-            // `"C:\foo\"` → CommandLineToArgvW が末尾 `\"` を escaped quote と解釈して次の引数まで
-            // 延長する known bug。caller が trailing backslash を含む path を渡しても安全に動くよう
-            // 先に TrimEnd で剥がす (path semantic は同等)。
+            // (#108 Phase 4 round 5 L-6 + round 6 L-1) trailing backslash defensive 正規化。`C:\foo\` を
+            // quote すると `"C:\foo\"` → CommandLineToArgvW が末尾 `\"` を escaped quote と解釈して
+            // 次の引数まで延長する known bug。caller が trailing backslash を含む path を渡しても
+            // 安全に動くよう先に TrimEnd で剥がす。
+            // **drive root 例外** (round 6 L-1): `C:\` → `C:` は path semantic が変わる (前者は root、
+            // 後者は drive-relative cwd)。通常 dir では同等だが drive root だけは別物。現 caller
+            // (StagingRootForUpdate / ManagerDir / Assembly.Location / UpdaterLogDir) は drive root を
+            // 渡さないため実害なし、将来 caller 追加時に注意。
             s = s.TrimEnd('\\');
             if (string.IsNullOrEmpty(s)) return "\"\"";
             // 既に quote 付きならそのまま、含まない場合は囲む
             if (s.Contains(" ") || s.Contains("\t"))
             {
-                // 内部 quote はバックスラッシュ escape (cmd 規約)
+                // 内部 quote の簡易 escape (= 上記 docstring の通り CommandLineToArgvW 厳密規約とは
+                // 非互換、現 caller は path 内 `"` を含まないため簡易実装で十分)
                 return "\"" + s.Replace("\"", "\\\"") + "\"";
             }
             return s;

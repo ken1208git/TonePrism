@@ -100,9 +100,14 @@ namespace GCTonePrism.Manager
                     key.SetValue(exeName, 11001, RegistryValueKind.DWord);
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // best-effort、失敗しても起動継続
+                // (#108 Phase 4 round 6 M-3) docstring「Logger に warn を残してアプリ起動は続行」と
+                // 整合させるため Logger.Warn を仕込む。best-effort、失敗しても起動継続。
+                // Note: Logger.Initialize() より前に呼ばれる場合は Logger 内部で no-op になる仕様の
+                // ため Logger 初期化前 path も safe。
+                try { Services.Logger.Warn("[Program] IE11 emulation 設定失敗 (best-effort、起動継続): " + ex.Message); }
+                catch { /* Logger 初期化前 / Logger 内部例外も握り潰し */ }
             }
         }
     }

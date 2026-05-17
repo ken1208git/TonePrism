@@ -47,10 +47,17 @@ namespace GCTonePrism.Manager.Services
             try
             {
                 BundleEntry entry = ChangelogParser.TryReadLatestFromFile(PathManager.BundleChangelogPath);
-                return entry == null ? null : entry.Version;
+                if (entry == null)
+                {
+                    // (#108 Phase 4 round 6 M-2) silent null trail: CHANGELOG 不在 / parse 失敗時に診断手掛かりを残す。
+                    Logger.Warn("[VersionInventory] ReadBundleVersion: CHANGELOG.md parse 失敗 (path=" + PathManager.BundleChangelogPath + ")");
+                    return null;
+                }
+                return entry.Version;
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Warn("[VersionInventory] ReadBundleVersion 例外: " + ex.Message);
                 return null;
             }
         }
@@ -61,8 +68,10 @@ namespace GCTonePrism.Manager.Services
             {
                 return Assembly.GetExecutingAssembly().GetName().Version;
             }
-            catch
+            catch (Exception ex)
             {
+                // (#108 Phase 4 round 6 M-2) Assembly version 取得失敗は通常起きないが診断 trail を残す。
+                Logger.Warn("[VersionInventory] ReadManagerVersion 例外: " + ex.Message);
                 return null;
             }
         }
@@ -84,16 +93,33 @@ namespace GCTonePrism.Manager.Services
             try
             {
                 string path = Path.Combine(PathManager.LauncherDir, "version.gd");
-                if (!File.Exists(path)) return null;
+                if (!File.Exists(path))
+                {
+                    // (#108 Phase 4 round 6 M-2) version.gd 不在の診断 trail。
+                    Logger.Warn("[VersionInventory] ReadLauncherVersion: version.gd 不在 (path=" + path + ")");
+                    return null;
+                }
                 string content = File.ReadAllText(path, System.Text.Encoding.UTF8);
                 int? major = TryReadInt(MajorRegex, content);
                 int? minor = TryReadInt(MinorRegex, content);
                 int? patch = TryReadInt(PatchRegex, content);
-                if (!major.HasValue || !minor.HasValue || !patch.HasValue) return null;
+                if (!major.HasValue || !minor.HasValue || !patch.HasValue)
+                {
+                    // (#108 Phase 4 round 6 M-2) 3 regex のどれかが miss = version.gd format 想定外
+                    // (型注釈削除 / rename / inline comment 等)。SPEC §3.7.8 の同期チェックリストと
+                    // version.gd 側 `DO NOT CHANGE FORMAT` コメントを更新の手掛かりとして trail を残す。
+                    Logger.Warn("[VersionInventory] ReadLauncherVersion: version.gd format 想定外 "
+                        + "(major=" + (major.HasValue ? major.Value.ToString() : "miss")
+                        + " minor=" + (minor.HasValue ? minor.Value.ToString() : "miss")
+                        + " patch=" + (patch.HasValue ? patch.Value.ToString() : "miss")
+                        + ") — SPEC §3.7.8 / version.gd の DO NOT CHANGE FORMAT 参照");
+                    return null;
+                }
                 return new Version(major.Value, minor.Value, patch.Value);
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Warn("[VersionInventory] ReadLauncherVersion 例外: " + ex.Message);
                 return null;
             }
         }
@@ -103,15 +129,22 @@ namespace GCTonePrism.Manager.Services
             try
             {
                 string path = PathManager.UpdaterExePath;
-                if (!File.Exists(path)) return null;
+                if (!File.Exists(path))
+                {
+                    // (#108 Phase 4 round 6 M-2) Updater 不在 (= pre-Phase 3 install) の診断 trail。
+                    Logger.Warn("[VersionInventory] ReadUpdaterVersion: Updater.exe 不在 (path=" + path + ")");
+                    return null;
+                }
                 FileVersionInfo info = FileVersionInfo.GetVersionInfo(path);
                 // FileVersionInfo.FileVersion は string、ProductVersion とは別。AssemblyFileVersion を反映。
                 Version v;
                 if (Version.TryParse(info.FileVersion, out v)) return v;
+                Logger.Warn("[VersionInventory] ReadUpdaterVersion: FileVersion parse 失敗 ('" + (info.FileVersion ?? "(null)") + "')");
                 return null;
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Warn("[VersionInventory] ReadUpdaterVersion 例外: " + ex.Message);
                 return null;
             }
         }

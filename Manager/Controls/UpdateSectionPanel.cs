@@ -580,7 +580,14 @@ namespace GCTonePrism.Manager.Controls
                 }
                 else
                 {
-                    Services.Logger.Warn("[UpdateSectionPanel]   InstallParentDir 空、shortcut bat 置換 skip");
+                    // (#108 Phase 4 round 6 M-4) InstallParentDir 空 = `PathManager.BaseDirectory` が
+                    // drive root 等の病的入力で `Path.GetDirectoryName` が null になった case。
+                    // 旧実装は Warn log のみで継続して shortcut 置換 skip + 適用続行する silent path
+                    // だったが、round 1 H1 で「FileReplacer 失敗時は throw」に揃えた原則と非対称。
+                    // 実環境では発生しないが silent pass を残さず fail-fast。
+                    throw new System.IO.IOException(
+                        "InstallParentDir が空のため shortcut bat を置換できません " +
+                        "(BaseDirectory=" + PathManager.BaseDirectory + " が drive root 等の病的入力疑い)。");
                 }
 
                 // (#108 Phase 4 round 5 M-1) CHANGELOG.md 置換は **Updater spawn 成功後** の defer

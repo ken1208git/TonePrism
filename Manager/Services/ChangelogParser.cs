@@ -60,7 +60,19 @@ namespace GCTonePrism.Manager.Services
             foreach (Match m in BundleEntryRegex.Matches(changelogContent))
             {
                 BundleEntry entry = BuildEntry(m);
-                if (entry == null || entry.Version == null) continue;
+                if (entry == null || entry.Version == null)
+                {
+                    // (#108 Phase 4 round 6 L-2) pre-release suffix (`v0.3.0-rc1` 等) は regex は受理する
+                    // が `TryParseTagVersion` で null 返却される (System.Version は SemVer pre-release
+                    // suffix 非対応)。GitHub Releases (SoT) が pre-release を server-side filter する
+                    // 一方、CHANGELOG body には staged pre-release entry が残るケースで cumulative
+                    // 表示から silent excluded する path があるため diagnostic trail を残す。
+                    if (m.Groups["ver"].Success)
+                    {
+                        Logger.Warn("[ChangelogParser] pre-release or invalid Bundle entry を cumulative から skip: '" + m.Groups["ver"].Value + "'");
+                    }
+                    continue;
+                }
                 if (lower != null && entry.Version <= lower) continue;
                 if (upper != null && entry.Version > upper) continue;
                 list.Add(entry);

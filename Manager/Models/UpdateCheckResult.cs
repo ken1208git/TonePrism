@@ -8,14 +8,20 @@ namespace GCTonePrism.Manager.Models
     /// 受け取って表示状態を更新する。
     ///
     /// 失敗 case も含めて単一の戻り値型で表現するため、`Status` で分岐する設計:
-    /// - `UpToDate`: 最新版 (= 現在の Bundle == latest)。「最新版を実行中」表示。
+    /// - `UpToDate`: 最新版 (= 現在の Bundle == latest)。「最新版を実行中」(緑文字) + Update/Skip ボタン無効。
+    ///   Latest は **非 null** で「現在実行中」release notes 表示に使用 ((#108 Phase 4 round 6 M-1) docstring 訂正)。
     /// - `UpdateAvailable`: 新バージョン検出。Latest != null、CumulativeReleases に間の release を含む。
-    /// - `Skipped`: 検出したが SkipKey で skip 済。UI は「最新版を実行中」と同じ静かな表示にする。
+    ///   「アップデートあり」(Orange 文字) + Update/Skip ボタン有効。
+    /// - `Skipped`: 検出したが SkipKey で skip 済。「このバージョンはスキップ済みです。」(Gray 文字) +
+    ///   **Update ボタンは有効残置** ((#108 Phase 4 round 6 M-1) 旧 docstring の「UpToDate と同じ静かな表示」
+    ///   は実装と乖離していたため訂正)。user が「タイミング決めて自分で apply」する path を保持。
     /// - `NetworkError`: API 失敗 (timeout / DNS / 4xx / 5xx)。前回 cache (LastError) を可能なら使う。
     /// - `ParseError`: API 応答の JSON が壊れている / 必須 field 不在。
     /// - `UnknownBundle`: 現在の Bundle version が CHANGELOG から取れず比較不能。
     ///
-    /// `Latest` は `Status` が `UpdateAvailable` / `Skipped` の場合のみ非 null。
+    /// `Latest` 非 null 条件 (round 6 M-1 訂正): NetworkError / ParseError / UnknownBundle 以外
+    /// (= UpToDate / UpdateAvailable / Skipped) で **非 null** 保証。旧 docstring の「UpdateAvailable /
+    /// Skipped のみ非 null」は UpToDate を見落としていた。
     /// </summary>
     internal sealed class UpdateCheckResult
     {
