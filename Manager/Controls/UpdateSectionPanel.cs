@@ -634,17 +634,41 @@ namespace GCTonePrism.Manager.Controls
                 // detection で 「target 存在 + .bak 存在 → 前回 partial state、target を正として .bak 削除」
                 // path に自然に流れて消化される。
                 Services.Logger.Info("[UpdateSectionPanel] 全 dir 置換成功、CHANGELOG.md 置換 + .bak cleanup");
-                if (!FileReplacer.ReplaceFile(
-                    System.IO.Path.Combine(stagingDir, "files", "CHANGELOG.md"),
-                    PathManager.BundleChangelogPath))
+                // (#108 Phase 4 round 7 M-1) `FileReplacer.ReplaceFile` は round 2 H4 で rollback-fatal
+                // 経路に `InvalidOperationException` throw を導入したため、旧 `if (!ReplaceFile(...))`
+                // 形式では throw を外に逃がして worker catch (本 method 末尾) で rethrow →
+                // CleanupBak loop + Application.Exit が skip → Updater が timeout (exit 3) で死ぬ
+                // silent partial-state があった。docstring「CHANGELOG 置換失敗は致命的ではない」前提と
+                // 乖離 = throw 経路も Warn log のみで継続する形に揃える。
+                try
                 {
-                    // CHANGELOG 置換失敗は致命的ではない (= VersionInventory が OLD のまま読むだけで
-                    // installation は機能、user は次回 update で再試行可能)。Warn log のみで継続。
-                    Services.Logger.Warn("[UpdateSectionPanel] CHANGELOG.md 置換失敗 (Updater spawn は成功済、Application.Exit 続行)");
+                    if (!FileReplacer.ReplaceFile(
+                        System.IO.Path.Combine(stagingDir, "files", "CHANGELOG.md"),
+                        PathManager.BundleChangelogPath))
+                    {
+                        // CHANGELOG 置換失敗は致命的ではない (= VersionInventory が OLD のまま読むだけで
+                        // installation は機能、user は次回 update で再試行可能)。Warn log のみで継続。
+                        Services.Logger.Warn("[UpdateSectionPanel] CHANGELOG.md 置換失敗 (Updater spawn は成功済、Application.Exit 続行)");
+                    }
+                }
+                catch (Exception fileEx)
+                {
+                    Services.Logger.Warn("[UpdateSectionPanel] CHANGELOG.md 置換例外 (致命的にせず継続): " + fileEx.GetType().Name + ": " + fileEx.Message);
                 }
                 foreach (string repDir in replacedDirs)
                 {
-                    DirReplacer.CleanupBak(repDir);
+                    // (#108 Phase 4 round 7 L-2) M-1 と同パッケージ: 1 dir の cleanup 失敗で残り dir の
+                    // .bak 処理 + Application.Exit が skip するのを防ぐ。.bak 残置は次回起動時の
+                    // zombie .bak detection 経路 (`DirReplacer.Replace` 冒頭で target + .bak 同時存在
+                    // → 前回 partial → .bak 削除) で消化されるため致命的ではない。
+                    try
+                    {
+                        DirReplacer.CleanupBak(repDir);
+                    }
+                    catch (Exception cleanupEx)
+                    {
+                        Services.Logger.Warn("[UpdateSectionPanel] CleanupBak 失敗 (継続): dir=" + repDir + " ex=" + cleanupEx.GetType().Name + ": " + cleanupEx.Message);
+                    }
                 }
 
                 progress.Report(new ProgressInfo(95, "Manager を終了中..."));

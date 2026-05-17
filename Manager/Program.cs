@@ -17,14 +17,19 @@ namespace GCTonePrism.Manager
         [STAThread]
         static void Main()
         {
+            // (#108 Phase 4 round 7 M-4) Logger.Initialize() を最先頭に移動。
+            // 旧順序 (TrySetIE11EmulationMode → Logger.Initialize) では TrySetIE11EmulationMode の
+            // catch 内 Logger.Warn (round 6 M-3 で導入) が常に Logger 未初期化状態で呼ばれ Logger 内部で
+            // no-op になる silent path だった (= round 6 M-3 fix は「docstring に合わせたフリ」で
+            // path 不到達)。本 round で reorder して `Logger.Warn` が実際にファイルに書かれる形に。
+            // ログ機構を最初に初期化することで、PathManager 以降のすべての Console.WriteLine が
+            // 自動的にファイル (logs/manager_YYYY-MM-DD.log) にも残る (#116)。
+            Logger.Initialize();
+
             // WebBrowser コントロール (UpdateSectionPanel のリリースノート表示で使用、Phase 4 #108) は
             // default で IE7 quirks mode で動作するため、render 崩れ + CSS 制限あり。HKCU レジストリで
             // 自プロセス名を IE11 emulation に登録する (best-effort、失敗してもアプリは起動可能)。
             TrySetIE11EmulationMode();
-
-            // ログ機構を最初に初期化することで、PathManager 以降のすべての Console.WriteLine が
-            // 自動的にファイル (logs/manager_YYYY-MM-DD.log) にも残る (#116)
-            Logger.Initialize();
 
             // (#108 Phase 4 round 3 L-1) AppDomain global の SecurityProtocol を起動時 1 回設定。
             // GitHubReleaseChecker / BackupService 等 HttpClient 共有 consumer の SSL/TLS handshake が
@@ -102,12 +107,14 @@ namespace GCTonePrism.Manager
             }
             catch (Exception ex)
             {
-                // (#108 Phase 4 round 6 M-3) docstring「Logger に warn を残してアプリ起動は続行」と
-                // 整合させるため Logger.Warn を仕込む。best-effort、失敗しても起動継続。
-                // Note: Logger.Initialize() より前に呼ばれる場合は Logger 内部で no-op になる仕様の
-                // ため Logger 初期化前 path も safe。
+                // (#108 Phase 4 round 6 M-3 → round 7 M-4) docstring「Logger に warn を残してアプリ
+                // 起動は続行」と整合させるため Logger.Warn を仕込む。best-effort、失敗しても起動継続。
+                // Note: round 7 M-4 で `Program.Main` 冒頭で `Logger.Initialize()` を本関数より先に呼ぶ
+                // 順序に reorder したため、本 catch 到達時点で Logger は初期化済前提。それでも Logger
+                // 自身の内部例外で再帰落ちしないように try/catch で握り潰す (AGENTS.md「Logger 自体の
+                // 障害は握り潰す、再帰ハング回避」原則)。
                 try { Services.Logger.Warn("[Program] IE11 emulation 設定失敗 (best-effort、起動継続): " + ex.Message); }
-                catch { /* Logger 初期化前 / Logger 内部例外も握り潰し */ }
+                catch { /* Logger 内部例外も握り潰し */ }
             }
         }
     }

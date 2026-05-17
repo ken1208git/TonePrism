@@ -208,8 +208,13 @@ namespace GCTonePrism.Manager.Services
         /// staging CHANGELOG.md から最新 Bundle entry を取得して target version と一致するか検証。
         /// 不一致は zip 改竄 / 取り違え疑い、abort 経路 (Manager UI が UpdateDownloader 呼出後に check)。
         /// (#108 Phase 4 round 5 L-5) `out Version stagingVer` で staging 側の parse 結果を caller に
-        /// 返す (error message に含めて UI に staging version を表示)。staging parse 失敗時は
-        /// `stagingVer = null`。
+        /// 返す (error message に含めて UI に staging version を表示)。
+        /// (#108 Phase 4 round 7 L-3) `false` 返却 case は 2 種、`stagingVer` の値で識別可能:
+        ///   (a) staging CHANGELOG 不在 / 読込失敗 / parse 失敗 → `stagingVer == null` + return false
+        ///   (b) staging Bundle version != expectedVersion (zip 改竄 / 取り違え疑い) → `stagingVer != null`
+        ///       (mismatch 値) + return false
+        /// caller (UpdateSectionPanel) は (b) のみ UI に「staging: vX.Y.Z / 期待: vA.B.C」を表示、
+        /// (a) は「CHANGELOG が見つかりません」固定文言に縮退する想定。
         /// </summary>
         public static bool ValidateBundleVersion(string stagingDir, Version expectedVersion, out Version stagingVer)
         {

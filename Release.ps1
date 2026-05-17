@@ -221,7 +221,11 @@ if (-not (Test-Path $_changelogPathEarly)) {
     exit 1
 }
 $_changelogContent = [System.IO.File]::ReadAllText($_changelogPathEarly, [System.Text.Encoding]::UTF8)
-$_latestBundleMatch = [regex]::Match($_changelogContent, '(?m)^### \[Bundle v(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?)\]')
+# (#108 Phase 4 round 7 L-1) `\s+` 採用 = Manager の ChangelogParser.cs BundleEntryRegex と literal 一致
+# (SPEC §3.7.8 sync fence)。旧 literal space (` `) 表現は ChangelogParser 側 (`\s+`) より strict で、
+# `### [Bundle v0.3.0]` に tab が混入した瞬間 Release.ps1 だけが silent skip → version bump 検出不能
+# になる path があった。`\s+` で揃えて両 path 同 behavior に。
+$_latestBundleMatch = [regex]::Match($_changelogContent, '(?m)^###\s+\[Bundle\s+v(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?)\]')
 if (-not $_latestBundleMatch.Success) {
     Write-Host "[FAIL] CHANGELOG.md に '### [Bundle vX.Y.Z]' エントリが見つかりません" -ForegroundColor Red
     exit 1
@@ -876,7 +880,10 @@ function Get-BundleReleaseNotes {
     # `## ` / EOF まで。`\Z`: 後続セクション無しの初回 Bundle release だけが該当する保険。
     # (#108 Phase 4 round 5 M-4) 旧 `^---` だと body 内 horizontal rule で silent truncation する path
     # があったため `^-{3,}\s*$` に厳密化、Manager の ChangelogParser.cs と同型同期。
-    $pattern = '(?ms)^### \[Bundle v' + [regex]::Escape($Version) + '\][^\r\n]*\r?\n(.*?)(?=^### |^-{3,}\s*$|^## |\Z)'
+    # (#108 Phase 4 round 7 L-1) heading の literal space を `\s+` に変更 = ChangelogParser.cs の
+    # BundleEntryRegex と literal 一致 (SPEC §3.7.8 sync fence)。tab 混入で Release.ps1 のみ silent
+    # skip する path 防止。
+    $pattern = '(?ms)^###\s+\[Bundle\s+v' + [regex]::Escape($Version) + '\][^\r\n]*\r?\n(.*?)(?=^### |^-{3,}\s*$|^## |\Z)'
     $m = [regex]::Match($content, $pattern)
     if (-not $m.Success) { return '' }
     return $m.Groups[1].Value.Trim()
