@@ -1590,6 +1590,12 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 **Codex round 8 false positive 4 件**: CX-2 / round 3 M-4 / round 4 codex P1 / round 7 H-1 (topo sort) を re-flag されたもの、コードに変更なし。
 
+**Round 8.6: 残存 follow-up issue 3 件 (#164 / #171 / #165) を本 PR に取り込み**:
+
+- **#164 (LoadGameDataForVersion 二重代入削除、close)**: `txtDescription.Text` / `txtVersionDescription.Text` が冒頭 + 末尾で重複代入されていた pre-existing bug を冒頭側に集約。round 2 L-4 で別 issue 化していた cleanup を本 PR scope (= 触ってるファイル + trivial fix) に統合。
+- **#171 (`TryParseAndSet` の `VersionStringChanged` 4 連発抑止、close)**: TryParseAndSet 末尾で `numMajor/Minor/Patch.Value` + `txtSuffix.Text` を順次代入する際、各 ValueChanged/TextChanged 経由で `VersionStringChanged` が 1 setter で最大 4 回発火していた API consistency 違反を解消。`_suspendChangeEvents` flag で child event を集約抑止、setter 完了後に 1 回だけ `OnVersionStringChanged()` を直接呼ぶ pattern (try/finally で flag を必ず戻す)。round 8 Low #7 で別 issue 化していた cosmetic 改善を本 PR scope に統合。
+- **#165 (per-version rename ループに ProcessingDialog、close)**: Phase 2 の `Directory.Move` ループを `ProcessingDialog` (marquee) で包んで UI 応答性を維持。共有フォルダ越しや cross-volume で `Directory.Move` が内部 copy+delete になる場合、`orderedPlan.Count > 0` の状況で UI が応答停止に見える問題を解消。gameId rename block と同 pattern。worker 内で rollback メッセージを文字列に format して dialog 終了後に `MessageBox` 表示する (= MessageBox を background thread から直接呼ばない、ProcessingDialog の generic error MessageBox との二重表示も回避するため worker 内では throw せず早期 return)。round 4 L-2 で別 issue 化していた UI 対称性改善を本 PR scope に統合。
+
 **Round 8.5: Manager 全 113 件の `Console.WriteLine` を Logger 経由に sweep (#166 取り込み・close)**:
 
 - 当初は #166 を follow-up issue として残す方針だったが、user 指摘「混在気持ち悪い、AGENTS にも書く」を受けて方針転換。Manager 全 13 ファイル (Logger.cs / Program.cs 除く) の `Console.WriteLine` 113 件を `Logger.Info` (59) / `Logger.Warn` (20) / `Logger.Error` (21) に振り分けて全件移行、Logger 初期化済前提で `using GCTonePrism.Manager.Services;` を 2 ファイル (PathManager / BackupLogRepository) に追加。

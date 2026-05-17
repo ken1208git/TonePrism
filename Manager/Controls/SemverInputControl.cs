@@ -57,6 +57,14 @@ namespace GCTonePrism.Manager.Controls
         /// <summary>VersionString が変更された時 (= Major / Minor / Patch / Suffix のいずれかが更新)</summary>
         public event EventHandler VersionStringChanged;
 
+        // (#158 round 8.6 / #171) TryParseAndSet は内部で numMajor/Minor/Patch/txtSuffix の 4 control
+        // を順次代入するため、それぞれの ValueChanged/TextChanged 経由で VersionStringChanged が
+        // 1 setter で最大 4 回発火する API consistency 違反があった。本 flag で TryParseAndSet 実行中
+        // は child event を集約抑止し、setter 完了後に 1 回だけ OnVersionStringChanged を直接呼ぶ。
+        // 現状 caller (= VersionStringChanged を購読する form) は不在だが、将来 wire された時に
+        // 「状態変化 = 1 event」の自然な semantics を維持。
+        private bool _suspendChangeEvents;
+
         public SemverInputControl()
         {
             InitializeComponent();
@@ -222,10 +230,21 @@ namespace GCTonePrism.Manager.Controls
                     error = "バージョン文字列が SemVer 形式ではありません: '" + value + "'";
                 }
             }
-            numMajor.Value = Clamp(major, numMajor.Minimum, numMajor.Maximum);
-            numMinor.Value = Clamp(minor, numMinor.Minimum, numMinor.Maximum);
-            numPatch.Value = Clamp(patch, numPatch.Minimum, numPatch.Maximum);
-            txtSuffix.Text = suffix;
+            // (#158 round 8.6 / #171) 4 control 順次代入による VersionStringChanged 4 連発を抑止、
+            // 末尾で 1 回だけ発火させる。例外で抜けても finally で flag を必ず戻す。
+            _suspendChangeEvents = true;
+            try
+            {
+                numMajor.Value = Clamp(major, numMajor.Minimum, numMajor.Maximum);
+                numMinor.Value = Clamp(minor, numMinor.Minimum, numMinor.Maximum);
+                numPatch.Value = Clamp(patch, numPatch.Minimum, numPatch.Maximum);
+                txtSuffix.Text = suffix;
+            }
+            finally
+            {
+                _suspendChangeEvents = false;
+            }
+            OnVersionStringChanged();
             return ok;
         }
 
@@ -346,6 +365,8 @@ namespace GCTonePrism.Manager.Controls
 
         private void OnVersionStringChanged()
         {
+            // (#158 round 8.6 / #171) TryParseAndSet 実行中は集約抑止 (末尾で 1 回だけ手動 fire)。
+            if (_suspendChangeEvents) return;
             var handler = VersionStringChanged;
             if (handler != null) handler(this, EventArgs.Empty);
         }
