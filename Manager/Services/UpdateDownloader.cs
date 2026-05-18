@@ -445,6 +445,11 @@ namespace GCTonePrism.Manager.Services
                 // layout 不在 → manifest.Layout = null、caller は null-coalesce で hardcoded legacy path に
                 // fallback。parse 失敗 (型不整合 / 部分 null 等) も silent 削除して null fallback、validate
                 // path 全体を fail-soft に保つ。
+                // (round 1 Medium-3 + Low-3) silent fallback による key drift masking を緩和するため、
+                // layout dict 経路に入った場合は populated key count を計測して Logger.Warn / Info で出力。
+                // 期待 7 key のうち null > 0 なら Warn (= Release.ps1 ↔ Manager POCO の SoT drift 疑い)。
+                int layoutPopulated = 0;
+                System.Collections.Generic.List<string> layoutMissing = null;
                 object layoutObj;
                 if (dict.TryGetValue("layout", out layoutObj))
                 {
@@ -461,11 +466,32 @@ namespace GCTonePrism.Manager.Services
                             ManagerBat    = TryGetLayoutString(layoutDict, "manager_bat"),
                             ChangelogMd   = TryGetLayoutString(layoutDict, "changelog_md"),
                         };
+                        // populated count 計測 (期待 7 key、null は drift signal)
+                        layoutMissing = new System.Collections.Generic.List<string>();
+                        if (manifest.Layout.LauncherDir   != null) layoutPopulated++; else layoutMissing.Add("launcher_dir");
+                        if (manifest.Layout.ManagerDir    != null) layoutPopulated++; else layoutMissing.Add("manager_dir");
+                        if (manifest.Layout.CompanionsDir != null) layoutPopulated++; else layoutMissing.Add("companions_dir");
+                        if (manifest.Layout.UpdaterDir    != null) layoutPopulated++; else layoutMissing.Add("updater_dir");
+                        if (manifest.Layout.LauncherBat   != null) layoutPopulated++; else layoutMissing.Add("launcher_bat");
+                        if (manifest.Layout.ManagerBat    != null) layoutPopulated++; else layoutMissing.Add("manager_bat");
+                        if (manifest.Layout.ChangelogMd   != null) layoutPopulated++; else layoutMissing.Add("changelog_md");
+                        if (layoutMissing.Count > 0)
+                        {
+                            // partial populate = Release.ps1 ↔ Manager POCO の SoT drift 疑い (key 名 typo /
+                            // rename 片側のみ更新 等)。各 apply 箇所は hardcoded legacy fallback で動くため
+                            // installation 自体は機能するが、forward compat 機構の意図に反するため Warn 出力。
+                            Logger.Warn("[UpdateDownloader] BundleLayout partial populate: " + layoutPopulated + "/7、apply 側は不足分 hardcoded legacy fallback で動作する (missing: " + string.Join(", ", layoutMissing) + ")。Release.ps1 ↔ Manager POCO の SoT drift 疑い、新規 key 追加時の同期更新漏れを review してください");
+                        }
                     }
                 }
+                string layoutLog;
+                if (manifest.Layout == null) layoutLog = "null";
+                else if (layoutMissing != null && layoutMissing.Count == 0) layoutLog = "present (7/7 populated)";
+                else if (layoutMissing != null) layoutLog = "present (" + layoutPopulated + "/7 populated, missing: " + string.Join(",", layoutMissing) + ")";
+                else layoutLog = "present";
                 Logger.Info("[UpdateDownloader] ReadBundleManifest OK: bundle_version=" + (manifest.BundleVersion ?? "(null)") +
                     " schema_version=" + manifest.SchemaVersion + " files=" + (manifest.Files == null ? 0 : manifest.Files.Count) +
-                    " layout=" + (manifest.Layout == null ? "null" : "present"));
+                    " layout=" + layoutLog);
                 return manifest;
             }
             catch (Exception ex)
@@ -501,7 +527,7 @@ namespace GCTonePrism.Manager.Services
         /// caller (UpdateSectionPanel) は (b) のみ UI に「staging: vX.Y.Z / 期待: vA.B.C」を表示、
         /// (a) は「CHANGELOG が見つかりません」固定文言に縮退する想定。
         /// </summary>
-        public static bool ValidateBundleVersion(string stagingDir, Version expectedVersion, out Version stagingVer)
+        public static bool ValidateBundleVersion(string stagingDir, Version expectedVersion, BundleManifest manifest, out Version stagingVer)
         {
             stagingVer = null;
             if (expectedVersion == null)
@@ -513,8 +539,13 @@ namespace GCTonePrism.Manager.Services
             // と同期、SPEC §3.7.7)。旧 path `files/Manager/CHANGELOG.md` は drift 残骸。
             // (#175 Phase 4.1) bundleRoot 経由に変更 (新構造で `<staging>/bundle/files/CHANGELOG.md`、
             // 旧構造 fallback で `<staging>/files/CHANGELOG.md`)。
+            // (#177 round 1 High-1) manifest.Layout 経由 path 解決に拡張。caller (Step 4) は Step 3 で
+            // 取得済の manifest を本関数にも渡し、apply 側 (Step 5-9) と同じ forward compat path を
+            // 通る (= 「Manager コード変更ゼロで dir 構造変更を吸収」claim を本関数まで貫徹)。layout
+            // 不在 / null は legacy hardcoded path に fallback。
             string bundleRoot = ResolveBundleRoot(stagingDir);
-            string changelogPath = Path.Combine(bundleRoot, "files", "CHANGELOG.md");
+            string changelogRel = manifest?.Layout?.ChangelogMd ?? "files/CHANGELOG.md";
+            string changelogPath = Path.Combine(bundleRoot, changelogRel.Replace('/', Path.DirectorySeparatorChar));
             Logger.Info("[UpdateDownloader] ValidateBundleVersion: expected=" + expectedVersion.ToString(3) + " changelog=" + changelogPath);
             BundleEntry latest = ChangelogParser.TryReadLatestFromFile(changelogPath);
             if (latest == null || latest.Version == null)
@@ -575,33 +606,45 @@ namespace GCTonePrism.Manager.Services
 
     /// <summary>
     /// (#177) `bundle_manifest.json` の `layout` field の deserialize 結果。category 名 → zip 内
-    /// 相対 path (`/` separator) の mapping。`BundleManifest.Layout` から参照される。
+    /// `bundle/` 起点の相対 path (`/` separator) の mapping。`BundleManifest.Layout` から参照される。
     ///
-    /// **Serializer 切替時の注意**: 本 class は C# 慣例 PascalCase property を持ち、JSON wire format は
-    /// snake_case (writer = Release.ps1 `$script:BundleLayout` の hashtable)。現状の
-    /// `System.Web.Script.Serialization.JavaScriptSerializer` は case-insensitive deserialize で互換性が
-    /// 成立しているが、将来 `System.Text.Json` 等の case-sensitive default serializer へ切替える場合、
-    /// wire 名 mapping を別途設定する必要がある (例: `[JsonPropertyName("launcher_dir")]` 等)。
-    /// 切替時は wire format との対応を再検証すること。
+    /// **Serializer 切替時の注意** (round 1 Medium-2 で rationale 訂正): 本 class は C# 慣例 PascalCase
+    /// property を持ち、JSON wire format は snake_case (writer = Release.ps1 `$script:BundleLayout`
+    /// hashtable)。**現状の実装は POCO 自動 deserialize を使っておらず**、`ReadBundleManifest` で
+    /// `JavaScriptSerializer.DeserializeObject` → `IDictionary&lt;string, object&gt;` 経由で snake_case key を
+    /// literal 文字列 (`"launcher_dir"` 等) で `TryGetValue` 参照する **manual dict 経由 mapping**。
+    /// よって serializer の POCO 自動 mapping 挙動 (case-sensitivity / member matching) には依存していない。
+    /// 将来 POCO 直 deserialize (例: `JsonSerializer.Deserialize&lt;BundleManifest&gt;(json)`) に切替える場合
+    /// のみ、wire 名 mapping (`[JsonPropertyName("launcher_dir")]` 等の attribute) を property に追加する
+    /// 必要がある。snake_case ↔ PascalCase は case 差ではなく separator 差 (`_`) のため、case-insensitive
+    /// 自動 mapping だけでは解決できず attribute / camelCase policy 明示が必須な点に注意。
     ///
     /// **legacy compat**: 各 property の値が null の場合、caller は hardcoded legacy path に fallback
     /// する想定 (`manifest?.Layout?.LauncherDir ?? "files/Launcher"` 等の null-coalesce pattern)。
+    /// silent fallback による key drift masking 問題は `ReadBundleManifest` で populated count を
+    /// Logger.Warn 検出する経路で緩和 (round 1 Medium-3)。
     /// </summary>
     internal sealed class BundleLayout
     {
-        /// <summary>Launcher dir の zip 内相対 path (例: "files/Launcher")。</summary>
+        /// <summary>Launcher dir の `bundle/` 起点 zip 内相対 path (例: "files/Launcher" = `bundle/files/Launcher`)。</summary>
         public string LauncherDir { get; set; }
-        /// <summary>Manager dir の zip 内相対 path (例: "files/Manager")。</summary>
+        /// <summary>
+        /// Manager dir の `bundle/` 起点 zip 内相対 path (例: "files/Manager" = `bundle/files/Manager`)。
+        /// **現状 Manager UI 側からは未参照** (round 1 Medium-1): Manager 自身の dir 置換は Updater
+        /// 責務で、Updater は本 PR (#177) で touch されていないため `ManagerDir` を読む consumer は
+        /// repo 内に存在しない (= manifest scaffolding のみ)。Updater 側の layout 経由 path 解決対応は
+        /// 別 PR で消化予定、本 field は forward compat 計画の予約 slot として manifest に書き出される。
+        /// </summary>
         public string ManagerDir { get; set; }
-        /// <summary>Companions root dir の zip 内相対 path (例: "files/Companions")。</summary>
+        /// <summary>Companions root dir の `bundle/` 起点 zip 内相対 path (例: "files/Companions" = `bundle/files/Companions`)。</summary>
         public string CompanionsDir { get; set; }
-        /// <summary>Updater dir の zip 内相対 path (例: "files/Companions/Updater")。</summary>
+        /// <summary>Updater dir の `bundle/` 起点 zip 内相対 path (例: "files/Companions/Updater" = `bundle/files/Companions/Updater`)。</summary>
         public string UpdaterDir { get; set; }
-        /// <summary>Launcher.bat shortcut の zip 内相対 path (例: "Launcher.bat")。</summary>
+        /// <summary>Launcher.bat shortcut の `bundle/` 起点 zip 内相対 path (例: "Launcher.bat" = `bundle/Launcher.bat`)。</summary>
         public string LauncherBat { get; set; }
-        /// <summary>Manager.bat shortcut の zip 内相対 path (例: "Manager.bat")。</summary>
+        /// <summary>Manager.bat shortcut の `bundle/` 起点 zip 内相対 path (例: "Manager.bat" = `bundle/Manager.bat`)。</summary>
         public string ManagerBat { get; set; }
-        /// <summary>CHANGELOG.md の zip 内相対 path (例: "files/CHANGELOG.md")。</summary>
+        /// <summary>CHANGELOG.md の `bundle/` 起点 zip 内相対 path (例: "files/CHANGELOG.md" = `bundle/files/CHANGELOG.md`)。</summary>
         public string ChangelogMd { get; set; }
     }
 
