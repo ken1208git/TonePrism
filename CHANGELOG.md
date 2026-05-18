@@ -1525,15 +1525,34 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 #### Fixed (#186 — Startup SessionConflictDialog がタスクバー不在 / focus 喪失で見失う)
 
-- **`MainForm_Load` の Startup dialog 表示を `BeginInvoke` で defer** (`Manager/MainForm.cs`): PR #184 (v0.10.0) で実装した起動時 SessionConflictDialog (= `MainForm_Load` 中で他 PC を検出して表示する modal「【危険】他 PC で Manager が起動中です」) は `MainForm` 自身がまだ `Show` されていない state で `MessageBox.Show(owner=MainForm, ...)` を呼ぶため、modal child も親も **taskbar entry を持たない silent UI bug** があった (PR #184 verify session で発覚、user が Claude Code window をクリックした瞬間 dialog が裏に行って Alt+Tab で能動的に探さないと辿り着けない path を user が踏んだ)。`BeginInvoke` で defer して MainForm の `Show` 完了 (= taskbar 登録済) 後に dialog を表示することで、**owner-modal の自然な WinForms 挙動 (= taskbar entry あり / 他 window click で裏に行ける / MainForm click で戻れる) を維持しつつ見失う path を物理閉鎖**。
-- **`Initialize` / `DetectOtherActiveSessions` は sync 維持**: heartbeat thread 起動は最速で走らせるため `_sessionService.Initialize()` は sync 呼出のまま、`DetectOtherActiveSessions` も sync で他 PC 検出結果を握ってから dialog 表示部分のみ `BeginInvoke` で defer する形に切り出し。
-- **race guard**: 内部の deferred action 冒頭で `if (IsDisposed || Disposing || _sessionService == null) return;` の早期 guard を追加。MainForm_Load 中に user が即 × で閉じた race + FormClosed 経由 `_sessionService.Shutdown()` との二重呼出 race の両方を物理閉鎖。
-- **Cancel path 簡素化**: 旧実装は `BeginInvoke(new Action(() => Close()))` で Close を 2 重 defer していたが、本 PR で deferred action 自体が post-Show 実行になるため `Close()` を直接呼ぶ形に短絡化。
-- **assembly version bump**: `0.10.0.0` → `0.10.1.0` (patch、bugfix のみ、DB schema 変更なし、AGENTS.md「Release and Versioning」ルール準拠)。
-- **verify**: Manager Release build clean。実機 verify は DB に他 PC row 手動 INSERT 状態で Manager 起動 → MainForm が一瞬表示されてから Startup dialog が modal child として開く → 他 window click で dialog が裏に行き、タスクバーの Manager entry click で復帰できる挙動を目視確認。EditOperation context は PR #184 verify session で動作確認済 (= MainForm visible 経路、本 PR で挙動変化なし)。
-- **本 round 2 で初版 1st 試行 `MessageBoxOptions.DefaultDesktopOnly` を撤回**: round 1 では `SessionConflictDialog.Show` 内で Startup context 限定 `DefaultDesktopOnly` を適用していたが、user feedback「他 window をクリックしても dialog が裏に行かず常時最前面でうざい」を受けて trade-off 不適切と判断。「見失う」path は閉鎖されたが「他 window を見れない」別 UX bug を生む形になっていたため、caller 側 BeginInvoke defer に方針転換。`SessionConflictDialog.cs` 側は標準 owner-modal 呼出に revert + rationale 履歴を docstring に記録。
-- **PR #185 / #188 (manifest 単独 DPI awareness 試行) との分離**: #185 が manifest 単独で Form layout regression を起こして revert された結果、起動時 dialog の見失い問題は引き続き残っていた。本 PR は **manifest 触らない `BeginInvoke` 1 段追加のみ** で #185 / #188 の DPI 問題と完全独立な path で fix、Form layout への影響ゼロ。DPI awareness 解消は #185 が再開された時に別 PR で扱う。
-- **関連**: PR #184 (v0.10.0、LAN-wide 同時起動検出) の verify session で発見した 3 つの issue (#185 / [#186](https://github.com/ken1208git/GCTonePrism/issues/186) / #187) のうち、本 PR で #186 を closure。#187 は別 PR で対応予定、#185 は manifest 単独 path 不可と判明、別 milestone へ移行。
+PR #184 (v0.10.0) で実装した起動時 SessionConflictDialog (= 「【危険】他 PC で Manager が起動中です」) は `MainForm_Load` 中 (= MainForm まだ `Show` 未完) で `MessageBox.Show(owner=MainForm, ...)` を呼ぶため、modal child も親も **taskbar entry を持たない silent UI bug** があった (= focus 喪失で dialog が裏に行って見失う、PR #184 verify session で発覚)。本 PR で fix。**3 round の試行錯誤を経て round 3 chain pattern が確定**:
+
+- **`MainForm_Load` を 2 段に分割 + chain pattern で gate 維持** (`Manager/MainForm.cs`):
+  - `MainForm_Load` 本体は session init + 他 PC 検出までで止め、検出時は `BeginInvoke` で dialog 表示を defer + `return` で本 method を即抜ける
+  - 残り init (= panel.Initialize × 4 + MigrateLegacySafetyFilesToSafetyFolder + RegisterUnknownSafetyFiles + CleanupStaleBackupEntries + LoadGames + StartAutoBackupIfDue + CleanupZombieStagings + StartBackgroundUpdateCheckIfDue) は新規 `ContinueLoadAfterSessionCheck()` private method に切出し
+  - dialog で OK 押下時のみ `ContinueLoadAfterSessionCheck` を chain で起動 → 旧実装 (v0.10.0) と同等の gate 意味論を維持 (= Cancel 時は panel init / backup / update check すべて skip)
+  - 競合なし path は `ContinueLoadAfterSessionCheck` を直接呼んで code path を 1 本化
+- **`BeginInvoke` defer の効果**: MainForm の `Show` 完了 (= taskbar 登録済) 後に dialog が modal child として開く → owner-modal の自然な WinForms 挙動 (= taskbar entry あり / 他 window click で裏に行ける / MainForm click で戻れる) を実現しつつ、見失う path を物理閉鎖
+- **`Initialize` / `DetectOtherActiveSessions` は sync 維持**: heartbeat thread 起動は最速で走らせるため `_sessionService.Initialize()` は sync 呼出のまま、`DetectOtherActiveSessions` も sync で他 PC 検出結果を握ってから dialog 表示部分のみ `BeginInvoke` で defer する切り出し
+- **race guard**: deferred action 冒頭で `if (IsDisposed || Disposing || _sessionService == null) return;` の早期 guard を追加 (= MainForm_Load 中に user が即 × で閉じた race + FormClosed 経由 `_sessionService.Shutdown()` との二重呼出 race の両方を物理閉鎖、PR #189 reviewer Low で「over-defensive」と評価されたが defense-in-depth で残置)
+- **deferred action 全体を try/catch で囲み**: `Logger.Error` で握り潰し (= FormClosed handler の Shutdown catch と同方針、PR #189 reviewer Low 指摘、`Application.ThreadException` 経路で UI thread crash を防ぐ defensive guard)
+- **`StartBackgroundUpdateCheckIfDue` との race 解消**: 旧 round 2 では `BeginInvoke` 投函された SessionConflictDialog message と、`async void StartBackgroundUpdateCheckIfDue` の continuation MessageBox (`ShowUpdateAvailableNotification`) の表示順序が non-deterministic race だった (PR #189 reviewer Medium 指摘)。本 round 3 で chain pattern により `StartBackgroundUpdateCheckIfDue` の起動を `ContinueLoadAfterSessionCheck` 内に閉じ込めたため、Startup dialog が必ず先に出てから update check が起動する deterministic 順序に修正
+- **assembly version bump**: `0.10.0.0` → `0.10.1.0` (patch、bugfix のみ、DB schema 変更なし、AGENTS.md「Release and Versioning」ルール準拠)
+- **verify**: Manager Release build clean。実機 verify は DB に他 PC row 手動 INSERT 状態で Manager 起動 → MainForm が一瞬表示 (= panel 未 init の空 state) されてから Startup dialog が modal child として開く → 他 window click で dialog が裏に行き、タスクバーの Manager entry click で復帰できる挙動 + OK 押下後に panel init / LoadGames 等が走って通常の MainForm 表示 + Cancel 押下時は panel init すべて skip して即 Close を目視確認。EditOperation context は PR #184 verify session で動作確認済 (= MainForm visible 経路、本 PR で挙動変化なし)
+
+##### round 1 → round 2 → round 3 試行履歴
+
+- **round 1** (commit `3c9129e`、撤回): `SessionConflictDialog.Show` 内で Startup context 限定 `MessageBoxOptions.DefaultDesktopOnly` を適用。dialog が default desktop 最前面に固定される効果で「見失う」path は閉鎖されたが、user feedback「他 window をクリックしても dialog が裏に行かず常時最前面でうざい」を受けて trade-off 不適切と判断
+- **round 2** (commit `ec4339c`、reviewer High 指摘で再修正): caller (`MainForm_Load`) で `BeginInvoke` で dialog 表示を defer。taskbar 問題は解消したが、`MainForm_Load` 残り init (panel.Initialize / LoadGames / RegisterUnknownSafetyFiles / CleanupStaleBackupEntries / StartAutoBackupIfDue / StartBackgroundUpdateCheckIfDue 等) が dialog 表示前に同期で走り終わる **gate → 事後通知 regression** が PR #189 reviewer High で指摘 → Cancel 押下しても backup_log INSERT / 自動 backup 起動 / アップデート check 等が既に走り終わっている path
+- **round 3** (本 entry、確定): `MainForm_Load` を 2 段に分割し chain pattern で gate を物理的に維持。残り init は `ContinueLoadAfterSessionCheck` に切出し、dialog OK 時のみ chain 起動。`SessionConflictDialog.cs` 側は標準 owner-modal MessageBox に revert + 3 round の rationale 履歴を docstring に記録 (= round 1 / 2 の経緯は本 entry + commit log + docstring で追跡可能)
+
+##### PR #185 / #188 (manifest 単独 DPI awareness 試行) との分離
+
+#185 が manifest 単独で Form layout regression を起こして revert された結果、起動時 dialog の見失い問題は引き続き残っていた。本 PR は **manifest 触らない MainForm_Load 構造変更のみ** で #185 / #188 の DPI 問題と完全独立な path で fix、Form layout への影響ゼロ。DPI awareness 解消は #185 が再開された時に別 PR で扱う。
+
+##### 関連
+
+PR #184 (v0.10.0、LAN-wide 同時起動検出) の verify session で発見した 3 つの issue (#185 / [#186](https://github.com/ken1208git/GCTonePrism/issues/186) / #187) のうち、本 PR で #186 を closure。#187 は別 PR で対応予定、#185 は manifest 単独 path 不可と判明、別 milestone へ移行。
 
 ### [Manager v0.10.0] - 2026-05-18
 
