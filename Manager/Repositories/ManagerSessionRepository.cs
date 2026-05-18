@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
-using GCTonePrism.Manager.Models;
+using TonePrism.Manager.Models;
 
-namespace GCTonePrism.Manager.Repositories
+namespace TonePrism.Manager.Repositories
 {
     /// <summary>
     /// (#179) `manager_sessions` table への CRUD アクセサ。Manager の LAN-wide 同時起動検出に使う。

@@ -1,4 +1,4 @@
-namespace GCTonePrism.Manager.Controls
+namespace TonePrism.Manager.Controls
 {
     partial class UpdateSectionPanel
     {

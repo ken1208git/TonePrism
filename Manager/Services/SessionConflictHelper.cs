@@ -1,7 +1,7 @@
 using System;
 using System.Windows.Forms;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// (#179 / #178 (c)) SectionPanel から `MainForm.CheckSessionConflictBeforeWrite` を呼ぶための

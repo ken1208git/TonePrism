@@ -1,6 +1,6 @@
 using System;
 
-namespace GCTonePrism.Manager.Models
+namespace TonePrism.Manager.Models
 {
     /// <summary>
     /// プレイ記録を表すデータモデル

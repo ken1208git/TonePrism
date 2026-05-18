@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Windows.Forms;
-using GCTonePrism.Manager.Models;
+using TonePrism.Manager.Models;
 
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     /// <summary>
     /// ストアセクション一覧管理フォーム

@@ -1,4 +1,4 @@
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     partial class EditGameForm
     {
@@ -80,7 +80,7 @@ namespace GCTonePrism.Manager
             this.lblThumbnailHint = new System.Windows.Forms.Label();
             this.lblBackgroundHint = new System.Windows.Forms.Label();
             this.lblVersionName = new System.Windows.Forms.Label();
-            this.semverVersionName = new GCTonePrism.Manager.Controls.SemverInputControl();
+            this.semverVersionName = new TonePrism.Manager.Controls.SemverInputControl();
             ((System.ComponentModel.ISupportInitialize)(this.numReleaseYear)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numMinPlayers)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numMaxPlayers)).BeginInit();
@@ -795,7 +795,7 @@ namespace GCTonePrism.Manager
         private System.Windows.Forms.Label lblVersionDescription;
         private System.Windows.Forms.TextBox txtVersionDescription;
         private System.Windows.Forms.Label lblVersionName;
-        private GCTonePrism.Manager.Controls.SemverInputControl semverVersionName;
+        private TonePrism.Manager.Controls.SemverInputControl semverVersionName;
         private System.Windows.Forms.PictureBox picThumbnailPreview;
         private System.Windows.Forms.PictureBox picBackgroundPreview;
         private System.Windows.Forms.Button btnTestRun;

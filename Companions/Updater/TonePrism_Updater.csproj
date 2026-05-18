@@ -6,8 +6,8 @@
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProjectGuid>{B5D71E9C-0F2E-4F4A-9E5A-1A2C3D4E5F6A}</ProjectGuid>
     <OutputType>Exe</OutputType>
-    <RootNamespace>GCTonePrism.Updater</RootNamespace>
-    <AssemblyName>GCTonePrism_Updater</AssemblyName>
+    <RootNamespace>TonePrism.Updater</RootNamespace>
+    <AssemblyName>TonePrism_Updater</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>

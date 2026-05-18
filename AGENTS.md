@@ -16,10 +16,10 @@
 
 リポジトリ内の各層で命名規約を分ける。理由は層ごとに「衝突回避の必要性」が違うため。
 
-- **トップレベル dir 名 (リポジトリ構造) = 短縮**: `Launcher/` / `Manager/` / `Monitor/` / `Companions/`。リポジトリ全体が GCTonePrism なので prefix は冗長。`Companions/` 配下のサブツール dir も `Companions/Updater/` / `Companions/WindowProbe/` と短縮。
-- **csproj / アセンブリ名 / exe ファイル名 = `GCTonePrism_<Name>`**: `GCTonePrism_Manager.exe` / `GCTonePrism_Updater.exe` / 将来 `GCTonePrism_WindowProbe.exe`。**理由: 実機 OS との接点 (tasklist / `Process.GetProcessesByName` / Windows のショートカット / プロセス管理 UI) で `Manager.exe` / `Updater.exe` のような汎用名は他アプリと衝突する。特に Chrome / Edge / 各種 Updater など多くのアプリが `Updater.exe` を使う**。prefix 維持で uniqueness を担保。
-  - **例外**: `Common` / `Core` / `Shared` 等の **汎用すぎる名前** は assembly 衝突 (= GCTonePrism 内の他コンポーネントが同名 `Common` を持つ可能性、または他アプリの `Common.dll` との namespace 衝突) を避けるため `GCTonePrism_<Parent><Name>` の形式で disambiguation を許容。例: `Companions/Common/` (dir 短縮) → `GCTonePrism_CompanionsCommon.csproj` (Parent=Companions を含めて衝突回避)。SPEC §2.4 参照。
-- **C# namespace = `GCTonePrism.<Name>`**: `GCTonePrism.Manager` / `GCTonePrism.Updater`。namespace 衝突は実害が小さいが、コード読みやすさのため exe 名と一貫させる。
+- **トップレベル dir 名 (リポジトリ構造) = 短縮**: `Launcher/` / `Manager/` / `Monitor/` / `Companions/`。リポジトリ全体が TonePrism なので prefix は冗長。`Companions/` 配下のサブツール dir も `Companions/Updater/` / `Companions/WindowProbe/` と短縮。
+- **csproj / アセンブリ名 / exe ファイル名 = `TonePrism_<Name>`**: `TonePrism_Manager.exe` / `TonePrism_Updater.exe` / 将来 `TonePrism_WindowProbe.exe`。**理由: 実機 OS との接点 (tasklist / `Process.GetProcessesByName` / Windows のショートカット / プロセス管理 UI) で `Manager.exe` / `Updater.exe` のような汎用名は他アプリと衝突する。特に Chrome / Edge / 各種 Updater など多くのアプリが `Updater.exe` を使う**。prefix 維持で uniqueness を担保。
+  - **例外**: `Common` / `Core` / `Shared` 等の **汎用すぎる名前** は assembly 衝突 (= TonePrism 内の他コンポーネントが同名 `Common` を持つ可能性、または他アプリの `Common.dll` との namespace 衝突) を避けるため `TonePrism_<Parent><Name>` の形式で disambiguation を許容。例: `Companions/Common/` (dir 短縮) → `TonePrism_CompanionsCommon.csproj` (Parent=Companions を含めて衝突回避)。SPEC §2.4 参照。
+- **C# namespace = `TonePrism.<Name>`**: `TonePrism.Manager` / `TonePrism.Updater`。namespace 衝突は実害が小さいが、コード読みやすさのため exe 名と一貫させる。
 
 主要 vs サポートの分類:
 - **主要アプリ** (Launcher / Manager / Monitor): リポジトリルート直下に置く独立 dir。
@@ -31,7 +31,7 @@
 - コミット直前に Launcher / Manager / Monitor / 各 Companion (Updater / WindowProbe 等) の各バージョン番号を上げるべきかを必ず提案する。
 - **Bundle version の bump はリリース実行時のみ**。`Release.bat` を押す直前に `CHANGELOG.md` の `## Bundle` セクションに新エントリを追加（最上段、`### [Bundle vX.Y.Z]` 形式）。これが Bundle version と release_notes 両方の SoT。開発中の component bump とは別タイミング。
 - **Bundle entry 追加時に CHANGELOG 末尾の参照リンク定義も同時追加する**。これは `### [Bundle vX.Y.Z]` 見出しを GitHub Releases ページへのリンクに resolve するため (SPEC §3.7.7 「Bundle release が SoT」規約整合)。
-  - **Markdown 形式**: `[Bundle vX.Y.Z]: https://github.com/ken1208git/GCTonePrism/releases/tag/vX.Y.Z`
+  - **Markdown 形式**: `[Bundle vX.Y.Z]: https://github.com/ken1208git/TonePrism/releases/tag/vX.Y.Z`
   - **追加位置**: CHANGELOG 末尾 HTML comment block の直下、既存 `[Bundle vX.Y.Z]:` 行群の **先頭** (降順を維持、= 新しいほど上)
   - **強制 fence**: Release.ps1 の `Assert-ChangelogLinkDefs` (Phase 0.5、Godot export / msbuild より前) が release 実行直後に footer block 内の link def を verify、(1) **presence** (該当 Bundle version の行が存在するか) と (2) **ordering** (Bundle 行群が降順に並んでいるか、issue #154) の両方を enforce、違反あれば Fail で停止 → build を捨てる前に fail-fast。順序比較は PowerShell `[version]` cast (= .NET `System.Version`、numeric `major.minor.build.revision`) で実装、Bundle が 3-part numeric の限り SemVer 順序と一致。pre-release suffix (例: `0.3.0-rc1`) を含む version は `[version]` cast 不可のため該当ペアの順序 check のみ warning で skip (presence は維持)、全ペアが skip された場合は「OK」ではなく warning で実比較なしを明示
   - **`-SkipUpload` 時** (および `-DryRun` / `-Offline` 経由 auto-promote 時): publish しないので URL resolution 不要、skip + warn で継続 (既存 `Assert-Preflight` の CHANGELOG セクション検証と同 pattern)

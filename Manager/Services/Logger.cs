@@ -3,14 +3,14 @@ using System.IO;
 using System.Linq;
 using System.Text;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// Manager 全体のファイルログ機構 (#116)。
     ///
     /// - 1 起動セッション = 1 ファイル (`manager_<PCname>_<YYYY-MM-DD_HHmmss>.log`)
-    /// - 保存先: `<project_root>/logs/manager/`（prism.db のあるディレクトリの隣）
-    ///   → 共有上の prism.db と同じ場所に集約することで、複数 PC の Launcher / Manager ログを 1 箇所で見られる
+    /// - 保存先: `<project_root>/logs/manager/`（toneprism.db のあるディレクトリの隣）
+    ///   → 共有上の toneprism.db と同じ場所に集約することで、複数 PC の Launcher / Manager ログを 1 箇所で見られる
     ///   → セッション単位でファイルが分かれるので書き込み競合・行間 interleaving が発生しない
     /// - INFO / WARN / ERROR の 3 段階
     /// - Console.SetOut フックで既存 Console.WriteLine も自動的にファイルへ流す (INFO 扱い)
@@ -180,7 +180,7 @@ namespace GCTonePrism.Manager.Services
         }
 
         /// <summary>
-        /// PathManager と同じく exe ベースで上に prism.db を探すが、
+        /// PathManager と同じく exe ベースで上に toneprism.db を探すが、
         /// Logger は PathManager より先に動くため軽量実装で重複させる
         /// (Console 出力なし、例外なし、見つからなければ exe 隣にフォールバックして Logger 自体は動かす)
         /// </summary>
@@ -192,7 +192,7 @@ namespace GCTonePrism.Manager.Services
                 DirectoryInfo dir = new DirectoryInfo(exePath);
                 for (int i = 0; i < 10 && dir != null; i++)
                 {
-                    if (File.Exists(Path.Combine(dir.FullName, "prism.db")))
+                    if (File.Exists(Path.Combine(dir.FullName, "toneprism.db")))
                         return dir.FullName;
                     dir = dir.Parent;
                 }

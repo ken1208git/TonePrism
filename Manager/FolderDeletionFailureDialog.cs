@@ -1,7 +1,7 @@
 using System;
 using System.Windows.Forms;
 
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     /// <summary>
     /// フォルダ削除に失敗した時の対応ダイアログ。

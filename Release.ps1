@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    GCTonePrism のリリース zip を生成し、GitHub Releases にアップロードする。
+    TonePrism のリリース zip を生成し、GitHub Releases にアップロードする。
 
 .DESCRIPTION
     Phase 1 (#108): Launcher + Manager のビルドと zip 化のみ。
@@ -13,7 +13,7 @@
           - Manager コードが C# 7+ (ValueTuple / string interpolation 等) を使うため、Roslyn を含む MSBuild 14+ が必須
           - Windows 同梱の .NET Framework MSBuild 4 は csc が古すぎて使えない（VS Build Tools のインストールが必要、~1-2 GB）
         - release/v<version>/files/ に staging
-        - Compress-Archive で release/GCTonePrism_v<version>.zip 生成
+        - Compress-Archive で release/TonePrism_v<version>.zip 生成
         - zip 完成後、Y/N 確認プロンプト → Y なら gh release create でアップロード、N なら zip だけ残して終了
           (`-SkipUpload` で confirm prompt 自体を skip。CI 等の non-interactive 運用向け)
 
@@ -280,15 +280,15 @@ $script:ManifestRelativePath = 'bundle\bundle_manifest.json'
 $BundleDir    = Join-Path $StagingDir 'bundle'
 $FilesDir     = Join-Path $BundleDir 'files'
 $ManifestPath = Join-Path $StagingDir $script:ManifestRelativePath
-$ZipPath      = Join-Path $StagingRoot "GCTonePrism_v$Version.zip"
+$ZipPath      = Join-Path $StagingRoot "TonePrism_v$Version.zip"
 $ChangelogPath = Join-Path $RepoRoot 'CHANGELOG.md'
 
-# round 3 Low-3: GitHub repo slug を SoT 化。本 script は ken1208git/GCTonePrism 専用前提
+# round 3 Low-3: GitHub repo slug を SoT 化。本 script は ken1208git/TonePrism 専用前提
 # (Assert-ChangelogLinkDefs で release tag URL を組み立てる用途)。fork / repo rename / org
 # transfer 時は本定数 1 箇所の修正で全箇所追随する形に集約。他の gh CLI 呼び出しは `gh` の
 # repo 自動検出に依拠していて hardcode していないので、本定数は本 script 内で 1 箇所のみで
 # 参照される (将来別箇所で必要になれば本定数を使う規約)。
-$GitHubRepoSlug = 'ken1208git/GCTonePrism'
+$GitHubRepoSlug = 'ken1208git/TonePrism'
 
 $script:ResolvedGodot       = $null
 $script:ResolvedMsBuild     = $null
@@ -1391,7 +1391,7 @@ function Build-Launcher {
 
     $outDir = Join-Path $FilesDir 'Launcher'
     New-Item -ItemType Directory -Path $outDir | Out-Null
-    $outExe = Join-Path $outDir 'GCTonePrism_Launcher.exe'
+    $outExe = Join-Path $outDir 'TonePrism_Launcher.exe'
 
     Write-Info "出力先: $outExe"
     Write-Info "Godot: $script:ResolvedGodot"
@@ -1424,7 +1424,7 @@ function Build-Launcher {
 function Build-Manager {
     Write-Step "Manager を msbuild で Release ビルド"
 
-    $csproj = Join-Path $ManagerDir 'GCTonePrism_Manager.csproj'
+    $csproj = Join-Path $ManagerDir 'TonePrism_Manager.csproj'
     $packagesDir = Join-Path $ManagerDir 'packages'
     $binRelease = Join-Path $ManagerDir 'bin\Release'
 
@@ -1535,11 +1535,11 @@ function Build-Updater {
     Write-Step "Updater を msbuild で Release ビルド"
 
     $updaterDir = Join-Path $RepoRoot 'Companions\Updater'
-    $csproj = Join-Path $updaterDir 'GCTonePrism_Updater.csproj'
+    $csproj = Join-Path $updaterDir 'TonePrism_Updater.csproj'
     $binRelease = Join-Path $updaterDir 'bin\Release'
 
     if (-not (Test-Path $csproj)) {
-        Fail "GCTonePrism_Updater.csproj が見つかりません: $csproj"
+        Fail "TonePrism_Updater.csproj が見つかりません: $csproj"
     }
 
     # 既存 bin/Release/ を消して clean build (Build-Manager と同じ思想)
@@ -1581,13 +1581,13 @@ function Build-Updater {
         Fail "Updater ビルド出力に .exe が見つかりません ($binRelease 内): msbuild は exit 0 だが成果物が生成されていない可能性"
     }
     # シニアレビュー round 5 L-2: 任意の .exe 1 件ではなく、**特定の exe 名**
-    # (`GCTonePrism_Updater.exe`) の存在も check。csproj の AssemblyName を将来誰かが変更して
+    # (`TonePrism_Updater.exe`) の存在も check。csproj の AssemblyName を将来誰かが変更して
     # 別名の .exe を生成しても round 4 L-3 だけだと build step green (任意の .exe で pass)、後段
     # Assert-ExpectedFiles で初めて検出。特定名 check で「msbuild 成功 + 期待 exe 名生成」まで
     # Build-Updater レベルで担保する。csproj 仕様変更時の早期検出。
-    $expectedExe = Join-Path $binRelease 'GCTonePrism_Updater.exe'
+    $expectedExe = Join-Path $binRelease 'TonePrism_Updater.exe'
     if (-not (Test-Path $expectedExe)) {
-        Fail "Updater ビルド出力に GCTonePrism_Updater.exe が見つかりません: csproj の AssemblyName が変更された可能性 (期待 path: $expectedExe)"
+        Fail "Updater ビルド出力に TonePrism_Updater.exe が見つかりません: csproj の AssemblyName が変更された可能性 (期待 path: $expectedExe)"
     }
     $outDir = Join-Path $FilesDir 'Companions\Updater'
     New-Item -ItemType Directory -Path $outDir -Force | Out-Null
@@ -1617,8 +1617,8 @@ function Build-Updater {
 # ============================================================================
 # zip 配布物の構造 (SPEC §3.7.1 正規 zip 構造):
 #   zip ルート:    Install.bat / INSTALL_README.txt
-#   zip files/:    Launcher.bat / Manager.bat (Install.bat が <インストール先>\GCTonePrism\
-#                  にコピーする payload、ユーザーは GCTonePrism\Launcher.bat 等で日常起動)
+#   zip files/:    Launcher.bat / Manager.bat (Install.bat が <インストール先>\TonePrism\
+#                  にコピーする payload、ユーザーは TonePrism\Launcher.bat 等で日常起動)
 
 function Copy-Templates {
     Write-Step "テンプレートを staging に同梱"
@@ -1654,7 +1654,7 @@ function Copy-Templates {
     #     Manager UI Phase 4 のアップデートフロー [7]〜[10] では `FileReplacer.ReplaceFile` の単体
     #     file copy で更新 (Launcher.bat / Manager.bat の shortcut bat 置換と同 pattern)。
     #   - Launcher/version.gd: Phase 4 で Manager UI の VersionInventory が Launcher 版数を抽出
-    #     するのに使う。Godot エクスポート成果物 (`bin/GCTonePrism_Launcher.exe` + `.pck` 等) には
+    #     するのに使う。Godot エクスポート成果物 (`bin/TonePrism_Launcher.exe` + `.pck` 等) には
     #     `.gd` source が含まれない (= `.pck` 内に compile されて隠匿) ため、`Launcher/version.gd`
     #     を staging 段階で明示的に同梱して install dir 配下に置く。Manager は
     #     `<install>/Launcher/version.gd` を直接 parse して MAJOR/MINOR/PATCH 定数を読み取る。
@@ -1732,19 +1732,19 @@ $script:BundleManifestFiles = @(
     'show_folder_dialog.ps1',
     'Launcher.bat',
     'Manager.bat',
-    # bundle/files/ 配下 = インストール後の <親>\GCTonePrism\ に展開される payload
-    'files\Launcher\GCTonePrism_Launcher.exe',
+    # bundle/files/ 配下 = インストール後の <親>\TonePrism\ に展開される payload
+    'files\Launcher\TonePrism_Launcher.exe',
     'files\Launcher\version.gd',                # Phase 4 #108: Manager UI VersionInventory が parse する SoT
-    'files\Manager\GCTonePrism_Manager.exe',
-    'files\Manager\GCTonePrism_Manager.exe.config',
+    'files\Manager\TonePrism_Manager.exe',
+    'files\Manager\TonePrism_Manager.exe.config',
     'files\Manager\System.Data.SQLite.dll',
     'files\Manager\Microsoft.WindowsAPICodePack.dll',
     'files\Manager\Microsoft.WindowsAPICodePack.Shell.dll',
     'files\Manager\x64\SQLite.Interop.dll',
     'files\Manager\x86\SQLite.Interop.dll',
     # Updater (Phase 3、SPEC §3.7.4): Manager 置換 + 再起動の最小 CLI、Companions/ 配下に配置
-    'files\Companions\Updater\GCTonePrism_Updater.exe',
-    'files\Companions\Updater\GCTonePrism_Updater.exe.config',
+    'files\Companions\Updater\TonePrism_Updater.exe',
+    'files\Companions\Updater\TonePrism_Updater.exe.config',
     # CHANGELOG.md (Phase 4 #108、SPEC §3.7.7): Manager UI が installed Bundle version 抽出に使う SoT、
     # `<install>/CHANGELOG.md` 直下配置で `Launcher/` `Manager/` 等と同階層 (project-wide な SoT semantic)
     'files\CHANGELOG.md'
@@ -2007,7 +2007,7 @@ function Clear-OldGodot {
 # ============================================================================
 
 Write-Host ""
-Write-Host "GCTonePrism Release Script (Phase 1)" -ForegroundColor White
+Write-Host "TonePrism Release Script (Phase 1)" -ForegroundColor White
 Write-Host "Bundle Version: $Version" -ForegroundColor White
 Write-Host "RepoRoot:       $RepoRoot" -ForegroundColor White
 if ($DryRun)     { Write-Host "Mode: DRY-RUN (zip と upload を skip)" -ForegroundColor Yellow }

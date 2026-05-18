@@ -3,7 +3,7 @@ using System.Data.SQLite;
 using System.IO;
 using System.Threading;
 
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     /// <summary>
     /// SQLite接続管理・WALモード・リトライロジック

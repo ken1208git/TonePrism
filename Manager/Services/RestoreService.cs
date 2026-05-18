@@ -4,10 +4,10 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
-    /// バックアップファイルから prism.db を復元するサービス。
+    /// バックアップファイルから toneprism.db を復元するサービス。
     /// 安全のため、復元前に現DBを backups/safety/safety_*.db として退避する。
     /// </summary>
     public class RestoreService
@@ -22,15 +22,15 @@ namespace GCTonePrism.Manager.Services
         }
 
         /// <summary>
-        /// 指定されたバックアップファイルから prism.db を復元する（atomic 復元）。
+        /// 指定されたバックアップファイルから toneprism.db を復元する（atomic 復元）。
         /// 1. 現DBを backups/safety/safety_HHmmss.db として退避（Online Backup API でコピー）
-        /// 2. バックアップを prism.db.restore-tmp に先にコピー（prism.db はまだ無傷）
+        /// 2. バックアップを toneprism.db.restore-tmp に先にコピー（toneprism.db はまだ無傷）
         /// 3. 全 SQLite 接続プールをクリア
-        ///   ─── ここから先はキャンセル不可（中断すると prism.db が一時的に欠落） ───
-        /// 4. 旧 WAL/SHM を削除し、prism.db を tmp で置換（File.Replace で atomic）
+        ///   ─── ここから先はキャンセル不可（中断すると toneprism.db が一時的に欠落） ───
+        /// 4. 旧 WAL/SHM を削除し、toneprism.db を tmp で置換（File.Replace で atomic）
         /// 5. backups/safety/ のリテンション適用（古いものから削除）
         ///
-        /// 利点: コピー失敗・キャンセル発生時に prism.db が消えてしまう事故を回避
+        /// 利点: コピー失敗・キャンセル発生時に toneprism.db が消えてしまう事故を回避
         /// （Codex P1 指摘 "Disallow cancellation after deleting active DB files" 対応）
         /// </summary>
         /// <returns>退避された安全バックアップのフルパス</returns>
@@ -72,8 +72,8 @@ namespace GCTonePrism.Manager.Services
 
             token.ThrowIfCancellationRequested();
 
-            // 2. バックアップを一時ファイルへ先にコピー（prism.db はまだ無傷）。
-            //    コピー中・コピー後にキャンセル/失敗が起きても prism.db は壊れない。
+            // 2. バックアップを一時ファイルへ先にコピー（toneprism.db はまだ無傷）。
+            //    コピー中・コピー後にキャンセル/失敗が起きても toneprism.db は壊れない。
             progress?.Report(new ProgressInfo(40, "バックアップを準備中...", backupFilePath));
             if (File.Exists(tempPath)) File.Delete(tempPath); // 前回失敗時の残骸があれば消す
             File.Copy(backupFilePath, tempPath, false);
@@ -86,8 +86,8 @@ namespace GCTonePrism.Manager.Services
             GC.Collect();
             GC.WaitForPendingFinalizers();
 
-            // ─── ここから先はキャンセル不可。中断すると prism.db が一時的に欠落する ───
-            // 4. WAL/SHM を削除し、tmp で prism.db を置換
+            // ─── ここから先はキャンセル不可。中断すると toneprism.db が一時的に欠落する ───
+            // 4. WAL/SHM を削除し、tmp で toneprism.db を置換
             progress?.Report(new ProgressInfo(80, "既存ファイルを置き換え中...", ""));
             DeleteWithRetry(dbPath + "-wal");
             DeleteWithRetry(dbPath + "-shm");
@@ -95,7 +95,7 @@ namespace GCTonePrism.Manager.Services
             if (File.Exists(dbPath))
             {
                 // File.Replace は NTFS 上で atomic（ReplaceFile Win32 API）
-                // backupFileName=null で旧 prism.db のバックアップは作らない（safety で既に確保済み）
+                // backupFileName=null で旧 toneprism.db のバックアップは作らない（safety で既に確保済み）
                 File.Replace(tempPath, dbPath, null);
             }
             else

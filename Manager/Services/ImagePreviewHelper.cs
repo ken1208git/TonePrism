@@ -2,7 +2,7 @@ using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// 画像プレビュー更新の共通ヘルパー。

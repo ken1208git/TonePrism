@@ -4,7 +4,7 @@ using System.IO;
 using System.Reflection;
 using System.Text.RegularExpressions;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// Manager UI Phase 4 (#108) で「アップデート」タブに表示する 5 + 1 component のバージョンを採取する。
@@ -13,7 +13,7 @@ namespace GCTonePrism.Manager.Services
     ///   - **Bundle**: `<install>/CHANGELOG.md` の最新 `### [Bundle vX.Y.Z]` から抽出 (zip 同梱、§3.7.7)
     ///   - **Manager**: 自身の Assembly.GetName().Version (AssemblyInfo.cs)
     ///   - **Launcher**: `<install>/Launcher/version.gd` の `MAJOR / MINOR / PATCH` 定数を parse
-    ///   - **Updater**: `<install>/Companions/Updater/GCTonePrism_Updater.exe` の FileVersionInfo
+    ///   - **Updater**: `<install>/Companions/Updater/TonePrism_Updater.exe` の FileVersionInfo
     ///   - **DB Schema**: SchemaManager.GetTargetDatabaseVersion() (= CurrentDbVersion)
     ///
     /// 全 component で「読み取り失敗 = `null` を返して UI 側で『不明』表示」の fail-soft 方針。例外を

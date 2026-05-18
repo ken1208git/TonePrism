@@ -4,9 +4,9 @@ using System.Data.SQLite;
 using System.IO;
 using System.Linq;
 using System.Threading;
-using GCTonePrism.Manager.Services;
+using TonePrism.Manager.Services;
 
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     /// <summary>
     /// テーブル作成・スキーママイグレーション・バージョン管理
@@ -105,7 +105,7 @@ namespace GCTonePrism.Manager
         /// <summary>
         /// データベースを完全初期化する (rename rollback 方式)。
         /// (1) games/ を pending-delete-{guid} に rename で退避、
-        /// (2) prism.db を削除、(3) 退避フォルダを物理削除、
+        /// (2) toneprism.db を削除、(3) 退避フォルダを物理削除、
         /// (4) games/ を再作成 + DB 再構築。
         /// 隣接する backups/ などには触らない（復元用に残す）。
         /// 確認画面 (ResetDatabaseConfirmForm) と挙動を一致させるための実装 (#119)。
@@ -185,13 +185,13 @@ namespace GCTonePrism.Manager
                     {
                         // ロールバック自体が失敗するケースは極めて稀だが、握りつぶさず元の例外と一緒に通知
                         throw new IOException(
-                            $"prism.db の削除に失敗し、games フォルダの復元（ロールバック）にも失敗しました。\n" +
+                            $"toneprism.db の削除に失敗し、games フォルダの復元（ロールバック）にも失敗しました。\n" +
                             $"以下のフォルダを手動で確認してください:\n  退避先: {pendingDeleteFolder}\n  本来の場所: {gamesFolder}\n\n" +
                             $"元のエラー: {dbEx.Message}", dbEx);
                     }
                 }
                 throw new IOException(
-                    $"prism.db の削除に失敗しました。Launcher など他のプロセスが DB を使用していないか確認してください。games フォルダは元に戻されています。\n\n{dbEx.Message}",
+                    $"toneprism.db の削除に失敗しました。Launcher など他のプロセスが DB を使用していないか確認してください。games フォルダは元に戻されています。\n\n{dbEx.Message}",
                     dbEx);
             }
 
@@ -211,7 +211,7 @@ namespace GCTonePrism.Manager
                 {
                     try { Directory.Delete(gamesFolder, true); } catch { /* best effort */ }
                 }
-                // ロールバック: 部分作成された prism.db を消す (壊れた DB を残さない)
+                // ロールバック: 部分作成された toneprism.db を消す (壊れた DB を残さない)
                 if (File.Exists(dbPath))
                 {
                     try { File.Delete(dbPath); } catch { /* best effort */ }
@@ -223,7 +223,7 @@ namespace GCTonePrism.Manager
                     try
                     {
                         Directory.Move(pendingDeleteFolder, gamesFolder);
-                        rollbackHint = "古い games フォルダは元の場所に復元されました。バックアップ機能 (#96) から prism.db を復元してください。";
+                        rollbackHint = "古い games フォルダは元の場所に復元されました。バックアップ機能 (#96) から toneprism.db を復元してください。";
                     }
                     catch
                     {
@@ -1406,7 +1406,7 @@ namespace GCTonePrism.Manager
 
         /// <summary>
         /// v11 → v12: backup_log テーブルに relative_path 列を追加 (#126)
-        /// プロジェクト場所の移動に追従できるよう、prism.db からの相対パスを記録する。
+        /// プロジェクト場所の移動に追従できるよう、toneprism.db からの相対パスを記録する。
         /// 既存レコードの relative_path は NULL のまま（呼び出し側で file_path にフォールバック）。
         /// </summary>
         private void MigrateV11ToV12(SQLiteConnection connection, SQLiteTransaction transaction)

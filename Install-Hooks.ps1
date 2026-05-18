@@ -31,7 +31,7 @@ $ErrorActionPreference = 'Stop'
 # Force UTF-8 for decoding native command stdout (e.g. `git rev-parse`).
 # Windows PowerShell 5.1 + JP locale defaults to CP932, so when git emits a
 # UTF-8 path that contains Japanese (this repo's worktree root is literally
-# `C:\【ゲームセンターTONE】\GCTonePrism\`), `& git rev-parse --show-toplevel`
+# `C:\【ゲームセンターTONE】\TonePrism\`), `& git rev-parse --show-toplevel`
 # would otherwise mojibake the result and `Set-Location` would fail with
 # PathNotFoundException. The check-bat-encoding.ps1 side handles this via
 # `Invoke-GitCapture` with `StandardOutputEncoding=UTF8`; here a simple
@@ -104,7 +104,7 @@ try {
         if (-not $Force) {
             Write-Host "[WARN] core.hooksPath is already set to '$currentHooksPath' (not '.githooks')."
             Write-Host "       Refusing to overwrite to avoid clobbering a third-party hooks setup."
-            Write-Host "       If you really want to switch this repo to GCTonePrism's hooks:"
+            Write-Host "       If you really want to switch this repo to TonePrism's hooks:"
             Write-Host "         .\Install-Hooks.ps1 -Force"
             exit 1
         }

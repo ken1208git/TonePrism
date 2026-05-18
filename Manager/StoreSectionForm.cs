@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
-using GCTonePrism.Manager.Models;
-using GCTonePrism.Manager.Services;
+using TonePrism.Manager.Models;
+using TonePrism.Manager.Services;
 
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     /// <summary>
     /// ストアセクション編集フォーム

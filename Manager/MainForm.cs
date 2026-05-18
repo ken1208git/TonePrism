@@ -1,13 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using GCTonePrism.Manager.Controls;
-using GCTonePrism.Manager.Models;
-using GCTonePrism.Manager.Services;
+using TonePrism.Manager.Controls;
+using TonePrism.Manager.Models;
+using TonePrism.Manager.Services;
 
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     /// <summary>
     /// メインフォーム - タブナビゲーション
@@ -129,6 +130,27 @@ namespace GCTonePrism.Manager
 
         private void MainForm_Load(object sender, EventArgs e)
         {
+            // (#168 v1.0.0 ハード切替 guard) 旧版 (GCTonePrism) install を検出した場合、
+            // user が誤って新 zip を旧 install dir に展開した想定。`prism.db` (旧 DB filename) が
+            // 残置されているが `toneprism.db` (新 DB filename) は存在しない、というのが旧版痕跡の
+            // 一意 marker。fresh install (= 何もない) と区別するため両方を check する。検出時は
+            // 警告 + 即時 exit で、誤った混在状態で先に進む path を物理的に塞ぐ。
+            string oldDb = Path.Combine(PathManager.BaseDirectory, "prism.db");
+            string newDb = Path.Combine(PathManager.BaseDirectory, "toneprism.db");
+            if (File.Exists(oldDb) && !File.Exists(newDb))
+            {
+                MessageBox.Show(
+                    "旧版 (GCTonePrism) の install が検出されました。\n\n" +
+                    "v1.0.0 は完全 rename (GCTonePrism → TonePrism) を伴う破壊的変更を含むため、" +
+                    "自動更新できません。\n\n" +
+                    "TonePrism_Bundle_v1.0.0.zip を新しいフォルダに解凍し、Install.bat を実行してください。",
+                    "旧版検出 — 手動再 install が必要です",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                Application.Exit();
+                return;
+            }
+
             // (#178 (b)) アップデート完了直後の起動 (= sentinel あり) は、まず「✓ アップデート完了」
             // MessageBox を表示。sentinel なし path は何もしない。
             // (#178 (c) / #179) 旧「同時起動に関する注意」MessageBox は撤廃、代わりに ManagerSessionService
@@ -353,7 +375,7 @@ namespace GCTonePrism.Manager
 
         /// <summary>
         /// 過去 run の失敗 / cancel で残った staging dir を起動時に best-effort 削除する (#108 Phase 4)。
-        /// `%TEMP%/GCTonePrism_update_*` を全部削除。今 update 中 (= Manager 起動中に Updater spawn 直後)
+        /// `%TEMP%/TonePrism_update_*` を全部削除。今 update 中 (= Manager 起動中に Updater spawn 直後)
         /// は normally 走らないので race condition なし。
         /// </summary>
         private void CleanupZombieStagings()

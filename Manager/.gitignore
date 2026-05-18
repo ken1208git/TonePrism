@@ -41,6 +41,7 @@ Generated\ Files/
 #!**/packages/repositories.config
 
 # Database file
+toneprism.db
 prism.db
 
 # Backup & report files from converting an old project file

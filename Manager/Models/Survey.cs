@@ -1,6 +1,6 @@
 using System;
 
-namespace GCTonePrism.Manager.Models
+namespace TonePrism.Manager.Models
 {
     /// <summary>
     /// アンケート結果を表すデータモデル

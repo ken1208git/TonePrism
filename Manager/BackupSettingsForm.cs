@@ -1,9 +1,9 @@
 using System;
 using System.Windows.Forms;
-using GCTonePrism.Manager.Repositories;
-using GCTonePrism.Manager.Services;
+using TonePrism.Manager.Repositories;
+using TonePrism.Manager.Services;
 
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     /// <summary>
     /// バックアップ機能の設定ダイアログ。

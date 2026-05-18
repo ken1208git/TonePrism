@@ -1,6 +1,6 @@
 using System;
 
-namespace GCTonePrism.Manager.Models
+namespace TonePrism.Manager.Models
 {
     /// <summary>
     /// 製作者情報を表すデータモデル

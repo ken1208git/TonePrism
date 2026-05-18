@@ -1,6 +1,6 @@
 using System;
 
-namespace GCTonePrism.Manager.Models
+namespace TonePrism.Manager.Models
 {
     /// <summary>
     /// GitHub Releases API (`/repos/<owner>/<repo>/releases/latest` または `/releases?per_page=N`)
@@ -8,7 +8,7 @@ namespace GCTonePrism.Manager.Models
     ///
     /// SPEC §3.7.3 [2] / [5] / Phase 4 task list:
     /// - 新バージョン検知時の表示: バージョン番号 / リリース日 / リリースノート
-    /// - zip ダウンロード URL は assets[].browser_download_url の `GCTonePrism_v<X.Y.Z>.zip` を採用
+    /// - zip ダウンロード URL は assets[].browser_download_url の `TonePrism_v<X.Y.Z>.zip` を採用
     ///
     /// `prerelease=true` の release は GitHubReleaseChecker 側で filter out するので、本 class は
     /// production release のみを保持する想定 (IsPrerelease flag は念のため保持して可視化用に残す)。
@@ -30,7 +30,7 @@ namespace GCTonePrism.Manager.Models
         /// <summary>API レスポンスの `html_url` (GitHub Releases ページ URL、「ブラウザで詳細を見る」用)。</summary>
         public string HtmlUrl { get; set; }
 
-        /// <summary>`assets[]` 中の `GCTonePrism_v<X.Y.Z>.zip` の `browser_download_url`。null = 該当 asset 不在 (= 不正な release)。</summary>
+        /// <summary>`assets[]` 中の `TonePrism_v<X.Y.Z>.zip` の `browser_download_url`。null = 該当 asset 不在 (= 不正な release)。</summary>
         public string ZipAssetUrl { get; set; }
 
         /// <summary>zip asset のバイト数 (`assets[].size`)。ディスク容量 pre-check に使う。0 = サイズ情報なし。</summary>

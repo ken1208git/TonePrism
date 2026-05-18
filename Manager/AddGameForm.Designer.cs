@@ -1,4 +1,4 @@
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     partial class AddGameForm
     {
@@ -30,7 +30,7 @@ namespace GCTonePrism.Manager
         {
             this.lblGameFolder = new System.Windows.Forms.Label();
             this.lblVersion = new System.Windows.Forms.Label();
-            this.semverInput = new GCTonePrism.Manager.Controls.SemverInputControl();
+            this.semverInput = new TonePrism.Manager.Controls.SemverInputControl();
             this.txtGameFolder = new System.Windows.Forms.TextBox();
             this.btnSelectGameFolder = new System.Windows.Forms.Button();
             this.lblGameFolderHint = new System.Windows.Forms.Label();
@@ -757,7 +757,7 @@ namespace GCTonePrism.Manager
         private System.Windows.Forms.Button btnOK;
         private System.Windows.Forms.Button btnCancel;
         private System.Windows.Forms.Label lblVersion;
-        private GCTonePrism.Manager.Controls.SemverInputControl semverInput;
+        private TonePrism.Manager.Controls.SemverInputControl semverInput;
         private System.Windows.Forms.PictureBox picThumbnailPreview;
         private System.Windows.Forms.PictureBox picBackgroundPreview;
         private System.Windows.Forms.Button btnTestRun;

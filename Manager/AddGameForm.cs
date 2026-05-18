@@ -6,11 +6,11 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using GCTonePrism.Manager.Models;
-using GCTonePrism.Manager.Services;
+using TonePrism.Manager.Models;
+using TonePrism.Manager.Services;
 using Microsoft.WindowsAPICodePack.Dialogs;
 
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     /// <summary>
     /// ゲーム追加フォーム

@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Text.RegularExpressions;
-using GCTonePrism.Manager.Models;
-using GCTonePrism.Manager.Services;
+using TonePrism.Manager.Models;
+using TonePrism.Manager.Services;
 
-namespace GCTonePrism.Manager.Repositories
+namespace TonePrism.Manager.Repositories
 {
     /// <summary>
     /// backup_log テーブルへのアクセサ
@@ -20,7 +20,7 @@ namespace GCTonePrism.Manager.Repositories
         }
 
         /// <summary>
-        /// File.Exists 判定用にパスを解決する。relative_path があれば現在の prism.db ディレクトリと結合、
+        /// File.Exists 判定用にパスを解決する。relative_path があれば現在の toneprism.db ディレクトリと結合、
         /// 無ければ file_path をそのまま返す。プロジェクト移動後でも relative_path 経由で実体を発見できる。
         /// </summary>
         private string ResolvePathForExistsCheck(string filePath, string relativePath)

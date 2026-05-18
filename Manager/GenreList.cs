@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     /// <summary>
     /// ゲームジャンル一覧

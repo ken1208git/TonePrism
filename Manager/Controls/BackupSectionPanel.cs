@@ -4,10 +4,10 @@ using System.Drawing;
 using System.IO;
 using System.Threading;
 using System.Windows.Forms;
-using GCTonePrism.Manager.Models;
-using GCTonePrism.Manager.Services;
+using TonePrism.Manager.Models;
+using TonePrism.Manager.Services;
 
-namespace GCTonePrism.Manager.Controls
+namespace TonePrism.Manager.Controls
 {
     public partial class BackupSectionPanel : UserControl
     {

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// `CHANGELOG.md` の `### [Bundle vX.Y.Z] - YYYY-MM-DD` セクションを抽出する parser。

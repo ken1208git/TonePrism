@@ -41,7 +41,7 @@ $result = $null
 try {
     Add-Type -AssemblyName System.Windows.Forms
     $d = New-Object System.Windows.Forms.FolderBrowserDialog
-    $d.Description = 'GCTonePrism のインストール先の親フォルダを選択してください'
+    $d.Description = 'TonePrism のインストール先の親フォルダを選択してください'
     $d.ShowNewFolderButton = $true
     $result = $d.ShowDialog()
 } catch {

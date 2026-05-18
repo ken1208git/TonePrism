@@ -1,6 +1,6 @@
-# ゲームセンターTONE Prism
+# TonePrism
 
-ゲームセンターTONE Prism は、大阪府立刀根山高校パソコン部の文化祭展示向けに作っている統合ランチャーシステムです。
+TonePrism は、大阪府立刀根山高校パソコン部の文化祭展示向けに作っている統合ランチャーシステムです。
 来場者がスタッフの補助なしでもゲームを選んで起動できること、展示運営を少ない人数でも回しやすくすることを目的としています。
 
 ## このリポジトリにあるもの
@@ -20,7 +20,7 @@
 ## ディレクトリ構成
 
 ```text
-GCTonePrism/
+TonePrism/
 ├── Launcher/               # 主要: Godot 製ランチャー本体
 ├── Manager/                # 主要: WinForms 製管理ツール
 ├── Monitor/                # 主要: 監視ソフト (将来)
@@ -28,12 +28,12 @@ GCTonePrism/
 │   └── Updater/            # Manager 置換用 (SPEC §3.7.4、#108 Phase 3)
 ├── games/                  # 展示対象ゲームやサンプルデータ
 ├── docs/                   # 補助ドキュメント
-├── prism.db                # SQLite データベース
+├── toneprism.db                # SQLite データベース
 ├── SPECIFICATION.md        # 仕様書
 └── CHANGELOG.md            # 変更履歴
 ```
 
-トップレベル命名規約: dir 名は短縮 (`Launcher/`, `Manager/`, `Companions/<Name>/`)、csproj / アセンブリ / exe 名は `GCTonePrism_<Name>` prefix 維持 (例: `GCTonePrism_Launcher.exe`、process 検知 uniqueness のため)。詳細は [AGENTS.md "Naming Conventions"](AGENTS.md) を参照。
+トップレベル命名規約: dir 名は短縮 (`Launcher/`, `Manager/`, `Companions/<Name>/`)、csproj / アセンブリ / exe 名は `TonePrism_<Name>` prefix 維持 (例: `TonePrism_Launcher.exe`、process 検知 uniqueness のため)。詳細は [AGENTS.md "Naming Conventions"](AGENTS.md) を参照。
 
 ## 動作環境
 
@@ -59,7 +59,7 @@ GCTonePrism/
 ### 1. リポジトリを取得
 
 ```bash
-git clone https://github.com/ken1208git/GCTonePrism.git
+git clone https://github.com/ken1208git/TonePrism.git
 ```
 
 ### 2. Launcher を開く
@@ -73,7 +73,7 @@ git clone https://github.com/ken1208git/GCTonePrism.git
 
 ### 3. Manager を開く
 
-1. Visual Studio 2026 で [Manager/GCTonePrism_Manager.csproj](Manager/GCTonePrism_Manager.csproj) を開きます。
+1. Visual Studio 2026 で [Manager/TonePrism_Manager.csproj](Manager/TonePrism_Manager.csproj) を開きます。
 2. NuGet パッケージを復元します。
 3. `Debug` もしくは `Release` でビルドして起動します。
 
@@ -86,7 +86,7 @@ git clone https://github.com/ken1208git/GCTonePrism.git
 ## 補足
 
 - `games/` には展示対象ゲームや確認用データが入っています。
-- `prism.db` は SQLite データベースです。
+- `toneprism.db` は SQLite データベースです。
 - README は「このリポジトリの入口」として簡潔に保ち、詳細仕様は仕様書側に寄せています。
 
 ## ライセンス

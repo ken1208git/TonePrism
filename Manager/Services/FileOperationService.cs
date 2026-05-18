@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// ファイル・ディレクトリ操作の共通サービス。

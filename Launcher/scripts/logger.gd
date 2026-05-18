@@ -1,8 +1,8 @@
 ## Launcher のファイルログ機構 (#116, #85 の土台)
 ##
 ## - 1 起動セッション = 1 ファイル (`launcher_<PCname>_<YYYY-MM-DD_HHmmss>.log`)
-## - 保存先: `<project_root>/logs/launcher/`（prism.db のあるディレクトリの隣）
-##   → 共有上の prism.db と同じ場所に集約することで、複数 PC の Launcher / Manager ログを 1 箇所で見られる
+## - 保存先: `<project_root>/logs/launcher/`（toneprism.db のあるディレクトリの隣）
+##   → 共有上の toneprism.db と同じ場所に集約することで、複数 PC の Launcher / Manager ログを 1 箇所で見られる
 ##   → セッション単位でファイルが分かれるので書き込み競合・行間 interleaving が発生しない
 ## - INFO / WARN / ERROR の 3 段階
 ## - 既存の print / printerr / push_warning / push_error / Godot エンジン内部エラーを **すべて** キャプチャ:
@@ -173,7 +173,7 @@ func _classify_godot_line(line: String) -> String:
 	return "INFO"
 
 
-# PathManager と同じく exe ベースで上に prism.db を探すが、
+# PathManager と同じく exe ベースで上に toneprism.db を探すが、
 # Logger は他の autoload より先に動くため軽量実装で重複させる
 # (print 出力なし、エラーなし、見つからなければ exe 隣にフォールバックして Logger 自体は動かす)
 func _find_project_root_for_logs() -> String:
@@ -190,7 +190,7 @@ func _find_project_root_for_logs() -> String:
 
 	var current = base_dir
 	for i in 10:
-		if FileAccess.file_exists(current.path_join("prism.db")):
+		if FileAccess.file_exists(current.path_join("toneprism.db")):
 			return current
 		var parent = current.get_base_dir()
 		if parent == current or parent.is_empty():

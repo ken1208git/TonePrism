@@ -6,10 +6,10 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using GCTonePrism.Manager.Models;
-using GCTonePrism.Manager.Services;
+using TonePrism.Manager.Models;
+using TonePrism.Manager.Services;
 
-namespace GCTonePrism.Manager.Controls
+namespace TonePrism.Manager.Controls
 {
     /// <summary>
     /// 「アップデート」タブの UI 本体。Phase 4 (#108)。
@@ -340,7 +340,7 @@ namespace GCTonePrism.Manager.Controls
                 "        Launcher も対象です。閉じないとアップデートに失敗し、\n" +
                 "        installation が破損する可能性があります。\n\n" +
                 "・ダウンロード + 置換中、Manager が再起動します。\n" +
-                "・ゲームデータ (prism.db / games/ / backups/ / responses/ / logs/) は保護されます。\n\n" +
+                "・ゲームデータ (toneprism.db / games/ / backups/ / responses/ / logs/) は保護されます。\n\n" +
                 "続行してよろしいですか？",
                 "アップデート開始 — 起動中アプリの確認をお願いします",
                 MessageBoxButtons.YesNo,
@@ -439,7 +439,7 @@ namespace GCTonePrism.Manager.Controls
                 }
                 System.IO.Directory.CreateDirectory(stagingDir);
 
-                string zipPath = System.IO.Path.Combine(stagingDir, "GCTonePrism_v" + targetVersion.ToString(3) + ".zip");
+                string zipPath = System.IO.Path.Combine(stagingDir, "TonePrism_v" + targetVersion.ToString(3) + ".zip");
 
                 // ディスク容量 pre-check (zip + 展開 + buffer = ~3 倍想定)
                 try

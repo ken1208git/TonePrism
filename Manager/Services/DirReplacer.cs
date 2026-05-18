@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// dir 単位の rename-rollback 置換。Phase 4 (#108) の Manager UI が Launcher dir / Companion dir

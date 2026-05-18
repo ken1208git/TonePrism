@@ -2,7 +2,7 @@ using System;
 using System.Data;
 using System.Data.SQLite;
 
-namespace GCTonePrism.Manager.Repositories
+namespace TonePrism.Manager.Repositories
 {
     /// <summary>
     /// settings テーブル（key TEXT PRIMARY KEY, value TEXT）への汎用アクセサ
