@@ -15,12 +15,12 @@ namespace GCTonePrism.Manager.Models
     ///   (`OnCheckCompleted`) で `UpToDate` / `UpdateAvailable` / `NetworkError` 等に上書きされる
     ///   短命状態。`ComputeStatus` 経由ではなく `LoadCacheOnly` で直接代入する設計 (= `ComputeStatus`
     ///   が `latest == null` を `UpToDate` に倒す挙動を維持しつつ、cache 不在経路だけ別状態に分離)。
-    ///   **Stuck path 受容** (PR #180 round 1 Medium-2): `MainForm.StartBackgroundUpdateCheckIfDue` が
-    ///   `dbManager == null` early return / catch 経路に倒れた場合、`OnCheckCompleted` が発火せず UI は
-    ///   `Initializing` のまま固着する path がある (旧挙動の緑「最新版を実行中」誤表示よりは UX 上良化、
-    ///   かつ dbManager null は MainForm 初期化失敗の異常 case で実発生頻度ほぼゼロ)。escape は user が
-    ///   「更新を確認」button を手動で押す経路で確保。本 path を物理閉鎖するには本 catch / early-return
-    ///   で `NetworkError` 相当を発火させる対応が必要だが、scope creep のため別 issue 検討。
+    ///   **Stuck path 受容** (PR #180 round 1 Medium-2 + round 2 Low-3): `MainForm.StartBackgroundUpdateCheckIfDue`
+    ///   が `dbManager == null` early return / catch 経路に倒れた場合、`OnCheckCompleted` が発火せず UI
+    ///   は `Initializing` のまま固着する path がある (旧挙動の緑「最新版を実行中」誤表示よりは UX 上
+    ///   良化、かつ dbManager null は MainForm 初期化失敗の異常 case で実発生頻度ほぼゼロ)。escape は
+    ///   user が「更新を確認」button を手動で押す経路で確保。本 path の物理閉鎖 (= catch / early-return
+    ///   で `NetworkError` 相当を発火) は別 issue **#181** で対応予定 (scope creep のため PR #180 受容)。
     /// - `UpToDate`: 最新版 (= 現在の Bundle == latest)。「最新版を実行中」(緑文字) + Update/Skip ボタン無効。
     ///   Latest は **非 null とは限らない** ((#108 Phase 4 round 7 H-1) round 6 M-1 訂正の再訂正):
     ///   `UpdateChecker.ComputeStatus` は `latest == null || latest.Version == null || latest.Version <= current`

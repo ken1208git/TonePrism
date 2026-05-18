@@ -663,6 +663,11 @@ namespace GCTonePrism.Manager.Controls
                 // round 5 M-1 で旧 Step 8 を defer 化した際、log label の renumber を怠ったため
                 // log を読むユーザーから「Step 8 で abort してログが切れた?」と誤読される path があった
                 // (= round 2 M9 「code 内部 step 番号 = [N/10]」原則の self-violation)。
+                // (#178 (b) round 2 Low-4) 旧実装は 85 → 95 の間に CHANGELOG 置換 + CleanupBak + sentinel
+                // 書出しの 3 操作が無音で連続し、UI が「Updater を起動中... 85%」で停滞して見えていた。
+                // SMB 共有 / AV scan 環境で seconds 単位かかる case の体感停滞を緩和するため、defer block /
+                // sentinel 書出し / 終了 message の 3 段階に分けて progress.Report を発火する。
+                progress.Report(new ProgressInfo(88, "後処理中 (CHANGELOG 置換 + 一時ファイル削除)..."));
                 Services.Logger.Info("[UpdateSectionPanel] [Step 8/10] CHANGELOG.md 置換 + .bak cleanup (defer: Updater spawn 成功後、SPEC §3.7.3 [8] + round 5 M-1 で旧 Step 8 を本 defer に移動)");
                 // (#108 Phase 4 round 7 M-1) `FileReplacer.ReplaceFile` は round 2 H4 で rollback-fatal
                 // 経路に `InvalidOperationException` throw を導入したため、旧 `if (!ReplaceFile(...))`
@@ -707,6 +712,7 @@ namespace GCTonePrism.Manager.Controls
                 // 起動時 dialog 数は常に 1 つ)。書込み失敗は dialog が出ないだけで installation 自体は
                 // 完成しているため Warn log で握り潰し、Application.Exit は続行。
                 // 詳細: SPECIFICATION.md §3.7.3 「sentinel ファイル仕様」参照。
+                progress.Report(new ProgressInfo(92, "完了通知ファイルを準備中..."));
                 try
                 {
                     string sentinelPath = System.IO.Path.Combine(PathManager.BaseDirectory, ".update_completed");
@@ -721,7 +727,7 @@ namespace GCTonePrism.Manager.Controls
                 }
                 catch (Exception sentEx)
                 {
-                    Services.Logger.Warn("[UpdateSectionPanel] update_completed sentinel 書出し失敗 (banner 出ないだけで続行): " + sentEx.Message);
+                    Services.Logger.Warn("[UpdateSectionPanel] update_completed sentinel 書出し失敗 (dialog 出ないだけで続行): " + sentEx.Message);
                 }
 
                 progress.Report(new ProgressInfo(95, "Manager を終了中..."));
