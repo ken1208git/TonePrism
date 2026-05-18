@@ -183,9 +183,13 @@ namespace GCTonePrism.Manager
                 {
                     try
                     {
-                        // form 既に閉じてる race の保険 (= MainForm_Load 中に user が即 × で閉じた等の
-                        // edge case、_sessionService が null になってる可能性も guard、FormClosed 経由
-                        // Shutdown と二重 race 予防)。
+                        // (PR #189 round 4 L-1 表現訂正) race の正確 timing は
+                        // 「`MainForm_Load` 完了 → `MainForm.Show` 完了 → message pump が本 BeginInvoke
+                        // action を pick up するまでの数 ms」に user が × で閉じた case。
+                        // MainForm_Load 実行中は MainForm 未表示で × clickable な window がないため、
+                        // 「Load 中 ×」ではない。_sessionService が null になってる可能性 (= FormClosed
+                        // 経由 Shutdown が deferred action 起動前に走った race) も同時 guard、defense-
+                        // in-depth で残置。
                         if (IsDisposed || Disposing || _sessionService == null) return;
 
                         var dialogResult = SessionConflictDialog.Show(
@@ -197,6 +201,12 @@ namespace GCTonePrism.Manager
                             // Cancel path では Shutdown 直接呼出後に _sessionService = null を set。
                             _sessionService.Shutdown();
                             _sessionService = null;
+                            // (PR #189 round 4 L-2 復活) `Application.Exit` ではなく `Close` で
+                            // FormClosing → FormClosed chain を確実に走らせる (= Logger.Shutdown +
+                            // FormClosed 経由の cleanup 一式)。round 3 で旧 `BeginInvoke(...Close())`
+                            // 二重 defer を素の `Close()` に短絡化した際に同 rationale が消えていたため
+                            // 復活。`Application.Exit` の方が直感的だが FormClosing が走らない drift
+                            // path があるため `Close()` を選ぶ。
                             Close();
                             return;
                         }

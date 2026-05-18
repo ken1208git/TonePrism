@@ -89,19 +89,17 @@ namespace GCTonePrism.Manager.Services
 
             Logger.Warn("[SessionConflictDialog] " + context + " context で他 PC 検出 (" + others.Count + " 件) → dialog 表示");
 
-            // (#186 round 2) Startup context の taskbar entry 不在 / focus 喪失で見失う UI bug は本 dialog
-            // 側ではなく **caller (`MainForm_Load`) 側で `BeginInvoke` を介して MainForm.Show 完了後に
-            // dialog を表示する形に倒す** ことで解消する設計に確定。
+            // (#186 round 3 確定) Startup context の taskbar entry 不在 / focus 喪失で見失う UI bug は
+            // **caller (`MainForm_Load`) 側で `BeginInvoke` defer + `ContinueLoadAfterSessionCheck`
+            // chain pattern を採用** することで解消。本 dialog 自身は標準 owner-modal MessageBox 呼出
+            // に留め、Startup / EditOperation の文言切替のみが本関数の責務。
             //
-            // round 1 試行: `MessageBoxOptions.DefaultDesktopOnly` で「default desktop 最前面に固定」する
-            // case を試したが、「他 window をクリックしても dialog が裏に行かず常時最前面」のため user
-            // から「うざい」feedback を受けて撤回 (= 「見失う」path は閉鎖されたが「他 window を見れない」
-            // 別 UX bug を生んでしまった、trade-off 不適切)。
-            //
-            // round 2 確定: caller 側 BeginInvoke defer で MainForm の taskbar 登録完了を待つ → 本 dialog
-            // は owner-modal 標準 WinForms 挙動を維持。owner Form が visible 状態であれば、taskbar entry
-            // は owner 経由、他 window click で dialog が裏に行ける、owner click で戻れる、という自然な
-            // 挙動になる。本関数は Startup / EditOperation の文言切替のみが責務。
+            // 詳細 rationale (round 1 `MessageBoxOptions.DefaultDesktopOnly` 試行 → user feedback
+            // 「常時最前面うざい」で撤回 / round 2 BeginInvoke defer のみ → reviewer High 指摘
+            // 「gate → 事後通知 regression」で再修正 / round 3 chain pattern で gate 物理維持 +
+            // taskbar entry 確保の両立) は `MainForm.MainForm_Load` 起動時 check 部の inline コメント
+            // 参照。本 dialog 単独では「caller が owner Form を visible 状態で渡せば自然な owner-modal
+            // child 挙動になる」前提のみが API contract。
             return MessageBox.Show(
                 owner,
                 body,

@@ -1529,7 +1529,7 @@ PR #184 (v0.10.0) で実装した起動時 SessionConflictDialog (= 「【危険
 
 - **`MainForm_Load` を 2 段に分割 + chain pattern で gate 維持** (`Manager/MainForm.cs`):
   - `MainForm_Load` 本体は session init + 他 PC 検出までで止め、検出時は `BeginInvoke` で dialog 表示を defer + `return` で本 method を即抜ける
-  - 残り init (= panel.Initialize × 4 + MigrateLegacySafetyFilesToSafetyFolder + RegisterUnknownSafetyFiles + CleanupStaleBackupEntries + LoadGames + StartAutoBackupIfDue + CleanupZombieStagings + StartBackgroundUpdateCheckIfDue) は新規 `ContinueLoadAfterSessionCheck()` private method に切出し
+  - 残り init (= 6 SectionPanel `_gameSectionPanel` / `_storeSectionPanel` / `_settingsSectionPanel` / `_backupSectionPanel` / `_logSectionPanel` / `_updateSectionPanel` の `Initialize` + `MigrateLegacySafetyFilesToSafetyFolder` + `RegisterUnknownSafetyFiles` + `CleanupStaleBackupEntries` + `LoadGames` + `StartAutoBackupIfDue` + `CleanupZombieStagings` + `StartBackgroundUpdateCheckIfDue`) は新規 `ContinueLoadAfterSessionCheck()` private method に切出し
   - dialog で OK 押下時のみ `ContinueLoadAfterSessionCheck` を chain で起動 → 旧実装 (v0.10.0) と同等の gate 意味論を維持 (= Cancel 時は panel init / backup / update check すべて skip)
   - 競合なし path は `ContinueLoadAfterSessionCheck` を直接呼んで code path を 1 本化
 - **`BeginInvoke` defer の効果**: MainForm の `Show` 完了 (= taskbar 登録済) 後に dialog が modal child として開く → owner-modal の自然な WinForms 挙動 (= taskbar entry あり / 他 window click で裏に行ける / MainForm click で戻れる) を実現しつつ、見失う path を物理閉鎖
@@ -1544,7 +1544,12 @@ PR #184 (v0.10.0) で実装した起動時 SessionConflictDialog (= 「【危険
 
 - **round 1** (commit `3c9129e`、撤回): `SessionConflictDialog.Show` 内で Startup context 限定 `MessageBoxOptions.DefaultDesktopOnly` を適用。dialog が default desktop 最前面に固定される効果で「見失う」path は閉鎖されたが、user feedback「他 window をクリックしても dialog が裏に行かず常時最前面でうざい」を受けて trade-off 不適切と判断
 - **round 2** (commit `ec4339c`、reviewer High 指摘で再修正): caller (`MainForm_Load`) で `BeginInvoke` で dialog 表示を defer。taskbar 問題は解消したが、`MainForm_Load` 残り init (panel.Initialize / LoadGames / RegisterUnknownSafetyFiles / CleanupStaleBackupEntries / StartAutoBackupIfDue / StartBackgroundUpdateCheckIfDue 等) が dialog 表示前に同期で走り終わる **gate → 事後通知 regression** が PR #189 reviewer High で指摘 → Cancel 押下しても backup_log INSERT / 自動 backup 起動 / アップデート check 等が既に走り終わっている path
-- **round 3** (本 entry、確定): `MainForm_Load` を 2 段に分割し chain pattern で gate を物理的に維持。残り init は `ContinueLoadAfterSessionCheck` に切出し、dialog OK 時のみ chain 起動。`SessionConflictDialog.cs` 側は標準 owner-modal MessageBox に revert + 3 round の rationale 履歴を docstring に記録 (= round 1 / 2 の経緯は本 entry + commit log + docstring で追跡可能)
+- **round 3** (commit `48bc6ed`、code logic 確定): `MainForm_Load` を 2 段に分割し chain pattern で gate を物理的に維持。残り init は `ContinueLoadAfterSessionCheck` に切出し、dialog OK 時のみ chain 起動。`SessionConflictDialog.cs` 側は標準 owner-modal MessageBox に revert
+- **round 4** (本 entry、documentation drift fix): PR #189 reviewer Medium 2 件 + Low 2 件すべて修正。code logic 変更なしの documentation / comment 修正のみ。
+  - **M-1**: 本 CHANGELOG entry 内「panel.Initialize × 4」が実際 6 件 (= 6 SectionPanel) との数値乖離だったため、抽象数を捨てて 6 panel 名を明示列挙する形式に修正 (= 将来 SectionPanel add/remove で drift する path を物理閉鎖、PR #189 round 2 で踏んだ「認識ズレが gate regression を生む」path と同質の防止策)
+  - **M-2**: `SessionConflictDialog.cs:92-104` の docstring が「round 2 確定」止まりで round 3 chain pattern を反映していなかったため、「round 3 確定」に書換え + 「詳細 rationale は `MainForm.MainForm_Load` 起動時 check 部の inline コメント参照」の pointer 形式に集約 (= 2 ファイル間の履歴記述分裂を解消)
+  - **L-1**: deferred action 内 race guard コメントの「MainForm_Load 中に user が即 × で閉じた」表現が timing として不正確 (= Load 中は MainForm 未表示で × clickable な window なし) だったため、「`MainForm_Load` 完了 → `MainForm.Show` 完了 → message pump が本 BeginInvoke action を pick up するまでの数 ms に user が × した case」と precise 表現に訂正
+  - **L-2**: round 3 で旧 `BeginInvoke(new Action(() => Close()))` 二重 defer を素の `Close()` に短絡化した際に「`Application.Exit` ではなく `Close` で FormClosing/Logger.Shutdown を確実に走らせる」rationale コメントが消えていたため復活 (= 将来「直感的な `Application.Exit` に書換え」regression 予防)
 
 ##### PR #185 / #188 (manifest 単独 DPI awareness 試行) との分離
 
