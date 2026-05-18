@@ -1264,6 +1264,12 @@ Release.ps1 と一致 (caller CI は `%ERRORLEVEL%` で 4 通り区別):
 - DB 不到達 / SQLite BUSY/LOCKED 永続失敗等 → `ManagerSessionService.Initialize` / `DetectOtherActiveSessions` が Logger.Error で trail を残しつつ **空 list / no-op で継続**。Manager 自体は起動 + 操作可能、検出機能のみ退化 (= 旧運用「同時起動注意 MessageBox」の自己管理依存に一時 fallback)。
 - 編集操作前 check も `_sessionService == null` で fail-soft (= MainForm.Load 完了前 / Initialize 失敗時は `DialogResult.OK` 返却で block しない)。
 
+**起動時 UI freeze 受容仕様** (PR #184 round 2 Medium-3 で明示化): `ManagerSessionService.Initialize` + `DetectOtherActiveSessions` は `MainForm_Load` (= UI thread) から sync 呼出されており、内部で 3 DB query (`DeleteStaleSessions` / `UpsertSelfSession` / `SelectOtherActiveSessions`) が `DatabaseConnection.ExecuteWithRetry` 経由で `busy_timeout=10000` ms まで block しうる。SMB 共有 + 他 PC 同時 write + retry 重複の worst case で **起動時に最大 ~30 秒 UI freeze する受容仕様** とする。設計判断の根拠:
+  - heartbeat thread 本体は `Task.Run` で async 化済、freeze は **起動時の最初の 3 query** に限定 (= 通常 path では 100 ms 以下)
+  - 起動時 background 化案 (= `Task.Run` 経由 + 完了 callback で SessionConflictDialog 表示) は scope creep、現在の sync path は実装シンプル + 失敗時 fail-soft で実害コントロール下
+  - 学校 LAN 運用で worst case 30 秒は許容範囲 (Manager 起動は user の能動操作で、通常運用では既に他の起動待ち = Launcher 起動 / DB initialize 等で数秒待つ前例あり)
+  - SMB latency 改善 / retry tuning は別 issue 候補、本 PR は受容
+
 #### 3.8.6 Launcher session tracking (PR scope 外、PR3b で扱う)
 
 本機構は **Manager 専用**。Launcher の LAN-wide session tracking は別 PR (PR3b) で扱う。**設計原則**: SPEC §6.5 / §3.x 序論 (L191 / L203 / L1988 付近) で「Launcher は SQLite に直接書き込まず、JSON ファイルを `responses/` 等の drop folder に出力 → Manager が取り込む drop-folder 方式」と明示されているため、Launcher session tracking は本 manager_sessions table とは異なる経路 (JSON drop folder + Manager polling / file system flag + Manager enumeration / TCP/UDP 通信) で実装する必要がある。candidates 検討は #179 issue 本文 update + PR3b 着手時に設計議論から。

@@ -63,6 +63,9 @@ namespace GCTonePrism.Manager
                         "Manager は 1 つだけ起動できます",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Stop);
+                    // (#179 round 2 Low-1) 重複起動 path でも Logger.Shutdown を呼んで "Manager 終了" trail
+                    // を残す。これがないと log 解析時に「crash したのか正常 exit したのか」区別できなくなる。
+                    Logger.Shutdown();
                     return;
                 }
 
@@ -112,12 +115,18 @@ namespace GCTonePrism.Manager
         /// (#179) Named Mutex の name に含める install path hash を算出 (MD5 ベース、衝突回避目的のみで
         /// crypto 用途ではない)。dev 環境と本番 install を別 mutex に分離するため、`Application.StartupPath`
         /// (= 自 exe の dir) を hash 化。
+        /// (round 2 Low-2) Windows file system は case-insensitive (NTFS / SMB 共に default)、かつ
+        /// `Application.StartupPath` は呼び方 (cmd 直叩き / Explorer shortcut / Process.Start) で casing
+        /// が変わる可能性がある (Microsoft docs「the path may not have the exact casing of the original
+        /// on disk」)。`ToLowerInvariant()` で正規化して同 dir の異 casing が別 mutex に化ける drift を
+        /// 物理閉鎖する。
         /// </summary>
         private static string ComputeInstallPathHash(string installPath)
         {
+            string normalized = (installPath ?? string.Empty).ToLowerInvariant();
             using (var md5 = System.Security.Cryptography.MD5.Create())
             {
-                byte[] bytes = System.Text.Encoding.UTF8.GetBytes(installPath ?? string.Empty);
+                byte[] bytes = System.Text.Encoding.UTF8.GetBytes(normalized);
                 byte[] hash = md5.ComputeHash(bytes);
                 return BitConverter.ToString(hash).Replace("-", string.Empty).Substring(0, 16);
             }

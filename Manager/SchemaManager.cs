@@ -1440,8 +1440,11 @@ namespace GCTonePrism.Manager
         /// </summary>
         private void MigrateV12ToV13(SQLiteConnection connection, SQLiteTransaction transaction)
         {
+            // CREATE TABLE IF NOT EXISTS で idempotent。table 既存時 (= dev test で手動 INSERT 済 / 部分
+            // migration 後の再実行) も silent skip。log は「migration 完了」状態表現で「作成しました」と
+            // 誤読されない表記 (round 2 Info-2)。
             CreateManagerSessionsTable(connection, transaction);
-            Logger.Info("[DatabaseManager] manager_sessions テーブルを作成しました (v12 → v13)");
+            Logger.Info("[DatabaseManager] v12 → v13 migration 完了 (manager_sessions table 確保)");
         }
 
         /// <summary>

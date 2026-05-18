@@ -35,12 +35,15 @@ namespace GCTonePrism.Manager.Services
                 Logger.Warn("[SessionConflictHelper] caller=null、check skip (fail-soft で OK 返却): op=" + operationDescription);
                 return DialogResult.OK;
             }
-            var mainForm = caller.FindForm() as MainForm;
+            // (round 2 Low-3) FindForm は parent walk なので 1 回呼出に整理 (旧実装は cast 用 + Warn message
+            // 内で 2 回呼出していた)。
+            var form = caller.FindForm();
+            var mainForm = form as MainForm;
             if (mainForm == null)
             {
                 // SectionPanel が MainForm 以外にホストされた場合の drift path。silent skip は維持するが
                 // Warn 出力で debug 容易化。将来 panel をネスト dialog に embed する設計変更時に検出。
-                Logger.Warn("[SessionConflictHelper] caller.FindForm() が MainForm でない (type=" + (caller.FindForm()?.GetType().Name ?? "null") + ")、check skip (fail-soft で OK 返却): op=" + operationDescription);
+                Logger.Warn("[SessionConflictHelper] caller.FindForm() が MainForm でない (type=" + (form?.GetType().Name ?? "null") + ")、check skip (fail-soft で OK 返却): op=" + operationDescription);
                 return DialogResult.OK;
             }
             return mainForm.CheckSessionConflictBeforeWrite(operationDescription);

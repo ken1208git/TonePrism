@@ -52,6 +52,11 @@ namespace GCTonePrism.Manager.Services
             long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             string detectedListLines = BuildDetectedList(others, nowMs);
 
+            // (round 2 High-1) MessageBox は markdown を解釈しないため `**...**` 等の強調記法は literal 表示
+            // される。本文は plain text で OS button label (= 「OK」/「キャンセル」) と一貫させる。
+            // (round 2 Medium-1) operationDescription が「ゲーム削除」「データベース初期化」等の場合に
+            // 「{op} の内容と...」が日本語として grammatical に合わない問題を解消するため、template を
+            // 「このまま {op} を実行すると...」の汎用文に統一 (op は名詞句のままで grammar 違和感なし)。
             string title;
             string body;
             if (context == SessionConflictDialogContext.Startup)
@@ -61,8 +66,8 @@ namespace GCTonePrism.Manager.Services
                     detectedListLines + "\n\n" +
                     "両方の PC で同時に Manager を使うと、編集内容や\n" +
                     "バックアップがお互いに上書きされて消える恐れがあります。\n\n" +
-                    "**「OK」**を押す: このまま起動する (データが消える可能性を承知)\n" +
-                    "**「キャンセル」**を押す: Manager を終了する (他 PC の人に確認してから起動する)";
+                    "「OK」を押す: このまま起動する (データが消える可能性を承知)\n" +
+                    "「キャンセル」を押す: Manager を終了する (他 PC の人に確認してから起動する)";
             }
             else
             {
@@ -70,10 +75,10 @@ namespace GCTonePrism.Manager.Services
                 string opLabel = string.IsNullOrEmpty(operationDescription) ? "この操作" : operationDescription;
                 body =
                     detectedListLines + "\n\n" +
-                    "このまま保存すると、" + opLabel + " の内容と\n" +
-                    "他 PC の編集内容がお互いに上書きされて消える恐れがあります。\n\n" +
-                    "**「OK」**を押す: このまま保存する (データが消える可能性を承知)\n" +
-                    "**「キャンセル」**を押す: 保存を中止する (他 PC の人に確認してから保存する)";
+                    "このまま " + opLabel + " を実行すると、\n" +
+                    "他 PC の編集内容とお互いに上書きされて消える恐れがあります。\n\n" +
+                    "「OK」を押す: このまま実行する (データが消える可能性を承知)\n" +
+                    "「キャンセル」を押す: 実行を中止する (他 PC の人に確認してから実行する)";
             }
 
             Logger.Warn("[SessionConflictDialog] " + context + " context で他 PC 検出 (" + others.Count + " 件) → dialog 表示");

@@ -126,7 +126,12 @@ namespace GCTonePrism.Manager.Services
                             Logger.Warn("[ManagerSessionService] heartbeat task shutdown 時 inner exception (継続): " + inner.GetType().Name + ": " + inner.Message);
                         }
                     }
-                    _heartbeatCts.Dispose();
+                    // (round 2 Low-4) Wait が timeout で抜けた場合 (= heartbeat task が SQLite BUSY 中で
+                    // 最大 10 秒 block) は task がまだ生きていて、Dispose 直後に `token.WaitHandle.WaitOne`
+                    // で ObjectDisposedException を踏む path がある。loop 内 catch で握り潰されるが
+                    // shutdown log に noise を残すため、Dispose 側を try/catch で握り潰して shutdown trail
+                    // を clean に保つ。CancellationTokenSource は finalizer なしで GC されても害なし。
+                    try { _heartbeatCts.Dispose(); } catch { /* race による ObjectDisposedException 等は無視 */ }
                     _heartbeatCts = null;
                 }
                 _repo.DeleteSelfSession(_pcName);

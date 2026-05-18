@@ -105,7 +105,7 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnEdit_Click(object sender, EventArgs e)
         {
-            if (Services.SessionConflictHelper.CheckBeforeWrite(this,"ストアセクション編集") == DialogResult.Cancel) return;
+            // (round 2 High-2) selection 依存 validation を session conflict check より前に倒す
             var section = GetSelectedSection();
             if (section == null)
             {
@@ -121,6 +121,7 @@ namespace GCTonePrism.Manager.Controls
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ストアセクション編集") == DialogResult.Cancel) return;
 
             using (var form = new StoreSectionForm(_dbManager, latest))
             {
@@ -133,7 +134,7 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnDelete_Click(object sender, EventArgs e)
         {
-            if (Services.SessionConflictHelper.CheckBeforeWrite(this,"ストアセクション削除") == DialogResult.Cancel) return;
+            // (round 2 High-2) selection 依存 validation を session conflict check より前に倒す
             var section = GetSelectedSection();
             if (section == null)
             {
@@ -148,6 +149,8 @@ namespace GCTonePrism.Manager.Controls
 
             if (result == DialogResult.Yes)
             {
+                // (round 2 High-2) user 確認後、DB write 直前で session conflict check
+                if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ストアセクション削除") == DialogResult.Cancel) return;
                 try
                 {
                     _dbManager.DeleteSection(section.SectionId);
@@ -163,13 +166,13 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnMoveUp_Click(object sender, EventArgs e)
         {
-            if (Services.SessionConflictHelper.CheckBeforeWrite(this,"ストアセクション並び替え") == DialogResult.Cancel) return;
+            // (round 2 High-2) selection 依存 validation は MoveSection 内、session conflict check は
+            // MoveSection の write 直前で実行する形に集約
             MoveSection(-1);
         }
 
         private void btnMoveDown_Click(object sender, EventArgs e)
         {
-            if (Services.SessionConflictHelper.CheckBeforeWrite(this,"ストアセクション並び替え") == DialogResult.Cancel) return;
             MoveSection(1);
         }
 
@@ -181,6 +184,9 @@ namespace GCTonePrism.Manager.Controls
 
             int newIdx = idx + direction;
             if (newIdx < 0 || newIdx >= _sections.Count) return;
+
+            // (round 2 High-2) selection / range validation 通過後、DB write 直前で session conflict check
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ストアセクション並び替え") == DialogResult.Cancel) return;
 
             var sectionA = _sections[idx];
             var sectionB = _sections[newIdx];

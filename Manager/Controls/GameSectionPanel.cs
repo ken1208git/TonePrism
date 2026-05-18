@@ -146,7 +146,8 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnEditGame_Click(object sender, EventArgs e)
         {
-            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ゲーム編集") == DialogResult.Cancel) return;
+            // (round 2 High-2) selection 依存 validation を session conflict check より前に倒し、
+            // 「行選択なし」で警告 dialog が出る UX 退行を物理閉鎖。
             if (dgvGames.SelectedRows.Count == 0)
             {
                 MessageBox.Show("編集するゲームを選択してください。", "情報",
@@ -165,6 +166,9 @@ namespace GCTonePrism.Manager.Controls
                 return;
             }
 
+            // 全 validation 通過後、DB write 直前で session conflict check
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ゲーム編集") == DialogResult.Cancel) return;
+
             using (var form = new EditGameForm(_dbManager, game))
             {
                 if (form.ShowDialog() == DialogResult.OK)
@@ -179,7 +183,7 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnVersionUp_Click(object sender, EventArgs e)
         {
-            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ゲームのバージョンアップ") == DialogResult.Cancel) return;
+            // (round 2 High-2) selection 依存 validation を session conflict check より前に倒す
             if (dgvGames.SelectedRows.Count == 0)
             {
                 MessageBox.Show("バージョンアップするゲームを選択してください。", "情報",
@@ -189,6 +193,7 @@ namespace GCTonePrism.Manager.Controls
 
             var selectedGame = dgvGames.SelectedRows[0].DataBoundItem as GameInfo;
             if (selectedGame == null) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ゲームのバージョンアップ") == DialogResult.Cancel) return;
 
             var game = _dbManager.GetGameById(selectedGame.GameId);
             if (game == null)
@@ -271,13 +276,14 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnDeleteGame_Click(object sender, EventArgs e)
         {
-            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ゲーム削除") == DialogResult.Cancel) return;
+            // (round 2 High-2) selection 依存 validation を session conflict check より前に倒す
             if (dgvGames.SelectedRows.Count == 0)
             {
                 MessageBox.Show("削除するゲームを選択してください。", "情報",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ゲーム削除") == DialogResult.Cancel) return;
 
             var selectedGame = dgvGames.SelectedRows[0].DataBoundItem as GameInfo;
             if (selectedGame == null) return;
