@@ -14,8 +14,6 @@
     <Deterministic>true</Deterministic>
     <NuGetPackageImportStamp>
     </NuGetPackageImportStamp>
-    <!-- (#185) DPI awareness 等の app.manifest を埋め込み。GDI+ Window taskbar shim + 高 DPI file dialog 縮小の同根 fix。 -->
-    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>

@@ -1521,23 +1521,6 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
-### [Manager v0.10.1] - 2026-05-18
-
-#### Fixed (#185 — app.manifest に DPI awareness 追加)
-
-- **`Manager/app.manifest` を新規追加** + `GCTonePrism_Manager.csproj` の PropertyGroup に `<ApplicationManifest>app.manifest</ApplicationManifest>` を埋め込み: Manager exe に DPI awareness 設定が欠落していたために発生していた **2 つの UX bug を同根原因 fix で同時 closure**:
-  - **症状 (1) GDI+ Window がタスクバーに 2 entry 目として表示**: タスクバー上に `ゲームセンターTONE Prism 管理ソフト` (= 本物の MainForm、`Class=WindowsForms10.Window.8.app.*`) と並んで `GDI+ Window (GCTonePrism_Manager.exe)` (= Windows compatibility shim、`Class=GDI+ Hook Window Class`) が独立 entry で表示されていた drift。manifest 追加で shim window が `Visible=False` 状態に倒れて taskbar entry を出さなくなる (= EnumWindows 検証で `Visible=True` → `Visible=False` への遷移を verify 済)。
-  - **症状 (2) 高 DPI モニターで file dialog が極端に縮小表示**: 2.8K 等の高 DPI モニターで `AddGameForm` → 「ファイル参照」button → `CommonOpenFileDialog` / `OpenFileDialog` を開くと、dialog window が物理 pixel native size で表示され、論理解像度比で極端に縮小して見える drift。manifest 追加で `<dpiAwareness>PerMonitorV2,PerMonitor</dpiAwareness>` 宣言が効いて Windows の DPI scaling が dialog にも適用される。
-- **manifest 内容**: 標準 WinForms 推奨 pattern を踏襲:
-  - `<compatibility>` で Windows 11 / 10 / 8.1 / 8 / 7 / Vista の supported OS GUID を宣言 (= 旧 OS 互換 shim 抑制、Windows 10 を「未サポート OS」扱いされて Vista compat mode に倒れる drift 解消)
-  - `<dpiAware>True/PM</dpiAware>` で Windows 8.1+ 用 Per-Monitor V1 fallback
-  - `<dpiAwareness>PerMonitorV2,PerMonitor</dpiAwareness>` で Windows 10 1703+ 用、`PerMonitorV2` が unsupported なら `PerMonitor` に fallback
-  - `<requestedExecutionLevel level="asInvoker" uiAccess="false" />` で **UAC 昇格不要** を明示 (= SPEC §3.7.4「Manager.exe の manifest は `requireAdministrator` を持たない、通常 user 権限前提」と整合、admin 化は将来別 PR で SPEC と同期切替の運用)
-- **scope 限定**: 本 PR は manifest 追加 1 ファイルのみ。`Form.AutoScaleMode` の見直し (= 現状の Font mode → Dpi mode 切替) は **scope 外**。各 Form (MainForm / AddGameForm / EditGameForm / VersionUpForm / StoreSectionForm / BackupSettingsForm 等) の現状レイアウトが Font mode で調整済の前提で、DPI awareness 宣言だけ追加して実機目視で regression がないことを確認する戦略 (= もし regression あれば AutoScaleMode 見直しを別 PR で追加する余地)。
-- **assembly version bump**: `0.10.0.0` → `0.10.1.0` (= patch、bugfix のみ、DB schema 変更なし、AGENTS.md「Release and Versioning」のルールに準拠)。
-- **verify**: Manager Release build clean (warnings 0)。実機起動 → window enumeration で `GDI+ Hook Window Class` が `Visible=False` 状態 (= taskbar 出ない) を verify 済。Taskbar candidate (= `Visible + AppWindow + Title あり + ToolWindow ではない`) は MainForm 1 件のみ確認。高 DPI 環境での file dialog scaling は 2.8K monitor 実機で目視確認 (= reviewer / merge 後の verify に委ねる、本 PR では manifest 機構的に同 mechanism で fix 確実な見込み)。
-- **関連**: PR #184 (v0.10.0、LAN-wide 同時起動検出) の verify session で発見した 2 つの独立 UX bug を [#185](https://github.com/ken1208git/GCTonePrism/issues/185) に集約。同 verify session で発見した別 issue ([#186](https://github.com/ken1208git/GCTonePrism/issues/186) Startup dialog タスクバー / [#187](https://github.com/ken1208git/GCTonePrism/issues/187) AddGameForm rollback) は別 PR で対応予定。
-
 ### [Manager v0.10.0] - 2026-05-18
 
 #### Added (#179 + #178 (c) — Manager LAN-wide 同時起動検出 + 競合 risk 操作前 dialog)
