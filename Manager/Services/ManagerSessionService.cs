@@ -49,7 +49,11 @@ namespace GCTonePrism.Manager.Services
         public ManagerSessionService(ManagerSessionRepository repo)
         {
             _repo = repo;
-            _pcName = Environment.MachineName ?? "(unknown)";
+            // (round 5 L-3) Environment.MachineName は MSDN 仕様で null を返さず、取得不能時は
+            // InvalidOperationException を throw する。旧 `?? "(unknown)"` は dead code だった drift を
+            // 修正、実際の例外 path を catch して fallback。
+            try { _pcName = Environment.MachineName; }
+            catch (InvalidOperationException) { _pcName = "(unknown)"; }
             _pid = System.Diagnostics.Process.GetCurrentProcess().Id;
             var ver = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
             _managerVersion = ver != null ? ver.ToString(3) : "(unknown)";

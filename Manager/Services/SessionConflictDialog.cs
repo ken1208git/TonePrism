@@ -43,12 +43,10 @@ namespace GCTonePrism.Manager.Services
             IReadOnlyList<ManagerSessionInfo> others,
             string operationDescription = null)
         {
-            if (others == null || others.Count == 0)
-            {
-                // defensive: caller は事前に Count > 0 を確認するべきだが、空 list なら検出なし扱いで OK 即時返却。
-                return DialogResult.OK;
-            }
-
+            // (round 5 L-4) 空 list / null の事前 guard は caller の contract に倒す:
+            //   - `MainForm.CheckSessionConflictBeforeWrite`: `others.Count == 0` で early return
+            //   - `MainForm_Load` startup check: `otherSessionsAtStartup.Count > 0` 内側でのみ呼出
+            // 同 assembly internal sealed class で caller は grep で全数確認可能、defensive 二重を撤去。
             long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             string detectedListLines = BuildDetectedList(others, nowMs);
 

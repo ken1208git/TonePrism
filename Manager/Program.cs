@@ -115,15 +115,27 @@ namespace GCTonePrism.Manager
         /// (#179) Named Mutex の name に含める install path hash を算出 (MD5 ベース、衝突回避目的のみで
         /// crypto 用途ではない)。dev 環境と本番 install を別 mutex に分離するため、`Application.StartupPath`
         /// (= 自 exe の dir) を hash 化。
-        /// (round 2 Low-2) Windows file system は case-insensitive (NTFS / SMB 共に default)、かつ
-        /// `Application.StartupPath` は呼び方 (cmd 直叩き / Explorer shortcut / Process.Start) で casing
-        /// が変わる可能性がある (Microsoft docs「the path may not have the exact casing of the original
-        /// on disk」)。`ToLowerInvariant()` で正規化して同 dir の異 casing が別 mutex に化ける drift を
-        /// 物理閉鎖する。
+        ///
+        /// **path 正規化** (round 2 Low-2 + round 5 L-5 で拡張):
+        /// - `Path.GetFullPath()` で 8.3 短縮形式 (`PROGRA~1`) / 相対 path / 末尾 `\` 有無を解決
+        /// - `ToLowerInvariant()` で case-insensitive 正規化 (NTFS / SMB default)
+        /// - `Application.StartupPath` は呼び方 (cmd 直叩き / Explorer shortcut / Process.Start) で
+        ///   casing / 8.3 表記が変わりうるため、同 install dir でも別 mutex に化ける drift を物理閉鎖
+        /// - SMB UNC path の `\\?\` prefix 等は学校 LAN 運用では稀、本 PR では未対応 (別 issue 候補)
         /// </summary>
         private static string ComputeInstallPathHash(string installPath)
         {
-            string normalized = (installPath ?? string.Empty).ToLowerInvariant();
+            string normalized;
+            try
+            {
+                // GetFullPath: 8.3 短縮形式展開 + 相対 path 解決 + 末尾 `\` 正規化
+                normalized = System.IO.Path.GetFullPath(installPath ?? string.Empty).ToLowerInvariant();
+            }
+            catch (Exception)
+            {
+                // GetFullPath は invalid path char / I/O error 等で throw、fallback で生 path を lower 化
+                normalized = (installPath ?? string.Empty).ToLowerInvariant();
+            }
             using (var md5 = System.Security.Cryptography.MD5.Create())
             {
                 byte[] bytes = System.Text.Encoding.UTF8.GetBytes(normalized);
