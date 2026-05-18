@@ -54,10 +54,17 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnResetDatabase_Click(object sender, EventArgs e)
         {
+            // (round 5 M-1) 最 destructive (DB 全削除 + 再構築) なので **2 段階 check**:
+            //   (1) ConfirmForm 開く前 = user 親切性 (= 他 PC 起動中なら confirm 開かず早期 abort)
+            //   (2) ConfirmForm OK 後 + ProcessingDialog 起動前 = race fence (= confirm 読んでる間に
+            //       他 PC が起動した case を catch)。confirm を user が長時間読む可能性があるので
+            //       race window が無視できない、本 callsite のみ 2 段階。
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "データベース初期化") == DialogResult.Cancel) return;
             using (var confirmForm = new ResetDatabaseConfirmForm())
             {
                 if (confirmForm.ShowDialog() != DialogResult.Yes) return;
             }
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "データベース初期化") == DialogResult.Cancel) return;
 
             // ResetDatabase は DBファイル削除 + games フォルダ再構築 + テーブル再作成 +
             // マイグレーション再実行を行う。共有フォルダ越しでは時間がかかるので進捗バー表示。

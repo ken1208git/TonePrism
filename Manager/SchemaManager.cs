@@ -18,7 +18,9 @@ namespace GCTonePrism.Manager
         // 現在のデータベースバージョン
         // 構造変更があるたびにインクリメントする
         // v11: SPEC v1.5.1 (2026-03-28) で変更された surveys / play_records スキーマの drift 修正（v0.8.1）
-        private const int CurrentDbVersion = 12;
+        // v12: backup_log に relative_path 列追加 (#127、v0.8.2)
+        // v13: manager_sessions テーブル新設 (#179、Manager LAN-wide 同時起動検出、v0.10.0)
+        private const int CurrentDbVersion = 13;
 
         public SchemaManager(DatabaseConnection conn)
         {
@@ -447,6 +449,9 @@ namespace GCTonePrism.Manager
             // backup_logテーブル作成（v9 で追加）
             CreateBackupLogTable(connection, transaction);
 
+            // (#179) manager_sessions テーブル作成 (v13 で追加、MigrateV12ToV13 でも再利用する helper)
+            CreateManagerSessionsTable(connection, transaction);
+
             // 新規DB向けにバックアップ関連の設定デフォルト値を投入
             InsertBackupDefaults(connection, transaction);
         }
@@ -809,6 +814,27 @@ namespace GCTonePrism.Manager
                         else
                         {
                             Logger.Warn("[DatabaseManager] v10→v11 が未完のため user_version は 10 のまま据え置き（v12 物理変更のみ先行適用）");
+                        }
+                    }
+
+                    if (currentVersion < 13)
+                    {
+                        // (#179) v12 → v13: manager_sessions table 新設。CREATE TABLE IF NOT EXISTS
+                        // で idempotent (= CreateTables 先行 path で既に作られていれば no-op)。物理変更
+                        // (= table 作成) 自体は先行実行する。
+                        MigrateV12ToV13(connection, migTransaction);
+
+                        // (round 3 H-1 fix) v10→v11 / v11→v12 と同じ guard pattern: 直前の migration が
+                        // 未完なら currentVersion bump を見送り、user_version は据え置きで次回起動時に
+                        // 再試行させる。MigrateV12ToV13 自体は CREATE IF NOT EXISTS で idempotent なので
+                        // 物理変更が先行適用されても害なし。
+                        if (currentVersion >= 12)
+                        {
+                            currentVersion = 13;
+                        }
+                        else
+                        {
+                            Logger.Warn("[DatabaseManager] 直前の migration が未完のため user_version は " + currentVersion + " のまま据え置き (v13 物理変更のみ先行適用)");
                         }
                     }
 
@@ -1418,6 +1444,44 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
+        /// (#179) v12 → v13: manager_sessions テーブル新設。
+        /// Manager の LAN-wide 同時起動検出 + 競合 risk 操作前 dialog のための SoT。
+        /// 各 PC で稼働中の Manager process が self row を heartbeat update、起動時の stale cleanup +
+        /// 他 PC row 検出に使う。SPEC §3.8 / §7.3 参照。
+        /// CreateTables で既に作成済みの場合 (= 新規 DB を v13 で作る場合) は CREATE TABLE IF NOT EXISTS
+        /// が黙って skip するため idempotent。
+        /// </summary>
+        private void MigrateV12ToV13(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            // CREATE TABLE IF NOT EXISTS で idempotent。table 既存時 (= dev test で手動 INSERT 済 / 部分
+            // migration 後の再実行) も silent skip。log は「migration 完了」状態表現で「作成しました」と
+            // 誤読されない表記 (round 2 Info-2)。
+            CreateManagerSessionsTable(connection, transaction);
+            Logger.Info("[DatabaseManager] v12 → v13 migration 完了 (manager_sessions table 確保)");
+        }
+
+        /// <summary>
+        /// (#179) manager_sessions テーブル作成 (CreateTables / MigrateV12ToV13 共通)。
+        /// schema は SPEC §7.3 参照。`pc_name` を PRIMARY KEY、同 PC は 1 row のみ (重複起動は Named
+        /// Mutex で物理 block する設計、SPEC §3.8)。
+        /// </summary>
+        private static void CreateManagerSessionsTable(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            string sql = @"
+                CREATE TABLE IF NOT EXISTS manager_sessions (
+                    pc_name TEXT PRIMARY KEY,
+                    started_at_unix_ms INTEGER NOT NULL,
+                    last_heartbeat_at_unix_ms INTEGER NOT NULL,
+                    pid INTEGER NOT NULL,
+                    manager_version TEXT NOT NULL
+                )";
+            using (var cmd = new SQLiteCommand(sql, connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        /// <summary>
         /// surveys テーブル作成（CreateTables / MigrateV10ToV11 共通）
         /// </summary>
         private static void CreateSurveysTable(SQLiteConnection connection, SQLiteTransaction transaction)
@@ -1519,6 +1583,7 @@ namespace GCTonePrism.Manager
             { "store_sections", new[] { "section_id", "title", "section_type", "section_source", "display_order", "max_display_count", "is_visible" } },
             { "store_section_games", new[] { "id", "section_id", "game_id", "display_order", "display_text" } },
             { "backup_log", new[] { "id", "started_at", "completed_at", "pc_name", "file_path", "relative_path", "file_size_bytes", "status", "error_message", "trigger_type" } },
+            { "manager_sessions", new[] { "pc_name", "started_at_unix_ms", "last_heartbeat_at_unix_ms", "pid", "manager_version" } },
         };
 
         /// <summary>

@@ -43,38 +43,121 @@ namespace GCTonePrism.Manager
                 // 古い .NET / SecurityProtocol 未定義の極端ケースは ignore (Win10/11 default で OK)
             }
 
+            // (#179) Named Mutex で同 PC 重複起動を物理 block。
+            // - mutex name に install path hash を含めて dev 環境 (= repo) と本番 install (= 学校 LAN
+            //   の install dir) で別 mutex に分離する。同 PC で複数 install dir 並存する場合も衝突なし。
+            // - `Global\` prefix で Windows session 全体に effective (= 同 user の別 RDP session でも block)。
+            // - createdNew=false で既に取得中の同 mutex 検出 → modal dialog → return (Application.Run 不到達)。
+            // - mutex は process lifetime 中保持、`Application.Run` 終了で `using` 経由 release。
+            // 詳細: SPEC §3.8 同時起動検出機構、CHANGELOG ## Manager v0.10.0 参照。
+            string mutexName = "Global\\GCTonePrism_Manager_SingleInstance_" + ComputeInstallPathHash(Application.StartupPath);
+            using (var singleInstanceMutex = new System.Threading.Mutex(initiallyOwned: true, name: mutexName, createdNew: out bool createdNew))
+            {
+                if (!createdNew)
+                {
+                    Logger.Warn("[Program] 同 PC で Manager が既に起動中 (mutex 取得失敗、name=" + mutexName + ")、2 個目 process は exit");
+                    MessageBox.Show(
+                        "既に同じ PC で Manager が起動中です。\n\n" +
+                        "2 つ目を起動すると編集内容や設定がお互いに上書きされて消える恐れがあります。\n" +
+                        "もう一方を閉じてから再度お試しください。",
+                        "Manager は 1 つだけ起動できます",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Stop);
+                    // (#179 round 2 Low-1) 重複起動 path でも Logger.Shutdown を呼んで "Manager 終了" trail
+                    // を残す。これがないと log 解析時に「crash したのか正常 exit したのか」区別できなくなる。
+                    Logger.Shutdown();
+                    return;
+                }
+
+                try
+                {
+                    // パスの確認（デバッグ用）
+                    PathManager.VerifyPaths();
+
+                    Application.EnableVisualStyles();
+                    Application.SetCompatibleTextRenderingDefault(false);
+                    Application.Run(new MainForm());
+                }
+                catch (DirectoryNotFoundException ex)
+                {
+                    Logger.Error("起動エラー (DirectoryNotFound)", ex);
+                    MessageBox.Show(
+                        ex.Message,
+                        "起動エラー",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                    Application.Exit();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("起動エラー", ex);
+                    MessageBox.Show(
+                        $"アプリケーションの起動に失敗しました。\n\n{ex.Message}",
+                        "起動エラー",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                    Application.Exit();
+                }
+                finally
+                {
+                    Logger.Shutdown();
+                    // (#179 round 1 L-1) initiallyOwned: true で取得した Mutex は ReleaseMutex で
+                    // 明示 release してから Dispose する。`using` の Dispose 単独では kernel 上「abandoned
+                    // mutex」状態を経由するため、将来 `WaitOne` 経由 pattern を追加した時に
+                    // AbandonedMutexException を踏む path を予防。
+                    try { singleInstanceMutex.ReleaseMutex(); }
+                    catch (Exception relEx)
+                    {
+                        // (round 8 L-4) Warn message を ReleaseMutex 失敗の **cause** 主題に書換え。
+                        // 旧 message「Dispose で abandoned 状態経由」は cause/effect が逆で、その後の
+                        // Dispose 挙動を説明していて triage 上 noise。実際の cause は `Main` thread 以外
+                        // (= ThreadPool / Task 経由) から ReleaseMutex を呼んだ場合の ApplicationException
+                        // が typical (mutex を所有していない thread から release を試みた)、または
+                        // AbandonedMutexException 経由で取得した case。 docstring L106-107 の「abandoned
+                        // 状態経由」説明は preamble 側で retain (= 設計判断の根拠としては正しい)。
+                        Logger.Warn("[Program] Mutex.ReleaseMutex 失敗 (mutex 非所有 thread からの release 等が typical cause): " + relEx.GetType().Name + ": " + relEx.Message);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// (#179) Named Mutex の name に含める install path hash を算出 (SHA256 ベース、衝突回避目的のみで
+        /// crypto 用途ではない)。dev 環境と本番 install を別 mutex に分離するため、`Application.StartupPath`
+        /// (= 自 exe の dir) を hash 化。
+        ///
+        /// **path 正規化** (round 2 Low-2 + round 5 L-5 で拡張):
+        /// - `Path.GetFullPath()` で 8.3 短縮形式 (`PROGRA~1`) / 相対 path / 末尾 `\` 有無を解決
+        /// - `ToLowerInvariant()` で case-insensitive 正規化 (NTFS / SMB default)
+        /// - `Application.StartupPath` は呼び方 (cmd 直叩き / Explorer shortcut / Process.Start) で
+        ///   casing / 8.3 表記が変わりうるため、同 install dir でも別 mutex に化ける drift を物理閉鎖
+        /// - SMB UNC path の `\\?\` prefix 等は学校 LAN 運用では稀、本 PR では未対応 (別 issue 候補)
+        ///
+        /// **hash algorithm** (round 7 L-2 で MD5 → SHA256 移行): 旧 MD5 実装は `FIPS=enabled` group
+        /// policy が適用された Windows 環境で `MD5.Create()` 自体が `InvalidOperationException ("not part
+        /// of the Windows Platform FIPS validated cryptographic algorithms")` を throw する path があった。
+        /// 本関数は mutex 取得 **前** に呼ばれるため `Main` の最外 catch がなく、企業 PC 流用の LAN 環境で
+        /// FIPS 有効化されると Manager が silent crash する drift 路があった。SHA256 は FIPS 認証 algorithm
+        /// で policy 影響なし、先頭 16 文字を使う形は維持 (= 衝突回避用途で 16 文字 = 64 bit で十分)。
+        /// </summary>
+        private static string ComputeInstallPathHash(string installPath)
+        {
+            string normalized;
             try
             {
-                // パスの確認（デバッグ用）
-                PathManager.VerifyPaths();
-
-                Application.EnableVisualStyles();
-                Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new MainForm());
+                // GetFullPath: 8.3 短縮形式展開 + 相対 path 解決 + 末尾 `\` 正規化
+                normalized = System.IO.Path.GetFullPath(installPath ?? string.Empty).ToLowerInvariant();
             }
-            catch (DirectoryNotFoundException ex)
+            catch (Exception)
             {
-                Logger.Error("起動エラー (DirectoryNotFound)", ex);
-                MessageBox.Show(
-                    ex.Message,
-                    "起動エラー",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-                Application.Exit();
+                // GetFullPath は invalid path char / I/O error 等で throw、fallback で生 path を lower 化
+                normalized = (installPath ?? string.Empty).ToLowerInvariant();
             }
-            catch (Exception ex)
+            using (var sha = System.Security.Cryptography.SHA256.Create())
             {
-                Logger.Error("起動エラー", ex);
-                MessageBox.Show(
-                    $"アプリケーションの起動に失敗しました。\n\n{ex.Message}",
-                    "起動エラー",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-                Application.Exit();
-            }
-            finally
-            {
-                Logger.Shutdown();
+                byte[] bytes = System.Text.Encoding.UTF8.GetBytes(normalized);
+                byte[] hash = sha.ComputeHash(bytes);
+                return BitConverter.ToString(hash).Replace("-", string.Empty).Substring(0, 16);
             }
         }
 

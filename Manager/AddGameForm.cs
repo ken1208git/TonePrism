@@ -377,6 +377,42 @@ namespace GCTonePrism.Manager
                 // 製作者情報を設定
                 game.Developers = developers;
 
+                // (#179 round 6 M-1 案 B) DB write 直前で他 PC session を再 check (race fence)。
+                // SectionPanel 側 (`ShowDialog` 直前) で既に 1 回 check 済だが、ファイルコピーに 30 秒
+                // ~ 5 分かかる間に他 PC が編集を始めると衝突しうるため二段 fence。Cancel 選択時は
+                // 既にコピー済の files を rollback して **編集画面に戻る** (= `DialogResult.OK` を
+                // 設定せず Form を閉じない、入力内容を保持して user が再試行 or 諦めるかを選べる)。
+                if (SessionConflictHelper.CheckBeforeWrite(this, "ゲーム追加") == DialogResult.Cancel)
+                {
+                    // コピー済 files を rollback (= L308-320 / L401-411 と同 pattern)
+                    // (#179 round 7 M-2) delete 失敗時は user に MessageBox 通知。silent Warn だけだと
+                    // 次回 OK click で `CopyGameFolder` の `if (Directory.Exists(destinationGameFolder))
+                    // throw "バージョンフォルダは既に存在します"` collision error として表示され、user は
+                    // 「session conflict cancel の rollback 残骸」とは読めない無関係な error を踏む path
+                    // があった (SMB file lock / Launcher 起動中 etc. で十分発生)。manual cleanup を促す。
+                    if (!string.IsNullOrEmpty(destinationGameFolder) && Directory.Exists(destinationGameFolder))
+                    {
+                        try
+                        {
+                            Directory.Delete(destinationGameFolder, true);
+                        }
+                        catch (Exception delEx)
+                        {
+                            Logger.Warn("[AddGameForm] session conflict Cancel rollback: コピー済 folder 削除失敗 (手動で削除してください): " + destinationGameFolder + " — " + delEx.Message);
+                            MessageBox.Show(this,
+                                "他 PC 検出による中止処理で、コピー済のファイルを削除できませんでした。\n\n" +
+                                "削除対象フォルダ:\n  " + destinationGameFolder + "\n\n" +
+                                "削除失敗の理由 (" + delEx.GetType().Name + "):\n  " + delEx.Message + "\n\n" +
+                                "次回もう一度「OK」を押すと、既存フォルダのため別エラー (バージョンフォルダは既に存在します)\n" +
+                                "として表示されます。再試行する前に、上記フォルダを手動で削除してください。\n\n" +
+                                "(編集内容は保持されています。準備ができたら再度「OK」を押してください。)",
+                                "中止処理: ファイル削除失敗", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+                    }
+                    destinationGameFolder = null;
+                    return;
+                }
+
                 // データベースに追加
                 dbManager.AddGame(game);
 

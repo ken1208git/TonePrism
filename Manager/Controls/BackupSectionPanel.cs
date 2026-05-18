@@ -161,6 +161,7 @@ namespace GCTonePrism.Manager.Controls
         private void btnBackupNow_Click(object sender, EventArgs e)
         {
             if (_dbManager == null) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ作成") == DialogResult.Cancel) return;
 
             BackupResult result = null;
             using (var dialog = new ProcessingDialog((progress, token) =>
@@ -211,6 +212,7 @@ namespace GCTonePrism.Manager.Controls
         private void btnRestore_Click(object sender, EventArgs e)
         {
             if (_dbManager == null) return;
+            // (round 2 High-2) selection 依存 validation を session conflict check より前に倒す
             if (gridHistory.SelectedRows.Count == 0)
             {
                 MessageBox.Show("復元したいバックアップを履歴一覧から選択してください。", "未選択",
@@ -239,6 +241,9 @@ namespace GCTonePrism.Manager.Controls
             {
                 if (confirm.ShowDialog(this) != DialogResult.Yes) return;
             }
+
+            // (round 2 High-2) user 確認後、DB write (Restore = safety backup + DB 置換) 直前で session conflict check
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ復元") == DialogResult.Cancel) return;
 
             string safetyPath = null;
             DialogResult dr;
@@ -321,6 +326,8 @@ namespace GCTonePrism.Manager.Controls
         private void btnDelete_Click(object sender, EventArgs e)
         {
             if (_dbManager == null) return;
+            // (round 2 High-2) selection / in_progress / 削除確認の各 validation を session conflict
+            // check より前に倒す。check は DB write 直前 (削除確認 OK 後) で実行。
             if (gridHistory.SelectedRows.Count == 0)
             {
                 MessageBox.Show("削除したいバックアップを履歴一覧から選択してください。", "未選択",
@@ -360,6 +367,9 @@ namespace GCTonePrism.Manager.Controls
                 MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
 
             if (dr != DialogResult.OK) return;
+
+            // (round 2 High-2) 削除確認 OK 後、DB write (file + log delete) 直前で session conflict check
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ削除") == DialogResult.Cancel) return;
 
             // 物理ファイル削除 (失敗しても DB レコードは消す)
             if (!string.IsNullOrEmpty(resolvedPath) && File.Exists(resolvedPath))

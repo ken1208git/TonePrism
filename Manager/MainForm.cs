@@ -13,6 +13,7 @@ namespace GCTonePrism.Manager
     public partial class MainForm : Form
     {
         private DatabaseManager dbManager;
+        private ManagerSessionService _sessionService;
 
         private GameSectionPanel _gameSectionPanel;
         private StoreSectionPanel _storeSectionPanel;
@@ -43,21 +44,66 @@ namespace GCTonePrism.Manager
             tabLog.Controls.Add(_logSectionPanel);
             tabUpdate.Controls.Add(_updateSectionPanel);
             tabSettings.Controls.Add(_settingsSectionPanel);
+
+            // (#179) ManagerSessionService の shutdown (self row delete + heartbeat 停止) を form 終了時に発火
+            this.FormClosed += MainForm_FormClosed;
+        }
+
+        private void MainForm_FormClosed(object sender, FormClosedEventArgs e)
+        {
+            try
+            {
+                if (_sessionService != null)
+                {
+                    _sessionService.Shutdown();
+                    _sessionService = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[MainForm] FormClosed で ManagerSessionService Shutdown 失敗 (stale cleanup に委ねる): " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// (#179 / #178 (c)) 編集操作 (DB write) 前に他 PC active session を check して、検出時に
+        /// SessionConflictDialog (EditOperation context) を表示する。各 SectionPanel が save handler 直前で
+        /// 本 method を呼び出して結果を判定する。
+        /// </summary>
+        /// <param name="operationDescription">操作内容 (例: "ゲーム編集"、"ストア section 編集")、dialog 文言に embed される。</param>
+        /// <returns>
+        /// `DialogResult.OK` = 操作続行 (= 検出なし or user が「このまま保存する」選択)、
+        /// `DialogResult.Cancel` = 操作中止 (= user が「保存を中止する」選択)。
+        /// </returns>
+        public DialogResult CheckSessionConflictBeforeWrite(string operationDescription)
+        {
+            // (#179 round 7 M-1) `_sessionService == null` (= MainForm_Load 完了前) と
+            // `_sessionService.IsInitialized == false` (= Initialize 失敗で heartbeat 機構なし) の両方を
+            // fail-soft で OK 返却。後者を guard しないと毎 click ごとに `DetectOtherActiveSessions` →
+            // `ExecuteWithRetry` (busy_timeout=10000ms × maxRetries=3 = 最大 ~30 秒 block) を空振りし、
+            // 全 13 SectionPanel callsite で click 毎 UI freeze + Warn log noise を踏む path だった。
+            // Initialize 失敗は SPEC §3.8.5「致命傷、検出機能は以降一切働かない」と整合するため早期 OK。
+            if (_sessionService == null || !_sessionService.IsInitialized)
+            {
+                return DialogResult.OK;
+            }
+            var others = _sessionService.DetectOtherActiveSessions();
+            if (others.Count == 0) return DialogResult.OK;
+            return SessionConflictDialog.Show(
+                this, SessionConflictDialogContext.EditOperation, others, operationDescription);
         }
 
         private void MainForm_Load(object sender, EventArgs e)
         {
-            // (#178 (b)) アップデート完了直後の起動 (= sentinel あり) は、通常の「同時起動に関する注意」
-            // MessageBox を「✓ アップデート完了」MessageBox に **置換** する設計。起動 dialog 数は変わらず 1 つ、
-            // user は完了 feedback を確実に受け取る。同時起動注意は次回 (sentinel なし) 起動から通常表示。
-            if (!TryShowUpdateCompletedDialog())
-            {
-                MessageBox.Show(
-                    "【重要】管理ソフトは必ず「1台のPC」だけで起動してください。\n\n複数のPCで同時に管理ソフトを開くと、データの保存に失敗したり、最悪の場合ファイルが破損して全てのデータが失われる可能性があります。\n（ランチャーは複数のPCで同時に動かしても大丈夫です）",
-                    "同時起動に関する注意",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-            }
+            // (#178 (b)) アップデート完了直後の起動 (= sentinel あり) は、まず「✓ アップデート完了」
+            // MessageBox を表示。sentinel なし path は何もしない。
+            // (#178 (c) / #179) 旧「同時起動に関する注意」MessageBox は撤廃、代わりに ManagerSessionService
+            // で他 PC で稼働中の Manager を自動検出 → 検出時のみ SessionConflictDialog (Startup context)
+            // を表示する設計に移行。session 初期化 + check は **dbManager.InitializeDatabase() で
+            // schema migration (v12 → v13) が完了した後** に行う (= round 1 C-1 fix)。旧実装は migration
+            // 前に Initialize を呼んでいて、v12 → v13 初回 upgrade で `no such table: manager_sessions`
+            // で session 機構が silent に永久 disabled になる bug があった。
+            TryShowUpdateCompletedDialog();
 
             bool dbReady = false;
 
@@ -97,8 +143,38 @@ namespace GCTonePrism.Manager
 
             if (!dbReady)
             {
+                // (round 1 L-3) DB 未初期化 path では session service も起動しない (= heartbeat 不在で
+                // form を user 手動 × で閉じるまで no-op、FormClosed で _sessionService=null なので
+                // Shutdown も skip される clean path)。
                 UpdateStatusBar("データベース未初期化");
                 return;
+            }
+
+            // (#179、round 1 C-1 fix) DB schema migration が確実に完了したため、ManagerSessionService を
+            // ここで初期化 + 起動時 check を実行。Initialize 内の SQL (`DELETE FROM manager_sessions ...` /
+            // `INSERT OR REPLACE INTO manager_sessions ...`) は v13 schema に依存。
+            _sessionService = new ManagerSessionService(dbManager.ManagerSessionRepository);
+            _sessionService.Initialize();
+
+            // 起動時 check: 他 PC で active session を検出 → SessionConflictDialog (Startup)。
+            // Cancel で Manager 終了 (self row delete 経由で clean exit trail を残す)。
+            var otherSessionsAtStartup = _sessionService.DetectOtherActiveSessions();
+            if (otherSessionsAtStartup.Count > 0)
+            {
+                var dialogResult = SessionConflictDialog.Show(
+                    this, SessionConflictDialogContext.Startup, otherSessionsAtStartup);
+                if (dialogResult == DialogResult.Cancel)
+                {
+                    Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で Cancel 選択、Manager 終了");
+                    // (round 1 M-4) FormClosed 経由 Shutdown と二重呼出にならないよう、
+                    // Cancel path では Shutdown 直接呼出後に _sessionService = null を set。
+                    _sessionService.Shutdown();
+                    _sessionService = null;
+                    // Application.Exit ではなく Close で FormClosing を確実に走らせる (= Logger.Shutdown 含む)
+                    BeginInvoke(new Action(() => Close()));
+                    return;
+                }
+                Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で OK 選択、起動を続行");
             }
 
             // DB確認後にパネルを初期化（DB存在前のアクセスを防止）
@@ -456,19 +532,22 @@ namespace GCTonePrism.Manager
             lblStatus.Text = $"データベース: {dbStatus} | {gameInfo}";
         }
 
-        // (#178 (b)) アップデート完了通知 dialog。2 invariant:
-        // (1) sentinel ファイルは読込直後の `finally` で必ず削除 (parse 成功 / 失敗問わず、永続再表示バグ防止)。
-        // (2) 起動時 dialog 数は常に 1 つに保つため、本 dialog 表示 (= true 返却) 時は caller が
-        //     「同時起動に関する注意」MessageBox を skip する排他置換。仕様: SPECIFICATION.md §3.7.3。
+        // (#178 (b)) アップデート完了通知 dialog。invariant:
+        //   sentinel ファイルは読込直後の `finally` で必ず削除 (parse 成功 / 失敗問わず、永続再表示バグ防止)。
+        // 仕様: SPECIFICATION.md §3.7.3。
+        //
+        // (round 4 Medium-3) 旧 docstring の「同時起動注意 MessageBox との排他置換 → true/false 返却で
+        // caller が gate」invariant は本 PR (#179 / #178 (c) で同時起動 MessageBox を撤廃) で消滅。
+        // 戻り値を使う caller も居ない (MainForm_Load:104 の呼出は戻り値捨て) ため signature を void 化。
 
         /// <summary>
         /// sentinel ファイル `<install>/.update_completed` を読んで完了 dialog を表示。
-        /// 表示した場合 true (caller は同時起動注意 MessageBox を skip)、表示しなかった場合 false。
+        /// sentinel 不在時は no-op。仕様 SPECIFICATION.md §3.7.3 参照。
         /// </summary>
-        private bool TryShowUpdateCompletedDialog()
+        private void TryShowUpdateCompletedDialog()
         {
             string sentinelPath = System.IO.Path.Combine(PathManager.BaseDirectory, ".update_completed");
-            if (!System.IO.File.Exists(sentinelPath)) return false;
+            if (!System.IO.File.Exists(sentinelPath)) return;
 
             string newVersion = null;
             string completedAtRaw = null;
@@ -492,8 +571,8 @@ namespace GCTonePrism.Manager
 
             if (string.IsNullOrEmpty(newVersion))
             {
-                // parse 失敗 / newVersion 不在は dialog 出さず終了、caller は通常の同時起動注意 MessageBox を表示。
-                return false;
+                // parse 失敗 / newVersion 不在は dialog 出さず終了 (sentinel は finally で削除済)。
+                return;
             }
 
             // CompletedAt は writer が ISO 8601 UTC で書き出した値 ("yyyy-MM-ddTHH:mm:ssZ")。dialog では
@@ -525,7 +604,6 @@ namespace GCTonePrism.Manager
                 "✓ アップデート完了",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
-            return true;
         }
 
         /// <summary>

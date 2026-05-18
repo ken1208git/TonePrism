@@ -55,6 +55,23 @@ namespace GCTonePrism.Manager
 
         private void btnOk_Click(object sender, EventArgs e)
         {
+            // (#179 round 7 H-1、round 8 M-2 で comment 整理) 旧実装はここに session conflict check が
+            // なく、settings table への 3 件 INSERT OR REPLACE (`backup_destination_path` /
+            // `backup_auto_interval_hours` / `backup_retention_count`) が他 PC の同 form と silent に
+            // 上書き合戦する path だった。`btnSettings_Click` → `BackupSettingsForm.ShowDialog` 経路は
+            // (a) SectionPanel 配下の 1 段目 fence 13 callsite (Game 4 + Store 4 + Settings 2 +
+            // Backup 3) は単に form を開くだけで DB write を持たないため check 不要、(b) round 6 案 B
+            // で追加された 2 段目 fence (4 Form の OK click) も BackupSettingsForm は対象外 — の
+            // **両方からも漏れていた** drift。SPEC §3.8.2 が「対象 button 13 箇所」と enumerate しつつ
+            // 本 callsite を accounting に含めていなかったため、reviewer / 将来の保守者から見ても
+            // 「14 callsite 目」が grep で発見されない silent skip 路。Form 内 OK click の DB write
+            // 直前で check、Cancel 時は **編集画面に戻る** semantic (= `DialogResult.OK` を設定せず
+            // Form を閉じない、入力保持) で round 6 案 B / 2 段目 fence と pattern を揃える。
+            if (SessionConflictHelper.CheckBeforeWrite(this, "バックアップ設定変更") == DialogResult.Cancel)
+            {
+                return;
+            }
+
             try
             {
                 _settingsRepo.SetString("backup_destination_path", txtDestPath.Text.Trim());

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
 using GCTonePrism.Manager.Models;
+using GCTonePrism.Manager.Services;
 
 namespace GCTonePrism.Manager
 {
@@ -340,6 +341,16 @@ namespace GCTonePrism.Manager
             _section.Games = lstAssigned.Items.Cast<GameListItem>()
                 .Select(item => item.Game).ToList();
             _section.GameDisplayTexts = new Dictionary<string, string>(_displayTexts);
+
+            // (#179 round 6 M-1 案 B) DB write 直前で他 PC session を再 check (race fence)。
+            // SectionPanel 側 (`ShowDialog` 直前) で既に 1 回 check 済だが、user が編集画面を 5-10 分
+            // 開きっぱなしにする間に他 PC が編集を始めると衝突しうるため二段 fence。Cancel 選択時は
+            // **編集画面に戻る** (= `DialogResult.OK` を設定せず Form を閉じない、入力内容を保持)。
+            string opLabel = _isNew ? "ストアセクション追加" : "ストアセクション編集";
+            if (SessionConflictHelper.CheckBeforeWrite(this, opLabel) == DialogResult.Cancel)
+            {
+                return;
+            }
 
             try
             {
