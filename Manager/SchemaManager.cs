@@ -18,7 +18,9 @@ namespace GCTonePrism.Manager
         // 現在のデータベースバージョン
         // 構造変更があるたびにインクリメントする
         // v11: SPEC v1.5.1 (2026-03-28) で変更された surveys / play_records スキーマの drift 修正（v0.8.1）
-        private const int CurrentDbVersion = 12;
+        // v12: backup_log に relative_path 列追加 (#127、v0.8.2)
+        // v13: manager_sessions テーブル新設 (#179、Manager LAN-wide 同時起動検出、v0.10.0)
+        private const int CurrentDbVersion = 13;
 
         public SchemaManager(DatabaseConnection conn)
         {
@@ -447,6 +449,9 @@ namespace GCTonePrism.Manager
             // backup_logテーブル作成（v9 で追加）
             CreateBackupLogTable(connection, transaction);
 
+            // (#179) manager_sessions テーブル作成 (v13 で追加、MigrateV12ToV13 でも再利用する helper)
+            CreateManagerSessionsTable(connection, transaction);
+
             // 新規DB向けにバックアップ関連の設定デフォルト値を投入
             InsertBackupDefaults(connection, transaction);
         }
@@ -810,6 +815,14 @@ namespace GCTonePrism.Manager
                         {
                             Logger.Warn("[DatabaseManager] v10→v11 が未完のため user_version は 10 のまま据え置き（v12 物理変更のみ先行適用）");
                         }
+                    }
+
+                    if (currentVersion < 13)
+                    {
+                        // (#179) v12 → v13: manager_sessions table 新設。CREATE TABLE IF NOT EXISTS
+                        // で idempotent (= CreateTables 先行 path で既に作られていれば no-op)。
+                        MigrateV12ToV13(connection, migTransaction);
+                        currentVersion = 13;
                     }
 
                     // 達成バージョン（CurrentDbVersion ではなく currentVersion）を書き込む。
@@ -1415,6 +1428,41 @@ namespace GCTonePrism.Manager
                 cmd.ExecuteNonQuery();
             }
             Logger.Info("[DatabaseManager] backup_log に relative_path 列を追加しました (v11 → v12)");
+        }
+
+        /// <summary>
+        /// (#179) v12 → v13: manager_sessions テーブル新設。
+        /// Manager の LAN-wide 同時起動検出 + 競合 risk 操作前 dialog のための SoT。
+        /// 各 PC で稼働中の Manager process が self row を heartbeat update、起動時の stale cleanup +
+        /// 他 PC row 検出に使う。SPEC §3.X / §7.3 参照。
+        /// CreateTables で既に作成済みの場合 (= 新規 DB を v13 で作る場合) は CREATE TABLE IF NOT EXISTS
+        /// が黙って skip するため idempotent。
+        /// </summary>
+        private void MigrateV12ToV13(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            CreateManagerSessionsTable(connection, transaction);
+            Logger.Info("[DatabaseManager] manager_sessions テーブルを作成しました (v12 → v13)");
+        }
+
+        /// <summary>
+        /// (#179) manager_sessions テーブル作成 (CreateTables / MigrateV12ToV13 共通)。
+        /// schema は SPEC §7.3 参照。`pc_name` を PRIMARY KEY、同 PC は 1 row のみ (重複起動は Named
+        /// Mutex で物理 block する設計、SPEC §3.X)。
+        /// </summary>
+        private static void CreateManagerSessionsTable(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            string sql = @"
+                CREATE TABLE IF NOT EXISTS manager_sessions (
+                    pc_name TEXT PRIMARY KEY,
+                    started_at_unix_ms INTEGER NOT NULL,
+                    last_heartbeat_at_unix_ms INTEGER NOT NULL,
+                    pid INTEGER NOT NULL,
+                    manager_version TEXT NOT NULL
+                )";
+            using (var cmd = new SQLiteCommand(sql, connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
         }
 
         /// <summary>

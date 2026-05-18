@@ -23,6 +23,7 @@ namespace GCTonePrism.Manager
         private readonly BackupLogRepository _backupLogRepo;
         private readonly BackupService _backupService;
         private readonly RestoreService _restoreService;
+        private readonly ManagerSessionRepository _sessionRepo;
 
         public DatabaseManager()
         {
@@ -36,6 +37,7 @@ namespace GCTonePrism.Manager
             _backupLogRepo = new BackupLogRepository(_conn);
             _backupService = new BackupService(_conn, _backupLogRepo, _settingsRepo);
             _restoreService = new RestoreService(_conn);
+            _sessionRepo = new ManagerSessionRepository(_conn);
         }
 
         // --- バックアップ機能アクセサ ---
@@ -43,6 +45,8 @@ namespace GCTonePrism.Manager
         public RestoreService RestoreService { get { return _restoreService; } }
         public BackupLogRepository BackupLogRepository { get { return _backupLogRepo; } }
         public SettingsRepository SettingsRepository { get { return _settingsRepo; } }
+        /// <summary>(#179) Manager session tracking 用 repository。</summary>
+        public ManagerSessionRepository ManagerSessionRepository { get { return _sessionRepo; } }
 
         // --- 接続・スキーマ ---
         /// <summary>

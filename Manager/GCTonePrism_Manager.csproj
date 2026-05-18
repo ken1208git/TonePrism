@@ -204,6 +204,7 @@
     <Compile Include="Repositories\BackupLogRepository.cs" />
     <Compile Include="Repositories\DeveloperRepository.cs" />
     <Compile Include="Repositories\GameRepository.cs" />
+    <Compile Include="Repositories\ManagerSessionRepository.cs" />
     <Compile Include="Repositories\SettingsRepository.cs" />
     <Compile Include="Repositories\StoreSectionRepository.cs" />
     <Compile Include="Repositories\VersionRepository.cs" />
@@ -223,6 +224,7 @@
     <Compile Include="Models\BackupLogEntry.cs" />
     <Compile Include="Models\DeveloperInfo.cs" />
     <Compile Include="Models\GameInfo.cs" />
+    <Compile Include="Models\ManagerSessionInfo.cs" />
     <Compile Include="Models\PlayRecord.cs" />
     <Compile Include="Models\Settings.cs" />
     <Compile Include="Models\StoreSectionInfo.cs" />
@@ -239,7 +241,9 @@
     <Compile Include="Services\GameFormHelper.cs" />
     <Compile Include="Services\ImagePreviewHelper.cs" />
     <Compile Include="Services\Logger.cs" />
+    <Compile Include="Services\ManagerSessionService.cs" />
     <Compile Include="Services\PathConversionHelper.cs" />
+    <Compile Include="Services\SessionConflictDialog.cs" />
     <Compile Include="Services\ChangelogParser.cs" />
     <Compile Include="Services\DirReplacer.cs" />
     <Compile Include="Services\FileReplacer.cs" />

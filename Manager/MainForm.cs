@@ -13,6 +13,7 @@ namespace GCTonePrism.Manager
     public partial class MainForm : Form
     {
         private DatabaseManager dbManager;
+        private ManagerSessionService _sessionService;
 
         private GameSectionPanel _gameSectionPanel;
         private StoreSectionPanel _storeSectionPanel;
@@ -43,20 +44,82 @@ namespace GCTonePrism.Manager
             tabLog.Controls.Add(_logSectionPanel);
             tabUpdate.Controls.Add(_updateSectionPanel);
             tabSettings.Controls.Add(_settingsSectionPanel);
+
+            // (#179) ManagerSessionService の shutdown (self row delete + heartbeat 停止) を form 終了時に発火
+            this.FormClosed += MainForm_FormClosed;
+        }
+
+        private void MainForm_FormClosed(object sender, FormClosedEventArgs e)
+        {
+            try
+            {
+                if (_sessionService != null)
+                {
+                    _sessionService.Shutdown();
+                    _sessionService = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[MainForm] FormClosed で ManagerSessionService Shutdown 失敗 (stale cleanup に委ねる): " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// (#179 / #178 (c)) 編集操作 (DB write) 前に他 PC active session を check して、検出時に
+        /// SessionConflictDialog (EditOperation context) を表示する。各 SectionPanel が save handler 直前で
+        /// 本 method を呼び出して結果を判定する。
+        /// </summary>
+        /// <param name="operationDescription">操作内容 (例: "ゲーム編集"、"ストア section 編集")、dialog 文言に embed される。</param>
+        /// <returns>
+        /// `DialogResult.OK` = 操作続行 (= 検出なし or user が「このまま保存する」選択)、
+        /// `DialogResult.Cancel` = 操作中止 (= user が「保存を中止する」選択)。
+        /// </returns>
+        public DialogResult CheckSessionConflictBeforeWrite(string operationDescription)
+        {
+            if (_sessionService == null)
+            {
+                // session service 未初期化 (= MainForm_Load 完了前 / Initialize 失敗時) は fail-soft で
+                // OK 返却、編集操作を block しない。
+                return DialogResult.OK;
+            }
+            var others = _sessionService.DetectOtherActiveSessions();
+            if (others.Count == 0) return DialogResult.OK;
+            return SessionConflictDialog.Show(
+                this, SessionConflictDialogContext.EditOperation, others, operationDescription);
         }
 
         private void MainForm_Load(object sender, EventArgs e)
         {
-            // (#178 (b)) アップデート完了直後の起動 (= sentinel あり) は、通常の「同時起動に関する注意」
-            // MessageBox を「✓ アップデート完了」MessageBox に **置換** する設計。起動 dialog 数は変わらず 1 つ、
-            // user は完了 feedback を確実に受け取る。同時起動注意は次回 (sentinel なし) 起動から通常表示。
-            if (!TryShowUpdateCompletedDialog())
+            // (#178 (b)) アップデート完了直後の起動 (= sentinel あり) は、まず「✓ アップデート完了」
+            // MessageBox を表示。sentinel なし path は何もしない。
+            // (#178 (c) / #179) 旧「同時起動に関する注意」MessageBox は撤廃、代わりに ManagerSessionService
+            // で他 PC で稼働中の Manager を自動検出 → 検出時のみ SessionConflictDialog (Startup context)
+            // を表示する設計に移行。sentinel 有無に関係なく session 初期化 + check を実行。
+            TryShowUpdateCompletedDialog();
+
+            // (#179) ManagerSessionService 初期化 (stale cleanup + self row 登録 + heartbeat thread 起動)
+            //   - DB schema migration が完了している必要があるため、dbManager 初期化後に呼ぶ
+            //   - DB 不到達等は service 内 fail-soft (= Logger.Error + heartbeat 不在で継続)
+            _sessionService = new ManagerSessionService(dbManager.ManagerSessionRepository);
+            _sessionService.Initialize();
+
+            // 起動時 check: 他 PC で active session を検出 → SessionConflictDialog (Startup)。
+            // Cancel で Manager 終了 (self row delete 経由で clean exit trail を残す)。
+            var otherSessionsAtStartup = _sessionService.DetectOtherActiveSessions();
+            if (otherSessionsAtStartup.Count > 0)
             {
-                MessageBox.Show(
-                    "【重要】管理ソフトは必ず「1台のPC」だけで起動してください。\n\n複数のPCで同時に管理ソフトを開くと、データの保存に失敗したり、最悪の場合ファイルが破損して全てのデータが失われる可能性があります。\n（ランチャーは複数のPCで同時に動かしても大丈夫です）",
-                    "同時起動に関する注意",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
+                var dialogResult = SessionConflictDialog.Show(
+                    this, SessionConflictDialogContext.Startup, otherSessionsAtStartup);
+                if (dialogResult == DialogResult.Cancel)
+                {
+                    Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で Cancel 選択、Manager 終了");
+                    _sessionService.Shutdown();
+                    // Application.Exit ではなく Close で FormClosing を確実に走らせる (= Logger.Shutdown 含む)
+                    BeginInvoke(new Action(() => Close()));
+                    return;
+                }
+                Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で OK 選択、起動を続行");
             }
 
             bool dbReady = false;

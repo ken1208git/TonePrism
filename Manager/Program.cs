@@ -43,38 +43,77 @@ namespace GCTonePrism.Manager
                 // 古い .NET / SecurityProtocol 未定義の極端ケースは ignore (Win10/11 default で OK)
             }
 
-            try
+            // (#179) Named Mutex で同 PC 重複起動を物理 block。
+            // - mutex name に install path hash を含めて dev 環境 (= repo) と本番 install (= 学校 LAN
+            //   の install dir) で別 mutex に分離する。同 PC で複数 install dir 並存する場合も衝突なし。
+            // - `Global\` prefix で Windows session 全体に effective (= 同 user の別 RDP session でも block)。
+            // - createdNew=false で既に取得中の同 mutex 検出 → modal dialog → return (Application.Run 不到達)。
+            // - mutex は process lifetime 中保持、`Application.Run` 終了で `using` 経由 release。
+            // 詳細: SPEC §3.X 同時起動検出機構、CHANGELOG ## Manager v0.10.0 参照。
+            string mutexName = "Global\\GCTonePrism_Manager_SingleInstance_" + ComputeInstallPathHash(Application.StartupPath);
+            using (var singleInstanceMutex = new System.Threading.Mutex(initiallyOwned: true, name: mutexName, createdNew: out bool createdNew))
             {
-                // パスの確認（デバッグ用）
-                PathManager.VerifyPaths();
+                if (!createdNew)
+                {
+                    Logger.Warn("[Program] 同 PC で Manager が既に起動中 (mutex 取得失敗、name=" + mutexName + ")、2 個目 process は exit");
+                    MessageBox.Show(
+                        "既に同じ PC で Manager が起動中です。\n\n" +
+                        "2 つ目を起動すると編集内容や設定がお互いに上書きされて消える恐れがあります。\n" +
+                        "もう一方を閉じてから再度お試しください。",
+                        "Manager は 1 つだけ起動できます",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Stop);
+                    return;
+                }
 
-                Application.EnableVisualStyles();
-                Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new MainForm());
+                try
+                {
+                    // パスの確認（デバッグ用）
+                    PathManager.VerifyPaths();
+
+                    Application.EnableVisualStyles();
+                    Application.SetCompatibleTextRenderingDefault(false);
+                    Application.Run(new MainForm());
+                }
+                catch (DirectoryNotFoundException ex)
+                {
+                    Logger.Error("起動エラー (DirectoryNotFound)", ex);
+                    MessageBox.Show(
+                        ex.Message,
+                        "起動エラー",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                    Application.Exit();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("起動エラー", ex);
+                    MessageBox.Show(
+                        $"アプリケーションの起動に失敗しました。\n\n{ex.Message}",
+                        "起動エラー",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                    Application.Exit();
+                }
+                finally
+                {
+                    Logger.Shutdown();
+                }
             }
-            catch (DirectoryNotFoundException ex)
+        }
+
+        /// <summary>
+        /// (#179) Named Mutex の name に含める install path hash を算出 (MD5 ベース、衝突回避目的のみで
+        /// crypto 用途ではない)。dev 環境と本番 install を別 mutex に分離するため、`Application.StartupPath`
+        /// (= 自 exe の dir) を hash 化。
+        /// </summary>
+        private static string ComputeInstallPathHash(string installPath)
+        {
+            using (var md5 = System.Security.Cryptography.MD5.Create())
             {
-                Logger.Error("起動エラー (DirectoryNotFound)", ex);
-                MessageBox.Show(
-                    ex.Message,
-                    "起動エラー",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-                Application.Exit();
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("起動エラー", ex);
-                MessageBox.Show(
-                    $"アプリケーションの起動に失敗しました。\n\n{ex.Message}",
-                    "起動エラー",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-                Application.Exit();
-            }
-            finally
-            {
-                Logger.Shutdown();
+                byte[] bytes = System.Text.Encoding.UTF8.GetBytes(installPath ?? string.Empty);
+                byte[] hash = md5.ComputeHash(bytes);
+                return BitConverter.ToString(hash).Replace("-", string.Empty).Substring(0, 16);
             }
         }
 

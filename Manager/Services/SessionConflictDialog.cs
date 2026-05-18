@@ -1,0 +1,109 @@
+using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Windows.Forms;
+using GCTonePrism.Manager.Models;
+
+namespace GCTonePrism.Manager.Services
+{
+    /// <summary>
+    /// (#179 / #178 (c)) 他 PC で Manager が起動中の時に表示する modal dialog の context。
+    /// </summary>
+    internal enum SessionConflictDialogContext
+    {
+        /// <summary>Manager 起動時、`MainForm.Load` 冒頭で他 PC 検出した場合。Cancel = Manager 終了。</summary>
+        Startup,
+        /// <summary>編集操作前 (ゲーム追加/編集/削除、ストア編集、設定変更、Backup/Restore 等の DB write 直前)。Cancel = その操作を中止。</summary>
+        EditOperation,
+    }
+
+    /// <summary>
+    /// (#179 / #178 (c)) 他 PC で Manager 起動中を検出した時の modal 警告 dialog の SoT。
+    ///
+    /// 文言は **「データ破損」「競合」のような技術用語を避け、部員が「何が起きるか」を想像できる
+    /// 具体表現** に統一 (「お互いに上書きされて消える恐れ」「他 PC の人に確認してから」)。
+    /// `MessageBoxIcon.Stop` + `MessageBoxButtons.OKCancel` で「OK = 続行 (data 喪失 risk 承知)」/
+    /// 「Cancel = 中止 (context に応じて Manager 終了 or その操作中止)」を user 判断に委ねる設計。
+    ///
+    /// 詳細仕様は SPECIFICATION.md §3.X 参照。
+    /// </summary>
+    internal static class SessionConflictDialog
+    {
+        /// <summary>
+        /// 他 PC 検出時の dialog を表示。OK で続行、Cancel で abort。
+        /// </summary>
+        /// <param name="owner">親 form (modal の親、null も可)。</param>
+        /// <param name="context">context (Startup / EditOperation) で文言切替。</param>
+        /// <param name="others">検出した他 PC session list (空でなく 1 件以上)。</param>
+        /// <param name="operationDescription">EditOperation 時の操作名 (例: "ゲーム編集")、Startup 時は null。</param>
+        /// <returns>user 選択 (DialogResult.OK / DialogResult.Cancel)。</returns>
+        public static DialogResult Show(
+            IWin32Window owner,
+            SessionConflictDialogContext context,
+            IReadOnlyList<ManagerSessionInfo> others,
+            string operationDescription = null)
+        {
+            if (others == null || others.Count == 0)
+            {
+                // defensive: caller は事前に Count > 0 を確認するべきだが、空 list なら検出なし扱いで OK 即時返却。
+                return DialogResult.OK;
+            }
+
+            long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            string detectedListLines = BuildDetectedList(others, nowMs);
+
+            string title;
+            string body;
+            if (context == SessionConflictDialogContext.Startup)
+            {
+                title = "【危険】他 PC で Manager が起動中です";
+                body =
+                    detectedListLines + "\n\n" +
+                    "両方の PC で同時に Manager を使うと、編集内容や\n" +
+                    "バックアップがお互いに上書きされて消える恐れがあります。\n\n" +
+                    "[OK] このまま起動する (データが消える可能性を承知)\n" +
+                    "[Cancel] Manager を終了する (他 PC の人に確認してから起動する)";
+            }
+            else
+            {
+                title = "【危険】他 PC で誰かが作業中です";
+                string opLabel = string.IsNullOrEmpty(operationDescription) ? "この操作" : operationDescription;
+                body =
+                    detectedListLines + "\n\n" +
+                    "このまま保存すると、" + opLabel + " の内容と\n" +
+                    "他 PC の編集内容がお互いに上書きされて消える恐れがあります。\n\n" +
+                    "[OK] このまま保存する (データが消える可能性を承知)\n" +
+                    "[Cancel] 保存を中止する (他 PC の人に確認してから保存する)";
+            }
+
+            Logger.Warn("[SessionConflictDialog] " + context + " context で他 PC 検出 (" + others.Count + " 件) → dialog 表示");
+
+            return MessageBox.Show(
+                owner,
+                body,
+                title,
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Stop,
+                MessageBoxDefaultButton.Button2 /* Cancel を default に倒して反射押下で続行する path を抑制 */);
+        }
+
+        private static string BuildDetectedList(IReadOnlyList<ManagerSessionInfo> others, long nowMs)
+        {
+            // 検出した PC 一覧を「pc_name (最終確認: N 秒前)」形式で列挙、最大 5 件表示で残りは件数で要約。
+            var sb = new StringBuilder();
+            sb.Append("検出した PC:");
+            int maxShown = Math.Min(others.Count, 5);
+            for (int i = 0; i < maxShown; i++)
+            {
+                var info = others[i];
+                int sec = info.SecondsSinceLastHeartbeat(nowMs);
+                sb.Append("\n  - " + info.PcName + " (最終確認: " + sec + " 秒前)");
+            }
+            if (others.Count > maxShown)
+            {
+                sb.Append("\n  ...他 " + (others.Count - maxShown) + " 件");
+            }
+            return sb.ToString();
+        }
+    }
+}

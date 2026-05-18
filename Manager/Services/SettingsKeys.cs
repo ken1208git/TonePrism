@@ -63,5 +63,16 @@ namespace GCTonePrism.Manager.Services
         /// 空文字 / 不在 = 通知履歴なし (= 通知する)。
         /// </summary>
         public const string UpdateNotifiedTag = "update_notified_tag";
+
+        // ----- (#179) Manager LAN-wide 同時起動検出 -----
+
+        /// <summary>
+        /// (#179) ManagerSessionService の heartbeat 間隔 (秒)。default 10 秒、本 PR では hardcoded で
+        /// settings 経由 override は提供しない (future tunability の余地として key 定数のみ確保、実装は
+        /// ManagerSessionService の private const で固定)。50 PC × 6 query/分 = 5 query/sec SMB 許容範囲。
+        /// </summary>
+        public const string ManagerHeartbeatIntervalSeconds = "manager_heartbeat_interval_seconds";
+
+        public const int DefaultManagerHeartbeatIntervalSeconds = 10;
     }
 }

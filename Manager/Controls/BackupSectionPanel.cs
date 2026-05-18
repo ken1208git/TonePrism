@@ -161,6 +161,7 @@ namespace GCTonePrism.Manager.Controls
         private void btnBackupNow_Click(object sender, EventArgs e)
         {
             if (_dbManager == null) return;
+            if ((this.FindForm() as MainForm)?.CheckSessionConflictBeforeWrite("バックアップ作成") == DialogResult.Cancel) return;
 
             BackupResult result = null;
             using (var dialog = new ProcessingDialog((progress, token) =>
@@ -211,6 +212,7 @@ namespace GCTonePrism.Manager.Controls
         private void btnRestore_Click(object sender, EventArgs e)
         {
             if (_dbManager == null) return;
+            if ((this.FindForm() as MainForm)?.CheckSessionConflictBeforeWrite("バックアップ復元") == DialogResult.Cancel) return;
             if (gridHistory.SelectedRows.Count == 0)
             {
                 MessageBox.Show("復元したいバックアップを履歴一覧から選択してください。", "未選択",
@@ -321,6 +323,7 @@ namespace GCTonePrism.Manager.Controls
         private void btnDelete_Click(object sender, EventArgs e)
         {
             if (_dbManager == null) return;
+            if ((this.FindForm() as MainForm)?.CheckSessionConflictBeforeWrite("バックアップ削除") == DialogResult.Cancel) return;
             if (gridHistory.SelectedRows.Count == 0)
             {
                 MessageBox.Show("削除したいバックアップを履歴一覧から選択してください。", "未選択",

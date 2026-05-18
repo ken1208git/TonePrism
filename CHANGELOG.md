@@ -1521,6 +1521,30 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.10.0] - 2026-05-18
+
+#### Added (#179 + #178 (c) — Manager LAN-wide 同時起動検出 + 競合 risk 操作前 dialog)
+
+- **`manager_sessions` table を新設** (DB schema v12 → v13、`SchemaManager.cs`): 学校 LAN 上で複数 PC が同時運用する `prism.db` (SMB 共有) で、各 PC の Manager process 稼働状況を heartbeat 周期で記録する SoT。schema: `pc_name TEXT PRIMARY KEY` + `started_at_unix_ms` + `last_heartbeat_at_unix_ms` + `pid` + `manager_version`。`MigrateV12ToV13` で `CREATE TABLE IF NOT EXISTS` (idempotent)、`CheckAndMigrateDatabase` chain に追加。
+- **`ManagerSessionService` を新規追加** (`Services/ManagerSessionService.cs`): heartbeat thread (10 秒間隔、`Task.Run` + `CancellationTokenSource`)、起動時 stale cleanup (`last_heartbeat_at_unix_ms < now - 30000` ms を DELETE で自動回収)、self row INSERT OR REPLACE、`DetectOtherActiveSessions` で他 PC active session 検出、`Shutdown` で heartbeat 停止 + self row DELETE。DB 操作は `DatabaseConnection.ExecuteWithRetry` で SMB BUSY/LOCKED 競合に対応。DB 不到達等は fail-soft (= heartbeat 不在で Manager 自体は継続、Logger.Error で trail)。
+- **`ManagerSessionRepository`** (`Repositories/ManagerSessionRepository.cs`): 上記 service の DB CRUD layer。`DeleteStaleSessions` / `UpsertSelfSession` / `UpdateHeartbeat` / `DeleteSelfSession` / `SelectOtherActiveSessions` の 5 method。
+- **`ManagerSessionInfo` DTO** (`Models/ManagerSessionInfo.cs`): 5 property + `SecondsSinceLastHeartbeat(nowMs)` helper (UI 表示用)。
+- **`SessionConflictDialog`** (`Services/SessionConflictDialog.cs`): 他 PC 検出時の modal 警告 dialog (MessageBoxIcon.Stop + MessageBoxButtons.OKCancel)。`SessionConflictDialogContext` enum (`Startup` / `EditOperation`) で文言出し分け。「データ破損」「競合」のような技術用語を避け、部員が「何が起きるか」を想像できる具体表現 (= 「お互いに上書きされて消える恐れ」「他 PC の人に確認してから」) に統一。`MessageBoxDefaultButton.Button2 (Cancel)` で反射押下による続行 path を抑制。検出 PC list は最大 5 件 + 残件数の要約で長 PC 列で dialog が膨らまない設計。
+- **`Program.cs` に Named Mutex で同 PC 重複起動を物理 block**: `Application.Run` 直前に `new Mutex(initiallyOwned: true, name: "Global\\GCTonePrism_Manager_SingleInstance_" + installPathHash, out createdNew)`、`createdNew=false` で既存 instance 検出 → modal dialog「Manager は 1 つだけ起動できます」→ return (Application.Run 不到達)。Mutex name に install path の MD5 hash (前 16 文字) を含めて dev 環境と本番 install を別 mutex に分離、`Global\` prefix で Windows session 全体に effective。LAN table は他 PC 検出専用、同 PC は別レイヤーで責務分離。
+- **`MainForm.MainForm_Load` 改修** + **`MainForm.CheckSessionConflictBeforeWrite` public helper 新規追加**: 既存「同時起動に関する注意」MessageBox を撤廃 (#178 (c) 消化)、代わりに `_sessionService.Initialize` + `DetectOtherActiveSessions` → 検出時 `SessionConflictDialog (Startup context)` を表示。user が Cancel で `_sessionService.Shutdown()` + Manager 終了 (= self row delete で clean exit)。`MainForm.FormClosed` event で Shutdown 自動発火。`CheckSessionConflictBeforeWrite(operationDescription)` helper を各 SectionPanel が DB write 直前に呼び、検出時 `SessionConflictDialog (EditOperation context)` を表示 → Cancel で操作中止。
+- **各 SectionPanel に `CheckSessionConflictBeforeWrite` 呼出を追加 (13 箇所)**: `GameSectionPanel` の btnAddGame / btnEditGame / btnVersionUp / btnDeleteGame (4 件)、`StoreSectionPanel` の btnAdd / btnEdit / btnDelete / btnMoveUp / btnMoveDown (5 件)、`SettingsSectionPanel` の btnResetDatabase (1 件)、`BackupSectionPanel` の btnBackupNow / btnRestore / btnDelete (3 件)。各 handler 冒頭で `(this.FindForm() as MainForm)?.CheckSessionConflictBeforeWrite("操作名") == DialogResult.Cancel` で early return。read-only 系 (btnRefresh / btnOpenLogFolder 等) は対象外。
+- **`SettingsKeys.ManagerHeartbeatIntervalSeconds` 定数追加** (`Services/SettingsKeys.cs`): future tunability の予約 slot、本 PR では `ManagerSessionService` の private const `HeartbeatIntervalSeconds = 10` で hardcoded、settings 経由 override は実装せず (= 運用上 default 固定で十分、UI override 提供は別 issue 余地)。
+- **SPEC §7.3 + §7.6 + 新規 §3.X + 変更履歴 v1.10.26 row 追加**: `manager_sessions` table 仕様 + v12 → v13 migration workflow + LAN-wide 同時起動検出機構の動作仕様 (heartbeat / stale timeout / dialog trigger / button 設計 / context-aware 文言の規約)。
+
+**スコープ**: Manager 同時起動の「人間頼り運用」を「DB 経由の自動検出 + 競合 risk 操作前 dialog」に upgrade。学校 LAN の SMB 共有 `prism.db` 運用で複数 PC が並走しても、Manager UI 側でデータ破損 risk を user に明示通知できるようになる。「【危険】... お互いに上書きされて消える恐れ」を Startup / EditOperation の両 trigger で表示、user は OK (続行) / Cancel (中止) を都度判断する設計。
+
+**スコープ外** (= 別 PR):
+- **Launcher session tracking** (= #179 の Launcher 側) → PR3b で SPEC §3.X の Launcher write 禁止原則 (= 「Launcher は SQLite に直接書き込まず、JSON drop folder 方式を採用」L1926 付近) に沿った代替案を設計議論から (candidates: JSON drop folder + Manager polling / file system flag + enumeration / TCP/UDP 通信)。
+- Bundle bump (リリース直前のみ)。
+- minor bump (v0.9.3 → v0.10.0) 判断: DB schema migration を伴う新機能追加 (manager_sessions table) + 新 service + 13 箇所の UI 動作変化 (検出時 dialog 表示) を考慮。0.x 系慣習でも DB schema 変更は minor bump が妥当。
+
+**詳細仕様は [SPECIFICATION.md §7.3](SPECIFICATION.md) (table schema) + [§7.6](SPECIFICATION.md) (migration) + [§3.X](SPECIFICATION.md) (同時起動検出機構) 参照**。
+
 ### [Manager v0.9.3] - 2026-05-18
 
 #### Changed (#177 — apply 側 path 解決を manifest 経由化、Phase 4.1+ forward compat 完成)
