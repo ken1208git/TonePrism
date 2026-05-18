@@ -101,6 +101,17 @@ namespace GCTonePrism.Manager.Services
             }
 
             Logger.Warn("[SessionConflictDialog] " + context + " context で他 PC 検出 (Manager=" + managerOthers.Count + " Launcher=" + launcherOthers.Count + " total=" + totalCount + " 件) → dialog 表示");
+            // (#179 PR3b round 3 L-2) 検出 PC の pc_name / pid を debug trail に embed。
+            // 同 PC 検出時に「自 Process.Id と一致 → 自 PC Launcher」を log 解析で判定可能化。
+            // dialog body (= user 視点) には pid は出さず (= 部員視点で意味なし)、log のみ。
+            foreach (var info in managerOthers)
+            {
+                Logger.Info("[SessionConflictDialog]   - Manager: pc=" + info.PcName + " pid=" + info.Pid + " ver=" + info.ManagerVersion);
+            }
+            foreach (var info in launcherOthers)
+            {
+                Logger.Info("[SessionConflictDialog]   - Launcher: pc=" + info.PcName + " pid=" + info.Pid + " ver=" + info.LauncherVersion);
+            }
 
             // (#186 round 3 確定) Startup context の taskbar entry 不在 / focus 喪失で見失う UI bug は
             // **caller (`MainForm_Load`) 側で `BeginInvoke` defer + `ContinueLoadAfterSessionCheck`

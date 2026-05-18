@@ -221,7 +221,19 @@ namespace GCTonePrism.Manager
             // Initialize は sync のまま (= heartbeat thread 起動を最速で)、Detect も sync で他 PC 検出結果
             // を握ってから dialog 表示部分のみ defer。
             var otherSessionsAtStartup = _sessionService.DetectOtherActiveSessions();
-            var launcherSessionsAtStartup = _launcherSessionService.DetectActiveLauncherSessions();
+            // (#179 PR3b round 3 L-4) `CheckSessionConflictBeforeWrite` 側と pattern を対称化、
+            // `_launcherSessionService.IsInitialized` を明示 check (= defense-in-depth、Initialize 失敗
+            // path で fail-soft empty を確実に返す)。`_launcherSessionService` は直前に Initialize 済で
+            // null になる path は無いが、guard を 2 箇所で揃えて読み手の認知 load を下げる。
+            IReadOnlyList<LauncherSessionInfo> launcherSessionsAtStartup;
+            if (_launcherSessionService != null && _launcherSessionService.IsInitialized)
+            {
+                launcherSessionsAtStartup = _launcherSessionService.DetectActiveLauncherSessions();
+            }
+            else
+            {
+                launcherSessionsAtStartup = new List<LauncherSessionInfo>();
+            }
             if (otherSessionsAtStartup.Count > 0 || launcherSessionsAtStartup.Count > 0)
             {
                 BeginInvoke(new Action(() =>

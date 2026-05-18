@@ -63,8 +63,15 @@ func _initialize() -> void:
 			_init_failed = true
 			return
 
+	# (#179 PR3b round 3 M-1) `_get_pc_name()` 結果を filename にする前に必ず sanitize する。
+	# Windows NetBIOS computer name 規約では invalid path char は通常入らないが、
+	# (a) `COMPUTERNAME` env var に malformed 値が injection される CI / testing path、
+	# (b) HOSTNAME fallback (Linux/macOS) で `:` 等が許容される path、
+	# が FileAccess.open silent 失敗 → 検出不能 になる drift を予防。
+	# logger.gd:213-219 `_sanitize_filename` と同 logic (= sibling 整合性、helper 共通化は別 PR scope)。
 	_pc_name = _get_pc_name()
-	_session_file_path = sessions_dir.path_join(_pc_name + ".json")
+	var safe_pc_name = _sanitize_filename(_pc_name)
+	_session_file_path = sessions_dir.path_join(safe_pc_name + ".json")
 	_tmp_file_path = _session_file_path + ".tmp"
 	_started_at_unix_ms = int(Time.get_unix_time_from_system() * 1000)
 	_pid = OS.get_process_id()
@@ -140,3 +147,13 @@ func _get_pc_name() -> String:
 	if pc_name.is_empty():
 		pc_name = "unknown"
 	return pc_name
+
+
+# (#179 PR3b round 3 M-1) filename safety 用 sanitize、logger.gd:213-219 と同 logic。
+# Windows で path として禁止される文字を `_` 置換、helper 共通化 (= 両者で 1 関数化) は別 PR scope。
+func _sanitize_filename(name: String) -> String:
+	var invalid = ["/", "\\", ":", "*", "?", "\"", "<", ">", "|"]
+	var result = name
+	for c in invalid:
+		result = result.replace(c, "_")
+	return result

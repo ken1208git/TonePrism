@@ -30,7 +30,13 @@ namespace GCTonePrism.Manager.Models
         /// <summary>最終 heartbeat 時刻 (UTC Unix epoch ms)。stale 判定の primary baseline。</summary>
         public long LastHeartbeatAtUnixMs { get; set; }
 
-        /// <summary>Launcher process ID。debug / 識別用、stale 判定には使用しない。</summary>
+        /// <summary>
+        /// Launcher process ID。stale 判定には使用しないが (round 3 L-2 で導入):
+        /// `SessionConflictDialog.Show` の Logger trail で `pc=PC-B pid=12345 ver=0.5.18` 形式で出力、
+        /// log 解析時に「自 PC 検出 = 自 `Process.GetCurrentProcess().Id` との一致」判定で同 PC 上の
+        /// Launcher を識別可能化する。dialog body (= user 視点) には pid は出さない (= 部員視点で
+        /// 意味なし、log のみ)。
+        /// </summary>
         public long Pid { get; set; }
 
         /// <summary>Launcher version (例: "0.5.18")。`SessionConflictDialog` 表示で使用。</summary>

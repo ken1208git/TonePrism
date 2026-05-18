@@ -190,11 +190,17 @@ namespace GCTonePrism.Manager.Services
                     // fallback: file mtime で stale 判定
                     long mtimeMs = new DateTimeOffset(File.GetLastWriteTimeUtc(path)).ToUnixTimeMilliseconds();
                     if (mtimeMs < staleThresholdMs) return null;
+                    // (round 3 L-1) fallback path でも dict から pc_name / launcher_version / started_at /
+                    // pid を best-effort 読込。dict 自体は parse 成功している (= 上の null check 通過) ので、
+                    // 個別 field の欠落のみが fallback path に倒れた case で、有効 field は活用する設計に変更。
+                    // 欠落時のみ primary path と同じ fallback 値 (filename / "(unknown)" / 0) を採用。
                     return new LauncherSessionInfo
                     {
-                        PcName = Path.GetFileNameWithoutExtension(path),
+                        PcName = dict.ContainsKey("pc_name") ? (dict["pc_name"]?.ToString() ?? Path.GetFileNameWithoutExtension(path)) : Path.GetFileNameWithoutExtension(path),
+                        StartedAtUnixMs = ParseLongOrZero(dict, "started_at_unix_ms"),
                         LastHeartbeatAtUnixMs = mtimeMs,
-                        LauncherVersion = "(version 不明)",
+                        Pid = ParseLongOrZero(dict, "pid"),
+                        LauncherVersion = dict.ContainsKey("launcher_version") ? (dict["launcher_version"]?.ToString() ?? "(version 不明)") : "(version 不明)",
                     };
                 }
 
