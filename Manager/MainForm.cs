@@ -456,19 +456,10 @@ namespace GCTonePrism.Manager
             lblStatus.Text = $"データベース: {dbStatus} | {gameInfo}";
         }
 
-        // ============================================================
-        // (#178 (b)) アップデート完了通知 dialog — sentinel ファイルによる post-update feedback
-        // ============================================================
-        //
-        // UpdateSectionPanel.RunUpdateWorker が完走時に <install>/.update_completed を書き出し、
-        // 自動再起動した新 Manager の MainForm_Load 冒頭で本 helper が sentinel を読んで完了 dialog 表示。
-        // sentinel は読込直後に必ず削除 (parse 成功 / 失敗を問わず) して、次回起動で再表示されるバグを防ぐ。
-        //
-        // dialog は通常の「同時起動に関する注意」MessageBox を **置換** する形 (= caller の MainForm_Load で
-        // `if (!TryShowUpdateCompletedDialog()) { 同時起動注意.Show() }` で gate)。起動 dialog 数は常に 1 つ、
-        // sentinel あり時は完了通知、sentinel なし時は同時起動注意、と排他切替する設計。
-        //
-        // 仕様詳細は SPECIFICATION.md §3.7.3 「sentinel ファイル仕様」参照。
+        // (#178 (b)) アップデート完了通知 dialog。2 invariant:
+        // (1) sentinel ファイルは読込直後の `finally` で必ず削除 (parse 成功 / 失敗問わず、永続再表示バグ防止)。
+        // (2) 起動時 dialog 数は常に 1 つに保つため、本 dialog 表示 (= true 返却) 時は caller が
+        //     「同時起動に関する注意」MessageBox を skip する排他置換。仕様: SPECIFICATION.md §3.7.3。
 
         /// <summary>
         /// sentinel ファイル `<install>/.update_completed` を読んで完了 dialog を表示。
@@ -485,17 +476,17 @@ namespace GCTonePrism.Manager
                 string json = System.IO.File.ReadAllText(sentinelPath, System.Text.Encoding.UTF8);
                 var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
                 var dto = ser.Deserialize<UpdateCompletedSentinel>(json);
-                if (dto != null) newVersion = dto.newVersion;
+                if (dto != null) newVersion = dto.NewVersion;
             }
             catch (Exception ex)
             {
-                Logger.Warn("[MainForm] update_completed sentinel parse 失敗 (dialog 表示 skip): " + ex.Message);
+                Services.Logger.Warn("[MainForm] update_completed sentinel parse 失敗 (dialog 表示 skip): " + ex.Message);
             }
             finally
             {
                 // 読込結果に関わらず sentinel は必ず削除する (永続 dialog 再表示バグ防止)。
                 try { System.IO.File.Delete(sentinelPath); }
-                catch (Exception delEx) { Logger.Warn("[MainForm] update_completed sentinel 削除失敗: " + delEx.Message); }
+                catch (Exception delEx) { Services.Logger.Warn("[MainForm] update_completed sentinel 削除失敗: " + delEx.Message); }
             }
 
             if (string.IsNullOrEmpty(newVersion))
@@ -504,7 +495,7 @@ namespace GCTonePrism.Manager
                 return false;
             }
 
-            Logger.Info("[MainForm] update_completed dialog 表示: v" + newVersion);
+            Services.Logger.Info("[MainForm] update_completed dialog 表示: v" + newVersion);
             MessageBox.Show(
                 "アップデートが完了しました。\n\n" +
                 "  新しいバージョン: v" + newVersion + "\n\n" +
@@ -517,8 +508,16 @@ namespace GCTonePrism.Manager
 
         private sealed class UpdateCompletedSentinel
         {
-            public string completedAt { get; set; }
-            public string newVersion { get; set; }
+            /// <summary>
+            /// 完了時刻 (ISO 8601 UTC、例: "2026-05-18T14:30:45Z")。**forensic 用** — File Explorer で
+            /// sentinel ファイルを直接開いた時に時刻が読めるためだけに書き出す。consumer
+            /// (`TryShowUpdateCompletedDialog`) は本 field を読み取らない (dialog 文言は `NewVersion`
+            /// のみで構成)。`JavaScriptSerializer` の case-insensitive deserialize により JSON 上は
+            /// `completedAt` (camelCase) でも `CompletedAt` (PascalCase) でも互換的に受理する。
+            /// </summary>
+            public string CompletedAt { get; set; }
+            /// <summary>新バージョン (例: "0.9.2")。consumer はこの値を dialog 文言に embed する。</summary>
+            public string NewVersion { get; set; }
         }
     }
 }

@@ -702,8 +702,10 @@ namespace GCTonePrism.Manager.Controls
                 }
 
                 // (#178 (b)) アップデート完了 sentinel ファイル書出し。自動再起動した新 Manager の
-                // MainForm_Load 冒頭で読まれて緑 banner を表示する。書込み失敗は banner が出ないだけで
-                // installation 自体は完成しているため Warn log で握り潰し、Application.Exit は続行。
+                // MainForm_Load 冒頭で `TryShowUpdateCompletedDialog` が読み込んで、「同時起動に関する
+                // 注意」MessageBox の替わりに「✓ アップデート完了」MessageBox を表示する (= 排他置換、
+                // 起動時 dialog 数は常に 1 つ)。書込み失敗は dialog が出ないだけで installation 自体は
+                // 完成しているため Warn log で握り潰し、Application.Exit は続行。
                 // 詳細: SPECIFICATION.md §3.7.3 「sentinel ファイル仕様」参照。
                 try
                 {
