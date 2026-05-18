@@ -25,6 +25,22 @@ namespace GCTonePrism.Manager
         private Label lblArgumentsPlaceholder;
 
         /// <summary>
+        /// (#187) `CopyGameFolder` で **parent gameFolder (`games/&lt;gameId&gt;/`) を新規作成したか** を
+        /// rollback 経路に伝える flag。旧 (#120) rollback 設計は version subfolder
+        /// (`games/&lt;gameId&gt;/v1.0.0/`) のみ削除する設計で、parent gameFolder は「同 gameId に他 version
+        /// が共存する可能性」safety で残置する判断だった。だが新規 game 追加 (= parent が今回新規作成)
+        /// では rollback 後に空の parent が残り、user が次回 OK click した時に `existingFolder check`
+        /// (#120) が trigger して「古いゲームデータが残っています」dialog 表示 → 「session conflict
+        /// で Cancel しただけなのに、なぜ古いデータ警告?」と user が混乱する UX 退行があった
+        /// (PR #184 round 6 案 B fence で Cancel 頻度が増えて顕在化、verify session で踏んだ)。
+        ///
+        /// 本 flag で「parent を今回 OK click 中に作成したか」を track、rollback 経路で `true` かつ
+        /// parent が **空** なら parent ごと削除。`false` (= 既存 game への version 追加 path、parent
+        /// に他 version 共存) は parent retain (旧 #120 設計通り、disk 上の他 version data loss 防止)。
+        /// </summary>
+        private bool parentCreatedThisCall = false;
+
+        /// <summary>
         /// 追加されたゲーム情報（OKボタンがクリックされた場合のみ設定される）
         /// </summary>
         public GameInfo AddedGame { get; private set; }
@@ -211,6 +227,43 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
+        /// (#187) `CopyGameFolder` で今回新規作成された空 parent gameFolder (`games/&lt;gameId&gt;/`) を、
+        /// rollback 経路で best-effort で削除する helper。3 つの rollback path (= ProcessingDialog
+        /// 失敗、案 B fence Cancel、catch blocks) から共通で呼ばれる。
+        ///
+        /// 安全 invariant の二重 guard:
+        /// - `parentCreatedThisCall == true`: 今回 OK click で parent を新規作成した case (= 既存
+        ///   game への version 追加 path はこの flag false で skip され、他 version 共存 case を保護)
+        /// - `Directory.GetFileSystemEntries(parent).Length == 0`: parent が **空** (= version subfolder
+        ///   削除済 + 他に何もない state)。万一 race で何か残っていたら削除しない (= data loss 予防)
+        ///
+        /// 削除失敗は Warn ログのみ、user に MessageBox は出さない (= 旧 #120 の retain 設計が許容範囲、
+        /// 削除できなくても次回 OK で `existingFolder check` dialog が出るだけで data loss なし)。
+        /// 呼出後は `parentCreatedThisCall = false` にリセット (= 同 form 内で再 OK 試行された時の二重削除予防)。
+        /// </summary>
+        private void TryDeleteEmptyParentGameFolder(string gameId)
+        {
+            if (!parentCreatedThisCall) return;
+
+            string parentFolder = PathManager.GetGameFolder(gameId);
+            try
+            {
+                if (Directory.Exists(parentFolder) &&
+                    Directory.GetFileSystemEntries(parentFolder).Length == 0)
+                {
+                    Directory.Delete(parentFolder);
+                    Logger.Info("[AddGameForm] (#187) rollback で空 parent gameFolder を削除: " + parentFolder);
+                }
+            }
+            catch (Exception ex)
+            {
+                // 削除失敗は旧 #120 retain 設計の範囲、Warn のみ。次回 OK で existingFolder dialog が出る path に倒れる。
+                Logger.Warn("[AddGameForm] (#187) rollback parent gameFolder 削除失敗 (旧 #120 retain 設計の範囲、次回 OK で existingFolder dialog 経由): " + parentFolder + " — " + ex.GetType().Name + ": " + ex.Message);
+            }
+            parentCreatedThisCall = false;
+        }
+
+        /// <summary>
         /// ゲームフォルダをコピー（バージョンフォルダ構造）
         /// </summary>
         private void CopyGameFolder(string gameId, string version, IProgress<ProgressInfo> progress, System.Threading.CancellationToken token)
@@ -220,6 +273,9 @@ namespace GCTonePrism.Manager
             if (!Directory.Exists(gameBaseFolder))
             {
                 Directory.CreateDirectory(gameBaseFolder);
+                // (#187) parent gameFolder を今回新規作成した flag を立てる。rollback 経路 (3 箇所) で
+                // この flag を見て「空 parent」だけ削除する判定に使う。詳細は field 定義の docstring 参照。
+                parentCreatedThisCall = true;
             }
             
             // バージョンフォルダにコピー
@@ -318,6 +374,9 @@ namespace GCTonePrism.Manager
                     {
                         try { Directory.Delete(destinationGameFolder, true); } catch { }
                     }
+                    // (#187) 今回新規作成された空 parent gameFolder も一緒に削除 (= 次回 OK で
+                    // existingFolder dialog が誤 trigger される drift 予防)。
+                    TryDeleteEmptyParentGameFolder(gameId);
                     return;
                 }
 
@@ -409,6 +468,9 @@ namespace GCTonePrism.Manager
                                 "中止処理: ファイル削除失敗", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         }
                     }
+                    // (#187) 今回新規作成された空 parent gameFolder も一緒に削除 (= 次回 OK で
+                    // existingFolder dialog が誤 trigger される drift 予防、本 issue の主目的)。
+                    TryDeleteEmptyParentGameFolder(gameId);
                     destinationGameFolder = null;
                     return;
                 }
@@ -445,6 +507,8 @@ namespace GCTonePrism.Manager
                         // 削除に失敗しても続行
                     }
                 }
+                // (#187) 今回新規作成された空 parent gameFolder も一緒に削除。
+                TryDeleteEmptyParentGameFolder(gameId);
 
                 string errorMessage = DatabaseManager.GetUserFriendlyErrorMessage(ex);
                 MessageBox.Show(
@@ -467,6 +531,8 @@ namespace GCTonePrism.Manager
                         // 削除に失敗しても続行
                     }
                 }
+                // (#187) 今回新規作成された空 parent gameFolder も一緒に削除。
+                TryDeleteEmptyParentGameFolder(gameId);
 
                 MessageBox.Show(
                     $"ゲームの追加に失敗しました。\n\n{ex.Message}",

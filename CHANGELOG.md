@@ -1521,6 +1521,21 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.10.2] - 2026-05-18
+
+#### Fixed (#187 — AddGameForm rollback で空 parent gameFolder が残り「古いゲームデータが残っています」dialog を誤 trigger)
+
+- **`parentCreatedThisCall` flag + `TryDeleteEmptyParentGameFolder` helper 追加** (`Manager/AddGameForm.cs`): PR #184 round 6 案 B fence で AddGameForm の Cancel 頻度が増えた結果、verify session で「ゲーム追加 → OK → CopyGameFolder 成功 → 案 B fence Cancel → rollback で version subfolder (`games/<gameId>/v1.0.0/`) は削除されるが parent gameFolder (`games/<gameId>/`) は空のまま残る → 同 form で OK 再 click すると existingFolder check (#120) が trigger して『古いゲームデータが残っています』dialog 表示 → user が『session conflict で Cancel しただけなのに、なぜ古いデータ警告?』と混乱」UX 退行 path を user が踏んだ。
+- **修正方針 (#187 Option A 採用)**:
+  - `private bool parentCreatedThisCall = false;` field を追加し、`CopyGameFolder` で `Directory.CreateDirectory(gameBaseFolder)` を呼んだ時に `true` に set。既存 game への version 追加 (= parent 既存) では `false` のまま (= 旧 #120 retain 設計通り、他 version 共存 case を保護)
+  - `TryDeleteEmptyParentGameFolder(gameId)` helper を新規追加。安全 invariant の二重 guard で「**今回 OK click で parent を新規作成** AND **parent が空**」の両方を満たす時のみ `Directory.Delete(parent)`、失敗は Warn ログのみ (旧 #120 retain 設計の範囲、user MessageBox なし)
+  - 3 rollback path (= ProcessingDialog 失敗、案 B fence Cancel、catch blocks の SQLite + general Exception) すべてで `TryDeleteEmptyParentGameFolder(gameId)` を version subfolder 削除直後に呼出
+- **invariant 保証**: 既存 game に新 version 追加 (= parent 既存) の rollback では parent retain (= 他 version 共存 case を保護、旧 #120 設計通り)、新規 game 追加 (= parent 新規作成) の rollback では parent も削除 → 次回 OK で誤 existingFolder dialog が出ない clean path に倒れる。
+- **影響範囲限定**: 本 fix は AddGameForm のみ。EditGameForm / VersionUpForm は parent gameFolder を新規作成しない (= 既存 game への変更) ため影響対象外。
+- **assembly version bump**: `0.10.1.0` → `0.10.2.0` (patch、bugfix のみ、DB schema 変更なし、AGENTS.md「Release and Versioning」ルール準拠)。
+- **verify**: Manager Release build clean。実機 verify は (1) DB に他 PC row 手動 INSERT で keepalive、(2) AddGameForm を新規 gameId で開く、(3) OK 押下 → CopyGameFolder 完了 → 案 B fence dialog → Cancel、(4) `Directory.Exists(games/<gameId>/) == false` を sqlite + PowerShell で確認、(5) 同 form で再 OK 押下 → existingFolder dialog が trigger しないことを目視確認。
+- **関連**: PR #184 (v0.10.0、LAN-wide 同時起動検出) verify session で発見した 3 issue (#185 / #186 / [#187](https://github.com/ken1208git/GCTonePrism/issues/187)) のうち本 PR で #187 を closure。#186 は PR #189 で fix 済、#185 は manifest 単独 path 不可と判明、別 milestone へ移行。
+
 ### [Manager v0.10.1] - 2026-05-18
 
 #### Fixed (#186 — Startup SessionConflictDialog がタスクバー不在 / focus 喪失で見失う)
