@@ -51,9 +51,22 @@ namespace GCTonePrism.Manager.Services
             }
             if (mainForm == null)
             {
-                foreach (Form f in Application.OpenForms)
+                // (round 8 L-2) `Application.OpenForms` の enumeration は別 thread / 別 event handler で
+                // form が `Close` / `Show` されると InvalidOperationException ("Collection was modified") を
+                // 投げる .NET WinForms の既知 race。本 helper の主旨「null 経路の silent skip を物理閉鎖」
+                // と一貫させるため、3 段目 fallback 自身も例外で button click handler を落とさないよう
+                // 握り潰す。catch 後は通常の「mainForm == null → fail-soft OK 返却 + Warn」path に倒す
+                // (= 1 段目 / 2 段目で 99% は hit するため 3 段目 fallback の race は稀 path、Warn trail で十分)。
+                try
                 {
-                    if (f is MainForm mf) { mainForm = mf; break; }
+                    foreach (Form f in Application.OpenForms)
+                    {
+                        if (f is MainForm mf) { mainForm = mf; break; }
+                    }
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Logger.Warn("[SessionConflictHelper] Application.OpenForms enumeration race (collection modified during enumeration)、3 段目 fallback skip: " + ex.Message);
                 }
             }
             if (mainForm == null)

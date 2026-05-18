@@ -106,7 +106,17 @@ namespace GCTonePrism.Manager
                     // mutex」状態を経由するため、将来 `WaitOne` 経由 pattern を追加した時に
                     // AbandonedMutexException を踏む path を予防。
                     try { singleInstanceMutex.ReleaseMutex(); }
-                    catch (Exception relEx) { Logger.Warn("[Program] Mutex.ReleaseMutex 失敗 (Dispose で abandoned 状態経由): " + relEx.Message); }
+                    catch (Exception relEx)
+                    {
+                        // (round 8 L-4) Warn message を ReleaseMutex 失敗の **cause** 主題に書換え。
+                        // 旧 message「Dispose で abandoned 状態経由」は cause/effect が逆で、その後の
+                        // Dispose 挙動を説明していて triage 上 noise。実際の cause は `Main` thread 以外
+                        // (= ThreadPool / Task 経由) から ReleaseMutex を呼んだ場合の ApplicationException
+                        // が typical (mutex を所有していない thread から release を試みた)、または
+                        // AbandonedMutexException 経由で取得した case。 docstring L106-107 の「abandoned
+                        // 状態経由」説明は preamble 側で retain (= 設計判断の根拠としては正しい)。
+                        Logger.Warn("[Program] Mutex.ReleaseMutex 失敗 (mutex 非所有 thread からの release 等が typical cause): " + relEx.GetType().Name + ": " + relEx.Message);
+                    }
                 }
             }
         }

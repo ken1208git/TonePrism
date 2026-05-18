@@ -167,10 +167,25 @@ namespace GCTonePrism.Manager.Services
                 if (_heartbeatCts != null)
                 {
                     _heartbeatCts.Cancel();
-                    // Task.Wait は thread block するが shutdown 同期 path で許容 (= 数秒以内に完了)。
+                    // Task.Wait は thread block するが shutdown 同期 path で許容 (= 通常数秒以内に完了)。
                     // (round 1 L-2) OperationCanceled だけ silent swallow、他 inner type (= heartbeat
                     // 最後の UpsertHeartbeat で SQLite 例外等) は Warn 出力で trail を残す。
-                    try { _heartbeatTask?.Wait(TimeSpan.FromSeconds(2)); }
+                    // (round 8 L-1) `Wait(2s)` の戻り値 bool (false=timeout) を確認。timeout 経由で抜けた
+                    // 場合 heartbeat task は **まだ生きている** ことが多く (= 内部で UpsertHeartbeat の
+                    // ExecuteWithRetry が busy_timeout=10000ms × maxRetries=3 で最悪 ~30 秒 block 中)、
+                    // 直後の `DeleteSelfSession(_pcName)` 実行 → heartbeat task が遅れて UpsertHeartbeat
+                    // を完了させると **zombie self row** が再登録される silent race path がある。
+                    // 30 秒以内に他 PC の stale cleanup で回収されるため致命的ではないが、log trail を
+                    // 残さないと triage 不能になるため Warn で記録する (silent fail-soft の暗黙運用を
+                    // 撤回、明示 trail に倒す)。
+                    bool completedInTime = true;
+                    try
+                    {
+                        if (_heartbeatTask != null)
+                        {
+                            completedInTime = _heartbeatTask.Wait(TimeSpan.FromSeconds(2));
+                        }
+                    }
                     catch (AggregateException ae) when (ae.InnerExceptions.All(e => e is OperationCanceledException))
                     {
                         // 想定済の cancellation、silent OK
@@ -181,6 +196,10 @@ namespace GCTonePrism.Manager.Services
                         {
                             Logger.Warn("[ManagerSessionService] heartbeat task shutdown 時 inner exception (継続): " + inner.GetType().Name + ": " + inner.Message);
                         }
+                    }
+                    if (!completedInTime)
+                    {
+                        Logger.Warn("[ManagerSessionService] heartbeat task が 2 秒以内に終了せず (= UpsertHeartbeat の SMB query が block 中の可能性)、stale cleanup に委ねる (zombie self row が最大 30 秒残存する可能性)");
                     }
                     // (round 3 L-1 fix) CancellationTokenSource.Dispose() 自体は idempotent で例外を
                     // 投げない (MSDN 仕様)。旧 round 2 L-1 で「Dispose の race で ObjectDisposedException」と

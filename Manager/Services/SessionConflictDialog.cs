@@ -55,6 +55,14 @@ namespace GCTonePrism.Manager.Services
             // (round 2 Medium-1) operationDescription が「ゲーム削除」「データベース初期化」等の場合に
             // 「{op} の内容と...」が日本語として grammatical に合わない問題を解消するため、template を
             // 「このまま {op} を実行すると...」の汎用文に統一 (op は名詞句のままで grammar 違和感なし)。
+            // (round 8 L-3) 文言の semantic 修正: 「他 PC の **編集内容と** お互いに上書きされて消える」
+            // は ゲーム編集 / Store 編集 / Settings 系には正しいが、「バックアップ作成」「バックアップ削除」
+            // 「バックアップ復元」「バックアップ設定変更」では「他 PC の編集内容を上書きする」関係性が
+            // 薄く文脈と乖離していた (= 13 callsite のうち 4 件 = BackupSection 3 + BackupSettings 1 が
+            // 該当)。「他 PC の **作業と競合して** データ破損や保存内容の喪失が起きる恐れ」のように
+            // 「上書き」「編集内容」依存を撤回した一般語に書換え、全 callsite で semantic と整合させる。
+            // Startup 側も同方針 (= 「編集内容や バックアップが お互いに上書き」を「データや バックアップが
+            // 競合して破損したり 消えたりする」に書換え)。
             string title;
             string body;
             if (context == SessionConflictDialogContext.Startup)
@@ -62,8 +70,8 @@ namespace GCTonePrism.Manager.Services
                 title = "【危険】他 PC で Manager が起動中です";
                 body =
                     detectedListLines + "\n\n" +
-                    "両方の PC で同時に Manager を使うと、編集内容や\n" +
-                    "バックアップがお互いに上書きされて消える恐れがあります。\n\n" +
+                    "両方の PC で同時に Manager を使うと、保存中のデータや\n" +
+                    "バックアップが競合して、データが破損したり消えたりする恐れがあります。\n\n" +
                     "「OK」を押す: このまま起動する (データが消える可能性を承知)\n" +
                     "「キャンセル」を押す: Manager を終了する (他 PC の人に確認してから起動する)";
             }
@@ -74,7 +82,7 @@ namespace GCTonePrism.Manager.Services
                 body =
                     detectedListLines + "\n\n" +
                     "このまま " + opLabel + " を実行すると、\n" +
-                    "他 PC の編集内容とお互いに上書きされて消える恐れがあります。\n\n" +
+                    "他 PC の作業と競合して、データが破損したり保存内容が消えたりする恐れがあります。\n\n" +
                     "「OK」を押す: このまま実行する (データが消える可能性を承知)\n" +
                     "「キャンセル」を押す: 実行を中止する (他 PC の人に確認してから実行する)";
             }
