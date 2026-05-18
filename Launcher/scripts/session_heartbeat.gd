@@ -16,7 +16,16 @@
 ## - atomic write: `<pc_name>.json.tmp` 仮書込 → rename
 ## - cleanup: `NOTIFICATION_PREDELETE` で self JSON 削除 (clean shutdown 即時反映)、
 ##   削除失敗 / crash 時は Manager 側 30 秒 stale timeout で fail-safe
-## - fail-soft: 全 write 失敗で `Logger.warn` trail のみ、Launcher 起動 / ゲームプレイは止めない
+## - fail-soft: 全 write 失敗で `push_warning` trail のみ、Launcher 起動 / ゲームプレイは止めない
+##
+## **log output 規約** (#85 移行待ち):
+## - INFO: `print(...)` (= logger.gd L168 `_classify_godot_line` で「その他 → INFO」分類)
+## - WARN: `push_warning(...)` (= 同 L169 「WARNING:/USER WARNING: → WARN」分類)
+##
+## 直接 `Logger.info/warn(...)` を呼べないのは Godot 4 の built-in `Logger` class と
+## autoload `Logger` の名前衝突で GDScript パーサーが built-in に解決して static method
+## lookup に失敗するため (logger.gd L10 同根問題)。#85 で Launcher 統一ログ基盤の
+## sweep が完了したら本 module も明示 API に移行予定。
 ##
 ## 詳細仕様: SPECIFICATION.md §3.8.7 参照。
 extends Node
@@ -42,7 +51,7 @@ func _ready() -> void:
 func _initialize() -> void:
 	var base_dir = PathManager.get_base_directory()
 	if base_dir.is_empty():
-		Logger.warn("[SessionHeartbeat] base directory 不明、heartbeat 機構 disable")
+		push_warning("[SessionHeartbeat] base directory 不明、heartbeat 機構 disable")
 		_init_failed = true
 		return
 
@@ -50,7 +59,7 @@ func _initialize() -> void:
 	if not DirAccess.dir_exists_absolute(sessions_dir):
 		var err = DirAccess.make_dir_recursive_absolute(sessions_dir)
 		if err != OK:
-			Logger.warn("[SessionHeartbeat] sessions directory 作成失敗 (heartbeat 機構 disable): " + sessions_dir + ", err=" + str(err))
+			push_warning("[SessionHeartbeat] sessions directory 作成失敗 (heartbeat 機構 disable): " + sessions_dir + ", err=" + str(err))
 			_init_failed = true
 			return
 
@@ -73,7 +82,7 @@ func _initialize() -> void:
 	add_child(_timer)
 
 	_initialized = true
-	Logger.info("[SessionHeartbeat] session 登録: pc=" + _pc_name + " pid=" + str(_pid) + " ver=" + _launcher_version + " path=" + _session_file_path)
+	print("[SessionHeartbeat] session 登録: pc=" + _pc_name + " pid=" + str(_pid) + " ver=" + _launcher_version + " path=" + _session_file_path)
 
 
 func _on_heartbeat_tick() -> void:
@@ -96,14 +105,14 @@ func _write_session_json() -> void:
 	# atomic write: .tmp に書込 → rename で atomic 反映
 	var f = FileAccess.open(_tmp_file_path, FileAccess.WRITE)
 	if f == null:
-		Logger.warn("[SessionHeartbeat] heartbeat write 失敗 (open .tmp): path=" + _tmp_file_path + " err=" + str(FileAccess.get_open_error()))
+		push_warning("[SessionHeartbeat] heartbeat write 失敗 (open .tmp): path=" + _tmp_file_path + " err=" + str(FileAccess.get_open_error()))
 		return
 	f.store_string(json_str)
 	f.close()
 
 	var rename_err = DirAccess.rename_absolute(_tmp_file_path, _session_file_path)
 	if rename_err != OK:
-		Logger.warn("[SessionHeartbeat] heartbeat rename 失敗 (.tmp → .json): err=" + str(rename_err))
+		push_warning("[SessionHeartbeat] heartbeat rename 失敗 (.tmp → .json): err=" + str(rename_err))
 		# .tmp 残骸を best-effort 削除 (= 次回 heartbeat で再 write されるが残骸は掃除しておく)
 		DirAccess.remove_absolute(_tmp_file_path)
 
@@ -117,9 +126,9 @@ func _notification(what: int) -> void:
 			if FileAccess.file_exists(_session_file_path):
 				var err = DirAccess.remove_absolute(_session_file_path)
 				if err != OK:
-					Logger.warn("[SessionHeartbeat] self session file 削除失敗 (Manager 側 30 秒 stale で fallback): path=" + _session_file_path + " err=" + str(err))
+					push_warning("[SessionHeartbeat] self session file 削除失敗 (Manager 側 30 秒 stale で fallback): path=" + _session_file_path + " err=" + str(err))
 				else:
-					Logger.info("[SessionHeartbeat] self session file 削除 (clean exit): pc=" + _pc_name)
+					print("[SessionHeartbeat] self session file 削除 (clean exit): pc=" + _pc_name)
 
 
 func _get_pc_name() -> String:
