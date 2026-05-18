@@ -1521,6 +1521,29 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.10.2] - 2026-05-18
+
+#### Fixed (#187 — AddGameForm 2 段目 fence を pre-copy に reorder し parent rollback を構造的に不要化)
+
+- **2 段目 fence を `CopyGameFolder` の前に移動** (`Manager/AddGameForm.cs`): PR #184 round 6 案 B で導入した「**DB write 直前**」の post-copy fence は、Cancel 時に 30 秒〜5 分の file copy が無駄になる + version subfolder / parent gameFolder の rollback complexity を抱え込む構造的 cost を持っていた (= PR #187 round 1 で `parentCreatedThisCall` flag + `TryDeleteEmptyParentGameFolder` helper + 3 rollback path 修正という拡張で対症療法を試みたが、根本的な「**フォルダを作って消す**」設計の歪みは残置)。本 PR で fence 位置自体を `CopyGameFolder` の **前** に移動する reorder approach に転換、parent rollback complexity を構造的に不要化。
+- **得るもの**:
+  - **Cancel 時の即時 feedback**: ProcessingDialog を見せる前に fence dialog → file copy そのものが走らない → version subfolder / parent gameFolder の rollback 自体が不要
+  - **code 大幅 simplify**: round 1 で導入した `parentCreatedThisCall` field (+ docstring) + `TryDeleteEmptyParentGameFolder` helper + 3 rollback path での呼出 (= 計 ~60 行) を全部撤去
+  - round 7 M-2 で導入した「rollback delete 失敗時の MessageBox 通知」(= ~20 行) も pre-copy fence では rollback 自体が走らないため不要化、合計 ~80 行の defensive code を構造的に廃止
+- **失うもの (= 受容仕様)**:
+  - file copy 中 (30 秒〜5 分) に他 PC が起動した case を 2 段目 fence で catch できなくなる
+  - **1 段目 fence (= SectionPanel `ShowDialog` 前 check) は維持** されているため、ほとんどの race window (= AddGameForm 開いて入力中の数分) は引き続き catch
+  - LAN 運用での「30 秒〜5 分の file copy 中に他 PC 起動」は rare event、user 視点で「5 分 copy 後の Cancel 損失」の体感 cost が大きい trade-off を反転
+- **3 rollback path は維持** (= ProcessingDialog 失敗 / catch blocks の SQLite + general Exception): file copy が走った後の例外経路 rollback は引き続き必要 (= 案 B fence Cancel ではなくなる)。旧 #120 retain 設計通り version subfolder のみ削除、parent gameFolder は他 version 共存 safety で retain。
+- **設計判断の経緯**: PR #190 round 1 で「`parentCreatedThisCall` flag + helper で 3 rollback path に parent 削除を追加」する Option A approach を実装 + verify PASS したが、reviewer (user) から「**わざわざフォルダ消しに行ってるの? 順番変更じゃなくて?**」の指摘を受けて再検討、reorder approach が universally clean (= 「フォルダ作って消す」より「作る前に check」) と判断、round 2 で書き換え。
+- **影響範囲限定**: 本 fix は AddGameForm のみ。EditGameForm / VersionUpForm / StoreSectionForm / BackupSettingsForm の 2 段目 fence 位置は touch なし (= 各々 ShowDialog 内部の DB write 直前 = round 6 案 B 配置のまま、これらは ProcessingDialog なしで file copy 経路を持たないため fence 位置による cost 差が AddGameForm ほど大きくない)。
+- **assembly version bump**: `0.10.1.0` → `0.10.2.0` (patch、bugfix のみ、DB schema 変更なし、AGENTS.md「Release and Versioning」ルール準拠)。
+- **verify**: 
+  - **完了**: Manager Release build clean (warnings 0、net -66 行)。
+  - **end state のみ verify 済 (= 不完全)**: PR #190 round 1 (= Option A approach、`parentCreatedThisCall` flag + helper + 3 rollback path) の verify session で「同 form 2 回 Cancel + rollback trail 2 回 log + `games/a/` 不在」を確認済。**ただし round 1 verify は end state (= `games/a/` 不在) のみ cover、本 reorder の主目的である path (= ProcessingDialog 出現前に fence dialog / file copy が走らない) は別 verify 必要** (= round 1 は「作って消す」path、round 2 は「作らない」path、両者は end state 一致だが path は別物)。
+  - **round 2 reorder 実機 verify** (Manager v0.10.2 リリース時 / PR merge 前に実施 **必須**): (1) DB に他 PC row 手動 INSERT + keepalive、(2) Manager 起動 → MainForm、(3) AddGameForm を新規 gameId で開く、(4) OK 押下 → **CopyGameFolder 開始前** (= ProcessingDialog 進捗バーが出る前) に fence dialog 表示確認 (= round 1 verify では cover していない path)、(5) Cancel 押下 → `Directory.Exists(games/<gameId>/) == false` を PowerShell で確認 (= 何も作成されていない state)、(6) 同 form で再 OK → 同じ fence dialog (= 「古いゲームデータが残っています」誤 trigger なし)、(7) (regression check) OK 押下 → ProcessingDialog → copy 完了 → DB write → Form close の normal path 確認。verify 未完で merge する場合、リリース当日に「fence 出ない / Cancel しても copy 走る」path の脱落 risk を承知して merge する必要あり (Bundle release の Release.ps1 経路では catch しない silent path)。
+- **関連**: PR #184 (v0.10.0、LAN-wide 同時起動検出) verify session で発見した 3 issue (#185 / #186 / [#187](https://github.com/ken1208git/GCTonePrism/issues/187)) のうち本 PR で #187 を closure。#186 は PR #189 で fix 済、#185 は manifest 単独 path 不可と判明、別 milestone へ移行。
+
 ### [Manager v0.10.1] - 2026-05-18
 
 #### Fixed (#186 — Startup SessionConflictDialog がタスクバー不在 / focus 喪失で見失う)
