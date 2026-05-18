@@ -130,11 +130,30 @@ namespace TonePrism.Manager
 
         private void MainForm_Load(object sender, EventArgs e)
         {
-            // (#168 v1.0.0 ハード切替 guard) 旧版 (GCTonePrism) install を検出した場合、
+            // (#168 brand rename ハード切替 guard) 旧版 (GCTonePrism) install を検出した場合、
             // user が誤って新 zip を旧 install dir に展開した想定。`prism.db` (旧 DB filename) が
             // 残置されているが `toneprism.db` (新 DB filename) は存在しない、というのが旧版痕跡の
             // 一意 marker。fresh install (= 何もない) と区別するため両方を check する。検出時は
-            // 警告 + 即時 exit で、誤った混在状態で先に進む path を物理的に塞ぐ。
+            // 警告 + 即時 process kill で、誤った混在状態で先に進む path を物理的に塞ぐ。
+            //
+            // **設計意図 (= 一過性 / 再利用前提なし)**: 本 guard は #168 brand rename transition 専用、
+            // prism.db → toneprism.db 跨ぎ install の fail-safe。trigger 条件 (`prism.db` 残置 +
+            // `toneprism.db` 不在) は brand rename specific で、健全 install では永久に発火しない
+            // (= v0.12.0 以降では dead code に近い)。将来別 transition (e.g. toneprism.db → 別 schema)
+            // では別 marker / 別 guard を新設する設計、本 guard を流用しない。
+            //
+            // **Environment.Exit(1) 採用根拠**: `Application.Exit()` だと WinForms message loop が
+            // queued message を消化してから停止する設計のため、guard return 後も Form Show / 子
+            // control 初期化 event が走り得る race window 残存 (= MainForm 未 Visible なので実害は
+            // 薄いが defensive)。`Environment.Exit(1)` で process 即時 kill、queued message 一切
+            // 処理されない厳密 fence。
+            //
+            // **dev 環境 false-positive 注意**: PathManager.FindBaseDirectory は priority-1
+            // (`toneprism.db` 探索) → priority-2 (`.git` 探索) → priority-3 (Manager+Launcher
+            // sibling) の順で BaseDirectory を resolve。開発者が repo root に過去の test artifact
+            // `prism.db` を残置していた場合、priority-1 hit せず priority-2 で repo root が選ばれ
+            // → 本 guard が trigger する path あり。回避は手動で `prism.db` 削除。MessageBox 文言は
+            // 説明的なので開発者が原因に気付きやすい想定 (= 受容範囲、別 issue 化なし)。
             string oldDb = Path.Combine(PathManager.BaseDirectory, "prism.db");
             string newDb = Path.Combine(PathManager.BaseDirectory, "toneprism.db");
             if (File.Exists(oldDb) && !File.Exists(newDb))
@@ -147,7 +166,7 @@ namespace TonePrism.Manager
                     "旧版検出 — 手動再 install が必要です",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
-                Application.Exit();
+                Environment.Exit(1);
                 return;
             }
 

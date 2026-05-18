@@ -19,7 +19,7 @@ static func get_games_folder() -> String:
 
 ## データベースファイルのパス
 static func get_database_path() -> String:
-	return get_base_directory().path_join("toneprism.db")
+	return get_base_directory().path_join("tonetoneprism.db")
 
 ## 指定したゲームのフォルダパス
 static func get_game_folder(game_id: String) -> String:
@@ -36,16 +36,16 @@ static func _find_base_directory() -> String:
 		# res://から取得したパスを正規化
 		project_root = project_root.replace("\\", "/").rstrip("/")
 		
-		# プロジェクトルートにprism.dbがあるか確認
-		var db_path = project_root.path_join("toneprism.db")
+		# プロジェクトルートにtoneprism.dbがあるか確認
+		var db_path = project_root.path_join("tonetoneprism.db")
 		if FileAccess.file_exists(db_path):
 			print("[PathManager] res://からプロジェクトルートを検出: ", project_root)
 			return project_root
 		else:
-			# res://から取得したパスにprism.dbがない場合、親ディレクトリを確認
+			# res://から取得したパスにtoneprism.dbがない場合、親ディレクトリを確認
 			# プロジェクトルートはLauncherフォルダの親ディレクトリ
 			var parent_path = project_root.get_base_dir()
-			var parent_db_path = parent_path.path_join("toneprism.db")
+			var parent_db_path = parent_path.path_join("tonetoneprism.db")
 			if FileAccess.file_exists(parent_db_path):
 				print("[PathManager] res://の親ディレクトリからプロジェクトルートを検出: ", parent_path)
 				return parent_path
@@ -57,7 +57,7 @@ static func _find_base_directory() -> String:
 				# NOTE: ends_with("Launcher") は文字列 prefix collision の余地があり、
 				# `MyLauncher` / `WindowLauncher` 等の末尾 "Launcher" を含む dir 名にも hit する。
 				# ただし本ブランチは editor 起動時の fallback (project.godot を Godot エディタが
-				# 読んで起動した直後、toneprism.db 未生成の初期状態) のみで発火する path。実機 install
+				# 読んで起動した直後、tonetoneprism.db 未生成の初期状態) のみで発火する path。実機 install
 				# 経路は _find_base_directory_from_executable() を通り、こちらは separator 付き
 				# begins_with で厳密化済み。editor 文脈での false-match は project.godot の位置で
 				# project_root が自動決まるため実害低と判断、修正は issue #151 (priority-3 detection
@@ -66,7 +66,7 @@ static func _find_base_directory() -> String:
 					print("[PathManager] DB未検出だがフォルダ構造からルートを推測: ", parent_path)
 					return parent_path
 				
-				print("[PathManager] res://から取得したパスにprism.dbが見つかりません。")
+				print("[PathManager] res://から取得したパスにtoneprism.dbが見つかりません。")
 	
 	# res://が使えない場合（エクスポート時など）、実行ファイルのパスから検出
 	return _find_base_directory_from_executable()
@@ -85,10 +85,10 @@ static func _find_base_directory_from_executable() -> String:
 	while dir != null and current_level < max_levels:
 		var current_dir_path = dir.get_current_dir()
 		
-		# 優先順位1: toneprism.db（データベースファイル）
-		var db_path = current_dir_path.path_join("toneprism.db")
+		# 優先順位1: tonetoneprism.db（データベースファイル）
+		var db_path = current_dir_path.path_join("tonetoneprism.db")
 		if FileAccess.file_exists(db_path):
-			print("[PathManager] toneprism.db を検出: ", current_dir_path)
+			print("[PathManager] tonetoneprism.db を検出: ", current_dir_path)
 			detected_base_directory = current_dir_path
 			break
 		
@@ -116,7 +116,7 @@ static func _find_base_directory_from_executable() -> String:
 		#     配置される (SPEC §3.7.1 / §7.5.1)。Manager/ も同 current_dir_path 直下に存在
 		#     することを確認することで、`<install>/Launcher/` 単独 dir (= 他アプリ等で
 		#     偶然存在する Launcher dir) との誤マッチを構造的に排除する。priority-1
-		#     (toneprism.db) / priority-2 (.git) が hit しない極限状況での false-match を低減
+		#     (tonetoneprism.db) / priority-2 (.git) が hit しない極限状況での false-match を低減
 		#     (round 7 L5)。
 		var launcher_folder_check = current_dir_path.path_join("Launcher")
 		var launcher_folder_check_with_sep = launcher_folder_check + "/"
