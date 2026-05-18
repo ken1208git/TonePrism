@@ -10,8 +10,8 @@ class_name Version
 ## 型注釈削除 / rename / line 分割で Manager UI の Launcher 版数表示が「不明」に化けるため、
 ## 形式変更時は SPEC §3.7.8 チェックリストに従って Manager 側 regex も同期更新すること。
 
-const MAJOR: int = 1
-const MINOR: int = 0
+const MAJOR: int = 0
+const MINOR: int = 6
 const PATCH: int = 0
 
 static func get_version_string() -> String:

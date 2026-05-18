@@ -141,9 +141,9 @@ namespace TonePrism.Manager
             {
                 MessageBox.Show(
                     "旧版 (GCTonePrism) の install が検出されました。\n\n" +
-                    "v1.0.0 は完全 rename (GCTonePrism → TonePrism) を伴う破壊的変更を含むため、" +
+                    "新版は完全 rename (GCTonePrism → TonePrism) を伴う破壊的変更を含むため、" +
                     "自動更新できません。\n\n" +
-                    "TonePrism_Bundle_v1.0.0.zip を新しいフォルダに解凍し、Install.bat を実行してください。",
+                    "最新の TonePrism_Bundle_vX.Y.Z.zip を新しいフォルダに解凍し、Install.bat を実行してください。",
                     "旧版検出 — 手動再 install が必要です",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);

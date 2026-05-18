@@ -1069,18 +1069,18 @@ Release.bat の編集は **UTF-8 (no BOM) + CRLF** 厳守 (SPEC §3.7.9.1 参照
 
 SPEC §2.4 で定義される「主要 (Launcher / Manager / Monitor) を補助する独立 exe 群」の **runtime exe** の変更履歴。`Companions/Updater/TonePrism_Updater.exe` (Manager 自身の dir 置換用) + 将来追加される `WindowProbe` (#101) / `PauseOverlay` (#30) 等の deployment 配置と整合。本 section は **#160 で `## Updater (Companions/Updater)` から rename + 一般化**、`## Release Tooling` (= build / 配布スクリプト) と責務分離 (= 後者は build 時のみ動く scripts、本 section は runtime exe)。SPEC §2.4 / §3.7.4 参照。
 
-### [Updater v1.0.0] - 2026-05-19
+### [Updater v0.2.0] - 2026-05-19
 
 #### Changed (#168 — 完全 rename + 配布対象拡張、破壊的変更)
 
-Bundle v1.0.0 完全 rename の Updater 側 contribution。詳細は `## Manager v1.0.0` entry 参照、本 entry は Updater 単体の変更点のみ記録。
+Bundle v0.5.0 完全 rename の Updater 側 contribution。詳細は `## Manager v0.12.0` entry 参照、本 entry は Updater 単体の変更点のみ記録。
 
-major bump 判断: exe filename rename (`GCTonePrism_Updater.exe` → `TonePrism_Updater.exe`) は OS layer の breaking change。AGENTS.md「実機 OS との接点で `Updater.exe` のような汎用名は他アプリと衝突」原則の prefix uniqueness 維持目的は据置、prefix 文字列のみ brand に合わせて update。
+minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bump OK) に乗って 0.1.0 → 0.2.0。exe filename rename (`GCTonePrism_Updater.exe` → `TonePrism_Updater.exe`) は OS layer の breaking change だが、AGENTS.md「実機 OS との接点で `Updater.exe` のような汎用名は他アプリと衝突」原則の prefix uniqueness 維持目的は据置、prefix 文字列のみ brand に合わせて update。
 
 - **exe filename rename**: `GCTonePrism_Updater.exe` → `TonePrism_Updater.exe` (`csproj` `AssemblyName` / `RootNamespace` 同期)
 - **`Companions/Updater/GCTonePrism_Updater.csproj` → `Companions/Updater/TonePrism_Updater.csproj`** (= `git mv`)
 - **C# namespace rename**: `namespace GCTonePrism.Updater` / `using GCTonePrism.Updater.*` → `TonePrism.Updater` / `TonePrism.Updater.*` (5 .cs file 内)
-- **AssemblyInfo.cs metadata update**: `AssemblyTitle("GCTonePrism_Updater")` / `AssemblyProduct("GCTonePrism_Updater")` / `AssemblyDescription("Updates GCTonePrism Manager...")` → `TonePrism_Updater` / `Updates TonePrism Manager...` 同期 (+ `AssemblyVersion` 0.1.0.0 → 1.0.0.0)
+- **AssemblyInfo.cs metadata update**: `AssemblyTitle("GCTonePrism_Updater")` / `AssemblyProduct("GCTonePrism_Updater")` / `AssemblyDescription("Updates GCTonePrism Manager...")` → `TonePrism_Updater` / `Updates TonePrism Manager...` 同期 (+ `AssemblyVersion` 0.1.0.0 → 0.2.0.0)
 
 ### [Updater v0.1.0] - 2026-05-13
 
@@ -1116,13 +1116,13 @@ major bump 判断: exe filename rename (`GCTonePrism_Updater.exe` → `TonePrism
 
 ## Launcher（ランチャー本体）
 
-### [Launcher v1.0.0] - 2026-05-19
+### [Launcher v0.6.0] - 2026-05-19
 
 #### Changed (#168 — 完全 rename + 配布対象拡張、破壊的変更)
 
-Bundle v1.0.0 完全 rename の Launcher 側 contribution。詳細は `## Manager v1.0.0` entry 参照、本 entry は Launcher 単体の変更点のみ記録。
+Bundle v0.5.0 完全 rename の Launcher 側 contribution。詳細は `## Manager v0.12.0` entry 参照、本 entry は Launcher 単体の変更点のみ記録。
 
-major bump 判断: Bundle 全体が major (= brand 完全 rename) のため Launcher も同 major に align。Launcher 単体での user 視点変化 (= `TonePrism_Launcher.exe` filename / title `TonePrism`) も brand 統一の visible part、patch 慣例 (= 旧 PR3b の `0.5.17 → 0.5.18` 等) からの整合性破壊点として major 妥当。
+minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bump OK) に乗って 0.5.18 → 0.6.0。Launcher 単体での user 視点変化 (= `TonePrism_Launcher.exe` filename / title `TonePrism`) は brand 統一の visible part、patch (= 旧 PR3b の `0.5.17 → 0.5.18` 等) では収まらない範囲のため minor bump 妥当。
 
 - **exe filename rename**: `GCTonePrism_Launcher.exe` → `TonePrism_Launcher.exe` (`project.godot` `config/name` + `export_presets.cfg` `product_name` 同期)
 - **`config/version` / `file_version` / `product_version` を 1.0.0 / 1.0.0.0 に bump** (`version.gd` `MAJOR=1 / MINOR=0 / PATCH=0`、project.godot `config/version="1.0.0"`、export_presets.cfg `file_version="1.0.0.0"` / `product_version="1.0.0.0"`)
@@ -1588,17 +1588,17 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
-### [Manager v1.0.0] - 2026-05-19
+### [Manager v0.12.0] - 2026-05-19
 
 #### Changed (#168 — 完全 rename + 配布対象拡張、破壊的変更)
 
-プロジェクト brand を `GCTonePrism` / `ゲームセンターTONE Prism` から **`TonePrism`** に統一、他の学校・団体への配布も視野に入れた汎用化 rename。exe filename / DB filename / repo URL / namespace / UI 文字列 / README まで完全 rename、auto-update 互換性は意図的に放棄してハード切替 transition を採用 (= 既存 install は手動で `TonePrism_Bundle_v1.0.0.zip` 解凍 + Install.bat 再実行が必要)。
+プロジェクト brand を `GCTonePrism` / `ゲームセンターTONE Prism` から **`TonePrism`** に統一、他の学校・団体への配布も視野に入れた汎用化 rename。exe filename / DB filename / repo URL / namespace / UI 文字列 / README まで完全 rename、auto-update 互換性は意図的に放棄してハード切替 transition を採用 (= 既存 install は手動で `TonePrism_Bundle_v0.5.0.zip` 解凍 + Install.bat 再実行が必要)。
 
-major bump 判断: exe filename / DB filename / namespace / repo URL 等の breaking change を含むため、AGENTS.md「Bundle bump ルール: Major = いずれかの component に breaking change」に準拠。SPEC §1 / §2.4 / §7.3 等の本文 literal も全件 sweep、過去 history (= CHANGELOG 過去 entry / SPEC §10.x 変更履歴 row) は事実として残置 (= git blame / commit 整合保持)。
+bump 判断: exe filename / DB filename / namespace / repo URL 等の breaking change を含むが、SemVer pre-1.0 (= 0.x.y) 原則「Major version zero (0.y.z) is for initial development. Anything MAY change at any time」に乗って **minor bump (0.11.0 → 0.12.0)** で対応。1.0.0 への bump は「API 安定保証 + 配布実績」の milestone として後の release に温存、本 PR は brand 統一 + 配布可能化への準備として位置付け。AGENTS.md Bundle bump ルール「Major = breaking change」は 1.x+ 想定の規約で、0.x 域では minor bump が SemVer 上 OK (= user への warning 強度は CHANGELOG / release notes の文言で確保)。SPEC §1 / §2.4 / §7.3 等の本文 literal も全件 sweep、過去 history (= CHANGELOG 過去 entry / SPEC §10.x 変更履歴 row) は事実として残置 (= git blame / commit 整合保持)。
 
 - **exe filename rename**: `GCTonePrism_Manager.exe` → `TonePrism_Manager.exe`、csproj `AssemblyName` / `RootNamespace` 同期。`Manager/GCTonePrism_Manager.csproj` → `Manager/TonePrism_Manager.csproj` (= `git mv`)、`Manager/GCTonePrism_Manager.slnx` → `Manager/TonePrism_Manager.slnx` 同様
 - **C# namespace 全件 rename**: `namespace GCTonePrism.Manager` / `using GCTonePrism.Manager.*` → `TonePrism.Manager` / `TonePrism.Manager.*` を 98 .cs file で 207 occurrence sweep
-- **AssemblyInfo.cs metadata update**: `AssemblyTitle("GCTonePrism_Manager")` / `AssemblyProduct("GCTonePrism_Manager")` → `TonePrism_Manager` (+ `AssemblyVersion` 0.11.0.0 → 1.0.0.0)
+- **AssemblyInfo.cs metadata update**: `AssemblyTitle("GCTonePrism_Manager")` / `AssemblyProduct("GCTonePrism_Manager")` → `TonePrism_Manager` (+ `AssemblyVersion` 0.11.0.0 → 0.12.0.0)
 - **DB filename rename**: `prism.db` → `toneprism.db` 全件 (= `PathManager.cs` / `SchemaManager.cs` / `DatabaseManager.cs` / `BackupService.cs` / `Logger.cs` 等 17 source file + .gitignore + templates/Install.bat + ERROR_CODES_MANUAL.txt + SPEC body)
 - **旧版 install detect guard 追加** (`MainForm.cs` MainForm_Load 冒頭): `prism.db` 残置 + `toneprism.db` 不在 = 旧版 install 痕跡として検出、警告 MessageBox + 即時 exit。user が誤って NEW zip を旧 dir に上書き展開した時の fail-safe (= 旧 DB と新 schema の混在で 不整合 path を物理閉鎖)
 - **GitHub repo URL rename**: `GitHubReleaseChecker.cs` `Owner` / `Repo` const + `Release.ps1` `$GitHubRepoSlug` + CHANGELOG 末尾 link def 全件 `ken1208git/GCTonePrism` → `ken1208git/TonePrism`。GitHub 自動 redirect で過去 release tag link も継続動作
