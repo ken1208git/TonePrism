@@ -89,6 +89,33 @@ namespace GCTonePrism.Manager.Services
 
             Logger.Warn("[SessionConflictDialog] " + context + " context で他 PC 検出 (" + others.Count + " 件) → dialog 表示");
 
+            // (#186) Startup context は MainForm_Load 中 (= MainForm がまだ Show されていない state) で
+            // 呼ばれるため、`MessageBox.Show(owner, ...)` だと modal child / 親 (= MainForm) のどちらも
+            // taskbar entry を持たず、別 window が前面に来ると user が dialog を見失う silent UI bug が
+            // あった (PR #184 verify session で発覚: Claude Code window をクリックした瞬間 dialog が裏に
+            // 行ってタスクバーにも entry がなく見失う、Alt+Tab で能動的に探さないと辿り着けない)。
+            //
+            // 修正方針: `MessageBoxOptions.DefaultDesktopOnly` を Startup context **限定** で適用。
+            // - 効果: dialog が default desktop 最前面に固定 → focus 失っても裏に行かない
+            // - 制約: DefaultDesktopOnly は owner との併用不可 (= 内部で `ShowDialog(IntPtr.Zero, ...)` に
+            //   倒れる、owner 渡しても無視) なので Startup 経路は `owner` 引数を捨てて null overload を使う
+            //
+            // EditOperation context は MainForm が **visible 状態** で呼ばれるため、owner-modal child の
+            // 標準 WinForms 挙動で十分 (= MainForm に紐づいた taskbar entry経由でアクセス可能、
+            // DefaultDesktopOnly に切替えると owner 関係喪失で「MainForm を最前面に持って来ても dialog
+            // は別の場所に留まる」UX 退行になるため適用しない)。
+            //
+            // 詳細: SPEC §3.8.2「dialog button」項 + #186 issue 本文の (a) MessageBoxOptions.DefaultDesktopOnly 候補。
+            if (context == SessionConflictDialogContext.Startup)
+            {
+                return MessageBox.Show(
+                    body,
+                    title,
+                    MessageBoxButtons.OKCancel,
+                    MessageBoxIcon.Stop,
+                    MessageBoxDefaultButton.Button2 /* Cancel を default に倒して反射押下で続行する path を抑制 */,
+                    MessageBoxOptions.DefaultDesktopOnly /* (#186) 最前面固定で focus 喪失 → 見失う drift 解消 */);
+            }
             return MessageBox.Show(
                 owner,
                 body,

@@ -1521,6 +1521,17 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.10.1] - 2026-05-18
+
+#### Fixed (#186 — Startup SessionConflictDialog がタスクバー不在 / focus 喪失で見失う)
+
+- **`SessionConflictDialog.Show` の Startup context 経路に `MessageBoxOptions.DefaultDesktopOnly` を追加** (`Manager/Services/SessionConflictDialog.cs`): PR #184 (v0.10.0) で実装した起動時 SessionConflictDialog (= `MainForm_Load` 中で他 PC を検出して表示する modal「【危険】他 PC で Manager が起動中です」) は `MainForm` 自身がまだ `Show` されていない state で `MessageBox.Show(owner=MainForm, ...)` を呼ぶため、modal child も親も **taskbar entry を持たない silent UI bug** があった (PR #184 verify session で発覚、user が Claude Code window をクリックした瞬間 dialog が裏に行って Alt+Tab で能動的に探さないと辿り着けない)。`DefaultDesktopOnly` option は dialog を default desktop の最前面に固定する効果があり、focus 失っても裏に行かなくなる。
+- **Startup context 限定の適用**: `DefaultDesktopOnly` は仕様上 `owner` との併用不可 (= 内部で `ShowDialog(IntPtr.Zero, ...)` に倒れて owner 引数が無視される) のため、Startup 経路でのみ `owner` 引数を捨てて null overload を使う形に分岐。EditOperation context (= 編集操作前 fence、SectionPanel / Form OK click 経由) は **MainForm が visible 状態で呼ばれる**ため owner-modal child の標準 WinForms 挙動で十分、`DefaultDesktopOnly` 適用すると owner 関係喪失で「MainForm を最前面に持って来ても dialog は別の場所に留まる」UX 退行になるため適用しない。
+- **assembly version bump**: `0.10.0.0` → `0.10.1.0` (patch、bugfix のみ、DB schema 変更なし、AGENTS.md「Release and Versioning」ルール準拠)。
+- **verify**: Manager Release build clean。実機 verify は DB に他 PC row 手動 INSERT 状態で Manager 起動 → Startup dialog が常に最前面表示されることを目視確認。EditOperation context は PR #184 verify session で動作確認済 (= MainForm visible 経路、本 PR で挙動変化なし)。
+- **PR #185 / #188 (manifest 単独 DPI awareness 試行) との分離**: #185 が manifest 単独で Form layout regression を起こして revert された結果、起動時 dialog の見失い問題は引き続き残っていた。本 PR は **manifest 触らない MessageBoxOptions 1 引数追加のみ** で #185 / #188 の DPI 問題と完全独立な path で fix、Form layout への影響ゼロ。DPI awareness 解消は #185 が再開された時に別 PR で扱う。
+- **関連**: PR #184 (v0.10.0、LAN-wide 同時起動検出) の verify session で発見した 3 つの issue (#185 / [#186](https://github.com/ken1208git/GCTonePrism/issues/186) / #187) のうち、本 PR で #186 を closure。#187 は別 PR で対応予定、#185 は manifest 単独 path 不可と判明、別 milestone へ移行。
+
 ### [Manager v0.10.0] - 2026-05-18
 
 #### Added (#179 + #178 (c) — Manager LAN-wide 同時起動検出 + 競合 risk 操作前 dialog)
