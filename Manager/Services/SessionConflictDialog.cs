@@ -89,6 +89,17 @@ namespace GCTonePrism.Manager.Services
 
             Logger.Warn("[SessionConflictDialog] " + context + " context で他 PC 検出 (" + others.Count + " 件) → dialog 表示");
 
+            // (#186 round 3 確定) Startup context の taskbar entry 不在 / focus 喪失で見失う UI bug は
+            // **caller (`MainForm_Load`) 側で `BeginInvoke` defer + `ContinueLoadAfterSessionCheck`
+            // chain pattern を採用** することで解消。本 dialog 自身は標準 owner-modal MessageBox 呼出
+            // に留め、Startup / EditOperation の文言切替のみが本関数の責務。
+            //
+            // 詳細 rationale (round 1 `MessageBoxOptions.DefaultDesktopOnly` 試行 → user feedback
+            // 「常時最前面うざい」で撤回 / round 2 BeginInvoke defer のみ → reviewer High 指摘
+            // 「gate → 事後通知 regression」で再修正 / round 3 chain pattern で gate 物理維持 +
+            // taskbar entry 確保の両立) は `MainForm.MainForm_Load` 起動時 check 部の inline コメント
+            // 参照。本 dialog 単独では「caller が owner Form を visible 状態で渡せば自然な owner-modal
+            // child 挙動になる」前提のみが API contract。
             return MessageBox.Show(
                 owner,
                 body,

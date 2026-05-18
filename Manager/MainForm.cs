@@ -158,25 +158,91 @@ namespace GCTonePrism.Manager
 
             // 起動時 check: 他 PC で active session を検出 → SessionConflictDialog (Startup)。
             // Cancel で Manager 終了 (self row delete 経由で clean exit trail を残す)。
+            //
+            // (#186 round 3) **gate 維持 + taskbar entry 確保の両立** のため chain pattern を採用:
+            //   - 検出時: `BeginInvoke` で dialog 表示を defer (= MainForm の Show 完了後に dialog が
+            //     owner-modal child で開く → taskbar entry あり、他 window click で裏に行ける、natural
+            //     WinForms 挙動)
+            //   - **panel.Initialize / LoadGames / RegisterUnknownSafetyFiles / CleanupStaleBackupEntries /
+            //     StartAutoBackupIfDue / CleanupZombieStagings / StartBackgroundUpdateCheckIfDue は全部
+            //     `ContinueLoadAfterSessionCheck` に切出し**、conflict 検出時は MainForm_Load 自体は
+            //     return して残り init は実行しない (= gate)。
+            //   - OK 押下時のみ `ContinueLoadAfterSessionCheck` を chain で起動 → 旧実装の gate 意味論
+            //     を完全に維持。Cancel 時は panel init / backup / update check すべて skip して Close。
+            //
+            // round 1 (`MessageBoxOptions.DefaultDesktopOnly`) は user feedback「常時最前面うざい」で撤回。
+            // round 2 (`BeginInvoke` defer のみ) は MainForm_Load の後続処理が dialog より先に走る regression
+            // が PR #189 reviewer High で指摘されたため、本 round 3 で chain pattern に拡張。
+            //
+            // Initialize は sync のまま (= heartbeat thread 起動を最速で)、Detect も sync で他 PC 検出結果
+            // を握ってから dialog 表示部分のみ defer。
             var otherSessionsAtStartup = _sessionService.DetectOtherActiveSessions();
             if (otherSessionsAtStartup.Count > 0)
             {
-                var dialogResult = SessionConflictDialog.Show(
-                    this, SessionConflictDialogContext.Startup, otherSessionsAtStartup);
-                if (dialogResult == DialogResult.Cancel)
+                BeginInvoke(new Action(() =>
                 {
-                    Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で Cancel 選択、Manager 終了");
-                    // (round 1 M-4) FormClosed 経由 Shutdown と二重呼出にならないよう、
-                    // Cancel path では Shutdown 直接呼出後に _sessionService = null を set。
-                    _sessionService.Shutdown();
-                    _sessionService = null;
-                    // Application.Exit ではなく Close で FormClosing を確実に走らせる (= Logger.Shutdown 含む)
-                    BeginInvoke(new Action(() => Close()));
-                    return;
-                }
-                Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で OK 選択、起動を続行");
+                    try
+                    {
+                        // (PR #189 round 4 L-1 表現訂正) race の正確 timing は
+                        // 「`MainForm_Load` 完了 → `MainForm.Show` 完了 → message pump が本 BeginInvoke
+                        // action を pick up するまでの数 ms」に user が × で閉じた case。
+                        // MainForm_Load 実行中は MainForm 未表示で × clickable な window がないため、
+                        // 「Load 中 ×」ではない。_sessionService が null になってる可能性 (= FormClosed
+                        // 経由 Shutdown が deferred action 起動前に走った race) も同時 guard、defense-
+                        // in-depth で残置。
+                        if (IsDisposed || Disposing || _sessionService == null) return;
+
+                        var dialogResult = SessionConflictDialog.Show(
+                            this, SessionConflictDialogContext.Startup, otherSessionsAtStartup);
+                        if (dialogResult == DialogResult.Cancel)
+                        {
+                            Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で Cancel 選択、Manager 終了");
+                            // (PR #184 round 1 M-4) FormClosed 経由 Shutdown と二重呼出にならないよう、
+                            // Cancel path では Shutdown 直接呼出後に _sessionService = null を set。
+                            _sessionService.Shutdown();
+                            _sessionService = null;
+                            // (PR #189 round 4 L-2 復活) `Application.Exit` ではなく `Close` で
+                            // FormClosing → FormClosed chain を確実に走らせる (= Logger.Shutdown +
+                            // FormClosed 経由の cleanup 一式)。round 3 で旧 `BeginInvoke(...Close())`
+                            // 二重 defer を素の `Close()` に短絡化した際に同 rationale が消えていたため
+                            // 復活。`Application.Exit` の方が直感的だが FormClosing が走らない drift
+                            // path があるため `Close()` を選ぶ。
+                            Close();
+                            return;
+                        }
+                        Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で OK 選択、起動を続行");
+                        // (#186 round 3) OK path: 残り init を chain で起動 (= gate を通過した時点で
+                        // 初めて panel init / backup / update check 等が走る)。
+                        ContinueLoadAfterSessionCheck();
+                    }
+                    catch (Exception ex)
+                    {
+                        // deferred action 内例外は Application.ThreadException 経由で UI thread crash
+                        // 経路を踏むため、Logger.Error で握り潰す (FormClosed handler の Shutdown catch と
+                        // 同方針、PR #189 round 3 reviewer Low 指摘)。
+                        Logger.Error("[MainForm] Startup dialog deferred action で例外", ex);
+                    }
+                }));
+                // (#186 round 3) gate 維持のため、conflict 検出時は MainForm_Load 自体ここで return。
+                // dialog の OK/Cancel 判定後に ContinueLoadAfterSessionCheck が chain で呼ばれる。
+                return;
             }
 
+            // 競合なし: 残り init を直接呼出 (= 旧実装と同じ sync 起動 path、user 視点で挙動不変)。
+            ContinueLoadAfterSessionCheck();
+        }
+
+        /// <summary>
+        /// (#186 round 3) `MainForm_Load` の session check 通過後に呼ばれる残り init 処理。
+        /// 旧実装は `MainForm_Load` 内に inline されていたが、Startup SessionConflictDialog の
+        /// `BeginInvoke` defer (= MainForm.Show 完了後に dialog を出す taskbar entry 確保策) と
+        /// 「Cancel 時は panel init / backup / update check すべて skip する gate 意味論」を両立する
+        /// ため、chain pattern (= dialog OK 時に本 method を呼出、Cancel 時は呼出しない) で gate を維持。
+        ///
+        /// 競合なし path も本 method を直接呼んで code path を 1 本化。
+        /// </summary>
+        private void ContinueLoadAfterSessionCheck()
+        {
             // DB確認後にパネルを初期化（DB存在前のアクセスを防止）
             _gameSectionPanel.Initialize(dbManager);
             _storeSectionPanel.Initialize(dbManager);
