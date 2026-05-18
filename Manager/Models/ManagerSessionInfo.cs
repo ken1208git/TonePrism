@@ -5,7 +5,7 @@ namespace GCTonePrism.Manager.Models
     /// <summary>
     /// (#179) `manager_sessions` table の row 1 件を表す軽量 DTO。
     /// `ManagerSessionService.DetectOtherActiveSessions` の返り値要素として使う。
-    /// schema は SPECIFICATION.md §7.3 / §3.X 参照。
+    /// schema は SPECIFICATION.md §7.3 / §3.8 参照。
     /// </summary>
     public sealed class ManagerSessionInfo
     {

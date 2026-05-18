@@ -25,7 +25,7 @@ namespace GCTonePrism.Manager.Services
     /// `MessageBoxIcon.Stop` + `MessageBoxButtons.OKCancel` で「OK = 続行 (data 喪失 risk 承知)」/
     /// 「Cancel = 中止 (context に応じて Manager 終了 or その操作中止)」を user 判断に委ねる設計。
     ///
-    /// 詳細仕様は SPECIFICATION.md §3.X 参照。
+    /// 詳細仕様は SPECIFICATION.md §3.8 参照。
     /// </summary>
     internal static class SessionConflictDialog
     {
@@ -61,8 +61,8 @@ namespace GCTonePrism.Manager.Services
                     detectedListLines + "\n\n" +
                     "両方の PC で同時に Manager を使うと、編集内容や\n" +
                     "バックアップがお互いに上書きされて消える恐れがあります。\n\n" +
-                    "[OK] このまま起動する (データが消える可能性を承知)\n" +
-                    "[Cancel] Manager を終了する (他 PC の人に確認してから起動する)";
+                    "**「OK」**を押す: このまま起動する (データが消える可能性を承知)\n" +
+                    "**「キャンセル」**を押す: Manager を終了する (他 PC の人に確認してから起動する)";
             }
             else
             {
@@ -72,8 +72,8 @@ namespace GCTonePrism.Manager.Services
                     detectedListLines + "\n\n" +
                     "このまま保存すると、" + opLabel + " の内容と\n" +
                     "他 PC の編集内容がお互いに上書きされて消える恐れがあります。\n\n" +
-                    "[OK] このまま保存する (データが消える可能性を承知)\n" +
-                    "[Cancel] 保存を中止する (他 PC の人に確認してから保存する)";
+                    "**「OK」**を押す: このまま保存する (データが消える可能性を承知)\n" +
+                    "**「キャンセル」**を押す: 保存を中止する (他 PC の人に確認してから保存する)";
             }
 
             Logger.Warn("[SessionConflictDialog] " + context + " context で他 PC 検出 (" + others.Count + " 件) → dialog 表示");
@@ -89,7 +89,9 @@ namespace GCTonePrism.Manager.Services
 
         private static string BuildDetectedList(IReadOnlyList<ManagerSessionInfo> others, long nowMs)
         {
-            // 検出した PC 一覧を「pc_name (最終確認: N 秒前)」形式で列挙、最大 5 件表示で残りは件数で要約。
+            // (round 1 L-4) 検出した PC 一覧を「pc_name (Manager v0.X.Y、最終確認: N 秒前)」形式で列挙、
+            // 最大 5 件表示で残りは件数で要約。manager_version を embed することで「他 PC が古い version
+            // で開いている」case を user が認知可能に (= compatibility 警告の材料)。
             var sb = new StringBuilder();
             sb.Append("検出した PC:");
             int maxShown = Math.Min(others.Count, 5);
@@ -97,7 +99,8 @@ namespace GCTonePrism.Manager.Services
             {
                 var info = others[i];
                 int sec = info.SecondsSinceLastHeartbeat(nowMs);
-                sb.Append("\n  - " + info.PcName + " (最終確認: " + sec + " 秒前)");
+                string version = string.IsNullOrEmpty(info.ManagerVersion) ? "(version 不明)" : "Manager v" + info.ManagerVersion;
+                sb.Append("\n  - " + info.PcName + " (" + version + "、最終確認: " + sec + " 秒前)");
             }
             if (others.Count > maxShown)
             {

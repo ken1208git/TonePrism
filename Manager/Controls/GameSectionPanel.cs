@@ -131,7 +131,7 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnAddGame_Click(object sender, EventArgs e)
         {
-            if ((this.FindForm() as MainForm)?.CheckSessionConflictBeforeWrite("ゲーム追加") == DialogResult.Cancel) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ゲーム追加") == DialogResult.Cancel) return;
             using (var form = new AddGameForm(_dbManager))
             {
                 if (form.ShowDialog() == DialogResult.OK)
@@ -146,7 +146,7 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnEditGame_Click(object sender, EventArgs e)
         {
-            if ((this.FindForm() as MainForm)?.CheckSessionConflictBeforeWrite("ゲーム編集") == DialogResult.Cancel) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ゲーム編集") == DialogResult.Cancel) return;
             if (dgvGames.SelectedRows.Count == 0)
             {
                 MessageBox.Show("編集するゲームを選択してください。", "情報",
@@ -179,7 +179,7 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnVersionUp_Click(object sender, EventArgs e)
         {
-            if ((this.FindForm() as MainForm)?.CheckSessionConflictBeforeWrite("ゲームのバージョンアップ") == DialogResult.Cancel) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ゲームのバージョンアップ") == DialogResult.Cancel) return;
             if (dgvGames.SelectedRows.Count == 0)
             {
                 MessageBox.Show("バージョンアップするゲームを選択してください。", "情報",
@@ -271,7 +271,7 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnDeleteGame_Click(object sender, EventArgs e)
         {
-            if ((this.FindForm() as MainForm)?.CheckSessionConflictBeforeWrite("ゲーム削除") == DialogResult.Cancel) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ゲーム削除") == DialogResult.Cancel) return;
             if (dgvGames.SelectedRows.Count == 0)
             {
                 MessageBox.Show("削除するゲームを選択してください。", "情報",

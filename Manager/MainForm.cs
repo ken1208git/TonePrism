@@ -95,32 +95,11 @@ namespace GCTonePrism.Manager
             // MessageBox を表示。sentinel なし path は何もしない。
             // (#178 (c) / #179) 旧「同時起動に関する注意」MessageBox は撤廃、代わりに ManagerSessionService
             // で他 PC で稼働中の Manager を自動検出 → 検出時のみ SessionConflictDialog (Startup context)
-            // を表示する設計に移行。sentinel 有無に関係なく session 初期化 + check を実行。
+            // を表示する設計に移行。session 初期化 + check は **dbManager.InitializeDatabase() で
+            // schema migration (v12 → v13) が完了した後** に行う (= round 1 C-1 fix)。旧実装は migration
+            // 前に Initialize を呼んでいて、v12 → v13 初回 upgrade で `no such table: manager_sessions`
+            // で session 機構が silent に永久 disabled になる bug があった。
             TryShowUpdateCompletedDialog();
-
-            // (#179) ManagerSessionService 初期化 (stale cleanup + self row 登録 + heartbeat thread 起動)
-            //   - DB schema migration が完了している必要があるため、dbManager 初期化後に呼ぶ
-            //   - DB 不到達等は service 内 fail-soft (= Logger.Error + heartbeat 不在で継続)
-            _sessionService = new ManagerSessionService(dbManager.ManagerSessionRepository);
-            _sessionService.Initialize();
-
-            // 起動時 check: 他 PC で active session を検出 → SessionConflictDialog (Startup)。
-            // Cancel で Manager 終了 (self row delete 経由で clean exit trail を残す)。
-            var otherSessionsAtStartup = _sessionService.DetectOtherActiveSessions();
-            if (otherSessionsAtStartup.Count > 0)
-            {
-                var dialogResult = SessionConflictDialog.Show(
-                    this, SessionConflictDialogContext.Startup, otherSessionsAtStartup);
-                if (dialogResult == DialogResult.Cancel)
-                {
-                    Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で Cancel 選択、Manager 終了");
-                    _sessionService.Shutdown();
-                    // Application.Exit ではなく Close で FormClosing を確実に走らせる (= Logger.Shutdown 含む)
-                    BeginInvoke(new Action(() => Close()));
-                    return;
-                }
-                Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で OK 選択、起動を続行");
-            }
 
             bool dbReady = false;
 
@@ -160,8 +139,38 @@ namespace GCTonePrism.Manager
 
             if (!dbReady)
             {
+                // (round 1 L-3) DB 未初期化 path では session service も起動しない (= heartbeat 不在で
+                // form を user 手動 × で閉じるまで no-op、FormClosed で _sessionService=null なので
+                // Shutdown も skip される clean path)。
                 UpdateStatusBar("データベース未初期化");
                 return;
+            }
+
+            // (#179、round 1 C-1 fix) DB schema migration が確実に完了したため、ManagerSessionService を
+            // ここで初期化 + 起動時 check を実行。Initialize 内の SQL (`DELETE FROM manager_sessions ...` /
+            // `INSERT OR REPLACE INTO manager_sessions ...`) は v13 schema に依存。
+            _sessionService = new ManagerSessionService(dbManager.ManagerSessionRepository);
+            _sessionService.Initialize();
+
+            // 起動時 check: 他 PC で active session を検出 → SessionConflictDialog (Startup)。
+            // Cancel で Manager 終了 (self row delete 経由で clean exit trail を残す)。
+            var otherSessionsAtStartup = _sessionService.DetectOtherActiveSessions();
+            if (otherSessionsAtStartup.Count > 0)
+            {
+                var dialogResult = SessionConflictDialog.Show(
+                    this, SessionConflictDialogContext.Startup, otherSessionsAtStartup);
+                if (dialogResult == DialogResult.Cancel)
+                {
+                    Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で Cancel 選択、Manager 終了");
+                    // (round 1 M-4) FormClosed 経由 Shutdown と二重呼出にならないよう、
+                    // Cancel path では Shutdown 直接呼出後に _sessionService = null を set。
+                    _sessionService.Shutdown();
+                    _sessionService = null;
+                    // Application.Exit ではなく Close で FormClosing を確実に走らせる (= Logger.Shutdown 含む)
+                    BeginInvoke(new Action(() => Close()));
+                    return;
+                }
+                Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で OK 選択、起動を続行");
             }
 
             // DB確認後にパネルを初期化（DB存在前のアクセスを防止）

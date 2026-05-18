@@ -1434,7 +1434,7 @@ namespace GCTonePrism.Manager
         /// (#179) v12 → v13: manager_sessions テーブル新設。
         /// Manager の LAN-wide 同時起動検出 + 競合 risk 操作前 dialog のための SoT。
         /// 各 PC で稼働中の Manager process が self row を heartbeat update、起動時の stale cleanup +
-        /// 他 PC row 検出に使う。SPEC §3.X / §7.3 参照。
+        /// 他 PC row 検出に使う。SPEC §3.8 / §7.3 参照。
         /// CreateTables で既に作成済みの場合 (= 新規 DB を v13 で作る場合) は CREATE TABLE IF NOT EXISTS
         /// が黙って skip するため idempotent。
         /// </summary>
@@ -1447,7 +1447,7 @@ namespace GCTonePrism.Manager
         /// <summary>
         /// (#179) manager_sessions テーブル作成 (CreateTables / MigrateV12ToV13 共通)。
         /// schema は SPEC §7.3 参照。`pc_name` を PRIMARY KEY、同 PC は 1 row のみ (重複起動は Named
-        /// Mutex で物理 block する設計、SPEC §3.X)。
+        /// Mutex で物理 block する設計、SPEC §3.8)。
         /// </summary>
         private static void CreateManagerSessionsTable(SQLiteConnection connection, SQLiteTransaction transaction)
         {
@@ -1567,6 +1567,7 @@ namespace GCTonePrism.Manager
             { "store_sections", new[] { "section_id", "title", "section_type", "section_source", "display_order", "max_display_count", "is_visible" } },
             { "store_section_games", new[] { "id", "section_id", "game_id", "display_order", "display_text" } },
             { "backup_log", new[] { "id", "started_at", "completed_at", "pc_name", "file_path", "relative_path", "file_size_bytes", "status", "error_message", "trigger_type" } },
+            { "manager_sessions", new[] { "pc_name", "started_at_unix_ms", "last_heartbeat_at_unix_ms", "pid", "manager_version" } },
         };
 
         /// <summary>

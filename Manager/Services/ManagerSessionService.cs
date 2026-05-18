@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using GCTonePrism.Manager.Models;
@@ -20,7 +21,7 @@ namespace GCTonePrism.Manager.Services
     /// **責務外** (別 layer):
     ///   - 同 PC 重複起動 block (Named Mutex で `Program.cs` で物理 prevention、本 service は touch しない)
     ///   - 検出結果の UI 表示 (= caller の `MainForm` / `SessionConflictDialog` 責務)
-    ///   - Launcher session tracking (PR3b 別 PR で SPEC §3.X の JSON drop folder 方式を採用予定)
+    ///   - Launcher session tracking (PR3b 別 PR で SPEC §3.8 の JSON drop folder 方式を採用予定)
     ///
     /// thread safety: heartbeat thread と UI thread (起動時 check / 編集前 check) が同時に DB へ
     /// access する。DB 操作は `DatabaseConnection.ExecuteWithRetry` で SQLite BUSY/LOCKED retry +
@@ -110,9 +111,21 @@ namespace GCTonePrism.Manager.Services
                 if (_heartbeatCts != null)
                 {
                     _heartbeatCts.Cancel();
-                    // Task.Wait は thread block するが shutdown 同期 path で許容 (= 数秒以内に完了)
+                    // Task.Wait は thread block するが shutdown 同期 path で許容 (= 数秒以内に完了)。
+                    // (round 1 L-2) OperationCanceled だけ silent swallow、他 inner type (= heartbeat
+                    // 最後の UpdateHeartbeat で SQLite 例外等) は Warn 出力で trail を残す。
                     try { _heartbeatTask?.Wait(TimeSpan.FromSeconds(2)); }
-                    catch (AggregateException) { /* OperationCanceled は想定済 */ }
+                    catch (AggregateException ae) when (ae.InnerExceptions.All(e => e is OperationCanceledException))
+                    {
+                        // 想定済の cancellation、silent OK
+                    }
+                    catch (AggregateException ae)
+                    {
+                        foreach (var inner in ae.InnerExceptions.Where(e => !(e is OperationCanceledException)))
+                        {
+                            Logger.Warn("[ManagerSessionService] heartbeat task shutdown 時 inner exception (継続): " + inner.GetType().Name + ": " + inner.Message);
+                        }
+                    }
                     _heartbeatCts.Dispose();
                     _heartbeatCts = null;
                 }

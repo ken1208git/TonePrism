@@ -244,6 +244,7 @@
     <Compile Include="Services\ManagerSessionService.cs" />
     <Compile Include="Services\PathConversionHelper.cs" />
     <Compile Include="Services\SessionConflictDialog.cs" />
+    <Compile Include="Services\SessionConflictHelper.cs" />
     <Compile Include="Services\ChangelogParser.cs" />
     <Compile Include="Services\DirReplacer.cs" />
     <Compile Include="Services\FileReplacer.cs" />

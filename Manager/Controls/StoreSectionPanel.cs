@@ -93,7 +93,7 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnAdd_Click(object sender, EventArgs e)
         {
-            if ((this.FindForm() as MainForm)?.CheckSessionConflictBeforeWrite("ストアセクション追加") == DialogResult.Cancel) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this,"ストアセクション追加") == DialogResult.Cancel) return;
             using (var form = new StoreSectionForm(_dbManager))
             {
                 if (form.ShowDialog() == DialogResult.OK)
@@ -105,7 +105,7 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnEdit_Click(object sender, EventArgs e)
         {
-            if ((this.FindForm() as MainForm)?.CheckSessionConflictBeforeWrite("ストアセクション編集") == DialogResult.Cancel) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this,"ストアセクション編集") == DialogResult.Cancel) return;
             var section = GetSelectedSection();
             if (section == null)
             {
@@ -133,7 +133,7 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnDelete_Click(object sender, EventArgs e)
         {
-            if ((this.FindForm() as MainForm)?.CheckSessionConflictBeforeWrite("ストアセクション削除") == DialogResult.Cancel) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this,"ストアセクション削除") == DialogResult.Cancel) return;
             var section = GetSelectedSection();
             if (section == null)
             {
@@ -163,13 +163,13 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnMoveUp_Click(object sender, EventArgs e)
         {
-            if ((this.FindForm() as MainForm)?.CheckSessionConflictBeforeWrite("ストアセクション並び替え") == DialogResult.Cancel) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this,"ストアセクション並び替え") == DialogResult.Cancel) return;
             MoveSection(-1);
         }
 
         private void btnMoveDown_Click(object sender, EventArgs e)
         {
-            if ((this.FindForm() as MainForm)?.CheckSessionConflictBeforeWrite("ストアセクション並び替え") == DialogResult.Cancel) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this,"ストアセクション並び替え") == DialogResult.Cancel) return;
             MoveSection(1);
         }
 

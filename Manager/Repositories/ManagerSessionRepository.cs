@@ -7,7 +7,7 @@ namespace GCTonePrism.Manager.Repositories
 {
     /// <summary>
     /// (#179) `manager_sessions` table への CRUD アクセサ。Manager の LAN-wide 同時起動検出に使う。
-    /// schema は SPECIFICATION.md §7.3 参照、heartbeat / stale cleanup の仕様は §3.X 参照。
+    /// schema は SPECIFICATION.md §7.3 参照、heartbeat / stale cleanup の仕様は §3.8 参照。
     ///
     /// 全 method は `DatabaseConnection.ExecuteWithRetry` で wrap、SMB BUSY/LOCKED 競合に対応。
     /// `pc_name` PRIMARY KEY のため同 PC は 1 row のみ (重複起動は Named Mutex で物理 block、

@@ -54,7 +54,7 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnResetDatabase_Click(object sender, EventArgs e)
         {
-            if ((this.FindForm() as MainForm)?.CheckSessionConflictBeforeWrite("データベース初期化") == DialogResult.Cancel) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this,"データベース初期化") == DialogResult.Cancel) return;
             using (var confirmForm = new ResetDatabaseConfirmForm())
             {
                 if (confirmForm.ShowDialog() != DialogResult.Yes) return;

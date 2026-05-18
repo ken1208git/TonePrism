@@ -49,7 +49,7 @@ namespace GCTonePrism.Manager
             // - `Global\` prefix で Windows session 全体に effective (= 同 user の別 RDP session でも block)。
             // - createdNew=false で既に取得中の同 mutex 検出 → modal dialog → return (Application.Run 不到達)。
             // - mutex は process lifetime 中保持、`Application.Run` 終了で `using` 経由 release。
-            // 詳細: SPEC §3.X 同時起動検出機構、CHANGELOG ## Manager v0.10.0 参照。
+            // 詳細: SPEC §3.8 同時起動検出機構、CHANGELOG ## Manager v0.10.0 参照。
             string mutexName = "Global\\GCTonePrism_Manager_SingleInstance_" + ComputeInstallPathHash(Application.StartupPath);
             using (var singleInstanceMutex = new System.Threading.Mutex(initiallyOwned: true, name: mutexName, createdNew: out bool createdNew))
             {
@@ -98,6 +98,12 @@ namespace GCTonePrism.Manager
                 finally
                 {
                     Logger.Shutdown();
+                    // (#179 round 1 L-1) initiallyOwned: true で取得した Mutex は ReleaseMutex で
+                    // 明示 release してから Dispose する。`using` の Dispose 単独では kernel 上「abandoned
+                    // mutex」状態を経由するため、将来 `WaitOne` 経由 pattern を追加した時に
+                    // AbandonedMutexException を踏む path を予防。
+                    try { singleInstanceMutex.ReleaseMutex(); }
+                    catch (Exception relEx) { Logger.Warn("[Program] Mutex.ReleaseMutex 失敗 (Dispose で abandoned 状態経由): " + relEx.Message); }
                 }
             }
         }
