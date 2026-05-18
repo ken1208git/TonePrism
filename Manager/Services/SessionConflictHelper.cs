@@ -37,13 +37,30 @@ namespace GCTonePrism.Manager.Services
             }
             // (round 2 Low-3) FindForm は parent walk なので 1 回呼出に整理 (旧実装は cast 用 + Warn message
             // 内で 2 回呼出していた)。
+            // (round 6) 3 段階で MainForm 探索:
+            //   (1) caller.FindForm() が MainForm = SectionPanel から呼んだ場合
+            //   (2) caller 自身が modal Form (AddGameForm 等) で .Owner が MainForm = Form から呼んだ場合
+            //   (3) Application.OpenForms 内に MainForm が存在 = fallback (Owner が null の race 等)
+            // 案 B fence で AddGameForm / EditGameForm / VersionUpForm / StoreSectionForm の OK button
+            // click handler 内から呼ぶ pattern を支援。
             var form = caller.FindForm();
             var mainForm = form as MainForm;
+            if (mainForm == null && form is Form modalForm)
+            {
+                mainForm = modalForm.Owner as MainForm;
+            }
             if (mainForm == null)
             {
-                // SectionPanel が MainForm 以外にホストされた場合の drift path。silent skip は維持するが
-                // Warn 出力で debug 容易化。将来 panel をネスト dialog に embed する設計変更時に検出。
-                Logger.Warn("[SessionConflictHelper] caller.FindForm() が MainForm でない (type=" + (form?.GetType().Name ?? "null") + ")、check skip (fail-soft で OK 返却): op=" + operationDescription);
+                foreach (Form f in Application.OpenForms)
+                {
+                    if (f is MainForm mf) { mainForm = mf; break; }
+                }
+            }
+            if (mainForm == null)
+            {
+                // 全 fallback 失敗 = MainForm 不在 (= 起動直後 / 単体 test 等の異常 case)。silent skip は
+                // 維持するが Warn 出力で debug 容易化。
+                Logger.Warn("[SessionConflictHelper] MainForm 取得失敗 (FindForm type=" + (form?.GetType().Name ?? "null") + ")、check skip (fail-soft で OK 返却): op=" + operationDescription);
                 return DialogResult.OK;
             }
             return mainForm.CheckSessionConflictBeforeWrite(operationDescription);

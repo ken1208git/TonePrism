@@ -377,6 +377,23 @@ namespace GCTonePrism.Manager
                 // 製作者情報を設定
                 game.Developers = developers;
 
+                // (#179 round 6 M-1 案 B) DB write 直前で他 PC session を再 check (race fence)。
+                // SectionPanel 側 (`ShowDialog` 直前) で既に 1 回 check 済だが、ファイルコピーに 30 秒
+                // ~ 5 分かかる間に他 PC が編集を始めると衝突しうるため二段 fence。Cancel 選択時は
+                // 既にコピー済の files を rollback して **編集画面に戻る** (= `DialogResult.OK` を
+                // 設定せず Form を閉じない、入力内容を保持して user が再試行 or 諦めるかを選べる)。
+                if (SessionConflictHelper.CheckBeforeWrite(this, "ゲーム追加") == DialogResult.Cancel)
+                {
+                    // コピー済 files を rollback (= L308-320 / L401-411 と同 pattern)
+                    if (!string.IsNullOrEmpty(destinationGameFolder) && Directory.Exists(destinationGameFolder))
+                    {
+                        try { Directory.Delete(destinationGameFolder, true); }
+                        catch (Exception delEx) { Logger.Warn("[AddGameForm] session conflict Cancel rollback: コピー済 folder 削除失敗 (手動で削除してください): " + destinationGameFolder + " — " + delEx.Message); }
+                    }
+                    destinationGameFolder = null;
+                    return;
+                }
+
                 // データベースに追加
                 dbManager.AddGame(game);
 

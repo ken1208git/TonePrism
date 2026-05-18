@@ -308,6 +308,18 @@ namespace GCTonePrism.Manager
         {
             if (ValidateInput())
             {
+                // (#179 round 6 M-1 案 B) DB write 直前で他 PC session を再 check (race fence)。
+                // SectionPanel 側 (`ShowDialog` 直前) で既に 1 回 check 済だが、user が編集画面を 5-10 分
+                // 開きっぱなしにする間に他 PC が編集を始めると衝突しうるため二段 fence。Cancel 選択時は
+                // **編集画面に戻る** (= `DialogResult.OK` を設定せず Form を閉じない、入力内容を保持)。
+                // VersionUpForm 自体は DB write を持たず、Close 後に caller (GameSectionPanel) が
+                // ファイルコピー (ProcessingDialog) + `AddGameVersion` を実行する。check はここで
+                // pre-copy なので copy 中の race は依然残る (受容仕様、SPEC §3.8.5)。
+                if (SessionConflictHelper.CheckBeforeWrite(this, "バージョン追加") == DialogResult.Cancel)
+                {
+                    return;
+                }
+
                 // バージョン情報を作成
                 NewVersion = new GameVersion
                 {
