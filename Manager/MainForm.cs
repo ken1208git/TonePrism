@@ -158,23 +158,42 @@ namespace GCTonePrism.Manager
 
             // 起動時 check: 他 PC で active session を検出 → SessionConflictDialog (Startup)。
             // Cancel で Manager 終了 (self row delete 経由で clean exit trail を残す)。
+            //
+            // (#186) **dialog 表示は `BeginInvoke` で defer** して MainForm が `Show` 完了 (= taskbar 登録
+            // 済) 後に表示する。旧実装は MainForm_Load 中で sync 呼出していたため、modal child / 親
+            // (= MainForm) のどちらも taskbar entry を持たない silent UI bug があった (= focus 喪失で
+            // dialog が裏に行って見失う、Alt+Tab で能動的に探さないと辿り着けない、PR #184 verify session
+            // で発覚)。
+            //
+            // defer 効果: MainForm が一瞬表示されてから dialog が modal child で開く → owner-modal の
+            // 自然な挙動 (= taskbar entry あり、他 window click で裏に行ける、MainForm click で戻れる)。
+            // Cancel 時の Form チラ見せは abort path のみで everyday path ではないため許容仕様。
+            //
+            // Initialize は sync のまま (= heartbeat thread 起動を最速で)、Detect も sync で他 PC 検出結果
+            // を握ってから BeginInvoke で dialog 表示部分のみ defer。
             var otherSessionsAtStartup = _sessionService.DetectOtherActiveSessions();
             if (otherSessionsAtStartup.Count > 0)
             {
-                var dialogResult = SessionConflictDialog.Show(
-                    this, SessionConflictDialogContext.Startup, otherSessionsAtStartup);
-                if (dialogResult == DialogResult.Cancel)
+                BeginInvoke(new Action(() =>
                 {
-                    Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で Cancel 選択、Manager 終了");
-                    // (round 1 M-4) FormClosed 経由 Shutdown と二重呼出にならないよう、
-                    // Cancel path では Shutdown 直接呼出後に _sessionService = null を set。
-                    _sessionService.Shutdown();
-                    _sessionService = null;
-                    // Application.Exit ではなく Close で FormClosing を確実に走らせる (= Logger.Shutdown 含む)
-                    BeginInvoke(new Action(() => Close()));
-                    return;
-                }
-                Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で OK 選択、起動を続行");
+                    // form 既に閉じてる race の保険 (= MainForm_Load 中に user が即 × で閉じた等の edge case、
+                    // _sessionService が null になってる可能性も guard、FormClosed 経由 Shutdown と二重 race 予防)。
+                    if (IsDisposed || Disposing || _sessionService == null) return;
+
+                    var dialogResult = SessionConflictDialog.Show(
+                        this, SessionConflictDialogContext.Startup, otherSessionsAtStartup);
+                    if (dialogResult == DialogResult.Cancel)
+                    {
+                        Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で Cancel 選択、Manager 終了");
+                        // (round 1 M-4) FormClosed 経由 Shutdown と二重呼出にならないよう、
+                        // Cancel path では Shutdown 直接呼出後に _sessionService = null を set。
+                        _sessionService.Shutdown();
+                        _sessionService = null;
+                        Close();
+                        return;
+                    }
+                    Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で OK 選択、起動を続行");
+                }));
             }
 
             // DB確認後にパネルを初期化（DB存在前のアクセスを防止）

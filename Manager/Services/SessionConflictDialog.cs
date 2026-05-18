@@ -89,33 +89,19 @@ namespace GCTonePrism.Manager.Services
 
             Logger.Warn("[SessionConflictDialog] " + context + " context で他 PC 検出 (" + others.Count + " 件) → dialog 表示");
 
-            // (#186) Startup context は MainForm_Load 中 (= MainForm がまだ Show されていない state) で
-            // 呼ばれるため、`MessageBox.Show(owner, ...)` だと modal child / 親 (= MainForm) のどちらも
-            // taskbar entry を持たず、別 window が前面に来ると user が dialog を見失う silent UI bug が
-            // あった (PR #184 verify session で発覚: Claude Code window をクリックした瞬間 dialog が裏に
-            // 行ってタスクバーにも entry がなく見失う、Alt+Tab で能動的に探さないと辿り着けない)。
+            // (#186 round 2) Startup context の taskbar entry 不在 / focus 喪失で見失う UI bug は本 dialog
+            // 側ではなく **caller (`MainForm_Load`) 側で `BeginInvoke` を介して MainForm.Show 完了後に
+            // dialog を表示する形に倒す** ことで解消する設計に確定。
             //
-            // 修正方針: `MessageBoxOptions.DefaultDesktopOnly` を Startup context **限定** で適用。
-            // - 効果: dialog が default desktop 最前面に固定 → focus 失っても裏に行かない
-            // - 制約: DefaultDesktopOnly は owner との併用不可 (= 内部で `ShowDialog(IntPtr.Zero, ...)` に
-            //   倒れる、owner 渡しても無視) なので Startup 経路は `owner` 引数を捨てて null overload を使う
+            // round 1 試行: `MessageBoxOptions.DefaultDesktopOnly` で「default desktop 最前面に固定」する
+            // case を試したが、「他 window をクリックしても dialog が裏に行かず常時最前面」のため user
+            // から「うざい」feedback を受けて撤回 (= 「見失う」path は閉鎖されたが「他 window を見れない」
+            // 別 UX bug を生んでしまった、trade-off 不適切)。
             //
-            // EditOperation context は MainForm が **visible 状態** で呼ばれるため、owner-modal child の
-            // 標準 WinForms 挙動で十分 (= MainForm に紐づいた taskbar entry経由でアクセス可能、
-            // DefaultDesktopOnly に切替えると owner 関係喪失で「MainForm を最前面に持って来ても dialog
-            // は別の場所に留まる」UX 退行になるため適用しない)。
-            //
-            // 詳細: SPEC §3.8.2「dialog button」項 + #186 issue 本文の (a) MessageBoxOptions.DefaultDesktopOnly 候補。
-            if (context == SessionConflictDialogContext.Startup)
-            {
-                return MessageBox.Show(
-                    body,
-                    title,
-                    MessageBoxButtons.OKCancel,
-                    MessageBoxIcon.Stop,
-                    MessageBoxDefaultButton.Button2 /* Cancel を default に倒して反射押下で続行する path を抑制 */,
-                    MessageBoxOptions.DefaultDesktopOnly /* (#186) 最前面固定で focus 喪失 → 見失う drift 解消 */);
-            }
+            // round 2 確定: caller 側 BeginInvoke defer で MainForm の taskbar 登録完了を待つ → 本 dialog
+            // は owner-modal 標準 WinForms 挙動を維持。owner Form が visible 状態であれば、taskbar entry
+            // は owner 経由、他 window click で dialog が裏に行ける、owner click で戻れる、という自然な
+            // 挙動になる。本関数は Startup / EditOperation の文言切替のみが責務。
             return MessageBox.Show(
                 owner,
                 body,
