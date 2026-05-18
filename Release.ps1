@@ -1750,6 +1750,31 @@ $script:BundleManifestFiles = @(
     'files\CHANGELOG.md'
 )
 
+# (#177 Phase 4.1+) `bundle/bundle_manifest.json` の `layout` field SoT。Manager 側 apply フロー
+# (`UpdateSectionPanel.RunUpdateWorker` Step 5-9 + defer block) が hardcoded path を捨てて本 layout
+# 経由で path 解決するための forward compat 機構。`$script:BundleManifestFiles` (= 個別 file list)
+# と独立した SoT で、**category → dir / file mapping** を表現する。
+#
+# 設計判断 (#177): `schema_version=1` 維持、layout は **optional additive field**。Bundle v0.3.1
+# リリースノートで「次回以降自動アップデート」と user に約束済のため、schema bump で v0.3.1 ユーザーが
+# 1 回手動 install 必須になる事態を避ける必要。`JavaScriptSerializer` の case-insensitive deserialize
+# と未知 field 黙殺で、v0.3.1 Manager も新 manifest を silent に parse success できる (PR #180 round 1
+# Low-2 で PowerShell 実機 verify 済 pattern)。
+#
+# key 命名は **snake_case** (JSON 慣例)、value は zip 内 `bundle/` 起点の `/` separator 相対 path。
+# Manager 側 `BundleLayout` POCO は PascalCase property (C# 慣例)、JavaScriptSerializer で
+# case-insensitive deserialize される。新規 component 追加時は本 hashtable に新 key を追加 + SPEC §3.7.8
+# チェックリスト同期更新 (= `$script:BundleManifestFiles` と並列の SoT)。
+$script:BundleLayout = [ordered]@{
+    launcher_dir   = 'files/Launcher'
+    manager_dir    = 'files/Manager'
+    companions_dir = 'files/Companions'
+    updater_dir    = 'files/Companions/Updater'
+    launcher_bat   = 'Launcher.bat'
+    manager_bat    = 'Manager.bat'
+    changelog_md   = 'files/CHANGELOG.md'
+}
+
 # ============================================================================
 # Phase 6.5: Bundle manifest 生成 (#175 Phase 4.1)
 # ============================================================================
@@ -1771,9 +1796,12 @@ function New-BundleManifest {
     #     "generated_at": "2026-05-18T...Z" (ISO 8601),
     #     "schema_version": 1,
     #     "files": ["show_folder_dialog.ps1", "files/CHANGELOG.md", ...]  # bundle/ からの相対 path
+    #     "layout": { "launcher_dir": "files/Launcher", ... }              # (#177) apply 側 path 解決用
     #   }
-    # 将来 schema 拡張時 (size / sha256 等の追加) は schema_version を bump、Manager 側で version
-    # 分岐させる。
+    # Schema 進化方針: **既存 field の semantics 変更** (例: files の型を [string] → [{name, sha256}] に
+    # 拡張) は schema_version bump 必須。**新 optional field の追加** (本 PR の `layout` 等) は旧 reader
+    # が TryGetValue で無視できる additive change のため schema_version=1 維持で forward compat。詳細
+    # SPEC §3.7.7 / Manager `BundleManifest` docstring 参照。
     # (#175 Phase 4.1 round 1 Critical-1) `generated_at` は `[DateTime]::UtcNow.ToString(...)` 直接代入。
     # 旧実装の `Get-Date -Format "..." -AsUTC -ErrorAction SilentlyContinue` + fallback block は PS 5.1
     # では `-AsUTC` が **NamedParameterNotFound** terminating error として `$ErrorActionPreference='Stop'`
@@ -1791,6 +1819,10 @@ function New-BundleManifest {
         # `Path.Combine` 渡す前に platform-specific separator に変換する想定 (.NET の Path.Combine は
         # `/` separator も受理するので実用上は変換不要、defensive 同期のため明示)。
         files          = @($script:BundleManifestFiles | ForEach-Object { $_ -replace '\\', '/' })
+        # (#177) layout (apply 側 path 解決用): Manager `UpdateSectionPanel.RunUpdateWorker` が本 layout
+        # 経由で path を取得して hardcoded path を捨てる、forward compat 機構の Phase 4.1+ 完成。layout
+        # 不在 (= v0.3.0 legacy) は Manager 側 null-coalesce で hardcoded legacy path に fallback。
+        layout         = $script:BundleLayout
     }
 
     # bundle dir 存在 check (Copy-Templates が既に作成済の想定、defensive で再作成)
@@ -1802,7 +1834,7 @@ function New-BundleManifest {
     # ため strict 制約ではないが、project 全体の JSON 出力規約と一貫させる)
     [System.IO.File]::WriteAllText($ManifestPath, $json, $script:Utf8NoBomEncoding)
 
-    Write-Ok "Bundle manifest 生成完了 ($($script:BundleManifestFiles.Count) entries)"
+    Write-Ok "Bundle manifest 生成完了 ($($script:BundleManifestFiles.Count) files entries + $($script:BundleLayout.Count) layout keys)"
 }
 
 function Assert-ExpectedFiles {

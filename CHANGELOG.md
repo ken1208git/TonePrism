@@ -59,6 +59,16 @@
 
 `Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
+### [Release Tooling v0.1.18] - 2026-05-18
+
+#### Changed (#177 — Bundle manifest に `layout` field 追加、apply 側 forward compat)
+
+- **`$script:BundleLayout` SoT 変数を新規追加** (`Release.ps1`、`$script:BundleManifestFiles` 配列の隣): `bundle_manifest.json` の `layout` field の SoT。category 名 → zip 内 `bundle/` 起点の `/` separator 相対 path の mapping を `[ordered]` hashtable で 1 箇所に集約。key 命名は **snake_case** (JSON 慣例)、7 key (`launcher_dir` / `manager_dir` / `companions_dir` / `updater_dir` / `launcher_bat` / `manager_bat` / `changelog_md`)。Manager 側 `BundleLayout` POCO は PascalCase property (C# 慣例)、`JavaScriptSerializer.Deserialize` の case-insensitive deserialize で wire format と互換 (PR #180 round 1 Low-2 と同 pattern、PowerShell 実機で verify 済)。新規 component 追加時は本 hashtable に新 key 追加 + Manager 側 `BundleLayout` 同期 + SPEC §3.7.8 チェックリスト更新の 3 件並列同期 (= `$script:BundleManifestFiles` と独立した SoT、用途が異なる)。
+- **`New-BundleManifest` 関数を拡張**: 生成 hashtable に `layout = $script:BundleLayout` を additive 追加。schema_version は 1 のまま据置 (additive optional field 追加のため bump 不要、Manager 側 `BundleManifest` docstring に「**Schema 進化方針**: 既存 field の semantics 変更のみ bump、新 optional field 追加は据置で forward compat」を明記)。Write-Ok 出力 message も「manifest 生成完了 (N files entries + M layout keys)」に同期更新で debug 容易化。
+- **Schema 進化方針の明文化**: 本 PR で「全 field 追加で bump」(Phase 4.1 round 1 Medium-1 の conservative 規約) → 「additive optional field は bump 不要、breaking change のみ bump」に修正、`layout` 追加が初の additive change 事例として SPEC §3.7.7 / §3.7.8 / Manager `BundleManifest` POCO docstring の 3 箇所で SoT 同期。これにより将来の review で「なぜ layout 追加で bump しない?」と問われた時の根拠を 1 箇所に集約。
+
+**スコープ**: Phase 4.1 (PR #175) で manifest 同梱機構を導入した後の片肺解消。Release.ps1 側は新 SoT 1 件追加 + manifest 生成に 1 行追加で完結、Manager 側との contract が拡張 (= apply 側 layout 経由 path 解決) だが Release Tooling 単体の挙動変化はゼロ (生成される zip 構造は v0.1.17 と同一、manifest JSON に layout key が増えるだけ)。詳細は `## Manager v0.9.3` セクション参照。
+
 ### [Release Tooling v0.1.17] - 2026-05-18
 
 #### Changed (#175 Phase 4.1 — Bundle manifest 同梱 + zip 構造整理)
@@ -1510,6 +1520,26 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.9.3] - 2026-05-18
+
+#### Changed (#177 — apply 側 path 解決を manifest 経由化、Phase 4.1+ forward compat 完成)
+
+- **`BundleManifest.Layout` プロパティ + `BundleLayout` POCO クラスを新規追加** (`Services/UpdateDownloader.cs`): manifest の `layout` field を deserialize する optional POCO で、category → zip 内相対 path の mapping を表現する 7 property (`LauncherDir` / `ManagerDir` / `CompanionsDir` / `UpdaterDir` / `LauncherBat` / `ManagerBat` / `ChangelogMd`)。`BundleManifest` クラス docstring を「全 field 追加で `schema_version` bump」(Phase 4.1 round 1 Medium-1 で導入された conservative 規約) → 「**additive optional field の追加は schema bump 不要、breaking change (型変更 / 削除 / semantics 変更) のみ bump**」に修正、本 PR の `layout` 追加が初の additive change 事例として明文化。`BundleLayout` クラス docstring に PR #180 Round 2 Low-2 と同 pattern の「Serializer 切替時の注意」(case-insensitive deserialize 依存) を embed。
+- **`ReadBundleManifest` で `layout` を null-safe に deserialize** (同ファイル): 既存 `files` field 取得の隣に `layout` を `TryGetValue` で取得 → `IDictionary<string, object>` cast → 各 key を `TryGetLayoutString` helper で抽出する形に拡張。parse 失敗 / `layout` 不在 / 部分 null は **silent fallback** (`manifest.Layout = null`)、apply 側で hardcoded fallback に倒れる設計。Logger.Info の出力 message にも `layout=present/null` を追加して debug 容易化。
+- **`ValidateStaging` signature を拡張** (`out BundleManifest manifest` 引数追加): `ValidateStagingViaManifest` 内で parse 済 `BundleManifest` を caller に流す経路を新設、`ValidateStagingLegacy` 経路 (= v0.3.0 旧構造、manifest 自体不在) では `manifest = null` で out。caller (`UpdateSectionPanel.RunUpdateWorker`) が `manifest?.Layout?.<Key>` 経由で apply 側 path を解決可能になる forward compat 機構。caller は 1 箇所 (`UpdateSectionPanel.cs:489`) のみで同期更新影響範囲は限定的、breaking signature 変更だが impl 時 grep verify 済。
+- **`UpdateSectionPanel.RunUpdateWorker` の hardcoded path 6 箇所を `manifest?.Layout?.<Key> ?? "<legacy>"` null-coalesce fallback 形式に書換え**:
+  - L534: `stagingLauncher = bundleRoot/files/Launcher` → `manifest?.Layout?.LauncherDir ?? "files/Launcher"`
+  - L559: `stagingCompanionsRoot = bundleRoot/files/Companions` → `manifest?.Layout?.CompanionsDir ?? "files/Companions"`
+  - L600: `Launcher.bat` → `manifest?.Layout?.LauncherBat ?? "Launcher.bat"`
+  - L606: `Manager.bat` → `manifest?.Layout?.ManagerBat ?? "Manager.bat"`
+  - L635: `stagingUpdater = bundleRoot/files/Companions/Updater` → `manifest?.Layout?.UpdaterDir ?? "files/Companions/Updater"`
+  - L687 (defer): `bundleRoot/files/CHANGELOG.md` → `manifest?.Layout?.ChangelogMd ?? "files/CHANGELOG.md"`
+  - これにより v0.3.1 manifest (= layout なし) と v0.3.2+ manifest (= layout あり) を同 code path で処理、将来 `bundle/files/Launcher/` → `bundle/Launcher/` のような dir 構造変更を Manager コード変更ゼロで吸収できる完全 forward compat を獲得。
+
+**スコープ**: Phase 4.1 (PR #175/#176) で validate 側だけ獲得した forward compat (= manifest 経由 file 存在 check) を apply 側にも拡張 (= manifest 経由 path 解決) して片肺状態を解消、Phase 4.1+ 設計を完成。`schema_version=1` 維持 + layout を optional additive field として追加することで Bundle v0.3.1 同梱 Manager (v0.9.1) との互換性も維持 (= リリースノートで約束した「次回以降自動アップデート」を守る)。本 PR は user 視点 invisible な内部 refactor で、現状の release では layout 経由でも legacy fallback でも結果は同一、forward compat 投資は将来の dir 構造変更 PR で初めて報われる。patch bump (v0.9.2 → v0.9.3) で「機能追加だが UX 変化ゼロ」を表現。
+
+**詳細仕様は [SPECIFICATION.md §3.7.7](SPECIFICATION.md) (apply 側 forward compat) + [§3.7.8](SPECIFICATION.md) (新規 component 追加チェックリスト) 参照**。
 
 ### [Manager v0.9.2] - 2026-05-18
 
