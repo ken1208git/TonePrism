@@ -105,6 +105,23 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
+        /// (#179 PR3b) Launcher session heartbeat 用 drop folder (`&lt;install&gt;/responses/launcher_sessions/`)。
+        /// Launcher autoload `SessionHeartbeat` が 1 PC 1 file (`&lt;pc_name&gt;.json`) で heartbeat JSON を
+        /// 10 秒周期 atomic write、Manager `LauncherSessionService` が on-demand polling で読込。
+        /// SPEC §3.8.7 仕様化、§6.5 の 3-state folder pattern (pending / imported/ / failed/) の **例外**
+        /// として heartbeat 用専用 sub-folder を明文化。
+        ///
+        /// Path SoT として両 component が同 relative path (`responses/launcher_sessions/`) を別実装
+        /// (Manager C# / Launcher GDScript) で resolve、drift は SPEC §3.8.7 + §6.5 の literal 定義で
+        /// fence。Launcher 側の対応 path は `Launcher/scripts/path_manager.gd:get_base_directory()` +
+        /// `.path_join("responses/launcher_sessions")` で同 path を返す。
+        /// </summary>
+        public static string LauncherSessionsFolder
+        {
+            get { return Path.Combine(BaseDirectory, "responses", "launcher_sessions"); }
+        }
+
+        /// <summary>
         /// アップデート用 staging dir (`%TEMP%/GCTonePrism_update_<version>/`)。SPEC §3.7.3 [6]。
         /// 失敗時の zombie staging を MainForm_Load 起動時に cleanup する。
         /// </summary>
@@ -273,6 +290,8 @@ namespace GCTonePrism.Manager
             Logger.Info($"");
             Logger.Info($"Gamesフォルダ存在: {Directory.Exists(GamesFolder)}");
             Logger.Info($"データベース存在: {File.Exists(DatabasePath)}");
+            Logger.Info($"Launcher sessions フォルダ: {LauncherSessionsFolder}");
+            Logger.Info($"Launcher sessions フォルダ存在: {Directory.Exists(LauncherSessionsFolder)}");
             Logger.Info("============================");
         }
         

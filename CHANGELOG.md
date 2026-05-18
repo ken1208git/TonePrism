@@ -1086,6 +1086,29 @@ Release.bat の編集は **UTF-8 (no BOM) + CRLF** 厳守 (SPEC §3.7.9.1 参照
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.5.18] - 2026-05-18
+
+#### Added (#179 PR3b — LAN-wide session tracking heartbeat 出力)
+
+- **新規 autoload `scripts/session_heartbeat.gd`**: 学校 LAN 上の SMB 共有 `prism.db` 運用で、Manager 編集中に Launcher の SQLite read が file lock 競合する path (= 「DB を開けません」error / Manager INSERT stall / 最悪 prism.db 破損) を予防するため、Launcher 側から「自 PC で Launcher 稼働中」を Manager に伝える heartbeat 機構を追加。`<base>/responses/launcher_sessions/<pc_name>.json` (= 1 PC 1 file、heartbeat 専用 sub-folder) に 10 秒周期で JSON を atomic write (`.tmp` → rename) し、Manager 側 `LauncherSessionService` が on-demand polling で読込。
+- **JSON schema** (= SPEC §3.8.7.2 で literal 定義、Manager / Launcher 両 implementation の SoT):
+  ```json
+  { "pc_name": "PC-A", "started_at_unix_ms": 1715379600000,
+    "last_heartbeat_at_unix_ms": 1715379630000, "pid": 12345,
+    "launcher_version": "0.5.18" }
+  ```
+- **動作**:
+  - `_ready()`: `responses/launcher_sessions/` directory 不在時に `DirAccess.make_dir_recursive_absolute` で自動作成、初回 heartbeat write、`Timer` node (`wait_time=10`、`autostart=true`、`one_shot=false`) を child として add
+  - `_on_heartbeat_tick()`: 10 秒周期で JSON 再書込 (`last_heartbeat_at_unix_ms` を update + atomic rename)
+  - `_notification(NOTIFICATION_PREDELETE)`: self JSON 削除 (clean shutdown 即時反映)、削除失敗時は `Logger.warn` trail + Manager 側 30 秒 stale fallback で fail-safe
+  - `_get_pc_name()`: COMPUTERNAME (Windows) → HOSTNAME (Linux/macOS) → "unknown" の 3 段 fallback (`logger.gd:204-210` と同 logic)
+- **fail-soft 戦略**: directory 作成失敗 / write 失敗時は `_init_failed = true` に倒し、以降 silent skip。`Logger.warn` で trail を残しつつ Launcher 起動 / ゲームプレイは一切止めない (= 部員視点で見えない fail-soft 原則、`logger.gd` の同型 pattern を踏襲)
+- **`project.godot` `[autoload]` 登録**: `SessionHeartbeat="*res://scripts/session_heartbeat.gd"` を `Logger` 直後に追加。`Logger` (= 最先頭規約) / `Version` (class_name RefCounted、autoload ではない) / `PathManager` (同) に依存
+- **`config/version` を `0.5.17` → `0.5.18`** + `version.gd` の `PATCH` も `17` → `18` に同期 (= `Manager/Services/VersionInventory.cs` の regex parse 要件を維持、SPEC §3.7.8 チェックリスト)
+- **patch bump 判断**: Launcher 単体 user 視点で UI / 操作変化ゼロ (= disk に 1 file 書出すだけの additive 拡張)、Manager v0.11.0 と連動して初めて「他 PC Launcher 稼働中」dialog 警告が動作する。AGENTS.md「Release and Versioning」minor=「機能追加」の解釈で Launcher 単体追加機能なら minor だが、本 PR は **Manager 連動機能の Launcher 側 contribution** という framing で patch bump 慣例
+- **scope 外** (= 別 PR 余地): Launcher 側で「他 PC Manager 編集中」を逆方向検出する機構は本 PR scope 外、後追い PR で対称化可能
+- **詳細は SPEC §3.8.7** および `## Manager v0.11.0` 参照
+
 ### [Launcher v0.5.17] - 2026-05-13
 
 PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して `scripts/path_manager.gd` の self-reference リテラル + priority-3 detection ロジック (begins_with 二段比較 + Launcher/Manager sibling 同時存在検証) を修正。配布構造変更を含むため SemVer 厳密だと minor 寄りだが、Install.bat の v0.2.0 → 新構造 migration で自動吸収されエンドユーザー視点では invisible のため patch bump 扱い。
@@ -1520,6 +1543,28 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.11.0] - 2026-05-18
+
+#### Added (#179 PR3b — Launcher LAN-wide session tracking + dialog 統合)
+
+学校 LAN 上で Manager 編集中に Launcher が SQLite read で file lock 競合する path を物理閉鎖。PR #184 (v0.10.0) で **Manager 間** の同時起動検出は完成済だったが、**Manager と Launcher** の競合は依然人間頼りだった drift を、SPEC §6.5 「Launcher は SQLite に直接 write しない」原則を遵守した JSON drop folder 方式で解消。詳細仕様は SPEC §3.8.7 / §6.5 例外注記 / 変更履歴 v1.10.28 参照。
+
+- **`LauncherSessionService` 新規追加** (`Manager/Services/LauncherSessionService.cs`): `<install>/responses/launcher_sessions/<pc_name>.json` を on-demand polling で読込、stale (= 30 秒) を除外した active Launcher session list を返す polling-only service。`ManagerSessionService` (DB-based) と非対称、**SQLite write ゼロ + DB table 化なし + in-memory cache のみ + 周期 polling Timer なし** で完結。directory 不在時の自動作成 + JSON parse 失敗時 individual file skip + SMB 一時不到達時 空 list 返却で fail-soft、`Initialize` / `IsInitialized` / `Shutdown` / `DetectActiveLauncherSessions` の 4 method (= `ManagerSessionService` と対称 API)
+- **`LauncherSessionInfo` DTO** (`Manager/Models/LauncherSessionInfo.cs`): `PcName` / `StartedAtUnixMs` / `LastHeartbeatAtUnixMs` / `Pid` / `LauncherVersion` の 5 property + `SecondsSinceLastHeartbeat(nowMs)` helper (= `ManagerSessionInfo` と対称)
+- **stale 判定 baseline 2 段 logic**: JSON 内 `last_heartbeat_at_unix_ms` primary + file mtime secondary fallback。SMB directory cache (~10 秒、SPEC §6.5) 由来の mtime drift を JSON content で補正、JSON parse 成功だが field 欠落時は file mtime で stale 判定 + `LauncherVersion = "(version 不明)"` fallback で表示
+- **`PathManager.LauncherSessionsFolder` property 追加** (`Manager/PathManager.cs`): `<install>/responses/launcher_sessions/` の path SoT。Launcher 側 `Launcher/scripts/session_heartbeat.gd` の `PathManager.get_base_directory().path_join("responses/launcher_sessions")` と同 relative path を別実装 (C# / GDScript) で resolve、drift は SPEC §3.8.7 / §6.5 の literal 定義で fence。`VerifyPaths` で起動時 trail に `LauncherSessionsFolder` path + 存在 flag を embed して drift 目視可能化
+- **`SessionConflictDialog.Show` signature 拡張** (`Manager/Services/SessionConflictDialog.cs`): 第 4 引数 `IReadOnlyList<LauncherSessionInfo> launcherOthers` を追加 (= `operationDescription` は第 5 引数に shift)、Manager + Launcher の検出結果を 1 dialog に **merge 表示** (= 2 連続 dialog の UX 退行回避)。`BuildDetectedList` → `BuildMergedDetectedList` に拡張、行毎に component 種別を区別 (`PC-A (Manager v0.11.0、最終確認: 5 秒前)` / `PC-B (Launcher v0.5.18、最終確認: 12 秒前)`)、最大 5 件 + 残件数要約は merge count、Manager → Launcher の表示順
+- **Startup dialog title 汎用化**: `【危険】他 PC で Manager が起動中です` → `【危険】他 PC で Manager / Launcher が稼働中です` (= 旧 Manager 主眼から汎用化、merge 表示の検出 list と文言を一致)。EditOperation title は既存維持 (= 「他 PC で誰かが作業中です」、Launcher 検出時も「作業中」と読める汎用表現)
+- **`MainForm.MainForm_Load` chain pattern に統合** (`Manager/MainForm.cs`): `_sessionService.Initialize` 直後に `_launcherSessionService = new(PathManager.LauncherSessionsFolder); _launcherSessionService.Initialize();` を追加、`DetectOtherActiveSessions` 直後に `DetectActiveLauncherSessions` で両 detect を sync 取得、両方の OR で `BeginInvoke` dialog 表示判定。Cancel path で `_launcherSessionService.Shutdown() + null` も追加 (= polling-only なので no-op だが対称化 + FormClosed 経由二重呼出予防)
+- **`MainForm.CheckSessionConflictBeforeWrite` も同 pattern で Launcher detect を merge**: 13 callsite (SectionPanel + 5 Form の 2 段目 fence) すべてが automatic に Launcher 検出も使うようになる (= callsite 側 code 変更ゼロ、MainForm 内部 merge で API contract 据置)。`_launcherSessionService == null || !_launcherSessionService.IsInitialized` 時は空 list で fail-soft、Manager 単独検出 path に倒れる
+- **`MainForm_FormClosed` で `_launcherSessionService.Shutdown()` 追加**: `_sessionService.Shutdown()` と対称、null 化 + try/catch で Warn trail (= polling-only なので no-op だが API 対称化)
+- **assembly version bump**: `0.10.2.0` → `0.11.0.0` (minor bump、新 service + 新 DTO + dialog 拡張 + 13 callsite 自動拡張、v0.10.0 (manager_sessions) と同規模、AGENTS.md「Release and Versioning」minor=「機能追加」)
+- **同 PC = Manager 起動 PC 上の Launcher も検出に含める** (= 除外しない、安全側設計、SPEC §3.8.7.6): file lock 競合は同 PC でも発生 (= Manager 編集 × 同 PC Launcher SQLite read)、user は dialog で「自分が起動した Launcher」と分かれば閉じれば済む。除外 option は別 PR 余地
+- **`csproj` に `<Compile Include>` 2 件追加** (`Manager/GCTonePrism_Manager.csproj`): `Models\LauncherSessionInfo.cs` (= `Models\ManagerSessionInfo.cs` 直前、alphabetical 配置) + `Services\LauncherSessionService.cs` (= `Services\Logger.cs` 直前、同)
+- **scope 外** (= 別 PR 余地): Launcher 側に「他 PC Manager 編集中」検出機構を追加 (= PR3b の対称化) は本 PR scope 外、後追い PR 余地
+- **詳細仕様は [SPECIFICATION.md §3.8.7](SPECIFICATION.md) (動作仕様 + JSON schema literal + 検出 trigger + fail-soft 戦略 + 非対称性明示) + [§6.5 例外注記](SPECIFICATION.md) (heartbeat 用専用 sub-folder の明文化) 参照**
+- **verify**: Manager Release build clean (= warnings 0)。実機 verify 9 path は SPEC §3.8.7 + 本 PR description 参照、merge 前必須
 
 ### [Manager v0.10.2] - 2026-05-18
 

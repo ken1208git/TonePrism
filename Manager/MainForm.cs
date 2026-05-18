@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using GCTonePrism.Manager.Controls;
+using GCTonePrism.Manager.Models;
 using GCTonePrism.Manager.Services;
 
 namespace GCTonePrism.Manager
@@ -14,6 +16,9 @@ namespace GCTonePrism.Manager
     {
         private DatabaseManager dbManager;
         private ManagerSessionService _sessionService;
+        // (#179 PR3b) Launcher LAN-wide session 検出機構。`manager_sessions` table と非対称の
+        // JSON drop folder 方式 (= SPEC §3.8.7)、polling-only で DB write ゼロ。
+        private LauncherSessionService _launcherSessionService;
 
         private GameSectionPanel _gameSectionPanel;
         private StoreSectionPanel _storeSectionPanel;
@@ -63,6 +68,21 @@ namespace GCTonePrism.Manager
             {
                 Logger.Warn("[MainForm] FormClosed で ManagerSessionService Shutdown 失敗 (stale cleanup に委ねる): " + ex.Message);
             }
+
+            // (#179 PR3b) LauncherSessionService も同様に Shutdown 呼出 + null 化。polling-only service
+            // なので Shutdown は no-op (= 自 PC に self file なし)、対称化のため API は呼ぶ。
+            try
+            {
+                if (_launcherSessionService != null)
+                {
+                    _launcherSessionService.Shutdown();
+                    _launcherSessionService = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[MainForm] FormClosed で LauncherSessionService Shutdown 失敗: " + ex.Message);
+            }
         }
 
         /// <summary>
@@ -88,9 +108,23 @@ namespace GCTonePrism.Manager
                 return DialogResult.OK;
             }
             var others = _sessionService.DetectOtherActiveSessions();
-            if (others.Count == 0) return DialogResult.OK;
+
+            // (#179 PR3b) Launcher 検出を同時に取得 (= SPEC §3.8.7 merge 表示)。
+            // LauncherSessionService が未 init / Initialize 失敗時は空 list で fail-soft、Manager 単独
+            // 検出 path に倒れる (= 13 callsite 側 code 変更ゼロ、内部 merge で API contract 据置)。
+            IReadOnlyList<LauncherSessionInfo> launcherOthers;
+            if (_launcherSessionService != null && _launcherSessionService.IsInitialized)
+            {
+                launcherOthers = _launcherSessionService.DetectActiveLauncherSessions();
+            }
+            else
+            {
+                launcherOthers = new List<LauncherSessionInfo>();
+            }
+
+            if (others.Count == 0 && launcherOthers.Count == 0) return DialogResult.OK;
             return SessionConflictDialog.Show(
-                this, SessionConflictDialogContext.EditOperation, others, operationDescription);
+                this, SessionConflictDialogContext.EditOperation, others, launcherOthers, operationDescription);
         }
 
         private void MainForm_Load(object sender, EventArgs e)
@@ -156,6 +190,13 @@ namespace GCTonePrism.Manager
             _sessionService = new ManagerSessionService(dbManager.ManagerSessionRepository);
             _sessionService.Initialize();
 
+            // (#179 PR3b) Launcher session 検出機構も同時に初期化。JSON drop folder 方式で SPEC §6.5
+            // 「Launcher は SQLite に直接 write しない」原則を遵守、Manager 側は polling-only で DB write
+            // ゼロ。`PathManager.LauncherSessionsFolder` (= `<install>/responses/launcher_sessions/`) を
+            // SoT として両 component が同 path を別実装 (C# / GDScript) で resolve する。詳細 SPEC §3.8.7。
+            _launcherSessionService = new LauncherSessionService(PathManager.LauncherSessionsFolder);
+            _launcherSessionService.Initialize();
+
             // 起動時 check: 他 PC で active session を検出 → SessionConflictDialog (Startup)。
             // Cancel で Manager 終了 (self row delete 経由で clean exit trail を残す)。
             //
@@ -174,10 +215,14 @@ namespace GCTonePrism.Manager
             // round 2 (`BeginInvoke` defer のみ) は MainForm_Load の後続処理が dialog より先に走る regression
             // が PR #189 reviewer High で指摘されたため、本 round 3 で chain pattern に拡張。
             //
+            // (#179 PR3b) Manager 検出 + Launcher 検出を merge して dialog 表示判定。両方が空の場合のみ
+            // ContinueLoadAfterSessionCheck を直接呼出 (= 競合なし path)、どちらか 1 件以上で dialog 表示。
+            //
             // Initialize は sync のまま (= heartbeat thread 起動を最速で)、Detect も sync で他 PC 検出結果
             // を握ってから dialog 表示部分のみ defer。
             var otherSessionsAtStartup = _sessionService.DetectOtherActiveSessions();
-            if (otherSessionsAtStartup.Count > 0)
+            var launcherSessionsAtStartup = _launcherSessionService.DetectActiveLauncherSessions();
+            if (otherSessionsAtStartup.Count > 0 || launcherSessionsAtStartup.Count > 0)
             {
                 BeginInvoke(new Action(() =>
                 {
@@ -193,7 +238,7 @@ namespace GCTonePrism.Manager
                         if (IsDisposed || Disposing || _sessionService == null) return;
 
                         var dialogResult = SessionConflictDialog.Show(
-                            this, SessionConflictDialogContext.Startup, otherSessionsAtStartup);
+                            this, SessionConflictDialogContext.Startup, otherSessionsAtStartup, launcherSessionsAtStartup);
                         if (dialogResult == DialogResult.Cancel)
                         {
                             Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で Cancel 選択、Manager 終了");
@@ -201,6 +246,13 @@ namespace GCTonePrism.Manager
                             // Cancel path では Shutdown 直接呼出後に _sessionService = null を set。
                             _sessionService.Shutdown();
                             _sessionService = null;
+                            // (#179 PR3b) LauncherSessionService も同様に Shutdown + null 化。polling-only
+                            // なので Shutdown は no-op だが対称化のため呼ぶ + FormClosed 経由二重呼出予防。
+                            if (_launcherSessionService != null)
+                            {
+                                _launcherSessionService.Shutdown();
+                                _launcherSessionService = null;
+                            }
                             // (PR #189 round 4 L-2 復活) `Application.Exit` ではなく `Close` で
                             // FormClosing → FormClosed chain を確実に走らせる (= Logger.Shutdown +
                             // FormClosed 経由の cleanup 一式)。round 3 で旧 `BeginInvoke(...Close())`
