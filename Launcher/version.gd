@@ -12,7 +12,7 @@ class_name Version
 
 const MAJOR: int = 0
 const MINOR: int = 5
-const PATCH: int = 17
+const PATCH: int = 18
 
 static func get_version_string() -> String:
 	return "v%d.%d.%d" % [MAJOR, MINOR, PATCH]

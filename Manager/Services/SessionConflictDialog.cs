@@ -31,24 +31,33 @@ namespace GCTonePrism.Manager.Services
     {
         /// <summary>
         /// 他 PC 検出時の dialog を表示。OK で続行、Cancel で abort。
+        ///
+        /// (#179 PR3b) Manager + Launcher の 2 系統検出を 1 dialog に merge 表示する設計。
+        /// 検出 list は行毎に component 種別 (Manager / Launcher) を区別、最大 5 件 + 残件数要約は
+        /// merge count で算出。caller (`MainForm`) は両 service から detect 結果を取り、本 method に
+        /// 渡す。SPEC §3.8.7.4 参照。
         /// </summary>
         /// <param name="owner">親 form (modal の親、null も可)。</param>
         /// <param name="context">context (Startup / EditOperation) で文言切替。</param>
-        /// <param name="others">検出した他 PC session list (空でなく 1 件以上)。</param>
+        /// <param name="managerOthers">検出した他 PC Manager session list (= self 除外、`ManagerSessionService.DetectOtherActiveSessions` の戻り値)。空 list 可、ただし `launcherOthers` と合算で 1 件以上が caller 契約。</param>
+        /// <param name="launcherOthers">検出した active Launcher session list (PR3b 追加、= `LauncherSessionService.DetectActiveLauncherSessions` の戻り値)。**`managerOthers` と非対称で self-PC Launcher も含みうる** (SPEC §3.8.7.6、同 PC 上の Manager 編集 × Launcher SQLite read の競合も検出対象、安全側設計)。空 list 可。</param>
         /// <param name="operationDescription">EditOperation 時の操作名 (例: "ゲーム編集")、Startup 時は null。</param>
         /// <returns>user 選択 (DialogResult.OK / DialogResult.Cancel)。</returns>
         public static DialogResult Show(
             IWin32Window owner,
             SessionConflictDialogContext context,
-            IReadOnlyList<ManagerSessionInfo> others,
+            IReadOnlyList<ManagerSessionInfo> managerOthers,
+            IReadOnlyList<LauncherSessionInfo> launcherOthers,
             string operationDescription = null)
         {
             // (round 5 L-4) 空 list / null の事前 guard は caller の contract に倒す:
-            //   - `MainForm.CheckSessionConflictBeforeWrite`: `others.Count == 0` で early return
-            //   - `MainForm_Load` startup check: `otherSessionsAtStartup.Count > 0` 内側でのみ呼出
+            //   - `MainForm.CheckSessionConflictBeforeWrite`: `managerOthers.Count + launcherOthers.Count == 0` で early return
+            //   - `MainForm_Load` startup check: 合算 Count > 0 内側でのみ呼出
             // 同 assembly internal sealed class で caller は grep で全数確認可能、defensive 二重を撤去。
             long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            string detectedListLines = BuildDetectedList(others, nowMs);
+            string detectedListLines = BuildMergedDetectedList(managerOthers, launcherOthers, nowMs);
+
+            int totalCount = managerOthers.Count + launcherOthers.Count;
 
             // (round 2 High-1) MessageBox は markdown を解釈しないため `**...**` 等の強調記法は literal 表示
             // される。本文は plain text で OS button label (= 「OK」/「キャンセル」) と一貫させる。
@@ -67,7 +76,10 @@ namespace GCTonePrism.Manager.Services
             string body;
             if (context == SessionConflictDialogContext.Startup)
             {
-                title = "【危険】他 PC で Manager が起動中です";
+                // (#179 PR3b) Startup title を「Manager / Launcher」の汎用形に書換え。
+                // 旧 (PR #184) は「Manager が起動中」固定だったが、Launcher 検出も merge 表示するため
+                // 「Manager / Launcher が稼働中」に汎用化、文言と検出 list を一致させる。
+                title = "【危険】他 PC で Manager / Launcher が稼働中です";
                 body =
                     detectedListLines + "\n\n" +
                     "両方の PC で同時に Manager を使うと、保存中のデータや\n" +
@@ -77,6 +89,7 @@ namespace GCTonePrism.Manager.Services
             }
             else
             {
+                // EditOperation title は既存維持 (= Launcher 検出時も「作業中」と読める汎用表現)。
                 title = "【危険】他 PC で誰かが作業中です";
                 string opLabel = string.IsNullOrEmpty(operationDescription) ? "この操作" : operationDescription;
                 body =
@@ -87,7 +100,18 @@ namespace GCTonePrism.Manager.Services
                     "「キャンセル」を押す: 実行を中止する (他 PC の人に確認してから実行する)";
             }
 
-            Logger.Warn("[SessionConflictDialog] " + context + " context で他 PC 検出 (" + others.Count + " 件) → dialog 表示");
+            Logger.Warn("[SessionConflictDialog] " + context + " context で他 PC 検出 (Manager=" + managerOthers.Count + " Launcher=" + launcherOthers.Count + " total=" + totalCount + " 件) → dialog 表示");
+            // (#179 PR3b round 3 L-2) 検出 PC の pc_name / pid を debug trail に embed。
+            // 同 PC 検出時に「自 Process.Id と一致 → 自 PC Launcher」を log 解析で判定可能化。
+            // dialog body (= user 視点) には pid は出さず (= 部員視点で意味なし)、log のみ。
+            foreach (var info in managerOthers)
+            {
+                Logger.Info("[SessionConflictDialog]   - Manager: pc=" + info.PcName + " pid=" + info.Pid + " ver=" + info.ManagerVersion);
+            }
+            foreach (var info in launcherOthers)
+            {
+                Logger.Info("[SessionConflictDialog]   - Launcher: pc=" + info.PcName + " pid=" + info.Pid + " ver=" + info.LauncherVersion);
+            }
 
             // (#186 round 3 確定) Startup context の taskbar entry 不在 / focus 喪失で見失う UI bug は
             // **caller (`MainForm_Load`) 側で `BeginInvoke` defer + `ContinueLoadAfterSessionCheck`
@@ -109,24 +133,65 @@ namespace GCTonePrism.Manager.Services
                 MessageBoxDefaultButton.Button2 /* Cancel を default に倒して反射押下で続行する path を抑制 */);
         }
 
-        private static string BuildDetectedList(IReadOnlyList<ManagerSessionInfo> others, long nowMs)
+        private static string BuildMergedDetectedList(
+            IReadOnlyList<ManagerSessionInfo> managerOthers,
+            IReadOnlyList<LauncherSessionInfo> launcherOthers,
+            long nowMs)
         {
-            // (round 1 L-4) 検出した PC 一覧を「pc_name (Manager v0.X.Y、最終確認: N 秒前)」形式で列挙、
-            // 最大 5 件表示で残りは件数で要約。manager_version を embed することで「他 PC が古い version
-            // で開いている」case を user が認知可能に (= compatibility 警告の材料)。
+            // (#179 PR3b) Manager + Launcher の検出結果を merge 表示。
+            // 各行に component 種別 (Manager vX.Y.Z / Launcher vX.Y.Z) を区別して列挙、最大 5 件 +
+            // 残件数要約は merge count。表示順は Manager → Launcher (= 既存 PR #184 の Manager 表示
+            // を上に維持しつつ Launcher を後段に追加、user が「Manager 系の検出」を先に視覚的に確認)。
+            //
+            // (round 1 L-4 既存) version embed の意義: 「他 PC が古い version で開いている」case を
+            // user が認知可能 (compatibility 警告の材料)、Launcher 側でも同 logic。
             var sb = new StringBuilder();
             sb.Append("検出した PC:");
-            int maxShown = Math.Min(others.Count, 5);
-            for (int i = 0; i < maxShown; i++)
+            int totalCount = managerOthers.Count + launcherOthers.Count;
+            const int maxShown = 5;
+            int shown = 0;
+
+            // Manager session を先に列挙
+            for (int i = 0; i < managerOthers.Count && shown < maxShown; i++)
             {
-                var info = others[i];
+                var info = managerOthers[i];
                 int sec = info.SecondsSinceLastHeartbeat(nowMs);
                 string version = string.IsNullOrEmpty(info.ManagerVersion) ? "(version 不明)" : "Manager v" + info.ManagerVersion;
                 sb.Append("\n  - " + info.PcName + " (" + version + "、最終確認: " + sec + " 秒前)");
+                shown++;
             }
-            if (others.Count > maxShown)
+
+            // Launcher session を後段に列挙 (= remaining quota の範囲で)
+            for (int i = 0; i < launcherOthers.Count && shown < maxShown; i++)
             {
-                sb.Append("\n  ...他 " + (others.Count - maxShown) + " 件");
+                var info = launcherOthers[i];
+                int sec = info.SecondsSinceLastHeartbeat(nowMs);
+                string version = string.IsNullOrEmpty(info.LauncherVersion) ? "(version 不明)" : "Launcher v" + info.LauncherVersion;
+                sb.Append("\n  - " + info.PcName + " (" + version + "、最終確認: " + sec + " 秒前)");
+                shown++;
+            }
+
+            if (totalCount > maxShown)
+            {
+                // (round 2 M-4) Manager → Launcher の表示順で 5 件 cap が共有されるため、Manager が 5 件
+                // 以上検出された場合 Launcher が 0 件しか表示されない drift がある。残件数要約に
+                // component 内訳を embed して、Launcher 検出があるのに表示外な状況を user に明示する。
+                int shownManager = Math.Min(managerOthers.Count, maxShown);
+                int shownLauncher = shown - shownManager;
+                int hiddenManager = managerOthers.Count - shownManager;
+                int hiddenLauncher = launcherOthers.Count - shownLauncher;
+                if (hiddenManager > 0 && hiddenLauncher > 0)
+                {
+                    sb.Append("\n  ...他 " + (totalCount - maxShown) + " 件 (Manager " + hiddenManager + " 件 / Launcher " + hiddenLauncher + " 件 表示外)");
+                }
+                else if (hiddenManager > 0)
+                {
+                    sb.Append("\n  ...他 " + hiddenManager + " 件 (Manager 表示外)");
+                }
+                else if (hiddenLauncher > 0)
+                {
+                    sb.Append("\n  ...他 " + hiddenLauncher + " 件 (Launcher 表示外)");
+                }
             }
             return sb.ToString();
         }

@@ -1086,6 +1086,29 @@ Release.bat の編集は **UTF-8 (no BOM) + CRLF** 厳守 (SPEC §3.7.9.1 参照
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.5.18] - 2026-05-18
+
+#### Added (#179 PR3b — LAN-wide session tracking heartbeat 出力)
+
+- **新規 autoload `scripts/session_heartbeat.gd`**: 学校 LAN 上の SMB 共有 `prism.db` 運用で、Manager 編集中に Launcher の SQLite read が file lock 競合する path (= 「DB を開けません」error / Manager INSERT stall / 最悪 prism.db 破損) を予防するため、Launcher 側から「自 PC で Launcher 稼働中」を Manager に伝える heartbeat 機構を追加。`<base>/responses/launcher_sessions/<pc_name>.json` (= 1 PC 1 file、heartbeat 専用 sub-folder) に 10 秒周期で JSON を atomic write (`.tmp` → rename) し、Manager 側 `LauncherSessionService` が on-demand polling で読込。
+- **JSON schema** (= SPEC §3.8.7.2 で literal 定義、Manager / Launcher 両 implementation の SoT):
+  ```json
+  { "pc_name": "PC-A", "started_at_unix_ms": 1715379600000,
+    "last_heartbeat_at_unix_ms": 1715379630000, "pid": 12345,
+    "launcher_version": "0.5.18" }
+  ```
+- **動作**:
+  - `_ready()`: `responses/launcher_sessions/` directory 不在時に `DirAccess.make_dir_recursive_absolute` で自動作成、初回 heartbeat write、`Timer` node (`wait_time=10`、`autostart=true`、`one_shot=false`) を child として add
+  - `_on_heartbeat_tick()`: 10 秒周期で JSON 再書込 (`last_heartbeat_at_unix_ms` を update + atomic rename)
+  - `_notification(NOTIFICATION_PREDELETE)`: self JSON 削除 (clean shutdown 即時反映)、削除失敗時は `push_warning` trail (= Launcher autoload `Logger` の Godot log tail で自動 WARN 分類) + Manager 側 30 秒 stale fallback で fail-safe
+  - `_get_pc_name()`: COMPUTERNAME (Windows) → HOSTNAME (Linux/macOS) → "unknown" の 3 段 fallback (`logger.gd:204-210` と同 logic)
+- **fail-soft 戦略**: directory 作成失敗 / write 失敗時は `_init_failed = true` に倒し、以降 silent skip。`push_warning` で trail を残しつつ Launcher 起動 / ゲームプレイは一切止めない (= 部員視点で見えない fail-soft 原則、`logger.gd` の同型 pattern を踏襲)。本 PR は **Godot 4 built-in `Logger` class と autoload `Logger` の名前衝突 (= GDScript パーサーが built-in に解決して static method lookup 失敗) を避けるため `print` / `push_warning` legacy API を使用**、Launcher autoload `Logger` の Godot log tail で INFO / WARN に自動分類される。明示 `Logger.info / warn / error` 直 call への移行は #85 (Launcher 統一ログ基盤 sweep) 完了後に実施予定 (= 既存 logger.gd L10 で明記済の落とし穴を新規実装で踏まないようにする規約)
+- **`project.godot` `[autoload]` 登録**: `SessionHeartbeat="*res://scripts/session_heartbeat.gd"` を `Logger` 直後に追加。`Logger` (= 最先頭規約) / `Version` (class_name RefCounted、autoload ではない) / `PathManager` (同) に依存
+- **`config/version` を `0.5.17` → `0.5.18`** + `version.gd` の `PATCH` も `17` → `18` に同期 (= `Manager/Services/VersionInventory.cs` の regex parse 要件を維持、SPEC §3.7.8 チェックリスト)
+- **patch bump 判断**: Launcher 単体 user 視点で UI / 操作変化ゼロ (= disk に 1 file 書出すだけの additive 拡張)、Manager v0.11.0 と連動して初めて「他 PC Launcher 稼働中」dialog 警告が動作する。AGENTS.md「Release and Versioning」minor=「機能追加」の解釈で Launcher 単体追加機能なら minor だが、本 PR は **Manager 連動機能の Launcher 側 contribution** という framing で patch bump 慣例
+- **scope 外** (= 別 PR 余地): Launcher 側で「他 PC Manager 編集中」を逆方向検出する機構は本 PR scope 外、後追い PR で対称化可能
+- **詳細は SPEC §3.8.7** および `## Manager v0.11.0` 参照
+
 ### [Launcher v0.5.17] - 2026-05-13
 
 PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して `scripts/path_manager.gd` の self-reference リテラル + priority-3 detection ロジック (begins_with 二段比較 + Launcher/Manager sibling 同時存在検証) を修正。配布構造変更を含むため SemVer 厳密だと minor 寄りだが、Install.bat の v0.2.0 → 新構造 migration で自動吸収されエンドユーザー視点では invisible のため patch bump 扱い。
@@ -1520,6 +1543,49 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.11.0] - 2026-05-18
+
+#### Added (#179 PR3b — Launcher LAN-wide session tracking + dialog 統合)
+
+学校 LAN 上で Manager 編集中に Launcher が SQLite read で file lock 競合する path を物理閉鎖。PR #184 (v0.10.0) で **Manager 間** の同時起動検出は完成済だったが、**Manager と Launcher** の競合は依然人間頼りだった drift を、SPEC §6.5 「Launcher は SQLite に直接 write しない」原則を遵守した JSON drop folder 方式で解消。詳細仕様は SPEC §3.8.7 / §6.5 例外注記 / 変更履歴 v1.10.28 参照。
+
+- **`LauncherSessionService` 新規追加** (`Manager/Services/LauncherSessionService.cs`): `<install>/responses/launcher_sessions/<pc_name>.json` を on-demand polling で読込、stale (= 30 秒) を除外した active Launcher session list を返す polling-only service。`ManagerSessionService` (DB-based) と非対称、**SQLite write ゼロ + DB table 化なし + in-memory cache のみ + 周期 polling Timer なし** で完結。directory 不在時の自動作成 + JSON parse 失敗時 individual file skip + SMB 一時不到達時 空 list 返却で fail-soft、`Initialize` / `IsInitialized` / `Shutdown` / `DetectActiveLauncherSessions` の 4 method (= `ManagerSessionService` と対称 API)
+- **`LauncherSessionInfo` DTO** (`Manager/Models/LauncherSessionInfo.cs`): `PcName` / `StartedAtUnixMs` / `LastHeartbeatAtUnixMs` / `Pid` / `LauncherVersion` の 5 property + `SecondsSinceLastHeartbeat(nowMs)` helper (= `ManagerSessionInfo` と対称)
+- **stale 判定 baseline 2 段 logic**: JSON 内 `last_heartbeat_at_unix_ms` primary + file mtime secondary fallback。SMB directory cache (~10 秒、SPEC §6.5) 由来の mtime drift を JSON content で補正、JSON parse 成功だが field 欠落時は file mtime で stale 判定 + `LauncherVersion = "(version 不明)"` fallback で表示
+- **`PathManager.LauncherSessionsFolder` property 追加** (`Manager/PathManager.cs`): `<install>/responses/launcher_sessions/` の path SoT。Launcher 側 `Launcher/scripts/session_heartbeat.gd` の `PathManager.get_base_directory().path_join("responses/launcher_sessions")` と同 relative path を別実装 (C# / GDScript) で resolve、drift は SPEC §3.8.7 / §6.5 の literal 定義で fence。`VerifyPaths` で起動時 trail に `LauncherSessionsFolder` path + 存在 flag を embed して drift 目視可能化
+- **`SessionConflictDialog.Show` signature 拡張** (`Manager/Services/SessionConflictDialog.cs`): 第 4 引数 `IReadOnlyList<LauncherSessionInfo> launcherOthers` を追加 (= `operationDescription` は第 5 引数に shift)、Manager + Launcher の検出結果を 1 dialog に **merge 表示** (= 2 連続 dialog の UX 退行回避)。`BuildDetectedList` → `BuildMergedDetectedList` に拡張、行毎に component 種別を区別 (`PC-A (Manager v0.11.0、最終確認: 5 秒前)` / `PC-B (Launcher v0.5.18、最終確認: 12 秒前)`)、最大 5 件 + 残件数要約は merge count、Manager → Launcher の表示順
+- **Startup dialog title 汎用化**: `【危険】他 PC で Manager が起動中です` → `【危険】他 PC で Manager / Launcher が稼働中です` (= 旧 Manager 主眼から汎用化、merge 表示の検出 list と文言を一致)。EditOperation title は既存維持 (= 「他 PC で誰かが作業中です」、Launcher 検出時も「作業中」と読める汎用表現)
+- **`MainForm.MainForm_Load` chain pattern に統合** (`Manager/MainForm.cs`): `_sessionService.Initialize` 直後に `_launcherSessionService = new(PathManager.LauncherSessionsFolder); _launcherSessionService.Initialize();` を追加、`DetectOtherActiveSessions` 直後に `DetectActiveLauncherSessions` で両 detect を sync 取得、両方の OR で `BeginInvoke` dialog 表示判定。Cancel path で `_launcherSessionService.Shutdown() + null` も追加 (= polling-only なので no-op だが対称化 + FormClosed 経由二重呼出予防)
+- **`MainForm.CheckSessionConflictBeforeWrite` も同 pattern で Launcher detect を merge**: 13 callsite (SectionPanel + 5 Form の 2 段目 fence) すべてが automatic に Launcher 検出も使うようになる (= callsite 側 code 変更ゼロ、MainForm 内部 merge で API contract 据置)。`_launcherSessionService == null || !_launcherSessionService.IsInitialized` 時は空 list で fail-soft、Manager 単独検出 path に倒れる
+- **`MainForm_FormClosed` で `_launcherSessionService.Shutdown()` 追加**: `_sessionService.Shutdown()` と対称、null 化 + try/catch で Warn trail (= polling-only なので no-op だが API 対称化)
+- **assembly version bump**: `0.10.2.0` → `0.11.0.0` (minor bump、新 service + 新 DTO + dialog 拡張 + 13 callsite 自動拡張、v0.10.0 (manager_sessions) と同規模、AGENTS.md「Release and Versioning」minor=「機能追加」)
+- **同 PC = Manager 起動 PC 上の Launcher も検出に含める** (= 除外しない、安全側設計、SPEC §3.8.7.6): file lock 競合は同 PC でも発生 (= Manager 編集 × 同 PC Launcher SQLite read)、user は dialog で「自分が起動した Launcher」と分かれば閉じれば済む。除外 option は別 PR 余地
+- **`csproj` に `<Compile Include>` 2 件追加** (`Manager/GCTonePrism_Manager.csproj`): `Models\LauncherSessionInfo.cs` (= `Models\ManagerSessionInfo.cs` 直前、alphabetical 配置) + `Services\LauncherSessionService.cs` (= `Services\Logger.cs` 直前、同)
+- **scope 外** (= 別 PR 余地): Launcher 側に「他 PC Manager 編集中」検出機構を追加 (= PR3b の対称化) は本 PR scope 外、後追い PR 余地
+- **詳細仕様は [SPECIFICATION.md §3.8.7](SPECIFICATION.md) (動作仕様 + JSON schema literal + 検出 trigger + fail-soft 戦略 + 非対称性明示) + [§6.5 例外注記](SPECIFICATION.md) (heartbeat 用専用 sub-folder の明文化) 参照**
+- **verify**: Manager Release build clean (= warnings 0)。実機 verify 9 path は SPEC §3.8.7 + 本 PR description 参照、merge 前必須
+
+**Round 2 review fix (H-1 + M-1/2/3/4 + L-1/2/5)** — version bump なし、本 entry に統合:
+
+- **H-1**: 新規 `Launcher/scripts/session_heartbeat.gd.uid` (= Godot 4 で `.gd` と pair で生成される UID file) を commit に同梱 (= 既存 19 file の対と一致、別 PC / CI で project open 時の UID drift を予防)
+- **M-1 (Launcher 側 fail-soft 表現 drift)**: 本 CHANGELOG entry / SPEC §3.8.7.5 / `session_heartbeat.gd` docstring 間で「`Logger.warn` trail」と書いた drift があり、実装は Godot 4 built-in `Logger` class との名前衝突を避けるため `push_warning` を使用。三者すべてを「`push_warning` 経由で Launcher autoload `Logger` の Godot log tail で WARN 自動分類」表現に同期、#85 (Launcher 統一ログ基盤 sweep) 完了後の明示 `Logger.warn` 直 call 移行 path も明記
+- **M-2 (`*.json` glob quirk)**: `LauncherSessionService.DetectActiveLauncherSessions` の `Directory.EnumerateFiles(*.json)` が Windows 8.3 short-name 有効時に `.json.tmp` (Launcher atomic write の rename 途中 / crash 残骸) を誤 match する drift を defensive filter で物理閉鎖 (= `path.EndsWith(".json")` + `!path.EndsWith(".tmp")` の 2 段 check、Launcher crash で `.tmp` 残置しても dialog list に「pc-a.json」誤表示する path を遮断)
+- **M-3 (`long.TryParse` silent 0)**: `TryParseSessionFile` で `last_heartbeat_at_unix_ms` field が存在するが `long.TryParse` 失敗 (= 科学記法 `1.7e+12` / 文字列等の数値 corruption) した case に「field 欠落」と同 path で扱い、silent 0 で stale 判定される drift を解消。新実装は field の **存在** と **parse 成否** を区別し、parse 失敗時のみ Warn log で trail を残してから mtime fallback path に流す (= silent drop 予防 + 「primary path で field あり parse 失敗を silent 0 にしない」claim と実装を整合)
+- **M-4 (5 件 cap 配分問題)**: `BuildMergedDetectedList` の 5 件 cap が Manager → Launcher の表示順で共有されるため、Manager が 5 件以上検出された場合 Launcher が 0 件表示になる drift を、残件数要約 line で `Manager X 件 / Launcher Y 件 表示外` のように内訳を明示する形に解消 (= 仕様判断 #1 案、cap 自体は 5 件維持で要約を充実)
+- **L-1/L-2 (method 名 / 引数名 の self-PC 非対称)**: `DetectActiveLauncherSessions` (= "Other" なし、self 含む) と `SessionConflictDialog.Show` 第 4 引数 `launcherOthers` (= "Others" だが実態は self 含む) の意図的非対称命名を、両 docstring で「SPEC §3.8.7.6 の自 PC 含む安全側設計、Manager 側 `DetectOtherActiveSessions` (= "Other" 明示) と意図的非対称」と明文化、call-site だけ読んで誤用する path を予防
+- **L-5 (pid 型注記)**: SPEC §3.8.7.2 の JSON schema literal だけでは `pid` / `started_at_unix_ms` / `last_heartbeat_at_unix_ms` の int64 範囲 / cross-language 整合が読み取れない drift を、schema 直後に型 / 単位の注記段落を追加して明文化 (= `pc_name` string / `started_at_unix_ms` `last_heartbeat_at_unix_ms` int64 / `pid` int64 / `launcher_version` string)
+- **scope 外として残置** (L-3 / L-4): `VerifyPaths` への `_initialized` flag 出力 / `_init_failed` + `_initialized` の state machine 単一化 は内部状態の改善で本 PR scope を超えるため別 PR 余地、現状の挙動に bug は確認できないため retain
+
+**Round 3 review fix (M-1/2/3 + L-1/2/4)** — version bump なし、本 entry に統合:
+
+- **M-1 (PC 名 → filename sanitization 漏れ)**: `session_heartbeat.gd` の `_get_pc_name()` 結果を filename に使う前の sanitization が `logger.gd:213-219 _sanitize_filename` と対称になっておらず、CI / testing で `COMPUTERNAME=test/foo` 等の malformed env var injection / HOSTNAME fallback (Linux/macOS) で `:` 等が許容される path で `FileAccess.open` silent 失敗 → 検出不能になる drift があった (= docstring 「`logger.gd:204-210` と同 logic」claim と一段ずれ)。`session_heartbeat.gd` 末尾に `_sanitize_filename` を追加 (= logger.gd と同 logic で `/ \ : * ? " < > |` を `_` 置換)、`_initialize` 内で filename にする前に必ず通す形に修正。JSON 内 `pc_name` field は **オリジナル** 値、filename のみ **sanitized** 値 (= SPEC §3.8.7.2 に明文化)。Manager 側 primary path は JSON 内 `pc_name` 経由でオリジナル表示、fallback path は `Path.GetFileNameWithoutExtension(path)` で sanitized 値に倒れる non-conflicting 設計。helper 共通化 (= 両者で 1 関数化) は別 PR scope
+- **M-2 (5 件 cap 維持の trade-off 受容を SPEC §3.8.7.4 で明文化)**: round 2 で導入した「`Manager X 件 / Launcher Y 件 表示外` 残件数要約」だけでは「なぜ category 別 cap (= 案 a: Manager 3 / Launcher 2) や round-robin interleave (= 案 b) や cap 緩和 (= 案 c: 5 → 8) を採らなかったか」が SPEC に残らず将来 reviewer が drift と誤読する余地。SPEC §3.8.7.4 に「5 件 cap 維持の trade-off 受容」段落を追加、学校 LAN (~10 PC) で Manager 5 件以上が稀 + 最 likely な「Manager 1-2 + Launcher 数台」混在 case では Launcher も primary list 表示される根拠、cap 緩和は user feedback で大規模 LAN 確認後の別 issue 余地 を明示
+- **M-3 (同 PC 検出の 13 callsite UX cost SPEC 明文化)**: `CheckSessionConflictBeforeWrite` が 13 callsite で編集操作前に毎回 detect するため、同 PC で Launcher を放置すると操作毎に同 dialog が pop up し続ける UX path が SPEC §3.8.7.6 で明示されていない drift。「user は dialog で同 PC Launcher 検出を確認 → × で閉じる → 編集続行」が想定運用 path、放置 path の操作毎 dialog UX cost は安全側設計の trade-off として受容、体感問題と判断したら除外 option (= `Environment.MachineName` で自 PC filter) を別 PR で追加可能、を SPEC §3.8.7.6 末尾段落で明文化
+- **L-1 (TryParseSessionFile fallback path で dict 情報を捨てる drift)**: `last_heartbeat_at_unix_ms` field 欠落 / parse 失敗時の fallback path で `PcName = Path.GetFileNameWithoutExtension(path)` + `LauncherVersion = "(version 不明)"` 固定だったが、dict 自体は parse 成功している (= primary 入口 null check 通過) ので `pc_name` / `launcher_version` / `started_at_unix_ms` / `pid` も best-effort 読込可能。新実装は primary path と同じ defensive 読み (= `dict.ContainsKey(...)` + null fallback) で活用、欠落 / null 時のみ filename / "(unknown)" / 0 に倒れる non-conflicting 設計。display 一貫性向上 (PC 名表記揺れ予防)
+- **L-2 (`LauncherSessionInfo.Pid` が dead data on the wire だった drift 解消)**: SPEC §3.8.7.2 schema に `pid` を載せて crossing-language 整合表 (`pid: int64`) まで書いていたが Manager 側 actual 消費経路なしだった drift を、`SessionConflictDialog.Show` の Logger trail に `pc=PC-B pid=12345 ver=0.5.18` 形式で embed することで解消。log 解析時に「自 PC 検出 = 自 `Process.GetCurrentProcess().Id` との一致」判定で同 PC 上 Launcher を識別可能化、dialog body (= user 視点) には pid は出さない (= 部員視点で意味なし、log のみ)。`LauncherSessionInfo.Pid` docstring も「dead data」から「Logger trail で消費」に更新
+- **L-4 (MainForm_Load と CheckSessionConflictBeforeWrite で IsInitialized guard 非対称)**: 動作上は両 path とも fail-soft で問題なしだが、code style 非対称で読み手の認知 load 増の drift。`MainForm_Load` 側にも `_launcherSessionService != null && _launcherSessionService.IsInitialized` の明示 guard を追加して `CheckSessionConflictBeforeWrite` と pattern を対称化、defense-in-depth を 2 箇所で揃える
+- **scope 外として残置** (L-3 / L-5): L-3 (autoload 名 rename / `class_name LauncherLog` 切出しで Godot 4 built-in `Logger` との衝突を構造的に予防) は #85 (Launcher 統一ログ基盤 sweep) で扱う方が文脈一致、本 PR で docstring 警告 retain のみ。L-5 (SPEC 変更履歴 v1.10.28 row が 2KB 超で renderer 視認性低下) は既存 v1.10.26 / v1.10.27 row も同様の長さで PR3b 由来の drift ではない、規約変更は将来別 PR 余地
 
 ### [Manager v0.10.2] - 2026-05-18
 
