@@ -1592,7 +1592,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 #### Changed (#168 — 完全 rename + 配布対象拡張、破壊的変更)
 
-プロジェクト brand を `GCTonePrism` / `ゲームセンターTONE Prism` から **`TonePrism`** に統一、他の学校・団体への配布も視野に入れた汎用化 rename。exe filename / DB filename / repo URL / namespace / UI 文字列 / README まで完全 rename、auto-update 互換性は意図的に放棄してハード切替 transition を採用 (= 既存 install は手動で `TonePrism_Bundle_v0.5.0.zip` 解凍 + Install.bat 再実行が必要)。
+プロジェクト brand を `GCTonePrism` / `ゲームセンターTONE Prism` から **`TonePrism`** に統一、他の学校・団体への配布も視野に入れた汎用化 rename。exe filename / DB filename / repo URL / namespace / UI 文字列 / README まで完全 rename、auto-update 互換性は意図的に放棄してハード切替 transition を採用 (= 既存 install は手動で `TonePrism_v0.5.0.zip` 解凍 + Install.bat 再実行が必要)。
 
 bump 判断: exe filename / DB filename / namespace / repo URL 等の breaking change を含むが、SemVer pre-1.0 (= 0.x.y) 原則「Major version zero (0.y.z) is for initial development. Anything MAY change at any time」に乗って **minor bump (0.11.0 → 0.12.0)** で対応。1.0.0 への bump は「API 安定保証 + 配布実績」の milestone として後の release に温存、本 PR は brand 統一 + 配布可能化への準備として位置付け。AGENTS.md Bundle bump ルール「Major = breaking change」は 1.x+ 想定の規約で、0.x 域では minor bump が SemVer 上 OK (= user への warning 強度は CHANGELOG / release notes の文言で確保)。SPEC §1 / §2.4 / §7.3 等の本文 literal も全件 sweep、過去 history (= CHANGELOG 過去 entry / SPEC §10.x 変更履歴 row) は事実として残置 (= git blame / commit 整合保持)。
 
