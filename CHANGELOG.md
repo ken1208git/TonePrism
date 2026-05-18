@@ -72,7 +72,9 @@
 
 ## Release Tooling（配布インフラ）
 
-`Release.ps1` / `Release.bat` / `Install.bat` (Phase 2 以降) / `Updater` (Phase 3 以降) 等の配布インフラの変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
+`Release.ps1` / `Release.bat` / `Install.bat` / `templates/*.bat` / `show_folder_dialog.ps1` / `INSTALL_README.txt` 等の **build / 配布スクリプト** の変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
+
+**注意 (#160 で section 責務分離)**: `Updater` 等の **runtime exe 群** (= SPEC §2.4 Companions 配置) の changelog は本 section ではなく **`## Companions`** (旧 `## Updater (Companions/Updater)`、本 PR で section 名を一般化) に記載する。本 section は build / 配布スクリプトのみ対象。Bundle v0.4.0 以前 (= 本 PR merge 前) の Updater 変更履歴は `## Release Tooling` の過去 entry (= round 1〜8 review 詳細等) に retain、retroactive consolidation は scope creep のため見送り (= PR #159 round 4 「SPEC 1 PR 1 bump 規約」導入時と同 pattern)。
 
 ### [Release Tooling v0.1.18] - 2026-05-18
 
@@ -546,7 +548,7 @@ Release.bat の編集は **UTF-8 (no BOM) + CRLF** 厳守 (SPEC §3.7.9.1 参照
 - **ExpectedFiles +2 件 (13 → 15)**: `files\Companions\Updater\GCTonePrism_Updater.exe` + `.exe.config` を SPEC §3.7.1 正規 zip 構造に追加
 - **TODO コメント更新**: `TODO Phase 3 (#108): Companions/Updater/ の build + staging を追加` を「Phase 3 完成: Companions/Updater/ の build + staging を `Build-Updater` で実装済」に書き換え
 
-詳細は `## Updater (Companions/Updater)` セクション v0.1.0 entry を参照。
+詳細は `## Companions` セクション v0.1.0 entry (= 旧 `## Updater (Companions/Updater)`、#160 で rename) を参照。
 
 ### [Release Tooling v0.1.10] - 2026-05-13
 
@@ -1063,9 +1065,9 @@ Release.bat の編集は **UTF-8 (no BOM) + CRLF** 厳守 (SPEC §3.7.9.1 参照
 
 ---
 
-## Updater (Companions/Updater)
+## Companions（runtime exe 群）
 
-`Companions/Updater/GCTonePrism_Updater.exe` の変更履歴。SPEC §2.4 / §3.7.4 参照。
+SPEC §2.4 で定義される「主要 (Launcher / Manager / Monitor) を補助する独立 exe 群」の **runtime exe** の変更履歴。`Companions/Updater/GCTonePrism_Updater.exe` (Manager 自身の dir 置換用) + 将来追加される `WindowProbe` (#101) / `PauseOverlay` (#30) 等の deployment 配置と整合。本 section は **#160 で `## Updater (Companions/Updater)` から rename + 一般化**、`## Release Tooling` (= build / 配布スクリプト) と責務分離 (= 後者は build 時のみ動く scripts、本 section は runtime exe)。SPEC §2.4 / §3.7.4 参照。
 
 ### [Updater v0.1.0] - 2026-05-13
 
