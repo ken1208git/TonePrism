@@ -1265,11 +1265,12 @@ Release.ps1 と一致 (caller CI は `%ERRORLEVEL%` で 4 通り区別):
 - DB 不到達 / SQLite BUSY/LOCKED 永続失敗等 → `ManagerSessionService.Initialize` / `DetectOtherActiveSessions` が Logger.Error で trail を残しつつ **空 list / no-op で継続**。Manager 自体は起動 + 操作可能、検出機能のみ退化 (= 旧運用「同時起動注意 MessageBox」の自己管理依存に一時 fallback)。
 - 編集操作前 check も `_sessionService == null` で fail-soft (= MainForm.Load 完了前 / Initialize 失敗時は `DialogResult.OK` 返却で block しない)。
 
-**起動時 UI freeze 受容仕様** (PR #184 round 2 Medium-3 で明示化): `ManagerSessionService.Initialize` + `DetectOtherActiveSessions` は `MainForm_Load` (= UI thread) から sync 呼出されており、内部で 3 DB query (`DeleteStaleSessions` / `UpsertSelfSession` / `SelectOtherActiveSessions`) が `DatabaseConnection.ExecuteWithRetry` 経由で `busy_timeout=10000` ms まで block しうる。SMB 共有 + 他 PC 同時 write + retry 重複の worst case で **起動時に最大 ~30 秒 UI freeze する受容仕様** とする。設計判断の根拠:
+**起動時 UI freeze 受容仕様** (PR #184 round 2 Medium-3 で明示化、round 4 Medium-4 で試算補正): `ManagerSessionService.Initialize` + `DetectOtherActiveSessions` は `MainForm_Load` (= UI thread) から sync 呼出されており、内部で 3 DB query (`DeleteStaleSessions` / `UpsertSelfSession` / `SelectOtherActiveSessions`) が `DatabaseConnection.ExecuteWithRetry` 経由で実行される。**worst case 試算**: `busy_timeout=10000` ms × `ExecuteWithRetry` の `maxRetries=3` = 1 query あたり最大 ~30 秒 block、3 query 直列で **最大 ~90 秒** UI freeze する受容仕様とする。さらに `OpenConnectionWithJournalMode` の PRAGMA 4 連発でもそれぞれ block 可能性があるため worst case はさらに延びる余地あり。設計判断の根拠:
   - heartbeat thread 本体は `Task.Run` で async 化済、freeze は **起動時の最初の 3 query** に限定 (= 通常 path では 100 ms 以下)
   - 起動時 background 化案 (= `Task.Run` 経由 + 完了 callback で SessionConflictDialog 表示) は scope creep、現在の sync path は実装シンプル + 失敗時 fail-soft で実害コントロール下
-  - 学校 LAN 運用で worst case 30 秒は許容範囲 (Manager 起動は user の能動操作で、通常運用では既に他の起動待ち = Launcher 起動 / DB initialize 等で数秒待つ前例あり)
-  - SMB latency 改善 / retry tuning は別 issue 候補、本 PR は受容
+  - SMB 共有が安定運用される学校 LAN では 90 秒 worst case が実発生する頻度は極低 (= 過去 backup 系で 10 秒 block 観測なし、3 query 直列の同時 contention は ~1% 以下)
+  - 改善余地として `ExecuteWithRetry` の `maxRetries` を起動時 session check に限り 1 に絞る (= worst case ~30 秒に縮小)、または background 化、等の選択肢があるが本 PR scope 外、別 issue 候補
+  - 旧記述 (round 2 で「~30 秒」と表記) は `maxRetries` を計算に入れない試算誤り、round 4 で `~90 秒` に補正
 
 #### 3.8.6 Launcher session tracking (PR scope 外、PR3b で扱う)
 

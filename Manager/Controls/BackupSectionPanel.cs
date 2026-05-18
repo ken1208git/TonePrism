@@ -161,7 +161,7 @@ namespace GCTonePrism.Manager.Controls
         private void btnBackupNow_Click(object sender, EventArgs e)
         {
             if (_dbManager == null) return;
-            if (Services.SessionConflictHelper.CheckBeforeWrite(this,"バックアップ作成") == DialogResult.Cancel) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ作成") == DialogResult.Cancel) return;
 
             BackupResult result = null;
             using (var dialog = new ProcessingDialog((progress, token) =>

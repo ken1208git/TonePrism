@@ -93,7 +93,7 @@ namespace GCTonePrism.Manager.Controls
 
         private void btnAdd_Click(object sender, EventArgs e)
         {
-            if (Services.SessionConflictHelper.CheckBeforeWrite(this,"ストアセクション追加") == DialogResult.Cancel) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ストアセクション追加") == DialogResult.Cancel) return;
             using (var form = new StoreSectionForm(_dbManager))
             {
                 if (form.ShowDialog() == DialogResult.OK)

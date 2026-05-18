@@ -528,19 +528,22 @@ namespace GCTonePrism.Manager
             lblStatus.Text = $"データベース: {dbStatus} | {gameInfo}";
         }
 
-        // (#178 (b)) アップデート完了通知 dialog。2 invariant:
-        // (1) sentinel ファイルは読込直後の `finally` で必ず削除 (parse 成功 / 失敗問わず、永続再表示バグ防止)。
-        // (2) 起動時 dialog 数は常に 1 つに保つため、本 dialog 表示 (= true 返却) 時は caller が
-        //     「同時起動に関する注意」MessageBox を skip する排他置換。仕様: SPECIFICATION.md §3.7.3。
+        // (#178 (b)) アップデート完了通知 dialog。invariant:
+        //   sentinel ファイルは読込直後の `finally` で必ず削除 (parse 成功 / 失敗問わず、永続再表示バグ防止)。
+        // 仕様: SPECIFICATION.md §3.7.3。
+        //
+        // (round 4 Medium-3) 旧 docstring の「同時起動注意 MessageBox との排他置換 → true/false 返却で
+        // caller が gate」invariant は本 PR (#179 / #178 (c) で同時起動 MessageBox を撤廃) で消滅。
+        // 戻り値を使う caller も居ない (MainForm_Load:104 の呼出は戻り値捨て) ため signature を void 化。
 
         /// <summary>
         /// sentinel ファイル `<install>/.update_completed` を読んで完了 dialog を表示。
-        /// 表示した場合 true (caller は同時起動注意 MessageBox を skip)、表示しなかった場合 false。
+        /// sentinel 不在時は no-op。仕様 SPECIFICATION.md §3.7.3 参照。
         /// </summary>
-        private bool TryShowUpdateCompletedDialog()
+        private void TryShowUpdateCompletedDialog()
         {
             string sentinelPath = System.IO.Path.Combine(PathManager.BaseDirectory, ".update_completed");
-            if (!System.IO.File.Exists(sentinelPath)) return false;
+            if (!System.IO.File.Exists(sentinelPath)) return;
 
             string newVersion = null;
             string completedAtRaw = null;
@@ -564,8 +567,8 @@ namespace GCTonePrism.Manager
 
             if (string.IsNullOrEmpty(newVersion))
             {
-                // parse 失敗 / newVersion 不在は dialog 出さず終了、caller は通常の同時起動注意 MessageBox を表示。
-                return false;
+                // parse 失敗 / newVersion 不在は dialog 出さず終了 (sentinel は finally で削除済)。
+                return;
             }
 
             // CompletedAt は writer が ISO 8601 UTC で書き出した値 ("yyyy-MM-ddTHH:mm:ssZ")。dialog では
@@ -597,7 +600,6 @@ namespace GCTonePrism.Manager
                 "✓ アップデート完了",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
-            return true;
         }
 
         /// <summary>

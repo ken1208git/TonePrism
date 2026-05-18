@@ -69,6 +69,11 @@ namespace GCTonePrism.Manager.Services
                 Logger.Warn("[ManagerSessionService] Initialize 多重 call、2 回目以降 no-op");
                 return;
             }
+            // (round 4 L-1) idempotent な再 init (= Shutdown 後の再 Initialize、現運用では発生しないが
+            // 将来 test / restart pattern で踏みうる) で `_shuttingDown` 残置 → heartbeat task が初回
+            // iteration で silent break する drift を予防。docstring 「多重 call は no-op + Warn」semantic
+            // と整合させ、re-init pathways で flag を確実にリセットする。
+            _shuttingDown = false;
             try
             {
                 long now = NowUnixMs();
@@ -187,7 +192,11 @@ namespace GCTonePrism.Manager.Services
             Logger.Info("[ManagerSessionService] heartbeat loop 起動 (interval=" + HeartbeatIntervalSeconds + "s)");
             try
             {
-                while (!token.IsCancellationRequested)
+                // (round 4 L-2) `while` 条件 / `if` 内の `token.IsCancellationRequested` access も
+                // CTS.Dispose 後は ObjectDisposedException を投げうるため、try/catch 外で参照すると
+                // unhandled exception で task fault → TaskScheduler.UnobservedTaskException で silent。
+                // helper `IsCancelled()` で wrap + shutdown 中は確実に終了 (= flag を見て exit) する形に。
+                while (!IsCancelled(token))
                 {
                     // (round 3 L-3) try を Wait 部分と UpsertHeartbeat 部分に分けて、example. SQLite BUSY
                     // / network blip / shutdown race の例外を message 上で区別可能に。Wait 部分は shutdown
@@ -202,7 +211,7 @@ namespace GCTonePrism.Manager.Services
                         if (_shuttingDown) break; // shutdown race による Wait 例外、silent break
                         Logger.Warn("[ManagerSessionService] heartbeat Wait 失敗 (token race?、継続): " + ex.GetType().Name + ": " + ex.Message);
                     }
-                    if (token.IsCancellationRequested) break;
+                    if (IsCancelled(token)) break;
 
                     try
                     {
@@ -236,6 +245,20 @@ namespace GCTonePrism.Manager.Services
         private static long NowUnixMs()
         {
             return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        }
+
+        /// <summary>
+        /// (round 4 L-2) `CancellationToken.IsCancellationRequested` の access は CTS.Dispose 後に
+        /// `ObjectDisposedException` を投げうる (.NET Framework 4.8、MSDN 仕様)。Heartbeat loop の
+        /// `while` / `if` 条件で参照する箇所を本 helper 経由にして、Dispose race で task が unhandled
+        /// fault しないように防御。shutdown 中 (= `_shuttingDown == true`) は確実に「cancelled」扱いで
+        /// loop を抜けさせる。
+        /// </summary>
+        private bool IsCancelled(CancellationToken token)
+        {
+            if (_shuttingDown) return true;
+            try { return token.IsCancellationRequested; }
+            catch (ObjectDisposedException) { return true; }
         }
     }
 }
