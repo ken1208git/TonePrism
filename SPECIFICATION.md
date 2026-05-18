@@ -1237,7 +1237,8 @@ Release.ps1 と一致 (caller CI は `%ERRORLEVEL%` で 4 通り区別):
 
 #### 3.8.2 動作仕様
 
-- **heartbeat 間隔**: 10 秒 (50 PC 同時稼働で ~5 query/sec、SMB DB の許容範囲)。`ManagerSessionService.HeartbeatIntervalSeconds` で hardcoded、`SettingsKeys.ManagerHeartbeatIntervalSeconds` 経由 override は future tunability の予約 slot として確保 (本 PR では実装せず default 固定)。
+- **heartbeat 間隔**: 10 秒 (50 PC 同時稼働で ~5 query/sec、SMB DB の許容範囲)。`ManagerSessionService.HeartbeatIntervalSeconds` private const で hardcoded、override 経路は実装なし (PR #184 round 2 Medium-2 で `SettingsKeys` 側の予約 constant も YAGNI で removal 済、将来 tunability が確定したら settings key 追加 + service 側で読込み実装する)。
+- **heartbeat UPSERT 戦略** (round 3 H-2 で UPDATE → UPSERT 変更): heartbeat は `UPDATE WHERE pc_name = ...` ではなく `INSERT OR REPLACE` (= 5 field 全部 set) で実行する。理由: 他 PC が `Initialize` で `DeleteStaleSessions` を走らせた瞬間に自 row を物理 DELETE する path があり (= network blip で自 heartbeat が 30 秒以上遅延 + 別 PC 新規起動)、その後の UPDATE は row 不在で silent no-op となり **自 PC が他 PC から永久不可視化** する silent failure があった。UPSERT で row 不在時も自動 reanimate、network blip 回復後に自動復帰する設計。
 - **stale timeout**: 30 秒 (heartbeat 間隔 × 3、crash detection balance)。起動時に `DELETE FROM manager_sessions WHERE last_heartbeat_at_unix_ms < (now - 30000)` で自動 cleanup。
 - **検出 trigger** (= dialog 表示の起点):
   - **起動時** (`MainForm_Load` 冒頭): `_sessionService.Initialize` 直後に `DetectOtherActiveSessions` → 検出時 `SessionConflictDialog` (Startup context)、user Cancel で Manager 終了。
@@ -1245,7 +1246,7 @@ Release.ps1 と一致 (caller CI は `%ERRORLEVEL%` で 4 通り区別):
 - **dialog button**: `MessageBoxButtons.OKCancel` + `MessageBoxIcon.Stop` + `MessageBoxDefaultButton.Button2 (Cancel)` (= 反射押下による続行 path 抑制)。OK = 続行 (data 喪失 risk 承知)、Cancel = 中止 (context に応じて Manager 終了 / 操作中止)。
 - **dialog 文言**: 技術用語 (「データ破損」「競合」) を避け、部員が「何が起きるか」を想像できる具体表現 (「お互いに上書きされて消える恐れ」「他 PC の人に確認してから」) で統一。
 - **Startup context** title: `【危険】他 PC で Manager が起動中です`。body の主旨: 「両方の PC で同時に Manager を使うと、編集内容や バックアップがお互いに上書きされて消える恐れがあります」+ 検出 PC list (pc_name + 最終確認 N 秒前、最大 5 件 + 残件数要約)。
-- **EditOperation context** title: `【危険】他 PC で誰かが作業中です`。body の主旨: 「このまま保存すると、{operationDescription} の内容と 他 PC の編集内容がお互いに上書きされて消える恐れがあります」。
+- **EditOperation context** title: `【危険】他 PC で誰かが作業中です`。body の主旨: 「**このまま {operationDescription} を実行すると、他 PC の編集内容と お互いに上書きされて消える恐れがあります**」(round 2 Medium-1 で「保存すると {op} の内容と...」から汎用文「{op} を実行すると...」に変更、operation 種別が削除 / 初期化 / 並び替え 等で grammatical に成立しなかった drift を解消)。
 
 #### 3.8.3 同 PC 重複起動 block (Named Mutex)
 
@@ -1257,7 +1258,7 @@ Release.ps1 と一致 (caller CI は `%ERRORLEVEL%` で 4 通り区別):
 #### 3.8.4 crash 時の挙動
 
 - **stale row 自動 cleanup**: `Initialize` 起動時に `last_heartbeat_at_unix_ms < (now - 30000)` の row を DELETE で自動回収。Manager crash で self row 残存しても次回起動 (= 30 秒以上後) で消える設計。
-- **network 切断時の false positive**: local PC で DB 到達不能 → heartbeat update 失敗 → 他 PC から見ると stale → 他 PC が「自分が唯一」判定 path がある (issue #179 open question)。本 PR では tolerance 設計 (30 秒 timeout で安全側に倒れる) で受容、物理閉鎖は将来の network resilience 別 issue で対応。
+- **network 切断時の false positive + 自動復帰** (round 3 H-2 で挙動見直し): local PC で DB 到達不能 → heartbeat upsert 失敗 → 他 PC から見ると stale → 他 PC が新規起動で自 row を `DeleteStaleSessions` で物理 DELETE する path がある (= 期待される自動 cleanup の副作用)。**この case でも本 PR の UPSERT heartbeat 戦略 (= §3.8.2 参照) により、自 PC の DB 到達が回復した瞬間に次の heartbeat で row を自動 reanimate** するため、永久不可視化はしない。network blip 中の最大 30 秒間は他 PC から「自分が唯一」と誤判定される可能性が残るが、blip 回復で自動復帰する tolerance 設計。物理閉鎖 (= 完全な network resilience) は将来別 issue で対応余地あり。
 
 #### 3.8.5 fail-soft 戦略
 

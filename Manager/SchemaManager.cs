@@ -820,9 +820,22 @@ namespace GCTonePrism.Manager
                     if (currentVersion < 13)
                     {
                         // (#179) v12 → v13: manager_sessions table 新設。CREATE TABLE IF NOT EXISTS
-                        // で idempotent (= CreateTables 先行 path で既に作られていれば no-op)。
+                        // で idempotent (= CreateTables 先行 path で既に作られていれば no-op)。物理変更
+                        // (= table 作成) 自体は先行実行する。
                         MigrateV12ToV13(connection, migTransaction);
-                        currentVersion = 13;
+
+                        // (round 3 H-1 fix) v10→v11 / v11→v12 と同じ guard pattern: 直前の migration が
+                        // 未完なら currentVersion bump を見送り、user_version は据え置きで次回起動時に
+                        // 再試行させる。MigrateV12ToV13 自体は CREATE IF NOT EXISTS で idempotent なので
+                        // 物理変更が先行適用されても害なし。
+                        if (currentVersion >= 12)
+                        {
+                            currentVersion = 13;
+                        }
+                        else
+                        {
+                            Logger.Warn("[DatabaseManager] 直前の migration が未完のため user_version は " + currentVersion + " のまま据え置き (v13 物理変更のみ先行適用)");
+                        }
                     }
 
                     // 達成バージョン（CurrentDbVersion ではなく currentVersion）を書き込む。

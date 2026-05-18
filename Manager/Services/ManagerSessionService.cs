@@ -40,6 +40,11 @@ namespace GCTonePrism.Manager.Services
         private CancellationTokenSource _heartbeatCts;
         private Task _heartbeatTask;
         private bool _initialized;
+        // (round 3 L-1 / L-3) Shutdown 進行中 flag。heartbeat loop が token.WaitHandle.WaitOne や
+        // _repo.UpsertHeartbeat で race 例外を踏んでも、Shutdown 中は silent に処理して noise を抑える。
+        // volatile で thread 間の memory ordering を保証 (Shutdown thread の set と heartbeat thread の
+        // read が並走するため)。
+        private volatile bool _shuttingDown;
 
         public ManagerSessionService(ManagerSessionRepository repo)
         {
@@ -87,8 +92,13 @@ namespace GCTonePrism.Manager.Services
                 Logger.Info("[ManagerSessionService] self session 登録: pc=" + _pcName + " pid=" + _pid + " ver=" + _managerVersion);
 
                 // (3) heartbeat thread 起動
+                // (round 3 L-2) lambda 内で `_heartbeatCts.Token` を late-capture すると、Initialize 直後
+                // に Shutdown が走って `_heartbeatCts = null` に set された場合 NRE で task が落ちる
+                // race path がある (実害は startup Cancel-終了 path で発火)。local var に capture して
+                // lambda は token のみ参照する形に変更。
                 _heartbeatCts = new CancellationTokenSource();
-                _heartbeatTask = Task.Run(() => HeartbeatLoop(_heartbeatCts.Token), _heartbeatCts.Token);
+                var capturedToken = _heartbeatCts.Token;
+                _heartbeatTask = Task.Run(() => HeartbeatLoop(capturedToken), capturedToken);
 
                 _initialized = true;
             }
@@ -106,6 +116,11 @@ namespace GCTonePrism.Manager.Services
         public void Shutdown()
         {
             if (!_initialized) return;
+            // (round 3 L-1/L-3) shutdown flag を先に立てて、heartbeat loop が以降に race 例外を踏んでも
+            // 「heartbeat update 失敗」Warn を抑制し、shutdown trail を本物に clean にする。Cancel()
+            // 直後の token.WaitHandle.WaitOne / UpsertHeartbeat が ObjectDisposedException や別例外を
+            // 投げる path はあるが、すべて shutting down 中の race として silent 扱いになる。
+            _shuttingDown = true;
             try
             {
                 if (_heartbeatCts != null)
@@ -113,7 +128,7 @@ namespace GCTonePrism.Manager.Services
                     _heartbeatCts.Cancel();
                     // Task.Wait は thread block するが shutdown 同期 path で許容 (= 数秒以内に完了)。
                     // (round 1 L-2) OperationCanceled だけ silent swallow、他 inner type (= heartbeat
-                    // 最後の UpdateHeartbeat で SQLite 例外等) は Warn 出力で trail を残す。
+                    // 最後の UpsertHeartbeat で SQLite 例外等) は Warn 出力で trail を残す。
                     try { _heartbeatTask?.Wait(TimeSpan.FromSeconds(2)); }
                     catch (AggregateException ae) when (ae.InnerExceptions.All(e => e is OperationCanceledException))
                     {
@@ -126,12 +141,12 @@ namespace GCTonePrism.Manager.Services
                             Logger.Warn("[ManagerSessionService] heartbeat task shutdown 時 inner exception (継続): " + inner.GetType().Name + ": " + inner.Message);
                         }
                     }
-                    // (round 2 Low-4) Wait が timeout で抜けた場合 (= heartbeat task が SQLite BUSY 中で
-                    // 最大 10 秒 block) は task がまだ生きていて、Dispose 直後に `token.WaitHandle.WaitOne`
-                    // で ObjectDisposedException を踏む path がある。loop 内 catch で握り潰されるが
-                    // shutdown log に noise を残すため、Dispose 側を try/catch で握り潰して shutdown trail
-                    // を clean に保つ。CancellationTokenSource は finalizer なしで GC されても害なし。
-                    try { _heartbeatCts.Dispose(); } catch { /* race による ObjectDisposedException 等は無視 */ }
+                    // (round 3 L-1 fix) CancellationTokenSource.Dispose() 自体は idempotent で例外を
+                    // 投げない (MSDN 仕様)。旧 round 2 L-1 で「Dispose の race で ObjectDisposedException」と
+                    // 書いた rationale は誤り (実際の noise source は heartbeat loop 側の WaitOne 例外、
+                    // round 3 L-1/L-3 fix で `_shuttingDown` flag による heartbeat loop 内 silent 化に
+                    // 集約)。Dispose の try/catch wrapper は撤回。
+                    _heartbeatCts.Dispose();
                     _heartbeatCts = null;
                 }
                 _repo.DeleteSelfSession(_pcName);
@@ -174,16 +189,41 @@ namespace GCTonePrism.Manager.Services
             {
                 while (!token.IsCancellationRequested)
                 {
+                    // (round 3 L-3) try を Wait 部分と UpsertHeartbeat 部分に分けて、example. SQLite BUSY
+                    // / network blip / shutdown race の例外を message 上で区別可能に。Wait 部分は shutdown
+                    // race (= ObjectDisposedException 等) を _shuttingDown flag で silent 化、UpsertHeartbeat
+                    // は SQLite BUSY 等で例外を投げても shutdown 中なら同様 silent。
                     try
                     {
                         token.WaitHandle.WaitOne(TimeSpan.FromSeconds(HeartbeatIntervalSeconds));
-                        if (token.IsCancellationRequested) break;
-                        _repo.UpdateHeartbeat(_pcName, NowUnixMs());
                     }
                     catch (Exception ex)
                     {
+                        if (_shuttingDown) break; // shutdown race による Wait 例外、silent break
+                        Logger.Warn("[ManagerSessionService] heartbeat Wait 失敗 (token race?、継続): " + ex.GetType().Name + ": " + ex.Message);
+                    }
+                    if (token.IsCancellationRequested) break;
+
+                    try
+                    {
+                        // (round 3 H-2 fix) `UPDATE WHERE pc_name = ...` だと row 不在時 silent no-op で
+                        // 自 PC 永久不可視化 path があったため `INSERT OR REPLACE` UPSERT に変更。
+                        // 他 PC の stale cleanup で削除されても次の heartbeat で reanimate できる。
+                        var self = new ManagerSessionInfo
+                        {
+                            PcName                = _pcName,
+                            StartedAtUnixMs       = _startedAtUnixMs,
+                            LastHeartbeatAtUnixMs = NowUnixMs(),
+                            Pid                   = _pid,
+                            ManagerVersion        = _managerVersion,
+                        };
+                        _repo.UpsertHeartbeat(self);
+                    }
+                    catch (Exception ex)
+                    {
+                        if (_shuttingDown) break; // shutdown race による UpsertHeartbeat 例外、silent break
                         // 1 回の heartbeat 失敗は致命的でない (次の 10 秒で retry)。Warn のみで継続。
-                        Logger.Warn("[ManagerSessionService] heartbeat update 失敗 (継続): " + ex.Message);
+                        Logger.Warn("[ManagerSessionService] heartbeat UpsertHeartbeat 失敗 (継続): " + ex.GetType().Name + ": " + ex.Message);
                     }
                 }
             }

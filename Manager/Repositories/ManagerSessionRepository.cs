@@ -77,26 +77,20 @@ namespace GCTonePrism.Manager.Repositories
         }
 
         /// <summary>
-        /// self row の `last_heartbeat_at_unix_ms` のみを update。heartbeat thread が周期実行する。
-        /// row 不在 (= 別 process が DELETE した case) でも no-op で済む UPDATE 文。
+        /// self row の heartbeat を update。heartbeat thread が周期実行する。
+        /// (round 3 H-2 fix) 旧実装は `UPDATE WHERE pc_name = @pc_name` で row 不在時に silent no-op
+        /// だったため、他 PC が stale cleanup で自 row を物理 DELETE した case (= network blip で自 heartbeat
+        /// が 30 秒以上遅延 → 別 PC 起動の `DeleteStaleSessions` で自 row 削除) で **以降の heartbeat が
+        /// すべて silent 空振り、自 PC が他 PC から永久不可視化** する path があった。本 PR の主目的
+        /// (LAN-wide 同時起動検出) が最初の network blip 後に sustained に機能不全になる silent failure。
+        /// `INSERT OR REPLACE` (UPSERT) で row 不在時も自動で再 INSERT する形に変更、reanimate 可能に。
         /// </summary>
-        public void UpdateHeartbeat(string pcName, long heartbeatUnixMs)
+        /// <param name="info">self session info (UpsertSelfSession と同じ 5 field、heartbeat 用に毎回新規 instance)。</param>
+        public void UpsertHeartbeat(ManagerSessionInfo info)
         {
-            _conn.ExecuteWithRetry(() =>
-            {
-                using (var connection = new SQLiteConnection(_conn.ConnectionString))
-                {
-                    _conn.OpenConnectionWithJournalMode(connection);
-                    using (var cmd = new SQLiteCommand(
-                        "UPDATE manager_sessions SET last_heartbeat_at_unix_ms = @heartbeat WHERE pc_name = @pc_name",
-                        connection))
-                    {
-                        cmd.Parameters.AddWithValue("@pc_name", pcName);
-                        cmd.Parameters.AddWithValue("@heartbeat", heartbeatUnixMs);
-                        cmd.ExecuteNonQuery();
-                    }
-                }
-            });
+            // 実装は UpsertSelfSession と同 SQL (INSERT OR REPLACE 5 field 全部 set) を再利用。
+            // 別 method 名で意図 (= 起動時 1 度 vs heartbeat 周期) を区別するが、SQL は共通の atomic upsert。
+            UpsertSelfSession(info);
         }
 
         /// <summary>
