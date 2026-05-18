@@ -47,11 +47,17 @@ namespace GCTonePrism.Manager
 
         private void MainForm_Load(object sender, EventArgs e)
         {
-            MessageBox.Show(
-                "【重要】管理ソフトは必ず「1台のPC」だけで起動してください。\n\n複数のPCで同時に管理ソフトを開くと、データの保存に失敗したり、最悪の場合ファイルが破損して全てのデータが失われる可能性があります。\n（ランチャーは複数のPCで同時に動かしても大丈夫です）",
-                "同時起動に関する注意",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
+            // (#178 (b)) アップデート完了直後の起動 (= sentinel あり) は、通常の「同時起動に関する注意」
+            // MessageBox を「✓ アップデート完了」MessageBox に **置換** する設計。起動 dialog 数は変わらず 1 つ、
+            // user は完了 feedback を確実に受け取る。同時起動注意は次回 (sentinel なし) 起動から通常表示。
+            if (!TryShowUpdateCompletedDialog())
+            {
+                MessageBox.Show(
+                    "【重要】管理ソフトは必ず「1台のPC」だけで起動してください。\n\n複数のPCで同時に管理ソフトを開くと、データの保存に失敗したり、最悪の場合ファイルが破損して全てのデータが失われる可能性があります。\n（ランチャーは複数のPCで同時に動かしても大丈夫です）",
+                    "同時起動に関する注意",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
 
             bool dbReady = false;
 
@@ -448,6 +454,108 @@ namespace GCTonePrism.Manager
             string dbStatus = dbManager.DatabaseExists() ? "接続済み" : "未接続";
             string gameInfo = additionalInfo ?? $"ゲーム数: {_gameSectionPanel.GameCount}件";
             lblStatus.Text = $"データベース: {dbStatus} | {gameInfo}";
+        }
+
+        // (#178 (b)) アップデート完了通知 dialog。2 invariant:
+        // (1) sentinel ファイルは読込直後の `finally` で必ず削除 (parse 成功 / 失敗問わず、永続再表示バグ防止)。
+        // (2) 起動時 dialog 数は常に 1 つに保つため、本 dialog 表示 (= true 返却) 時は caller が
+        //     「同時起動に関する注意」MessageBox を skip する排他置換。仕様: SPECIFICATION.md §3.7.3。
+
+        /// <summary>
+        /// sentinel ファイル `<install>/.update_completed` を読んで完了 dialog を表示。
+        /// 表示した場合 true (caller は同時起動注意 MessageBox を skip)、表示しなかった場合 false。
+        /// </summary>
+        private bool TryShowUpdateCompletedDialog()
+        {
+            string sentinelPath = System.IO.Path.Combine(PathManager.BaseDirectory, ".update_completed");
+            if (!System.IO.File.Exists(sentinelPath)) return false;
+
+            string newVersion = null;
+            string completedAtRaw = null;
+            try
+            {
+                string json = System.IO.File.ReadAllText(sentinelPath, System.Text.Encoding.UTF8);
+                var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
+                var dto = ser.Deserialize<UpdateCompletedSentinel>(json);
+                if (dto != null) { newVersion = dto.NewVersion; completedAtRaw = dto.CompletedAt; }
+            }
+            catch (Exception ex)
+            {
+                Services.Logger.Warn("[MainForm] update_completed sentinel parse 失敗 (dialog 表示 skip): " + ex.Message);
+            }
+            finally
+            {
+                // 読込結果に関わらず sentinel は必ず削除する (永続 dialog 再表示バグ防止)。
+                try { System.IO.File.Delete(sentinelPath); }
+                catch (Exception delEx) { Services.Logger.Warn("[MainForm] update_completed sentinel 削除失敗: " + delEx.Message); }
+            }
+
+            if (string.IsNullOrEmpty(newVersion))
+            {
+                // parse 失敗 / newVersion 不在は dialog 出さず終了、caller は通常の同時起動注意 MessageBox を表示。
+                return false;
+            }
+
+            // CompletedAt は writer が ISO 8601 UTC で書き出した値 ("yyyy-MM-ddTHH:mm:ssZ")。dialog では
+            // user-friendly な local time format に変換 ("yyyy-MM-dd HH:mm")。parse 失敗時は空文字で fallback、
+            // dialog 表示は version のみで継続 (= 完了時刻不在で dialog 出ない方が UX 悪なので silent fallback)。
+            string completedAtLocal = string.Empty;
+            if (!string.IsNullOrEmpty(completedAtRaw))
+            {
+                DateTime parsed;
+                if (DateTime.TryParse(completedAtRaw,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                        out parsed))
+                {
+                    completedAtLocal = parsed.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+                }
+            }
+
+            Services.Logger.Info("[MainForm] update_completed dialog 表示: Bundle v" + newVersion + " completedAt=" + (completedAtRaw ?? "(null)"));
+            string body = "アップデートが完了しました。\n\n" +
+                          "  Bundle バージョン: v" + newVersion + "\n";
+            if (!string.IsNullOrEmpty(completedAtLocal))
+            {
+                body += "  完了時刻: " + completedAtLocal + "\n";
+            }
+            body += "\n新しい管理ソフトが起動しています。";
+            MessageBox.Show(
+                body,
+                "✓ アップデート完了",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return true;
+        }
+
+        /// <summary>
+        /// `<install>/.update_completed` sentinel ファイルの JSON deserialize 用 DTO。
+        ///
+        /// **Serializer 切替時の注意** (round 2 review fix Low-2): 本 class は PascalCase property を
+        /// 持ち、JSON wire format は camelCase (writer 側 `UpdateSectionPanel.RunUpdateWorker` の anonymous
+        /// type が camelCase で書出し)。現状の `System.Web.Script.Serialization.JavaScriptSerializer` は
+        /// case-insensitive deserialize で互換性が成立しているが、将来 `System.Text.Json` 等の case-sensitive
+        /// default serializer へ切替える場合、wire 名 mapping を別途設定する必要がある (例: `JsonPropertyName`
+        /// attribute)。切替時は wire format との対応を再検証すること。
+        /// </summary>
+        private sealed class UpdateCompletedSentinel
+        {
+            /// <summary>
+            /// アップデート完了時刻 (ISO 8601 UTC、例: "2026-05-18T14:30:45Z")。consumer
+            /// (`TryShowUpdateCompletedDialog`) が `DateTime.TryParse` で読み取り、`ToLocalTime` →
+            /// "yyyy-MM-dd HH:mm" 形式に変換して dialog 文言の「完了時刻」行に embed する。parse 失敗時は
+            /// 空文字 fallback で時刻行を省略 (= 時刻不在で dialog 自体を skip するより UX 良の判断)。
+            /// `JavaScriptSerializer` の case-insensitive deserialize により JSON 上は `completedAt`
+            /// (camelCase、wire format) でも `CompletedAt` (PascalCase) でも互換的に受理。
+            /// </summary>
+            public string CompletedAt { get; set; }
+            /// <summary>
+            /// 新 Bundle バージョン (例: "0.3.2")。**Bundle 全体の version** (= GitHub Releases tag) で、
+            /// Manager 単体 version (例: "0.9.2") ではない (writer 側 `targetVersion.ToString(3)` が
+            /// `_currentResult.Latest.Version` = Bundle Version 由来のため)。dialog 文言「Bundle バージョン: v...」
+            /// に embed して user に表示する。
+            /// </summary>
+            public string NewVersion { get; set; }
         }
     }
 }
