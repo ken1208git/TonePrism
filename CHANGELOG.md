@@ -13,6 +13,21 @@
 
 リリース zip 全体に付与する独立バージョン。GitHub Releases の本文として `Release.ps1` がこのセクションを抜き出して使う。エンドユーザー（来場スタッフ / 顧問の先生 / 部員）向けの **summary** を書く。技術詳細は `## Launcher` / `## Manager` / `## Release Tooling` 等の別セクションを参照。詳細仕様は [SPECIFICATION.md §3.7.7](SPECIFICATION.md) を参照。
 
+### [Bundle v0.4.0] - 2026-05-19
+
+**LAN 上の同時起動を自動検出して警告する機構が完成** (#179)。学校 LAN の SMB 共有 `prism.db` で、これまで「同時起動するとデータが壊れる可能性あり、毎回 MessageBox で注意喚起」だった人間頼り運用から、**他 PC で Manager / Launcher が動いている時にだけ自動で警告 dialog を出す** 方式に upgrade。Manager 起動時 + ゲーム編集 / バックアップ / 設定変更等の前で「【危険】他 PC で Manager / Launcher が稼働中です: PC-A (Manager v0.11.0、最終確認: 5 秒前) / PC-B (Launcher v0.5.18、最終確認: 12 秒前)」のように **検出された PC を具体的に表示** し、user は OK (続行) / キャンセル (中止) を都度判断できるようになりました。
+
+その他の改善:
+- アップデート完了直後の起動時に「✓ アップデート完了 (Bundle vX.Y.Z)」通知 dialog が出るようになりました (= 旧仕様は完了通知ゼロで silent 再起動)
+- 同 PC で Manager を 2 つ起動しようとすると即座に block (= 物理的に防止、誤起動による上書き競合を予防)
+- アップデート関連の UI / 安全性改善多数 (詳細は `## Manager` 別セクション参照)
+
+- Launcher: v0.5.17 → v0.5.18 (LAN-wide session 出力 module 追加)
+- Manager: v0.9.1 → v0.11.0 (6 段 bump、機能追加 + UX 改善)
+- Release Tooling: v0.1.17 → v0.1.18 (manifest 経由 path 解決の forward compat)
+
+**[v0.3.1 以前をインストール済みの方へ]** Manager の「アップデート」タブから「今すぐアップデート」で適用してください (= Bundle v0.3.0 以降は自動アップデート対応)。**ゲームデータ (DB、ゲーム、バックアップ、回答、ログ) は自動で保護**、内部の DB スキーマも自動で v12 → v13 に migration されます。
+
 ### [Bundle v0.3.1] - 2026-05-18
 
 **zip の中身をシンプルに整理 + 将来の自動アップデート対応を強化** (#175)。zip を解凍した時に並ぶファイルが `Install.bat` / `INSTALL_README.txt` / `bundle/` フォルダ の 3 つだけになり、「どれを押せばいいか」が一目瞭然になりました。あわせて Manager の「アップデート」タブが将来の配布内容の変更に自動で追従できるように改良 — **次のリリース以降は zip を手動 DL する手間なく自動でアップデートできるように**なります。
@@ -2731,6 +2746,7 @@ Release.ps1 の $FooterSentinel 定数も同期更新すること。
 
 <!-- GCTONEPRISM-CHANGELOG-FOOTER-BEGIN-V1 -->
 
+[Bundle v0.4.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/v0.4.0
 [Bundle v0.3.1]: https://github.com/ken1208git/GCTonePrism/releases/tag/v0.3.1
 [Bundle v0.3.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/v0.3.0
 [Bundle v0.2.0]: https://github.com/ken1208git/GCTonePrism/releases/tag/v0.2.0
