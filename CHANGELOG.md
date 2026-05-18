@@ -1523,17 +1523,22 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ### [Manager v0.10.2] - 2026-05-18
 
-#### Fixed (#187 — AddGameForm rollback で空 parent gameFolder が残り「古いゲームデータが残っています」dialog を誤 trigger)
+#### Fixed (#187 — AddGameForm 2 段目 fence を pre-copy に reorder し parent rollback を構造的に不要化)
 
-- **`parentCreatedThisCall` flag + `TryDeleteEmptyParentGameFolder` helper 追加** (`Manager/AddGameForm.cs`): PR #184 round 6 案 B fence で AddGameForm の Cancel 頻度が増えた結果、verify session で「ゲーム追加 → OK → CopyGameFolder 成功 → 案 B fence Cancel → rollback で version subfolder (`games/<gameId>/v1.0.0/`) は削除されるが parent gameFolder (`games/<gameId>/`) は空のまま残る → 同 form で OK 再 click すると existingFolder check (#120) が trigger して『古いゲームデータが残っています』dialog 表示 → user が『session conflict で Cancel しただけなのに、なぜ古いデータ警告?』と混乱」UX 退行 path を user が踏んだ。
-- **修正方針 (#187 Option A 採用)**:
-  - `private bool parentCreatedThisCall = false;` field を追加し、`CopyGameFolder` で `Directory.CreateDirectory(gameBaseFolder)` を呼んだ時に `true` に set。既存 game への version 追加 (= parent 既存) では `false` のまま (= 旧 #120 retain 設計通り、他 version 共存 case を保護)
-  - `TryDeleteEmptyParentGameFolder(gameId)` helper を新規追加。安全 invariant の二重 guard で「**今回 OK click で parent を新規作成** AND **parent が空**」の両方を満たす時のみ `Directory.Delete(parent)`、失敗は Warn ログのみ (旧 #120 retain 設計の範囲、user MessageBox なし)
-  - 3 rollback path (= ProcessingDialog 失敗、案 B fence Cancel、catch blocks の SQLite + general Exception) すべてで `TryDeleteEmptyParentGameFolder(gameId)` を version subfolder 削除直後に呼出
-- **invariant 保証**: 既存 game に新 version 追加 (= parent 既存) の rollback では parent retain (= 他 version 共存 case を保護、旧 #120 設計通り)、新規 game 追加 (= parent 新規作成) の rollback では parent も削除 → 次回 OK で誤 existingFolder dialog が出ない clean path に倒れる。
-- **影響範囲限定**: 本 fix は AddGameForm のみ。EditGameForm / VersionUpForm は parent gameFolder を新規作成しない (= 既存 game への変更) ため影響対象外。
+- **2 段目 fence を `CopyGameFolder` の前に移動** (`Manager/AddGameForm.cs`): PR #184 round 6 案 B で導入した「**DB write 直前**」の post-copy fence は、Cancel 時に 30 秒〜5 分の file copy が無駄になる + version subfolder / parent gameFolder の rollback complexity を抱え込む構造的 cost を持っていた (= PR #187 round 1 で `parentCreatedThisCall` flag + `TryDeleteEmptyParentGameFolder` helper + 3 rollback path 修正という拡張で対症療法を試みたが、根本的な「**フォルダを作って消す**」設計の歪みは残置)。本 PR で fence 位置自体を `CopyGameFolder` の **前** に移動する reorder approach に転換、parent rollback complexity を構造的に不要化。
+- **得るもの**:
+  - **Cancel 時の即時 feedback**: ProcessingDialog を見せる前に fence dialog → file copy そのものが走らない → version subfolder / parent gameFolder の rollback 自体が不要
+  - **code 大幅 simplify**: round 1 で導入した `parentCreatedThisCall` field (+ docstring) + `TryDeleteEmptyParentGameFolder` helper + 3 rollback path での呼出 (= 計 ~60 行) を全部撤去
+  - round 7 M-2 で導入した「rollback delete 失敗時の MessageBox 通知」(= ~20 行) も pre-copy fence では rollback 自体が走らないため不要化、合計 ~80 行の defensive code を構造的に廃止
+- **失うもの (= 受容仕様)**:
+  - file copy 中 (30 秒〜5 分) に他 PC が起動した case を 2 段目 fence で catch できなくなる
+  - **1 段目 fence (= SectionPanel `ShowDialog` 前 check) は維持** されているため、ほとんどの race window (= AddGameForm 開いて入力中の数分) は引き続き catch
+  - LAN 運用での「30 秒〜5 分の file copy 中に他 PC 起動」は rare event、user 視点で「5 分 copy 後の Cancel 損失」の体感 cost が大きい trade-off を反転
+- **3 rollback path は維持** (= ProcessingDialog 失敗 / catch blocks の SQLite + general Exception): file copy が走った後の例外経路 rollback は引き続き必要 (= 案 B fence Cancel ではなくなる)。旧 #120 retain 設計通り version subfolder のみ削除、parent gameFolder は他 version 共存 safety で retain。
+- **設計判断の経緯**: PR #190 round 1 で「`parentCreatedThisCall` flag + helper で 3 rollback path に parent 削除を追加」する Option A approach を実装 + verify PASS したが、reviewer (user) から「**わざわざフォルダ消しに行ってるの? 順番変更じゃなくて?**」の指摘を受けて再検討、reorder approach が universally clean (= 「フォルダ作って消す」より「作る前に check」) と判断、round 2 で書き換え。
+- **影響範囲限定**: 本 fix は AddGameForm のみ。EditGameForm / VersionUpForm / StoreSectionForm / BackupSettingsForm の 2 段目 fence 位置は touch なし (= 各々 ShowDialog 内部の DB write 直前 = round 6 案 B 配置のまま、これらは ProcessingDialog なしで file copy 経路を持たないため fence 位置による cost 差が AddGameForm ほど大きくない)。
 - **assembly version bump**: `0.10.1.0` → `0.10.2.0` (patch、bugfix のみ、DB schema 変更なし、AGENTS.md「Release and Versioning」ルール準拠)。
-- **verify**: Manager Release build clean。実機 verify は (1) DB に他 PC row 手動 INSERT で keepalive、(2) AddGameForm を新規 gameId で開く、(3) OK 押下 → CopyGameFolder 完了 → 案 B fence dialog → Cancel、(4) `Directory.Exists(games/<gameId>/) == false` を sqlite + PowerShell で確認、(5) 同 form で再 OK 押下 → existingFolder dialog が trigger しないことを目視確認。
+- **verify**: Manager Release build clean。実機 verify は (1) DB に他 PC row 手動 INSERT で keepalive、(2) AddGameForm を新規 gameId で開く、(3) OK 押下 → **CopyGameFolder 開始前**に fence dialog → Cancel、(4) `Directory.Exists(games/<gameId>/) == false` を sqlite + PowerShell で確認 (= **何も作成されていない state** に倒れる、round 1 の「作って消す」より厳密に clean)、(5) 同 form で再 OK 押下 → 同じ fence dialog (= 1 段目 / 2 段目 fence は同 helper 経由なので同 modal)。
 - **関連**: PR #184 (v0.10.0、LAN-wide 同時起動検出) verify session で発見した 3 issue (#185 / #186 / [#187](https://github.com/ken1208git/GCTonePrism/issues/187)) のうち本 PR で #187 を closure。#186 は PR #189 で fix 済、#185 は manifest 単独 path 不可と判明、別 milestone へ移行。
 
 ### [Manager v0.10.1] - 2026-05-18
