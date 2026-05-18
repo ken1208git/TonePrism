@@ -484,9 +484,15 @@ namespace GCTonePrism.Manager.Controls
                 ct.ThrowIfCancellationRequested();
 
                 // [3] ExpectedFiles 検証 (50-55%)
+                // (#177) ValidateStaging が parse 済 BundleManifest を out 引数で返すように signature 拡張。
+                // apply 側 (Step 5-9 + defer block) が manifest.Layout 経由で path 解決するための forward
+                // compat 機構。v0.3.1 manifest (layout なし) や旧構造 (manifest なし) は manifest=null /
+                // manifest.Layout=null に倒れて、各 apply 箇所の `??` null-coalesce で hardcoded legacy
+                // path に fallback する設計。
                 Services.Logger.Info("[UpdateSectionPanel] [Step 3/10] ExpectedFiles 検証 (SPEC §3.7.3 [6] 内容検証)");
                 progress.Report(new ProgressInfo(50, "ファイル検証中..."));
-                var missing = UpdateDownloader.ValidateStaging(stagingDir);
+                BundleManifest manifest;
+                var missing = UpdateDownloader.ValidateStaging(stagingDir, out manifest);
                 if (missing.Count > 0)
                 {
                     throw new System.IO.InvalidDataException(
@@ -497,7 +503,7 @@ namespace GCTonePrism.Manager.Controls
                 Services.Logger.Info("[UpdateSectionPanel] [Step 4/10] Bundle version 一致検証 (SPEC §3.7.3 [6] 内容検証)");
                 progress.Report(new ProgressInfo(55, "バージョン一致を検証中..."));
                 Version stagingBundleVer;
-                if (!UpdateDownloader.ValidateBundleVersion(stagingDir, targetVersion, out stagingBundleVer))
+                if (!UpdateDownloader.ValidateBundleVersion(stagingDir, targetVersion, manifest, out stagingBundleVer))
                 {
                     // (#108 Phase 4 round 5 L-5) error message に staging 側 version を含めて debug
                     // ergonomics 改善 (旧実装は user が log を開かないと staging version を知れなかった)。
@@ -525,7 +531,12 @@ namespace GCTonePrism.Manager.Controls
                 // [5] Launcher dir 置換 (60-67%)
                 Services.Logger.Info("[UpdateSectionPanel] [Step 5/10] Launcher dir 置換 (SPEC §3.7.3 [7])");
                 progress.Report(new ProgressInfo(60, "Launcher を更新中...", PathManager.LauncherDir));
-                string stagingLauncher = System.IO.Path.Combine(bundleRoot, "files", "Launcher");
+                // (#177) manifest.Layout 経由 path 解決、layout 不在 (v0.3.1 以前 manifest / 旧構造) は
+                // hardcoded legacy path に fallback して新旧 zip を同 code path で扱う forward compat。
+                // (round 1 Medium-4) wire format `/` separator を OS-native separator に変換、
+                // `ValidateStagingViaManifest` の `relWin = rel.Replace('/', Path.DirectorySeparatorChar)`
+                // pattern と一貫させる (.NET on Windows は `/` も許容するため実害ゼロだが in-PR の作法統一)。
+                string stagingLauncher = System.IO.Path.Combine(bundleRoot, (manifest?.Layout?.LauncherDir ?? "files/Launcher").Replace('/', System.IO.Path.DirectorySeparatorChar));
                 // (#108 Phase 4 round 4 codex P1 NEW) CleanupBak は Step 10 後にまとめて実行する。
                 // 旧実装は各 Step 完了直後に CleanupBak していたため、Step 6-10 で failure 時に旧
                 // Launcher 復元不能 mixed-version state に陥っていた (例: Launcher 置換成功 → Companion
@@ -550,7 +561,7 @@ namespace GCTonePrism.Manager.Controls
                 // [6] Companions (Updater 以外) 置換 — 現状 dir 列挙で対象なし、将来 WindowProbe / PauseOverlay 用
                 Services.Logger.Info("[UpdateSectionPanel] [Step 6/10] Companions (Updater 以外) 置換 (SPEC §3.7.3 [8])");
                 progress.Report(new ProgressInfo(67, "Companions を更新中..."));
-                string stagingCompanionsRoot = System.IO.Path.Combine(bundleRoot, "files", "Companions");
+                string stagingCompanionsRoot = System.IO.Path.Combine(bundleRoot, (manifest?.Layout?.CompanionsDir ?? "files/Companions").Replace('/', System.IO.Path.DirectorySeparatorChar));
                 if (System.IO.Directory.Exists(stagingCompanionsRoot))
                 {
                     foreach (string stagingComp in System.IO.Directory.EnumerateDirectories(stagingCompanionsRoot))
@@ -591,13 +602,13 @@ namespace GCTonePrism.Manager.Controls
                 if (!string.IsNullOrEmpty(parentDir))
                 {
                     if (!FileReplacer.ReplaceFile(
-                        System.IO.Path.Combine(bundleRoot, "Launcher.bat"),
+                        System.IO.Path.Combine(bundleRoot, (manifest?.Layout?.LauncherBat ?? "Launcher.bat").Replace('/', System.IO.Path.DirectorySeparatorChar)),
                         System.IO.Path.Combine(parentDir, "Launcher.bat")))
                     {
                         throw new System.IO.IOException("Launcher.bat の置換に失敗しました (詳細は log 参照)。");
                     }
                     if (!FileReplacer.ReplaceFile(
-                        System.IO.Path.Combine(bundleRoot, "Manager.bat"),
+                        System.IO.Path.Combine(bundleRoot, (manifest?.Layout?.ManagerBat ?? "Manager.bat").Replace('/', System.IO.Path.DirectorySeparatorChar)),
                         System.IO.Path.Combine(parentDir, "Manager.bat")))
                     {
                         throw new System.IO.IOException("Manager.bat の置換に失敗しました (詳細は log 参照)。");
@@ -626,7 +637,7 @@ namespace GCTonePrism.Manager.Controls
                 // [9] Companions/Updater 置換 (SPEC §3.7.3 [10]、常に staging の新 Updater で置換)
                 Services.Logger.Info("[UpdateSectionPanel] [Step 9/10] Companions/Updater 置換 (SPEC §3.7.3 [10])");
                 progress.Report(new ProgressInfo(77, "Updater を更新中...", PathManager.UpdaterDir));
-                string stagingUpdater = System.IO.Path.Combine(bundleRoot, "files", "Companions", "Updater");
+                string stagingUpdater = System.IO.Path.Combine(bundleRoot, (manifest?.Layout?.UpdaterDir ?? "files/Companions/Updater").Replace('/', System.IO.Path.DirectorySeparatorChar));
                 var updaterResult = DirReplacer.Replace(stagingUpdater, PathManager.UpdaterDir, allowInitialDeploy: false);
                 if (updaterResult == DirReplacer.ReplaceResult.RecoveredAbort)
                 {
@@ -678,7 +689,7 @@ namespace GCTonePrism.Manager.Controls
                 try
                 {
                     if (!FileReplacer.ReplaceFile(
-                        System.IO.Path.Combine(bundleRoot, "files", "CHANGELOG.md"),
+                        System.IO.Path.Combine(bundleRoot, (manifest?.Layout?.ChangelogMd ?? "files/CHANGELOG.md").Replace('/', System.IO.Path.DirectorySeparatorChar)),
                         PathManager.BundleChangelogPath))
                     {
                         // CHANGELOG 置換失敗は致命的ではない (= VersionInventory が OLD のまま読むだけで
