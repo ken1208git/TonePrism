@@ -1100,9 +1100,9 @@ Release.bat の編集は **UTF-8 (no BOM) + CRLF** 厳守 (SPEC §3.7.9.1 参照
 - **動作**:
   - `_ready()`: `responses/launcher_sessions/` directory 不在時に `DirAccess.make_dir_recursive_absolute` で自動作成、初回 heartbeat write、`Timer` node (`wait_time=10`、`autostart=true`、`one_shot=false`) を child として add
   - `_on_heartbeat_tick()`: 10 秒周期で JSON 再書込 (`last_heartbeat_at_unix_ms` を update + atomic rename)
-  - `_notification(NOTIFICATION_PREDELETE)`: self JSON 削除 (clean shutdown 即時反映)、削除失敗時は `Logger.warn` trail + Manager 側 30 秒 stale fallback で fail-safe
+  - `_notification(NOTIFICATION_PREDELETE)`: self JSON 削除 (clean shutdown 即時反映)、削除失敗時は `push_warning` trail (= Launcher autoload `Logger` の Godot log tail で自動 WARN 分類) + Manager 側 30 秒 stale fallback で fail-safe
   - `_get_pc_name()`: COMPUTERNAME (Windows) → HOSTNAME (Linux/macOS) → "unknown" の 3 段 fallback (`logger.gd:204-210` と同 logic)
-- **fail-soft 戦略**: directory 作成失敗 / write 失敗時は `_init_failed = true` に倒し、以降 silent skip。`Logger.warn` で trail を残しつつ Launcher 起動 / ゲームプレイは一切止めない (= 部員視点で見えない fail-soft 原則、`logger.gd` の同型 pattern を踏襲)
+- **fail-soft 戦略**: directory 作成失敗 / write 失敗時は `_init_failed = true` に倒し、以降 silent skip。`push_warning` で trail を残しつつ Launcher 起動 / ゲームプレイは一切止めない (= 部員視点で見えない fail-soft 原則、`logger.gd` の同型 pattern を踏襲)。本 PR は **Godot 4 built-in `Logger` class と autoload `Logger` の名前衝突 (= GDScript パーサーが built-in に解決して static method lookup 失敗) を避けるため `print` / `push_warning` legacy API を使用**、Launcher autoload `Logger` の Godot log tail で INFO / WARN に自動分類される。明示 `Logger.info / warn / error` 直 call への移行は #85 (Launcher 統一ログ基盤 sweep) 完了後に実施予定 (= 既存 logger.gd L10 で明記済の落とし穴を新規実装で踏まないようにする規約)
 - **`project.godot` `[autoload]` 登録**: `SessionHeartbeat="*res://scripts/session_heartbeat.gd"` を `Logger` 直後に追加。`Logger` (= 最先頭規約) / `Version` (class_name RefCounted、autoload ではない) / `PathManager` (同) に依存
 - **`config/version` を `0.5.17` → `0.5.18`** + `version.gd` の `PATCH` も `17` → `18` に同期 (= `Manager/Services/VersionInventory.cs` の regex parse 要件を維持、SPEC §3.7.8 チェックリスト)
 - **patch bump 判断**: Launcher 単体 user 視点で UI / 操作変化ゼロ (= disk に 1 file 書出すだけの additive 拡張)、Manager v0.11.0 と連動して初めて「他 PC Launcher 稼働中」dialog 警告が動作する。AGENTS.md「Release and Versioning」minor=「機能追加」の解釈で Launcher 単体追加機能なら minor だが、本 PR は **Manager 連動機能の Launcher 側 contribution** という framing で patch bump 慣例
@@ -1565,6 +1565,17 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **scope 外** (= 別 PR 余地): Launcher 側に「他 PC Manager 編集中」検出機構を追加 (= PR3b の対称化) は本 PR scope 外、後追い PR 余地
 - **詳細仕様は [SPECIFICATION.md §3.8.7](SPECIFICATION.md) (動作仕様 + JSON schema literal + 検出 trigger + fail-soft 戦略 + 非対称性明示) + [§6.5 例外注記](SPECIFICATION.md) (heartbeat 用専用 sub-folder の明文化) 参照**
 - **verify**: Manager Release build clean (= warnings 0)。実機 verify 9 path は SPEC §3.8.7 + 本 PR description 参照、merge 前必須
+
+**Round 2 review fix (H-1 + M-1/2/3/4 + L-1/2/5)** — version bump なし、本 entry に統合:
+
+- **H-1**: 新規 `Launcher/scripts/session_heartbeat.gd.uid` (= Godot 4 で `.gd` と pair で生成される UID file) を commit に同梱 (= 既存 19 file の対と一致、別 PC / CI で project open 時の UID drift を予防)
+- **M-1 (Launcher 側 fail-soft 表現 drift)**: 本 CHANGELOG entry / SPEC §3.8.7.5 / `session_heartbeat.gd` docstring 間で「`Logger.warn` trail」と書いた drift があり、実装は Godot 4 built-in `Logger` class との名前衝突を避けるため `push_warning` を使用。三者すべてを「`push_warning` 経由で Launcher autoload `Logger` の Godot log tail で WARN 自動分類」表現に同期、#85 (Launcher 統一ログ基盤 sweep) 完了後の明示 `Logger.warn` 直 call 移行 path も明記
+- **M-2 (`*.json` glob quirk)**: `LauncherSessionService.DetectActiveLauncherSessions` の `Directory.EnumerateFiles(*.json)` が Windows 8.3 short-name 有効時に `.json.tmp` (Launcher atomic write の rename 途中 / crash 残骸) を誤 match する drift を defensive filter で物理閉鎖 (= `path.EndsWith(".json")` + `!path.EndsWith(".tmp")` の 2 段 check、Launcher crash で `.tmp` 残置しても dialog list に「pc-a.json」誤表示する path を遮断)
+- **M-3 (`long.TryParse` silent 0)**: `TryParseSessionFile` で `last_heartbeat_at_unix_ms` field が存在するが `long.TryParse` 失敗 (= 科学記法 `1.7e+12` / 文字列等の数値 corruption) した case に「field 欠落」と同 path で扱い、silent 0 で stale 判定される drift を解消。新実装は field の **存在** と **parse 成否** を区別し、parse 失敗時のみ Warn log で trail を残してから mtime fallback path に流す (= silent drop 予防 + 「primary path で field あり parse 失敗を silent 0 にしない」claim と実装を整合)
+- **M-4 (5 件 cap 配分問題)**: `BuildMergedDetectedList` の 5 件 cap が Manager → Launcher の表示順で共有されるため、Manager が 5 件以上検出された場合 Launcher が 0 件表示になる drift を、残件数要約 line で `Manager X 件 / Launcher Y 件 表示外` のように内訳を明示する形に解消 (= 仕様判断 #1 案、cap 自体は 5 件維持で要約を充実)
+- **L-1/L-2 (method 名 / 引数名 の self-PC 非対称)**: `DetectActiveLauncherSessions` (= "Other" なし、self 含む) と `SessionConflictDialog.Show` 第 4 引数 `launcherOthers` (= "Others" だが実態は self 含む) の意図的非対称命名を、両 docstring で「SPEC §3.8.7.6 の自 PC 含む安全側設計、Manager 側 `DetectOtherActiveSessions` (= "Other" 明示) と意図的非対称」と明文化、call-site だけ読んで誤用する path を予防
+- **L-5 (pid 型注記)**: SPEC §3.8.7.2 の JSON schema literal だけでは `pid` / `started_at_unix_ms` / `last_heartbeat_at_unix_ms` の int64 範囲 / cross-language 整合が読み取れない drift を、schema 直後に型 / 単位の注記段落を追加して明文化 (= `pc_name` string / `started_at_unix_ms` `last_heartbeat_at_unix_ms` int64 / `pid` int64 / `launcher_version` string)
+- **scope 外として残置** (L-3 / L-4): `VerifyPaths` への `_initialized` flag 出力 / `_init_failed` + `_initialized` の state machine 単一化 は内部状態の改善で本 PR scope を超えるため別 PR 余地、現状の挙動に bug は確認できないため retain
 
 ### [Manager v0.10.2] - 2026-05-18
 

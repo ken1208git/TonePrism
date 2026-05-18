@@ -39,8 +39,8 @@ namespace GCTonePrism.Manager.Services
         /// </summary>
         /// <param name="owner">親 form (modal の親、null も可)。</param>
         /// <param name="context">context (Startup / EditOperation) で文言切替。</param>
-        /// <param name="managerOthers">検出した他 PC Manager session list。空 list 可、ただし `launcherOthers` と合算で 1 件以上が caller 契約。</param>
-        /// <param name="launcherOthers">検出した他 PC Launcher session list (PR3b 追加)。空 list 可。</param>
+        /// <param name="managerOthers">検出した他 PC Manager session list (= self 除外、`ManagerSessionService.DetectOtherActiveSessions` の戻り値)。空 list 可、ただし `launcherOthers` と合算で 1 件以上が caller 契約。</param>
+        /// <param name="launcherOthers">検出した active Launcher session list (PR3b 追加、= `LauncherSessionService.DetectActiveLauncherSessions` の戻り値)。**`managerOthers` と非対称で self-PC Launcher も含みうる** (SPEC §3.8.7.6、同 PC 上の Manager 編集 × Launcher SQLite read の競合も検出対象、安全側設計)。空 list 可。</param>
         /// <param name="operationDescription">EditOperation 時の操作名 (例: "ゲーム編集")、Startup 時は null。</param>
         /// <returns>user 選択 (DialogResult.OK / DialogResult.Cancel)。</returns>
         public static DialogResult Show(
@@ -162,7 +162,25 @@ namespace GCTonePrism.Manager.Services
 
             if (totalCount > maxShown)
             {
-                sb.Append("\n  ...他 " + (totalCount - maxShown) + " 件");
+                // (round 2 M-4) Manager → Launcher の表示順で 5 件 cap が共有されるため、Manager が 5 件
+                // 以上検出された場合 Launcher が 0 件しか表示されない drift がある。残件数要約に
+                // component 内訳を embed して、Launcher 検出があるのに表示外な状況を user に明示する。
+                int shownManager = Math.Min(managerOthers.Count, maxShown);
+                int shownLauncher = shown - shownManager;
+                int hiddenManager = managerOthers.Count - shownManager;
+                int hiddenLauncher = launcherOthers.Count - shownLauncher;
+                if (hiddenManager > 0 && hiddenLauncher > 0)
+                {
+                    sb.Append("\n  ...他 " + (totalCount - maxShown) + " 件 (Manager " + hiddenManager + " 件 / Launcher " + hiddenLauncher + " 件 表示外)");
+                }
+                else if (hiddenManager > 0)
+                {
+                    sb.Append("\n  ...他 " + hiddenManager + " 件 (Manager 表示外)");
+                }
+                else if (hiddenLauncher > 0)
+                {
+                    sb.Append("\n  ...他 " + hiddenLauncher + " 件 (Launcher 表示外)");
+                }
             }
             return sb.ToString();
         }

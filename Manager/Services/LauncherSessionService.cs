@@ -100,7 +100,15 @@ namespace GCTonePrism.Manager.Services
         /// on-demand polling で `&lt;sessionsFolder&gt;/*.json` を re-scan、stale を除外した active session
         /// list を返す。検出 trigger (= Manager 起動時 + 編集操作前、SPEC §3.8.7.4) 呼出ごとに fresh
         /// scan する設計 (= 周期 polling Timer なし)。
-        /// 戻り値: 0 件以上の active Launcher session、SMB エラー時は空 list で fail-soft。
+        ///
+        /// **method 名の非対称性** (round 2 L-1): Manager 側は `DetectOtherActiveSessions` (= self
+        /// 除外を name 上で示す) だが、本 method は `Detect` **Active** (= "Other" なし)。これは
+        /// SPEC §3.8.7.6 の「同 PC = Manager 起動 PC 上の Launcher も検出に含める」設計判断による
+        /// 意図的命名 (= file lock 競合は同 PC でも発生するため安全側設計、user は dialog で自 PC
+        /// Launcher と分かれば閉じれば済む)。除外 option は別 PR 余地。
+        ///
+        /// 戻り値: 0 件以上の active Launcher session (= 自 PC Launcher も含む)、SMB エラー時は空 list
+        /// で fail-soft。
         /// </summary>
         public IReadOnlyList<LauncherSessionInfo> DetectActiveLauncherSessions()
         {
@@ -120,6 +128,15 @@ namespace GCTonePrism.Manager.Services
 
                 foreach (var path in Directory.EnumerateFiles(_sessionsFolder, "*.json"))
                 {
+                    // (#179 PR3b round 2 M-2) Windows 8.3 short-name 有効時に `*.json` glob が `.json.tmp`
+                    // にも match する quirk があり、Launcher atomic write の rename 中断 (= crash 等で
+                    // `.tmp` 残置) で `pc-a.json.tmp` が誤検出され dialog list に「pc-a.json」が表示
+                    // される drift path。明示 extension check で defensive filter する。
+                    if (!path.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ||
+                        path.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
                     var info = TryParseSessionFile(path, staleThresholdMs);
                     if (info != null) result.Add(info);
                 }
@@ -135,9 +152,14 @@ namespace GCTonePrism.Manager.Services
 
         /// <summary>
         /// 単一 JSON file を読込 + parse + stale 判定。
-        /// primary: JSON 内 `last_heartbeat_at_unix_ms` で stale 判定
-        /// fallback: parse 成功だが `last_heartbeat_at_unix_ms` field 欠落 → file mtime で stale 判定
-        /// 完全に parse 失敗: null 返却 (= individual file skip、Warn log で trail、他 file の検出は継続)。
+        ///
+        /// **stale 判定の 3 経路** (round 2 M-3 で field 欠落 と parse 失敗 を区別):
+        /// - **primary**: JSON 内 `last_heartbeat_at_unix_ms` を `long.TryParse` 成功で stale 判定
+        /// - **fallback (= field 欠落 or `long.TryParse` 失敗)**: file mtime で stale 判定 (= JSON 内
+        ///   科学記法 `1.7e+12` 等の数値 corruption で `long.TryParse` が false 返却するケースも mtime
+        ///   fallback に倒れる、silent 0 で stale 扱いされる drift を予防)
+        /// - **完全 parse 失敗** (JSON 構文エラー / SMB read エラー / file 削除 race): null 返却 (=
+        ///   individual file skip、Warn log で trail、他 file の検出は継続)
         /// </summary>
         private LauncherSessionInfo TryParseSessionFile(string path, long staleThresholdMs)
         {
@@ -148,13 +170,24 @@ namespace GCTonePrism.Manager.Services
                 var dict = serializer.Deserialize<Dictionary<string, object>>(text);
                 if (dict == null) return null;
 
-                long lastHeartbeat;
-                bool hasHeartbeat = dict.ContainsKey("last_heartbeat_at_unix_ms") &&
+                // (round 2 M-3) primary path: last_heartbeat_at_unix_ms を long.TryParse 成功で確定。
+                // 失敗 (= field 欠落 / 値が 0 でない 0 / 科学記法 etc.) は fallback path に流す。
+                // C# の definite assignment 制約 + && short-circuit を考慮し、初期値 0 で declare。
+                long lastHeartbeat = 0;
+                bool hasHeartbeatField = dict.ContainsKey("last_heartbeat_at_unix_ms");
+                bool hasHeartbeat = hasHeartbeatField &&
                     long.TryParse(dict["last_heartbeat_at_unix_ms"]?.ToString() ?? "0", out lastHeartbeat);
 
                 if (!hasHeartbeat)
                 {
-                    // fallback: field 欠落 → file mtime で stale 判定
+                    // (round 2 M-3) parse 失敗 (field あるが long として読めない) と field 欠落を区別、
+                    // 前者は Warn log で trail を残してから mtime fallback (silent 0 で stale 扱いされる
+                    // drift を予防)。後者は素直に mtime fallback。
+                    if (hasHeartbeatField)
+                    {
+                        Logger.Warn("[LauncherSessionService] session file parse 警告 (last_heartbeat_at_unix_ms が long parse 不能、mtime fallback): path=" + path + " raw=" + (dict["last_heartbeat_at_unix_ms"]?.ToString() ?? "(null)"));
+                    }
+                    // fallback: file mtime で stale 判定
                     long mtimeMs = new DateTimeOffset(File.GetLastWriteTimeUtc(path)).ToUnixTimeMilliseconds();
                     if (mtimeMs < staleThresholdMs) return null;
                     return new LauncherSessionInfo
@@ -165,8 +198,7 @@ namespace GCTonePrism.Manager.Services
                     };
                 }
 
-                // primary path: last_heartbeat_at_unix_ms で stale 判定
-                long.TryParse(dict["last_heartbeat_at_unix_ms"].ToString(), out lastHeartbeat);
+                // primary path: last_heartbeat_at_unix_ms parse 成功で stale 判定
                 if (lastHeartbeat < staleThresholdMs) return null;
 
                 return new LauncherSessionInfo
