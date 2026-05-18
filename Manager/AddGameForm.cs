@@ -24,7 +24,6 @@ namespace GCTonePrism.Manager
         private DeveloperListManager devListManager;
         private Label lblArgumentsPlaceholder;
 
-
         /// <summary>
         /// 追加されたゲーム情報（OKボタンがクリックされた場合のみ設定される）
         /// </summary>
@@ -289,31 +288,10 @@ namespace GCTonePrism.Manager
                 // suffix 文字種チェックは ValidateInput に移動済 (L-3)。
                 string version = semverInput.VersionString;
 
-                // (#179 round 6 M-1 案 B + #187 round 2 reorder) 2 段目 fence を **CopyGameFolder の前**
-                // に置く設計に転換。
-                //
-                // 旧 (PR #184 round 6) は CopyGameFolder の **後** (= DB write 直前) に fence を置いて
-                // 「copy 中の race も catch」していたが、Cancel 時に 30 秒〜5 分の copy が無駄になる +
-                // version subfolder / parent gameFolder の rollback complexity (= #187 で parent も削除
-                // する flag + helper + 3 path の修正) を抱え込んでいた。
-                //
-                // 本 reorder で得るもの:
-                // - Cancel 時に **即時 feedback** (= ProcessingDialog を見せる前に dialog)、file copy
-                //   そのものが走らない → version subfolder / parent gameFolder の rollback 自体が不要
-                // - code が大幅 simplify (= #187 の parent rollback flag + helper + 3 path 全部撤去可)
-                //
-                // 失うもの (= 受容仕様):
-                // - file copy 中 (30 秒〜5 分) に他 PC が起動した case を 2 段目 fence で catch できない
-                // - 1 段目 fence (= SectionPanel `ShowDialog` 前 check) でほとんどの race window は
-                //   既に catch 済、本 2 段目 fence は「AddGameForm 開いて入力中の数分」を main 用途と
-                //   して維持
-                // - LAN 運用での「30 秒〜5 分の copy 中に他 PC 起動」は rare event、user 視点で
-                //   「5 分 copy 後の Cancel 損失」の方が体感 cost が大きいため reorder で trade-off 反転
-                //
-                // 詳細: SPEC §3.8.2「dialog button + check 位置」、PR #190 round 2 reorder approach。
+                // (#187) 2 段目 fence は CopyGameFolder の前 (= pre-copy)。Cancel 時に file copy が走らず
+                // rollback complexity 不要、trade-off の rationale は SPEC §3.8.2 / §3.8.5 参照。
                 if (SessionConflictHelper.CheckBeforeWrite(this, "ゲーム追加") == DialogResult.Cancel)
                 {
-                    // pre-copy fence なので何も作成していない → rollback 不要、Form を閉じずに編集画面に戻る。
                     return;
                 }
 
@@ -406,10 +384,6 @@ namespace GCTonePrism.Manager
                 // 製作者情報を設定
                 game.Developers = developers;
 
-                // (#187 round 2 reorder) 旧 post-copy fence + parent rollback (= round 6 案 B / round 7
-                // M-2 / #187 round 1 の TryDeleteEmptyParentGameFolder) は本 PR の reorder で全部撤去。
-                // 2 段目 fence は CopyGameFolder の **前** に移動済、ここではそのまま AddGame に進む。
-
                 // データベースに追加
                 dbManager.AddGame(game);
 
@@ -442,6 +416,7 @@ namespace GCTonePrism.Manager
                         // 削除に失敗しても続行
                     }
                 }
+
                 string errorMessage = DatabaseManager.GetUserFriendlyErrorMessage(ex);
                 MessageBox.Show(
                     $"ゲームの追加に失敗しました。\n\n{errorMessage}",
@@ -463,6 +438,7 @@ namespace GCTonePrism.Manager
                         // 削除に失敗しても続行
                     }
                 }
+
                 MessageBox.Show(
                     $"ゲームの追加に失敗しました。\n\n{ex.Message}",
                     "エラー",
