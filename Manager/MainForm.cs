@@ -77,10 +77,14 @@ namespace GCTonePrism.Manager
         /// </returns>
         public DialogResult CheckSessionConflictBeforeWrite(string operationDescription)
         {
-            if (_sessionService == null)
+            // (#179 round 7 M-1) `_sessionService == null` (= MainForm_Load 完了前) と
+            // `_sessionService.IsInitialized == false` (= Initialize 失敗で heartbeat 機構なし) の両方を
+            // fail-soft で OK 返却。後者を guard しないと毎 click ごとに `DetectOtherActiveSessions` →
+            // `ExecuteWithRetry` (busy_timeout=10000ms × maxRetries=3 = 最大 ~30 秒 block) を空振りし、
+            // 全 13 SectionPanel callsite で click 毎 UI freeze + Warn log noise を踏む path だった。
+            // Initialize 失敗は SPEC §3.8.5「致命傷、検出機能は以降一切働かない」と整合するため早期 OK。
+            if (_sessionService == null || !_sessionService.IsInitialized)
             {
-                // session service 未初期化 (= MainForm_Load 完了前 / Initialize 失敗時) は fail-soft で
-                // OK 返却、編集操作を block しない。
                 return DialogResult.OK;
             }
             var others = _sessionService.DetectOtherActiveSessions();

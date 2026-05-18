@@ -112,7 +112,7 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
-        /// (#179) Named Mutex の name に含める install path hash を算出 (MD5 ベース、衝突回避目的のみで
+        /// (#179) Named Mutex の name に含める install path hash を算出 (SHA256 ベース、衝突回避目的のみで
         /// crypto 用途ではない)。dev 環境と本番 install を別 mutex に分離するため、`Application.StartupPath`
         /// (= 自 exe の dir) を hash 化。
         ///
@@ -122,6 +122,13 @@ namespace GCTonePrism.Manager
         /// - `Application.StartupPath` は呼び方 (cmd 直叩き / Explorer shortcut / Process.Start) で
         ///   casing / 8.3 表記が変わりうるため、同 install dir でも別 mutex に化ける drift を物理閉鎖
         /// - SMB UNC path の `\\?\` prefix 等は学校 LAN 運用では稀、本 PR では未対応 (別 issue 候補)
+        ///
+        /// **hash algorithm** (round 7 L-2 で MD5 → SHA256 移行): 旧 MD5 実装は `FIPS=enabled` group
+        /// policy が適用された Windows 環境で `MD5.Create()` 自体が `InvalidOperationException ("not part
+        /// of the Windows Platform FIPS validated cryptographic algorithms")` を throw する path があった。
+        /// 本関数は mutex 取得 **前** に呼ばれるため `Main` の最外 catch がなく、企業 PC 流用の LAN 環境で
+        /// FIPS 有効化されると Manager が silent crash する drift 路があった。SHA256 は FIPS 認証 algorithm
+        /// で policy 影響なし、先頭 16 文字を使う形は維持 (= 衝突回避用途で 16 文字 = 64 bit で十分)。
         /// </summary>
         private static string ComputeInstallPathHash(string installPath)
         {
@@ -136,10 +143,10 @@ namespace GCTonePrism.Manager
                 // GetFullPath は invalid path char / I/O error 等で throw、fallback で生 path を lower 化
                 normalized = (installPath ?? string.Empty).ToLowerInvariant();
             }
-            using (var md5 = System.Security.Cryptography.MD5.Create())
+            using (var sha = System.Security.Cryptography.SHA256.Create())
             {
                 byte[] bytes = System.Text.Encoding.UTF8.GetBytes(normalized);
-                byte[] hash = md5.ComputeHash(bytes);
+                byte[] hash = sha.ComputeHash(bytes);
                 return BitConverter.ToString(hash).Replace("-", string.Empty).Substring(0, 16);
             }
         }

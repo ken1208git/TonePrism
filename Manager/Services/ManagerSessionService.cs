@@ -40,6 +40,15 @@ namespace GCTonePrism.Manager.Services
         private CancellationTokenSource _heartbeatCts;
         private Task _heartbeatTask;
         private bool _initialized;
+
+        /// <summary>
+        /// (#179 round 7 M-1) `Initialize()` が **完全成功** したかを caller が判定するための read-only flag。
+        /// `Initialize` 失敗 path (= catch L114-119 に到達) では `_initialized = false` のまま、`_sessionService`
+        /// 自体は non-null で残る。caller (`MainForm.CheckSessionConflictBeforeWrite`) はこの flag を見て
+        /// 「`_sessionService` 非 null だが Init 失敗」case を short-circuit、毎 click の DB query 空振り
+        /// (busy_timeout × maxRetries で最大 ~30 秒 UI freeze + Warn noise) を回避する。
+        /// </summary>
+        public bool IsInitialized => _initialized;
         // (round 3 L-1 / L-3) Shutdown 進行中 flag。heartbeat loop が token.WaitHandle.WaitOne や
         // _repo.UpsertHeartbeat で race 例外を踏んでも、Shutdown 中は silent に処理して noise を抑える。
         // volatile で thread 間の memory ordering を保証 (Shutdown thread の set と heartbeat thread の
@@ -78,6 +87,10 @@ namespace GCTonePrism.Manager.Services
             // iteration で silent break する drift を予防。docstring 「多重 call は no-op + Warn」semantic
             // と整合させ、re-init pathways で flag を確実にリセットする。
             _shuttingDown = false;
+            // (#179 round 7 M-3) step (2) UpsertSelfSession 成功 → step (3) heartbeat thread 起動 で例外、
+            // という partial-success path で self row が DB 登録済 + heartbeat 不在 = orphaned zombie に
+            // なる drift があった。`selfRegistered` flag で step (2) 完了を tracking、catch 内で rollback。
+            bool selfRegistered = false;
             try
             {
                 long now = NowUnixMs();
@@ -98,6 +111,7 @@ namespace GCTonePrism.Manager.Services
                     ManagerVersion        = _managerVersion,
                 };
                 _repo.UpsertSelfSession(self);
+                selfRegistered = true;
                 Logger.Info("[ManagerSessionService] self session 登録: pc=" + _pcName + " pid=" + _pid + " ver=" + _managerVersion);
 
                 // (3) heartbeat thread 起動
@@ -116,6 +130,24 @@ namespace GCTonePrism.Manager.Services
                 // DB 不到達は致命的だが、Manager 起動自体は続行する (= heartbeat 不在で他 PC 検出機能が
                 // 退化、user は MessageBox レス起動を体験する fail-soft path)。Logger.Error で trail 残し。
                 Logger.Error("[ManagerSessionService] Initialize 失敗 (heartbeat 機構なしで継続)", ex);
+
+                // (#179 round 7 M-3) partial-success rollback: step (2) 成功 + step (3) 失敗で self row が
+                // 残ると、他 PC からは「自 PC で起動中」と誤検出される (= 30 秒間の false positive、
+                // stale cleanup で消えるまで)。rollback で即座に DELETE、docstring claim「DB 不到達は
+                // heartbeat 不在で機能退化、self row も残らない」を物理保証する。rollback 自体の失敗は
+                // stale cleanup に委ねる (= 二重失敗の log noise のみ Warn で残す)。
+                if (selfRegistered)
+                {
+                    try
+                    {
+                        _repo.DeleteSelfSession(_pcName);
+                        Logger.Info("[ManagerSessionService] Initialize partial-success rollback: self row 削除 (pc=" + _pcName + ")");
+                    }
+                    catch (Exception rollbackEx)
+                    {
+                        Logger.Warn("[ManagerSessionService] Initialize partial-success rollback 失敗 (stale cleanup に委ねる、最大 30 秒の false positive 残存): " + rollbackEx.Message);
+                    }
+                }
             }
         }
 
@@ -213,7 +245,10 @@ namespace GCTonePrism.Manager.Services
                     catch (Exception ex)
                     {
                         if (_shuttingDown) break; // shutdown race による Wait 例外、silent break
-                        Logger.Warn("[ManagerSessionService] heartbeat Wait 失敗 (token race?、継続): " + ex.GetType().Name + ": " + ex.Message);
+                        // (round 7 L-3) 旧 message の「token race?」臆測表現を撤回。実際の例外 type +
+                        // message は embed 済なので triage 側は事実から原因判定可能、`?` で推測 hint を
+                        // 残すと log noise に。
+                        Logger.Warn("[ManagerSessionService] heartbeat Wait 例外 (継続): " + ex.GetType().Name + ": " + ex.Message);
                     }
                     if (IsCancelled(token)) break;
 
@@ -236,7 +271,8 @@ namespace GCTonePrism.Manager.Services
                     {
                         if (_shuttingDown) break; // shutdown race による UpsertHeartbeat 例外、silent break
                         // 1 回の heartbeat 失敗は致命的でない (次の 10 秒で retry)。Warn のみで継続。
-                        Logger.Warn("[ManagerSessionService] heartbeat UpsertHeartbeat 失敗 (継続): " + ex.GetType().Name + ": " + ex.Message);
+                        // (round 7 L-3) 「失敗」表現を「例外」に統一、Wait 部分との表記揺れを解消。
+                        Logger.Warn("[ManagerSessionService] heartbeat UpsertHeartbeat 例外 (継続): " + ex.GetType().Name + ": " + ex.Message);
                     }
                 }
             }
