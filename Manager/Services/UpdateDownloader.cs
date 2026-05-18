@@ -159,6 +159,14 @@ namespace GCTonePrism.Manager.Services
         /// staging dir は worker 1 回ごとに新規 (`%TEMP%/GCTonePrism_update_<ver>/`) なので、process
         /// が長時間生きても cache 肥大は最大数回 entries に留まる。
         /// OrdinalIgnoreCase で Windows path comparison に揃える。
+        ///
+        /// **Retry path での stale cache trade-off** (#182 round 2 Low-4、#183 で別 issue 化): UI の
+        /// retry path (= 失敗後の「もう一度今すぐアップデート」) で `Directory.Delete(stagingDir, recursive: true)` +
+        /// 再 `Extract` を経由しても cache は前回値を返し続ける invalidation 不在の設計。実用上は同
+        /// release tag の再 DL で同 zip 構造になるため挙動は等価、edge case (= 別 zip を staging に
+        /// 手動配置 / 別 release の zip 取得後 retry 等) で stale risk。#177 round 1 High-1 で
+        /// `ValidateBundleVersion` も `ResolveBundleRoot` を呼ぶ追加 call site が増えて surface 拡大、
+        /// 物理閉鎖は別 issue #183 で消化予定 (案: `Directory.Delete` 隣で explicit `InvalidateCache`)。
         /// </summary>
         private static readonly System.Collections.Generic.Dictionary<string, string> _bundleRootCache
             = new System.Collections.Generic.Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -454,6 +462,15 @@ namespace GCTonePrism.Manager.Services
                 if (dict.TryGetValue("layout", out layoutObj))
                 {
                     var layoutDict = layoutObj as System.Collections.Generic.IDictionary<string, object>;
+                    if (layoutDict == null && layoutObj != null)
+                    {
+                        // (round 2 Low-2) layout key 存在するが shape 違反 (= `IDictionary<string, object>`
+                        // 以外、e.g. string / object[] / null) は Release.ps1 SoT 側の hashtable 形式破壊
+                        // 疑いとして fail-loud。manifest.Layout は null のまま (= caller の null-coalesce
+                        // で hardcoded legacy fallback に倒れる、installation 自体は機能) だが、
+                        // forward compat 機構の意図に反するため Warn 出力で SoT drift を runtime に flag。
+                        Logger.Warn("[UpdateDownloader] BundleLayout shape 違反: layout field present だが IDictionary 以外の型 (" + layoutObj.GetType().Name + ")、Release.ps1 $script:BundleLayout hashtable 形式破壊疑い。apply 側は全 key hardcoded legacy fallback で動作する");
+                    }
                     if (layoutDict != null)
                     {
                         manifest.Layout = new BundleLayout
@@ -484,11 +501,12 @@ namespace GCTonePrism.Manager.Services
                         }
                     }
                 }
+                // (round 2 Low-1) invariant: `manifest.Layout != null` ⇒ `layoutMissing != null`
+                // (両者とも `if (layoutDict != null)` block 内で同時 set されるため)。dead else 削除済。
                 string layoutLog;
                 if (manifest.Layout == null) layoutLog = "null";
-                else if (layoutMissing != null && layoutMissing.Count == 0) layoutLog = "present (7/7 populated)";
-                else if (layoutMissing != null) layoutLog = "present (" + layoutPopulated + "/7 populated, missing: " + string.Join(",", layoutMissing) + ")";
-                else layoutLog = "present";
+                else if (layoutMissing.Count == 0) layoutLog = "present (7/7 populated)";
+                else layoutLog = "present (" + layoutPopulated + "/7 populated, missing: " + string.Join(",", layoutMissing) + ")";
                 Logger.Info("[UpdateDownloader] ReadBundleManifest OK: bundle_version=" + (manifest.BundleVersion ?? "(null)") +
                     " schema_version=" + manifest.SchemaVersion + " files=" + (manifest.Files == null ? 0 : manifest.Files.Count) +
                     " layout=" + layoutLog);

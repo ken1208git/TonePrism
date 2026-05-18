@@ -1757,14 +1757,20 @@ $script:BundleManifestFiles = @(
 #
 # 設計判断 (#177): `schema_version=1` 維持、layout は **optional additive field**。Bundle v0.3.1
 # リリースノートで「次回以降自動アップデート」と user に約束済のため、schema bump で v0.3.1 ユーザーが
-# 1 回手動 install 必須になる事態を避ける必要。`JavaScriptSerializer` の case-insensitive deserialize
-# と未知 field 黙殺で、v0.3.1 Manager も新 manifest を silent に parse success できる (PR #180 round 1
-# Low-2 で PowerShell 実機 verify 済 pattern)。
+# 1 回手動 install 必須になる事態を避ける必要。**未知 field 黙殺** (= 旧 reader は `TryGetValue` で
+# 必要 field のみ取り出し、新 optional field `layout` は dict 内に残るが POCO 側で参照しなければ
+# 無視される標準 JSON forward compat pattern) により、v0.3.1 Manager (v0.9.1) も新 manifest を silent
+# に parse success できる (PR #180 round 1 Low-2 で PowerShell 実機 verify 済 pattern。**注**: PR #180
+# の `UpdateCompletedSentinel` は POCO 直 deserialize で case-insensitive 自動 mapping に依存していたが、
+# 本 PR `BundleLayout` は dict 経由 manual `TryGetValue` 参照のため case-sensitivity には依存しない)。
 #
 # key 命名は **snake_case** (JSON 慣例)、value は zip 内 `bundle/` 起点の `/` separator 相対 path。
-# Manager 側 `BundleLayout` POCO は PascalCase property (C# 慣例)、JavaScriptSerializer で
-# case-insensitive deserialize される。新規 component 追加時は本 hashtable に新 key を追加 + SPEC §3.7.8
-# チェックリスト同期更新 (= `$script:BundleManifestFiles` と並列の SoT)。
+# Manager 側 `BundleLayout` POCO は PascalCase property (C# 慣例)、wire format との対応は
+# `ReadBundleManifest` 内の `TryGetLayoutString(dict, "launcher_dir")` 等の **literal snake_case key
+# 参照** で manual 解決 (= `Dictionary<string, object>` default comparer は case-sensitive、snake_case ↔
+# PascalCase は case 差ではなく separator 差 `_` のため自動 mapping だけでは不可)。新規 component 追加
+# 時は本 hashtable に新 key を追加 + SPEC §3.7.8 チェックリスト同期更新 (= `$script:BundleManifestFiles`
+# と並列の SoT)。
 $script:BundleLayout = [ordered]@{
     launcher_dir   = 'files/Launcher'
     manager_dir    = 'files/Manager'
