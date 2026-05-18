@@ -289,7 +289,9 @@ namespace GCTonePrism.Manager
                 string version = semverInput.VersionString;
 
                 // (#187) 2 段目 fence は CopyGameFolder の前 (= pre-copy)。Cancel 時に file copy が走らず
-                // rollback complexity 不要、trade-off の rationale は SPEC §3.8.2 / §3.8.5 参照。
+                // **この path に限り** rollback 不要 (= ProcessingDialog Cancel / SQLite catch / general
+                // Exception catch の 3 rollback path は依然維持、SPEC §3.8.5 「parent gameFolder retention
+                // の非対称性」参照)。trade-off の rationale は SPEC §3.8.2 / §3.8.5 参照。
                 if (SessionConflictHelper.CheckBeforeWrite(this, "ゲーム追加") == DialogResult.Cancel)
                 {
                     return;
