@@ -21,7 +21,7 @@ namespace GCTonePrism.Updater
     /// 置換まで担当した後で本 Updater を spawn する。本 Updater は spawn 後に Manager が graceful 終了
     /// するのを待ち、自分自身が Manager 置換 + 再起動を行う。
     ///
-    /// Exit codes (CliArgs.UsageText() / SPEC §3.7.4 / CHANGELOG `## Updater v0.1.0` / PR #152 body と
+    /// Exit codes (CliArgs.UsageText() / SPEC §3.7.4 / CHANGELOG `## Companions` `### [Updater v0.1.0]` (#160 で rename、旧 `## Updater`) / PR #152 body と
     /// **5 者同期**、round 4 H-1 + M-1 で 3 を 3/7/8 分割 + 1 追記、round 5 H-1 で 5 者同期を review
     /// 完了基準として固定化、round 6 Medium-1 で本 docstring の同期表記を「三者」→「5 者」に訂正):
     ///   0 = 成功

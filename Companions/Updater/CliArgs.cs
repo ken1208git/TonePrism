@@ -224,7 +224,7 @@ namespace GCTonePrism.Updater
                 "                            (同 PC の他 install Manager を巻き添えにしない)。未指定時は\n" +
                 "                            system-wide GetProcessesByName fallback。\n" +
                 "\n" +
-                "Exit codes (SPEC §3.7.4 / Program.cs docstring / CHANGELOG ## Updater v0.1.0 / PR #152 body と **5 者同期**、round 4 H-1+M-1 で 3 分割 + 1 追記、round 6 で 6 失敗時 rollback 仕様化):\n" +
+                "Exit codes (SPEC §3.7.4 / Program.cs docstring / CHANGELOG ## Companions ### [Updater v0.1.0] (#160 で rename、旧 ## Updater) / PR #152 body と **5 者同期**、round 4 H-1+M-1 で 3 分割 + 1 追記、round 6 で 6 失敗時 rollback 仕様化):\n" +
                 "  0  成功\n" +
                 "  1  予期しない実行時例外 (Logger に stack trace、bug report 対象。parse 段階の例外は stderr のみ)\n" +
                 "  2  引数エラー / 必須引数不足 / --restart-exe が --manager-target 外 等 (parse 段階のため Logger 未初期化、stderr のみ。round 6 Medium-4)\n" +

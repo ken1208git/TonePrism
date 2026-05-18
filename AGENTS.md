@@ -56,7 +56,7 @@
 - `## Bundle` セクション: リリース単位の **summary**。Release.ps1 がここを抜き出して GitHub Releases の本文に流すため、エンドユーザー (来場スタッフ / 顧問の先生 / 部員) が読んで意味が分かる粒度で書く（1-3 行 + 影響を受けるコンポーネント版数の言及）
 - `## Launcher` / `## Manager` / 将来の `## Monitor` 等のコンポーネント別セクション: 開発者向けの **詳細履歴**。技術判断、PR / issue 番号、設計の経緯等を書く
 - `## Release Tooling` セクション: `Release.ps1` / `Release.bat` / `Install.bat` / `templates/*.bat` / `show_folder_dialog.ps1` / `INSTALL_README.txt` 等の **build / 配布スクリプト** の変更履歴。リリース当日のエンドユーザーは見ないが、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。**runtime exe** (= Updater 等) の変更履歴は本 section ではなく `## Companions` に記載 (#160 で section 責務分離)
-- `## Companions` セクション: SPEC §2.4 で定義される「主要 (Launcher / Manager / Monitor) を補助する独立 exe 群」の **runtime exe** の変更履歴。`Updater` (Manager 自身の dir 置換用) + 将来追加される `WindowProbe` (#101) / `PauseOverlay` (#30) 等。本 section は #160 で `## Updater (Companions/Updater)` から rename + 一般化、`## Release Tooling` (build script 専属) と責務分離
+- `## Companions` セクション: SPEC §2.4 で定義される「主要 (Launcher / Manager / Monitor) を補助する独立 exe 群」の **runtime exe** の変更履歴。`Updater` (Manager 自身の dir 置換用) + 将来追加される `WindowProbe` (#101) / `PauseOverlay` (#30) 等。本 section は #160 で `## Updater (Companions/Updater)` から rename + 一般化、`## Release Tooling` (build / 配布スクリプト 専属) と責務分離
 - 1 件の変更は **どれか 1 セクション** にのみ詳細を書き、他セクションからは「Manager v0.8.10 を参照」のような形で参照する。重複記述は避ける
 - **1 PR 内の version bump は原則 1 回のみ**。PR 初コミットで version エントリを確定させ、レビュー対応コミットでは既存エントリの description を加筆・修正する形にする。新規 version エントリを毎回作ると CHANGELOG が「途中段階の version」を抱える ("v0.1.4 と v0.1.5 の差分はレビュー対応のみ" のような無意味な差分が残る) ため避ける。バージョン番号自体を変える必要が出た場合 (breaking change が見つかった、想定範囲を超える機能追加が混入した等) は例外として変更可。これにより PR レビュー進行中にユーザーが merge ボタン押しても CHANGELOG が常に正しい状態になる
 
