@@ -57,6 +57,7 @@ namespace TonePrism.Manager.Services
                 cached.FromCache = true;
                 cached.Current = current;
                 cached.Status = ComputeStatus(current, cached.Latest);
+                cached.CumulativeReleases = FilterStaleFromCumulative(cached.CumulativeReleases, current);
                 return cached;
             }
             return await CheckFromApiAsync(ct, fallbackCache: cached).ConfigureAwait(false);
@@ -90,6 +91,7 @@ namespace TonePrism.Manager.Services
                 cached.FromCache = true;
                 cached.Current = current;
                 cached.Status = ComputeStatus(current, cached.Latest);
+                cached.CumulativeReleases = FilterStaleFromCumulative(cached.CumulativeReleases, current);
                 return cached;
             }
             // (#173) cache 不在 path: `ComputeStatus(current, null)` だと latest=null が UpToDate に倒れて
@@ -310,6 +312,7 @@ namespace TonePrism.Manager.Services
                     fallbackCache.LastError = lastError;
                     fallbackCache.Current = current;
                     fallbackCache.Status = ComputeStatus(current, fallbackCache.Latest);
+                    fallbackCache.CumulativeReleases = FilterStaleFromCumulative(fallbackCache.CumulativeReleases, current);
                     return fallbackCache;
                 }
                 return new UpdateCheckResult
@@ -455,6 +458,23 @@ namespace TonePrism.Manager.Services
         private static Version TryParse(string s)
         {
             return ChangelogParser.TryParseTagVersion(s);
+        }
+
+        /// <summary>
+        /// (#170 followup / Bundle v0.5.0 受入テストで発見) cache hydrate 経路で
+        /// `CumulativeReleases` に「cache 書込み時点では current より新しかったが、現時点では
+        /// current 以下に降格した release」が残る path への defense。具体例: cache 書込み時に
+        /// current=v0.4.0 / cumulative=[v0.5.0] だったケースで、後で current が v0.5.0 に上がる
+        /// (= 手動 install or 別 path) と、cache 内 cumulative の v0.5.0 は **既に適用済**
+        /// なのに UI は「これから適用される変更」と誤誘導していた。本 filter で
+        /// `release.Version &gt; current` のみ残すことで、UI 側 fallback と二重防御。
+        /// </summary>
+        private static IReadOnlyList<ReleaseInfo> FilterStaleFromCumulative(
+            IReadOnlyList<ReleaseInfo> cumulative, Version current)
+        {
+            if (cumulative == null || cumulative.Count == 0) return new List<ReleaseInfo>();
+            if (current == null) return cumulative;
+            return cumulative.Where(r => r != null && r.Version != null && r.Version > current).ToList<ReleaseInfo>();
         }
 
         // cache serialization 用 DTO (System.Version は JavaScriptSerializer がうまく扱えないので string 経由)

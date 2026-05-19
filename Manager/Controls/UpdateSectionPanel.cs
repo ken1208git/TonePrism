@@ -105,9 +105,15 @@ namespace TonePrism.Manager.Controls
             }
 
             // 最新 ver / 日付
+            // (#170 followup) cache fallback (FromCache=true + LastError あり) の場合、表示している
+            // version は **再確認できていない古い値の可能性** があるため「(キャッシュ)」suffix +
+            // 灰色化で disclaimer を視覚化。再確認成功時 (FromCache=true でも LastError=null) は
+            // disclaimer 不要 (= cache TTL 内の正常 hit、信頼可)。
+            bool isStaleCache = result.FromCache && !string.IsNullOrEmpty(result.LastError);
             if (result.Latest != null)
             {
-                lblLatestVersion.Text = result.Latest.TagName ?? "不明";
+                lblLatestVersion.Text = (result.Latest.TagName ?? "不明") + (isStaleCache ? " (キャッシュ)" : string.Empty);
+                lblLatestVersion.ForeColor = isStaleCache ? System.Drawing.Color.Gray : System.Drawing.SystemColors.ControlText;
                 lblLatestDate.Text = result.Latest.PublishedAt.HasValue
                     ? "(公開: " + result.Latest.PublishedAt.Value.ToLocalTime().ToString("yyyy-MM-dd") + ")"
                     : string.Empty;
@@ -115,6 +121,7 @@ namespace TonePrism.Manager.Controls
             else
             {
                 lblLatestVersion.Text = result.Status == UpdateCheckStatus.UnknownBundle ? "(Bundle 不明)" : "—";
+                lblLatestVersion.ForeColor = System.Drawing.SystemColors.ControlText;
                 lblLatestDate.Text = string.Empty;
             }
 
@@ -135,8 +142,19 @@ namespace TonePrism.Manager.Controls
                     btnSkip.Enabled = false;
                     break;
                 case UpdateCheckStatus.UpToDate:
-                    lblStatusMessage.Text = "最新版を実行中です。";
-                    lblStatusMessage.ForeColor = System.Drawing.Color.DarkGreen;
+                    // (#170 followup) cache 経由判定の場合、実 GitHub 最新と比較できていないため
+                    // 緑文字「最新版を実行中」と断言すると過信させすぎ。stale cache 時は灰色 + 文言
+                    // を「キャッシュ比較、再確認失敗中」に降格して信頼度を視覚化。
+                    if (isStaleCache)
+                    {
+                        lblStatusMessage.Text = "最新版を実行中 (キャッシュ比較、再確認失敗中)";
+                        lblStatusMessage.ForeColor = System.Drawing.Color.DimGray;
+                    }
+                    else
+                    {
+                        lblStatusMessage.Text = "最新版を実行中です。";
+                        lblStatusMessage.ForeColor = System.Drawing.Color.DarkGreen;
+                    }
                     btnUpdateNow.Enabled = false;
                     btnSkip.Enabled = false;
                     break;
@@ -196,7 +214,17 @@ namespace TonePrism.Manager.Controls
             // (ユーザーが期待した「アプデできたら最新版だけ表示」semantic)。
             try
             {
-                if (result.CumulativeReleases != null && result.CumulativeReleases.Count > 0)
+                // (#170 followup) 「これから適用される変更」見出しは UpdateAvailable / Skipped
+                // (= current < latest、実際に未適用 release がある状態) でのみ意味を持つ。
+                // UpToDate / UnknownBundle / NetworkError / ParseError のときに CumulativeReleases が
+                // 残っていても (= cache stale 由来で UpdateChecker filter を通り抜けたケース) UI 側
+                // で表示しない fallback。defense-in-depth として UpdateChecker の
+                // FilterStaleFromCumulative と組み合わせ、片方が漏れても誤情報を user に出さない。
+                bool showCumulative = result.CumulativeReleases != null
+                    && result.CumulativeReleases.Count > 0
+                    && (result.Status == UpdateCheckStatus.UpdateAvailable
+                        || result.Status == UpdateCheckStatus.Skipped);
+                if (showCumulative)
                 {
                     // (#108 Phase 4 round 2 L12) cache hydrate 経路で CumulativeReleases=空 (size 抑制の
                     // ため cache に入れない設計) のケースは、次行の BuildCumulativeHtml が単一 Latest
