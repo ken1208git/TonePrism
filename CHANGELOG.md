@@ -1657,6 +1657,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 #### Changed (#170 followup round 2 — review 指摘対応)
 
+- **アップデートタブのリリースノートを local CHANGELOG.md 優先 fallback に変更**: 旧実装は `cache.Latest.Body` を直接「現在実行中: vX.Y.Z」notes として render していたが、cache stale (= current > cache.Latest) のケースで「user は v0.5.0 を実行中なのに、UI は v0.4.0 の release notes を『現在実行中』として表示」する誤誘導があった。新実装は `ChangelogParser.TryReadLatestFromFile(PathManager.BundleChangelogPath)` で local CHANGELOG.md (= bundle 同梱、Release Tooling v0.1.16 以降の SoT) を先読みし、parse 成功時は **local の `### [Bundle vX.Y.Z]` body** を「現在実行中」notes として表示。fallback chain: 1) local CHANGELOG → 2) cache.Latest.Body → 3) 「リリースノートはありません」。ApplyResult の catch block は維持 (= local read 失敗時は warn log + fallback 続行)。
 - **自動バックアップを ON/OFF できる checkbox を新規追加**: `chkBackupAutoEnabled` を grpBackup 内に配置、`SettingsKeys.BackupAutoEnabled = "backup_auto_enabled"` (default "true") で永続化。OFF にすると `BackupService.IsAutoBackupDue` / `RunAutoBackupIfDue` が起動時 trigger を完全 skip (= 手動バックアップは引き続き使える)。checkbox に従って interval section の controls (lblBackupInterval / numBackupInterval / cmbBackupIntervalUnit / lblBackupIntervalUnit) を `Enabled` で連動 enable/disable、OFF 時は灰色化して「無効」状態を視覚化。保存先 / 保持世代数は手動バックアップでも使うため対象外で常時有効。
 - **設定タブの grpBackup と grpLog の順序を入替**: 旧 round 1 で「ログ (top) → バックアップ」だったが、user 提案で「バックアップ (top) → ログ」に変更。バックアップが日常運用で頻度高い設定であることを反映。
 

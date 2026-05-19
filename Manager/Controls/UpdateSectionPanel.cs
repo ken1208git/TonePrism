@@ -234,16 +234,50 @@ namespace TonePrism.Manager.Controls
                     webReleaseNotes.DocumentText = MarkdownRenderer.BuildCumulativeHtml(
                         result.CumulativeReleases, topHeading: "これから適用される変更");
                 }
-                else if (result.Latest != null && !string.IsNullOrEmpty(result.Latest.Body))
-                {
-                    string bodyHtml = MarkdownRenderer.MarkdownToHtml(result.Latest.Body);
-                    string heading = "現在実行中: " + (result.Latest.TagName ?? "");
-                    webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument(
-                        "<h1>" + System.Web.HttpUtility.HtmlEncode(heading) + "</h1>" + bodyHtml);
-                }
                 else
                 {
-                    webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument("<p>リリースノートはありません。</p>");
+                    // (#170 followup round 2) 「現在実行中」notes は **local CHANGELOG.md を優先** する。
+                    // 旧実装は cache.Latest.Body を直接使っていたが、cache が stale (= current > cache.Latest)
+                    // のケースで「現在実行中: v0.4.0」+ v0.4.0 body を表示する誤誘導があった (user は実際は
+                    // v0.5.0 を実行中で、v0.4.0 の内容は既に適用済)。local CHANGELOG.md は bundle 同梱
+                    // (Release Tooling v0.1.16 以降) で、必ず current Bundle 版の notes を持つため SoT として
+                    // 信頼可。fallback chain: 1) local CHANGELOG → 2) cache.Latest.Body → 3) "ありません"。
+                    string localBody = null;
+                    string localHeading = null;
+                    try
+                    {
+                        BundleEntry localBundle = ChangelogParser.TryReadLatestFromFile(PathManager.BundleChangelogPath);
+                        if (localBundle != null && !string.IsNullOrEmpty(localBundle.Body))
+                        {
+                            localBody = localBundle.Body;
+                            string verStr = localBundle.Version != null
+                                ? "v" + localBundle.Version.ToString(3)
+                                : localBundle.RawVersionString ?? "";
+                            localHeading = "現在実行中: " + verStr;
+                        }
+                    }
+                    catch (Exception localEx)
+                    {
+                        Logger.Warn("[UpdateSectionPanel] local CHANGELOG.md 読込失敗 (cache fallback に降格): " + localEx.Message);
+                    }
+
+                    if (!string.IsNullOrEmpty(localBody))
+                    {
+                        string bodyHtml = MarkdownRenderer.MarkdownToHtml(localBody);
+                        webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument(
+                            "<h1>" + System.Web.HttpUtility.HtmlEncode(localHeading) + "</h1>" + bodyHtml);
+                    }
+                    else if (result.Latest != null && !string.IsNullOrEmpty(result.Latest.Body))
+                    {
+                        string bodyHtml = MarkdownRenderer.MarkdownToHtml(result.Latest.Body);
+                        string heading = "現在実行中: " + (result.Latest.TagName ?? "");
+                        webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument(
+                            "<h1>" + System.Web.HttpUtility.HtmlEncode(heading) + "</h1>" + bodyHtml);
+                    }
+                    else
+                    {
+                        webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument("<p>リリースノートはありません。</p>");
+                    }
                 }
             }
             catch
