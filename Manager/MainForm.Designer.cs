@@ -60,6 +60,10 @@ namespace TonePrism.Manager
             this.lblBackupStatus.Size = new System.Drawing.Size(0, 17);
             this.lblBackupStatus.Text = "";
             this.lblBackupStatus.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+            // (#170 followup round 2) Overflow=Never で「strip が item を overflow dropdown に隠す」path を遮断。
+            // 既知の WinForms StatusStrip quirk で、item の natural width > strip width な時に overflow に
+            // 流れて invisible になる症状あり。
+            this.lblBackupStatus.Overflow = System.Windows.Forms.ToolStripItemOverflow.Never;
             //
             // tabControl1
             //

@@ -769,7 +769,13 @@ namespace TonePrism.Manager
             // 余分な layout 計算不要、PerformLayout / Width 直書きも不要。
             lblBackupStatus.Text = message ?? string.Empty;
             lblBackupStatus.ForeColor = color;
-            Logger.Info("[MainForm] UpdateBackupStatus: text='" + (message ?? "") + "' lblBackupStatus.Bounds=" + lblBackupStatus.Bounds);
+            Logger.Info("[MainForm] UpdateBackupStatus: text='" + (message ?? "")
+                + "' strip.Bounds=" + statusStrip1.Bounds
+                + " strip.ClientSize=" + statusStrip1.ClientSize
+                + " strip.OverflowButton.Visible=" + statusStrip1.OverflowButton.Visible
+                + " lblStatus.Width=" + lblStatus.Width
+                + " lblBackupStatus.Bounds=" + lblBackupStatus.Bounds
+                + " IsOnOverflow=" + lblBackupStatus.IsOnOverflow);
 
             // 既存 timer を破棄してから新規 (= 連続呼出時に古い timer が古い message を消すのを防ぐ)
             if (_backupStatusClearTimer != null)
