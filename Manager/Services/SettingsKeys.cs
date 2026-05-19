@@ -67,7 +67,7 @@ namespace TonePrism.Manager.Services
         /// </summary>
         public const string UpdateNotifiedTag = "update_notified_tag";
 
-        // ----- (#170 followup) Logger retention -----
+        // ----- (#170 followup) Logger retention / destination -----
 
         /// <summary>
         /// ログファイル保存日数 (default 30)。`Logger.CleanupOldLogs(days)` が起動時 1 回読込み、
@@ -78,5 +78,25 @@ namespace TonePrism.Manager.Services
         public const string LogRetentionDays = "log_retention_days";
 
         public const int DefaultLogRetentionDays = 30;
+
+        /// <summary>
+        /// (#170 followup round 1) ログファイル保存先 directory の絶対 path (空文字 / 不在 = default の
+        /// `&lt;project_root&gt;/logs/manager/` を使用)。設定 UI から変更可、**反映は次回 Manager 起動時**。
+        /// バックアップ保存先 (`backup_destination_path`) と同 semantic、Program.Main で Logger.Initialize 前に
+        /// SQLite 直接 read で取り出して Logger に渡す (= Logger は SettingsRepository に依存しない invariant を維持)。
+        /// </summary>
+        public const string LogDestinationPath = "log_destination_path";
+
+        // ----- (#170 followup round 1) バックアップ自動間隔の表示単位 -----
+
+        /// <summary>
+        /// 自動バックアップ間隔の表示単位。"hours" or "days"。default "hours"。UI ComboBox で選択、
+        /// **DB に保存される間隔値 (`backup_auto_interval_hours`) は常に時間単位**で BackupService 既存実装と互換、
+        /// 本 key は UI 側の表示ヒントのみで runtime logic には影響しない。
+        /// </summary>
+        public const string BackupAutoIntervalUnit = "backup_auto_interval_unit";
+
+        public const string BackupAutoIntervalUnitHours = "hours";
+        public const string BackupAutoIntervalUnitDays = "days";
     }
 }

@@ -1655,6 +1655,16 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ### [Manager v0.13.0] - 2026-05-19
 
+#### Changed (#170 followup round 1 — review 指摘対応)
+
+PR #196 round 1 review で指摘された UI 改善:
+- **バックアップタブの「設定...」ボタン削除**: 旧 modal Form 廃止後の info dialog 案内も完全削除、動線を「設定タブ」一本に絞る。
+- **設定タブの section 順を再構成**: ログ (top) → バックアップ → データベース → バージョン情報 (bottom) の **使用頻度 / destructive 度** 順に並べ替え (= 旧 DB リセットがトップに来ていた配置の修正)。
+- **データベースリセット button を赤色化** (= IndianRed BG + White FG + Bold)、[btnRestore](Manager/Controls/BackupSectionPanel.Designer.cs) と同 destructive pattern で統一。誤押下リスク低減。
+- **ログ保存先 path 設定を新規追加**: `SettingsKeys.LogDestinationPath = "log_destination_path"` 新設、`Logger.Initialize(string customLogDir = null)` に signature 変更、Program.Main が SQLite 直接 read で先取得して渡す。設定 UI は `grpLog` 内に txtLogDest + btnLogBrowse + hint で追加、空欄なら default の `<install>/logs/manager/` を使用。**反映は次回 Manager 起動時** (= UI ラベルで明示)。
+- **バックアップ自動間隔の表示単位 ComboBox 追加**: 「時間」/「日」を選択可能、`SettingsKeys.BackupAutoIntervalUnit` 新 key で永続化。DB 側 `backup_auto_interval_hours` は **常に時間単位**で BackupService 既存実装と互換 (= UI 表示時のみ unit 換算)、unit 切替時は表示値を換算して update + clamp。
+- **バックアップ設定の保存ボタン廃止 + per-control immediate save**: 旧 btnBackupSave (旧 modal の OK pattern) を廃止、ログ retention と同 pattern (= 1 control 変更 = 即 save) に統一。txtBackupDest は Leave event + btnBackupBrowse 経由で save、各 NumericUpDown / ComboBox は値変更 event で save。CheckBeforeWrite は変更ごとに発火、Cancel 時は前回 save 値に rollback。
+
 #### Added (#170 followup — UI brushup PR)
 
 Bundle v0.5.0 受入テストで見つかった UX / safety 課題 5 件をまとめた brushup。**5 commit 構成** で、各 commit は項目別の独立変更:

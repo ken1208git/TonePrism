@@ -48,8 +48,13 @@ namespace TonePrism.Manager.Services
         /// <summary>
         /// ロガーを初期化する。Application.Run より前で必ず呼ぶこと。
         /// 失敗してもアプリ起動は止めない (例外を握り潰し、以降の API は no-op)。
+        ///
+        /// (#170 followup round 1) `customLogDir` が指定された場合は default の
+        /// `&lt;project_root&gt;/logs/manager/` の代わりに `&lt;customLogDir&gt;/manager/` を使用する。
+        /// 失敗時は default にフォールバック。Program.Main が `settings.log_destination_path` を
+        /// SQLite 直接 read して渡す (Logger は SettingsRepository に依存しない invariant 維持)。
         /// </summary>
-        public static void Initialize()
+        public static void Initialize(string customLogDir = null)
         {
             lock (_lock)
             {
@@ -57,8 +62,18 @@ namespace TonePrism.Manager.Services
 
                 try
                 {
-                    string projectRoot = FindProjectRootForLogs();
-                    _logDirectory = Path.Combine(projectRoot, "logs", LogSubDirectory);
+                    // (#170 followup round 1) customLogDir 指定時はその full path を直接使用
+                    // (backup_destination_path と同 semantic、`logs/manager` を append しない)。
+                    // default は `<project_root>/logs/manager/`。
+                    if (!string.IsNullOrWhiteSpace(customLogDir))
+                    {
+                        _logDirectory = customLogDir;
+                    }
+                    else
+                    {
+                        string projectRoot = FindProjectRootForLogs();
+                        _logDirectory = Path.Combine(projectRoot, "logs", LogSubDirectory);
+                    }
                     Directory.CreateDirectory(_logDirectory);
 
                     OpenSessionFile();

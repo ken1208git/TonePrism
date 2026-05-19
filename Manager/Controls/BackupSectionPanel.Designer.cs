@@ -26,7 +26,6 @@ namespace TonePrism.Manager.Controls
             this.grpControls = new System.Windows.Forms.GroupBox();
             this.btnRestore = new System.Windows.Forms.Button();
             this.btnDelete = new System.Windows.Forms.Button();
-            this.btnSettings = new System.Windows.Forms.Button();
             this.lblDestPath = new System.Windows.Forms.Label();
             this.grpActions.SuspendLayout();
             this.grpHistory.SuspendLayout();
@@ -120,7 +119,6 @@ namespace TonePrism.Manager.Controls
             this.grpControls.Controls.Add(this.lblDestPath);
             this.grpControls.Controls.Add(this.btnRestore);
             this.grpControls.Controls.Add(this.btnDelete);
-            this.grpControls.Controls.Add(this.btnSettings);
             this.grpControls.Location = new System.Drawing.Point(20, 500);
             this.grpControls.Name = "grpControls";
             this.grpControls.Size = new System.Drawing.Size(1040, 70);
@@ -150,17 +148,6 @@ namespace TonePrism.Manager.Controls
             this.btnDelete.Text = "選択した履歴を削除...";
             this.btnDelete.UseVisualStyleBackColor = true;
             this.btnDelete.Click += new System.EventHandler(this.btnDelete_Click);
-            //
-            // btnSettings
-            //
-            this.btnSettings.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnSettings.Location = new System.Drawing.Point(940, 26);
-            this.btnSettings.Name = "btnSettings";
-            this.btnSettings.Size = new System.Drawing.Size(80, 30);
-            this.btnSettings.TabIndex = 2;
-            this.btnSettings.Text = "設定...";
-            this.btnSettings.UseVisualStyleBackColor = true;
-            this.btnSettings.Click += new System.EventHandler(this.btnSettings_Click);
             //
             // lblDestPath
             //
@@ -200,7 +187,6 @@ namespace TonePrism.Manager.Controls
         private System.Windows.Forms.GroupBox grpControls;
         private System.Windows.Forms.Button btnRestore;
         private System.Windows.Forms.Button btnDelete;
-        private System.Windows.Forms.Button btnSettings;
         private System.Windows.Forms.Label lblDestPath;
     }
 }

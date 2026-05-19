@@ -24,7 +24,12 @@ namespace TonePrism.Manager
             // path 不到達)。本 round で reorder して `Logger.Warn` が実際にファイルに書かれる形に。
             // ログ機構を最初に初期化することで、PathManager 以降のすべての Console.WriteLine が
             // 自動的にファイル (logs/manager_YYYY-MM-DD.log) にも残る (#116)。
-            Logger.Initialize();
+            //
+            // (#170 followup round 1) `log_destination_path` を SQLite 直接 read で先取得。
+            // SettingsRepository / DatabaseManager は使わない (= Logger は SettingsRepository に依存しない
+            // invariant 維持、DB 不在時の fallback 経路もシンプル)。失敗時は null fallback で default path。
+            string customLogDir = TryReadCustomLogDir();
+            Logger.Initialize(customLogDir);
 
             // WebBrowser コントロール (UpdateSectionPanel のリリースノート表示で使用、Phase 4 #108) は
             // default で IE7 quirks mode で動作するため、render 崩れ + CSS 制限あり。HKCU レジストリで
@@ -118,6 +123,39 @@ namespace TonePrism.Manager
                         Logger.Warn("[Program] Mutex.ReleaseMutex 失敗 (mutex 非所有 thread からの release 等が typical cause): " + relEx.GetType().Name + ": " + relEx.Message);
                     }
                 }
+            }
+        }
+
+        /// <summary>
+        /// (#170 followup round 1) Logger.Initialize の前に `settings.log_destination_path` を SQLite 直接
+        /// read で取得する。SettingsRepository を経由しないのは Logger が SettingsRepository に依存しない
+        /// invariant を維持するため (= Logger は最早期に初期化する責務、DB が無くても動く必要がある)。
+        ///
+        /// 失敗時 (DB 不在 / 解析失敗 / key 不在) は null を返す → Logger.Initialize が default path に
+        /// fallback。Logger.Warn は Logger 未初期化時 no-op で flag できないため try-catch で握り潰し。
+        /// </summary>
+        private static string TryReadCustomLogDir()
+        {
+            try
+            {
+                string dbPath = PathManager.DatabasePath;
+                if (string.IsNullOrEmpty(dbPath) || !System.IO.File.Exists(dbPath)) return null;
+                using (var conn = new System.Data.SQLite.SQLiteConnection("Data Source=" + dbPath + ";Version=3;Read Only=True;"))
+                {
+                    conn.Open();
+                    using (var cmd = new System.Data.SQLite.SQLiteCommand(
+                        "SELECT value FROM settings WHERE key = 'log_destination_path' LIMIT 1", conn))
+                    {
+                        object v = cmd.ExecuteScalar();
+                        if (v == null || v == DBNull.Value) return null;
+                        string s = v.ToString();
+                        return string.IsNullOrWhiteSpace(s) ? null : s;
+                    }
+                }
+            }
+            catch
+            {
+                return null;
             }
         }
 
