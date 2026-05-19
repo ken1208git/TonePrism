@@ -51,9 +51,21 @@ namespace TonePrism.Manager.Services
         public async Task<UpdateCheckResult> CheckAsync(CancellationToken ct)
         {
             UpdateCheckResult cached = TryLoadCache();
-            if (cached != null && IsCacheFresh(cached))
+            Version current = VersionInventory.ReadBundleVersion();
+
+            // (#170 followup round 2) cache が「current より古い latest」を保持している場合は明らかに stale
+            // (= 過去 cache 時点では知らなかった新 release が既に install されて current に反映されている、
+            // または間に手動 install を挟んだ)。TTL fresh でもこの状況では cached return すると UI が
+            // 「最新 v0.4.0」を表示し続ける silent stale path になる (user は実際 v0.5.0 を実行中で、
+            // GitHub には v0.5.0 release が publish 済の場合)。
+            // **TTL を無視して強制 refresh** することで、user が手動で「更新を確認」を押さなくても
+            // 起動時 background check で cache が自動更新される。
+            bool cacheVersionStale = cached != null && current != null
+                && cached.Latest != null && cached.Latest.Version != null
+                && current > cached.Latest.Version;
+
+            if (cached != null && IsCacheFresh(cached) && !cacheVersionStale)
             {
-                Version current = VersionInventory.ReadBundleVersion();
                 cached.FromCache = true;
                 cached.Current = current;
                 cached.Status = ComputeStatus(current, cached.Latest);
