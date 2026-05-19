@@ -399,6 +399,11 @@ namespace TonePrism.Manager
             _gameSectionPanel.LoadGames();
             UpdateStatusBar();
 
+            // [TEMPORARY DEBUG] PR #196 round 2 user 提案: 自動バックアップ indicator のデザイン確認のため
+            // 起動時に sample message を永続表示 (autoRevert:false で 7 秒 timer なし)。design 確認後に削除予定。
+            UpdateBackupStatus("✓ 自動バックアップ完了: toneprism_20260519_162332.db",
+                System.Drawing.Color.DarkGreen, autoRevert: false);
+
             // 起動時に自動バックアップが必要なら走らせる（バックグラウンドで非ブロッキング）
             StartAutoBackupIfDue();
 
