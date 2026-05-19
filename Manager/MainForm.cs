@@ -86,6 +86,24 @@ namespace TonePrism.Manager
             {
                 Logger.Warn("[MainForm] FormClosed で LauncherSessionService Shutdown 失敗: " + ex.Message);
             }
+
+            // (#170 followup round 2 review #8) backup status auto-revert timer の cleanup。
+            // UpdateBackupStatus(autoRevert:true) で起動した System.Windows.Forms.Timer が GC まで残り、
+            // 7 秒経過後の Tick で disposed form の lblBackupStatus.Text にアクセスして
+            // ObjectDisposedException を throw する path を構造閉鎖。
+            try
+            {
+                if (_backupStatusClearTimer != null)
+                {
+                    _backupStatusClearTimer.Stop();
+                    _backupStatusClearTimer.Dispose();
+                    _backupStatusClearTimer = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[MainForm] FormClosed で _backupStatusClearTimer cleanup 失敗: " + ex.Message);
+            }
         }
 
         /// <summary>
@@ -643,7 +661,15 @@ namespace TonePrism.Manager
                     UpdateBackupStatus($"✗ 自動バックアップ失敗: {result.Message}",
                         System.Drawing.Color.DarkRed, autoRevert: true);
                 }
-                // IsSkipped はそのまま（他PCで実行済み等、特に通知不要）
+                else if (result.IsSkipped)
+                {
+                    // (#170 followup round 2 review #1) 他 PC で実行済 / disable 等で skip された場合、
+                    // 直前の `UpdateBackupStatus("自動バックアップ実行中...", autoRevert: false)` で表示した
+                    // indicator が永久残留する path を閉じる。empty string + autoRevert: true で
+                    // 即時 clear (Timer の 7 秒経過で消える、または重複呼出時に旧 timer が dispose される
+                    // ので問題なし)。
+                    UpdateBackupStatus(string.Empty, System.Drawing.SystemColors.ControlText, autoRevert: true);
+                }
             }
             catch (Exception ex)
             {

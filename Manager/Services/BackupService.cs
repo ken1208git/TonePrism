@@ -37,6 +37,17 @@ namespace TonePrism.Manager.Services
         /// </summary>
         public bool IsAutoBackupDue()
         {
+            // (#170 followup round 2 review #1+#2) 自動バックアップ無効化 checkbox。UI 設定タブから OFF
+            // にされていたら due 判定を常に false (= 起動時 trigger 完全 skip、手動バックアップは引き続き可)。
+            // 旧実装は `RunAutoBackupIfDue` 側のみ gate を入れ、IsAutoBackupDue は disable flag を見ていない
+            // 非対称設計だった。それにより MainForm.StartAutoBackupIfDue が「Due だから走らせる」と判断して
+            // 「実行中...」indicator を出した直後、RunAutoBackupIfDue が IsSkipped を返して MainForm の
+            // IsSkipped 分岐は no-op、indicator が「実行中...」のまま永久残留する bug があった。
+            // 本 fix で IsAutoBackupDue 側も同 gate を持たせて「Due だけど skip」の不整合 path を構造閉鎖、
+            // CHANGELOG `## Manager v0.13.0` の「IsAutoBackupDue / RunAutoBackupIfDue 両方 skip」記述とも
+            // 整合させる。
+            string enabledStr = _settingsRepo.GetString(SettingsKeys.BackupAutoEnabled, "true");
+            if (string.Equals(enabledStr, "false", StringComparison.OrdinalIgnoreCase)) return false;
             int intervalHours = _settingsRepo.GetInt32("backup_auto_interval_hours", 24);
             long lastBackupAt = _settingsRepo.GetInt64("last_backup_at", 0);
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
