@@ -14,8 +14,11 @@ namespace TonePrism.Manager.Services
     {
         // ----- backup 既存 (settings テーブルに既に存在) -----
         // SettingsRepository.TryAcquireBackupLease 内で hardcode された "last_backup_at"
-        // および BackupSettingsForm 系で使う key。既存実装に合わせて参照しない (本クラスで
+        // および backup 設定系 (`backup_destination_path` / `backup_auto_interval_hours` /
+        // `backup_retention_count`) で使う key。既存実装に合わせて参照しない (本クラスで
         // ラップしない方が既存コードを書き換える scope creep を防げる)。
+        // (#170 followup) 旧 BackupSettingsForm modal は廃止、設定タブ内 grpBackup section に inline 統合
+        // (SettingsSectionPanel.LoadBackupSettings / btnBackupSave_Click)。
 
         // ----- Phase 4 (#108) update flow -----
 

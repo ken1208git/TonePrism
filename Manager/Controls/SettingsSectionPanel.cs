@@ -21,6 +21,7 @@ namespace TonePrism.Manager.Controls
             _dbManager = dbManager;
             UpdateVersionInfo();
             LoadLogSettings();
+            LoadBackupSettings();
         }
 
         /// <summary>
@@ -80,6 +81,82 @@ namespace TonePrism.Manager.Controls
                 Logger.Warn("[SettingsSectionPanel] LogRetentionDays 書込失敗: " + ex.Message);
                 MessageBox.Show("ログ保存日数の保存に失敗しました: " + ex.Message,
                     "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>
+        /// (#170 followup) バックアップ設定 section の初期化。旧 modal Form (BackupSettingsForm) から
+        /// inline 統合、3 control (path / interval / retention) を一括 load + 保存ボタン経由で save。
+        /// 個別 ValueChanged 経由 (= ログ retention pattern) ではなく、保存ボタン経由にした理由:
+        /// (a) BackupSettingsForm の OK 1 click で 3 値一括 save という既存 UX を維持、
+        /// (b) 値を中途半端に変えてる最中に LAN 他 PC 編集 dialog が連続発火するのを避ける、
+        /// (c) 保存ボタン押下を意図的な commit signal とする (= 誤操作で各 control 個別に commit される
+        ///     race を排除)。
+        /// </summary>
+        private void LoadBackupSettings()
+        {
+            if (_dbManager == null) return;
+            try
+            {
+                var repo = _dbManager.SettingsRepository;
+                txtBackupDest.Text = repo.GetString("backup_destination_path", "");
+
+                int interval = repo.GetInt32("backup_auto_interval_hours", 24);
+                if (interval < numBackupInterval.Minimum) interval = (int)numBackupInterval.Minimum;
+                if (interval > numBackupInterval.Maximum) interval = (int)numBackupInterval.Maximum;
+                numBackupInterval.Value = interval;
+
+                int retention = repo.GetInt32("backup_retention_count", 30);
+                if (retention < numBackupRetention.Minimum) retention = (int)numBackupRetention.Minimum;
+                if (retention > numBackupRetention.Maximum) retention = (int)numBackupRetention.Maximum;
+                numBackupRetention.Value = retention;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[SettingsSectionPanel] LoadBackupSettings 読込失敗: " + ex.Message);
+            }
+        }
+
+        private void btnBackupBrowse_Click(object sender, EventArgs e)
+        {
+            using (var dialog = new FolderBrowserDialog())
+            {
+                dialog.Description = "バックアップ保存先フォルダを選択してください";
+                if (!string.IsNullOrEmpty(txtBackupDest.Text))
+                {
+                    dialog.SelectedPath = txtBackupDest.Text;
+                }
+                if (dialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    txtBackupDest.Text = dialog.SelectedPath;
+                }
+            }
+        }
+
+        private void btnBackupSave_Click(object sender, EventArgs e)
+        {
+            if (_dbManager == null) return;
+            // (#170 followup) 旧 BackupSettingsForm.btnOk_Click と同 pattern の race fence。
+            // user 意図的な destructive (= settings table 3 件 INSERT OR REPLACE) 直前で CheckBeforeWrite。
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ設定変更") == DialogResult.Cancel)
+            {
+                return;
+            }
+            try
+            {
+                var repo = _dbManager.SettingsRepository;
+                repo.SetString("backup_destination_path", txtBackupDest.Text.Trim());
+                repo.SetInt32("backup_auto_interval_hours", (int)numBackupInterval.Value);
+                repo.SetInt32("backup_retention_count", (int)numBackupRetention.Value);
+                Logger.Info("[SettingsSectionPanel] バックアップ設定を保存しました");
+                MessageBox.Show("バックアップ設定を保存しました。", "保存完了",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[SettingsSectionPanel] バックアップ設定書込失敗: " + ex.Message);
+                MessageBox.Show("設定の保存に失敗しました: " + ex.Message, "エラー",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 

@@ -198,15 +198,13 @@ namespace TonePrism.Manager.Controls
 
         private void btnSettings_Click(object sender, EventArgs e)
         {
-            if (_dbManager == null) return;
-
-            using (var form = new BackupSettingsForm(_dbManager.SettingsRepository, _dbManager.BackupService))
-            {
-                if (form.ShowDialog(this) == DialogResult.OK)
-                {
-                    RefreshDisplay();
-                }
-            }
+            // (#170 followup) BackupSettingsForm modal は廃止、設定タブ内に inline 統合した。
+            // 既存 user が「設定」ボタンを押した時の動線案内として info dialog を出す (= 学習 cost 最小化)。
+            // 将来「設定タブを直接開く」shortcut に置換できる余地あり (= 親 MainForm の tab control 参照が
+            // 必要、現状は BackupSectionPanel が tab control を知らないため info dialog で代替)。
+            MessageBox.Show(this,
+                "バックアップ設定は「設定」タブから変更できるようになりました。",
+                "ご案内", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         private void btnRestore_Click(object sender, EventArgs e)
