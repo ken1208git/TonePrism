@@ -347,9 +347,17 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>
-        /// (#175 Phase 4.1) Legacy 旧構造 (v0.3.0) 用の hardcoded list 検証 path。
-        /// Phase 4 PR #161 round 1 C1 fix で確立した list をそのまま保持。新規 caller は使わず、
-        /// `ValidateStaging` 内の manifest fallback 経路としてのみ呼ばれる。
+        /// (#175 Phase 4.1) manifest 不在時の hardcoded fallback validation。`ValidateStaging` の
+        /// manifest 検証で `bundle/bundle_manifest.json` が見つからない時のみ呼ばれる。
+        ///
+        /// **history note (#168)**: 関数名「Legacy」は元々「v0.3.0 旧構造 zip 用」を意図して命名された
+        /// が、本 PR (Bundle v0.5.0 brand rename) で hardcoded list を `GCTonePrism_*.exe` →
+        /// `TonePrism_*.exe` に sync 更新したため、**純粋な v0.3.0 zip (= `GCTonePrism_*.exe` 含む)
+        /// に対しては match しない** (= 6 件 missing で fail)。manifest を持たない zip は v0.3.0 のみで、
+        /// 本 PR 以降の install は manifest 必須なので、純粋 v0.3.0 zip を OLD Manager から apply する
+        /// path は MainForm 旧版 detect guard で別途 block する設計 (SPEC §10 v1.10.30 row「2 段構成
+        /// block」参照、本 list は NEW + NEW の forward 経路で動作する補助 validation の位置付け)。
+        /// 名前は historical reason で retain、別 PR で `ValidateStagingHardcodedFallback` 等に rename 余地。
         /// </summary>
         private static IReadOnlyList<string> ValidateStagingLegacy(string stagingDir)
         {

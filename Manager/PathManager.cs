@@ -132,7 +132,14 @@ namespace TonePrism.Manager
 
         /// <summary>
         /// 過去 run の zombie staging dir を列挙する (起動時 cleanup 用)。
-        /// `Path.GetTempPath()` 直下の `TonePrism_update_*` 全てを返す。
+        /// `Path.GetTempPath()` 直下の `TonePrism_update_*` + `GCTonePrism_update_*` 全てを返す。
+        ///
+        /// **#168 transition defensive cleanup**: 旧版 Manager (v0.11.0 以前) は `GCTonePrism_update_*`
+        /// prefix で staging dir を作っていたため、その zombie が `%TEMP%` 直下に残る path あり。
+        /// brand rename PR で新 Manager は `TonePrism_update_*` 一本だが、glob を 2 つ実行する形で
+        /// transition 期間中の defensive cleanup を提供。staging dir は install path と独立なので
+        /// 「旧 install 完全削除」の transition 戦略では cover 外、本 method 経由で別途回収する。
+        /// **v0.13 以降**: 旧 prefix glob は削除候補 (= 全 user が transition 完了済を確認後)。
         /// </summary>
         public static System.Collections.Generic.IEnumerable<string> EnumerateZombieStagings()
         {
@@ -140,7 +147,9 @@ namespace TonePrism.Manager
             if (!Directory.Exists(tempRoot)) return new string[0];
             try
             {
-                return Directory.EnumerateDirectories(tempRoot, "TonePrism_update_*");
+                var newPrefix = Directory.EnumerateDirectories(tempRoot, "TonePrism_update_*");
+                var oldPrefix = Directory.EnumerateDirectories(tempRoot, "GCTonePrism_update_*");
+                return System.Linq.Enumerable.Concat(newPrefix, oldPrefix);
             }
             catch
             {

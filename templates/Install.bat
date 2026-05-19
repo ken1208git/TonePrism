@@ -445,7 +445,7 @@ REM
 REM Flow 順序方針 (round 3 L3 + Codex P2 で確定):
 REM   overwrite path: migration → shortcut → robocopy → install_done
 REM     - 理由: robocopy partial failure 時に shortcut bat が旧 path
-REM       (`%~dp0TonePrism\GCTonePrism_Launcher\...`) のまま実体が新 dir
+REM       (`%~dp0GCTonePrism\GCTonePrism_Launcher\...` = v0.2.0 当時の path) のまま実体が新 dir
 REM       `<install>/Launcher/` に移動済 → user が Launcher.bat ダブルクリックで
 REM       「ファイルが見つかりません」窓を防ぐため、shortcut を先に新 path で書く。
 REM       Install.bat 再実行で robocopy リトライ → 復旧可能。

@@ -54,15 +54,20 @@ static func _find_base_directory() -> String:
 				# その親をプロジェクトルートとみなして返す（開発中のフォルダ構造を信じる）
 				# これは、DBファイルがまだ存在しない初期状態などでのパス解決を防ぐため
 				#
-				# NOTE: ends_with("Launcher") は文字列 prefix collision の余地があり、
+				# NOTE: project_root.ends_with("Launcher") は文字列 suffix collision の余地があり、
 				# `MyLauncher` / `WindowLauncher` 等の末尾 "Launcher" を含む dir 名にも hit する。
-				# ただし本ブランチは editor 起動時の fallback (project.godot を Godot エディタが
+				# parent_path 側は `get_file() == "TonePrism"` で **exact match** に修正 (#168 round 3 L-3)、
+				# 旧 `ends_with("TonePrism")` は `GCTonePrism` (= 旧 brand 期の workspace dir 名) も
+				# suffix match で hit する副次効果があった (= 後方互換的に動作はしたが意図外)。
+				# 本 PR の brand rename 後は workspace dir = `TonePrism` 一本前提なので exact match
+				# が正確。ただし本ブランチは editor 起動時の fallback (project.godot を Godot エディタが
 				# 読んで起動した直後、toneprism.db 未生成の初期状態) のみで発火する path。実機 install
 				# 経路は _find_base_directory_from_executable() を通り、こちらは separator 付き
 				# begins_with で厳密化済み。editor 文脈での false-match は project.godot の位置で
-				# project_root が自動決まるため実害低と判断、修正は issue #151 (priority-3 detection
-				# 強化) の scope で将来実施予定。
-				if project_root.ends_with("Launcher") or parent_path.ends_with("TonePrism"):
+				# project_root が自動決まるため実害低と判断、project_root.ends_with("Launcher") 側の
+				# substring match collision 修正は issue #151 (priority-3 detection 強化) の scope で
+				# 将来実施予定。
+				if project_root.ends_with("Launcher") or parent_path.get_file() == "TonePrism":
 					print("[PathManager] DB未検出だがフォルダ構造からルートを推測: ", parent_path)
 					return parent_path
 				

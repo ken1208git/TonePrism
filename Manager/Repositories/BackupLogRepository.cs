@@ -267,7 +267,7 @@ namespace TonePrism.Manager.Repositories
 
         /// <summary>
         /// `file_path` が空のまま残っている `failed` 行について、バックアップフォルダ内の
-        /// `prism_yyyyMMdd_HHmmss.db` 形式のファイル名と `started_at` を照合し、
+        /// `toneprism_yyyyMMdd_HHmmss.db` 形式のファイル名と `started_at` を照合し、
         /// 一致するファイルが見つかれば `success` として復元する。
         ///
         /// 旧バージョンの Manager（`InsertInProgress` がファイルパスを記録していなかった頃）に
@@ -281,10 +281,10 @@ namespace TonePrism.Manager.Repositories
 
             // ファイル一覧を timestamp → path のマップに
             var fileMap = new Dictionary<string, string>();
-            var regex = new Regex(@"^prism_(\d{8})_(\d{6})\.db$");
+            var regex = new Regex(@"^toneprism_(\d{8})_(\d{6})\.db$");
             try
             {
-                foreach (var file in System.IO.Directory.EnumerateFiles(backupFolder, "prism_*.db"))
+                foreach (var file in System.IO.Directory.EnumerateFiles(backupFolder, "toneprism_*.db"))
                 {
                     var name = System.IO.Path.GetFileName(file);
                     var match = regex.Match(name);

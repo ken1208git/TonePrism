@@ -43,7 +43,7 @@ obj/
 # データベース
 toneprism.db
 prism.db
-# 注: prism.db は #168 (v1.0.0) で toneprism.db に rename したが、
+# 注: prism.db は #168 (Bundle v0.5.0 brand rename) で toneprism.db に rename したが、
 # 旧版 dev 環境からの transition 期間中の local 残置 file 用に gitignore は維持。
 *.db-journal
 *.db-wal
