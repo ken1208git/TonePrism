@@ -217,8 +217,16 @@ namespace TonePrism.Manager
             // conflict check 通過後)。MainForm_Load の早期で absorb すると同一 PC で複数 Manager が同時起動
             // した極端 case で `.absorbed` の append race + 重複 absorb が発生し得る path があった (実害は
             // Manager log file 間の重複 entry のみで file 内競合は無いが、構造的に bound するため移設)。
-            // session conflict Cancel path では absorb skip されるが、次回 Manager 起動で必ず picked up
-            // される idempotent 設計なので timing 影響なし。
+            //
+            // (R4 review M-2) **skip path (dbReady=false / session conflict Cancel) の整理**:
+            //   - dbReady=false (= DB 初期化を user が拒否 / 不存在 path) → MainForm_Load early return →
+            //     ContinueLoadAfterSessionCheck 呼ばれず → absorb 走らない
+            //   - session conflict Cancel → BeginInvoke dialog で Cancel → ContinueLoadAfterSessionCheck
+            //     呼ばれず → absorb 走らない
+            //   両 path とも次回 Manager 起動で `.absorbed` の未含有 entry として picked up される
+            //   idempotent 設計のため、当該 startup の Manager log には Updater event が遅延反映されるが、
+            //   永久に失われることはない (= CleanupOldLogs の「全起動 path 必達」設計とは要件が異なる、
+            //   absorb は idempotent + deferred OK の弱い保証で十分)。
 
             bool dbReady = false;
 

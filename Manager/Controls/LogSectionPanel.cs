@@ -33,9 +33,10 @@ namespace TonePrism.Manager.Controls
         private List<LogFileEntry> _allEntries = new List<LogFileEntry>();
         private LogFileEntry _currentEntry; // 現在描画中のエントリ (フィルタ変更時の再描画用)
         // tab で選択中の component (`launcher` / `manager` / `monitor`)。TabPage.Name と一致させる。
-        // 値は constructor で Designer の初期選択 tab から derive する (= Designer の TabPage 順序入替で
-        // hidden drift が起きないよう、`SelectedIndex=0` の hardcode と field default の二重管理を避ける)。
-        // 防御 fallback 値の `"launcher"` は Designer が壊れた場合の last resort、通常 path は通らない。
+        // 値は constructor で Designer の初期選択 tab から derive (= Designer の SelectedIndex 設定が SoT、
+        // field default は last resort fallback の二段防御)。Designer が完全破壊された異常 path
+        // (= tabComponent == null) のみ field default `"launcher"` に倒れる (= 通常運用では到達不能、
+        // R4 review L-1: 「二重管理を避ける」より「Designer SoT 優先 + fallback 明示」に framing 訂正)。
         private string _currentComponent = "launcher";
 
         public LogSectionPanel()
@@ -459,8 +460,11 @@ namespace TonePrism.Manager.Controls
         {
             public string FilePath;
             // TryParseFileName が返す値: "Manager" / "Launcher" / "Monitor"。
-            // 現状の tab UI は Launcher / Manager の 2 tab のみで Monitor file は scan 対象に入らないが、
-            // FileNameRegex 側は monitor を forward-compat で許容しているため値域は 3 値の可能性を持つ。
+            // Monitor tab 追加までは事実上 2 値 (Manager / Launcher)。"Monitor" は健全運用では出ない
+            // (= ScanLogFiles が `<logsRoot>/<component>/` subdir のみ scan するため、tab=launcher/manager
+            // 選択中に Monitor file が混入するのは `logs/launcher/` 等への誤配置の異常運用のみ)。
+            // 誤配置 file の parse に備えて forward-compat で値域に保持 (R4 review L-2: 「3 値の可能性」
+            // と書いて future reader が「Monitor tab が動いている」と誤読する path を予防)。
             public string Component;
             public string PcName;
             public DateTime StartedAt;
