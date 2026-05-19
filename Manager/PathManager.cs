@@ -77,10 +77,70 @@ namespace TonePrism.Manager
             get { return Path.Combine(UpdaterDir, "TonePrism_Updater.exe"); }
         }
 
-        /// <summary>Updater のログ出力先 (`<install>/logs/updater/`)。SPEC §3.7.4 default と一致。</summary>
+        // ===== Unified logs root (v0.15.0、#201 前提の logs_root_path 設定) =====
+        // SPEC §3.6: 全 component の log は `<LogsRootDirectory>/<component>/<file>.log` に統一配置。
+        // LogsRootDirectory は Program.Main が SQLite から `logs_root_path` setting を読込んで
+        // 起動時 1 回 set する (空 / 未設定なら default の `<BaseDirectory>/logs/`)。
+        // 旧 v0.14.0 までの `log_destination_path` (Manager log 直配置 semantic) は廃止、起動時に
+        // auto-migrate (Program.TryAutoMigrateLegacyLogPath) で値を `logs_root_path` に copy。
+
+        private static string _logsRootDirectory;
+
+        /// <summary>
+        /// ログ全体の親 dir (`<BaseDirectory>/logs/` または user 設定 `logs_root_path`)。
+        /// Program.Main が SQLite を読込んで起動時に SetLogsRootDirectory() で 1 回 set、以降は immutable。
+        /// Get 時に未設定なら default 計算 fallback、SettingsRepository には依存しない (Logger SoT 一元化)。
+        /// </summary>
+        public static string LogsRootDirectory
+        {
+            get
+            {
+                if (_logsRootDirectory == null)
+                {
+                    // Set 前 fallback: default (BaseDirectory/logs/)。Program.Main 経由の正規 path では
+                    // SetLogsRootDirectory が必ず先に呼ばれるが、test や異常 path で getter が先に走った
+                    // case の defensive fallback。
+                    _logsRootDirectory = Path.Combine(BaseDirectory, "logs");
+                }
+                return _logsRootDirectory;
+            }
+        }
+
+        /// <summary>
+        /// LogsRootDirectory を起動時に 1 回 set する。Program.Main が SQLite 読込結果で呼出。
+        /// 空文字 / null 時は default `<BaseDirectory>/logs/` を採用 (= 旧 v0.14.0 と同じ default 挙動)。
+        /// 2 回目以降の呼出は no-op (= 上書き禁止、immutable 保証)。
+        /// </summary>
+        public static void SetLogsRootDirectory(string customRoot)
+        {
+            if (_logsRootDirectory != null) return; // 既 set、上書き禁止
+            _logsRootDirectory = string.IsNullOrWhiteSpace(customRoot)
+                ? Path.Combine(BaseDirectory, "logs")
+                : customRoot;
+        }
+
+        /// <summary>Manager のログ出力先 (`<LogsRootDirectory>/manager/`)。SPEC §3.6 unified logs root 規約。</summary>
+        public static string ManagerLogDir
+        {
+            get { return Path.Combine(LogsRootDirectory, "manager"); }
+        }
+
+        /// <summary>Launcher のログ出力先 (`<LogsRootDirectory>/launcher/`)。Launcher Logger は `responses/launcher_logs_root.json` 経由で同 path を resolve。</summary>
+        public static string LauncherLogDir
+        {
+            get { return Path.Combine(LogsRootDirectory, "launcher"); }
+        }
+
+        /// <summary>Updater のログ出力先 (`<LogsRootDirectory>/updater/`)。Manager spawn 時に `--log-dir` 引数で Updater に渡される。SPEC §3.7.4 + §3.6 unified logs root 規約。</summary>
         public static string UpdaterLogDir
         {
-            get { return Path.Combine(BaseDirectory, "logs", "updater"); }
+            get { return Path.Combine(LogsRootDirectory, "updater"); }
+        }
+
+        /// <summary>Monitor のログ出力先 (`<LogsRootDirectory>/monitor/`)。Monitor component 実装着手時に使用 (現状 readiness)。</summary>
+        public static string MonitorLogDir
+        {
+            get { return Path.Combine(LogsRootDirectory, "monitor"); }
         }
 
         /// <summary>

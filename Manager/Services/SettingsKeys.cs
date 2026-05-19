@@ -83,12 +83,24 @@ namespace TonePrism.Manager.Services
         public const int DefaultLogRetentionDays = 30;
 
         /// <summary>
-        /// (#170 followup round 1) ログファイル保存先 directory の絶対 path (空文字 / 不在 = default の
-        /// `&lt;project_root&gt;/logs/manager/` を使用)。設定 UI から変更可、**反映は次回 Manager 起動時**。
-        /// バックアップ保存先 (`backup_destination_path`) と同 semantic、Program.Main で Logger.Initialize 前に
-        /// SQLite 直接 read で取り出して Logger に渡す (= Logger は SettingsRepository に依存しない invariant を維持)。
+        /// **DEPRECATED (v0.15.0 で `LogsRootPath` に統合、auto-migrate 対象)**。
+        /// 旧 semantic: Manager log だけが直配置される dir (= `<value>/manager_*.log` 直書き、Launcher / Updater
+        /// は別管理)。v0.15.0 起動時に `TryAutoMigrateLegacyLogPath` で値を `logs_root_path` に copy + 旧 key DELETE。
+        /// 本 const は **auto-migrate code 内でのみ参照**、UI / runtime path 解決からは削除済。
         /// </summary>
         public const string LogDestinationPath = "log_destination_path";
+
+        /// <summary>
+        /// (#201、v0.15.0) ログ全体の親 root directory の絶対 path (空文字 / 不在 = default の
+        /// `&lt;project_root&gt;/logs/` を使用)。指定先には `manager/` `launcher/` `updater/` `monitor/` の
+        /// subdir が **各 component の Logger により自動作成**される (= subdir append は consumer 側責務)。
+        /// 設定 UI から変更可、**反映は次回 Manager 起動時 + 次回 Launcher 起動時の 2 段**。
+        /// Manager は Program.Main で Logger.Initialize 前に SQLite 直接 read で取り出して
+        /// PathManager.SetLogsRootDirectory に渡す (= Logger は SettingsRepository に依存しない invariant を維持)。
+        /// Launcher は同値を `responses/launcher_logs_root.json` 経由で受取 (= SPEC §6.5 Launcher SQLite write 禁止
+        /// 原則維持、Logger の autoload 最先頭 init 時に DB 接続前で完結する file read のみ)。
+        /// </summary>
+        public const string LogsRootPath = "logs_root_path";
 
         // ----- (#170 followup round 2) 自動バックアップの有効/無効 -----
 
