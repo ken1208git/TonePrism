@@ -762,26 +762,14 @@ namespace TonePrism.Manager
         /// </summary>
         private void UpdateBackupStatus(string message, System.Drawing.Color color, bool autoRevert)
         {
+            // (#170 followup round 2) 旧設計の spacer 方式は WinForms StatusStrip の layout が
+            // ToolStripItem.Width 直接 set を尊重せず Bounds.X=827 (strip width 825 超過) ではみ出る bug。
+            // 新設計: spacer 廃止、lblBackupStatus 自体に Spring=true (= 残り space 全埋め) +
+            // TextAlign=MiddleRight (= 右寄せ表示) で「lblStatus 右から strip 右端まで」を覆う 2 item 構成。
+            // 余分な layout 計算不要、PerformLayout / Width 直書きも不要。
             lblBackupStatus.Text = message ?? string.Empty;
             lblBackupStatus.ForeColor = color;
-            // (#170 followup round 2) Spring spacer 廃止 → 手動で spacer.Width を計算する方式に切替。
-            // 旧実装: lblStatusSpacer.Spring=true で残り space を greedy に消費 → AutoSize 後の
-            // lblBackupStatus expand 量を考慮せず spacer width 不変 → 合計 width が strip width を
-            // 超過して lblBackupStatus が右端外にはみ出す bug (= log の Bounds.X=827 vs strip Width=825 で確認)。
-            // 新実装: spacer.Spring=false (= Designer 側で設定済) + ここで explicit Width 計算で
-            // lblStatus と lblBackupStatus の自然 width を引いた残りを spacer に割当。
-            //   spacer.Width = max(0, statusStrip.Width - lblStatus.Width - lblBackupStatus.Width - margins)
-            int margin = 8; // 端の余白
-            int spacerWidth = statusStrip1.Width - lblStatus.Width - lblBackupStatus.Width - margin;
-            if (spacerWidth < 0) spacerWidth = 0;
-            lblStatusSpacer.Width = spacerWidth;
-            statusStrip1.PerformLayout();
-            statusStrip1.Refresh();
-            Logger.Info("[MainForm] UpdateBackupStatus: strip.Width=" + statusStrip1.Width
-                + " lblStatus.Width=" + lblStatus.Width
-                + " lblBackupStatus.Width=" + lblBackupStatus.Width
-                + " spacer.Width=" + spacerWidth
-                + " lblBackupStatus.Bounds=" + lblBackupStatus.Bounds);
+            Logger.Info("[MainForm] UpdateBackupStatus: text='" + (message ?? "") + "' lblBackupStatus.Bounds=" + lblBackupStatus.Bounds);
 
             // 既存 timer を破棄してから新規 (= 連続呼出時に古い timer が古い message を消すのを防ぐ)
             if (_backupStatusClearTimer != null)

@@ -19,7 +19,6 @@ namespace TonePrism.Manager
         {
             this.statusStrip1 = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
-            this.lblStatusSpacer = new System.Windows.Forms.ToolStripStatusLabel();
             this.lblBackupStatus = new System.Windows.Forms.ToolStripStatusLabel();
             this.tabControl1 = new System.Windows.Forms.TabControl();
             this.tabGame = new System.Windows.Forms.TabPage();
@@ -37,7 +36,6 @@ namespace TonePrism.Manager
             this.statusStrip1.ImageScalingSize = new System.Drawing.Size(20, 20);
             this.statusStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.lblStatus,
-            this.lblStatusSpacer,
             this.lblBackupStatus});
             this.statusStrip1.Location = new System.Drawing.Point(0, 628);
             this.statusStrip1.Name = "statusStrip1";
@@ -50,21 +48,15 @@ namespace TonePrism.Manager
             this.lblStatus.Size = new System.Drawing.Size(56, 17);
             this.lblStatus.Text = "準備完了";
             //
-            // lblStatusSpacer (左 zone と右 zone を分離するスペーサ)
-            // (#170 followup round 2) Spring=true は AutoSize neighbor の expand に追従しない bug があり、
-            // lblBackupStatus が strip 右端から押し出される (Bounds.X=827 vs strip Width=825)。
-            // Spring=false + AutoSize=false + 手動 Width 計算 (UpdateBackupStatus 内) で fix。
+            // lblBackupStatus (Spring=true で残り space を全部埋めて TextAlign=MiddleRight で右寄せ表示)
+            // (#170 followup round 2) 旧設計は spacer + AutoSize=true で 3 item 構成だったが、Spring spacer
+            // と AutoSize neighbor の expand に WinForms layout が追従しない仕様で右端外にはみ出した。
+            // 新設計は lblBackupStatus 自体に Spring=true を載せて「lblStatus 右から strip 右端まで」を埋め、
+            // 内部の text を MiddleRight で右寄せ、spacer 不要のシンプル 2 item 構成。
             //
-            this.lblStatusSpacer.AutoSize = false;
-            this.lblStatusSpacer.Name = "lblStatusSpacer";
-            this.lblStatusSpacer.Spring = false;
-            this.lblStatusSpacer.Size = new System.Drawing.Size(0, 17);
-            this.lblStatusSpacer.Text = "";
-            //
-            // lblBackupStatus (右固定 = transient backup 状態、Timer で自動消去)
-            //
-            this.lblBackupStatus.AutoSize = true;
+            this.lblBackupStatus.AutoSize = false;
             this.lblBackupStatus.Name = "lblBackupStatus";
+            this.lblBackupStatus.Spring = true;
             this.lblBackupStatus.Size = new System.Drawing.Size(0, 17);
             this.lblBackupStatus.Text = "";
             this.lblBackupStatus.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
@@ -168,7 +160,6 @@ namespace TonePrism.Manager
 
         private System.Windows.Forms.StatusStrip statusStrip1;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
-        private System.Windows.Forms.ToolStripStatusLabel lblStatusSpacer;
         private System.Windows.Forms.ToolStripStatusLabel lblBackupStatus;
         private System.Windows.Forms.TabControl tabControl1;
         private System.Windows.Forms.TabPage tabGame;
