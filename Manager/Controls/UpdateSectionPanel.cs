@@ -468,7 +468,7 @@ namespace TonePrism.Manager.Controls
                     MessageBox.Show(this,
                         "ダウンロードと展開が完了しました。\n\n" +
                         "これから Manager を一旦終了して、新しいバージョンで自動的に再起動します。\n" +
-                        "再起動には数秒〜数十秒かかる場合があります (= 共有フォルダ越しの場合は長くなります)。\n\n" +
+                        "再起動には数秒〜数十秒かかる場合があります。\n\n" +
                         "新しい Manager が起動したら、「✓ アップデート完了」のお知らせが表示されます。",
                         "Manager を再起動します",
                         MessageBoxButtons.OK,
