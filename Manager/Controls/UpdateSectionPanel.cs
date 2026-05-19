@@ -244,16 +244,28 @@ namespace TonePrism.Manager.Controls
                     // 信頼可。fallback chain: 1) local CHANGELOG → 2) cache.Latest.Body → 3) "ありません"。
                     string localBody = null;
                     string localHeading = null;
+                    string changelogPath = PathManager.BundleChangelogPath;
+                    Logger.Info("[UpdateSectionPanel] release notes 描画開始: changelogPath=" + (changelogPath ?? "(null)")
+                        + ", fileExists=" + (changelogPath != null && System.IO.File.Exists(changelogPath)));
                     try
                     {
-                        BundleEntry localBundle = ChangelogParser.TryReadLatestFromFile(PathManager.BundleChangelogPath);
-                        if (localBundle != null && !string.IsNullOrEmpty(localBundle.Body))
+                        BundleEntry localBundle = ChangelogParser.TryReadLatestFromFile(changelogPath);
+                        if (localBundle == null)
                         {
-                            localBody = localBundle.Body;
-                            string verStr = localBundle.Version != null
-                                ? "v" + localBundle.Version.ToString(3)
-                                : localBundle.RawVersionString ?? "";
-                            localHeading = "現在実行中: " + verStr;
+                            Logger.Warn("[UpdateSectionPanel] local CHANGELOG parse → BundleEntry=null");
+                        }
+                        else
+                        {
+                            int bodyLen = string.IsNullOrEmpty(localBundle.Body) ? 0 : localBundle.Body.Length;
+                            Logger.Info("[UpdateSectionPanel] local CHANGELOG parse OK: ver=" + (localBundle.RawVersionString ?? "(null)") + " bodyLen=" + bodyLen);
+                            if (!string.IsNullOrEmpty(localBundle.Body))
+                            {
+                                localBody = localBundle.Body;
+                                string verStr = localBundle.Version != null
+                                    ? "v" + localBundle.Version.ToString(3)
+                                    : localBundle.RawVersionString ?? "";
+                                localHeading = "現在実行中: " + verStr;
+                            }
                         }
                     }
                     catch (Exception localEx)
@@ -264,18 +276,23 @@ namespace TonePrism.Manager.Controls
                     if (!string.IsNullOrEmpty(localBody))
                     {
                         string bodyHtml = MarkdownRenderer.MarkdownToHtml(localBody);
-                        webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument(
+                        string doc = MarkdownRenderer.WrapAsDocument(
                             "<h1>" + System.Web.HttpUtility.HtmlEncode(localHeading) + "</h1>" + bodyHtml);
+                        Logger.Info("[UpdateSectionPanel] local CHANGELOG path で DocumentText 設定: docLen=" + doc.Length + ", bodyHtmlLen=" + (bodyHtml?.Length ?? 0));
+                        webReleaseNotes.DocumentText = doc;
                     }
                     else if (result.Latest != null && !string.IsNullOrEmpty(result.Latest.Body))
                     {
                         string bodyHtml = MarkdownRenderer.MarkdownToHtml(result.Latest.Body);
                         string heading = "現在実行中: " + (result.Latest.TagName ?? "");
-                        webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument(
+                        string doc = MarkdownRenderer.WrapAsDocument(
                             "<h1>" + System.Web.HttpUtility.HtmlEncode(heading) + "</h1>" + bodyHtml);
+                        Logger.Info("[UpdateSectionPanel] cache.Latest fallback path で DocumentText 設定: docLen=" + doc.Length);
+                        webReleaseNotes.DocumentText = doc;
                     }
                     else
                     {
+                        Logger.Warn("[UpdateSectionPanel] release notes: local 不在 + cache.Latest body も空、ありません表示");
                         webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument("<p>リリースノートはありません。</p>");
                     }
                 }
