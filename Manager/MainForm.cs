@@ -62,11 +62,11 @@ namespace TonePrism.Manager
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
         {
-            // (#170 followup round 2 review L-3) backup status auto-revert timer の cleanup を
-            // **FormClosing** (= Dispose 前、message pump 走行中) に移動。
-            // 旧実装は FormClosed (= Dispose 後、message pump 停止後) に置いており、その時点では Tick が
-            // dispatch されないため race window は実質微小だった。FormClosing 内で Stop+Dispose することで
-            // 「ユーザーが ✕ 押下 → FormClosing 発火 → Timer 停止 → Dispose 順」を明示的に保証する。
+            // (#170 followup round 2 review L-3 + round 3 review L-1) backup status auto-revert timer の
+            // cleanup を **FormClosing** (= Dispose 前、message pump 走行中) で実行。
+            // 別 handler が `e.Cancel=true` を set した場合 (= 将来「保存して閉じますか?」confirm dialog 追加時)
+            // は timer を生かしたまま return、form が継続生存して `UpdateBackupStatus` 呼出時に新 timer 作成可能。
+            if (e.Cancel) return;
             try
             {
                 if (_backupStatusClearTimer != null)
@@ -807,9 +807,12 @@ namespace TonePrism.Manager
 
         /// <summary>
         /// (#170 followup round 2 review M-2) status bar 右 zone 用の text truncation helper。
-        /// strip clientWidth (= MainForm ClientSize=1100 baseline) - lblStatus (= 動的) を超えると chevron に
-        /// 流れて user から見えなくなる path への defense。80 文字を超えたら先頭 + 中央省略 (`...`) + 末尾 で
-        /// 元 message の特徴 (= ファイル名 / error 種別) を残しつつ抑制。
+        /// 経験則上 80 chars で過半数の典型 message (= 自動 backup 失敗 SQLite error / 長 path) を救い、
+        /// 極端 overflow は WinForms StatusStrip の chevron に逃げる設計。
+        ///
+        /// 注: 厳密な pixel 幅判定はしない (= 全角混じり / window resize / DPI scaling で精度差あり)。
+        /// 完全な message は呼出元 (e.g., `StartAutoBackupIfDue` の `Logger.Error`) で別途 log に残るため
+        /// UI で truncated でも debug 可能、本 helper は user 視覚的 alarm 用 carry-best-effort と位置付け。
         /// </summary>
         private static string TruncateForStatusBar(string message)
         {

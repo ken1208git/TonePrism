@@ -200,7 +200,6 @@ namespace TonePrism.Manager.Controls
             this.lblBackupDestHint.Text = "空欄にするとデフォルト（DB ファイルの隣の backups/）。指定先には toneprism_yyyyMMdd_HHmmss.db が直配置されます";
             //
             // chkBackupAutoEnabled (自動バックアップ有効/無効)
-            // (#170 followup round 2 review L-1) AutoSize=true なので explicit Size 行は dead → 削除。
             //
             this.chkBackupAutoEnabled.AutoSize = true;
             this.chkBackupAutoEnabled.Checked = true;

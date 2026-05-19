@@ -35,6 +35,18 @@ namespace TonePrism.Manager.Services
         /// 自動バックアップを走らせるべきかチェック（参照のみ、副作用なし）。
         /// 実際の実行時には RunAutoBackupIfDue を使う（lease 取得を含む）。
         /// </summary>
+        /// <summary>
+        /// (#170 followup round 3 review L-4) 「自動バックアップが UI 上で有効か」の判定 SoT helper。
+        /// `IsAutoBackupDue` と `RunAutoBackupIfDue` の両方で参照、`"false"` 厳密一致 (case-insensitive) で
+        /// disabled、それ以外 (空 / "true" / unknown) はすべて enabled 扱い。
+        /// 旧実装は両関数で同じ判定 string を重複記述しており、将来 enum 化等で片方更新漏れの drift 路があった。
+        /// </summary>
+        private bool IsAutoBackupEnabled()
+        {
+            string enabledStr = _settingsRepo.GetString(SettingsKeys.BackupAutoEnabled, "true");
+            return !string.Equals(enabledStr, "false", StringComparison.OrdinalIgnoreCase);
+        }
+
         public bool IsAutoBackupDue()
         {
             // (#170 followup round 2 review #1+#2) 自動バックアップ無効化 checkbox。UI 設定タブから OFF
@@ -45,9 +57,8 @@ namespace TonePrism.Manager.Services
             // IsSkipped 分岐は no-op、indicator が「実行中...」のまま永久残留する bug があった。
             // 本 fix で IsAutoBackupDue 側も同 gate を持たせて「Due だけど skip」の不整合 path を構造閉鎖、
             // CHANGELOG `## Manager v0.13.0` の「IsAutoBackupDue / RunAutoBackupIfDue 両方 skip」記述とも
-            // 整合させる。
-            string enabledStr = _settingsRepo.GetString(SettingsKeys.BackupAutoEnabled, "true");
-            if (string.Equals(enabledStr, "false", StringComparison.OrdinalIgnoreCase)) return false;
+            // 整合させる。判定 string は round 3 L-4 で IsAutoBackupEnabled helper に集約。
+            if (!IsAutoBackupEnabled()) return false;
             int intervalHours = _settingsRepo.GetInt32("backup_auto_interval_hours", 24);
             long lastBackupAt = _settingsRepo.GetInt64("last_backup_at", 0);
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -72,8 +83,8 @@ namespace TonePrism.Manager.Services
         public BackupResult RunAutoBackupIfDue(IProgress<ProgressInfo> progress, CancellationToken token)
         {
             // (#170 followup round 2) 自動バックアップ無効化 checkbox。OFF なら起動時 trigger を skip。
-            string enabledStr = _settingsRepo.GetString(SettingsKeys.BackupAutoEnabled, "true");
-            if (string.Equals(enabledStr, "false", StringComparison.OrdinalIgnoreCase))
+            // (round 3 L-4) 判定 string は IsAutoBackupEnabled helper に集約。
+            if (!IsAutoBackupEnabled())
             {
                 return BackupResult.Skipped("自動バックアップが無効に設定されています (設定タブから有効化可能)");
             }

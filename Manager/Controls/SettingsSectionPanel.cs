@@ -212,6 +212,11 @@ namespace TonePrism.Manager.Controls
         /// (#170 followup round 2) 自動バックアップ checkbox の状態に応じて interval section の
         /// control を enable/disable する。OFF 時は user 視点で「設定しても無効化されている」のが明確になる。
         /// 保存先 / 保持世代数は手動バックアップでも使うため対象外。
+        ///
+        /// (round 3 review L-1) `chkBackupAutoEnabled` は `AutoSize=true` で natural width 取得、明示
+        /// `Size=new Size(200, 19)` 行は Designer から削除 (= AutoSize=true 時は ignored)。
+        /// 経緯コメントは Designer.cs 側ではなく本 .cs 側に保持 (= Designer は VS WinForms Designer の
+        /// regenerate で section コメントが失われる可能性があるため、設計判断は非 Designer ファイルに集約)。
         /// </summary>
         private void ApplyAutoBackupEnabledUi(bool enabled)
         {
@@ -245,10 +250,20 @@ namespace TonePrism.Manager.Controls
             catch (Exception ex)
             {
                 Logger.Warn("[SettingsSectionPanel] BackupAutoEnabled 書込失敗: " + ex.Message);
-                // (#170 followup round 2 review M-4) UI 値を rollback (= DB 状態に再同期、UI 内部矛盾を解消)。
+                // (#170 followup round 2 review M-4 + round 3 review M-2) UI 値を rollback (= DB 状態に
+                // 再同期、UI 内部矛盾を解消)。SetString 失敗時 + Apply 失敗時 (極稀: child control disposed 等)
+                // の両方で発火、checkbox と interval section の両方を rollback 後の値 (!newValue) に
+                // 揃えて UI 内部矛盾 (checkbox / interval section の disable 状態の片寄せ) を完全閉鎖。
                 chkBackupAutoEnabled.CheckedChanged -= ChkBackupAutoEnabled_CheckedChanged;
                 chkBackupAutoEnabled.Checked = !newValue;
                 chkBackupAutoEnabled.CheckedChanged += ChkBackupAutoEnabled_CheckedChanged;
+                try { ApplyAutoBackupEnabledUi(!newValue); }
+                catch (Exception applyEx)
+                {
+                    // ApplyAutoBackupEnabledUi 自体が throw する path (= 全 control が dispose 済の極稀 race) は
+                    // form 全体が破棄中の状態、UI 内部矛盾を完全に直すのは不可能。Warn だけ残して continue。
+                    Logger.Warn("[SettingsSectionPanel] BackupAutoEnabled rollback の Apply で例外 (= form 破棄中の race の可能性、log のみ残して諦め): " + applyEx.Message);
+                }
                 MessageBox.Show("自動バックアップ設定の保存に失敗しました: " + ex.Message,
                     "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }

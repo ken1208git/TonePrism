@@ -14,9 +14,12 @@ namespace TonePrism.Manager.Services
     ///   → セッション単位でファイルが分かれるので書き込み競合・行間 interleaving が発生しない
     /// - INFO / WARN / ERROR の 3 段階
     /// - Console.SetOut フックで既存 Console.WriteLine も自動的にファイルへ流す (INFO 扱い)
-    /// - 古いログファイル削除は `CleanupOldLogs(int retentionDays)` を caller (MainForm) が
-    ///   DB 初期化後に明示呼出する (= Logger 自体は SettingsRepository に依存しない設計)。
-    ///   旧実装は `Initialize` 内で 30 日 hardcode 削除していたが、(#170 followup) で UI 設定化。
+    /// - 古いログファイル削除は `CleanupOldLogs(int retentionDays)` を caller (= Program.Main) が
+    ///   `Initialize` 直後に明示呼出する (= Logger 自体は SettingsRepository に依存しない設計)。
+    ///   retention 値は Program.Main 側で SQLite 直接 read 経由で取得 (DB 不在時は default 30 日 fallback)。
+    ///   旧実装は `Initialize` 内で 30 日 hardcode 削除 + round 1 では MainForm で呼出していたが、
+    ///   後者は dbReady=false 等の early-return path で到達不能になる regression があり、
+    ///   round 3 H-1 fix で Program.Main 経由に再移動 (= 全起動 path で確実に走る)。
     /// - スレッドセーフ (内部 lock。lock は同一スレッドで再入可能)
     /// - 自身の例外で無限ループ・アプリ起動阻害を起こさない (try-catch で握り潰し)
     ///
@@ -88,9 +91,12 @@ namespace TonePrism.Manager.Services
 
                     // 起動イベントは初期化完了後に書く
                     WriteInternal("INFO", $"[Logger] Manager 起動 (PC={Environment.MachineName})");
-                    // (#170 followup) CleanupOldLogs は SettingsRepository 経由で retention 値を読むため、
-                    // DB が初期化された後に MainForm から `Logger.CleanupOldLogs(days)` で明示呼出する
-                    // 設計に変更。本 Initialize は file open + Console hook + 起動 trail のみに責務を絞る。
+                    // (#170 followup round 3 H-1) CleanupOldLogs は Initialize の責務外。
+                    // Program.Main が `Logger.Initialize(customLogDir)` 直後に SQLite 直接 read で
+                    // retention 値を取得して `Logger.CleanupOldLogs(days)` を呼出する設計
+                    // (= dbReady=false / SessionConflictDialog Cancel 等の early-return path でも
+                    // 確実に走るよう round 3 で MainForm 経路から Program.Main 経路へ再移動)。
+                    // 本 Initialize は file open + Console hook + 起動 trail のみに責務を絞る。
                 }
                 catch (Exception ex)
                 {
@@ -233,11 +239,19 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>
-        /// `retentionDays` 日より古い manager_*.log を削除する。MainForm の DB 初期化後に 1 回呼ぶ。
+        /// `retentionDays` 日より古い manager_*.log を削除する。Program.Main が
+        /// `Logger.Initialize(customLogDir)` 直後に 1 回呼ぶ。
         ///
-        /// (#170 followup) 旧実装は `Initialize` 内で 30 日 hardcode、本 followup で UI 設定化に伴い
-        /// public + parametrized 化。caller が `SettingsRepository.GetInt32(SettingsKeys.LogRetentionDays,
-        /// SettingsKeys.DefaultLogRetentionDays)` の値を渡す。retentionDays &lt;= 0 / Logger 未初期化時は no-op。
+        /// (#170 followup round 3 H-1) 呼出元と timing の確定経緯:
+        /// - 旧 (本 PR 以前): `Initialize` 内で 30 日 hardcode + 自動実行
+        /// - round 1: public + parametrized 化、`MainForm.ContinueLoadAfterSessionCheck` で
+        ///   `SettingsRepository.GetInt32(SettingsKeys.LogRetentionDays, DefaultLogRetentionDays)` 経由呼出
+        /// - round 3 H-1: dbReady=false / SessionConflictDialog Cancel 等の early-return path で
+        ///   到達不能になる regression を解消するため、Program.Main で **SQLite 直接 read**
+        ///   (`TryReadLogRetentionDays`) → `CleanupOldLogs` 呼出に再移動 (= Logger 不変条件
+        ///   「SettingsRepository に依存しない」を維持しつつ全起動 path で確実に走る)
+        ///
+        /// retentionDays &lt;= 0 / Logger 未初期化時は no-op。
         /// </summary>
         public static void CleanupOldLogs(int retentionDays)
         {
