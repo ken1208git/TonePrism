@@ -87,7 +87,12 @@ namespace TonePrism.Manager.Services
                     FileName = updaterExe,
                     Arguments = argLine,
                     UseShellExecute = false,
-                    CreateNoWindow = false,           // Updater は console window を持つ短命プロセス、ユーザーに見える方が安心
+                    // (#170 followup) `CreateNoWindow = true`。旧設計は「Updater console を visible にして
+                    // user 安心感」だったが、実態は `RedirectStandardOutput=true` で stdout/stderr が pipe に
+                    // 吸われて visible console が常に empty (= 黒い空 box が表示されるだけで「ウイルスかな?」
+                    // UX 悪化の温床) だった。Updater output は (a) `<install>/logs/updater/*.log` + (b) Manager
+                    // log への redirect 経由で完全 trace 可能、情報損失ゼロで hidden 化。
+                    CreateNoWindow = true,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     StandardOutputEncoding = Encoding.UTF8,

@@ -1653,6 +1653,42 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.13.1] - 2026-05-19
+
+#### Added (#170 followup — アップデート時の再起動予告 dialog)
+
+「今すぐアップデート」flow の ProcessingDialog (= zip DL + staging + Updater spawn) 完了直後、
+`Application.Exit` 呼出前に新 `MessageBox` を追加して **Manager 再起動を予告**:
+
+> ダウンロードと展開が完了しました。
+> これから Manager を一旦終了して、新しいバージョンで自動的に再起動します。
+> 再起動には数秒〜数十秒かかる場合があります (= 共有フォルダ越しの場合は長くなります)。
+>
+> 新しい Manager が起動したら、「✓ アップデート完了」のお知らせが表示されます。
+
+旧実装 (= v0.13.0 以前) は ProcessingDialog 閉じた直後に Manager が silent に消える挙動で、
+user 視点で「あれ?何が起きた?」になりやすかった。本 dialog で「これから一旦終了 → 自動再起動」を
+明示してから user の OK で確定終了する flow に変更、再起動完了後の sentinel 経由
+「✓ アップデート完了」 dialog (= Bundle v0.4.0 から存在) と組み合わせて開始 → 終了 → 完了の
+**3 段階通知** を user に提供。
+
+#### Changed (#170 followup — Updater spawn 時の空 console window を hidden 化)
+
+`UpdaterClient.cs` の `CreateNoWindow` を `false` → `true` に変更。
+
+旧設計は「Updater console を visible にして user 安心感 + 進捗 visible」だったが、実態は
+`RedirectStandardOutput=true` で stdout/stderr が Manager の pipe に吸われて
+**visible console が常に empty** (= 黒い空 box が表示されるだけで「ウイルスかな?」「強制終了したい」
+UX 悪化の温床) だった。「visible 設定だが output は redirect されて見えない」という矛盾した状態を fix。
+
+Updater output は以下で完全 trace 可能、情報損失ゼロ:
+- (a) file log `<install>/logs/updater/updater_<PC>_<datetime>.log`
+- (b) Manager の `OutputDataReceived` / `ErrorDataReceived` 経由 Logger.Info / Logger.Warn 出力
+
+bump 判断: UI 改善 (= 既存 flow に dialog 1 つ追加 + Updater spawn の `CreateNoWindow` 値変更)、
+behavior の core path には影響なし (= Updater logic / file ops / restart 流れは無変更)、
+SemVer 上 patch (v0.13.0 → v0.13.1)。
+
 ### [Manager v0.13.0] - 2026-05-19
 
 #### Changed (#170 followup round 2 — review 指摘対応)
