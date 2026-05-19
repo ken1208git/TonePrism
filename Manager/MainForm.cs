@@ -40,7 +40,9 @@ namespace TonePrism.Manager
             _logSectionPanel = new LogSectionPanel { Dock = DockStyle.Fill };
             _updateSectionPanel = new UpdateSectionPanel { Dock = DockStyle.Fill };
 
-            _gameSectionPanel.StatusChanged += (msg) => UpdateStatusBar(msg);
+            // (#170 followup) GameSectionPanel から送られる msg は常に「ゲーム数: N 件」で UpdateStatusBar()
+            // の default と同義のため引数なし版に統一。旧 signature `UpdateStatusBar(string)` は廃止。
+            _gameSectionPanel.StatusChanged += (msg) => UpdateStatusBar();
             _settingsSectionPanel.DatabaseReset += OnDatabaseReset;
             _backupSectionPanel.DatabaseChanged += OnDatabaseRestored;
 
@@ -221,7 +223,8 @@ namespace TonePrism.Manager
                 // (round 1 L-3) DB 未初期化 path では session service も起動しない (= heartbeat 不在で
                 // form を user 手動 × で閉じるまで no-op、FormClosed で _sessionService=null なので
                 // Shutdown も skip される clean path)。
-                UpdateStatusBar("データベース未初期化");
+                // (#170 followup) DB 未初期化は左 zone 占有 (= ゲーム数取得不可、データベース状態を伝える)
+                lblStatus.Text = "データベース未初期化";
                 return;
             }
 
@@ -621,7 +624,8 @@ namespace TonePrism.Manager
                     return;
                 }
 
-                UpdateStatusBar("自動バックアップを実行中...");
+                // (#170 followup) 右 zone (lblBackupStatus) で transient 表示、左 zone のゲーム数は維持。
+                UpdateBackupStatus("自動バックアップ実行中...", System.Drawing.Color.DarkBlue, autoRevert: false);
                 BackupResult result = await Task.Run(() =>
                     dbManager.BackupService.RunAutoBackupIfDue(null, CancellationToken.None));
 
@@ -629,19 +633,23 @@ namespace TonePrism.Manager
 
                 if (result.IsSuccess)
                 {
-                    UpdateStatusBar($"自動バックアップ完了: {System.IO.Path.GetFileName(result.FilePath)}");
+                    UpdateBackupStatus(
+                        $"✓ 自動バックアップ完了: {System.IO.Path.GetFileName(result.FilePath)}",
+                        System.Drawing.Color.DarkGreen, autoRevert: true);
                     _backupSectionPanel.RefreshDisplay();
                 }
                 else if (result.IsFailed)
                 {
-                    UpdateStatusBar($"自動バックアップ失敗: {result.Message}");
+                    UpdateBackupStatus($"✗ 自動バックアップ失敗: {result.Message}",
+                        System.Drawing.Color.DarkRed, autoRevert: true);
                 }
                 // IsSkipped はそのまま（他PCで実行済み等、特に通知不要）
             }
             catch (Exception ex)
             {
                 Logger.Error("[MainForm] StartAutoBackupIfDue エラー", ex);
-                UpdateStatusBar($"自動バックアップエラー: {ex.Message}");
+                UpdateBackupStatus($"✗ 自動バックアップエラー: {ex.Message}",
+                    System.Drawing.Color.DarkRed, autoRevert: true);
             }
         }
 
@@ -721,11 +729,62 @@ namespace TonePrism.Manager
             }
         }
 
-        private void UpdateStatusBar(string additionalInfo = null)
+        // (#170 followup) status bar の左 / 右 zone を分離。
+        //   左 (lblStatus): データベース接続状態 + ゲーム数 = 永続表示
+        //   右 (lblBackupStatus): 自動バックアップの transient 状態 = autoRevert=true なら 7 秒で消える
+        // 旧実装は 1 ラベル 1 関数で、auto backup message が「ゲーム数」を上書きして元情報が一時消失していた。
+        private System.Windows.Forms.Timer _backupStatusClearTimer;
+
+        private void UpdateStatusBar()
         {
+            if (dbManager == null) return;
             string dbStatus = dbManager.DatabaseExists() ? "接続済み" : "未接続";
-            string gameInfo = additionalInfo ?? $"ゲーム数: {_gameSectionPanel.GameCount}件";
+            string gameInfo = $"ゲーム数: {_gameSectionPanel.GameCount}件";
             lblStatus.Text = $"データベース: {dbStatus} | {gameInfo}";
+        }
+
+        /// <summary>
+        /// (#170 followup) status bar の右 zone (`lblBackupStatus`) に transient な backup 状態を表示する。
+        /// 左 zone (`lblStatus` の「データベース | ゲーム数」) は変えない (= 旧 UpdateStatusBar(string) の
+        /// 上書き問題への対処)。
+        ///
+        /// `autoRevert=true` で渡すと 7 秒後に自動 clear する Timer を仕掛ける (= 完了 / 失敗 message が
+        /// 永続表示で stale になるのを防ぐ)。`autoRevert=false` は「実行中...」のような完了まで残したい
+        /// 状態用、次の `UpdateBackupStatus` 呼出か手動 clear まで残る。
+        ///
+        /// Accessibility: color 情報を text prefix で補強する (`✓` / `✗`)、screen reader で color を
+        /// 識別できない user 向けの fallback。
+        /// </summary>
+        private void UpdateBackupStatus(string message, System.Drawing.Color color, bool autoRevert)
+        {
+            lblBackupStatus.Text = message ?? string.Empty;
+            lblBackupStatus.ForeColor = color;
+
+            // 既存 timer を破棄してから新規 (= 連続呼出時に古い timer が古い message を消すのを防ぐ)
+            if (_backupStatusClearTimer != null)
+            {
+                _backupStatusClearTimer.Stop();
+                _backupStatusClearTimer.Dispose();
+                _backupStatusClearTimer = null;
+            }
+            if (autoRevert && !string.IsNullOrEmpty(message))
+            {
+                _backupStatusClearTimer = new System.Windows.Forms.Timer();
+                _backupStatusClearTimer.Interval = 7000;
+                _backupStatusClearTimer.Tick += BackupStatusClearTimer_Tick;
+                _backupStatusClearTimer.Start();
+            }
+        }
+
+        private void BackupStatusClearTimer_Tick(object sender, EventArgs e)
+        {
+            lblBackupStatus.Text = string.Empty;
+            if (_backupStatusClearTimer != null)
+            {
+                _backupStatusClearTimer.Stop();
+                _backupStatusClearTimer.Dispose();
+                _backupStatusClearTimer = null;
+            }
         }
 
         // (#178 (b)) アップデート完了通知 dialog。invariant:

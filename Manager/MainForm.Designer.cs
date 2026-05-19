@@ -19,6 +19,8 @@ namespace TonePrism.Manager
         {
             this.statusStrip1 = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
+            this.lblStatusSpacer = new System.Windows.Forms.ToolStripStatusLabel();
+            this.lblBackupStatus = new System.Windows.Forms.ToolStripStatusLabel();
             this.tabControl1 = new System.Windows.Forms.TabControl();
             this.tabGame = new System.Windows.Forms.TabPage();
             this.tabStore = new System.Windows.Forms.TabPage();
@@ -34,17 +36,33 @@ namespace TonePrism.Manager
             //
             this.statusStrip1.ImageScalingSize = new System.Drawing.Size(20, 20);
             this.statusStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.lblStatus});
+            this.lblStatus,
+            this.lblStatusSpacer,
+            this.lblBackupStatus});
             this.statusStrip1.Location = new System.Drawing.Point(0, 628);
             this.statusStrip1.Name = "statusStrip1";
             this.statusStrip1.Size = new System.Drawing.Size(1100, 22);
             this.statusStrip1.TabIndex = 0;
             //
-            // lblStatus
+            // lblStatus (左固定 = データベース + ゲーム数、永続)
             //
             this.lblStatus.Name = "lblStatus";
             this.lblStatus.Size = new System.Drawing.Size(56, 17);
             this.lblStatus.Text = "準備完了";
+            //
+            // lblStatusSpacer (Spring=true で中央伸縮、左 zone と右 zone を分離)
+            //
+            this.lblStatusSpacer.Name = "lblStatusSpacer";
+            this.lblStatusSpacer.Spring = true;
+            this.lblStatusSpacer.Size = new System.Drawing.Size(0, 17);
+            this.lblStatusSpacer.Text = "";
+            //
+            // lblBackupStatus (右固定 = transient backup 状態、Timer で自動消去)
+            //
+            this.lblBackupStatus.Name = "lblBackupStatus";
+            this.lblBackupStatus.Size = new System.Drawing.Size(0, 17);
+            this.lblBackupStatus.Text = "";
+            this.lblBackupStatus.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             //
             // tabControl1
             //
@@ -145,6 +163,8 @@ namespace TonePrism.Manager
 
         private System.Windows.Forms.StatusStrip statusStrip1;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
+        private System.Windows.Forms.ToolStripStatusLabel lblStatusSpacer;
+        private System.Windows.Forms.ToolStripStatusLabel lblBackupStatus;
         private System.Windows.Forms.TabControl tabControl1;
         private System.Windows.Forms.TabPage tabGame;
         private System.Windows.Forms.TabPage tabStore;
