@@ -28,7 +28,13 @@ namespace TonePrism.Manager.Services
             RegexOptions.Compiled);
 
         // INFO 行のうち absorb 対象とする milestone marker pattern (大小無視)。
-        // 既存 Updater の Logger.Info callsite を網羅:
+        // 高レベル境界 (Step ヘッダ + 完了 marker) のみを拾う設計、内側 file replace の中間進捗
+        // (= FileReplacer.cs の `[Replace 1/2]` / `[Replace 2/2]` rename 段 + copy 段) は intentionally 除外:
+        //   - 「rename か copy か」の段階別失敗判別が必要な場合は ERROR/WARN 行で十分判別可能 (= 各段の失敗
+        //     は Logger.Error / Logger.Warn で出る、Step 2/4 + 完了 marker + ERROR/WARN の組合せで原因特定可)
+        //   - 成功 path で `[Replace N/M]` を absorb すると 1 update につき 2 行増えて Manager log を冗長化
+        //   - 深掘り debug は Updater 自身 file (`logs/updater/*.log`) を直接読む運用 (3 component 収束方針)
+        // 対象:
         //   - `Updater 起動` / `Updater 終了` (Logger 自身が出すセッション境界)
         //   - `[Step N/M]` Step 1/2/3/4 のヘッダ (Program.cs)
         //   - `Updater 全工程完了` (= 最終成功)

@@ -34,13 +34,21 @@ namespace TonePrism.Manager.Controls
         private List<LogFileEntry> _allEntries = new List<LogFileEntry>();
         private LogFileEntry _currentEntry; // 現在描画中のエントリ (フィルタ変更時の再描画用)
         // tab で選択中の component (`launcher` / `manager` / `monitor`)。TabPage.Name と一致させる。
-        // 起動 default は Designer の SelectedIndex=0 (= Launcher tab) と合わせる。
+        // 値は constructor で Designer の初期選択 tab から derive する (= Designer の TabPage 順序入替で
+        // hidden drift が起きないよう、`SelectedIndex=0` の hardcode と field default の二重管理を避ける)。
+        // 防御 fallback 値の `"launcher"` は Designer が壊れた場合の last resort、通常 path は通らない。
         private string _currentComponent = "launcher";
 
         public LogSectionPanel()
         {
             InitializeComponent();
             ConfigureGrid();
+            // Designer 上の初期選択 tab を SoT として derive。tabComponent が null / SelectedTab 不在の
+            // 異常 path は field default ("launcher") にフォールバック。
+            if (tabComponent != null && tabComponent.SelectedTab != null)
+            {
+                _currentComponent = tabComponent.SelectedTab.Name;
+            }
         }
 
         public void Initialize(string projectRoot)
@@ -451,7 +459,10 @@ namespace TonePrism.Manager.Controls
         private class LogFileEntry
         {
             public string FilePath;
-            public string Component;     // "Manager" / "Launcher"
+            // TryParseFileName が返す値: "Manager" / "Launcher" / "Monitor"。
+            // 現状の tab UI は Launcher / Manager の 2 tab のみで Monitor file は scan 対象に入らないが、
+            // FileNameRegex 側は monitor を forward-compat で許容しているため値域は 3 値の可能性を持つ。
+            public string Component;
             public string PcName;
             public DateTime StartedAt;
             public DateTime LastWriteTime;
