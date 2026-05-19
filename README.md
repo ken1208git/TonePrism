@@ -93,4 +93,4 @@ git clone https://github.com/ken1208git/TonePrism.git
 
 MIT License
 
-Copyright (c) 2025-2026 Kenshiro Kuroga (Osaka Prefectural Toneyama Upper Secondary School PC Club)
+Copyright (c) 2025-2026 Kenshiro Kuroga - TonePrism Project (Osaka Prefectural Toneyama Upper Secondary School PC Club)
