@@ -2,7 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Threading;
 
-namespace GCTonePrism.Updater
+namespace TonePrism.Updater
 {
     /// <summary>
     /// `WaitForManagerExit` の戻り値 (round 4 H-1 対応)。
@@ -38,13 +38,13 @@ namespace GCTonePrism.Updater
     /// **wait/kill 対象の決定** (Codex round 2 P1 #1 対応):
     ///   - `callerPid > 0` (Manager UI から `--caller-pid` 指定) → PID-only wait/kill
     ///     (`Process.GetProcessById(pid)` で対象を絞る、同 PC の他 install Manager を巻き添えにしない)
-    ///   - `callerPid == -1` (未指定) → system-wide fallback (`GetProcessesByName("GCTonePrism_Manager")`)
+    ///   - `callerPid == -1` (未指定) → system-wide fallback (`GetProcessesByName("TonePrism_Manager")`)
     ///     (round 1 L5 で acknowledged、校内 1 PC 1 install 前提なら実害なしの fallback)
     ///   Phase 4 で Manager UI が `Process.GetCurrentProcess().Id` を渡す前提。
     /// </summary>
     internal static class ProcessWaiter
     {
-        private const string ManagerProcessName = "GCTonePrism_Manager";
+        private const string ManagerProcessName = "TonePrism_Manager";
         private const int PollIntervalMs = 500;
         // 待機継続ログを N iter ごとに 1 回出す (PollIntervalMs × LogEveryNIter = 実 interval)。
         // 名前付き定数化 (シニアレビュー round 2 L4) で「PollIntervalMs を変えるとログ間隔も連動して
@@ -202,11 +202,11 @@ namespace GCTonePrism.Updater
         ///      Windows は exit 済プロセスの PID を別プロセスに再利用する。Manager (PID=1234) が Updater
         ///      spawn 直後に exit → OS が 1234 を別プロセス (例: notepad) に割当 → `GetProcessById(1234)`
         ///      が notepad を返し Manager と誤認 → `--force-kill` 指定時に notepad を kill する silent
-        ///      danger があった。`ProcessName == "GCTonePrism_Manager"` で「異名 exe による PID 再利用」を排除。
+        ///      danger があった。`ProcessName == "TonePrism_Manager"` で「異名 exe による PID 再利用」を排除。
         ///   2. **MainModule.FileName 検証** (round 8 Codex P2-1):
         ///      ProcessName だけでは「**同名** exe (= 同 PC 別 install / 別 session の Manager)」による PID
-        ///      再利用を区別できなかった。例: D:\Install_A\Manager\GCTonePrism_Manager.exe (caller、exit) →
-        ///      OS が PID を E:\Install_B\Manager\GCTonePrism_Manager.exe (別 install で同時稼働中) に再割当
+        ///      再利用を区別できなかった。例: D:\Install_A\Manager\TonePrism_Manager.exe (caller、exit) →
+        ///      OS が PID を E:\Install_B\Manager\TonePrism_Manager.exe (別 install で同時稼働中) に再割当
         ///      → ProcessName 一致で誤認 → `--force-kill` 指定時に E:\ 側を kill する silent danger。
         ///      `MainModule.FileName` を `expectedExePath` (Program.cs が `--restart-exe` を渡す) と比較して
         ///      install path 単位で識別を強化。`expectedExePath` が null/empty なら本検証は skip (後方互換)。
@@ -231,7 +231,7 @@ namespace GCTonePrism.Updater
                 }
 
                 // [1] ProcessName 検証 (PID 再利用での異名 exe 誤認防止、round 3 H1)。
-                // `.exe` 拡張子は ProcessName には含まれないので比較値は "GCTonePrism_Manager"。
+                // `.exe` 拡張子は ProcessName には含まれないので比較値は "TonePrism_Manager"。
                 string actualName;
                 try
                 {

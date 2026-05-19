@@ -8,7 +8,7 @@
 // </auto-generated>
 //------------------------------------------------------------------------------
 
-namespace GCTonePrism.Manager.Properties
+namespace TonePrism.Manager.Properties
 {
 
 

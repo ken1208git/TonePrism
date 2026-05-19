@@ -9,9 +9,9 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
-using GCTonePrism.Manager.Models;
+using TonePrism.Manager.Models;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// GitHub Releases API (`https://api.github.com/repos/<owner>/<repo>/releases/...`) のクライアント。
@@ -31,7 +31,7 @@ namespace GCTonePrism.Manager.Services
         // 学校サーバー / 校内 PC からも見える public repo。固定で hardcode。
         // 将来 fork や transfer がある場合は本 const を変更するだけで対応可能。
         public const string Owner = "ken1208git";
-        public const string Repo = "GCTonePrism";
+        public const string Repo = "TonePrism";
 
         private const string ApiBase = "https://api.github.com";
         private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(15);
@@ -60,7 +60,7 @@ namespace GCTonePrism.Manager.Services
             }
             catch { }
             // GitHub API は UA header を必須要求する。`Manager` ascii で UA を構成。
-            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("GCTonePrism-Manager", ver));
+            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("TonePrism-Manager", ver));
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
             client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
             return client;
@@ -199,7 +199,7 @@ namespace GCTonePrism.Manager.Services
                 info.PublishedAt = publishedAt;
             }
 
-            // assets[] から `GCTonePrism_v<X.Y.Z>.zip` を探す。
+            // assets[] から `TonePrism_v<X.Y.Z>.zip` を探す。
             //
             // JavaScriptSerializer の nested array 表現は .NET version / context で `object[]` /
             // `ArrayList` / `List<object>` のいずれかになる仕様揺らぎがある (実機検証で
@@ -228,7 +228,7 @@ namespace GCTonePrism.Manager.Services
                         }
                         string name = AsString(assetDict, "name");
                         if (string.IsNullOrEmpty(name)) continue;
-                        if (!name.StartsWith("GCTonePrism_v", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!name.StartsWith("TonePrism_v", StringComparison.OrdinalIgnoreCase)) continue;
                         if (!name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) continue;
                         info.ZipAssetUrl = AsString(assetDict, "browser_download_url");
                         info.ZipSizeBytes = AsLong(assetDict, "size");

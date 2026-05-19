@@ -1,4 +1,4 @@
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     partial class MainForm
     {
@@ -132,7 +132,7 @@ namespace GCTonePrism.Manager
             this.Controls.Add(this.statusStrip1);
             this.Name = "MainForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-            this.Text = "ゲームセンターTONE Prism 管理ソフト";
+            this.Text = "TonePrism 管理ソフト";
             this.Load += new System.EventHandler(this.MainForm_Load);
             this.statusStrip1.ResumeLayout(false);
             this.statusStrip1.PerformLayout();

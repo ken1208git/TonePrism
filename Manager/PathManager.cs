@@ -1,8 +1,8 @@
 using System;
 using System.IO;
-using GCTonePrism.Manager.Services;
+using TonePrism.Manager.Services;
 
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     /// <summary>
     /// アプリケーションのファイルパスを管理するクラス
@@ -39,7 +39,7 @@ namespace GCTonePrism.Manager
         /// </summary>
         public static string DatabasePath
         {
-            get { return Path.Combine(BaseDirectory, "prism.db"); }
+            get { return Path.Combine(BaseDirectory, "toneprism.db"); }
         }
 
         // ===== Phase 4 (#108) update flow 用 path 拡張 =====
@@ -71,10 +71,10 @@ namespace GCTonePrism.Manager
             get { return Path.Combine(CompanionsDir, "Updater"); }
         }
 
-        /// <summary>Updater 実行 exe (`<install>/Companions/Updater/GCTonePrism_Updater.exe`)。</summary>
+        /// <summary>Updater 実行 exe (`<install>/Companions/Updater/TonePrism_Updater.exe`)。</summary>
         public static string UpdaterExePath
         {
-            get { return Path.Combine(UpdaterDir, "GCTonePrism_Updater.exe"); }
+            get { return Path.Combine(UpdaterDir, "TonePrism_Updater.exe"); }
         }
 
         /// <summary>Updater のログ出力先 (`<install>/logs/updater/`)。SPEC §3.7.4 default と一致。</summary>
@@ -122,17 +122,24 @@ namespace GCTonePrism.Manager
         }
 
         /// <summary>
-        /// アップデート用 staging dir (`%TEMP%/GCTonePrism_update_<version>/`)。SPEC §3.7.3 [6]。
+        /// アップデート用 staging dir (`%TEMP%/TonePrism_update_<version>/`)。SPEC §3.7.3 [6]。
         /// 失敗時の zombie staging を MainForm_Load 起動時に cleanup する。
         /// </summary>
         public static string StagingRootForUpdate(string version)
         {
-            return Path.Combine(Path.GetTempPath(), "GCTonePrism_update_" + (version ?? "unknown"));
+            return Path.Combine(Path.GetTempPath(), "TonePrism_update_" + (version ?? "unknown"));
         }
 
         /// <summary>
         /// 過去 run の zombie staging dir を列挙する (起動時 cleanup 用)。
-        /// `Path.GetTempPath()` 直下の `GCTonePrism_update_*` 全てを返す。
+        /// `Path.GetTempPath()` 直下の `TonePrism_update_*` + `GCTonePrism_update_*` 全てを返す。
+        ///
+        /// **#168 transition defensive cleanup**: 旧版 Manager (v0.11.0 以前) は `GCTonePrism_update_*`
+        /// prefix で staging dir を作っていたため、その zombie が `%TEMP%` 直下に残る path あり。
+        /// brand rename PR で新 Manager は `TonePrism_update_*` 一本だが、glob を 2 つ実行する形で
+        /// transition 期間中の defensive cleanup を提供。staging dir は install path と独立なので
+        /// 「旧 install 完全削除」の transition 戦略では cover 外、本 method 経由で別途回収する。
+        /// **v0.13 以降**: 旧 prefix glob は削除候補 (= 全 user が transition 完了済を確認後)。
         /// </summary>
         public static System.Collections.Generic.IEnumerable<string> EnumerateZombieStagings()
         {
@@ -140,7 +147,9 @@ namespace GCTonePrism.Manager
             if (!Directory.Exists(tempRoot)) return new string[0];
             try
             {
-                return Directory.EnumerateDirectories(tempRoot, "GCTonePrism_update_*");
+                var newPrefix = Directory.EnumerateDirectories(tempRoot, "TonePrism_update_*");
+                var oldPrefix = Directory.EnumerateDirectories(tempRoot, "GCTonePrism_update_*");
+                return System.Linq.Enumerable.Concat(newPrefix, oldPrefix);
             }
             catch
             {
@@ -183,10 +192,10 @@ namespace GCTonePrism.Manager
             {
                 string currentPath = dir.FullName;
                 
-                // 優先順位1: prism.db（データベースファイル）
-                if (File.Exists(Path.Combine(currentPath, "prism.db")))
+                // 優先順位1: toneprism.db（データベースファイル）
+                if (File.Exists(Path.Combine(currentPath, "toneprism.db")))
                 {
-                    Logger.Info($"[PathManager] prism.db を検出: {currentPath}");
+                    Logger.Info($"[PathManager] toneprism.db を検出: {currentPath}");
                     detectedBaseDirectory = currentPath;
                     break;
                 }
@@ -217,7 +226,7 @@ namespace GCTonePrism.Manager
                 //     セットで配置される (SPEC §3.7.1 / §7.5.1)。Launcher/ も同 currentPath
                 //     直下に存在することを確認することで、`<install>/Manager/` 単独 dir
                 //     (= 他アプリ等で偶然存在する Manager dir) との誤マッチを構造的に排除する。
-                //     priority-1 (prism.db) / priority-2 (.git) が hit しない極限状況での
+                //     priority-1 (toneprism.db) / priority-2 (.git) が hit しない極限状況での
                 //     false-match を低減 (round 7 L5)。
                 string managerCandidate = Path.Combine(currentPath, "Manager");
                 string managerCandidateWithSep = managerCandidate + Path.DirectorySeparatorChar;

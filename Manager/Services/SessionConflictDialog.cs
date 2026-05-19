@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Windows.Forms;
-using GCTonePrism.Manager.Models;
+using TonePrism.Manager.Models;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// (#179 / #178 (c)) 他 PC で Manager が起動中の時に表示する modal dialog の context。

@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
-using GCTonePrism.Manager.Models;
+using TonePrism.Manager.Models;
 
-namespace GCTonePrism.Manager.Repositories
+namespace TonePrism.Manager.Repositories
 {
     /// <summary>
     /// ストアセクションのCRUD操作

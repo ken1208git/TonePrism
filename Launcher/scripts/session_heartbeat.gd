@@ -1,6 +1,6 @@
 ## (#179 PR3b) Launcher LAN-wide session tracking 機構の heartbeat 出力 module。
 ##
-## 学校 LAN 上で `prism.db` を SMB 共有運用するため、Manager が編集中に
+## 学校 LAN 上で `toneprism.db` を SMB 共有運用するため、Manager が編集中に
 ## Launcher が SQLite read を継続すると file lock / WAL 競合で「DB を
 ## 開けません」error や Manager INSERT stall を起こす path がある。
 ## Manager 側 (PR #184) で `manager_sessions` table 経由の同時起動検出は

@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
-using GCTonePrism.Manager.Models;
-using GCTonePrism.Manager.Repositories;
-using GCTonePrism.Manager.Services;
+using TonePrism.Manager.Models;
+using TonePrism.Manager.Repositories;
+using TonePrism.Manager.Services;
 
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     /// <summary>
     /// データベース操作のファサード。
@@ -50,7 +50,7 @@ namespace GCTonePrism.Manager
 
         // --- 接続・スキーマ ---
         /// <summary>
-        /// 現在の prism.db のフルパス (BackupPathResolver 等から参照)
+        /// 現在の toneprism.db のフルパス (BackupPathResolver 等から参照)
         /// </summary>
         public string DatabasePath => _conn.DbPath;
         public bool DatabaseExists() => _conn.DatabaseExists();

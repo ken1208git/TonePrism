@@ -1,17 +1,17 @@
 using System;
 using System.Collections.Generic;
 
-namespace GCTonePrism.Updater
+namespace TonePrism.Updater
 {
     /// <summary>
     /// Updater の CLI 引数モデル + parser。
     ///
     /// 想定呼出し (Manager から):
-    ///   GCTonePrism_Updater.exe ^
-    ///     --staging "C:\Users\user\AppData\Local\Temp\GCTonePrism_update_0.2.1\" ^
-    ///     --manager-target "D:\Games\GCTonePrism\Manager\" ^
-    ///     --restart-exe "D:\Games\GCTonePrism\Manager\GCTonePrism_Manager.exe" ^
-    ///     --log-dir "D:\Games\GCTonePrism\logs\updater\"
+    ///   TonePrism_Updater.exe ^
+    ///     --staging "C:\Users\user\AppData\Local\Temp\TonePrism_update_0.2.1\" ^
+    ///     --manager-target "D:\Games\TonePrism\Manager\" ^
+    ///     --restart-exe "D:\Games\TonePrism\Manager\TonePrism_Manager.exe" ^
+    ///     --log-dir "D:\Games\TonePrism\logs\updater\"
     ///
     /// 引数仕様 (SPEC §3.7.4):
     ///   --staging          (必須) source dir のルート。`&lt;source&gt;/files/Manager/` を新 Manager のソースとする。
@@ -203,10 +203,10 @@ namespace GCTonePrism.Updater
         public static string UsageText()
         {
             return
-                "GCTonePrism_Updater - Manager 置換 + 再起動の最小 CLI (SPEC §3.7.4)\n" +
+                "TonePrism_Updater - Manager 置換 + 再起動の最小 CLI (SPEC §3.7.4)\n" +
                 "\n" +
                 "Usage:\n" +
-                "  GCTonePrism_Updater.exe --staging <path> --manager-target <path> --restart-exe <path>\n" +
+                "  TonePrism_Updater.exe --staging <path> --manager-target <path> --restart-exe <path>\n" +
                 "                          [--log-dir <path>] [--wait-timeout <seconds>] [--force-kill]\n" +
                 "                          [--caller-pid <PID>]\n" +
                 "\n" +

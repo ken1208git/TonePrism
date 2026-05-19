@@ -5,9 +5,9 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Win32;
-using GCTonePrism.Manager.Services;
+using TonePrism.Manager.Services;
 
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     internal static class Program
     {
@@ -50,7 +50,7 @@ namespace GCTonePrism.Manager
             // - createdNew=false で既に取得中の同 mutex 検出 → modal dialog → return (Application.Run 不到達)。
             // - mutex は process lifetime 中保持、`Application.Run` 終了で `using` 経由 release。
             // 詳細: SPEC §3.8 同時起動検出機構、CHANGELOG ## Manager v0.10.0 参照。
-            string mutexName = "Global\\GCTonePrism_Manager_SingleInstance_" + ComputeInstallPathHash(Application.StartupPath);
+            string mutexName = "Global\\TonePrism_Manager_SingleInstance_" + ComputeInstallPathHash(Application.StartupPath);
             using (var singleInstanceMutex = new System.Threading.Mutex(initiallyOwned: true, name: mutexName, createdNew: out bool createdNew))
             {
                 if (!createdNew)
@@ -166,7 +166,7 @@ namespace GCTonePrism.Manager
         /// HKCU レジストリ設定。Phase 4 (#108) で UpdateSectionPanel のリリースノート表示に使う。
         ///
         /// レジストリ key: `HKCU\Software\Microsoft\Internet Explorer\Main\FeatureControl\FEATURE_BROWSER_EMULATION`
-        ///   value name: 自 exe のファイル名 (= "GCTonePrism_Manager.exe")
+        ///   value name: 自 exe のファイル名 (= "TonePrism_Manager.exe")
         ///   value (DWORD): 11001 = IE11 Edge mode (latest)
         /// 詳細: https://docs.microsoft.com/en-us/previous-versions/windows/internet-explorer/ie-developer/general-info/ee330730
         ///

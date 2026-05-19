@@ -1,13 +1,13 @@
 using System;
 using System.IO;
-using GCTonePrism.Manager.Models;
+using TonePrism.Manager.Models;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// バックアップ履歴 (BackupLogEntry) の絶対パスを解決するヘルパー (#126)。
     /// プロジェクト場所が移動した場合でも、relative_path が記録されているレコードは
-    /// 現在の prism.db からの絶対パスを動的に再計算する。
+    /// 現在の toneprism.db からの絶対パスを動的に再計算する。
     /// マイグレーション前の relative_path NULL レコードは file_path をそのまま使う
     /// (プロジェクト移動には追従できないが、後方互換性のため温存)。
     /// </summary>
@@ -17,7 +17,7 @@ namespace GCTonePrism.Manager.Services
         /// BackupLogEntry の絶対パスを解決する。
         /// </summary>
         /// <param name="entry">対象エントリ</param>
-        /// <param name="dbPath">現在の prism.db のフルパス</param>
+        /// <param name="dbPath">現在の toneprism.db のフルパス</param>
         /// <returns>解決された絶対パス。entry が null や情報不足なら空文字</returns>
         public static string ResolveAbsolutePath(BackupLogEntry entry, string dbPath)
         {

@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Web.Script.Serialization;
-using GCTonePrism.Manager.Models;
+using TonePrism.Manager.Models;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// (#179 PR3b) Launcher の LAN-wide session を JSON drop folder 経由で検出する service。

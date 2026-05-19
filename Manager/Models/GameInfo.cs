@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace GCTonePrism.Manager.Models
+namespace TonePrism.Manager.Models
 {
     /// <summary>
     /// ゲーム情報を表すデータモデル

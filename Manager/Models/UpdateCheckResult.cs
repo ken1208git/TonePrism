@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace GCTonePrism.Manager.Models
+namespace TonePrism.Manager.Models
 {
     /// <summary>
     /// `UpdateChecker.CheckAsync` の結果を表す POCO。Manager UI Phase 4 (#108) のアップデートタブが

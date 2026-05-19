@@ -33,7 +33,7 @@
 # any informational git warning (e.g. "warning: LF will be replaced by CRLF
 # in foo.bat") into a script-killing exception that bypasses our friendly
 # [FAIL] reporter. The helper also passes `-c core.quotepath=false` so
-# non-ASCII filenames (this project root is C:\<Japanese>\GCTonePrism, and
+# non-ASCII filenames (this project root is C:\<Japanese>\TonePrism, and
 # future .bat under Companions/<日本語>/ etc. is plausible) come back as
 # raw UTF-8 instead of `\343\203\206...` style C-escaped quotes.
 #

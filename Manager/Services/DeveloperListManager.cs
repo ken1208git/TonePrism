@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
-using GCTonePrism.Manager.Models;
+using TonePrism.Manager.Models;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// 製作者リストのDataGridView管理を共通化するヘルパー。

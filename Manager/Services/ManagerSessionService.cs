@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using GCTonePrism.Manager.Models;
-using GCTonePrism.Manager.Repositories;
+using TonePrism.Manager.Models;
+using TonePrism.Manager.Repositories;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// (#179) Manager の LAN-wide 同時起動検出 service。`manager_sessions` table に self row を

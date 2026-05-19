@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Windows.Forms;
 
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     /// <summary>
     /// ゲーム削除確認フォーム。

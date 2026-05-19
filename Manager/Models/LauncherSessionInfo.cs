@@ -1,6 +1,6 @@
 using System;
 
-namespace GCTonePrism.Manager.Models
+namespace TonePrism.Manager.Models
 {
     /// <summary>
     /// (#179 PR3b) Launcher の heartbeat JSON file 1 件を表す軽量 DTO。

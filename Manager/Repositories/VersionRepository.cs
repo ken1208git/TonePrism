@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Linq;
-using GCTonePrism.Manager.Models;
+using TonePrism.Manager.Models;
 
-namespace GCTonePrism.Manager.Repositories
+namespace TonePrism.Manager.Repositories
 {
     /// <summary>
     /// ゲームバージョンのCRUD操作

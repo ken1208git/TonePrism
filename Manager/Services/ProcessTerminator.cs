@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// Launcher / Companion プロセスの検出 + 待機 + (最終手段の) kill。Phase 4 (#108) の Manager UI が
@@ -19,14 +19,14 @@ namespace GCTonePrism.Manager.Services
     /// していた。docstring と実装の乖離が「強制終了 path が動くように見える」誤読を生むため削除。
     /// 将来 `--force-kill` UI を Manager UI 側に配線する場合は本 class に再導入する。
     ///
-    /// process name 判定は AGENTS.md「Naming Conventions」の `GCTonePrism_<Name>` 命名規約に従う:
-    ///   - Launcher: "GCTonePrism_Launcher"
-    ///   - Companion (Updater 以外): `<install>/Companions/<Name>/` の dir 名から「GCTonePrism_<Name>」を導出
+    /// process name 判定は AGENTS.md「Naming Conventions」の `TonePrism_<Name>` 命名規約に従う:
+    ///   - Launcher: "TonePrism_Launcher"
+    ///   - Companion (Updater 以外): `<install>/Companions/<Name>/` の dir 名から「TonePrism_<Name>」を導出
     ///   - Updater 自身は Manager UI から終了対象にしない (Manager が自分で spawn する仕組み)
     /// </summary>
     internal static class ProcessTerminator
     {
-        public const string LauncherProcessName = "GCTonePrism_Launcher";
+        public const string LauncherProcessName = "TonePrism_Launcher";
 
         /// <summary>
         /// 置換対象プロセス (Launcher + Companions/Updater 以外) で起動中のものを返す。
@@ -47,7 +47,7 @@ namespace GCTonePrism.Manager.Services
                     string name = Path.GetFileName(companionDir.TrimEnd('\\', '/'));
                     if (string.IsNullOrEmpty(name)) continue;
                     if (string.Equals(name, "Updater", StringComparison.OrdinalIgnoreCase)) continue;
-                    string procName = "GCTonePrism_" + name;
+                    string procName = "TonePrism_" + name;
                     AppendIfRunning(list, procName, "Companion: " + name);
                 }
             }

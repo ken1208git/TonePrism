@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Windows.Forms;
-using GCTonePrism.Manager.Models;
+using TonePrism.Manager.Models;
 
-namespace GCTonePrism.Manager.Controls
+namespace TonePrism.Manager.Controls
 {
     public partial class StoreSectionPanel : UserControl
     {

@@ -5,10 +5,10 @@ using System.IO;
 using System.Text;
 using System.Threading;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
-    /// `Companions/Updater/GCTonePrism_Updater.exe` の spawn と exit code dispatch。Phase 4 (#108)。
+    /// `Companions/Updater/TonePrism_Updater.exe` の spawn と exit code dispatch。Phase 4 (#108)。
     ///
     /// SPEC §3.7.4 で固定された Updater CLI 規約に従って Manager UI が Updater を起動する。重要な
     /// 規約 (Phase 3 round 6-8 で固まった):

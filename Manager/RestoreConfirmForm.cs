@@ -1,9 +1,9 @@
 using System;
 using System.IO;
 using System.Windows.Forms;
-using GCTonePrism.Manager.Models;
+using TonePrism.Manager.Models;
 
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     /// <summary>
     /// データベース復元の確認ダイアログ。確認コード入力で誤操作を防止する。

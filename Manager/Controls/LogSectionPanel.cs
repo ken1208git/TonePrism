@@ -5,9 +5,9 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
-using GCTonePrism.Manager.Services;
+using TonePrism.Manager.Services;
 
-namespace GCTonePrism.Manager.Controls
+namespace TonePrism.Manager.Controls
 {
     /// <summary>
     /// ログビューア (#129)。

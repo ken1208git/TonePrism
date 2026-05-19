@@ -1,4 +1,4 @@
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// `settings` テーブル (汎用 K/V) で使う key 定数を集約する。

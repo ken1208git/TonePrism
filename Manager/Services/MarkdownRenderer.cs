@@ -2,7 +2,7 @@ using System;
 using System.Text;
 using Markdig;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// Markdig を使ってリリースノート Markdown を HTML に変換するヘルパー。Phase 4 (#108) で導入。

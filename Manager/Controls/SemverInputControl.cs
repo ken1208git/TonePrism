@@ -2,7 +2,7 @@ using System;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
-namespace GCTonePrism.Manager.Controls
+namespace TonePrism.Manager.Controls
 {
     /// <summary>
     /// SemVer 形式のバージョン入力コントロール (#158)。

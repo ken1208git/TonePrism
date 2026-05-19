@@ -1,4 +1,4 @@
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     partial class VersionUpForm
     {
@@ -27,7 +27,7 @@ namespace GCTonePrism.Manager
             this.lblCurrentVersionLabel = new System.Windows.Forms.Label();
             this.lblCurrentVersion = new System.Windows.Forms.Label();
             this.lblNextVersion = new System.Windows.Forms.Label();
-            this.semverNext = new GCTonePrism.Manager.Controls.SemverInputControl();
+            this.semverNext = new TonePrism.Manager.Controls.SemverInputControl();
             this.lblGameFolder = new System.Windows.Forms.Label();
             this.txtGameFolder = new System.Windows.Forms.TextBox();
             this.btnSelectGameFolder = new System.Windows.Forms.Button();
@@ -719,7 +719,7 @@ namespace GCTonePrism.Manager
         private System.Windows.Forms.Label lblCurrentVersionLabel;
         private System.Windows.Forms.Label lblCurrentVersion;
         private System.Windows.Forms.Label lblNextVersion;
-        private GCTonePrism.Manager.Controls.SemverInputControl semverNext;
+        private TonePrism.Manager.Controls.SemverInputControl semverNext;
         private System.Windows.Forms.Label lblGameFolder;
         private System.Windows.Forms.TextBox txtGameFolder;
         private System.Windows.Forms.Button btnSelectGameFolder;

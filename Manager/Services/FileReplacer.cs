@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// 単体ファイルの atomic 置換 (Phase 4 の shortcut bat = `<install_parent>/Launcher.bat` /

@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace GCTonePrism.Updater
+namespace TonePrism.Updater
 {
     /// <summary>
     /// `Manager/` dir 単位の rename-rollback 置換。
@@ -10,15 +10,15 @@ namespace GCTonePrism.Updater
     /// 元 dir に展開、成功なら .bak 削除、失敗なら .bak から復元する atomic 戦略。
     ///
     /// なぜ dir 単位 atomic か:
-    ///   - Manager 関連は `GCTonePrism_Manager.exe` + 多数の DLL (System.Data.SQLite, Microsoft.WindowsAPICodePack
+    ///   - Manager 関連は `TonePrism_Manager.exe` + 多数の DLL (System.Data.SQLite, Microsoft.WindowsAPICodePack
     ///     等) で構成されていて、個別ファイル単位の置換だと「.exe は新、DLL は旧」の半分置換状態で起動して
     ///     ロード失敗する path がある
     ///   - dir rename は Windows API レベルで atomic (NTFS の MFT エントリ更新 1 回)、部分失敗が起こりにくい
     ///   - 失敗時 .bak から rename 戻すだけで元の状態に戻る、シンプル
     ///
-    /// ユーザーデータ保護 (`prism.db` / `games/` / `backups/` / `responses/` / `logs/`):
+    /// ユーザーデータ保護 (`toneprism.db` / `games/` / `backups/` / `responses/` / `logs/`):
     ///   SPEC §3.7.3 「保護の仕組み」で **構造的保護** として定義されている。実態:
-    ///   - user data は `<install>/` 直下に配置される (例: `<install>/prism.db`、§7.5.1)
+    ///   - user data は `<install>/` 直下に配置される (例: `<install>/toneprism.db`、§7.5.1)
     ///   - **`<install>/Manager/` の中ではない** ため、Manager dir の置換と物理的に無関係に維持される
     ///   - `.bak` は **binary atomic rollback 用** であって user data 保護とは別仕組み
     ///   - 従って本 FileReplacer は user data の carry-over ロジックを持たない (= 持つ必要がない、

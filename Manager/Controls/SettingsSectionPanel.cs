@@ -1,9 +1,9 @@
 using System;
 using System.Reflection;
 using System.Windows.Forms;
-using GCTonePrism.Manager.Services;
+using TonePrism.Manager.Services;
 
-namespace GCTonePrism.Manager.Controls
+namespace TonePrism.Manager.Controls
 {
     public partial class SettingsSectionPanel : UserControl
     {
@@ -32,7 +32,7 @@ namespace GCTonePrism.Manager.Controls
                 AssemblyName assemblyName = assembly.GetName();
                 Version version = assemblyName.Version;
 
-                string productName = assembly.GetCustomAttribute<AssemblyProductAttribute>()?.Product ?? "GCTonePrism 管理ソフト";
+                string productName = assembly.GetCustomAttribute<AssemblyProductAttribute>()?.Product ?? "TonePrism 管理ソフト";
 
                 string versionStr = $"{version.Major}.{version.Minor}.{version.Build}";
                 if (version.Revision > 0)

@@ -5,14 +5,14 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
-using GCTonePrism.Manager.Models;
-using GCTonePrism.Manager.Repositories;
+using TonePrism.Manager.Models;
+using TonePrism.Manager.Repositories;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// データベースバックアップ機能のドメインロジック。
-    /// SQLite Online Backup API を用いて prism.db のスナップショットを取得し、
+    /// SQLite Online Backup API を用いて toneprism.db のスナップショットを取得し、
     /// backup_log への記録、世代管理（リテンション）、自動バックアップの lease 取得を担う。
     /// </summary>
     public class BackupService
@@ -87,10 +87,10 @@ namespace GCTonePrism.Manager.Services
             // ファイルパスを先に確定させ、in_progress 行に最初から記録する。
             // こうすることで、後で「ファイル存在の有無」で行をリコンサイルできる。
             string destinationDir = GetEffectiveDestinationDirectory();
-            string fileName = $"prism_{DateTime.Now:yyyyMMdd_HHmmss}.db";
+            string fileName = $"toneprism_{DateTime.Now:yyyyMMdd_HHmmss}.db";
             string destinationPath = Path.Combine(destinationDir, fileName);
 
-            // プロジェクト移動耐性のため、prism.db のあるディレクトリからの相対パスも記録 (#126)
+            // プロジェクト移動耐性のため、toneprism.db のあるディレクトリからの相対パスも記録 (#126)
             // dbDir 配下に無い destinationDir (ユーザー指定の絶対パス等) では null になり、
             // 表示時は file_path にフォールバックされる。
             string dbDir = Path.GetDirectoryName(_conn.DbPath);
@@ -193,7 +193,7 @@ namespace GCTonePrism.Manager.Services
                 var dir = new DirectoryInfo(destinationDir);
                 if (!dir.Exists) return;
 
-                var oldFiles = dir.GetFiles("prism_*.db")
+                var oldFiles = dir.GetFiles("toneprism_*.db")
                     .OrderByDescending(f => f.CreationTimeUtc)
                     .Skip(retentionCount)
                     .ToList();
@@ -291,7 +291,7 @@ namespace GCTonePrism.Manager.Services
         {
             var dir = new DirectoryInfo(GetEffectiveDestinationDirectory());
             if (!dir.Exists) return new List<FileInfo>();
-            return dir.GetFiles("prism_*.db")
+            return dir.GetFiles("toneprism_*.db")
                 .OrderByDescending(f => f.CreationTimeUtc)
                 .ToList();
         }

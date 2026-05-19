@@ -3,7 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 
-namespace GCTonePrism.Updater
+namespace TonePrism.Updater
 {
     /// <summary>
     /// Updater 用 minimal logger。

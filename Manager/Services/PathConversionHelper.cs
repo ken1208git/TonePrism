@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// パス変換ヘルパー（相対パス⇔絶対パス変換）

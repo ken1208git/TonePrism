@@ -1,6 +1,6 @@
 @echo off
-REM Manager.bat - launches GCTonePrism Manager from the install parent folder.
-REM Deployed by Install.bat to <parent>/Manager.bat (one level above GCTonePrism/).
+REM Manager.bat - launches TonePrism Manager from the install parent folder.
+REM Deployed by Install.bat to <parent>/Manager.bat (one level above TonePrism/).
 REM File format: edit source = UTF-8 (no BOM) + CRLF, staging = cp932 + CRLF
 REM   (Release.ps1 Copy-Templates re-encodes, see templates/Install.bat docstring).
 REM
@@ -14,5 +14,5 @@ REM   cmd to terminate, closing the window uniformly.
 REM   Trade-off: if a future caller uses `call Manager.bat` instead of `start`/
 REM   double-click, this `exit` would terminate the caller too. Acceptable since
 REM   Manager.bat is a leaf shortcut, not a building block called from other bats.
-start "" "%~dp0GCTonePrism\Manager\GCTonePrism_Manager.exe"
+start "" "%~dp0TonePrism\Manager\TonePrism_Manager.exe"
 exit

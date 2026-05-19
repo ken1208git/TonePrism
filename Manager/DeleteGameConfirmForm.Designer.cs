@@ -1,4 +1,4 @@
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     partial class DeleteGameConfirmForm
     {

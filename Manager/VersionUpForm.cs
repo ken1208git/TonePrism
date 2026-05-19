@@ -4,12 +4,12 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
-using GCTonePrism.Manager.Controls;
-using GCTonePrism.Manager.Models;
-using GCTonePrism.Manager.Services;
+using TonePrism.Manager.Controls;
+using TonePrism.Manager.Models;
+using TonePrism.Manager.Services;
 using Microsoft.WindowsAPICodePack.Dialogs;
 
-namespace GCTonePrism.Manager
+namespace TonePrism.Manager
 {
     public partial class VersionUpForm : Form
     {

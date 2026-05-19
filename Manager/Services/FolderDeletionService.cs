@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Threading;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// フォルダ削除のリトライ機構を提供する static service。

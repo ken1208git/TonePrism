@@ -5,10 +5,10 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
-using GCTonePrism.Manager.Models;
-using GCTonePrism.Manager.Repositories;
+using TonePrism.Manager.Models;
+using TonePrism.Manager.Repositories;
 
-namespace GCTonePrism.Manager.Services
+namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// アップデート check のオーケストレーション層。Phase 4 (#108) で導入。
@@ -30,7 +30,7 @@ namespace GCTonePrism.Manager.Services
         // (#108 Phase 4 round 1 M4 → round 5 M-3 撤去) 旧実装は process-wide `_settingsWriteLock` で
         // Skip / SaveCache 等の settings 書込みを serialize していたが、SettingsRepository は
         //   - call ごとに `new SQLiteConnection` + ExecuteWithRetry で SQLITE_BUSY retry
-        //   - prism.db は WAL モード (PR #103) で multi-writer 安全
+        //   - toneprism.db は WAL モード (PR #103) で multi-writer 安全
         // のため SQLite 側で既に atomic、process-wide lock を被せるのは redundant な二重 lock だった。
         // round 4 L-4 で「read は lock 外で片手落ち」と debt 明示していたが、本 round で SettingsRepository
         // が atomic と確認できたため lock 自体撤去 + 各 method の try/catch + Logger.Warn の error

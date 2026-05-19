@@ -2,10 +2,10 @@ using System;
 using System.Diagnostics;
 using System.IO;
 
-namespace GCTonePrism.Updater
+namespace TonePrism.Updater
 {
     /// <summary>
-    /// GCTonePrism_Updater entry point.
+    /// TonePrism_Updater entry point.
     ///
     /// 責務 / Run() のステップ構成 (SPEC §3.7.4 minimum scope、round 7 Medium-2 で docstring と
     /// log ラベルを同期):
@@ -133,7 +133,7 @@ namespace GCTonePrism.Updater
         private static int Run(CliArgs args)
         {
             Logger.Info("============================================================");
-            Logger.Info("GCTonePrism_Updater (Phase 3 minimal CLI)");
+            Logger.Info("TonePrism_Updater (Phase 3 minimal CLI)");
             Logger.Info("============================================================");
             Logger.Info($"  --staging         : {args.StagingDir}");
             Logger.Info($"  --manager-target  : {args.ManagerTargetDir}");
