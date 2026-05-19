@@ -197,15 +197,15 @@ namespace TonePrism.Manager.Controls
             this.lblBackupDestHint.Location = new System.Drawing.Point(20, 75);
             this.lblBackupDestHint.Size = new System.Drawing.Size(420, 15);
             this.lblBackupDestHint.TabIndex = 3;
-            this.lblBackupDestHint.Text = "空欄にするとデフォルト（データベースファイルの隣の backups/ フォルダ）が使われます";
+            this.lblBackupDestHint.Text = "空欄にするとデフォルト（DB ファイルの隣の backups/）。指定先には toneprism_yyyyMMdd_HHmmss.db が直配置されます";
             //
             // chkBackupAutoEnabled (自動バックアップ有効/無効)
+            // (#170 followup round 2 review L-1) AutoSize=true なので explicit Size 行は dead → 削除。
             //
             this.chkBackupAutoEnabled.AutoSize = true;
             this.chkBackupAutoEnabled.Checked = true;
             this.chkBackupAutoEnabled.CheckState = System.Windows.Forms.CheckState.Checked;
             this.chkBackupAutoEnabled.Location = new System.Drawing.Point(20, 110);
-            this.chkBackupAutoEnabled.Size = new System.Drawing.Size(200, 19);
             this.chkBackupAutoEnabled.TabIndex = 4;
             this.chkBackupAutoEnabled.Text = "自動バックアップを実行する";
             this.chkBackupAutoEnabled.UseVisualStyleBackColor = true;

@@ -50,7 +50,8 @@ namespace TonePrism.Manager.Services
         /// 失敗してもアプリ起動は止めない (例外を握り潰し、以降の API は no-op)。
         ///
         /// (#170 followup round 1) `customLogDir` が指定された場合は default の
-        /// `&lt;project_root&gt;/logs/manager/` の代わりに `&lt;customLogDir&gt;/manager/` を使用する。
+        /// `&lt;project_root&gt;/logs/manager/` の代わりに **`&lt;customLogDir&gt;/` の直配置** を使用する
+        /// (= `/manager/` subdir は append しない、backup_destination_path と同 semantic)。
         /// 失敗時は default にフォールバック。Program.Main が `settings.log_destination_path` を
         /// SQLite 直接 read して渡す (Logger は SettingsRepository に依存しない invariant 維持)。
         /// </summary>

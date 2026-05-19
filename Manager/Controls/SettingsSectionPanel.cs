@@ -48,7 +48,10 @@ namespace TonePrism.Manager.Controls
             try
             {
                 var repo = _dbManager.SettingsRepository;
-                _lastSavedLogDest = repo.GetString(SettingsKeys.LogDestinationPath, "");
+                // (#170 followup round 2 review M-3) 初期値も trim して比較側 (newValue = Text.Trim()) と
+                // 揃える。DB に末尾 whitespace が混入していた case で起動直後の focus 移動 1 回で
+                // 「変更扱い」になり CheckBeforeWrite dialog が空発火する race を構造閉鎖。
+                _lastSavedLogDest = (repo.GetString(SettingsKeys.LogDestinationPath, "") ?? "").Trim();
                 txtLogDest.Text = _lastSavedLogDest;
 
                 int days = repo.GetInt32(SettingsKeys.LogRetentionDays, SettingsKeys.DefaultLogRetentionDays);
@@ -164,7 +167,8 @@ namespace TonePrism.Manager.Controls
             try
             {
                 var repo = _dbManager.SettingsRepository;
-                _lastSavedBackupDest = repo.GetString("backup_destination_path", "");
+                // (#170 followup round 2 review M-3) trim 揃え (上記 LogDest 同 pattern、空発火 dialog 防止)
+                _lastSavedBackupDest = (repo.GetString("backup_destination_path", "") ?? "").Trim();
                 txtBackupDest.Text = _lastSavedBackupDest;
 
                 // (#170 followup round 2) 自動バックアップ有効/無効 checkbox の load
@@ -232,12 +236,19 @@ namespace TonePrism.Manager.Controls
             try
             {
                 _dbManager.SettingsRepository.SetString(SettingsKeys.BackupAutoEnabled, newValue ? "true" : "false");
+                // (#170 followup round 2 review M-4) UI 更新は **SetString 成功後** に行う。
+                // 旧実装は SetString 前 / 例外時に Apply 呼出されると UI 内部矛盾 (checkbox ON 表示なのに
+                // interval section disable 状態) になる drift 路があった。
                 ApplyAutoBackupEnabledUi(newValue);
                 Logger.Info("[SettingsSectionPanel] 自動バックアップを " + (newValue ? "有効" : "無効") + " に変更");
             }
             catch (Exception ex)
             {
                 Logger.Warn("[SettingsSectionPanel] BackupAutoEnabled 書込失敗: " + ex.Message);
+                // (#170 followup round 2 review M-4) UI 値を rollback (= DB 状態に再同期、UI 内部矛盾を解消)。
+                chkBackupAutoEnabled.CheckedChanged -= ChkBackupAutoEnabled_CheckedChanged;
+                chkBackupAutoEnabled.Checked = !newValue;
+                chkBackupAutoEnabled.CheckedChanged += ChkBackupAutoEnabled_CheckedChanged;
                 MessageBox.Show("自動バックアップ設定の保存に失敗しました: " + ex.Message,
                     "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }

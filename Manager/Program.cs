@@ -31,6 +31,17 @@ namespace TonePrism.Manager
             string customLogDir = TryReadCustomLogDir();
             Logger.Initialize(customLogDir);
 
+            // (#170 followup round 2 review H-1) 古いログ削除を **MainForm 経由ではなく Program.Main で実行**。
+            // 旧実装 (round 1) は MainForm.ContinueLoadAfterSessionCheck から呼んでいたが、
+            // (a) dbReady=false (= 新規ユーザーが DB 作成 dialog で No 押下) / (b) SessionConflictDialog Cancel
+            // という early-return path で CleanupOldLogs に到達せず、「DB 未作成のまま頻繁に起動 → 閉じる」
+            // 運用でログが永久に溜まる silent regression があった。
+            // 本 fix で SQLite 直接 read (TryReadLogRetentionDays、customLogDir 取得と同 pattern) で retention 値を
+            // 取得 → Logger.CleanupOldLogs を Program.Main で即時呼出。MainForm 状態に依存しないため全起動 path で
+            // 確実に走る。Logger は依然 SettingsRepository 不要 (invariant 維持)、DB 不在時は default 30 日に fallback。
+            int retentionDays = TryReadLogRetentionDays();
+            Logger.CleanupOldLogs(retentionDays);
+
             // WebBrowser コントロール (UpdateSectionPanel のリリースノート表示で使用、Phase 4 #108) は
             // default で IE7 quirks mode で動作するため、render 崩れ + CSS 制限あり。HKCU レジストリで
             // 自プロセス名を IE11 emulation に登録する (best-effort、失敗してもアプリは起動可能)。
@@ -156,6 +167,37 @@ namespace TonePrism.Manager
             catch
             {
                 return null;
+            }
+        }
+
+        /// <summary>
+        /// (#170 followup round 2 review H-1) Logger.Initialize 後の `Logger.CleanupOldLogs` 用に retention 値を
+        /// SQLite 直接 read で取得。DB 不在 / table 不在 / 解析失敗時は default 30 日に fallback。
+        /// SettingsRepository を経由しないのは Logger が依然 SettingsRepository に依存しない invariant を維持
+        /// するため。
+        /// </summary>
+        private static int TryReadLogRetentionDays()
+        {
+            try
+            {
+                string dbPath = PathManager.DatabasePath;
+                if (string.IsNullOrEmpty(dbPath) || !System.IO.File.Exists(dbPath)) return Services.SettingsKeys.DefaultLogRetentionDays;
+                using (var conn = new System.Data.SQLite.SQLiteConnection("Data Source=" + dbPath + ";Version=3;Read Only=True;"))
+                {
+                    conn.Open();
+                    using (var cmd = new System.Data.SQLite.SQLiteCommand(
+                        "SELECT value FROM settings WHERE key = 'log_retention_days' LIMIT 1", conn))
+                    {
+                        object v = cmd.ExecuteScalar();
+                        if (v == null || v == DBNull.Value) return Services.SettingsKeys.DefaultLogRetentionDays;
+                        if (int.TryParse(v.ToString(), out int days) && days > 0) return days;
+                        return Services.SettingsKeys.DefaultLogRetentionDays;
+                    }
+                }
+            }
+            catch
+            {
+                return Services.SettingsKeys.DefaultLogRetentionDays;
             }
         }
 

@@ -58,7 +58,7 @@ namespace TonePrism.Manager
             this.lblBackupStatus.AutoSize = true;
             this.lblBackupStatus.Name = "lblBackupStatus";
             this.lblBackupStatus.Text = "";
-            this.lblBackupStatus.Overflow = System.Windows.Forms.ToolStripItemOverflow.Never;
+            this.lblBackupStatus.Overflow = System.Windows.Forms.ToolStripItemOverflow.AsNeeded;
             //
             // tabControl1
             //

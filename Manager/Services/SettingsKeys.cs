@@ -96,6 +96,10 @@ namespace TonePrism.Manager.Services
         /// 自動バックアップを実行するかどうか ("true"/"false")。default "true" (= 有効、既存挙動)。
         /// UI 設定タブ「バックアップ」section の checkbox から変更可、UI 上で OFF にすると自動 backup の
         /// 起動時 trigger を完全に skip する (= 手動バックアップは引き続き使える)。
+        ///
+        /// (#170 followup round 2 review L-2) **比較は `"false"` 厳密一致 (case-insensitive)、それ以外
+        /// (空 / "true" / unknown / "1" / "0" 等) はすべて enabled 扱い**。手動 DB 編集で誤った値を入れても
+        /// default "true" semantic に safely fall through する設計、UI からは必ず "true"/"false" のみ書込まれる。
         /// </summary>
         public const string BackupAutoEnabled = "backup_auto_enabled";
 

@@ -55,6 +55,31 @@ namespace TonePrism.Manager
 
             // (#179) ManagerSessionService の shutdown (self row delete + heartbeat 停止) を form 終了時に発火
             this.FormClosed += MainForm_FormClosed;
+            // (#170 followup round 2 review L-3) backup status auto-revert timer の cleanup は Dispose 前に
+            // 走らせたいので FormClosing を hook (= FormClosed は Dispose 後で意味薄)。
+            this.FormClosing += MainForm_FormClosing;
+        }
+
+        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            // (#170 followup round 2 review L-3) backup status auto-revert timer の cleanup を
+            // **FormClosing** (= Dispose 前、message pump 走行中) に移動。
+            // 旧実装は FormClosed (= Dispose 後、message pump 停止後) に置いており、その時点では Tick が
+            // dispatch されないため race window は実質微小だった。FormClosing 内で Stop+Dispose することで
+            // 「ユーザーが ✕ 押下 → FormClosing 発火 → Timer 停止 → Dispose 順」を明示的に保証する。
+            try
+            {
+                if (_backupStatusClearTimer != null)
+                {
+                    _backupStatusClearTimer.Stop();
+                    _backupStatusClearTimer.Dispose();
+                    _backupStatusClearTimer = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[MainForm] FormClosing で _backupStatusClearTimer cleanup 失敗: " + ex.Message);
+            }
         }
 
         private void MainForm_FormClosed(object sender, FormClosedEventArgs e)
@@ -87,23 +112,6 @@ namespace TonePrism.Manager
                 Logger.Warn("[MainForm] FormClosed で LauncherSessionService Shutdown 失敗: " + ex.Message);
             }
 
-            // (#170 followup round 2 review #8) backup status auto-revert timer の cleanup。
-            // UpdateBackupStatus(autoRevert:true) で起動した System.Windows.Forms.Timer が GC まで残り、
-            // 7 秒経過後の Tick で disposed form の lblBackupStatus.Text にアクセスして
-            // ObjectDisposedException を throw する path を構造閉鎖。
-            try
-            {
-                if (_backupStatusClearTimer != null)
-                {
-                    _backupStatusClearTimer.Stop();
-                    _backupStatusClearTimer.Dispose();
-                    _backupStatusClearTimer = null;
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn("[MainForm] FormClosed で _backupStatusClearTimer cleanup 失敗: " + ex.Message);
-            }
         }
 
         /// <summary>
@@ -374,20 +382,10 @@ namespace TonePrism.Manager
             _storeSectionPanel.Initialize(dbManager);
             _settingsSectionPanel.Initialize(dbManager);
 
-            // (#170 followup) Logger の古いログ掃除を DB 設定値で実行。Logger.Initialize は file open のみで
-            // CleanupOldLogs を含まなくなった (= SettingsRepository に依存しない設計)、本 callsite で
-            // retention 値を読んで明示呼出する。設定値変更は次回起動時に反映される (= 設定 UI ラベルで明示)。
-            try
-            {
-                int retentionDays = dbManager.SettingsRepository.GetInt32(
-                    Services.SettingsKeys.LogRetentionDays,
-                    Services.SettingsKeys.DefaultLogRetentionDays);
-                Logger.CleanupOldLogs(retentionDays);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn("[MainForm] Logger.CleanupOldLogs 呼出失敗: " + ex.Message);
-            }
+            // (#170 followup round 2 review H-1) CleanupOldLogs は **Program.Main に移動済**。
+            // 旧実装は本 MainForm 経路で呼出していたが、dbReady=false / SessionConflictDialog Cancel
+            // 等の early-return path で到達不能になる silent regression があり、Program.Main で
+            // SQLite 直接 read 経由で呼ぶ形に変更。本 MainForm 内で再呼出は不要。
 
             // 旧バージョンが root 直下に作っていた safety ファイルを backups/safety/ へ一度きり移動
             try
@@ -785,7 +783,10 @@ namespace TonePrism.Manager
         {
             // (#170 followup round 2) lblBackupStatus は Designer で Alignment=Right + AutoSize=true 設定済。
             // strip 右端から natural width 分を anchor 配置するため、Text / ForeColor 設定だけで OK。
-            lblBackupStatus.Text = message ?? string.Empty;
+            // (review M-2) 長文 message (= SQLite error / 長 path) で strip 幅超過 + left zone 重なりを防ぐため、
+            // 表示 text を 80 文字に pre-truncate (= chevron に逃げる前の defense)。完全な message は呼出元
+            // (e.g., 自動 backup 失敗 path) で Logger.Error として別途残るため UI で truncated でも debug 可能。
+            lblBackupStatus.Text = TruncateForStatusBar(message);
             lblBackupStatus.ForeColor = color;
 
             // 既存 timer を破棄してから新規 (= 連続呼出時に古い timer が古い message を消すのを防ぐ)
@@ -802,6 +803,21 @@ namespace TonePrism.Manager
                 _backupStatusClearTimer.Tick += BackupStatusClearTimer_Tick;
                 _backupStatusClearTimer.Start();
             }
+        }
+
+        /// <summary>
+        /// (#170 followup round 2 review M-2) status bar 右 zone 用の text truncation helper。
+        /// strip clientWidth (= MainForm ClientSize=1100 baseline) - lblStatus (= 動的) を超えると chevron に
+        /// 流れて user から見えなくなる path への defense。80 文字を超えたら先頭 + 中央省略 (`...`) + 末尾 で
+        /// 元 message の特徴 (= ファイル名 / error 種別) を残しつつ抑制。
+        /// </summary>
+        private static string TruncateForStatusBar(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return string.Empty;
+            const int MaxLen = 80;
+            if (message.Length <= MaxLen) return message;
+            // 先頭 50 文字 + "..." + 末尾 27 文字 で末尾 (ファイル名等) を維持
+            return message.Substring(0, 50) + "..." + message.Substring(message.Length - 27);
         }
 
         private void BackupStatusClearTimer_Tick(object sender, EventArgs e)
