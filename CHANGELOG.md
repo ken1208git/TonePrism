@@ -1686,6 +1686,13 @@ milestone marker pattern: `[Step N/M]` ヘッダ / `Manager spawn` 結果 / `Man
 - `Manager/MainForm.cs`: `MainForm_Load` の `TryShowUpdateCompletedDialog()` 直後に `Services.UpdaterLogAbsorber.AbsorbPendingLogs()` 呼出を追加。
 - `Manager/TonePrism_Manager.csproj`: `Services\UpdaterLogAbsorber.cs` の `<Compile Include>` 追加。
 
+#### Round 2 review fix (H-1 + M-1 + M-2 + M-3 + L-3)
+
+- **多行 ERROR 継続行 (stack trace) を absorb で保持** (`UpdaterLogAbsorber.AbsorbContent`): `Logger.Error(string, Exception)` が出力する exception stack trace は LineRegex (`[ts] [LEVEL]` ヘッダ) を持たない継続行になるため、旧実装は header 1 行目だけ拾って silent に欠落していた。header 行を検知したら直前の累積 entry を flush + 新 entry を開始、header 不一致行は active entry があれば payload に append する state machine pattern に書換え、改行込みの単一 entry として Manager Logger に書出。SPEC §3.6 に「多行 entry 継続行サポート」規約を追記。
+- **crashed Updater の time-based fallback absorb** (`UpdaterLogAbsorber.AbsorbPendingLogs`): 「Updater 終了」marker 不在 file は通常「まだ書込中 race」として skip するが、`LastWriteTime` から 10 分以上経過していれば process 終了確定として absorb 対象に含める + `[CRASHED?]` summary marker + WARN level で notice する fallback path を追加。Updater が segfault / kill / OOM 等で abnormally terminate した case で永久 skip され続ける silent failure path を閉じる。SPEC §3.6 に「部分 absorb 事故防止 + crash fallback」規約を追記。
+- **INFO milestone success-path 限定規約** + `rollback` alternation removal: SPEC §3.6 で「INFO レベルの milestone marker は success path のみ、failure は WARN/ERROR で出す」契約を明文化、MilestoneRegex から `rollback` alternation を removal (= 現状 Updater rollback はすべて WARN/ERROR で出ているため coverage 損失なし、anchor なし broad match の forward-compat false positive リスクを予防)。
+- **`LineRegex` SoT 化** (`Manager/Services/LogLineFormat.cs` 新規): UpdaterLogAbsorber と LogSectionPanel の 2 callsite で hardcode 重複していた Logger format parse regex を共通 helper に抽出、将来 DEBUG level 追加等の format 拡張時の silent drift を予防。
+
 #### Bump 根拠 (v0.13.1 → v0.14.0)
 
 SemVer pre-1.0 minor bump: 新機能追加 (Companion log absorb + UI tab refactor)。SPEC §3.6 に新 subsection 追加で SPEC 側も v1.10.31 → v1.10.32 を同 PR で bump。

@@ -18,14 +18,25 @@ namespace TonePrism.Manager.Services
     ///   level + milestone marker で絞る。verbose 詳細は Updater 自身の file (= `logs/updater/*.log`) に残る。
     /// - GUI で見れる log source は Launcher / Manager / Monitor の 3 component に収束させる方針
     ///   (= Companion log は親 log の一部として閲覧、Companion 用 tab は増やさない)。
-    /// - 重複 absorb 防止は `<install>/logs/updater/.absorbed` text file (= 1 行 1 path) で管理。
+    /// - 重複 absorb 防止は `<install>/logs/updater/.absorbed` text file で管理 (= **order-insensitive set
+    ///   persistence**、1 行 1 path、入れ替え順序は意味なし、prune 時に HashSet 反復順で書き直し)。
+    ///
+    /// 取込責務:
+    /// - **多行 entry の継続行を保持** (R2 review H-1): `Logger.Error(string, Exception)` が出す stack trace
+    ///   等の継続行 (= LineRegex の `[ts] [LEVEL]` ヘッダを持たない行) は直前 absorb 行の payload に
+    ///   append、Manager log への書出も改行込みの単一 entry として記録する。
+    /// - **crashed Updater の time-based fallback absorb** (R2 review M-1): 「Updater 終了」marker が
+    ///   含まれない file は通常「まだ書込中 race window」として skip するが、`LastWriteTime` から 10 分以上
+    ///   経過していれば process 終了確定として absorb 対象に含め、`[CRASHED?]` summary marker + WARN level
+    ///   で Manager log に notice する。Updater segfault / kill / OOM 等で永久 skip される silent failure
+    ///   path を閉じる。trade-off: Updater が 10 分以上正常稼働する case (= SMB 共有越し大量 file copy 等)
+    ///   で誤 crash 判定する path はあるが、現状 Step 2 の rename + copy は数秒 〜 数十秒で完了する想定。
     /// </summary>
     public static class UpdaterLogAbsorber
     {
-        // Updater log の行 format: `[YYYY-MM-DD HH:mm:ss] [LEVEL] message` (= Manager Logger と同一)
-        private static readonly Regex LineRegex = new Regex(
-            @"^\[(?<ts>[^\]]+)\] \[(?<level>INFO|WARN|ERROR)\] (?<rest>.*)$",
-            RegexOptions.Compiled);
+        // Updater log の行 format は Manager Logger と同一。parse SoT は `LogLineFormat.LineRegex`
+        // (LogSectionPanel と共有、format 拡張時の同期 drift 防止)。
+        private static readonly Regex LineRegex = LogLineFormat.LineRegex;
 
         // INFO 行のうち absorb 対象とする milestone marker pattern (大小無視)。
         // 高レベル境界 (Step ヘッダ + 完了 marker) のみを拾う設計、内側 file replace の中間進捗
@@ -34,24 +45,40 @@ namespace TonePrism.Manager.Services
         //     は Logger.Error / Logger.Warn で出る、Step 2/4 + 完了 marker + ERROR/WARN の組合せで原因特定可)
         //   - 成功 path で `[Replace N/M]` を absorb すると 1 update につき 2 行増えて Manager log を冗長化
         //   - 深掘り debug は Updater 自身 file (`logs/updater/*.log`) を直接読む運用 (3 component 収束方針)
+        //
+        // 規約 (SPEC §3.6 INFO milestone success-path 限定):
+        //   - **本 regex は success path の INFO milestone のみを対象**、failure event は WARN/ERROR レベル
+        //     で出される前提。「rollback」「Manager spawn 失敗」等の failure 言及 INFO を将来追加してはならない
+        //     (= 追加する場合は WARN/ERROR にする規約)。これにより本 regex に anchor なし broad alternation を
+        //     置いても INFO false positive が構造的に発生しない契約となる。
+        //
         // 対象:
         //   - `Updater 起動` / `Updater 終了` (Logger 自身が出すセッション境界)
         //   - `[Step N/M]` Step 1/2/3/4 のヘッダ (Program.cs)
         //   - `Updater 全工程完了` (= 最終成功)
-        //   - `Manager 起動完了` / `Manager 起動失敗` / `Manager spawn` (= Step 3 結果)
+        //   - `Manager 起動完了` / `Manager spawn` 成功 (= Step 3 結果、失敗 path は ERROR 経由で absorb)
         //   - `Manager プロセス終了確認` / `Manager プロセスは既に終了済み` (= Step 1 完了)
         //   - `Manager dir 置換完了` (= Step 2 完了)
-        //   - `rollback` (= 復旧 path、INFO/WARN/ERROR どれでも該当時は出る)
         //   - `FATAL` (= 致命的状態を示す ERROR の典型 prefix、ERROR で既に拾われるが念の為)
+        //
+        // R2 review M-2 で `rollback` alternation を removal:
+        //   - 現状 Updater の rollback 言及はすべて WARN/ERROR (FileReplacer.cs L101/L280/L288/L292、
+        //     Program.cs L333/L342) で出ているため、WARN/ERROR 全件 absorb 経路で完全 cover、removal で
+        //     coverage 損失なし。anchor なし `rollback` alternation が将来 INFO 行に偶然含まれた時の
+        //     false positive を予防 (上記 SPEC 規約と整合)。
         private static readonly Regex MilestoneRegex = new Regex(
             @"Updater\s*(起動|終了|全工程完了)" +
             @"|^\[Step\s*\d+/\d+\]" +
-            @"|Manager\s*(起動完了|起動失敗|spawn|プロセス終了確認|プロセスは既に終了済み|dir\s*置換完了)" +
-            @"|rollback" +
+            @"|Manager\s*(起動完了|spawn|プロセス終了確認|プロセスは既に終了済み|dir\s*置換完了)" +
             @"|FATAL",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private const string AbsorbedListFileName = ".absorbed";
+
+        // crashed Updater fallback の閾値 (= file 終端 marker 不在 + LastWriteTime からこの時間以上経過で
+        // process 終了確定として absorb 対象に含める)。10 分に設定。Updater は通常 数秒〜数分で完了する
+        // 設計なので、10 分超は実質確実に terminated。
+        private const int CrashFallbackMinutes = 10;
 
         /// <summary>
         /// 未 absorb な Updater log を全て読み込み、抽出行を Manager log に書出。例外は内部で握り潰す
@@ -92,14 +119,42 @@ namespace TonePrism.Manager.Services
                         continue;
                     }
 
-                    if (content.IndexOf("Updater 終了", StringComparison.Ordinal) < 0)
+                    bool hasShutdownMarker = content.IndexOf("Updater 終了", StringComparison.Ordinal) >= 0;
+                    bool crashedFallback = false;
+                    if (!hasShutdownMarker)
                     {
-                        // 終端未達 = 次回 Manager 起動で再評価。今回は absorb しない (mark もしない)。
-                        continue;
+                        // Shutdown marker 不在 — 通常 path では「まだ書込中 race window」として skip するが、
+                        // LastWriteTime から CrashFallbackMinutes 以上経過していれば process 終了確定として
+                        // absorb 対象に含める (R2 review M-1: crashed Updater が永久 skip される path 閉鎖)。
+                        DateTime lastWrite;
+                        try
+                        {
+                            lastWrite = new FileInfo(filePath).LastWriteTime;
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Warn($"[UpdaterLogAbsorber] LastWriteTime 取得失敗 (skip): {filePath} — {ex.Message}");
+                            continue;
+                        }
+                        if ((DateTime.Now - lastWrite).TotalMinutes < CrashFallbackMinutes)
+                        {
+                            // 終端未達 + まだ書込中の可能性 = 次回 Manager 起動で再評価。
+                            continue;
+                        }
+                        crashedFallback = true;
                     }
 
                     int extracted = AbsorbContent(content);
-                    Logger.Info($"[UpdaterLogAbsorber] Updater log を absorb: {Path.GetFileName(filePath)} ({extracted} 件)");
+                    if (crashedFallback)
+                    {
+                        Logger.Warn(
+                            $"[UpdaterLogAbsorber] Updater log を absorb [CRASHED?]: {Path.GetFileName(filePath)} " +
+                            $"({extracted} 件、Shutdown marker 不在 + {CrashFallbackMinutes} 分以上書込なし → process 終了確定として absorb)");
+                    }
+                    else
+                    {
+                        Logger.Info($"[UpdaterLogAbsorber] Updater log を absorb: {Path.GetFileName(filePath)} ({extracted} 件)");
+                    }
                     newlyAbsorbed.Add(normalized);
                 }
 
@@ -123,35 +178,77 @@ namespace TonePrism.Manager.Services
         }
 
         // file 内容を行レベルで parse、抽出行を Manager Logger に書出。書出件数を return。
+        //
+        // 多行 entry の継続行サポート (R2 review H-1):
+        //   `Logger.Error(string, Exception)` は exception 本体を message に埋込む形 (`$"{message}\n{ex}"`)
+        //   で出力するため、stack trace 行は LineRegex の `[ts] [LEVEL] ...` ヘッダを持たない継続行となる。
+        //   header 行を見たら直前の累積 entry を flush + 新 entry を開始、header 不一致行は active entry
+        //   があれば payload に append (= 改行込みの単一 entry として Manager Logger に書出)、active entry が
+        //   なければ noise として skip する state machine pattern。
         private static int AbsorbContent(string content)
         {
             int count = 0;
+            string activeLevel = null;
+            StringBuilder activePayload = null;
+
             foreach (string raw in content.Split('\n'))
             {
                 string line = raw.TrimEnd('\r');
-                if (line.Length == 0) continue;
 
-                var m = LineRegex.Match(line);
-                if (!m.Success) continue;
+                Match m = line.Length == 0 ? null : LineRegex.Match(line);
+                bool isHeader = m != null && m.Success;
 
-                string level = m.Groups["level"].Value;
-                string ts = m.Groups["ts"].Value;
-                string rest = m.Groups["rest"].Value;
-
-                bool keep = level == "WARN" || level == "ERROR" || MilestoneRegex.IsMatch(rest);
-                if (!keep) continue;
-
-                // Manager log への出力時、由来 + 元 timestamp を prefix で明示
-                string payload = $"[Updater {ts}] {rest}";
-                switch (level)
+                if (isHeader)
                 {
-                    case "ERROR": Logger.Error(payload); break;
-                    case "WARN": Logger.Warn(payload); break;
-                    default: Logger.Info(payload); break;
+                    // 新 header 検出 → 直前の active entry を flush
+                    if (activeLevel != null)
+                    {
+                        WriteToManagerLogger(activeLevel, activePayload.ToString());
+                        count++;
+                        activeLevel = null;
+                        activePayload = null;
+                    }
+
+                    string level = m.Groups["level"].Value;
+                    string ts = m.Groups["ts"].Value;
+                    string rest = m.Groups["rest"].Value;
+
+                    bool keep = level == "WARN" || level == "ERROR" || MilestoneRegex.IsMatch(rest);
+                    if (!keep) continue; // header だが absorb 対象外 → 後続継続行も accumulate しない
+
+                    activeLevel = level;
+                    activePayload = new StringBuilder();
+                    activePayload.Append($"[Updater {ts}] {rest}");
                 }
+                else
+                {
+                    // header 不一致行 (= 継続行 or 空行)。
+                    // active entry があれば payload に append (改行 + 本文)、なければ skip。
+                    if (activeLevel != null)
+                    {
+                        activePayload.Append('\n');
+                        if (line.Length > 0) activePayload.Append(line);
+                    }
+                }
+            }
+
+            // EOF 時の trailing entry を flush
+            if (activeLevel != null)
+            {
+                WriteToManagerLogger(activeLevel, activePayload.ToString());
                 count++;
             }
             return count;
+        }
+
+        private static void WriteToManagerLogger(string level, string payload)
+        {
+            switch (level)
+            {
+                case "ERROR": Logger.Error(payload); break;
+                case "WARN": Logger.Warn(payload); break;
+                default: Logger.Info(payload); break;
+            }
         }
 
         private static HashSet<string> LoadAbsorbedSet(string absorbedListPath)

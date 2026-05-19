@@ -25,10 +25,9 @@ namespace TonePrism.Manager.Controls
             @"^(?<component>manager|launcher|monitor)_(?<pc>.+)_(?<date>\d{4}-\d{2}-\d{2})_(?<time>\d{6})(?:_(?<seq>\d+))?\.log$",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-        // 行頭フォーマット: `[YYYY-MM-DD HH:mm:ss] [LEVEL] ...`
-        private static readonly Regex LineRegex = new Regex(
-            @"^\[(?<ts>[^\]]+)\] \[(?<level>INFO|WARN|ERROR)\] (?<rest>.*)$",
-            RegexOptions.Compiled);
+        // 行頭フォーマット: `[YYYY-MM-DD HH:mm:ss] [LEVEL] ...` の parse SoT は `Services/LogLineFormat.cs`
+        // (UpdaterLogAbsorber と共有、format 拡張時の同期 drift 防止)。
+        private static readonly Regex LineRegex = LogLineFormat.LineRegex;
 
         private string _logsRoot;
         private List<LogFileEntry> _allEntries = new List<LogFileEntry>();
