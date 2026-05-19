@@ -1719,9 +1719,19 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 - 旧 setting key `log_destination_path` は SettingsRepository の get/set callsite から削除 (= 1 semantic 維持)。`SettingsKeys.LogDestinationPath` const は migration code 内 reference のみで残置 (= deprecated marker、docstring で migration 完了後の参照禁止を明示)。
 
+#### Also Changed: `responses/` directory layout 規約 (= β 化)
+
+User レビューで「`responses/` 直下に `launcher_logs_root.json` (本 PR 新規 IPC file) を置くと、将来 SPEC §6.5 のプレイ記録取り込み logic (= 直下 sweep + `imported/` / `failed/` move) と誤認衝突する」hazard を発見、本 PR scope 内で SPEC §6.5 directory layout 規約を **β 化** (= 直下 vs subfolder の責務分離):
+
+- **直下** = Manager ↔ Launcher の **system / IPC 用 file** 専用 (= `launcher_logs_root.json` 等の single-file write、取り込み logic の sweep 対象外)
+- **subfolder (category 別)** = **data drop 用** (= プレイ記録は `responses/play_records/{,imported/,failed/}`、アンケートは `responses/surveys/{,imported/,failed/}`、各 subfolder 内が 3-state folder pattern)
+- **SessionHeartbeat** (`responses/launcher_sessions/`) も「IPC 用 subfolder」として旧版の「例外」表現から一般化規約に乗る整理
+
+プレイ記録 / アンケートの実装はまだ未着手 (= Launcher / Manager 両側で SQLite write / 取り込み logic はゼロ、SPEC で設計のみ) のため **code 変更ゼロ、SPEC §6.5 書換えのみで完結**。将来 plays/surveys 取り込み実装時に新 layout で着手される。
+
 #### Bump 根拠 (v0.14.0 → v0.15.0)
 
-SemVer pre-1.0 minor bump: 設定 semantic の breaking 変更 (= 旧 `log_destination_path` の Manager-only 直配置 → unified parent root) + 新機能 (Launcher への path 伝搬 / migration dialog)。SPEC §3.6 書換えで SPEC 側も v1.10.32 → v1.10.33 を同 PR で bump。
+SemVer pre-1.0 minor bump: 設定 semantic の breaking 変更 (= 旧 `log_destination_path` の Manager-only 直配置 → unified parent root) + 新機能 (Launcher への path 伝搬 / migration dialog) + SPEC §6.5 directory layout 規約 β 化。SPEC §3.6 + §6.5 書換えで SPEC 側も v1.10.32 → v1.10.33 を同 PR で bump。
 
 ### [Manager v0.14.0] - 2026-05-19
 
