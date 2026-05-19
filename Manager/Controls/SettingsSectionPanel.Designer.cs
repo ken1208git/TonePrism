@@ -104,7 +104,7 @@ namespace TonePrism.Manager.Controls
             this.lblLogDestHint.Location = new System.Drawing.Point(20, 75);
             this.lblLogDestHint.Size = new System.Drawing.Size(420, 15);
             this.lblLogDestHint.TabIndex = 3;
-            this.lblLogDestHint.Text = "空欄にするとデフォルト（DB ファイルの隣の logs/）。指定先に manager/ launcher/ updater/ の subdir が作成されます";
+            this.lblLogDestHint.Text = "空欄にするとデフォルト（DB ファイルの隣の logs/）。指定先に manager/ launcher/ updater/ のフォルダが自動で作られます";
             //
             // lblLogRetentionPrompt
             //
