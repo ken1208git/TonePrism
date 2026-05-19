@@ -48,21 +48,16 @@ namespace TonePrism.Manager
             this.lblStatus.Size = new System.Drawing.Size(56, 17);
             this.lblStatus.Text = "準備完了";
             //
-            // lblBackupStatus (Spring=true で残り space を全部埋めて TextAlign=MiddleRight で右寄せ表示)
-            // (#170 followup round 2) 旧設計は spacer + AutoSize=true で 3 item 構成だったが、Spring spacer
-            // と AutoSize neighbor の expand に WinForms layout が追従しない仕様で右端外にはみ出した。
-            // 新設計は lblBackupStatus 自体に Spring=true を載せて「lblStatus 右から strip 右端まで」を埋め、
-            // 内部の text を MiddleRight で右寄せ、spacer 不要のシンプル 2 item 構成。
+            // lblBackupStatus (Alignment=Right で strip 右端配置、AutoSize で natural width)
+            // (#170 followup round 2) 旧 Spring=true 方式は strip.ClientSize 無視して X=827, Width=759 を
+            // 算出し strip 外に hidden になる症状 (log で確定: IsOnOverflow=False なのに Bounds が strip 外)。
+            // WinForms 本来の右寄せ pattern である `Alignment=Right` に切替。これは layout engine が
+            // 「右端から item.Width 分を確保して配置」する明示 anchor 方式で、Spring の余白計算 race を回避。
             //
-            this.lblBackupStatus.AutoSize = false;
+            this.lblBackupStatus.Alignment = System.Windows.Forms.ToolStripItemAlignment.Right;
+            this.lblBackupStatus.AutoSize = true;
             this.lblBackupStatus.Name = "lblBackupStatus";
-            this.lblBackupStatus.Spring = true;
-            this.lblBackupStatus.Size = new System.Drawing.Size(0, 17);
             this.lblBackupStatus.Text = "";
-            this.lblBackupStatus.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-            // (#170 followup round 2) Overflow=Never で「strip が item を overflow dropdown に隠す」path を遮断。
-            // 既知の WinForms StatusStrip quirk で、item の natural width > strip width な時に overflow に
-            // 流れて invisible になる症状あり。
             this.lblBackupStatus.Overflow = System.Windows.Forms.ToolStripItemOverflow.Never;
             //
             // tabControl1
