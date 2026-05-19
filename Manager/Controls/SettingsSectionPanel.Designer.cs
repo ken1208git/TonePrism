@@ -104,7 +104,7 @@ namespace TonePrism.Manager.Controls
             this.lblLogDestHint.Location = new System.Drawing.Point(20, 75);
             this.lblLogDestHint.Size = new System.Drawing.Size(420, 15);
             this.lblLogDestHint.TabIndex = 3;
-            this.lblLogDestHint.Text = "Manager / Launcher / Updater 全ての保存先 (空欄でデフォルト: DB ファイルの隣の logs/)。指定先に manager/ launcher/ updater/ subdir が作成されます。反映: Manager は次回起動時 / Launcher は次回起動時";
+            this.lblLogDestHint.Text = "空欄にするとデフォルト（DB ファイルの隣の logs/）。指定先に manager/ launcher/ updater/ の subdir が作成されます";
             //
             // lblLogRetentionPrompt
             //
@@ -139,7 +139,7 @@ namespace TonePrism.Manager.Controls
             this.lblLogRetentionNote.Location = new System.Drawing.Point(20, 145);
             this.lblLogRetentionNote.Size = new System.Drawing.Size(330, 15);
             this.lblLogRetentionNote.TabIndex = 7;
-            this.lblLogRetentionNote.Text = "保存先 / 保存日数の変更は次回 Manager 起動時に反映されます。";
+            this.lblLogRetentionNote.Text = "保存先の変更は次回 Manager / Launcher 起動時、保存日数の変更は次回 Manager 起動時に反映されます。";
             //
             // grpBackup (top、バックアップ保存先 + 自動有効化 + 自動間隔 + 単位 + 世代数)
             //
