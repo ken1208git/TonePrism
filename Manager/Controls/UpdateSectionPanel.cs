@@ -105,9 +105,15 @@ namespace TonePrism.Manager.Controls
             }
 
             // 最新 ver / 日付
+            // (#170 followup) cache fallback (FromCache=true + LastError あり) の場合、表示している
+            // version は **再確認できていない古い値の可能性** があるため「(キャッシュ)」suffix +
+            // 灰色化で disclaimer を視覚化。再確認成功時 (FromCache=true でも LastError=null) は
+            // disclaimer 不要 (= cache TTL 内の正常 hit、信頼可)。
+            bool isStaleCache = result.FromCache && !string.IsNullOrEmpty(result.LastError);
             if (result.Latest != null)
             {
-                lblLatestVersion.Text = result.Latest.TagName ?? "不明";
+                lblLatestVersion.Text = (result.Latest.TagName ?? "不明") + (isStaleCache ? " (キャッシュ)" : string.Empty);
+                lblLatestVersion.ForeColor = isStaleCache ? System.Drawing.Color.Gray : System.Drawing.SystemColors.ControlText;
                 lblLatestDate.Text = result.Latest.PublishedAt.HasValue
                     ? "(公開: " + result.Latest.PublishedAt.Value.ToLocalTime().ToString("yyyy-MM-dd") + ")"
                     : string.Empty;
@@ -115,6 +121,7 @@ namespace TonePrism.Manager.Controls
             else
             {
                 lblLatestVersion.Text = result.Status == UpdateCheckStatus.UnknownBundle ? "(Bundle 不明)" : "—";
+                lblLatestVersion.ForeColor = System.Drawing.SystemColors.ControlText;
                 lblLatestDate.Text = string.Empty;
             }
 
@@ -135,8 +142,19 @@ namespace TonePrism.Manager.Controls
                     btnSkip.Enabled = false;
                     break;
                 case UpdateCheckStatus.UpToDate:
-                    lblStatusMessage.Text = "最新版を実行中です。";
-                    lblStatusMessage.ForeColor = System.Drawing.Color.DarkGreen;
+                    // (#170 followup) cache 経由判定の場合、実 GitHub 最新と比較できていないため
+                    // 緑文字「最新版を実行中」と断言すると過信させすぎ。stale cache 時は灰色 + 文言
+                    // を「キャッシュ比較、再確認失敗中」に降格して信頼度を視覚化。
+                    if (isStaleCache)
+                    {
+                        lblStatusMessage.Text = "最新版を実行中 (キャッシュ比較、再確認失敗中)";
+                        lblStatusMessage.ForeColor = System.Drawing.Color.DimGray;
+                    }
+                    else
+                    {
+                        lblStatusMessage.Text = "最新版を実行中です。";
+                        lblStatusMessage.ForeColor = System.Drawing.Color.DarkGreen;
+                    }
                     btnUpdateNow.Enabled = false;
                     btnSkip.Enabled = false;
                     break;
@@ -196,7 +214,17 @@ namespace TonePrism.Manager.Controls
             // (ユーザーが期待した「アプデできたら最新版だけ表示」semantic)。
             try
             {
-                if (result.CumulativeReleases != null && result.CumulativeReleases.Count > 0)
+                // (#170 followup) 「これから適用される変更」見出しは UpdateAvailable / Skipped
+                // (= current < latest、実際に未適用 release がある状態) でのみ意味を持つ。
+                // UpToDate / UnknownBundle / NetworkError / ParseError のときに CumulativeReleases が
+                // 残っていても (= cache stale 由来で UpdateChecker filter を通り抜けたケース) UI 側
+                // で表示しない fallback。defense-in-depth として UpdateChecker の
+                // FilterStaleFromCumulative と組み合わせ、片方が漏れても誤情報を user に出さない。
+                bool showCumulative = result.CumulativeReleases != null
+                    && result.CumulativeReleases.Count > 0
+                    && (result.Status == UpdateCheckStatus.UpdateAvailable
+                        || result.Status == UpdateCheckStatus.Skipped);
+                if (showCumulative)
                 {
                     // (#108 Phase 4 round 2 L12) cache hydrate 経路で CumulativeReleases=空 (size 抑制の
                     // ため cache に入れない設計) のケースは、次行の BuildCumulativeHtml が単一 Latest
@@ -206,16 +234,50 @@ namespace TonePrism.Manager.Controls
                     webReleaseNotes.DocumentText = MarkdownRenderer.BuildCumulativeHtml(
                         result.CumulativeReleases, topHeading: "これから適用される変更");
                 }
-                else if (result.Latest != null && !string.IsNullOrEmpty(result.Latest.Body))
-                {
-                    string bodyHtml = MarkdownRenderer.MarkdownToHtml(result.Latest.Body);
-                    string heading = "現在実行中: " + (result.Latest.TagName ?? "");
-                    webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument(
-                        "<h1>" + System.Web.HttpUtility.HtmlEncode(heading) + "</h1>" + bodyHtml);
-                }
                 else
                 {
-                    webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument("<p>リリースノートはありません。</p>");
+                    // (#170 followup round 2) 「現在実行中」notes は **local CHANGELOG.md を優先** する。
+                    // 旧実装は cache.Latest.Body を直接使っていたが、cache が stale (= current > cache.Latest)
+                    // のケースで「現在実行中: v0.4.0」+ v0.4.0 body を表示する誤誘導があった (user は実際は
+                    // v0.5.0 を実行中で、v0.4.0 の内容は既に適用済)。local CHANGELOG.md は bundle 同梱
+                    // (Release Tooling v0.1.16 以降) で、必ず current Bundle 版の notes を持つため SoT として
+                    // 信頼可。fallback chain: 1) local CHANGELOG → 2) cache.Latest.Body → 3) "ありません"。
+                    string localBody = null;
+                    string localHeading = null;
+                    try
+                    {
+                        BundleEntry localBundle = ChangelogParser.TryReadLatestFromFile(PathManager.BundleChangelogPath);
+                        if (localBundle != null && !string.IsNullOrEmpty(localBundle.Body))
+                        {
+                            localBody = localBundle.Body;
+                            string verStr = localBundle.Version != null
+                                ? "v" + localBundle.Version.ToString(3)
+                                : localBundle.RawVersionString ?? "";
+                            localHeading = "現在実行中: " + verStr;
+                        }
+                    }
+                    catch (Exception localEx)
+                    {
+                        Logger.Warn("[UpdateSectionPanel] local CHANGELOG.md 読込失敗 (cache fallback に降格): " + localEx.Message);
+                    }
+
+                    if (!string.IsNullOrEmpty(localBody))
+                    {
+                        string bodyHtml = MarkdownRenderer.MarkdownToHtml(localBody);
+                        webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument(
+                            "<h1>" + System.Web.HttpUtility.HtmlEncode(localHeading) + "</h1>" + bodyHtml);
+                    }
+                    else if (result.Latest != null && !string.IsNullOrEmpty(result.Latest.Body))
+                    {
+                        string bodyHtml = MarkdownRenderer.MarkdownToHtml(result.Latest.Body);
+                        string heading = "現在実行中: " + (result.Latest.TagName ?? "");
+                        webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument(
+                            "<h1>" + System.Web.HttpUtility.HtmlEncode(heading) + "</h1>" + bodyHtml);
+                    }
+                    else
+                    {
+                        webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument("<p>リリースノートはありません。</p>");
+                    }
                 }
             }
             catch
@@ -770,6 +832,11 @@ namespace TonePrism.Manager.Controls
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question);
             if (dr != DialogResult.Yes) return;
+            // (#170 followup) LAN 他 PC race fence。skip 書込は user 意図的な destructive 操作
+            // (= settings table への INSERT OR REPLACE) で BackupSettingsForm OK click と同位置付け、
+            // 1 段目 fence (SectionPanel 配下の button click 直前) として CheckBeforeWrite を呼ぶ。
+            // Cancel 時は skip 自体を中止して current 状態維持。
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "アップデートスキップ") == DialogResult.Cancel) return;
             _updateChecker.Skip(_currentResult.Latest.Version);
             // (#108 Phase 4 round 4 L-5) LastError も carry。Skip 直前に「再確認エラー: ...」grey sub-text
             // が出ていた case で Skip 後に context が消えると UX surprise になるため明示的に維持。

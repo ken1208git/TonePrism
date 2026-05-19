@@ -40,7 +40,9 @@ namespace TonePrism.Manager
             _logSectionPanel = new LogSectionPanel { Dock = DockStyle.Fill };
             _updateSectionPanel = new UpdateSectionPanel { Dock = DockStyle.Fill };
 
-            _gameSectionPanel.StatusChanged += (msg) => UpdateStatusBar(msg);
+            // (#170 followup) GameSectionPanel から送られる msg は常に「ゲーム数: N 件」で UpdateStatusBar()
+            // の default と同義のため引数なし版に統一。旧 signature `UpdateStatusBar(string)` は廃止。
+            _gameSectionPanel.StatusChanged += (msg) => UpdateStatusBar();
             _settingsSectionPanel.DatabaseReset += OnDatabaseReset;
             _backupSectionPanel.DatabaseChanged += OnDatabaseRestored;
 
@@ -53,6 +55,36 @@ namespace TonePrism.Manager
 
             // (#179) ManagerSessionService の shutdown (self row delete + heartbeat 停止) を form 終了時に発火
             this.FormClosed += MainForm_FormClosed;
+            // (#170 followup round 2 review L-3) backup status auto-revert timer の cleanup は Dispose 前に
+            // 走らせたいので FormClosing を hook (= FormClosed は Dispose 後で意味薄)。
+            this.FormClosing += MainForm_FormClosing;
+        }
+
+        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            // (#170 followup round 2 review L-3 + round 3 review L-1) backup status auto-revert timer の
+            // cleanup を **FormClosing** (= Dispose 前、message pump 走行中) で実行。
+            // 別 handler が `e.Cancel=true` を set した場合 (= 将来「保存して閉じますか?」confirm dialog 追加時)
+            // は timer を生かしたまま return、form が継続生存して `UpdateBackupStatus` 呼出時に新 timer 作成可能。
+            //
+            // (round 4 review L-3) **handler subscription 順序の前提**: `e.Cancel=true` を判定する handler
+            // (= 「保存して閉じますか?」等) は **本 handler より先に subscribe** された場合のみ「timer を
+            // 生かしたまま return」が成立する。`+=` の subscription 順で event 発火するため、後付け時は
+            // ctor (L57-60) の `FormClosing` hook 行より前に新 handler の `+=` を追加すること。
+            if (e.Cancel) return;
+            try
+            {
+                if (_backupStatusClearTimer != null)
+                {
+                    _backupStatusClearTimer.Stop();
+                    _backupStatusClearTimer.Dispose();
+                    _backupStatusClearTimer = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[MainForm] FormClosing で _backupStatusClearTimer cleanup 失敗: " + ex.Message);
+            }
         }
 
         private void MainForm_FormClosed(object sender, FormClosedEventArgs e)
@@ -84,6 +116,7 @@ namespace TonePrism.Manager
             {
                 Logger.Warn("[MainForm] FormClosed で LauncherSessionService Shutdown 失敗: " + ex.Message);
             }
+
         }
 
         /// <summary>
@@ -221,7 +254,8 @@ namespace TonePrism.Manager
                 // (round 1 L-3) DB 未初期化 path では session service も起動しない (= heartbeat 不在で
                 // form を user 手動 × で閉じるまで no-op、FormClosed で _sessionService=null なので
                 // Shutdown も skip される clean path)。
-                UpdateStatusBar("データベース未初期化");
+                // (#170 followup) DB 未初期化は左 zone 占有 (= ゲーム数取得不可、データベース状態を伝える)
+                lblStatus.Text = "データベース未初期化";
                 return;
             }
 
@@ -353,6 +387,11 @@ namespace TonePrism.Manager
             _storeSectionPanel.Initialize(dbManager);
             _settingsSectionPanel.Initialize(dbManager);
 
+            // (#170 followup round 2 review H-1) CleanupOldLogs は **Program.Main に移動済**。
+            // 旧実装は本 MainForm 経路で呼出していたが、dbReady=false / SessionConflictDialog Cancel
+            // 等の early-return path で到達不能になる silent regression があり、Program.Main で
+            // SQLite 直接 read 経由で呼ぶ形に変更。本 MainForm 内で再呼出は不要。
+
             // 旧バージョンが root 直下に作っていた safety ファイルを backups/safety/ へ一度きり移動
             try
             {
@@ -464,6 +503,16 @@ namespace TonePrism.Manager
                         bool shown = ShowUpdateAvailableNotification(result);
                         if (shown)
                         {
+                            // (#170 followup) MarkNotified は **意図的に CheckBeforeWrite を呼ばない**。
+                            // 理由 3 つ: (1) auto background path (StartBackgroundUpdateCheckIfDue) からの
+                            // 自動副作用で user 操作直接 trigger ではない、(2) 非破壊的な metadata write
+                            // (= 同 tag 上書きでも実害ゼロ、SQLite WAL で atomic)、(3) 直前に通知 dialog を
+                            // user が dismiss したばかりで、直後に「他 PC 競合中」popup を出すと UX 二重表示
+                            // で煩雑。BackupService の `last_backup_at` 自動書込が同種 auto path で
+                            // CheckBeforeWrite ではなく TryAcquireBackupLease の独自 fence を採用しているのと
+                            // 同じ判断基準 (= auto path は popup ではなく atomic 性に依存)。本 PR の plan
+                            // で当初追加候補だったが、background thread + auto side-effect + 非破壊性 という
+                            // 3 constraint で意図的に skip と文書化。
                             checker.MarkNotified(result.Latest.TagName);
                         }
                         else
@@ -596,7 +645,8 @@ namespace TonePrism.Manager
                     return;
                 }
 
-                UpdateStatusBar("自動バックアップを実行中...");
+                // (#170 followup) 右 zone (lblBackupStatus) で transient 表示、左 zone のゲーム数は維持。
+                UpdateBackupStatus("自動バックアップ実行中...", System.Drawing.Color.DarkBlue, autoRevert: false);
                 BackupResult result = await Task.Run(() =>
                     dbManager.BackupService.RunAutoBackupIfDue(null, CancellationToken.None));
 
@@ -604,19 +654,31 @@ namespace TonePrism.Manager
 
                 if (result.IsSuccess)
                 {
-                    UpdateStatusBar($"自動バックアップ完了: {System.IO.Path.GetFileName(result.FilePath)}");
+                    UpdateBackupStatus(
+                        $"✓ 自動バックアップ完了: {System.IO.Path.GetFileName(result.FilePath)}",
+                        System.Drawing.Color.DarkGreen, autoRevert: true);
                     _backupSectionPanel.RefreshDisplay();
                 }
                 else if (result.IsFailed)
                 {
-                    UpdateStatusBar($"自動バックアップ失敗: {result.Message}");
+                    UpdateBackupStatus($"✗ 自動バックアップ失敗: {result.Message}",
+                        System.Drawing.Color.DarkRed, autoRevert: true);
                 }
-                // IsSkipped はそのまま（他PCで実行済み等、特に通知不要）
+                else if (result.IsSkipped)
+                {
+                    // (#170 followup round 2 review #1) 他 PC で実行済 / disable 等で skip された場合、
+                    // 直前の `UpdateBackupStatus("自動バックアップ実行中...", autoRevert: false)` で表示した
+                    // indicator が永久残留する path を閉じる。empty string + autoRevert: true で
+                    // 即時 clear (Timer の 7 秒経過で消える、または重複呼出時に旧 timer が dispose される
+                    // ので問題なし)。
+                    UpdateBackupStatus(string.Empty, System.Drawing.SystemColors.ControlText, autoRevert: true);
+                }
             }
             catch (Exception ex)
             {
                 Logger.Error("[MainForm] StartAutoBackupIfDue エラー", ex);
-                UpdateStatusBar($"自動バックアップエラー: {ex.Message}");
+                UpdateBackupStatus($"✗ 自動バックアップエラー: {ex.Message}",
+                    System.Drawing.Color.DarkRed, autoRevert: true);
             }
         }
 
@@ -696,11 +758,85 @@ namespace TonePrism.Manager
             }
         }
 
-        private void UpdateStatusBar(string additionalInfo = null)
+        // (#170 followup) status bar の左 / 右 zone を分離。
+        //   左 (lblStatus): データベース接続状態 + ゲーム数 = 永続表示
+        //   右 (lblBackupStatus): 自動バックアップの transient 状態 = autoRevert=true なら 7 秒で消える
+        // 旧実装は 1 ラベル 1 関数で、auto backup message が「ゲーム数」を上書きして元情報が一時消失していた。
+        private System.Windows.Forms.Timer _backupStatusClearTimer;
+
+        private void UpdateStatusBar()
         {
+            if (dbManager == null) return;
             string dbStatus = dbManager.DatabaseExists() ? "接続済み" : "未接続";
-            string gameInfo = additionalInfo ?? $"ゲーム数: {_gameSectionPanel.GameCount}件";
+            string gameInfo = $"ゲーム数: {_gameSectionPanel.GameCount}件";
             lblStatus.Text = $"データベース: {dbStatus} | {gameInfo}";
+        }
+
+        /// <summary>
+        /// (#170 followup) status bar の右 zone (`lblBackupStatus`) に transient な backup 状態を表示する。
+        /// 左 zone (`lblStatus` の「データベース | ゲーム数」) は変えない (= 旧 UpdateStatusBar(string) の
+        /// 上書き問題への対処)。
+        ///
+        /// `autoRevert=true` で渡すと 7 秒後に自動 clear する Timer を仕掛ける (= 完了 / 失敗 message が
+        /// 永続表示で stale になるのを防ぐ)。`autoRevert=false` は「実行中...」のような完了まで残したい
+        /// 状態用、次の `UpdateBackupStatus` 呼出か手動 clear まで残る。
+        ///
+        /// Accessibility: color 情報を text prefix で補強する (`✓` / `✗`)、screen reader で color を
+        /// 識別できない user 向けの fallback。
+        /// </summary>
+        private void UpdateBackupStatus(string message, System.Drawing.Color color, bool autoRevert)
+        {
+            // (#170 followup round 2) lblBackupStatus は Designer で Alignment=Right + AutoSize=true 設定済。
+            // strip 右端から natural width 分を anchor 配置するため、Text / ForeColor 設定だけで OK。
+            // (review M-2) 長文 message (= SQLite error / 長 path) で strip 幅超過 + left zone 重なりを防ぐため、
+            // 表示 text を 80 文字に pre-truncate (= chevron に逃げる前の defense)。完全な message は呼出元
+            // (e.g., 自動 backup 失敗 path) で Logger.Error として別途残るため UI で truncated でも debug 可能。
+            lblBackupStatus.Text = TruncateForStatusBar(message);
+            lblBackupStatus.ForeColor = color;
+
+            // 既存 timer を破棄してから新規 (= 連続呼出時に古い timer が古い message を消すのを防ぐ)
+            if (_backupStatusClearTimer != null)
+            {
+                _backupStatusClearTimer.Stop();
+                _backupStatusClearTimer.Dispose();
+                _backupStatusClearTimer = null;
+            }
+            if (autoRevert && !string.IsNullOrEmpty(message))
+            {
+                _backupStatusClearTimer = new System.Windows.Forms.Timer();
+                _backupStatusClearTimer.Interval = 7000;
+                _backupStatusClearTimer.Tick += BackupStatusClearTimer_Tick;
+                _backupStatusClearTimer.Start();
+            }
+        }
+
+        /// <summary>
+        /// (#170 followup round 2 review M-2) status bar 右 zone 用の text truncation helper。
+        /// 経験則上 80 chars で過半数の典型 message (= 自動 backup 失敗 SQLite error / 長 path) を救い、
+        /// 極端 overflow は WinForms StatusStrip の chevron に逃げる設計。
+        ///
+        /// 注: 厳密な pixel 幅判定はしない (= 全角混じり / window resize / DPI scaling で精度差あり)。
+        /// 完全な message は呼出元 (e.g., `StartAutoBackupIfDue` の `Logger.Error`) で別途 log に残るため
+        /// UI で truncated でも debug 可能、本 helper は user 視覚的 alarm 用 carry-best-effort と位置付け。
+        /// </summary>
+        private static string TruncateForStatusBar(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return string.Empty;
+            const int MaxLen = 80;
+            if (message.Length <= MaxLen) return message;
+            // 先頭 50 文字 + "..." + 末尾 27 文字 で末尾 (ファイル名等) を維持
+            return message.Substring(0, 50) + "..." + message.Substring(message.Length - 27);
+        }
+
+        private void BackupStatusClearTimer_Tick(object sender, EventArgs e)
+        {
+            lblBackupStatus.Text = string.Empty;
+            if (_backupStatusClearTimer != null)
+            {
+                _backupStatusClearTimer.Stop();
+                _backupStatusClearTimer.Dispose();
+                _backupStatusClearTimer = null;
+            }
         }
 
         // (#178 (b)) アップデート完了通知 dialog。invariant:

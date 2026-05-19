@@ -11,6 +11,15 @@ namespace TonePrism.Manager.Controls
 
         public event Action DatabaseReset;
 
+        // (#170 followup round 1) Text 系 control の Leave event は focus 移動ごとに発火するため、
+        // 値が前回 save 時から変更されていない場合は save を skip する。これらの field は
+        // 「最後に DB に書込んだ値」を tracking する。
+        private string _lastSavedLogDest = "";
+        private string _lastSavedBackupDest = "";
+        // (#170 followup round 1) 単位 ComboBox の SelectedIndexChanged は値の rollback で
+        // 再帰発火するため、現在の選択を tracking して「実際の unit change か revert か」を区別する。
+        private string _prevIntervalUnit = "時間";
+
         public SettingsSectionPanel()
         {
             InitializeComponent();
@@ -20,7 +29,420 @@ namespace TonePrism.Manager.Controls
         {
             _dbManager = dbManager;
             UpdateVersionInfo();
+            LoadLogSettings();
+            LoadBackupSettings();
         }
+
+        // ----- ログ section -----
+
+        /// <summary>
+        /// (#170 followup round 1) ログ section の初期化。保存先 path + 保存日数 を load。
+        /// event hook は LoadLogSettings 完了後に attach (= 起動時 SetValue で spurious 発火回避)。
+        /// </summary>
+        private void LoadLogSettings()
+        {
+            if (_dbManager == null) return;
+            // hook 一時 detach
+            numLogRetention.ValueChanged -= NumLogRetention_ValueChanged;
+            txtLogDest.Leave -= TxtLogDest_Leave;
+            try
+            {
+                var repo = _dbManager.SettingsRepository;
+                // (#170 followup round 2 review M-3) 初期値も trim して比較側 (newValue = Text.Trim()) と
+                // 揃える。DB に末尾 whitespace が混入していた case で起動直後の focus 移動 1 回で
+                // 「変更扱い」になり CheckBeforeWrite dialog が空発火する race を構造閉鎖。
+                _lastSavedLogDest = (repo.GetString(SettingsKeys.LogDestinationPath, "") ?? "").Trim();
+                txtLogDest.Text = _lastSavedLogDest;
+
+                int days = repo.GetInt32(SettingsKeys.LogRetentionDays, SettingsKeys.DefaultLogRetentionDays);
+                if (days < numLogRetention.Minimum) days = (int)numLogRetention.Minimum;
+                if (days > numLogRetention.Maximum) days = (int)numLogRetention.Maximum;
+                numLogRetention.Value = days;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[SettingsSectionPanel] LoadLogSettings 読込失敗: " + ex.Message);
+            }
+            numLogRetention.ValueChanged += NumLogRetention_ValueChanged;
+            txtLogDest.Leave += TxtLogDest_Leave;
+        }
+
+        private void NumLogRetention_ValueChanged(object sender, EventArgs e)
+        {
+            if (_dbManager == null) return;
+            int newValue = (int)numLogRetention.Value;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ログ保存日数変更") == DialogResult.Cancel)
+            {
+                // rollback
+                numLogRetention.ValueChanged -= NumLogRetention_ValueChanged;
+                try
+                {
+                    int previous = _dbManager.SettingsRepository.GetInt32(
+                        SettingsKeys.LogRetentionDays, SettingsKeys.DefaultLogRetentionDays);
+                    if (previous < numLogRetention.Minimum) previous = (int)numLogRetention.Minimum;
+                    if (previous > numLogRetention.Maximum) previous = (int)numLogRetention.Maximum;
+                    numLogRetention.Value = previous;
+                }
+                catch { }
+                numLogRetention.ValueChanged += NumLogRetention_ValueChanged;
+                return;
+            }
+            try
+            {
+                _dbManager.SettingsRepository.SetInt32(SettingsKeys.LogRetentionDays, newValue);
+                Logger.Info("[SettingsSectionPanel] ログ保存日数を " + newValue + " 日に変更 (次回起動時反映)");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[SettingsSectionPanel] LogRetentionDays 書込失敗: " + ex.Message);
+                MessageBox.Show("ログ保存日数の保存に失敗しました: " + ex.Message,
+                    "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void btnLogBrowse_Click(object sender, EventArgs e)
+        {
+            using (var dialog = new FolderBrowserDialog())
+            {
+                dialog.Description = "ログ保存先フォルダを選択してください";
+                if (!string.IsNullOrEmpty(txtLogDest.Text))
+                {
+                    dialog.SelectedPath = txtLogDest.Text;
+                }
+                if (dialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    txtLogDest.Text = dialog.SelectedPath;
+                    SaveLogDestIfChanged();
+                }
+            }
+        }
+
+        private void TxtLogDest_Leave(object sender, EventArgs e)
+        {
+            SaveLogDestIfChanged();
+        }
+
+        private void SaveLogDestIfChanged()
+        {
+            if (_dbManager == null) return;
+            string newValue = (txtLogDest.Text ?? string.Empty).Trim();
+            if (newValue == _lastSavedLogDest) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ログ保存先変更") == DialogResult.Cancel)
+            {
+                // rollback
+                txtLogDest.Leave -= TxtLogDest_Leave;
+                txtLogDest.Text = _lastSavedLogDest;
+                txtLogDest.Leave += TxtLogDest_Leave;
+                return;
+            }
+            try
+            {
+                _dbManager.SettingsRepository.SetString(SettingsKeys.LogDestinationPath, newValue);
+                _lastSavedLogDest = newValue;
+                Logger.Info("[SettingsSectionPanel] ログ保存先を変更 (次回起動時反映): " + newValue);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[SettingsSectionPanel] LogDestinationPath 書込失敗: " + ex.Message);
+                MessageBox.Show("ログ保存先の保存に失敗しました: " + ex.Message,
+                    "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // ----- バックアップ section -----
+
+        /// <summary>
+        /// (#170 followup) バックアップ section の初期化 + per-control event hook attach。
+        /// 旧 BackupSettingsForm.LoadSettings の置換、3 値 + 単位 ComboBox の 4 制御を load。
+        /// </summary>
+        private void LoadBackupSettings()
+        {
+            if (_dbManager == null) return;
+            // hook 一時 detach
+            txtBackupDest.Leave -= TxtBackupDest_Leave;
+            chkBackupAutoEnabled.CheckedChanged -= ChkBackupAutoEnabled_CheckedChanged;
+            numBackupInterval.ValueChanged -= NumBackupInterval_ValueChanged;
+            cmbBackupIntervalUnit.SelectedIndexChanged -= CmbBackupIntervalUnit_SelectedIndexChanged;
+            numBackupRetention.ValueChanged -= NumBackupRetention_ValueChanged;
+            try
+            {
+                var repo = _dbManager.SettingsRepository;
+                // (#170 followup round 2 review M-3) trim 揃え (上記 LogDest 同 pattern、空発火 dialog 防止)
+                _lastSavedBackupDest = (repo.GetString("backup_destination_path", "") ?? "").Trim();
+                txtBackupDest.Text = _lastSavedBackupDest;
+
+                // (#170 followup round 2) 自動バックアップ有効/無効 checkbox の load
+                string enabledStr = repo.GetString(SettingsKeys.BackupAutoEnabled, "true");
+                chkBackupAutoEnabled.Checked = !string.Equals(enabledStr, "false", StringComparison.OrdinalIgnoreCase);
+
+                int hours = repo.GetInt32("backup_auto_interval_hours", 24);
+                string unit = repo.GetString(SettingsKeys.BackupAutoIntervalUnit, SettingsKeys.BackupAutoIntervalUnitHours);
+                // 単位 ComboBox に display unit を設定 (= 「時間」or「日」)
+                string displayUnit = unit == SettingsKeys.BackupAutoIntervalUnitDays ? "日" : "時間";
+                cmbBackupIntervalUnit.SelectedItem = displayUnit;
+                if (cmbBackupIntervalUnit.SelectedIndex < 0) cmbBackupIntervalUnit.SelectedIndex = 0;
+                _prevIntervalUnit = (string)cmbBackupIntervalUnit.SelectedItem;
+                // 単位に応じて Max を変える + displayValue を hours から換算
+                ApplyIntervalUnitBounds(_prevIntervalUnit);
+                int factor = _prevIntervalUnit == "日" ? 24 : 1;
+                int displayValue = Math.Max(1, hours / factor);
+                if (displayValue > numBackupInterval.Maximum) displayValue = (int)numBackupInterval.Maximum;
+                numBackupInterval.Value = displayValue;
+
+                int retention = repo.GetInt32("backup_retention_count", 30);
+                if (retention < numBackupRetention.Minimum) retention = (int)numBackupRetention.Minimum;
+                if (retention > numBackupRetention.Maximum) retention = (int)numBackupRetention.Maximum;
+                numBackupRetention.Value = retention;
+
+                // checkbox に従って interval section の enable/disable
+                ApplyAutoBackupEnabledUi(chkBackupAutoEnabled.Checked);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[SettingsSectionPanel] LoadBackupSettings 読込失敗: " + ex.Message);
+            }
+            txtBackupDest.Leave += TxtBackupDest_Leave;
+            chkBackupAutoEnabled.CheckedChanged += ChkBackupAutoEnabled_CheckedChanged;
+            numBackupInterval.ValueChanged += NumBackupInterval_ValueChanged;
+            cmbBackupIntervalUnit.SelectedIndexChanged += CmbBackupIntervalUnit_SelectedIndexChanged;
+            numBackupRetention.ValueChanged += NumBackupRetention_ValueChanged;
+        }
+
+        /// <summary>
+        /// (#170 followup round 2) 自動バックアップ checkbox の状態に応じて interval section の
+        /// control を enable/disable する。OFF 時は user 視点で「設定しても無効化されている」のが明確になる。
+        /// 保存先 / 保持世代数は手動バックアップでも使うため対象外。
+        ///
+        /// (round 3 review L-1) `chkBackupAutoEnabled` は `AutoSize=true` で natural width 取得、明示
+        /// `Size=new Size(200, 19)` 行は Designer から削除 (= AutoSize=true 時は ignored)。
+        /// 経緯コメントは Designer.cs 側ではなく本 .cs 側に保持 (= Designer は VS WinForms Designer の
+        /// regenerate で section コメントが失われる可能性があるため、設計判断は非 Designer ファイルに集約)。
+        /// </summary>
+        private void ApplyAutoBackupEnabledUi(bool enabled)
+        {
+            lblBackupInterval.Enabled = enabled;
+            numBackupInterval.Enabled = enabled;
+            cmbBackupIntervalUnit.Enabled = enabled;
+            lblBackupIntervalUnit.Enabled = enabled;
+        }
+
+        private void ChkBackupAutoEnabled_CheckedChanged(object sender, EventArgs e)
+        {
+            if (_dbManager == null) return;
+            bool newValue = chkBackupAutoEnabled.Checked;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "自動バックアップ有効化変更") == DialogResult.Cancel)
+            {
+                // rollback (= event 再帰回避のため hook 一時 detach)
+                chkBackupAutoEnabled.CheckedChanged -= ChkBackupAutoEnabled_CheckedChanged;
+                chkBackupAutoEnabled.Checked = !newValue;
+                chkBackupAutoEnabled.CheckedChanged += ChkBackupAutoEnabled_CheckedChanged;
+                return;
+            }
+            try
+            {
+                _dbManager.SettingsRepository.SetString(SettingsKeys.BackupAutoEnabled, newValue ? "true" : "false");
+                // (#170 followup round 2 review M-4) UI 更新は **SetString 成功後** に行う。
+                // 旧実装は SetString 前 / 例外時に Apply 呼出されると UI 内部矛盾 (checkbox ON 表示なのに
+                // interval section disable 状態) になる drift 路があった。
+                ApplyAutoBackupEnabledUi(newValue);
+                Logger.Info("[SettingsSectionPanel] 自動バックアップを " + (newValue ? "有効" : "無効") + " に変更");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[SettingsSectionPanel] BackupAutoEnabled 書込失敗: " + ex.Message);
+                // (#170 followup round 2 review M-4 + round 3 review M-2) UI 値を rollback (= DB 状態に
+                // 再同期、UI 内部矛盾を解消)。SetString 失敗時 + Apply 失敗時 (極稀: child control disposed 等)
+                // の両方で発火、checkbox と interval section の両方を rollback 後の値 (!newValue) に
+                // 揃えて UI 内部矛盾 (checkbox / interval section の disable 状態の片寄せ) を完全閉鎖。
+                chkBackupAutoEnabled.CheckedChanged -= ChkBackupAutoEnabled_CheckedChanged;
+                chkBackupAutoEnabled.Checked = !newValue;
+                chkBackupAutoEnabled.CheckedChanged += ChkBackupAutoEnabled_CheckedChanged;
+                try { ApplyAutoBackupEnabledUi(!newValue); }
+                catch (Exception applyEx)
+                {
+                    // ApplyAutoBackupEnabledUi 自体が throw する path (= 全 control が dispose 済の極稀 race) は
+                    // form 全体が破棄中の状態、UI 内部矛盾を完全に直すのは不可能。Warn だけ残して continue。
+                    Logger.Warn("[SettingsSectionPanel] BackupAutoEnabled rollback の Apply で例外 (= form 破棄中の race の可能性、log のみ残して諦め): " + applyEx.Message);
+                }
+                MessageBox.Show("自動バックアップ設定の保存に失敗しました: " + ex.Message,
+                    "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>
+        /// 単位 (「時間」/「日」) に応じて numBackupInterval の Maximum を切替える。
+        /// 「時間」mode: 1-720 (= 30 日相当)。「日」mode: 1-30。
+        /// </summary>
+        private void ApplyIntervalUnitBounds(string unit)
+        {
+            int max = unit == "日" ? 30 : 720;
+            numBackupInterval.Maximum = max;
+            // current Value が新 Max を超えていたら clamp
+            if (numBackupInterval.Value > max) numBackupInterval.Value = max;
+        }
+
+        private void btnBackupBrowse_Click(object sender, EventArgs e)
+        {
+            using (var dialog = new FolderBrowserDialog())
+            {
+                dialog.Description = "バックアップ保存先フォルダを選択してください";
+                if (!string.IsNullOrEmpty(txtBackupDest.Text))
+                {
+                    dialog.SelectedPath = txtBackupDest.Text;
+                }
+                if (dialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    txtBackupDest.Text = dialog.SelectedPath;
+                    SaveBackupDestIfChanged();
+                }
+            }
+        }
+
+        private void TxtBackupDest_Leave(object sender, EventArgs e)
+        {
+            SaveBackupDestIfChanged();
+        }
+
+        private void SaveBackupDestIfChanged()
+        {
+            if (_dbManager == null) return;
+            string newValue = (txtBackupDest.Text ?? string.Empty).Trim();
+            if (newValue == _lastSavedBackupDest) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ保存先変更") == DialogResult.Cancel)
+            {
+                txtBackupDest.Leave -= TxtBackupDest_Leave;
+                txtBackupDest.Text = _lastSavedBackupDest;
+                txtBackupDest.Leave += TxtBackupDest_Leave;
+                return;
+            }
+            try
+            {
+                _dbManager.SettingsRepository.SetString("backup_destination_path", newValue);
+                _lastSavedBackupDest = newValue;
+                Logger.Info("[SettingsSectionPanel] バックアップ保存先を変更: " + newValue);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[SettingsSectionPanel] backup_destination_path 書込失敗: " + ex.Message);
+                MessageBox.Show("バックアップ保存先の保存に失敗しました: " + ex.Message,
+                    "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void NumBackupInterval_ValueChanged(object sender, EventArgs e)
+        {
+            SaveBackupIntervalWithGuard();
+        }
+
+        private void CmbBackupIntervalUnit_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            string newUnit = cmbBackupIntervalUnit.SelectedItem as string ?? "時間";
+            if (newUnit == _prevIntervalUnit) return;
+            if (_dbManager == null)
+            {
+                _prevIntervalUnit = newUnit;
+                return;
+            }
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ間隔単位変更") == DialogResult.Cancel)
+            {
+                // revert ComboBox (= event 再帰回避のため hook 一時 detach)
+                cmbBackupIntervalUnit.SelectedIndexChanged -= CmbBackupIntervalUnit_SelectedIndexChanged;
+                cmbBackupIntervalUnit.SelectedItem = _prevIntervalUnit;
+                cmbBackupIntervalUnit.SelectedIndexChanged += CmbBackupIntervalUnit_SelectedIndexChanged;
+                return;
+            }
+            // 換算: 現在 displayed 値 × 旧 factor = effective hours → 新 factor で割って新 display
+            int oldFactor = _prevIntervalUnit == "日" ? 24 : 1;
+            int newFactor = newUnit == "日" ? 24 : 1;
+            int effectiveHours = (int)numBackupInterval.Value * oldFactor;
+            // bounds 更新 (= 単位による Max 変更) — ValueChanged 発火を suppress するため event detach
+            numBackupInterval.ValueChanged -= NumBackupInterval_ValueChanged;
+            ApplyIntervalUnitBounds(newUnit);
+            int newDisplay = Math.Max(1, effectiveHours / newFactor);
+            if (newDisplay > numBackupInterval.Maximum) newDisplay = (int)numBackupInterval.Maximum;
+            numBackupInterval.Value = newDisplay;
+            numBackupInterval.ValueChanged += NumBackupInterval_ValueChanged;
+            _prevIntervalUnit = newUnit;
+            // 単位 + 換算後 hours を一括 save
+            SaveBackupIntervalDirect();
+        }
+
+        private void SaveBackupIntervalWithGuard()
+        {
+            if (_dbManager == null) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ間隔変更") == DialogResult.Cancel)
+            {
+                // rollback to saved value
+                numBackupInterval.ValueChanged -= NumBackupInterval_ValueChanged;
+                try
+                {
+                    int hours = _dbManager.SettingsRepository.GetInt32("backup_auto_interval_hours", 24);
+                    int factor = _prevIntervalUnit == "日" ? 24 : 1;
+                    int displayValue = Math.Max(1, hours / factor);
+                    if (displayValue > numBackupInterval.Maximum) displayValue = (int)numBackupInterval.Maximum;
+                    numBackupInterval.Value = displayValue;
+                }
+                catch { }
+                numBackupInterval.ValueChanged += NumBackupInterval_ValueChanged;
+                return;
+            }
+            SaveBackupIntervalDirect();
+        }
+
+        private void SaveBackupIntervalDirect()
+        {
+            if (_dbManager == null) return;
+            try
+            {
+                int factor = _prevIntervalUnit == "日" ? 24 : 1;
+                int hours = (int)numBackupInterval.Value * factor;
+                _dbManager.SettingsRepository.SetInt32("backup_auto_interval_hours", hours);
+                string unitKey = _prevIntervalUnit == "日"
+                    ? SettingsKeys.BackupAutoIntervalUnitDays
+                    : SettingsKeys.BackupAutoIntervalUnitHours;
+                _dbManager.SettingsRepository.SetString(SettingsKeys.BackupAutoIntervalUnit, unitKey);
+                Logger.Info("[SettingsSectionPanel] バックアップ間隔を変更: " + (int)numBackupInterval.Value + " " + _prevIntervalUnit + " (= " + hours + " 時間)");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[SettingsSectionPanel] backup_auto_interval_hours 書込失敗: " + ex.Message);
+                MessageBox.Show("バックアップ間隔の保存に失敗しました: " + ex.Message,
+                    "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void NumBackupRetention_ValueChanged(object sender, EventArgs e)
+        {
+            if (_dbManager == null) return;
+            int newValue = (int)numBackupRetention.Value;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ世代数変更") == DialogResult.Cancel)
+            {
+                numBackupRetention.ValueChanged -= NumBackupRetention_ValueChanged;
+                try
+                {
+                    int previous = _dbManager.SettingsRepository.GetInt32("backup_retention_count", 30);
+                    if (previous < numBackupRetention.Minimum) previous = (int)numBackupRetention.Minimum;
+                    if (previous > numBackupRetention.Maximum) previous = (int)numBackupRetention.Maximum;
+                    numBackupRetention.Value = previous;
+                }
+                catch { }
+                numBackupRetention.ValueChanged += NumBackupRetention_ValueChanged;
+                return;
+            }
+            try
+            {
+                _dbManager.SettingsRepository.SetInt32("backup_retention_count", newValue);
+                Logger.Info("[SettingsSectionPanel] バックアップ世代数を " + newValue + " 個に変更");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[SettingsSectionPanel] backup_retention_count 書込失敗: " + ex.Message);
+                MessageBox.Show("バックアップ世代数の保存に失敗しました: " + ex.Message,
+                    "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // ----- バージョン情報 + DB リセット -----
 
         public void UpdateVersionInfo()
         {
@@ -78,7 +500,9 @@ namespace TonePrism.Manager.Controls
             if (Services.SessionConflictHelper.CheckBeforeWrite(this, "データベース初期化") == DialogResult.Cancel) return;
             using (var confirmForm = new ResetDatabaseConfirmForm())
             {
-                if (confirmForm.ShowDialog() != DialogResult.Yes) return;
+                // (round 3 review L-1) owner=this 渡しで同 method 内の他 dialog (FolderDeletionFailureDialog /
+                // MessageBox) と pattern 統一、taskbar separate entry + modal stack の不整合を防止。
+                if (confirmForm.ShowDialog(this) != DialogResult.Yes) return;
             }
             if (Services.SessionConflictHelper.CheckBeforeWrite(this, "データベース初期化") == DialogResult.Cancel) return;
 

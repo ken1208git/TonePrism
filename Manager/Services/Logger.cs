@@ -14,7 +14,12 @@ namespace TonePrism.Manager.Services
     ///   → セッション単位でファイルが分かれるので書き込み競合・行間 interleaving が発生しない
     /// - INFO / WARN / ERROR の 3 段階
     /// - Console.SetOut フックで既存 Console.WriteLine も自動的にファイルへ流す (INFO 扱い)
-    /// - 起動時に 30 日より古いログファイルを削除 (mtime 基準)
+    /// - 古いログファイル削除は `CleanupOldLogs(int retentionDays)` を caller (= Program.Main) が
+    ///   `Initialize` 直後に明示呼出する (= Logger 自体は SettingsRepository に依存しない設計)。
+    ///   retention 値は Program.Main 側で SQLite 直接 read 経由で取得 (DB 不在時は default 30 日 fallback)。
+    ///   旧実装は `Initialize` 内で 30 日 hardcode 削除 + round 1 では MainForm で呼出していたが、
+    ///   後者は dbReady=false 等の early-return path で到達不能になる regression があり、
+    ///   round 3 H-1 fix で Program.Main 経由に再移動 (= 全起動 path で確実に走る)。
     /// - スレッドセーフ (内部 lock。lock は同一スレッドで再入可能)
     /// - 自身の例外で無限ループ・アプリ起動阻害を起こさない (try-catch で握り潰し)
     ///
@@ -23,7 +28,6 @@ namespace TonePrism.Manager.Services
     /// </summary>
     public static class Logger
     {
-        private const int RetentionDays = 30;
         private const string FileNamePrefix = "manager_";
         private const string FileNameSuffix = ".log";
         private const string LogSubDirectory = "manager";
@@ -47,8 +51,14 @@ namespace TonePrism.Manager.Services
         /// <summary>
         /// ロガーを初期化する。Application.Run より前で必ず呼ぶこと。
         /// 失敗してもアプリ起動は止めない (例外を握り潰し、以降の API は no-op)。
+        ///
+        /// (#170 followup round 1) `customLogDir` が指定された場合は default の
+        /// `&lt;project_root&gt;/logs/manager/` の代わりに **`&lt;customLogDir&gt;/` の直配置** を使用する
+        /// (= `/manager/` subdir は append しない、backup_destination_path と同 semantic)。
+        /// 失敗時は default にフォールバック。Program.Main が `settings.log_destination_path` を
+        /// SQLite 直接 read して渡す (Logger は SettingsRepository に依存しない invariant 維持)。
         /// </summary>
-        public static void Initialize()
+        public static void Initialize(string customLogDir = null)
         {
             lock (_lock)
             {
@@ -56,8 +66,18 @@ namespace TonePrism.Manager.Services
 
                 try
                 {
-                    string projectRoot = FindProjectRootForLogs();
-                    _logDirectory = Path.Combine(projectRoot, "logs", LogSubDirectory);
+                    // (#170 followup round 1) customLogDir 指定時はその full path を直接使用
+                    // (backup_destination_path と同 semantic、`logs/manager` を append しない)。
+                    // default は `<project_root>/logs/manager/`。
+                    if (!string.IsNullOrWhiteSpace(customLogDir))
+                    {
+                        _logDirectory = customLogDir;
+                    }
+                    else
+                    {
+                        string projectRoot = FindProjectRootForLogs();
+                        _logDirectory = Path.Combine(projectRoot, "logs", LogSubDirectory);
+                    }
                     Directory.CreateDirectory(_logDirectory);
 
                     OpenSessionFile();
@@ -71,7 +91,12 @@ namespace TonePrism.Manager.Services
 
                     // 起動イベントは初期化完了後に書く
                     WriteInternal("INFO", $"[Logger] Manager 起動 (PC={Environment.MachineName})");
-                    CleanupOldLogs();
+                    // (#170 followup round 3 H-1) CleanupOldLogs は Initialize の責務外。
+                    // Program.Main が `Logger.Initialize(customLogDir)` 直後に SQLite 直接 read で
+                    // retention 値を取得して `Logger.CleanupOldLogs(days)` を呼出する設計
+                    // (= dbReady=false / SessionConflictDialog Cancel 等の early-return path でも
+                    // 確実に走るよう round 3 で MainForm 経路から Program.Main 経路へ再移動)。
+                    // 本 Initialize は file open + Console hook + 起動 trail のみに責務を絞る。
                 }
                 catch (Exception ex)
                 {
@@ -214,34 +239,51 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>
-        /// 30 日より古い manager_*.log を削除する。起動時 1 回のみ実行。
+        /// `retentionDays` 日より古い manager_*.log を削除する。Program.Main が
+        /// `Logger.Initialize(customLogDir)` 直後に 1 回呼ぶ。
+        ///
+        /// (#170 followup round 3 H-1) 呼出元と timing の確定経緯:
+        /// - 旧 (本 PR 以前): `Initialize` 内で 30 日 hardcode + 自動実行
+        /// - round 1: public + parametrized 化、`MainForm.ContinueLoadAfterSessionCheck` で
+        ///   `SettingsRepository.GetInt32(SettingsKeys.LogRetentionDays, DefaultLogRetentionDays)` 経由呼出
+        /// - round 3 H-1: dbReady=false / SessionConflictDialog Cancel 等の early-return path で
+        ///   到達不能になる regression を解消するため、Program.Main で **SQLite 直接 read**
+        ///   (`TryReadLogRetentionDays`) → `CleanupOldLogs` 呼出に再移動 (= Logger 不変条件
+        ///   「SettingsRepository に依存しない」を維持しつつ全起動 path で確実に走る)
+        ///
+        /// retentionDays &lt;= 0 / Logger 未初期化時は no-op。
         /// </summary>
-        private static void CleanupOldLogs()
+        public static void CleanupOldLogs(int retentionDays)
         {
-            try
+            lock (_lock)
             {
-                DateTime cutoff = DateTime.Now.AddDays(-RetentionDays);
-                foreach (string path in Directory.EnumerateFiles(_logDirectory, $"{FileNamePrefix}*{FileNameSuffix}"))
+                if (!_initialized) return;
+                if (retentionDays <= 0) return;
+                try
                 {
-                    try
+                    DateTime cutoff = DateTime.Now.AddDays(-retentionDays);
+                    foreach (string path in Directory.EnumerateFiles(_logDirectory, $"{FileNamePrefix}*{FileNameSuffix}"))
                     {
-                        // 念のため: 今セッションのアクティブファイルは絶対に消さない
-                        if (string.Equals(path, _currentLogPath, StringComparison.OrdinalIgnoreCase)) continue;
-                        if (File.GetLastWriteTime(path) < cutoff)
+                        try
                         {
-                            File.Delete(path);
+                            // 念のため: 今セッションのアクティブファイルは絶対に消さない
+                            if (string.Equals(path, _currentLogPath, StringComparison.OrdinalIgnoreCase)) continue;
+                            if (File.GetLastWriteTime(path) < cutoff)
+                            {
+                                File.Delete(path);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            // ロック・権限エラー等は警告だけ残して続行
+                            WriteInternal("WARN", $"[Logger] 古いログファイル削除失敗 ({path}): {ex.Message}");
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        // ロック・権限エラー等は警告だけ残して続行
-                        WriteInternal("WARN", $"[Logger] 古いログファイル削除失敗 ({path}): {ex.Message}");
-                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                WriteInternal("WARN", $"[Logger] 古いログ掃除中にエラー: {ex.Message}");
+                catch (Exception ex)
+                {
+                    WriteInternal("WARN", $"[Logger] 古いログ掃除中にエラー: {ex.Message}");
+                }
             }
         }
 

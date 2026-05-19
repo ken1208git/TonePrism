@@ -19,6 +19,7 @@ namespace TonePrism.Manager
         {
             this.statusStrip1 = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
+            this.lblBackupStatus = new System.Windows.Forms.ToolStripStatusLabel();
             this.tabControl1 = new System.Windows.Forms.TabControl();
             this.tabGame = new System.Windows.Forms.TabPage();
             this.tabStore = new System.Windows.Forms.TabPage();
@@ -34,17 +35,30 @@ namespace TonePrism.Manager
             //
             this.statusStrip1.ImageScalingSize = new System.Drawing.Size(20, 20);
             this.statusStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.lblStatus});
+            this.lblStatus,
+            this.lblBackupStatus});
             this.statusStrip1.Location = new System.Drawing.Point(0, 628);
             this.statusStrip1.Name = "statusStrip1";
             this.statusStrip1.Size = new System.Drawing.Size(1100, 22);
             this.statusStrip1.TabIndex = 0;
             //
-            // lblStatus
+            // lblStatus (左固定 = データベース + ゲーム数、永続)
             //
             this.lblStatus.Name = "lblStatus";
             this.lblStatus.Size = new System.Drawing.Size(56, 17);
             this.lblStatus.Text = "準備完了";
+            //
+            // lblBackupStatus (Alignment=Right で strip 右端配置、AutoSize で natural width)
+            // (#170 followup round 2) 旧 Spring=true 方式は strip.ClientSize 無視して X=827, Width=759 を
+            // 算出し strip 外に hidden になる症状 (log で確定: IsOnOverflow=False なのに Bounds が strip 外)。
+            // WinForms 本来の右寄せ pattern である `Alignment=Right` に切替。これは layout engine が
+            // 「右端から item.Width 分を確保して配置」する明示 anchor 方式で、Spring の余白計算 race を回避。
+            //
+            this.lblBackupStatus.Alignment = System.Windows.Forms.ToolStripItemAlignment.Right;
+            this.lblBackupStatus.AutoSize = true;
+            this.lblBackupStatus.Name = "lblBackupStatus";
+            this.lblBackupStatus.Text = "";
+            this.lblBackupStatus.Overflow = System.Windows.Forms.ToolStripItemOverflow.AsNeeded;
             //
             // tabControl1
             //
@@ -145,6 +159,7 @@ namespace TonePrism.Manager
 
         private System.Windows.Forms.StatusStrip statusStrip1;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
+        private System.Windows.Forms.ToolStripStatusLabel lblBackupStatus;
         private System.Windows.Forms.TabControl tabControl1;
         private System.Windows.Forms.TabPage tabGame;
         private System.Windows.Forms.TabPage tabStore;

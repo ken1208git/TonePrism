@@ -196,18 +196,9 @@ namespace TonePrism.Manager.Controls
             RefreshDisplay();
         }
 
-        private void btnSettings_Click(object sender, EventArgs e)
-        {
-            if (_dbManager == null) return;
-
-            using (var form = new BackupSettingsForm(_dbManager.SettingsRepository, _dbManager.BackupService))
-            {
-                if (form.ShowDialog(this) == DialogResult.OK)
-                {
-                    RefreshDisplay();
-                }
-            }
-        }
+        // (#170 followup round 1) btnSettings はバックアップタブから完全に削除。
+        // 旧 btnSettings_Click はここで modal を開く処理 → info dialog 案内 → 完全削除と段階的に縮退、
+        // 最終的に動線を一本化 (= 設定はすべて「設定タブ」)。
 
         private void btnRestore_Click(object sender, EventArgs e)
         {

@@ -24,7 +24,24 @@ namespace TonePrism.Manager
             // path 不到達)。本 round で reorder して `Logger.Warn` が実際にファイルに書かれる形に。
             // ログ機構を最初に初期化することで、PathManager 以降のすべての Console.WriteLine が
             // 自動的にファイル (logs/manager_YYYY-MM-DD.log) にも残る (#116)。
-            Logger.Initialize();
+            //
+            // (#170 followup round 1) `log_destination_path` を SQLite 直接 read で先取得。
+            // SettingsRepository / DatabaseManager は使わない (= Logger は SettingsRepository に依存しない
+            // invariant 維持、DB 不在時の fallback 経路もシンプル)。失敗時は null fallback で default path。
+            // (#170 followup round 3 review L-3) customLogDir + log_retention_days を 1 SQLite 接続で
+            // 取得 (= 2 接続/起動を 1 接続/起動に削減、SMB 共有 DB の latency 軽減)。
+            var initialSettings = TryReadInitialLogSettings();
+            Logger.Initialize(initialSettings.CustomLogDir);
+
+            // (#170 followup round 2 review H-1) 古いログ削除を **MainForm 経由ではなく Program.Main で実行**。
+            // 旧実装 (round 1) は MainForm.ContinueLoadAfterSessionCheck から呼んでいたが、
+            // (a) dbReady=false (= 新規ユーザーが DB 作成 dialog で No 押下) / (b) SessionConflictDialog Cancel
+            // という early-return path で CleanupOldLogs に到達せず、「DB 未作成のまま頻繁に起動 → 閉じる」
+            // 運用でログが永久に溜まる silent regression があった。
+            // 本 fix で SQLite 直接 read で retention 値を取得 → Logger.CleanupOldLogs を Program.Main で即時呼出。
+            // MainForm 状態に依存しないため全起動 path で確実に走る。Logger は依然 SettingsRepository 不要
+            // (invariant 維持)、DB 不在時は default 30 日に fallback。
+            Logger.CleanupOldLogs(initialSettings.LogRetentionDays);
 
             // WebBrowser コントロール (UpdateSectionPanel のリリースノート表示で使用、Phase 4 #108) は
             // default で IE7 quirks mode で動作するため、render 崩れ + CSS 制限あり。HKCU レジストリで
@@ -119,6 +136,55 @@ namespace TonePrism.Manager
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// (#170 followup round 1 / round 3 review L-3) Logger.Initialize の前に `log_destination_path` +
+        /// `log_retention_days` を **1 SQLite 接続で同時取得**。SettingsRepository を経由しないのは
+        /// Logger が SettingsRepository に依存しない invariant を維持するため (= Logger は最早期に初期化する
+        /// 責務、DB が無くても動く必要がある)。
+        ///
+        /// 失敗時 (DB 不在 / 解析失敗 / key 不在) は CustomLogDir=null + LogRetentionDays=DefaultLogRetentionDays
+        /// に fallback。Logger.Warn は Logger 未初期化時 no-op で flag できないため try-catch で握り潰し。
+        /// </summary>
+        private static (string CustomLogDir, int LogRetentionDays) TryReadInitialLogSettings()
+        {
+            string customLogDir = null;
+            int retentionDays = Services.SettingsKeys.DefaultLogRetentionDays;
+            try
+            {
+                string dbPath = PathManager.DatabasePath;
+                if (string.IsNullOrEmpty(dbPath) || !System.IO.File.Exists(dbPath))
+                    return (customLogDir, retentionDays);
+
+                using (var conn = new System.Data.SQLite.SQLiteConnection("Data Source=" + dbPath + ";Version=3;Read Only=True;"))
+                {
+                    conn.Open();
+                    using (var cmd = new System.Data.SQLite.SQLiteCommand(
+                        "SELECT key, value FROM settings WHERE key IN ('log_destination_path', 'log_retention_days')", conn))
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            string key = reader.IsDBNull(0) ? null : reader.GetString(0);
+                            string val = reader.IsDBNull(1) ? null : reader.GetString(1);
+                            if (key == "log_destination_path")
+                            {
+                                if (!string.IsNullOrWhiteSpace(val)) customLogDir = val;
+                            }
+                            else if (key == "log_retention_days")
+                            {
+                                if (int.TryParse(val, out int days) && days > 0) retentionDays = days;
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // DB 不在 / 解析失敗時は default fallback、Logger 未初期化のため warn 不可
+            }
+            return (customLogDir, retentionDays);
         }
 
         /// <summary>

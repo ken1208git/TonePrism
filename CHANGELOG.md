@@ -1653,6 +1653,51 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.13.0] - 2026-05-19
+
+#### Changed (#170 followup round 2 — review 指摘対応)
+
+- **アップデートタブのリリースノートを local CHANGELOG.md 優先 fallback に変更**: 旧実装は `cache.Latest.Body` を直接「現在実行中: vX.Y.Z」notes として render していたが、cache stale (= current > cache.Latest) のケースで「user は v0.5.0 を実行中なのに、UI は v0.4.0 の release notes を『現在実行中』として表示」する誤誘導があった。新実装は `ChangelogParser.TryReadLatestFromFile(PathManager.BundleChangelogPath)` で local CHANGELOG.md (= bundle 同梱、Release Tooling v0.1.16 以降の SoT) を先読みし、parse 成功時は **local の `### [Bundle vX.Y.Z]` body** を「現在実行中」notes として表示。fallback chain: 1) local CHANGELOG → 2) cache.Latest.Body → 3) 「リリースノートはありません」。ApplyResult の catch block は維持 (= local read 失敗時は warn log + fallback 続行)。
+- **自動バックアップを ON/OFF できる checkbox を新規追加**: `chkBackupAutoEnabled` を grpBackup 内に配置、`SettingsKeys.BackupAutoEnabled = "backup_auto_enabled"` (default "true") で永続化。OFF にすると `BackupService.IsAutoBackupDue` / `RunAutoBackupIfDue` が起動時 trigger を完全 skip (= 手動バックアップは引き続き使える)。checkbox に従って interval section の controls (lblBackupInterval / numBackupInterval / cmbBackupIntervalUnit / lblBackupIntervalUnit) を `Enabled` で連動 enable/disable、OFF 時は灰色化して「無効」状態を視覚化。保存先 / 保持世代数は手動バックアップでも使うため対象外で常時有効。
+- **設定タブの grpBackup と grpLog の順序を入替**: 旧 round 1 で「ログ (top) → バックアップ」だったが、user 提案で「バックアップ (top) → ログ」に変更。バックアップが日常運用で頻度高い設定であることを反映。
+
+#### Changed (#170 followup round 1 — review 指摘対応)
+
+PR #196 round 1 review で指摘された UI 改善:
+- **バックアップタブの「設定...」ボタン削除**: 旧 modal Form 廃止後の info dialog 案内も完全削除、動線を「設定タブ」一本に絞る。
+- **設定タブの section 順を再構成**: ログ (top) → バックアップ → データベース → バージョン情報 (bottom) の **使用頻度 / destructive 度** 順に並べ替え (= 旧 DB リセットがトップに来ていた配置の修正)。
+- **データベースリセット button を赤色化** (= IndianRed BG + White FG + Bold)、[btnRestore](Manager/Controls/BackupSectionPanel.Designer.cs) と同 destructive pattern で統一。誤押下リスク低減。
+- **ログ保存先 path 設定を新規追加**: `SettingsKeys.LogDestinationPath = "log_destination_path"` 新設、`Logger.Initialize(string customLogDir = null)` に signature 変更、Program.Main が SQLite 直接 read で先取得して渡す。設定 UI は `grpLog` 内に txtLogDest + btnLogBrowse + hint で追加、空欄なら default の `<install>/logs/manager/` を使用。**反映は次回 Manager 起動時** (= UI ラベルで明示)。
+- **バックアップ自動間隔の表示単位 ComboBox 追加**: 「時間」/「日」を選択可能、`SettingsKeys.BackupAutoIntervalUnit` 新 key で永続化。DB 側 `backup_auto_interval_hours` は **常に時間単位**で BackupService 既存実装と互換 (= UI 表示時のみ unit 換算)、unit 切替時は表示値を換算して update + clamp。
+- **バックアップ設定の保存ボタン廃止 + per-control immediate save**: 旧 btnBackupSave (旧 modal の OK pattern) を廃止、ログ retention と同 pattern (= 1 control 変更 = 即 save) に統一。txtBackupDest は Leave event + btnBackupBrowse 経由で save、各 NumericUpDown / ComboBox は値変更 event で save。CheckBeforeWrite は変更ごとに発火、Cancel 時は前回 save 値に rollback。
+
+#### Added (#170 followup — UI brushup PR)
+
+Bundle v0.5.0 受入テストで見つかった UX / safety 課題 5 件をまとめた brushup。**5 commit 構成** で、各 commit は項目別の独立変更:
+
+- **ログ保存日数を 設定タブから設定可能に**: 旧 `Logger.cs:RetentionDays = 30` hardcode を `settings` table の `log_retention_days` 経由に移行、新 `grpLog` group box (NumericUpDown 1-365 日、default 30) を設定タブに追加。変更は次回 Manager 起動時に反映 (= UI label で明示)。`CleanupOldLogs` は `public static void CleanupOldLogs(int retentionDays)` に signature 変更、**`Program.Main` が `Logger.Initialize` 直後に SQLite 直接 read 経由 (`TryReadLogRetentionDays`) で呼出** (= round 1 で MainForm の `ContinueLoadAfterSessionCheck` 経路にしていたが、dbReady=false / SessionConflictDialog Cancel 等の early-return path で到達不能になる regression を round 3 H-1 fix で再移動)。Logger は依然 SettingsRepository に依存しない invariant 維持。
+- **バックアップ設定を設定タブに inline 統合**: 旧 modal Form `BackupSettingsForm` を廃止、新 `grpBackup` group box (チェックボックス + 5 control [path/browse、interval、unit ComboBox、retention] の per-control immediate save) を設定タブに inline 統合。BackupSettingsForm.cs / .Designer.cs / csproj 該当行を削除。バックアップタブ「設定」ボタンは round 1 で完全削除 (= 動線を「設定タブ」一本に絞る)。**Per-control immediate save** = 各 control の `Leave` / `ValueChanged` / `SelectedIndexChanged` / `CheckedChanged` で個別 CheckBeforeWrite → save、Cancel 時 rollback (= round 1 で旧 modal の「保存ボタン経由 3 値一括 commit」設計から方針転換、ログ retention と pattern 統一)。
+- **status bar を 2 ラベル分割 + 自動消去 timer**: 旧実装は `lblStatus` 1 ラベルで自動バックアップ message が「ゲーム数: N 件」を上書きして元情報一時消失。新 layout は左 zone (lblStatus = DB + ゲーム数 永続、AutoSize=true) + 右 zone (lblBackupStatus = transient backup 状態、**`Alignment=Right + AutoSize=true`**)。`UpdateBackupStatus(message, color, autoRevert)` 関数新設、autoRevert=true で 7 秒 Timer 自動消去。完了 ✓ 緑 / 失敗 ✗ 赤の color + text prefix (accessibility 補強)。設計経緯は round 2 Changed で詳述: 初版の Spring spacer 方式は WinForms layout の broken path で右端外に hidden する症状あり、round 2 で WinForms 本来の `Alignment=Right` 標準 pattern に切替。
+
+#### Fixed (#170 followup)
+
+- **アップデートタブ cache stale バグの defense-in-depth 修正**: Bundle v0.5.0 受入テストで「GitHub API rate limit hit 時に **既に適用済の v0.4.0 release** を『これから適用される変更』と誤表示する」バグ発見。2 layer で修正:
+  1. UpdateChecker 側 (`Services/UpdateChecker.cs`): cache hydrate 3 経路 (`CheckAsync` / `LoadCacheOnly` / `CheckFromApiAsync` failure path) で `FilterStaleFromCumulative(cumulative, current)` 新 helper を呼出、`release.Version > current` の release のみ残す
+  2. UpdateSectionPanel 側 (`Controls/UpdateSectionPanel.cs:ApplyResult`): 「これから適用される変更」見出しの表示条件に `Status == UpdateAvailable || Status == Skipped` を追加、UpToDate / 各種 error 時は CumulativeReleases が残っていても UI で表示しない fallback
+  - あわせて cache 経由情報の disclaimer 強化: `FromCache && LastError != null` 時に「最新バージョン」欄に `(キャッシュ)` suffix + 灰色化、`UpToDate` status message を「最新版を実行中 (キャッシュ比較、再確認失敗中)」+ DimGray に降格 (緑文字「最新版を実行中です。」断言を回避)
+- **Update check 系の DB write race fence を `btnSkip_Click` に追加**: `Controls/UpdateSectionPanel.cs:btnSkip_Click` で `_updateChecker.Skip(...)` 直前に `SessionConflictHelper.CheckBeforeWrite(this, "アップデートスキップ")` 追加 (= BackupSettingsForm.btnOk_Click と同 pattern の 1 段目 fence)。`StartBackgroundUpdateCheckIfDue:checker.MarkNotified(...)` への追加は意図的に skip (= background thread + auto side-effect + 非破壊性 / BackupService `last_backup_at` 自動書込の precedent と整合)、該当箇所に 12 行コメントで理由文書化。
+
+#### Changed (#170 followup)
+
+- `Services/Logger.cs`: `private const int RetentionDays = 30` 削除、`CleanupOldLogs` を public + parametrized 化。`Logger.Initialize` から `CleanupOldLogs` 呼出を削除 (= Logger は SettingsRepository 依存ゼロを維持、DB 初期化前に動く invariant 保持)。
+- `Services/SettingsKeys.cs`: 新 const `LogRetentionDays = "log_retention_days"` + `DefaultLogRetentionDays = 30`。
+- `Controls/SettingsSectionPanel`: GroupBox 4 件構成 (grpBackup / grpLog / grpDatabase / grpInfo の round 2 reorder 後) に拡張、Panel Size 500 → 830、AutoScroll=true。
+- `Controls/BackupSectionPanel.cs:btnSettings_Click`: modal Form 開く処理 → info dialog に置換。
+- `MainForm.cs:UpdateStatusBar`: signature を `(string additionalInfo = null)` → 引数なし `()` に簡略化 (= 右 zone 上書き path を排除)。新 `UpdateBackupStatus` で右 zone 専用 API 提供。
+- `Manager/TonePrism_Manager.csproj`: `<Compile Include="BackupSettingsForm.*">` 2 行削除。
+
+bump 判断: 新機能追加 (UI / API signature 変更) を含むため SemVer minor (0.12.1 → 0.13.0)。pre-1.0 minor bump 規約 (AGENTS.md) と整合。配布物 layout / DB schema / 既存 user data は無変更、user data migration 不要。
+
 ### [Manager v0.12.1] - 2026-05-19
 
 #### Changed (#170 — copyright metadata sync + 設定タブ UI 追加)
