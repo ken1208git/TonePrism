@@ -1610,13 +1610,15 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ### [Manager v0.12.1] - 2026-05-19
 
-#### Changed (#170 — copyright metadata sync)
+#### Changed (#170 — copyright metadata sync + 設定タブ UI 追加)
 
-`Properties/AssemblyInfo.cs:13` の `AssemblyCopyright` を `Copyright ©  2025` (著者名なし、年単独) → `Copyright © 2025-2026 TonePrism Project — Lead maintainer: Kenshiro Kuroga (Osaka Prefectural Toneyama Upper Secondary School PC Club)` に書換、`LICENSE:3` / `README.md:96` と同期。`TonePrism_Manager.exe` を右クリック → プロパティ → 詳細の Copyright 表示が LICENSE と整合するようになる。
+- **PE metadata sync**: `Properties/AssemblyInfo.cs:13` の `AssemblyCopyright` を `Copyright ©  2025` (著者名なし、年単独) → `Copyright © 2025-2026 TonePrism Project — Lead maintainer: Kenshiro Kuroga (Osaka Prefectural Toneyama Upper Secondary School PC Club)` に書換、`LICENSE:3` / `README.md:96` と同期。`TonePrism_Manager.exe` を右クリック → プロパティ → 詳細の Copyright 表示が LICENSE と整合するようになる。
+- **設定タブ「バージョン情報」UI に copyright + license 行を追加** (`Controls/SettingsSectionPanel.cs:UpdateVersionInfo`): 既存の「製品名 / バージョン / データベース構造」3 行に加えて、`Assembly.GetCustomAttribute<AssemblyCopyrightAttribute>()` で **AssemblyCopyright を Reflection 取得** (= SoT は `AssemblyInfo.cs:13` 1 か所のみ、drift 防止) して「Copyright © ... TonePrism Project — Lead maintainer: ... (school 行は折り返し)」+「ライセンス: MIT License」を追加表示。来場スタッフ / 顧問が runtime で copyright を目視確認できる経路を確保 (= LICENSE / README / exe properties に続く 4 経路目の surface)。canonical string は AssemblyInfo の 1 行を維持、UI 表示時のみ school suffix 直前で soft break を挿入。
+- **`Controls/SettingsSectionPanel.Designer.cs`**: 追加行を収めるため `grpInfo` Size 高さを `120` → `180` に拡張 (= width 760 維持)。
 
 書式判断は `## Companions Updater v0.2.1` entry 参照、3 component で同じ表記に統一。
 
-bump 判断: AssemblyInfo metadata 変更は SemVer 上 patch (0.12.0 → 0.12.1)。コード behavior は完全に無変更、build 出力の PE metadata だけが変わる。同様の sync 動機は `## Launcher v0.6.1` / `## Companions Updater v0.2.1` も同時 bump、cross-cutting copyright 統一として 3 component 同期。
+bump 判断: AssemblyInfo metadata 変更 + 設定タブ UI 追加は SemVer 上 patch (0.12.0 → 0.12.1)。表示行 1 セクション追加のみで behavior 影響なし (= DB / API / build 出力 layout 無変更)、build 出力の PE metadata と Settings UI 表示だけが変わる。同様の sync 動機は `## Launcher v0.6.1` / `## Companions Updater v0.2.1` も同時 bump、cross-cutting copyright 統一として 3 component 同期。
 
 ### [Manager v0.12.0] - 2026-05-19
 

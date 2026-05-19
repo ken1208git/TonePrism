@@ -41,10 +41,19 @@ namespace TonePrism.Manager.Controls
                 int targetVersion = _dbManager.GetTargetDatabaseVersion();
                 int actualVersion = _dbManager.GetActualDatabaseVersion();
 
+                // AssemblyCopyright を SoT として Reflection 取得 (= AssemblyInfo.cs:13 と drift しない)。
+                // 長い 1 行を UI 上は school suffix 直前で soft break、canonical string は AssemblyInfo
+                // の 1 行を維持 (= exe properties の表示は無変更)。
+                string copyright = assembly.GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright ?? "";
+                string copyrightDisplay = copyright.Replace(" (Osaka Prefectural", "\n  (Osaka Prefectural");
+
                 lblVersionInfo.Text =
                     $"製品名: {productName}\n" +
                     $"バージョン: {versionStr}\n" +
-                    $"データベース構造: v{actualVersion} (ターゲット: v{targetVersion})";
+                    $"データベース構造: v{actualVersion} (ターゲット: v{targetVersion})\n" +
+                    "\n" +
+                    $"{copyrightDisplay}\n" +
+                    "ライセンス: MIT License";
             }
             catch
             {

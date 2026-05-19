@@ -55,7 +55,7 @@ namespace TonePrism.Manager.Controls
             this.grpInfo.Controls.Add(this.lblVersionInfo);
             this.grpInfo.Location = new System.Drawing.Point(20, 120);
             this.grpInfo.Name = "grpInfo";
-            this.grpInfo.Size = new System.Drawing.Size(760, 120);
+            this.grpInfo.Size = new System.Drawing.Size(760, 180);
             this.grpInfo.TabIndex = 1;
             this.grpInfo.TabStop = false;
             this.grpInfo.Text = "バージョン情報";
