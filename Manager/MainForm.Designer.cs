@@ -51,7 +51,10 @@ namespace TonePrism.Manager
             this.lblStatus.Text = "準備完了";
             //
             // lblStatusSpacer (Spring=true で中央伸縮、左 zone と右 zone を分離)
+            // (#170 followup round 2) AutoSize=false 明示。Spring=true との combination で
+            // 「Spring が greedy に full width を取り、右 lblBackupStatus が 0 width に潰れる」path 防止。
             //
+            this.lblStatusSpacer.AutoSize = false;
             this.lblStatusSpacer.Name = "lblStatusSpacer";
             this.lblStatusSpacer.Spring = true;
             this.lblStatusSpacer.Size = new System.Drawing.Size(0, 17);
