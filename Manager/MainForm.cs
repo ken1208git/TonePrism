@@ -762,16 +762,20 @@ namespace TonePrism.Manager
         /// </summary>
         private void UpdateBackupStatus(string message, System.Drawing.Color color, bool autoRevert)
         {
-            Logger.Info("[MainForm] UpdateBackupStatus 呼出 (前): lblBackupStatus.Size=" + lblBackupStatus.Size + " Visible=" + lblBackupStatus.Visible + " AutoSize=" + lblBackupStatus.AutoSize);
+            Logger.Info("[MainForm] UpdateBackupStatus 呼出 (前): lblBackupStatus.Size=" + lblBackupStatus.Size + " Bounds=" + lblBackupStatus.Bounds + " Visible=" + lblBackupStatus.Visible + " AutoSize=" + lblBackupStatus.AutoSize);
             lblBackupStatus.Text = message ?? string.Empty;
             lblBackupStatus.ForeColor = color;
+            // [TEMP DEBUG] BackColor=Yellow で label の物理位置を可視化 (= text 不可視でも黄色 box が見える)。
+            // 解決後に削除予定。
+            lblBackupStatus.BackColor = System.Drawing.Color.Yellow;
             // (#170 followup round 2) WinForms StatusStrip の layout を強制再計算。
             // Spring=true の spacer が AutoSize 計算より先に space を greedy に取る path で
             // lblBackupStatus が 0 width のままになる症状への保険。PerformLayout で layout 再計算 →
             // Refresh で redraw。
             statusStrip1.PerformLayout();
             statusStrip1.Refresh();
-            Logger.Info("[MainForm] UpdateBackupStatus 呼出 (後): lblBackupStatus.Size=" + lblBackupStatus.Size + " Text='" + lblBackupStatus.Text + "'");
+            Logger.Info("[MainForm] UpdateBackupStatus 呼出 (後): lblBackupStatus.Size=" + lblBackupStatus.Size + " Bounds=" + lblBackupStatus.Bounds + " Text='" + lblBackupStatus.Text + "'");
+            Logger.Info("[MainForm] statusStrip1.Bounds=" + statusStrip1.Bounds + " Size=" + statusStrip1.Size + " Dock=" + statusStrip1.Dock + " Visible=" + statusStrip1.Visible);
 
             // 既存 timer を破棄してから新規 (= 連続呼出時に古い timer が古い message を消すのを防ぐ)
             if (_backupStatusClearTimer != null)
