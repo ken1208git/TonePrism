@@ -1069,6 +1069,16 @@ Release.bat の編集は **UTF-8 (no BOM) + CRLF** 厳守 (SPEC §3.7.9.1 参照
 
 SPEC §2.4 で定義される「主要 (Launcher / Manager / Monitor) を補助する独立 exe 群」の **runtime exe** の変更履歴。`Companions/Updater/TonePrism_Updater.exe` (Manager 自身の dir 置換用) + 将来追加される `WindowProbe` (#101) / `PauseOverlay` (#30) 等の deployment 配置と整合。本 section は **#160 で `## Updater (Companions/Updater)` から rename + 一般化**、`## Release Tooling` (= build / 配布スクリプト) と責務分離 (= 後者は build 時のみ動く scripts、本 section は runtime exe)。SPEC §2.4 / §3.7.4 参照。
 
+### [Updater v0.2.1] - 2026-05-19
+
+#### Changed (#170 — copyright metadata sync)
+
+`AssemblyInfo.cs:10` の `AssemblyCopyright` を `Copyright ©  2026` (著者名なし、年単独) → `Copyright © 2025-2026 TonePrism Project — Lead maintainer: Kenshiro Kuroga (Osaka Prefectural Toneyama Upper Secondary School PC Club)` に書換、`LICENSE:3` / `README.md:96` と同期。Updater.exe を右クリック → プロパティ → 詳細の Copyright 表示が LICENSE と整合するようになる。
+
+書式判断: copyright holder を `TonePrism Project` 単独に整理、`Kenshiro Kuroga` は `Lead maintainer:` 役割明示で併記、学校所属は個人側に attach (= project は #168 で汎用化したため学校に固有でない、所属は個人属性として attach する方が史実整合)。SPDX 慣用「`<Holder>` 単独 or `<H1>, <H2>`」から見ても dash 区切り「`A - B (Org)`」より明瞭、将来 contributor 追加時の拡張性も確保 (= `and contributors` 形式へ移行可能)。
+
+bump 判断: AssemblyInfo metadata 変更は SemVer 上 patch (0.2.0 → 0.2.1)。コード behavior は完全に無変更、build 出力の PE metadata だけが変わる。同様の sync 動機は `## Manager v0.12.1` / `## Launcher v0.6.1` も同時 bump、cross-cutting copyright 統一として 3 component 同期。
+
 ### [Updater v0.2.0] - 2026-05-19
 
 #### Changed (#168 — 完全 rename + 配布対象拡張、破壊的変更)
@@ -1115,6 +1125,16 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 ---
 
 ## Launcher（ランチャー本体）
+
+### [Launcher v0.6.1] - 2026-05-19
+
+#### Changed (#170 — copyright metadata sync)
+
+`export_presets.cfg:50` `application/copyright` を `Copyright (c) 2025 Kenshiro Kuroga (Osaka Prefectural Toneyama Upper Secondary School PC Club)` (旧個人表記、年 2025 単独) → `Copyright (c) 2025-2026 TonePrism Project — Lead maintainer: Kenshiro Kuroga (Osaka Prefectural Toneyama Upper Secondary School PC Club)` に書換、`LICENSE:3` / `README.md:96` と同期。`TonePrism_Launcher.exe` を右クリック → プロパティ → 詳細の Copyright 表示が LICENSE と整合するようになる (= 次回 Godot export 以降反映)。
+
+書式判断は `## Companions Updater v0.2.1` entry 参照、3 component で同じ表記に統一。
+
+bump 判断: export config metadata 変更は SemVer 上 patch (0.6.0 → 0.6.1)。GDScript behavior / scene / runtime logic は完全に無変更、Godot export 出力 exe の Windows PE metadata だけが変わる。`version.gd` `PATCH=0 → 1`、`project.godot` `config/version="0.6.1"`、`export_presets.cfg` `file_version="0.6.1.0"` / `product_version="0.6.1.0"` を同期更新 (SPEC §3.7.8 launcher version SoT 3 か所同期チェックリスト準拠)。同様の sync 動機は `## Manager v0.12.1` / `## Companions Updater v0.2.1` も同時 bump、cross-cutting copyright 統一として 3 component 同期。
 
 ### [Launcher v0.6.0] - 2026-05-19
 
@@ -1587,6 +1607,16 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.12.1] - 2026-05-19
+
+#### Changed (#170 — copyright metadata sync)
+
+`Properties/AssemblyInfo.cs:13` の `AssemblyCopyright` を `Copyright ©  2025` (著者名なし、年単独) → `Copyright © 2025-2026 TonePrism Project — Lead maintainer: Kenshiro Kuroga (Osaka Prefectural Toneyama Upper Secondary School PC Club)` に書換、`LICENSE:3` / `README.md:96` と同期。`TonePrism_Manager.exe` を右クリック → プロパティ → 詳細の Copyright 表示が LICENSE と整合するようになる。
+
+書式判断は `## Companions Updater v0.2.1` entry 参照、3 component で同じ表記に統一。
+
+bump 判断: AssemblyInfo metadata 変更は SemVer 上 patch (0.12.0 → 0.12.1)。コード behavior は完全に無変更、build 出力の PE metadata だけが変わる。同様の sync 動機は `## Launcher v0.6.1` / `## Companions Updater v0.2.1` も同時 bump、cross-cutting copyright 統一として 3 component 同期。
 
 ### [Manager v0.12.0] - 2026-05-19
 
