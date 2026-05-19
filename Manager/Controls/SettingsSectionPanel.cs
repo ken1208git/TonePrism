@@ -500,7 +500,9 @@ namespace TonePrism.Manager.Controls
             if (Services.SessionConflictHelper.CheckBeforeWrite(this, "データベース初期化") == DialogResult.Cancel) return;
             using (var confirmForm = new ResetDatabaseConfirmForm())
             {
-                if (confirmForm.ShowDialog() != DialogResult.Yes) return;
+                // (round 3 review L-1) owner=this 渡しで同 method 内の他 dialog (FolderDeletionFailureDialog /
+                // MessageBox) と pattern 統一、taskbar separate entry + modal stack の不整合を防止。
+                if (confirmForm.ShowDialog(this) != DialogResult.Yes) return;
             }
             if (Services.SessionConflictHelper.CheckBeforeWrite(this, "データベース初期化") == DialogResult.Cancel) return;
 

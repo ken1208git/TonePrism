@@ -66,6 +66,11 @@ namespace TonePrism.Manager
             // cleanup を **FormClosing** (= Dispose 前、message pump 走行中) で実行。
             // 別 handler が `e.Cancel=true` を set した場合 (= 将来「保存して閉じますか?」confirm dialog 追加時)
             // は timer を生かしたまま return、form が継続生存して `UpdateBackupStatus` 呼出時に新 timer 作成可能。
+            //
+            // (round 4 review L-3) **handler subscription 順序の前提**: `e.Cancel=true` を判定する handler
+            // (= 「保存して閉じますか?」等) は **本 handler より先に subscribe** された場合のみ「timer を
+            // 生かしたまま return」が成立する。`+=` の subscription 順で event 発火するため、後付け時は
+            // ctor (L57-60) の `FormClosing` hook 行より前に新 handler の `+=` を追加すること。
             if (e.Cancel) return;
             try
             {

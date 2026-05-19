@@ -32,10 +32,6 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>
-        /// 自動バックアップを走らせるべきかチェック（参照のみ、副作用なし）。
-        /// 実際の実行時には RunAutoBackupIfDue を使う（lease 取得を含む）。
-        /// </summary>
-        /// <summary>
         /// (#170 followup round 3 review L-4) 「自動バックアップが UI 上で有効か」の判定 SoT helper。
         /// `IsAutoBackupDue` と `RunAutoBackupIfDue` の両方で参照、`"false"` 厳密一致 (case-insensitive) で
         /// disabled、それ以外 (空 / "true" / unknown) はすべて enabled 扱い。
@@ -47,6 +43,10 @@ namespace TonePrism.Manager.Services
             return !string.Equals(enabledStr, "false", StringComparison.OrdinalIgnoreCase);
         }
 
+        /// <summary>
+        /// 自動バックアップを走らせるべきかチェック（参照のみ、副作用なし）。
+        /// 実際の実行時には RunAutoBackupIfDue を使う（lease 取得を含む）。
+        /// </summary>
         public bool IsAutoBackupDue()
         {
             // (#170 followup round 2 review #1+#2) 自動バックアップ無効化 checkbox。UI 設定タブから OFF
@@ -84,6 +84,10 @@ namespace TonePrism.Manager.Services
         {
             // (#170 followup round 2) 自動バックアップ無効化 checkbox。OFF なら起動時 trigger を skip。
             // (round 3 L-4) 判定 string は IsAutoBackupEnabled helper に集約。
+            // (round 4 review L-2) 現状の唯一の caller `MainForm.StartAutoBackupIfDue` は事前に
+            // `IsAutoBackupDue` で同 check を通過するため本 path は production code から到達不能 (= dead path)。
+            // 将来 RunAutoBackupIfDue を IsAutoBackupDue 経由なしで直接 caller が増えた時の defensive gate
+            // として残置 + Skipped message も将来 user 視点で見せる用途で維持。
             if (!IsAutoBackupEnabled())
             {
                 return BackupResult.Skipped("自動バックアップが無効に設定されています (設定タブから有効化可能)");
