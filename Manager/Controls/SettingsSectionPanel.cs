@@ -51,7 +51,7 @@ namespace TonePrism.Manager.Controls
                 // (#170 followup round 2 review M-3) 初期値も trim して比較側 (newValue = Text.Trim()) と
                 // 揃える。DB に末尾 whitespace が混入していた case で起動直後の focus 移動 1 回で
                 // 「変更扱い」になり CheckBeforeWrite dialog が空発火する race を構造閉鎖。
-                _lastSavedLogDest = (repo.GetString(SettingsKeys.LogDestinationPath, "") ?? "").Trim();
+                _lastSavedLogDest = (repo.GetString(SettingsKeys.LogsRootPath, "") ?? "").Trim();
                 txtLogDest.Text = _lastSavedLogDest;
 
                 int days = repo.GetInt32(SettingsKeys.LogRetentionDays, SettingsKeys.DefaultLogRetentionDays);
@@ -137,13 +137,18 @@ namespace TonePrism.Manager.Controls
             }
             try
             {
-                _dbManager.SettingsRepository.SetString(SettingsKeys.LogDestinationPath, newValue);
+                _dbManager.SettingsRepository.SetString(SettingsKeys.LogsRootPath, newValue);
                 _lastSavedLogDest = newValue;
-                Logger.Info("[SettingsSectionPanel] ログ保存先を変更 (次回起動時反映): " + newValue);
+                Logger.Info("[SettingsSectionPanel] ログ保存先を変更 (Manager は次回起動時反映、Launcher は次回起動時反映): " + newValue);
+
+                // (#201, v0.15.0) Launcher への path 伝搬: responses/launcher_logs_root.json を即時 atomic write。
+                // Launcher が autoload 最先頭 init 時に DB 接続前で読込んで log dir を決定する。
+                // Manager 自身の log dir は本 process の Logger 初期化済値を据置 (= 次回 Manager 起動時に反映)。
+                Services.LauncherLogsRootBridge.WriteCurrentLogsRoot(newValue);
             }
             catch (Exception ex)
             {
-                Logger.Warn("[SettingsSectionPanel] LogDestinationPath 書込失敗: " + ex.Message);
+                Logger.Warn("[SettingsSectionPanel] LogsRootPath 書込失敗: " + ex.Message);
                 MessageBox.Show("ログ保存先の保存に失敗しました: " + ex.Message,
                     "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }

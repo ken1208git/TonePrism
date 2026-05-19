@@ -213,6 +213,12 @@ namespace TonePrism.Manager
             // で session 機構が silent に永久 disabled になる bug があった。
             TryShowUpdateCompletedDialog();
 
+            // (#201, v0.15.0) ログ保存先 setting auto-migrate 完了 (v0.14.0 → v0.15.0 移行) の一回限り通知。
+            // Program.Main の TryAutoMigrateLegacyLogPath が migration 完了時に `<install>/.logs_root_migrated`
+            // sentinel file を書出している。本関数で sentinel を読込 → 部員向け subdir 構造説明 MessageBox →
+            // sentinel を削除する flow。次回起動以降は sentinel 不在で発火しない。
+            TryShowLogsRootMigratedDialog();
+
             // (R3 review M-2) Updater log absorb は ContinueLoadAfterSessionCheck 経由に移設済 (= session
             // conflict check 通過後)。MainForm_Load の早期で absorb すると同一 PC で複数 Manager が同時起動
             // した極端 case で `.absorbed` の append race + 重複 absorb が発生し得る path があった (実害は
@@ -440,7 +446,7 @@ namespace TonePrism.Manager
             CleanupStaleBackupEntries();
 
             _backupSectionPanel.Initialize(dbManager);
-            _logSectionPanel.Initialize(PathManager.BaseDirectory);
+            _logSectionPanel.Initialize(PathManager.LogsRootDirectory);
             _updateSectionPanel.Initialize(dbManager);
 
             _gameSectionPanel.LoadGames();
@@ -937,6 +943,87 @@ namespace TonePrism.Manager
                 "✓ アップデート完了",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
+        }
+
+        /// <summary>
+        /// (#201, v0.15.0) ログ保存先 setting auto-migrate 完了通知 dialog。
+        /// `<install>/.logs_root_migrated` sentinel ファイル存在 check → 部員向け subdir 構造説明 MessageBox 表示
+        /// → sentinel 削除。次回起動以降は sentinel 不在で発火しない。
+        ///
+        /// sentinel JSON schema: `{"migrated_from": "<oldValue>", "migrated_at": "<ISO 8601 UTC>"}`
+        /// (= Program.TryAutoMigrateLegacyLogPath で書出済)
+        /// 例外は内部で握り潰し (= Manager 起動を阻害しない)、parse 失敗時も sentinel は finally で削除する
+        /// (永続 dialog 再表示バグ防止、TryShowUpdateCompletedDialog と同 pattern)。
+        /// </summary>
+        private void TryShowLogsRootMigratedDialog()
+        {
+            string sentinelPath = System.IO.Path.Combine(PathManager.BaseDirectory, ".logs_root_migrated");
+            if (!System.IO.File.Exists(sentinelPath)) return;
+
+            string migratedFrom = null;
+            try
+            {
+                string json = System.IO.File.ReadAllText(sentinelPath, System.Text.Encoding.UTF8);
+                var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
+                var dto = ser.Deserialize<LogsRootMigratedSentinel>(json);
+                if (dto != null) migratedFrom = dto.MigratedFrom;
+            }
+            catch (Exception ex)
+            {
+                Services.Logger.Warn("[MainForm] logs_root_migrated sentinel parse 失敗 (dialog 表示 skip): " + ex.Message);
+            }
+            finally
+            {
+                // 読込結果に関わらず sentinel は必ず削除する (永続 dialog 再表示バグ防止)。
+                try { System.IO.File.Delete(sentinelPath); }
+                catch (Exception delEx) { Services.Logger.Warn("[MainForm] logs_root_migrated sentinel 削除失敗: " + delEx.Message); }
+            }
+
+            if (string.IsNullOrEmpty(migratedFrom))
+            {
+                // parse 失敗 / migratedFrom 不在は dialog 出さず終了 (sentinel は finally で削除済)。
+                return;
+            }
+
+            Services.Logger.Info("[MainForm] logs_root_migrated dialog 表示: migratedFrom=" + migratedFrom);
+            string body =
+                "これまでのバージョンでは、Manager のログだけが指定したフォルダに保存されていました。\n" +
+                "このバージョンから、Manager / Launcher / Updater など 全コンポーネントのログを\n" +
+                "1 つのフォルダにまとめて保存できるようになりました。\n" +
+                "\n" +
+                "【設定の自動引き継ぎ】\n" +
+                "これまでの設定値 (" + migratedFrom + ") はそのまま引き継がれましたが、\n" +
+                "フォルダ構造が以下のように変わります:\n" +
+                "\n" +
+                "  " + migratedFrom + "\\\n" +
+                "    ├ manager\\    ← Manager のログ\n" +
+                "    ├ launcher\\   ← Launcher のログ (新規追加)\n" +
+                "    └ updater\\    ← Updater のログ (新規追加)\n" +
+                "\n" +
+                "これまで " + migratedFrom + " 直下に保存されていた古いログファイルはそのまま残ります\n" +
+                "(30 日後に自動的に削除されます)。\n" +
+                "\n" +
+                "設定タブの「ログ」セクションから保存先を変更できます。";
+            MessageBox.Show(
+                this,
+                body,
+                "ログの保存先の構造が変わりました",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+
+        /// <summary>
+        /// `<install>/.logs_root_migrated` sentinel ファイルの JSON deserialize 用 DTO (#201, v0.15.0)。
+        /// writer 側は Program.TryAutoMigrateLegacyLogPath、wire format は camelCase
+        /// (`migrated_from` / `migrated_at`)、`JavaScriptSerializer` の case-insensitive deserialize で
+        /// PascalCase property と互換受理 (UpdateCompletedSentinel と同 pattern)。
+        /// </summary>
+        private sealed class LogsRootMigratedSentinel
+        {
+            /// <summary>migration 前の旧 `log_destination_path` 値 (= dialog に embed して user に表示する)。</summary>
+            public string MigratedFrom { get; set; }
+            /// <summary>migration 実行時刻 (ISO 8601 UTC、現状は dialog 表示には使わず audit trail 用)。</summary>
+            public string MigratedAt { get; set; }
         }
 
         /// <summary>

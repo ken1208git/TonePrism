@@ -51,9 +51,16 @@ namespace TonePrism.Manager.Controls
             }
         }
 
-        public void Initialize(string projectRoot)
+        /// <summary>
+        /// (#201, v0.15.0) 引数を `projectRoot` から `logsRoot` (= 親 logs root 直接) に変更。
+        /// 旧 semantic は `Path.Combine(projectRoot, "logs")` を内部で append していたが、
+        /// 統一 logs root setting 導入で path 計算は PathManager.LogsRootDirectory に集約、
+        /// 本 panel は親 root を直接受取って `<root>/manager/` `<root>/launcher/` `<root>/monitor/`
+        /// の subdir を scan する責務のみ。
+        /// </summary>
+        public void Initialize(string logsRoot)
         {
-            _logsRoot = Path.Combine(projectRoot ?? "", "logs");
+            _logsRoot = logsRoot ?? "";
             RefreshDisplay();
         }
 
