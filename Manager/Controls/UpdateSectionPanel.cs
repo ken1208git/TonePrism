@@ -798,6 +798,11 @@ namespace TonePrism.Manager.Controls
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question);
             if (dr != DialogResult.Yes) return;
+            // (#170 followup) LAN 他 PC race fence。skip 書込は user 意図的な destructive 操作
+            // (= settings table への INSERT OR REPLACE) で BackupSettingsForm OK click と同位置付け、
+            // 1 段目 fence (SectionPanel 配下の button click 直前) として CheckBeforeWrite を呼ぶ。
+            // Cancel 時は skip 自体を中止して current 状態維持。
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "アップデートスキップ") == DialogResult.Cancel) return;
             _updateChecker.Skip(_currentResult.Latest.Version);
             // (#108 Phase 4 round 4 L-5) LastError も carry。Skip 直前に「再確認エラー: ...」grey sub-text
             // が出ていた case で Skip 後に context が消えると UX surprise になるため明示的に維持。

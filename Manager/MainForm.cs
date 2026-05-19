@@ -464,6 +464,16 @@ namespace TonePrism.Manager
                         bool shown = ShowUpdateAvailableNotification(result);
                         if (shown)
                         {
+                            // (#170 followup) MarkNotified は **意図的に CheckBeforeWrite を呼ばない**。
+                            // 理由 3 つ: (1) auto background path (StartBackgroundUpdateCheckIfDue) からの
+                            // 自動副作用で user 操作直接 trigger ではない、(2) 非破壊的な metadata write
+                            // (= 同 tag 上書きでも実害ゼロ、SQLite WAL で atomic)、(3) 直前に通知 dialog を
+                            // user が dismiss したばかりで、直後に「他 PC 競合中」popup を出すと UX 二重表示
+                            // で煩雑。BackupService の `last_backup_at` 自動書込が同種 auto path で
+                            // CheckBeforeWrite ではなく TryAcquireBackupLease の独自 fence を採用しているのと
+                            // 同じ判断基準 (= auto path は popup ではなく atomic 性に依存)。本 PR の plan
+                            // で当初追加候補だったが、background thread + auto side-effect + 非破壊性 という
+                            // 3 constraint で意図的に skip と文書化。
                             checker.MarkNotified(result.Latest.TagName);
                         }
                         else
