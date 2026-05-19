@@ -76,7 +76,29 @@ namespace TonePrism.Manager.Services
                 "--log-dir",        Quote(PathManager.UpdaterLogDir),
                 "--caller-pid",     callerPid.ToString(),
             };
-            if (forceKill) args.Add("--force-kill");
+            if (forceKill)
+            {
+                // (#170 followup v0.13.1 review Medium-1) force-kill 経路は **default 60s timeout を維持**。
+                // ProcessWaiter の force-kill trigger は `timeoutSeconds > 0 && elapsed >= timeoutSeconds` で
+                // **timeout 到達で初めて発火** する設計 (ProcessWaiter.cs:143)。`--wait-timeout 0` (= 無制限) と
+                // `--force-kill` を併用すると force-kill branch が永久に到達不能になり silent dead code 化。
+                // force-kill は「previous attempt timeout → user が "強制終了して再試行" を選択した経路」で
+                // 「停止した Manager を確実に殺す」semantic なので timeout が必須。
+                args.Add("--force-kill");
+            }
+            else
+            {
+                // (#170 followup v0.13.1) 通常経路は Updater の Manager 終了待ち timeout を **0 = 無制限** に明示。
+                // default 60s だと UpdateSectionPanel の再起動予告 dialog (Application.Exit 前) で user が
+                // OK を遅延 click した場合 + defer 化された CHANGELOG / .bak cleanup の SMB latency で
+                // Updater が exit 3 (TimedOutNoForceKill) を返して abort → 次回 Manager 起動時に
+                // 「Manager が時間内に閉じませんでした」失敗 banner が出る race があった。
+                // 0 (= 無制限) 根拠: Manager UI freeze で永久 polling し続ける zombie Updater リスクはあるが、
+                // Windows user 常識として「ソフトが固まったら task manager で kill」が確立しており、
+                // 自動 abort で謎 banner を出すより user 自身が手動 recovery する path のほうが clean。
+                args.Add("--wait-timeout");
+                args.Add("0");
+            }
             string argLine = string.Join(" ", args);
             Services.Logger.Info("[UpdaterClient] Updater spawn: " + updaterExe + " " + argLine);
 
@@ -87,7 +109,18 @@ namespace TonePrism.Manager.Services
                     FileName = updaterExe,
                     Arguments = argLine,
                     UseShellExecute = false,
-                    CreateNoWindow = false,           // Updater は console window を持つ短命プロセス、ユーザーに見える方が安心
+                    // (#170 followup) `CreateNoWindow = true`。旧設計は「Updater console を visible にして
+                    // user 安心感」だったが、実態は `RedirectStandardOutput=true` で stdout/stderr が pipe に
+                    // 吸われて visible console が常に empty (= 黒い空 box が表示されるだけで「ウイルスかな?」
+                    // UX 悪化の温床) だった。
+                    // Updater output の trace 経路:
+                    // - (a) `<install>/logs/updater/updater_<PC>_<datetime>.log` (= Updater 自身の file log、
+                    //   **完全な全行ログ**)
+                    // - (b) Manager log 経由 `[Updater stdout/stderr] ...` (= 本 Manager process が生きている
+                    //   間だけ redirect で取込まれる、**Manager 死亡後の Updater output は届かない**)
+                    // つまり (a) が full trace の SoT、(b) は Manager 生存中の補助記録。visible console を
+                    // 消しても trace 情報は (a) で完全に残るため情報損失なし。
+                    CreateNoWindow = true,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     StandardOutputEncoding = Encoding.UTF8,
@@ -125,11 +158,16 @@ namespace TonePrism.Manager.Services
                 Services.Logger.Info("[UpdaterClient] Updater spawn 成功 (PID=" + proc.Id + ")。Manager は終了します。");
                 // proc.Dispose() しない: child process が exit 前に handle close すると stream redirect が
                 // 切れる。Manager が Application.Exit で抜けると process tree が綺麗に分離するので問題なし。
-                // (#108 Phase 4 round 4 L-3) **caller 不変式**: 本 method の return true は「caller が即
+                // (#108 Phase 4 round 4 L-3) **caller 不変式**: 本 method の return true は「caller が
                 // Application.Exit を呼ぶこと」を前提とする trade-off (= proc handle を intentional leak、
                 // GC finalizer 経由 Dispose で stdout redirect 切断する path を避けるため)。
-                // Application.Exit が何らかの理由で抜けない / 遅延する場合 (modal dialog 重ね開き等) は
-                // 不変式違反、SPEC §3.7.3 [11] の不可分性に依存する。
+                // (#170 followup v0.13.1) 旧 invariant 「**即** Application.Exit」+「modal dialog 重ね開き
+                // 等で遅延 = 不変式違反」は v0.13.1 で **緩和**: Spawn と Application.Exit の間に
+                // user 介入 modal (= 再起動予告 dialog) を **意図的に挟むことが許容** された (= 通常経路で
+                // `--wait-timeout 0` を渡して Updater 側 polling を無制限化、user の OK click を任意時間
+                // 待てる構造に変更)。force-kill 経路は default 60s timeout 維持で旧 invariant 通り。
+                // SPEC §3.7.3 [11] の不可分性は file 置換 / sentinel / 再起動 ops の atomic 性であって、
+                // user 介入 delay は SPEC 範囲外 (本 round で sentinel write 位置の SPEC 表現も同期更新)。
                 return true;
             }
             catch (Exception ex)
