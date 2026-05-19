@@ -460,7 +460,20 @@ namespace TonePrism.Manager.Controls
                 Services.Logger.Info("[UpdateSectionPanel] ProcessingDialog 結果: DialogResult=" + dialog.DialogResult + " spawnedUpdater=" + spawnedUpdater);
                 if (dialog.DialogResult == DialogResult.OK && spawnedUpdater)
                 {
-                    Services.Logger.Info("[UpdateSectionPanel] Updater spawn 成功、Application.Exit を呼ぶ");
+                    // (#170 followup) ダウンロード + staging 完了直後の再起動予告 dialog。
+                    // 旧実装は ProcessingDialog 閉じてから即 Application.Exit で Manager が silent に
+                    // 消える挙動 (= user 視点で「あれ?何が起きた?」になりやすい)。本 dialog で
+                    // 「これから Manager を一旦終了 → 新版で自動起動」を明示してから user の OK で
+                    // 確定終了。新 Manager 起動時には sentinel 経由で「✓ アップデート完了」 dialog が出る。
+                    MessageBox.Show(this,
+                        "ダウンロードと展開が完了しました。\n\n" +
+                        "これから Manager を一旦終了して、新しいバージョンで自動的に再起動します。\n" +
+                        "再起動には数秒〜数十秒かかる場合があります (= 共有フォルダ越しの場合は長くなります)。\n\n" +
+                        "新しい Manager が起動したら、「✓ アップデート完了」のお知らせが表示されます。",
+                        "Manager を再起動します",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    Services.Logger.Info("[UpdateSectionPanel] Updater spawn 成功、再起動予告 dialog 確認後 Application.Exit を呼ぶ");
                     // Updater は spawn 済、Manager プロセスの終了待機を開始している。Application.Exit で
                     // message loop を抜けると `finally Logger.Shutdown` 経由で正常 exit、Updater の Step 1/4
                     // polling が抜けて Manager dir 置換 + 新 Manager.exe 起動に進む。

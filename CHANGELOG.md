@@ -30,7 +30,7 @@
 - アップデート関連 / 設定変更の race safety 強化 (= LAN 上の他 PC が同時操作中の DB write を CheckBeforeWrite で検出)
 
 - Launcher: 変更なし (v0.6.1 同梱)
-- Manager: v0.12.1 → v0.13.0 (UI 大幅 brushup、5 課題 bundle + 4 round review 対応)
+- Manager: v0.12.1 → v0.13.1 (UI 大幅 brushup、5 課題 bundle + 4 round review 対応 + アップデート時の再起動予告 dialog 追加)
 - Updater: 変更なし (v0.2.1 同梱)
 - Release Tooling: 変更なし (v0.1.19 同梱)
 
@@ -1675,6 +1675,27 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.13.1] - 2026-05-19
+
+#### Added (#170 followup — アップデート時の再起動予告 dialog)
+
+「今すぐアップデート」flow の ProcessingDialog (= zip DL + staging + Updater spawn) 完了直後、
+`Application.Exit` 呼出前に新 `MessageBox` を追加して **Manager 再起動を予告**:
+
+> ダウンロードと展開が完了しました。
+> これから Manager を一旦終了して、新しいバージョンで自動的に再起動します。
+> 再起動には数秒〜数十秒かかる場合があります (= 共有フォルダ越しの場合は長くなります)。
+> 新しい Manager が起動したら、「✓ アップデート完了」のお知らせが表示されます。
+
+旧実装 (= v0.13.0 以前) は ProcessingDialog 閉じた直後に Manager が silent に消える挙動で、
+user 視点で「あれ?何が起きた?」になりやすかった (= 突然 Manager が消えてから Updater 経由で
+数秒〜数十秒待たされる)。本 dialog で「これから一旦終了 → 自動再起動」を明示してから
+user の OK で確定終了する flow に変更、再起動完了後の sentinel 経由「✓ アップデート完了」
+dialog (= Bundle v0.4.0 から存在) と組み合わせて開始 → 終了 → 完了の 3 段階通知を user に提供。
+
+bump 判断: UI 改善 (= 既存 flow に dialog 1 つ追加)、behavior の core path には影響なし、
+SemVer 上 patch (v0.13.0 → v0.13.1)。
 
 ### [Manager v0.13.0] - 2026-05-19
 
