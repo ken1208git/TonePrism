@@ -63,5 +63,17 @@ namespace TonePrism.Manager.Services
         /// 空文字 / 不在 = 通知履歴なし (= 通知する)。
         /// </summary>
         public const string UpdateNotifiedTag = "update_notified_tag";
+
+        // ----- (#170 followup) Logger retention -----
+
+        /// <summary>
+        /// ログファイル保存日数 (default 30)。`Logger.CleanupOldLogs(days)` が起動時 1 回読込み、
+        /// 該当日数より古い `manager_*.log` を mtime 基準で削除。設定 UI (SettingsSectionPanel の
+        /// grpLog) から変更可、**反映は次回 Manager 起動時** (= 設定 UI 上に明示ラベル)。
+        /// 旧実装は `Logger.cs:RetentionDays = 30` の hardcode、本 followup で K/V 化。
+        /// </summary>
+        public const string LogRetentionDays = "log_retention_days";
+
+        public const int DefaultLogRetentionDays = 30;
     }
 }

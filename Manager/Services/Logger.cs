@@ -14,7 +14,9 @@ namespace TonePrism.Manager.Services
     ///   → セッション単位でファイルが分かれるので書き込み競合・行間 interleaving が発生しない
     /// - INFO / WARN / ERROR の 3 段階
     /// - Console.SetOut フックで既存 Console.WriteLine も自動的にファイルへ流す (INFO 扱い)
-    /// - 起動時に 30 日より古いログファイルを削除 (mtime 基準)
+    /// - 古いログファイル削除は `CleanupOldLogs(int retentionDays)` を caller (MainForm) が
+    ///   DB 初期化後に明示呼出する (= Logger 自体は SettingsRepository に依存しない設計)。
+    ///   旧実装は `Initialize` 内で 30 日 hardcode 削除していたが、(#170 followup) で UI 設定化。
     /// - スレッドセーフ (内部 lock。lock は同一スレッドで再入可能)
     /// - 自身の例外で無限ループ・アプリ起動阻害を起こさない (try-catch で握り潰し)
     ///
@@ -23,7 +25,6 @@ namespace TonePrism.Manager.Services
     /// </summary>
     public static class Logger
     {
-        private const int RetentionDays = 30;
         private const string FileNamePrefix = "manager_";
         private const string FileNameSuffix = ".log";
         private const string LogSubDirectory = "manager";
@@ -71,7 +72,9 @@ namespace TonePrism.Manager.Services
 
                     // 起動イベントは初期化完了後に書く
                     WriteInternal("INFO", $"[Logger] Manager 起動 (PC={Environment.MachineName})");
-                    CleanupOldLogs();
+                    // (#170 followup) CleanupOldLogs は SettingsRepository 経由で retention 値を読むため、
+                    // DB が初期化された後に MainForm から `Logger.CleanupOldLogs(days)` で明示呼出する
+                    // 設計に変更。本 Initialize は file open + Console hook + 起動 trail のみに責務を絞る。
                 }
                 catch (Exception ex)
                 {
@@ -214,34 +217,43 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>
-        /// 30 日より古い manager_*.log を削除する。起動時 1 回のみ実行。
+        /// `retentionDays` 日より古い manager_*.log を削除する。MainForm の DB 初期化後に 1 回呼ぶ。
+        ///
+        /// (#170 followup) 旧実装は `Initialize` 内で 30 日 hardcode、本 followup で UI 設定化に伴い
+        /// public + parametrized 化。caller が `SettingsRepository.GetInt32(SettingsKeys.LogRetentionDays,
+        /// SettingsKeys.DefaultLogRetentionDays)` の値を渡す。retentionDays &lt;= 0 / Logger 未初期化時は no-op。
         /// </summary>
-        private static void CleanupOldLogs()
+        public static void CleanupOldLogs(int retentionDays)
         {
-            try
+            lock (_lock)
             {
-                DateTime cutoff = DateTime.Now.AddDays(-RetentionDays);
-                foreach (string path in Directory.EnumerateFiles(_logDirectory, $"{FileNamePrefix}*{FileNameSuffix}"))
+                if (!_initialized) return;
+                if (retentionDays <= 0) return;
+                try
                 {
-                    try
+                    DateTime cutoff = DateTime.Now.AddDays(-retentionDays);
+                    foreach (string path in Directory.EnumerateFiles(_logDirectory, $"{FileNamePrefix}*{FileNameSuffix}"))
                     {
-                        // 念のため: 今セッションのアクティブファイルは絶対に消さない
-                        if (string.Equals(path, _currentLogPath, StringComparison.OrdinalIgnoreCase)) continue;
-                        if (File.GetLastWriteTime(path) < cutoff)
+                        try
                         {
-                            File.Delete(path);
+                            // 念のため: 今セッションのアクティブファイルは絶対に消さない
+                            if (string.Equals(path, _currentLogPath, StringComparison.OrdinalIgnoreCase)) continue;
+                            if (File.GetLastWriteTime(path) < cutoff)
+                            {
+                                File.Delete(path);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            // ロック・権限エラー等は警告だけ残して続行
+                            WriteInternal("WARN", $"[Logger] 古いログファイル削除失敗 ({path}): {ex.Message}");
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        // ロック・権限エラー等は警告だけ残して続行
-                        WriteInternal("WARN", $"[Logger] 古いログファイル削除失敗 ({path}): {ex.Message}");
-                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                WriteInternal("WARN", $"[Logger] 古いログ掃除中にエラー: {ex.Message}");
+                catch (Exception ex)
+                {
+                    WriteInternal("WARN", $"[Logger] 古いログ掃除中にエラー: {ex.Message}");
+                }
             }
         }
 

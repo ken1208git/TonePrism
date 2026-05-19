@@ -353,6 +353,21 @@ namespace TonePrism.Manager
             _storeSectionPanel.Initialize(dbManager);
             _settingsSectionPanel.Initialize(dbManager);
 
+            // (#170 followup) Logger の古いログ掃除を DB 設定値で実行。Logger.Initialize は file open のみで
+            // CleanupOldLogs を含まなくなった (= SettingsRepository に依存しない設計)、本 callsite で
+            // retention 値を読んで明示呼出する。設定値変更は次回起動時に反映される (= 設定 UI ラベルで明示)。
+            try
+            {
+                int retentionDays = dbManager.SettingsRepository.GetInt32(
+                    Services.SettingsKeys.LogRetentionDays,
+                    Services.SettingsKeys.DefaultLogRetentionDays);
+                Logger.CleanupOldLogs(retentionDays);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[MainForm] Logger.CleanupOldLogs 呼出失敗: " + ex.Message);
+            }
+
             // 旧バージョンが root 直下に作っていた safety ファイルを backups/safety/ へ一度きり移動
             try
             {

@@ -20,6 +20,67 @@ namespace TonePrism.Manager.Controls
         {
             _dbManager = dbManager;
             UpdateVersionInfo();
+            LoadLogSettings();
+        }
+
+        /// <summary>
+        /// (#170 followup) 設定タブ「ログ」section の初期化。`numLogRetention.ValueChanged` event を
+        /// **LoadLogSettings 後に hook** して、初期 SetValue 時に handler が発火しない (= CheckBeforeWrite
+        /// dialog が起動時に意図せず出る path) を防ぐ。
+        /// </summary>
+        private void LoadLogSettings()
+        {
+            if (_dbManager == null) return;
+            // ValueChanged を hook する前に初期値を SetValue (= 起動時 spurious 発火を防ぐ)
+            numLogRetention.ValueChanged -= NumLogRetention_ValueChanged;
+            try
+            {
+                int days = _dbManager.SettingsRepository.GetInt32(
+                    SettingsKeys.LogRetentionDays, SettingsKeys.DefaultLogRetentionDays);
+                if (days < numLogRetention.Minimum) days = (int)numLogRetention.Minimum;
+                if (days > numLogRetention.Maximum) days = (int)numLogRetention.Maximum;
+                numLogRetention.Value = days;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[SettingsSectionPanel] LoadLogSettings 読込失敗: " + ex.Message);
+            }
+            numLogRetention.ValueChanged += NumLogRetention_ValueChanged;
+        }
+
+        private void NumLogRetention_ValueChanged(object sender, EventArgs e)
+        {
+            if (_dbManager == null) return;
+            // (#170 followup) user 意図的な destructive (= settings table 書込) 操作前に CheckBeforeWrite。
+            // Cancel 時は値を元に戻して silent abort (= 他 PC 競合中の編集を中止)。
+            int newValue = (int)numLogRetention.Value;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ログ保存日数変更") == DialogResult.Cancel)
+            {
+                // 値を rollback (= event 再発火を避けるため hook 一時 detach)
+                numLogRetention.ValueChanged -= NumLogRetention_ValueChanged;
+                try
+                {
+                    int previous = _dbManager.SettingsRepository.GetInt32(
+                        SettingsKeys.LogRetentionDays, SettingsKeys.DefaultLogRetentionDays);
+                    if (previous < numLogRetention.Minimum) previous = (int)numLogRetention.Minimum;
+                    if (previous > numLogRetention.Maximum) previous = (int)numLogRetention.Maximum;
+                    numLogRetention.Value = previous;
+                }
+                catch { /* swallow、UI 上は中途半端な値で残るが致命でない */ }
+                numLogRetention.ValueChanged += NumLogRetention_ValueChanged;
+                return;
+            }
+            try
+            {
+                _dbManager.SettingsRepository.SetInt32(SettingsKeys.LogRetentionDays, newValue);
+                Logger.Info("[SettingsSectionPanel] ログ保存日数を " + newValue + " 日に変更 (次回起動時反映)");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[SettingsSectionPanel] LogRetentionDays 書込失敗: " + ex.Message);
+                MessageBox.Show("ログ保存日数の保存に失敗しました: " + ex.Message,
+                    "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         public void UpdateVersionInfo()
