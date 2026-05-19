@@ -17,6 +17,9 @@ namespace TonePrism.Manager.Controls
 
         private void InitializeComponent()
         {
+            this.tabComponent = new System.Windows.Forms.TabControl();
+            this.tabLauncher = new System.Windows.Forms.TabPage();
+            this.tabManager = new System.Windows.Forms.TabPage();
             this.toolStrip = new System.Windows.Forms.Panel();
             this.row2Panel = new System.Windows.Forms.Panel();
             this.txtSearch = new System.Windows.Forms.TextBox();
@@ -27,8 +30,6 @@ namespace TonePrism.Manager.Controls
             this.chkInfo = new System.Windows.Forms.CheckBox();
             this.chkWarn = new System.Windows.Forms.CheckBox();
             this.chkError = new System.Windows.Forms.CheckBox();
-            this.chkManager = new System.Windows.Forms.CheckBox();
-            this.chkLauncher = new System.Windows.Forms.CheckBox();
             this.lblFileCount = new System.Windows.Forms.Label();
             this.splitContainer = new System.Windows.Forms.SplitContainer();
             this.gridFiles = new System.Windows.Forms.DataGridView();
@@ -60,8 +61,6 @@ namespace TonePrism.Manager.Controls
             this.row1Panel.Controls.Add(this.chkInfo);
             this.row1Panel.Controls.Add(this.chkWarn);
             this.row1Panel.Controls.Add(this.chkError);
-            this.row1Panel.Controls.Add(this.chkManager);
-            this.row1Panel.Controls.Add(this.chkLauncher);
             this.row1Panel.Controls.Add(this.lblFileCount);
             this.row1Panel.Dock = System.Windows.Forms.DockStyle.Top;
             this.row1Panel.Location = new System.Drawing.Point(0, 0);
@@ -128,32 +127,6 @@ namespace TonePrism.Manager.Controls
             this.chkError.UseVisualStyleBackColor = true;
             this.chkError.CheckedChanged += new System.EventHandler(this.chkLevelFilter_Changed);
             //
-            // chkManager
-            //
-            this.chkManager.AutoSize = true;
-            this.chkManager.Checked = true;
-            this.chkManager.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.chkManager.Location = new System.Drawing.Point(458, 12);
-            this.chkManager.Name = "chkManager";
-            this.chkManager.Size = new System.Drawing.Size(80, 19);
-            this.chkManager.TabIndex = 4;
-            this.chkManager.Text = "Manager";
-            this.chkManager.UseVisualStyleBackColor = true;
-            this.chkManager.CheckedChanged += new System.EventHandler(this.chkLevelFilter_Changed);
-            //
-            // chkLauncher
-            //
-            this.chkLauncher.AutoSize = true;
-            this.chkLauncher.Checked = true;
-            this.chkLauncher.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.chkLauncher.Location = new System.Drawing.Point(544, 12);
-            this.chkLauncher.Name = "chkLauncher";
-            this.chkLauncher.Size = new System.Drawing.Size(80, 19);
-            this.chkLauncher.TabIndex = 5;
-            this.chkLauncher.Text = "Launcher";
-            this.chkLauncher.UseVisualStyleBackColor = true;
-            this.chkLauncher.CheckedChanged += new System.EventHandler(this.chkLevelFilter_Changed);
-            //
             // lblFileCount (右アンカー)
             //
             this.lblFileCount.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
@@ -195,6 +168,30 @@ namespace TonePrism.Manager.Controls
             this.txtSearch.Size = new System.Drawing.Size(1024, 23);
             this.txtSearch.TabIndex = 1;
             this.txtSearch.TextChanged += new System.EventHandler(this.txtSearch_TextChanged);
+            //
+            // tabComponent (上端: component 選択タブ。各 TabPage は selector としてのみ用い、内容描画はタブ外の共通 grid + content view で行う)
+            //
+            this.tabComponent.Controls.Add(this.tabLauncher);
+            this.tabComponent.Controls.Add(this.tabManager);
+            this.tabComponent.Dock = System.Windows.Forms.DockStyle.Top;
+            this.tabComponent.Location = new System.Drawing.Point(0, 0);
+            this.tabComponent.Name = "tabComponent";
+            this.tabComponent.SelectedIndex = 0;
+            this.tabComponent.Size = new System.Drawing.Size(1092, 28);
+            this.tabComponent.ItemSize = new System.Drawing.Size(100, 22);
+            this.tabComponent.SizeMode = System.Windows.Forms.TabSizeMode.Fixed;
+            this.tabComponent.TabIndex = 0;
+            this.tabComponent.SelectedIndexChanged += new System.EventHandler(this.tabComponent_SelectedIndexChanged);
+            //
+            // tabLauncher (空: selector としてのみ機能、内容描画は tab control 外の共通エリア)
+            //
+            this.tabLauncher.Name = "launcher";
+            this.tabLauncher.Text = "Launcher";
+            //
+            // tabManager
+            //
+            this.tabManager.Name = "manager";
+            this.tabManager.Text = "Manager";
             //
             // splitContainer (横割り: 上=ファイル一覧 / 下=本文)
             //
@@ -246,6 +243,7 @@ namespace TonePrism.Manager.Controls
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.Controls.Add(this.splitContainer);
             this.Controls.Add(this.toolStrip);
+            this.Controls.Add(this.tabComponent);
             this.Name = "LogSectionPanel";
             this.Size = new System.Drawing.Size(1092, 596);
             this.toolStrip.ResumeLayout(false);
@@ -271,8 +269,9 @@ namespace TonePrism.Manager.Controls
         private System.Windows.Forms.CheckBox chkInfo;
         private System.Windows.Forms.CheckBox chkWarn;
         private System.Windows.Forms.CheckBox chkError;
-        private System.Windows.Forms.CheckBox chkManager;
-        private System.Windows.Forms.CheckBox chkLauncher;
+        private System.Windows.Forms.TabControl tabComponent;
+        private System.Windows.Forms.TabPage tabLauncher;
+        private System.Windows.Forms.TabPage tabManager;
         private System.Windows.Forms.Label lblSearch;
         private System.Windows.Forms.TextBox txtSearch;
         private System.Windows.Forms.Label lblFileCount;

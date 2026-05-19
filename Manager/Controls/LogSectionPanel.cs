@@ -19,24 +19,36 @@ namespace TonePrism.Manager.Controls
     public partial class LogSectionPanel : UserControl
     {
         // ファイル名の規約: `{component}_{PCname}_{YYYY-MM-DD}_{HHmmss}.log`
-        // 同秒衝突時は `_2`, `_3` が末尾に付くため正規表現は末尾オプショナルで吸収する
+        // 同秒衝突時は `_2`, `_3` が末尾に付くため正規表現は末尾オプショナルで吸収する。
+        // monitor は将来 (= Monitor component 実装時) の readiness、現状 file 不在でも tab 切替時に grid 空表示が出るだけで害なし。
         private static readonly Regex FileNameRegex = new Regex(
-            @"^(?<component>manager|launcher)_(?<pc>.+)_(?<date>\d{4}-\d{2}-\d{2})_(?<time>\d{6})(?:_(?<seq>\d+))?\.log$",
+            @"^(?<component>manager|launcher|monitor)_(?<pc>.+)_(?<date>\d{4}-\d{2}-\d{2})_(?<time>\d{6})(?:_(?<seq>\d+))?\.log$",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-        // 行頭フォーマット: `[YYYY-MM-DD HH:mm:ss] [LEVEL] ...`
-        private static readonly Regex LineRegex = new Regex(
-            @"^\[(?<ts>[^\]]+)\] \[(?<level>INFO|WARN|ERROR)\] (?<rest>.*)$",
-            RegexOptions.Compiled);
+        // 行頭フォーマット: `[YYYY-MM-DD HH:mm:ss] [LEVEL] ...` の parse SoT は `Services/LogLineFormat.cs`
+        // (UpdaterLogAbsorber と共有、format 拡張時の同期 drift 防止)。
+        private static readonly Regex LineRegex = LogLineFormat.LineRegex;
 
         private string _logsRoot;
         private List<LogFileEntry> _allEntries = new List<LogFileEntry>();
         private LogFileEntry _currentEntry; // 現在描画中のエントリ (フィルタ変更時の再描画用)
+        // tab で選択中の component (`launcher` / `manager` / `monitor`)。TabPage.Name と一致させる。
+        // 値は constructor で Designer の初期選択 tab から derive (= Designer の SelectedIndex 設定が SoT、
+        // field default は last resort fallback の二段防御)。Designer が完全破壊された異常 path
+        // (= tabComponent == null) のみ field default `"launcher"` に倒れる (= 通常運用では到達不能、
+        // R4 review L-1: 「二重管理を避ける」より「Designer SoT 優先 + fallback 明示」に framing 訂正)。
+        private string _currentComponent = "launcher";
 
         public LogSectionPanel()
         {
             InitializeComponent();
             ConfigureGrid();
+            // Designer 上の初期選択 tab を SoT として derive。tabComponent が null / SelectedTab 不在の
+            // 異常 path は field default ("launcher") にフォールバック。
+            if (tabComponent != null && tabComponent.SelectedTab != null)
+            {
+                _currentComponent = tabComponent.SelectedTab.Name;
+            }
         }
 
         public void Initialize(string projectRoot)
@@ -78,7 +90,7 @@ namespace TonePrism.Manager.Controls
 
             try
             {
-                _allEntries = ScanLogFiles(_logsRoot)
+                _allEntries = ScanLogFiles(_logsRoot, _currentComponent)
                     .OrderByDescending(e => e.StartedAt)
                     .ToList();
 
@@ -134,20 +146,18 @@ namespace TonePrism.Manager.Controls
             }
         }
 
-        private static IEnumerable<LogFileEntry> ScanLogFiles(string logsRoot)
+        // 指定 component の subdir のみ scan する (= tab で component が決まっているため、複数 subdir 横断は不要)。
+        private static IEnumerable<LogFileEntry> ScanLogFiles(string logsRoot, string component)
         {
-            foreach (var subdir in new[] { "manager", "launcher" })
+            string dir = Path.Combine(logsRoot, component);
+            if (!Directory.Exists(dir)) yield break;
+            foreach (string path in Directory.EnumerateFiles(dir, "*.log"))
             {
-                string dir = Path.Combine(logsRoot, subdir);
-                if (!Directory.Exists(dir)) continue;
-                foreach (string path in Directory.EnumerateFiles(dir, "*.log"))
+                var entry = TryParseFileName(path);
+                if (entry != null)
                 {
-                    var entry = TryParseFileName(path);
-                    if (entry != null)
-                    {
-                        LoadAndParseContent(entry);
-                        yield return entry;
-                    }
+                    LoadAndParseContent(entry);
+                    yield return entry;
                 }
             }
         }
@@ -171,10 +181,18 @@ namespace TonePrism.Manager.Controls
             }
 
             var fi = new FileInfo(path);
+            string componentLower = m.Groups["component"].Value.ToLowerInvariant();
+            string componentDisplay;
+            switch (componentLower)
+            {
+                case "manager": componentDisplay = "Manager"; break;
+                case "monitor": componentDisplay = "Monitor"; break;
+                default: componentDisplay = "Launcher"; break;
+            }
             return new LogFileEntry
             {
                 FilePath = path,
-                Component = m.Groups["component"].Value.ToLowerInvariant() == "manager" ? "Manager" : "Launcher",
+                Component = componentDisplay,
                 PcName = m.Groups["pc"].Value,
                 StartedAt = started,
                 LastWriteTime = fi.LastWriteTime,
@@ -283,12 +301,10 @@ namespace TonePrism.Manager.Controls
 
         /// <summary>
         /// 全ファイル行を走査し、現在のフィルタで「表示するものがゼロ」なファイルを灰色化する。
-        /// コンポーネントフィルタ (Manager / Launcher) はファイル単位で適用、
-        /// レベル + 検索フィルタはファイル内行レベルで適用。
+        /// コンポーネントは tab で既に絞られているため、ここではレベル + 検索フィルタのみを行レベルで適用する。
         /// </summary>
         private void UpdateRowGreyout()
         {
-            bool[] componentOn = { chkManager.Checked, chkLauncher.Checked };
             bool[] levelOn = { chkInfo.Checked, chkWarn.Checked, chkError.Checked };
             string search = txtSearch.Text ?? "";
 
@@ -296,25 +312,21 @@ namespace TonePrism.Manager.Controls
             {
                 var entry = row.Tag as LogFileEntry;
                 if (entry == null) continue;
-                bool hasMatch = HasAnyMatchingLine(entry, componentOn, levelOn, search);
+                bool hasMatch = HasAnyMatchingLine(entry, levelOn, search);
                 ApplyRowAppearance(row, hasMatch);
             }
         }
 
         private void UpdateFileCountLabel()
         {
-            bool[] componentOn = { chkManager.Checked, chkLauncher.Checked };
             bool[] levelOn = { chkInfo.Checked, chkWarn.Checked, chkError.Checked };
             string search = txtSearch.Text ?? "";
-            int visible = _allEntries.Count(e => HasAnyMatchingLine(e, componentOn, levelOn, search));
+            int visible = _allEntries.Count(e => HasAnyMatchingLine(e, levelOn, search));
             lblFileCount.Text = $"ログファイル: {visible} 件";
         }
 
-        private static bool HasAnyMatchingLine(LogFileEntry entry, bool[] componentOn, bool[] levelOn, string search)
+        private static bool HasAnyMatchingLine(LogFileEntry entry, bool[] levelOn, string search)
         {
-            // ファイル単位のコンポーネントフィルタ (cheap, やる前に弾く)
-            if (!IsComponentOn(entry.Component, componentOn)) return false;
-
             if (entry.Lines == null) return true; // 安全側: 不明なら表示扱い
             foreach (var pl in entry.Lines)
             {
@@ -322,16 +334,6 @@ namespace TonePrism.Manager.Controls
                     return true;
             }
             return false;
-        }
-
-        private static bool IsComponentOn(string component, bool[] componentOn)
-        {
-            switch (component)
-            {
-                case "Manager": return componentOn[0];
-                case "Launcher": return componentOn[1];
-                default: return true;
-            }
         }
 
         private static bool IsLevelOn(string level, bool[] levelOn)
@@ -395,6 +397,16 @@ namespace TonePrism.Manager.Controls
             RefreshDisplay();
         }
 
+        // tab 切替時に scan 対象 subdir が変わるため、grid と content view を full refresh する。
+        // TabPage.Name は Designer 側で `launcher` / `manager` / `monitor` (= subdir 名と一致) を割当ててある。
+        private void tabComponent_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            var page = tabComponent.SelectedTab;
+            if (page == null) return;
+            _currentComponent = page.Name;
+            RefreshDisplay();
+        }
+
         /// <summary>
         /// `<install>/logs/` をエクスプローラで開く。部員がエラー発生時にログを zip して送る際の動線。
         /// logs/ dir が存在しない場合は親 dir (`<install>/`) を fallback として開く。失敗時は MessageBox。
@@ -447,7 +459,13 @@ namespace TonePrism.Manager.Controls
         private class LogFileEntry
         {
             public string FilePath;
-            public string Component;     // "Manager" / "Launcher"
+            // TryParseFileName が返す値: "Manager" / "Launcher" / "Monitor"。
+            // Monitor tab 追加までは事実上 2 値 (Manager / Launcher)。"Monitor" は健全運用では出ない
+            // (= ScanLogFiles が `<logsRoot>/<component>/` subdir のみ scan するため、tab=launcher/manager
+            // 選択中に Monitor file が混入するのは `logs/launcher/` 等への誤配置の異常運用のみ)。
+            // 誤配置 file の parse に備えて forward-compat で値域に保持 (R4 review L-2: 「3 値の可能性」
+            // と書いて future reader が「Monitor tab が動いている」と誤読する path を予防)。
+            public string Component;
             public string PcName;
             public DateTime StartedAt;
             public DateTime LastWriteTime;

@@ -237,6 +237,7 @@
     <Compile Include="Services\ImagePreviewHelper.cs" />
     <Compile Include="Services\LauncherSessionService.cs" />
     <Compile Include="Services\Logger.cs" />
+    <Compile Include="Services\LogLineFormat.cs" />
     <Compile Include="Services\ManagerSessionService.cs" />
     <Compile Include="Services\PathConversionHelper.cs" />
     <Compile Include="Services\SessionConflictDialog.cs" />
@@ -252,6 +253,7 @@
     <Compile Include="Services\UpdateChecker.cs" />
     <Compile Include="Services\UpdateDownloader.cs" />
     <Compile Include="Services\UpdaterClient.cs" />
+    <Compile Include="Services\UpdaterLogAbsorber.cs" />
     <Compile Include="Services\VersionInventory.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

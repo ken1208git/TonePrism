@@ -1653,6 +1653,64 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.14.0] - 2026-05-19
+
+#### Added (#199 — Companions ログ管理 + ログビューア タブ式リファクタ)
+
+**1. Updater log の Manager log への post-hoc filtered absorb** (`Manager/Services/UpdaterLogAbsorber.cs` 新規):
+
+Manager 起動直後の `ContinueLoadAfterSessionCheck` (= 起動時 session conflict check の通過後) で 1 回呼出。`<install>/logs/updater/*.log` を scan、未 absorb な file から **`[ERROR]` / `[WARN]` 全件 + 主要 milestone marker 行** のみ抽出して Manager 自身の Logger 経由で Manager log に append。各行は `[Updater <original-ts>] <message>` prefix で由来 + 元 timestamp を明示。verbose な詳細行 (file copy / verify 等) は Updater 自身の file に隔離。
+
+milestone marker pattern: `[Step N/M]` ヘッダ / `Manager spawn` 結果 / `Manager dir 置換完了` / `FATAL` / `Updater 起動` / `Updater 終了` / `Updater 全工程完了` / `Manager 起動完了` / `Manager プロセス終了確認` 等 (= success path INFO のみ、failure event は WARN/ERROR 経路で absorb される規約)。
+
+設計判断 (SPEC §3.6 Companions ログ管理規約と同期):
+- **絞り込み level**: Warn/Error は全件 (= 問題追跡の信号)、INFO は milestone marker pattern を含むもののみ (= Phase 境界 + 完了 marker)。普段の Manager log が Updater verbose で埋もれない balance。
+- **重複 absorb 防止**: `<install>/logs/updater/.absorbed` text file (= 1 行 1 path) で管理。Manager 再起動で同 Updater log を 2 回 absorb しない。
+- **部分 absorb 事故防止**: Updater Logger の Shutdown marker 「Updater 終了」行を含む file のみ absorb 対象、未含有なら次回 Manager 起動で再評価 (= Phase B/C 中の race で終端未達のまま mark 済になる事故を構造的に防止)。
+- **dead path prune**: Updater Logger の 30 日 retention で消えた file path の `.absorbed` entry を best-effort 掃除、`.absorbed` の永続 growth を防止。
+- **例外は内部で握り潰し**: Manager 起動を阻害しない (= SPEC §3.6「Logger 自身の障害は握り潰す」と同じ defensive 規約)。
+
+**2. LogSectionPanel を tab 式 component selector に変更** (`Manager/Controls/LogSectionPanel.{cs,Designer.cs}`):
+
+旧 `chkManager` / `chkLauncher` checkbox 式 component filter を **`TabControl` (Launcher / Manager の 2 tab)** に置換。tab 切替で grid に表示する component が切り替わる。default tab は Launcher (= 部員が普段 trouble shoot する対象が Launcher 側であろう想定、後で変更余地あり)。Monitor は SPEC では 3 component 収束方針の 1 つだが、Monitor 実装着手前なので tab UI には現段階で含めない (= 動かないボタンを表に出さない方針)、`FileNameRegex` のみ将来 readiness で `monitor` 含む。
+
+設計判断:
+- **3 component 収束方針**: Manager GUI で見える log source は Launcher / Manager / Monitor の 3 component に固定、Companion 用 tab は追加しない (= SPEC §3.6 Companions ログ管理規約)。Monitor tab は Monitor component 実装着手と同 PR で UI 追加予定。
+- **checkbox 撤廃の妥当性**: 旧 checkbox 「両方 ON」状態は grid 上で Manager session と Launcher session の file 一覧を時刻順に並べていたが、log line レベルでの時系列 cross-correlate 機能は存在しなかった (= `RenderContent` は 1 file の内容のみ表示)。tab 式に切替えても失う UX なし、3 component 収束が UI 上に明示される利得のみ。
+- **`HasAnyMatchingLine` / `UpdateRowGreyout` / `UpdateFileCountLabel` から component filter logic を削除** (= tab で既に絞込済)、code path 簡素化。
+
+#### Changed
+
+- `Manager/Controls/LogSectionPanel.Designer.cs`: `chkManager` / `chkLauncher` field 削除、`tabComponent` (TabControl) + `tabLauncher` / `tabManager` (TabPage、Monitor は未追加) field 追加。layout は `tabComponent` を最上端 (Dock=Top) に配置、既存 `toolStrip` + `splitContainer` は下に shift。
+- `Manager/Controls/LogSectionPanel.cs`: `FileNameRegex` を `(?<component>manager|launcher|monitor)` に拡張 (= 将来 Monitor file が落ちてきた時に parse 可能、現状 file 不在で実害なし)、`_currentComponent` field + `tabComponent_SelectedIndexChanged` handler 追加、`ScanLogFiles(logsRoot)` を `ScanLogFiles(logsRoot, component)` に signature 変更。
+- `Manager/MainForm.cs`: `MainForm_Load` の `TryShowUpdateCompletedDialog()` 直後に `Services.UpdaterLogAbsorber.AbsorbPendingLogs()` 呼出を追加。
+- `Manager/TonePrism_Manager.csproj`: `Services\UpdaterLogAbsorber.cs` の `<Compile Include>` 追加。
+
+#### Round 4 review fix (M-1 + M-2 + M-3 + L-1 + L-2)
+
+- **「line-prefix 厳格化」表現 drift 解消** (R4 M-1): R3 で導入した「line-prefix 厳格化」「行頭 prefix 固定」表現が `content.IndexOf` の substring 検索実態と乖離していた drift を解消、「Logger 内部 prefix `[Logger]` 込みの specific phrase substring 一致」に整合化。実装は `content.IndexOf(UpdaterShutdownMarker, ...)` の substring 検索のままで、判定 string を `[Logger]` prefix 込みの unique phrase にすることで brittleness を抑える設計意図を表現修正。
+- **`dbReady=false` / session conflict Cancel 両 skip path の明文化** (R4 M-2): MainForm.cs コメントで「dbReady=false (= DB 初期化 user 拒否 / 不存在) と session conflict Cancel の両 path で AbsorbPendingLogs が skip される、両 path とも次回 Manager 起動で `.absorbed` 未含有 entry として idempotent picked up」を明文化。CleanupOldLogs (= Program.Main 移設で全起動 path 必達) の設計とは要件が異なる (= absorb は idempotent + deferred OK の弱い保証で十分) こと、CleanupOldLogs と同型の Program.Main 移設は今回採用しない trade-off (= R3 M-2 の「`.absorbed` 競合 bound」設計を維持するため) を embed。
+- **orphan 継続行 skip の trade-off documentation** (R4 M-3): SPEC §3.6「多行 entry 継続行サポート」項に「orphan 継続行 (= ファイル先頭からの異常 path / skip された非 milestone INFO 直後の継続行) は active entry なし state で見つかるため noise skip、健全 file は `[Logger] <Component> 起動` で必ず始まる契約のため通常運用では発火しない」を 1 文追記。実装変更なし、契約 documentation の完全性向上のみ。
+- **コメント framing 訂正 (L-1 + L-2)**: `_currentComponent` field comment を「二重管理を避ける」から「Designer SoT 優先 + last resort fallback の二段防御」へ訂正 (= 実装が field default を残している現実と整合)。`LogFileEntry.Component` 値域コメントを「3 値の可能性」から「Monitor tab 追加までは事実上 2 値、Monitor は誤配置 file 対応の forward-compat」へ訂正 (= future reader の誤読 path を予防)。
+
+#### Round 3 review fix (H-1 + M-1 + M-2 + M-3)
+
+- **CHANGELOG catalog ↔ call-site drift 解消** (R3 H-1): 上の「Added」記述の milestone marker pattern 列挙から `rollback` を削除 + INFO success-path 限定規約注記を sync。R2 で MilestoneRegex から `rollback` を removal 済だが「Added」記述には残置していて同一 PR エントリ内で矛盾していた状態を解消。
+- **Shutdown marker を Logger 内部 prefix 込み specific phrase 一致に厳格化** (R3 M-1): `UpdaterLogAbsorber` の Shutdown marker 検出を `"Updater 終了"` substring 一致から `"[Logger] Updater 終了"` (= Logger 内部 prefix 込みの specific phrase) **substring 一致**に変更、`UpdaterShutdownMarker` const として SoT 化。実装は `content.IndexOf(...)` の substring 検索のままで、判定 string を `[Logger]` prefix 込みの unique phrase に強化することで application code が偶然 error message 中に「Updater 終了」文字列を含めた時の誤発火 path を構造的閉鎖 (= 行頭 anchor までは要求していない、Logger 内部 prefix の uniqueness で十分という判断)。SPEC §3.6 に「Companion の Logger Shutdown 出力には `[Logger] <Component> 終了` を含めること」+「parent absorber は当該 substring の有無で判定」規約を新規明文化、将来 WindowProbe / PauseOverlay 等の parent absorber コピペ時の brittleness 継承も予防。
+- **AbsorbPendingLogs 呼出位置を session conflict check 後に移設** (R3 M-2): `MainForm_Load` 早期 (= TryShowUpdateCompletedDialog 直後) から `ContinueLoadAfterSessionCheck` 内 (= session conflict 通過後) に移設。同一 PC 複数 Manager 同時起動時の `.absorbed` 競合 + Manager log file 間重複 absorb path を構造的 bound。session conflict Cancel path では absorb skip されるが、次回 Manager 起動で idempotent に picked up される設計なので timing 影響なし。
+- **多行継続行の改行を `Environment.NewLine` に変更** (R3 M-3): `AbsorbContent` の継続行 accumulate `Append('\n')` を `Append(Environment.NewLine)` に変更。Manager Logger の WriteLine 出力 (= entry 間 CRLF on Windows) との line ending mixed (= entry 内 LF / entry 間 CRLF) 状態を解消、log を外部 tool に渡した時の brittleness を予防。
+
+#### Round 2 review fix (H-1 + M-1 + M-2 + M-3 + L-3)
+
+- **多行 ERROR 継続行 (stack trace) を absorb で保持** (`UpdaterLogAbsorber.AbsorbContent`): `Logger.Error(string, Exception)` が出力する exception stack trace は LineRegex (`[ts] [LEVEL]` ヘッダ) を持たない継続行になるため、旧実装は header 1 行目だけ拾って silent に欠落していた。header 行を検知したら直前の累積 entry を flush + 新 entry を開始、header 不一致行は active entry があれば payload に append する state machine pattern に書換え、改行込みの単一 entry として Manager Logger に書出。SPEC §3.6 に「多行 entry 継続行サポート」規約を追記。
+- **crashed Updater の time-based fallback absorb** (`UpdaterLogAbsorber.AbsorbPendingLogs`): 「Updater 終了」marker 不在 file は通常「まだ書込中 race」として skip するが、`LastWriteTime` から 10 分以上経過していれば process 終了確定として absorb 対象に含める + `[CRASHED?]` summary marker + WARN level で notice する fallback path を追加。Updater が segfault / kill / OOM 等で abnormally terminate した case で永久 skip され続ける silent failure path を閉じる。SPEC §3.6 に「部分 absorb 事故防止 + crash fallback」規約を追記。
+- **INFO milestone success-path 限定規約** + `rollback` alternation removal: SPEC §3.6 で「INFO レベルの milestone marker は success path のみ、failure は WARN/ERROR で出す」契約を明文化、MilestoneRegex から `rollback` alternation を removal (= 現状 Updater rollback はすべて WARN/ERROR で出ているため coverage 損失なし、anchor なし broad match の forward-compat false positive リスクを予防)。
+- **`LineRegex` SoT 化** (`Manager/Services/LogLineFormat.cs` 新規): UpdaterLogAbsorber と LogSectionPanel の 2 callsite で hardcode 重複していた Logger format parse regex を共通 helper に抽出、将来 DEBUG level 追加等の format 拡張時の silent drift を予防。
+
+#### Bump 根拠 (v0.13.1 → v0.14.0)
+
+SemVer pre-1.0 minor bump: 新機能追加 (Companion log absorb + UI tab refactor)。SPEC §3.6 に新 subsection 追加で SPEC 側も v1.10.31 → v1.10.32 を同 PR で bump。
+
 ### [Manager v0.13.1] - 2026-05-19
 
 #### Added (#170 followup — アップデート時の再起動予告 dialog)
