@@ -1069,6 +1069,22 @@ Release.bat の編集は **UTF-8 (no BOM) + CRLF** 厳守 (SPEC §3.7.9.1 参照
 
 SPEC §2.4 で定義される「主要 (Launcher / Manager / Monitor) を補助する独立 exe 群」の **runtime exe** の変更履歴。`Companions/Updater/TonePrism_Updater.exe` (Manager 自身の dir 置換用) + 将来追加される `WindowProbe` (#101) / `PauseOverlay` (#30) 等の deployment 配置と整合。本 section は **#160 で `## Updater (Companions/Updater)` から rename + 一般化**、`## Release Tooling` (= build / 配布スクリプト) と責務分離 (= 後者は build 時のみ動く scripts、本 section は runtime exe)。SPEC §2.4 / §3.7.4 参照。
 
+### [Updater v0.2.1] - 2026-05-19
+
+#### Changed (#170 — copyright metadata sync)
+
+`AssemblyInfo.cs:10` の `AssemblyCopyright` を `Copyright ©  2026` (著者名なし、年単独) → `Copyright © 2025-2026 TonePrism Project — Lead maintainer: Kenshiro Kuroga (Osaka Prefectural Toneyama Upper Secondary School PC Club)` に書換、`LICENSE:3` / `README.md:96` と同期。Updater.exe を右クリック → プロパティ → 詳細の Copyright 表示が LICENSE と整合するようになる。
+
+書式判断: copyright holder を `TonePrism Project` 単独に整理、`Kenshiro Kuroga` は `Lead maintainer:` 役割明示で併記、学校所属は個人側に attach (= project は #168 で汎用化したため学校に固有でない、所属は個人属性として attach する方が史実整合)。SPDX 慣用「`<Holder>` 単独 or `<H1>, <H2>`」から見ても dash 区切り「`A - B (Org)`」より明瞭、将来 contributor 追加時の拡張性も確保 (= `and contributors` 形式へ移行可能)。
+
+marker 判断: `(c)` と `©` は **意図的に file family 別の convention を保持** する split (= 「literal 文字列 5 か所完全一致」ではなく「holder 文字列の semantic sync」を目的とする)。
+- `(c)` group (3 file): `LICENSE:3` / `README.md:96` / `Launcher/export_presets.cfg:50` — MIT License spec の例文が `(c)` を採用しており LICENSE / README は同期、Godot export config は marker 規約なしのため元 file の `(c)` を維持
+- `©` group (2 file): `Manager/Properties/AssemblyInfo.cs:13` / `Companions/Updater/Properties/AssemblyInfo.cs:10` — .NET / Visual Studio template default の `©` を維持 (= `dotnet new` 自動生成 marker)
+- 法的同等性: 米著作権法は `(c)` と `©` を copyright notice として等価に認める、Windows file properties 上の表示も人間の読み取り意味は同一
+- verify 手法: 単一 grep `Copyright.*Kuroga` ではなく 2 系統別個に `Copyright \(c\) 2025-2026 TonePrism Project` (3 hit) + `Copyright © 2025-2026 TonePrism Project` (2 hit) で sweep する
+
+bump 判断: AssemblyInfo metadata 変更は SemVer 上 patch (0.2.0 → 0.2.1)。コード behavior は完全に無変更、build 出力の PE metadata だけが変わる。同様の sync 動機は `## Manager v0.12.1` / `## Launcher v0.6.1` も同時 bump、cross-cutting copyright 統一として 3 component 同期。
+
 ### [Updater v0.2.0] - 2026-05-19
 
 #### Changed (#168 — 完全 rename + 配布対象拡張、破壊的変更)
@@ -1115,6 +1131,16 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 ---
 
 ## Launcher（ランチャー本体）
+
+### [Launcher v0.6.1] - 2026-05-19
+
+#### Changed (#170 — copyright metadata sync)
+
+`export_presets.cfg:50` `application/copyright` を `Copyright (c) 2025 Kenshiro Kuroga (Osaka Prefectural Toneyama Upper Secondary School PC Club)` (旧個人表記、年 2025 単独) → `Copyright (c) 2025-2026 TonePrism Project — Lead maintainer: Kenshiro Kuroga (Osaka Prefectural Toneyama Upper Secondary School PC Club)` に書換、`LICENSE:3` / `README.md:96` と同期。`TonePrism_Launcher.exe` を右クリック → プロパティ → 詳細の Copyright 表示が LICENSE と整合するようになる (= 次回 Godot export 以降反映)。
+
+書式判断は `## Companions Updater v0.2.1` entry 参照、3 component で同じ表記に統一。
+
+bump 判断: export config metadata 変更は SemVer 上 patch (0.6.0 → 0.6.1)。GDScript behavior / scene / runtime logic は完全に無変更、Godot export 出力 exe の Windows PE metadata だけが変わる。`version.gd` `PATCH=0 → 1`、`project.godot` `config/version="0.6.1"`、`export_presets.cfg` `file_version="0.6.1.0"` / `product_version="0.6.1.0"` を同期更新 (SPEC §3.7.8 launcher version SoT 3 か所同期チェックリスト準拠)。同様の sync 動機は `## Manager v0.12.1` / `## Companions Updater v0.2.1` も同時 bump、cross-cutting copyright 統一として 3 component 同期。
 
 ### [Launcher v0.6.0] - 2026-05-19
 
@@ -1587,6 +1613,20 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.12.1] - 2026-05-19
+
+#### Changed (#170 — copyright metadata sync + 設定タブ UI 追加)
+
+- **PE metadata sync**: `Properties/AssemblyInfo.cs:13` の `AssemblyCopyright` を `Copyright ©  2025` (著者名なし、年単独) → `Copyright © 2025-2026 TonePrism Project — Lead maintainer: Kenshiro Kuroga (Osaka Prefectural Toneyama Upper Secondary School PC Club)` に書換、`LICENSE:3` / `README.md:96` と同期。`TonePrism_Manager.exe` を右クリック → プロパティ → 詳細の Copyright 表示が LICENSE と整合するようになる。
+- **設定タブ「バージョン情報」UI に copyright + license 行を追加** (`Controls/SettingsSectionPanel.cs:UpdateVersionInfo`): 既存の「製品名 / バージョン / データベース構造」3 行に加えて、`Assembly.GetCustomAttribute<AssemblyCopyrightAttribute>()` で **AssemblyCopyright を Reflection 取得** (= SoT は `AssemblyInfo.cs:13` 1 か所のみ、UI 側に literal を直書きしないので drift 防止) して「Copyright © ... TonePrism Project — Lead maintainer: ...」+「ライセンス: MIT License」を追加表示。来場スタッフ / 顧問が runtime で copyright を目視確認できる経路を確保 (= LICENSE / README / exe properties に続く 4 経路目の surface)。
+- **折返しは WinForms の word-wrap に委任** (round 2 review M-2 対応): 初版 `string.Replace(" (Osaka Prefectural", "\n  (Osaka Prefectural")` で school suffix 直前に手動 soft break を挿入していたが、これは AssemblyInfo の中身に対する第二の coupling (= 将来 AssemblyInfo を改変 [学校名 rename / 学校 attribution 削除 / 日本語表記] したら silent no-op で 1 行表示に戻る、HiDPI / font scaling 環境で grpInfo 幅超過リスク) で「SoT 1 か所主張」と矛盾。round 2 fix で **`lblVersionInfo.MaximumSize = new Size(grpInfo.ClientSize.Width - 40, 0)` + 既存 `AutoSize=true`** に切替、`Replace` 自体を削除。WinForms が word 境界で自動折返し + Label 高さを自動拡張、AssemblyInfo の文字列内容に対する coupling が消滅して真の意味で drift 防止が成立。
+- **`Controls/SettingsSectionPanel.Designer.cs`**: 追加行 + word-wrap 行数の余裕を確保するため `grpInfo` Size 高さを `120` → `200` に拡張 (= width 760 維持)。
+- **`SettingsSectionPanel.cs:catch` に `Logger.Warn` 追加** (round 2 review L-4 対応): 既存 try/catch が silent fail だったため、AGENTS.md Cross-component Standards「新規実装は `Logger.Warn/Error` 直接使用」規約に従って `catch (Exception ex)` 形に変更 + `Logger.Warn` で version + copyright 取得失敗の例外詳細を出力 (= 将来 Reflection / DB 取得失敗時の debug 容易化)。
+
+書式判断は `## Companions Updater v0.2.1` entry 参照、3 component で同じ表記に統一。
+
+bump 判断: AssemblyInfo metadata 変更 + 設定タブ UI 追加は SemVer 上 patch (0.12.0 → 0.12.1)。表示行 1 セクション追加のみで behavior 影響なし (= DB / API / build 出力 layout 無変更)、build 出力の PE metadata と Settings UI 表示だけが変わる。同様の sync 動機は `## Launcher v0.6.1` / `## Companions Updater v0.2.1` も同時 bump、cross-cutting copyright 統一として 3 component 同期。
 
 ### [Manager v0.12.0] - 2026-05-19
 

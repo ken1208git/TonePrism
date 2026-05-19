@@ -10,7 +10,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("TonePrism_Manager")]
-[assembly: AssemblyCopyright("Copyright ©  2025")]
+[assembly: AssemblyCopyright("Copyright © 2025-2026 TonePrism Project — Lead maintainer: Kenshiro Kuroga (Osaka Prefectural Toneyama Upper Secondary School PC Club)")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
@@ -29,5 +29,5 @@ using System.Runtime.InteropServices;
 //      ビルド番号
 //      リビジョン
 //
-[assembly: AssemblyVersion("0.12.0.0")]
-[assembly: AssemblyFileVersion("0.12.0.0")]
+[assembly: AssemblyVersion("0.12.1.0")]
+[assembly: AssemblyFileVersion("0.12.1.0")]
