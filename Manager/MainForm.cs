@@ -213,12 +213,12 @@ namespace TonePrism.Manager
             // で session 機構が silent に永久 disabled になる bug があった。
             TryShowUpdateCompletedDialog();
 
-            // Updater log の post-hoc filtered absorb (= SPEC §3.6 Companions ログ管理規約)。
-            // 直前のアップデートサイクル中に Updater が書き出した log のうち Warn/Error + 主要 milestone
-            // を Manager log に embed する。Manager GUI の log viewer から 3 component に収束させる方針の
-            // 一環 (= Updater 用 tab を増やさず、Updater 由来の重要 event を Manager log の一部として閲覧)。
-            // 例外は内部で握り潰し済、Manager 起動を阻害しない。
-            Services.UpdaterLogAbsorber.AbsorbPendingLogs();
+            // (R3 review M-2) Updater log absorb は ContinueLoadAfterSessionCheck 経由に移設済 (= session
+            // conflict check 通過後)。MainForm_Load の早期で absorb すると同一 PC で複数 Manager が同時起動
+            // した極端 case で `.absorbed` の append race + 重複 absorb が発生し得る path があった (実害は
+            // Manager log file 間の重複 entry のみで file 内競合は無いが、構造的に bound するため移設)。
+            // session conflict Cancel path では absorb skip されるが、次回 Manager 起動で必ず picked up
+            // される idempotent 設計なので timing 影響なし。
 
             bool dbReady = false;
 
@@ -393,6 +393,17 @@ namespace TonePrism.Manager
             _gameSectionPanel.Initialize(dbManager);
             _storeSectionPanel.Initialize(dbManager);
             _settingsSectionPanel.Initialize(dbManager);
+
+            // Updater log の post-hoc filtered absorb (= SPEC §3.6 Companions ログ管理規約)。
+            // 直前のアップデートサイクル中に Updater が書き出した log のうち Warn/Error + 主要 milestone
+            // を Manager log に embed する。Manager GUI の log viewer から 3 component に収束させる方針の
+            // 一環 (= Updater 用 tab を増やさず、Updater 由来の重要 event を Manager log の一部として閲覧)。
+            // 例外は内部で握り潰し済、Manager 起動を阻害しない。
+            //
+            // **呼出位置**: session conflict check 通過後 = ContinueLoadAfterSessionCheck 内 (= R3 review
+            // M-2 対応で MainForm_Load 早期から移設)。同一 PC 複数 Manager 同時起動時の `.absorbed` 競合を
+            // 構造的に bound する目的。Cancel path で skip されるが next start で idempotent に picked up。
+            Services.UpdaterLogAbsorber.AbsorbPendingLogs();
 
             // (#170 followup round 2 review H-1) CleanupOldLogs は **Program.Main に移動済**。
             // 旧実装は本 MainForm 経路で呼出していたが、dbReady=false / SessionConflictDialog Cancel

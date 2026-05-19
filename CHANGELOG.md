@@ -1659,9 +1659,9 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 **1. Updater log の Manager log への post-hoc filtered absorb** (`Manager/Services/UpdaterLogAbsorber.cs` 新規):
 
-Manager 起動直後の `MainForm_Load` (= `TryShowUpdateCompletedDialog` 直後) で 1 回呼出。`<install>/logs/updater/*.log` を scan、未 absorb な file から **`[ERROR]` / `[WARN]` 全件 + 主要 milestone marker 行** のみ抽出して Manager 自身の Logger 経由で Manager log に append。各行は `[Updater <original-ts>] <message>` prefix で由来 + 元 timestamp を明示。verbose な詳細行 (file copy / verify 等) は Updater 自身の file に隔離。
+Manager 起動直後の `ContinueLoadAfterSessionCheck` (= 起動時 session conflict check の通過後) で 1 回呼出。`<install>/logs/updater/*.log` を scan、未 absorb な file から **`[ERROR]` / `[WARN]` 全件 + 主要 milestone marker 行** のみ抽出して Manager 自身の Logger 経由で Manager log に append。各行は `[Updater <original-ts>] <message>` prefix で由来 + 元 timestamp を明示。verbose な詳細行 (file copy / verify 等) は Updater 自身の file に隔離。
 
-milestone marker pattern: `[Step N/M]` ヘッダ / `Manager spawn` 結果 / `Manager dir 置換完了` / `rollback` / `FATAL` / `Updater 起動` / `Updater 終了` / `Updater 全工程完了` / `Manager 起動完了` / `Manager プロセス終了確認` 等。
+milestone marker pattern: `[Step N/M]` ヘッダ / `Manager spawn` 結果 / `Manager dir 置換完了` / `FATAL` / `Updater 起動` / `Updater 終了` / `Updater 全工程完了` / `Manager 起動完了` / `Manager プロセス終了確認` 等 (= success path INFO のみ、failure event は WARN/ERROR 経路で absorb される規約)。
 
 設計判断 (SPEC §3.6 Companions ログ管理規約と同期):
 - **絞り込み level**: Warn/Error は全件 (= 問題追跡の信号)、INFO は milestone marker pattern を含むもののみ (= Phase 境界 + 完了 marker)。普段の Manager log が Updater verbose で埋もれない balance。
@@ -1685,6 +1685,13 @@ milestone marker pattern: `[Step N/M]` ヘッダ / `Manager spawn` 結果 / `Man
 - `Manager/Controls/LogSectionPanel.cs`: `FileNameRegex` を `(?<component>manager|launcher|monitor)` に拡張 (= 将来 Monitor file が落ちてきた時に parse 可能、現状 file 不在で実害なし)、`_currentComponent` field + `tabComponent_SelectedIndexChanged` handler 追加、`ScanLogFiles(logsRoot)` を `ScanLogFiles(logsRoot, component)` に signature 変更。
 - `Manager/MainForm.cs`: `MainForm_Load` の `TryShowUpdateCompletedDialog()` 直後に `Services.UpdaterLogAbsorber.AbsorbPendingLogs()` 呼出を追加。
 - `Manager/TonePrism_Manager.csproj`: `Services\UpdaterLogAbsorber.cs` の `<Compile Include>` 追加。
+
+#### Round 3 review fix (H-1 + M-1 + M-2 + M-3)
+
+- **CHANGELOG catalog ↔ call-site drift 解消** (R3 H-1): 上の「Added」記述の milestone marker pattern 列挙から `rollback` を削除 + INFO success-path 限定規約注記を sync。R2 で MilestoneRegex から `rollback` を removal 済だが「Added」記述には残置していて同一 PR エントリ内で矛盾していた状態を解消。
+- **Shutdown marker line-prefix 厳格化** (R3 M-1): `UpdaterLogAbsorber` の Shutdown marker 検出を `"Updater 終了"` substring 一致から `"[Logger] Updater 終了"` (= Logger 内部 prefix 込みの specific phrase) 一致に変更、`UpdaterShutdownMarker` const として SoT 化。application code が偶然 error message 中に「Updater 終了」文字列を含めた時の誤発火 path を構造的閉鎖。SPEC §3.6 に「Companion Shutdown marker は `[Logger] <Component> 終了` 行頭 prefix 固定」規約を新規明文化、将来 WindowProbe / PauseOverlay 等の parent absorber コピペ時の brittleness 継承も予防。
+- **AbsorbPendingLogs 呼出位置を session conflict check 後に移設** (R3 M-2): `MainForm_Load` 早期 (= TryShowUpdateCompletedDialog 直後) から `ContinueLoadAfterSessionCheck` 内 (= session conflict 通過後) に移設。同一 PC 複数 Manager 同時起動時の `.absorbed` 競合 + Manager log file 間重複 absorb path を構造的 bound。session conflict Cancel path では absorb skip されるが、次回 Manager 起動で idempotent に picked up される設計なので timing 影響なし。
+- **多行継続行の改行を `Environment.NewLine` に変更** (R3 M-3): `AbsorbContent` の継続行 accumulate `Append('\n')` を `Append(Environment.NewLine)` に変更。Manager Logger の WriteLine 出力 (= entry 間 CRLF on Windows) との line ending mixed (= entry 内 LF / entry 間 CRLF) 状態を解消、log を外部 tool に渡した時の brittleness を予防。
 
 #### Round 2 review fix (H-1 + M-1 + M-2 + M-3 + L-3)
 

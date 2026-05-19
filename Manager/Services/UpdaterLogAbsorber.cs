@@ -8,8 +8,9 @@ namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// `<install>/logs/updater/` 配下の Updater log を Manager log に **post-hoc filtered absorb** する。
-    /// Manager 起動直後に 1 回呼ばれ、未 absorb な `updater_*.log` から Warn/Error + 主要 milestone のみを
-    /// 抽出して Manager 自身の Logger 経由で記録する。
+    /// Manager 起動の session conflict check 通過後 (= `ContinueLoadAfterSessionCheck` 経由) に 1 回呼ばれ、
+    /// 未 absorb な `updater_*.log` から Warn/Error + 主要 milestone のみを抽出して Manager 自身の Logger
+    /// 経由で記録する。
     ///
     /// 設計意図 (= SPEC §3.6 Companions ログ管理規約):
     /// - Updater は Manager のライフサイクルを跨ぐ (Phase B: Manager dead 期間) ため、リアルタイム pipe redirect
@@ -80,6 +81,14 @@ namespace TonePrism.Manager.Services
         // 設計なので、10 分超は実質確実に terminated。
         private const int CrashFallbackMinutes = 10;
 
+        // SPEC §3.6「Companion Shutdown marker は `[Logger] <Component> 終了` 行頭 prefix 固定」規約
+        // に従う検出 string。Updater Logger.Shutdown が `[Logger] Updater 終了` を出力する specific phrase
+        // と一致 (Companions/Updater/Logger.cs:108)、bare `Updater 終了` substring 一致 (R2 実装) より
+        // 厳格化することで、将来 error message 中に偶然 "Updater 終了" を含む文字列が出ても誤発火しない
+        // (R3 review M-1)。検出 phrase 自体は Logger 内部 prefix `[Logger]` を含むため、application code が
+        // 無関係文脈で出す可能性が極めて低い。
+        private const string UpdaterShutdownMarker = "[Logger] Updater 終了";
+
         /// <summary>
         /// 未 absorb な Updater log を全て読み込み、抽出行を Manager log に書出。例外は内部で握り潰す
         /// (Manager 起動を阻害しない = SPEC §3.6 「Logger 自身の障害は握り潰す」と同じ defensive 規約)。
@@ -119,7 +128,7 @@ namespace TonePrism.Manager.Services
                         continue;
                     }
 
-                    bool hasShutdownMarker = content.IndexOf("Updater 終了", StringComparison.Ordinal) >= 0;
+                    bool hasShutdownMarker = content.IndexOf(UpdaterShutdownMarker, StringComparison.Ordinal) >= 0;
                     bool crashedFallback = false;
                     if (!hasShutdownMarker)
                     {
@@ -224,9 +233,13 @@ namespace TonePrism.Manager.Services
                 {
                     // header 不一致行 (= 継続行 or 空行)。
                     // active entry があれば payload に append (改行 + 本文)、なければ skip。
+                    // R3 review M-3: Manager Logger は CRLF 出力 (UTF-8 BOM-less StreamWriter default
+                    // NewLine = `Environment.NewLine` = CRLF on Windows)、entry 間と整合するため継続行
+                    // 区切りも `Environment.NewLine` を使用 (= LF 単体だと 1 entry 内が LF / entry 間が
+                    // CRLF と mixed line ending になり、log を外部 tool に渡した時の brittleness を生む)。
                     if (activeLevel != null)
                     {
-                        activePayload.Append('\n');
+                        activePayload.Append(Environment.NewLine);
                         if (line.Length > 0) activePayload.Append(line);
                     }
                 }
