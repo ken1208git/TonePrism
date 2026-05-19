@@ -75,19 +75,30 @@ namespace TonePrism.Manager.Services
                 "--restart-exe",    Quote(managerExe),
                 "--log-dir",        Quote(PathManager.UpdaterLogDir),
                 "--caller-pid",     callerPid.ToString(),
-                // (#170 followup v0.13.1) Updater の Manager 終了待ち timeout を **0 = 無制限** に明示。
+            };
+            if (forceKill)
+            {
+                // (#170 followup v0.13.1 review Medium-1) force-kill 経路は **default 60s timeout を維持**。
+                // ProcessWaiter の force-kill trigger は `timeoutSeconds > 0 && elapsed >= timeoutSeconds` で
+                // **timeout 到達で初めて発火** する設計 (ProcessWaiter.cs:143)。`--wait-timeout 0` (= 無制限) と
+                // `--force-kill` を併用すると force-kill branch が永久に到達不能になり silent dead code 化。
+                // force-kill は「previous attempt timeout → user が "強制終了して再試行" を選択した経路」で
+                // 「停止した Manager を確実に殺す」semantic なので timeout が必須。
+                args.Add("--force-kill");
+            }
+            else
+            {
+                // (#170 followup v0.13.1) 通常経路は Updater の Manager 終了待ち timeout を **0 = 無制限** に明示。
                 // default 60s だと UpdateSectionPanel の再起動予告 dialog (Application.Exit 前) で user が
                 // OK を遅延 click した場合 + defer 化された CHANGELOG / .bak cleanup の SMB latency で
                 // Updater が exit 3 (TimedOutNoForceKill) を返して abort → 次回 Manager 起動時に
                 // 「Manager が時間内に閉じませんでした」失敗 banner が出る race があった。
-                // 0 (= 無制限) を選んだ根拠: Manager UI freeze (WebBrowser / SQLite latency / WindowProc
-                // 応答不能 等) で永久 polling し続ける zombie Updater リスクはあるが、Windows user 常識として
-                // 「ソフトが固まったら task manager で kill」が確立しており、自動 abort で謎の「時間内に
-                // 閉じませんでした」banner を出すより、user 自身が手動 recovery する path のほうが clean。
-                // 学校 LAN 運用でも来場スタッフ / 顧問が task manager 操作可能な前提で OK。
-                "--wait-timeout",   "0",
-            };
-            if (forceKill) args.Add("--force-kill");
+                // 0 (= 無制限) 根拠: Manager UI freeze で永久 polling し続ける zombie Updater リスクはあるが、
+                // Windows user 常識として「ソフトが固まったら task manager で kill」が確立しており、
+                // 自動 abort で謎 banner を出すより user 自身が手動 recovery する path のほうが clean。
+                args.Add("--wait-timeout");
+                args.Add("0");
+            }
             string argLine = string.Join(" ", args);
             Services.Logger.Info("[UpdaterClient] Updater spawn: " + updaterExe + " " + argLine);
 
@@ -147,11 +158,16 @@ namespace TonePrism.Manager.Services
                 Services.Logger.Info("[UpdaterClient] Updater spawn 成功 (PID=" + proc.Id + ")。Manager は終了します。");
                 // proc.Dispose() しない: child process が exit 前に handle close すると stream redirect が
                 // 切れる。Manager が Application.Exit で抜けると process tree が綺麗に分離するので問題なし。
-                // (#108 Phase 4 round 4 L-3) **caller 不変式**: 本 method の return true は「caller が即
+                // (#108 Phase 4 round 4 L-3) **caller 不変式**: 本 method の return true は「caller が
                 // Application.Exit を呼ぶこと」を前提とする trade-off (= proc handle を intentional leak、
                 // GC finalizer 経由 Dispose で stdout redirect 切断する path を避けるため)。
-                // Application.Exit が何らかの理由で抜けない / 遅延する場合 (modal dialog 重ね開き等) は
-                // 不変式違反、SPEC §3.7.3 [11] の不可分性に依存する。
+                // (#170 followup v0.13.1) 旧 invariant 「**即** Application.Exit」+「modal dialog 重ね開き
+                // 等で遅延 = 不変式違反」は v0.13.1 で **緩和**: Spawn と Application.Exit の間に
+                // user 介入 modal (= 再起動予告 dialog) を **意図的に挟むことが許容** された (= 通常経路で
+                // `--wait-timeout 0` を渡して Updater 側 polling を無制限化、user の OK click を任意時間
+                // 待てる構造に変更)。force-kill 経路は default 60s timeout 維持で旧 invariant 通り。
+                // SPEC §3.7.3 [11] の不可分性は file 置換 / sentinel / 再起動 ops の atomic 性であって、
+                // user 介入 delay は SPEC 範囲外 (本 round で sentinel write 位置の SPEC 表現も同期更新)。
                 return true;
             }
             catch (Exception ex)

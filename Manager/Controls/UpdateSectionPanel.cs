@@ -392,7 +392,9 @@ namespace TonePrism.Manager.Controls
             // 明示。SMB 配置運用 (SPECIFICATION.md §3.7、`\\学校サーバー\PCクラブ` 配置) では他 PC で起動中の
             // Launcher も file lock 衝突源になるが、現状 LAN 検出機構未実装のため文言で予告する暫定対応。
             // 自動検出への upgrade は #179 拡張 PR (Launcher session tracking 含む) で対応予定。
-            DialogResult confirm = MessageBox.Show(
+            // (v0.13.1 review Low-2) owner=this 渡しで Z-order / TaskbarOwner 挙動を確定化、
+            // 同 method の再起動予告 dialog (L468) と pattern 統一。
+            DialogResult confirm = MessageBox.Show(this,
                 "アップデートを開始します。\n\n" +
                 "  現在: v" + (_currentResult.Current == null ? "(不明)" : _currentResult.Current.ToString(3)) + "\n" +
                 "  最新: " + _currentResult.Latest.TagName + "\n\n" +
