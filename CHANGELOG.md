@@ -1653,6 +1653,43 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.14.0] - 2026-05-19
+
+#### Added (#199 — Companions ログ管理 + ログビューア タブ式リファクタ)
+
+**1. Updater log の Manager log への post-hoc filtered absorb** (`Manager/Services/UpdaterLogAbsorber.cs` 新規):
+
+Manager 起動直後の `MainForm_Load` (= `TryShowUpdateCompletedDialog` 直後) で 1 回呼出。`<install>/logs/updater/*.log` を scan、未 absorb な file から **`[ERROR]` / `[WARN]` 全件 + 主要 milestone marker 行** のみ抽出して Manager 自身の Logger 経由で Manager log に append。各行は `[Updater <original-ts>] <message>` prefix で由来 + 元 timestamp を明示。verbose な詳細行 (file copy / verify 等) は Updater 自身の file に隔離。
+
+milestone marker pattern: `[Step N/M]` ヘッダ / `Manager spawn` 結果 / `Manager dir 置換完了` / `rollback` / `FATAL` / `Updater 起動` / `Updater 終了` / `Updater 全工程完了` / `Manager 起動完了` / `Manager プロセス終了確認` 等。
+
+設計判断 (SPEC §3.6 Companions ログ管理規約と同期):
+- **絞り込み level**: Warn/Error は全件 (= 問題追跡の信号)、INFO は milestone marker pattern を含むもののみ (= Phase 境界 + 完了 marker)。普段の Manager log が Updater verbose で埋もれない balance。
+- **重複 absorb 防止**: `<install>/logs/updater/.absorbed` text file (= 1 行 1 path) で管理。Manager 再起動で同 Updater log を 2 回 absorb しない。
+- **部分 absorb 事故防止**: Updater Logger の Shutdown marker 「Updater 終了」行を含む file のみ absorb 対象、未含有なら次回 Manager 起動で再評価 (= Phase B/C 中の race で終端未達のまま mark 済になる事故を構造的に防止)。
+- **dead path prune**: Updater Logger の 30 日 retention で消えた file path の `.absorbed` entry を best-effort 掃除、`.absorbed` の永続 growth を防止。
+- **例外は内部で握り潰し**: Manager 起動を阻害しない (= SPEC §3.6「Logger 自身の障害は握り潰す」と同じ defensive 規約)。
+
+**2. LogSectionPanel を tab 式 component selector に変更** (`Manager/Controls/LogSectionPanel.{cs,Designer.cs}`):
+
+旧 `chkManager` / `chkLauncher` checkbox 式 component filter を **`TabControl` (3 tab: Launcher / Manager / Monitor)** に置換。tab 切替で grid に表示する component が切り替わる。default tab は Launcher (= 部員が普段 trouble shoot する対象が Launcher 側であろう想定、後で変更余地あり)。
+
+設計判断:
+- **3 component 収束方針**: Manager GUI で見える log source は Launcher / Manager / Monitor の 3 component に固定、Companion 用 tab は追加しない (= SPEC §3.6 Companions ログ管理規約)。将来 Monitor 実装で tab を有効化、`FileNameRegex` も `monitor` を含めて readiness 確保。
+- **checkbox 撤廃の妥当性**: 旧 checkbox 「両方 ON」状態は grid 上で Manager session と Launcher session の file 一覧を時刻順に並べていたが、log line レベルでの時系列 cross-correlate 機能は存在しなかった (= `RenderContent` は 1 file の内容のみ表示)。tab 式に切替えても失う UX なし、3 component 収束が UI 上に明示される利得のみ。
+- **`HasAnyMatchingLine` / `UpdateRowGreyout` / `UpdateFileCountLabel` から component filter logic を削除** (= tab で既に絞込済)、code path 簡素化。
+
+#### Changed
+
+- `Manager/Controls/LogSectionPanel.Designer.cs`: `chkManager` / `chkLauncher` field 削除、`tabComponent` (TabControl) + `tabLauncher` / `tabManager` / `tabMonitor` (TabPage) field 追加。layout は `tabComponent` を最上端 (Dock=Top) に配置、既存 `toolStrip` + `splitContainer` は下に shift。
+- `Manager/Controls/LogSectionPanel.cs`: `FileNameRegex` を `(?<component>manager|launcher|monitor)` に拡張 (= 将来 Monitor file が落ちてきた時に parse 可能、現状 file 不在で実害なし)、`_currentComponent` field + `tabComponent_SelectedIndexChanged` handler 追加、`ScanLogFiles(logsRoot)` を `ScanLogFiles(logsRoot, component)` に signature 変更。
+- `Manager/MainForm.cs`: `MainForm_Load` の `TryShowUpdateCompletedDialog()` 直後に `Services.UpdaterLogAbsorber.AbsorbPendingLogs()` 呼出を追加。
+- `Manager/TonePrism_Manager.csproj`: `Services\UpdaterLogAbsorber.cs` の `<Compile Include>` 追加。
+
+#### Bump 根拠 (v0.13.1 → v0.14.0)
+
+SemVer pre-1.0 minor bump: 新機能追加 (Companion log absorb + UI tab refactor)。SPEC §3.6 に新 subsection 追加で SPEC 側も v1.10.31 → v1.10.32 を同 PR で bump。
+
 ### [Manager v0.13.1] - 2026-05-19
 
 #### Added (#170 followup — アップデート時の再起動予告 dialog)
