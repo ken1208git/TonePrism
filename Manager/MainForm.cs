@@ -762,20 +762,10 @@ namespace TonePrism.Manager
         /// </summary>
         private void UpdateBackupStatus(string message, System.Drawing.Color color, bool autoRevert)
         {
-            // (#170 followup round 2) 旧設計の spacer 方式は WinForms StatusStrip の layout が
-            // ToolStripItem.Width 直接 set を尊重せず Bounds.X=827 (strip width 825 超過) ではみ出る bug。
-            // 新設計: spacer 廃止、lblBackupStatus 自体に Spring=true (= 残り space 全埋め) +
-            // TextAlign=MiddleRight (= 右寄せ表示) で「lblStatus 右から strip 右端まで」を覆う 2 item 構成。
-            // 余分な layout 計算不要、PerformLayout / Width 直書きも不要。
+            // (#170 followup round 2) lblBackupStatus は Designer で Alignment=Right + AutoSize=true 設定済。
+            // strip 右端から natural width 分を anchor 配置するため、Text / ForeColor 設定だけで OK。
             lblBackupStatus.Text = message ?? string.Empty;
             lblBackupStatus.ForeColor = color;
-            Logger.Info("[MainForm] UpdateBackupStatus: text='" + (message ?? "")
-                + "' strip.Bounds=" + statusStrip1.Bounds
-                + " strip.ClientSize=" + statusStrip1.ClientSize
-                + " strip.OverflowButton.Visible=" + statusStrip1.OverflowButton.Visible
-                + " lblStatus.Width=" + lblStatus.Width
-                + " lblBackupStatus.Bounds=" + lblBackupStatus.Bounds
-                + " IsOnOverflow=" + lblBackupStatus.IsOnOverflow);
 
             // 既存 timer を破棄してから新規 (= 連続呼出時に古い timer が古い message を消すのを防ぐ)
             if (_backupStatusClearTimer != null)
