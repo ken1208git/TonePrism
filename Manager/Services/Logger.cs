@@ -52,13 +52,18 @@ namespace TonePrism.Manager.Services
         /// ロガーを初期化する。Application.Run より前で必ず呼ぶこと。
         /// 失敗してもアプリ起動は止めない (例外を握り潰し、以降の API は no-op)。
         ///
-        /// (#170 followup round 1) `customLogDir` が指定された場合は default の
-        /// `&lt;project_root&gt;/logs/manager/` の代わりに **`&lt;customLogDir&gt;/` の直配置** を使用する
-        /// (= `/manager/` subdir は append しない、backup_destination_path と同 semantic)。
-        /// 失敗時は default にフォールバック。Program.Main が `settings.log_destination_path` を
+        /// (#201, v0.15.0) `customLogsRoot` semantic 変更: 指定値は **ログ全体の親 root**
+        /// (= `<root>/manager/` `<root>/launcher/` `<root>/updater/` の親) で、Manager Logger は
+        /// 内部で `<root>/manager/` を append してそこに `manager_*.log` を書く。
+        /// 旧 v0.14.0 までの「直配置 semantic」(= `<customLogDir>/manager_*.log` 直書き) は廃止、
+        /// Program.Main の `TryAutoMigrateLegacyLogPath` で旧 `log_destination_path` setting 値を
+        /// 新 `logs_root_path` に copy 済 (= 旧 setting の値はそのまま新 root として再解釈される、
+        /// 旧 log file は当該 dir 直下に残置されるが新 file は `manager/` subdir に書き出される)。
+        /// 未指定時は default `&lt;project_root&gt;/logs/manager/`。
+        /// 失敗時は default にフォールバック。Program.Main が `settings.logs_root_path` を
         /// SQLite 直接 read して渡す (Logger は SettingsRepository に依存しない invariant 維持)。
         /// </summary>
-        public static void Initialize(string customLogDir = null)
+        public static void Initialize(string customLogsRoot = null)
         {
             lock (_lock)
             {
@@ -66,18 +71,13 @@ namespace TonePrism.Manager.Services
 
                 try
                 {
-                    // (#170 followup round 1) customLogDir 指定時はその full path を直接使用
-                    // (backup_destination_path と同 semantic、`logs/manager` を append しない)。
-                    // default は `<project_root>/logs/manager/`。
-                    if (!string.IsNullOrWhiteSpace(customLogDir))
-                    {
-                        _logDirectory = customLogDir;
-                    }
-                    else
-                    {
-                        string projectRoot = FindProjectRootForLogs();
-                        _logDirectory = Path.Combine(projectRoot, "logs", LogSubDirectory);
-                    }
+                    // (#201, v0.15.0) customLogsRoot は親 root path、Manager Logger は `manager/` subdir を append。
+                    // 未指定なら default `<project_root>/logs/manager/`。両 path 共通で `_logDirectory` には
+                    // 最終 `manager/` まで含めた path が入る (= `manager_*.log` 書出先)。
+                    string root = !string.IsNullOrWhiteSpace(customLogsRoot)
+                        ? customLogsRoot
+                        : Path.Combine(FindProjectRootForLogs(), "logs");
+                    _logDirectory = Path.Combine(root, LogSubDirectory);
                     Directory.CreateDirectory(_logDirectory);
 
                     OpenSessionFile();

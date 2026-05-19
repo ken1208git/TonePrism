@@ -25,13 +25,21 @@ namespace TonePrism.Manager
             // ログ機構を最初に初期化することで、PathManager 以降のすべての Console.WriteLine が
             // 自動的にファイル (logs/manager_YYYY-MM-DD.log) にも残る (#116)。
             //
-            // (#170 followup round 1) `log_destination_path` を SQLite 直接 read で先取得。
+            // (#201, v0.15.0) `logs_root_path` を SQLite 直接 read で先取得 + 旧 `log_destination_path` の
+            // auto-migrate (v0.14.0 setting → v0.15.0 setting への 1 回限り value copy + 旧 key DELETE)。
             // SettingsRepository / DatabaseManager は使わない (= Logger は SettingsRepository に依存しない
             // invariant 維持、DB 不在時の fallback 経路もシンプル)。失敗時は null fallback で default path。
-            // (#170 followup round 3 review L-3) customLogDir + log_retention_days を 1 SQLite 接続で
-            // 取得 (= 2 接続/起動を 1 接続/起動に削減、SMB 共有 DB の latency 軽減)。
+            // migration は Logger.Initialize の **前** に実行、migration 後の新値で Logger を init。
+            TryAutoMigrateLegacyLogPath();
             var initialSettings = TryReadInitialLogSettings();
-            Logger.Initialize(initialSettings.CustomLogDir);
+            Logger.Initialize(initialSettings.LogsRootPath);
+            // (#201) PathManager.LogsRootDirectory も同じ値で 1 回 set (= UpdaterLogDir / LauncherLogDir 等の
+            // 派生 getter が一貫した値を返すように)。SetLogsRootDirectory は immutable 保証 (= 2 回目以降 no-op)。
+            PathManager.SetLogsRootDirectory(initialSettings.LogsRootPath);
+            // (#201) Launcher への path 伝搬: `responses/launcher_logs_root.json` を atomic write。
+            // Launcher Logger は autoload 最先頭 init 時に DB 接続前で本 file を読込、log dir を決定する。
+            // 例外は内部で握り潰し済、Manager 起動を阻害しない。
+            Services.LauncherLogsRootBridge.WriteCurrentLogsRoot(initialSettings.LogsRootPath);
 
             // (#170 followup round 2 review H-1) 古いログ削除を **MainForm 経由ではなく Program.Main で実行**。
             // 旧実装 (round 1) は MainForm.ContinueLoadAfterSessionCheck から呼んでいたが、
@@ -139,38 +147,39 @@ namespace TonePrism.Manager
         }
 
         /// <summary>
-        /// (#170 followup round 1 / round 3 review L-3) Logger.Initialize の前に `log_destination_path` +
-        /// `log_retention_days` を **1 SQLite 接続で同時取得**。SettingsRepository を経由しないのは
-        /// Logger が SettingsRepository に依存しない invariant を維持するため (= Logger は最早期に初期化する
-        /// 責務、DB が無くても動く必要がある)。
+        /// (#201, v0.15.0) Logger.Initialize の前に `logs_root_path` + `log_retention_days` を 1 SQLite 接続で
+        /// 同時取得。SettingsRepository を経由しないのは Logger が SettingsRepository に依存しない invariant を
+        /// 維持するため (= Logger は最早期に初期化する責務、DB が無くても動く必要がある)。
         ///
-        /// 失敗時 (DB 不在 / 解析失敗 / key 不在) は CustomLogDir=null + LogRetentionDays=DefaultLogRetentionDays
+        /// 失敗時 (DB 不在 / 解析失敗 / key 不在) は LogsRootPath=null + LogRetentionDays=DefaultLogRetentionDays
         /// に fallback。Logger.Warn は Logger 未初期化時 no-op で flag できないため try-catch で握り潰し。
+        /// 旧 `log_destination_path` の auto-migrate は本関数より **前** の `TryAutoMigrateLegacyLogPath` で
+        /// 完了済 (= 本関数 read 時点では新 key に正規化されている)。
         /// </summary>
-        private static (string CustomLogDir, int LogRetentionDays) TryReadInitialLogSettings()
+        private static (string LogsRootPath, int LogRetentionDays) TryReadInitialLogSettings()
         {
-            string customLogDir = null;
+            string logsRootPath = null;
             int retentionDays = Services.SettingsKeys.DefaultLogRetentionDays;
             try
             {
                 string dbPath = PathManager.DatabasePath;
                 if (string.IsNullOrEmpty(dbPath) || !System.IO.File.Exists(dbPath))
-                    return (customLogDir, retentionDays);
+                    return (logsRootPath, retentionDays);
 
                 using (var conn = new System.Data.SQLite.SQLiteConnection("Data Source=" + dbPath + ";Version=3;Read Only=True;"))
                 {
                     conn.Open();
                     using (var cmd = new System.Data.SQLite.SQLiteCommand(
-                        "SELECT key, value FROM settings WHERE key IN ('log_destination_path', 'log_retention_days')", conn))
+                        "SELECT key, value FROM settings WHERE key IN ('logs_root_path', 'log_retention_days')", conn))
                     using (var reader = cmd.ExecuteReader())
                     {
                         while (reader.Read())
                         {
                             string key = reader.IsDBNull(0) ? null : reader.GetString(0);
                             string val = reader.IsDBNull(1) ? null : reader.GetString(1);
-                            if (key == "log_destination_path")
+                            if (key == "logs_root_path")
                             {
-                                if (!string.IsNullOrWhiteSpace(val)) customLogDir = val;
+                                if (!string.IsNullOrWhiteSpace(val)) logsRootPath = val;
                             }
                             else if (key == "log_retention_days")
                             {
@@ -184,7 +193,111 @@ namespace TonePrism.Manager
             {
                 // DB 不在 / 解析失敗時は default fallback、Logger 未初期化のため warn 不可
             }
-            return (customLogDir, retentionDays);
+            return (logsRootPath, retentionDays);
+        }
+
+        /// <summary>
+        /// (#201, v0.15.0) 旧 `log_destination_path` (v0.14.0 Manager-only direct 配置 setting) を新
+        /// `logs_root_path` (unified root semantic) に **1 回限り** value copy + 旧 key DELETE。
+        /// sentinel file `&lt;BaseDirectory&gt;/.logs_root_migrated` を atomic write、MainForm が読込んで
+        /// 一回限り MessageBox 通知に使う。Logger.Initialize より前に呼出、新 setting で Logger init する。
+        ///
+        /// 条件: 旧 key 値が非空 + 新 key 値が空 (= まだ migration 未実施)。それ以外は no-op。
+        /// 失敗時は内部で握り潰し (Logger 未初期化、Manager 起動を阻害しない)。
+        /// </summary>
+        private static void TryAutoMigrateLegacyLogPath()
+        {
+            try
+            {
+                string dbPath = PathManager.DatabasePath;
+                if (string.IsNullOrEmpty(dbPath) || !System.IO.File.Exists(dbPath)) return;
+
+                string legacyValue = null;
+                string currentNewValue = null;
+                using (var conn = new System.Data.SQLite.SQLiteConnection("Data Source=" + dbPath + ";Version=3;"))
+                {
+                    conn.Open();
+                    using (var cmd = new System.Data.SQLite.SQLiteCommand(
+                        "SELECT key, value FROM settings WHERE key IN ('log_destination_path', 'logs_root_path')", conn))
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            string key = reader.IsDBNull(0) ? null : reader.GetString(0);
+                            string val = reader.IsDBNull(1) ? null : reader.GetString(1);
+                            if (key == "log_destination_path") legacyValue = val;
+                            else if (key == "logs_root_path") currentNewValue = val;
+                        }
+                    }
+
+                    // migration 条件: 旧値あり + 新値なし
+                    if (string.IsNullOrWhiteSpace(legacyValue) || !string.IsNullOrWhiteSpace(currentNewValue))
+                    {
+                        // 旧値あり + 新値もありの場合は legacy を念のため DELETE (= 二重設定の解消)
+                        if (!string.IsNullOrWhiteSpace(legacyValue))
+                        {
+                            try
+                            {
+                                using (var deleteCmd = new System.Data.SQLite.SQLiteCommand(
+                                    "DELETE FROM settings WHERE key = 'log_destination_path'", conn))
+                                {
+                                    deleteCmd.ExecuteNonQuery();
+                                }
+                            }
+                            catch { /* swallow */ }
+                        }
+                        return;
+                    }
+
+                    // 旧値 → 新値 copy + 旧 key DELETE を 1 transaction で
+                    using (var tx = conn.BeginTransaction())
+                    {
+                        using (var insertCmd = new System.Data.SQLite.SQLiteCommand(
+                            "INSERT OR REPLACE INTO settings (key, value) VALUES ('logs_root_path', @v)", conn, tx))
+                        {
+                            insertCmd.Parameters.AddWithValue("@v", legacyValue);
+                            insertCmd.ExecuteNonQuery();
+                        }
+                        using (var deleteCmd = new System.Data.SQLite.SQLiteCommand(
+                            "DELETE FROM settings WHERE key = 'log_destination_path'", conn, tx))
+                        {
+                            deleteCmd.ExecuteNonQuery();
+                        }
+                        tx.Commit();
+                    }
+                }
+
+                // sentinel file atomic write (= MainForm の TryShowLogsRootMigratedDialog が読込)
+                try
+                {
+                    string sentinelPath = System.IO.Path.Combine(PathManager.BaseDirectory, ".logs_root_migrated");
+                    string sentinelTmp = sentinelPath + ".tmp";
+                    string sentinelJson = "{\"migrated_from\":\"" + EscapeJsonString(legacyValue) + "\","
+                        + "\"migrated_at\":\"" + DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") + "\"}";
+                    System.IO.File.WriteAllText(sentinelTmp, sentinelJson, new System.Text.UTF8Encoding(false));
+                    if (System.IO.File.Exists(sentinelPath)) System.IO.File.Delete(sentinelPath);
+                    System.IO.File.Move(sentinelTmp, sentinelPath);
+                }
+                catch
+                {
+                    // sentinel 書出失敗時は migration MessageBox 出ないだけで migration 自体は完了済、
+                    // 起動阻害なし。Logger 未初期化のため warn 不可。
+                }
+            }
+            catch
+            {
+                // 全失敗時は Logger 未初期化のため warn 不可、Manager 起動を阻害しないため握り潰し
+            }
+        }
+
+        /// <summary>
+        /// minimal JSON string escape (`\` と `"` のみ)。sentinel JSON は内部 generated path のみ書き出すので
+        /// surrogate pair / unicode escape まで対応する必要なし。
+        /// </summary>
+        private static string EscapeJsonString(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return string.Empty;
+            return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
 
         /// <summary>

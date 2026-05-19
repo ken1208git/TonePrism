@@ -237,6 +237,7 @@
     <Compile Include="Services\ImagePreviewHelper.cs" />
     <Compile Include="Services\LauncherSessionService.cs" />
     <Compile Include="Services\Logger.cs" />
+    <Compile Include="Services\LauncherLogsRootBridge.cs" />
     <Compile Include="Services\LogLineFormat.cs" />
     <Compile Include="Services\ManagerSessionService.cs" />
     <Compile Include="Services\PathConversionHelper.cs" />
