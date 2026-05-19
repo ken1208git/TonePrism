@@ -1,7 +1,12 @@
 ## Launcher のファイルログ機構 (#116, #85 の土台)
 ##
 ## - 1 起動セッション = 1 ファイル (`launcher_<PCname>_<YYYY-MM-DD_HHmmss>.log`)
-## - 保存先: `<project_root>/logs/launcher/`（toneprism.db のあるディレクトリの隣）
+## - 保存先: default `<project_root>/logs/launcher/`、
+##   Manager 側で `logs_root_path` setting が設定されていれば `<custom_root>/launcher/` を使用
+##   (= #201, v0.15.0 unified logs root)
+##   Manager → Launcher への path 伝搬は `<project_root>/responses/launcher_logs_root.json`
+##   atomic write file 経由。autoload 最先頭 init 時に DB 接続前で file read のみで完結
+##   (= SPEC §6.5 「Launcher は SQLite write しない」原則維持)
 ##   → 共有上の toneprism.db と同じ場所に集約することで、複数 PC の Launcher / Manager ログを 1 箇所で見られる
 ##   → セッション単位でファイルが分かれるので書き込み競合・行間 interleaving が発生しない
 ## - INFO / WARN / ERROR の 3 段階
@@ -70,7 +75,15 @@ func _open_log_directory_and_file() -> bool:
 	if project_root.is_empty():
 		return false
 
-	_log_directory = project_root.path_join("logs").path_join(LOG_SUBDIRECTORY)
+	# (#201, v0.15.0 unified logs root) Manager 側 setting `logs_root_path` を
+	# `<project_root>/responses/launcher_logs_root.json` 経由で受取。
+	# parse 成功 + path 非空 → `<custom_root>/launcher/`、それ以外は default `<project_root>/logs/launcher/`。
+	# JSON 不在 / parse 失敗 / path 空 はすべて default fallback、Launcher 起動阻害しない。
+	var logs_root = _read_logs_root_from_responses(project_root)
+	if logs_root.is_empty():
+		_log_directory = project_root.path_join("logs").path_join(LOG_SUBDIRECTORY)
+	else:
+		_log_directory = logs_root.path_join(LOG_SUBDIRECTORY)
 
 	if not DirAccess.dir_exists_absolute(_log_directory):
 		var err = DirAccess.make_dir_recursive_absolute(_log_directory)
@@ -78,6 +91,40 @@ func _open_log_directory_and_file() -> bool:
 			return false
 
 	return _open_session_file()
+
+
+# (#201, v0.15.0) Manager → Launcher 設定伝搬 file を読込んで logs root path を返す。
+# 失敗時 (file 不在 / parse 失敗 / path 空) はすべて空文字を返し、caller が default fallback する。
+# DB 接続前の autoload 最先頭 init で呼ばれる前提、file read のみで完結。
+func _read_logs_root_from_responses(project_root: String) -> String:
+	var responses_dir = project_root.path_join("responses")
+	var bridge_path = responses_dir.path_join("launcher_logs_root.json")
+	if not FileAccess.file_exists(bridge_path):
+		return ""
+
+	var f = FileAccess.open(bridge_path, FileAccess.READ)
+	if f == null:
+		push_warning("[Logger] launcher_logs_root.json open 失敗、default 使用")
+		return ""
+
+	var content = f.get_as_text()
+	f.close()
+
+	var json = JSON.new()
+	var parse_result = json.parse(content)
+	if parse_result != OK:
+		push_warning("[Logger] launcher_logs_root.json parse 失敗 (line=%d msg=%s)、default 使用" % [json.get_error_line(), json.get_error_message()])
+		return ""
+
+	var data = json.data
+	if typeof(data) != TYPE_DICTIONARY:
+		push_warning("[Logger] launcher_logs_root.json 内容が dictionary でない、default 使用")
+		return ""
+
+	var value = data.get("logs_root_path", "")
+	if typeof(value) != TYPE_STRING or (value as String).is_empty():
+		return ""
+	return value as String
 
 
 # 1 セッション 1 ファイル: launcher_<PCname>_<YYYY-MM-DD_HHmmss>.log
