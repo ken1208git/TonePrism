@@ -252,6 +252,7 @@
     <Compile Include="Services\UpdateChecker.cs" />
     <Compile Include="Services\UpdateDownloader.cs" />
     <Compile Include="Services\UpdaterClient.cs" />
+    <Compile Include="Services\UpdaterLogAbsorber.cs" />
     <Compile Include="Services\VersionInventory.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

@@ -213,6 +213,13 @@ namespace TonePrism.Manager
             // で session 機構が silent に永久 disabled になる bug があった。
             TryShowUpdateCompletedDialog();
 
+            // Updater log の post-hoc filtered absorb (= SPEC §3.6 Companions ログ管理規約)。
+            // 直前のアップデートサイクル中に Updater が書き出した log のうち Warn/Error + 主要 milestone
+            // を Manager log に embed する。Manager GUI の log viewer から 3 component に収束させる方針の
+            // 一環 (= Updater 用 tab を増やさず、Updater 由来の重要 event を Manager log の一部として閲覧)。
+            // 例外は内部で握り潰し済、Manager 起動を阻害しない。
+            Services.UpdaterLogAbsorber.AbsorbPendingLogs();
+
             bool dbReady = false;
 
             if (!dbManager.DatabaseExists())
