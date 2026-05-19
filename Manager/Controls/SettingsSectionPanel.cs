@@ -41,18 +41,21 @@ namespace TonePrism.Manager.Controls
                 int targetVersion = _dbManager.GetTargetDatabaseVersion();
                 int actualVersion = _dbManager.GetActualDatabaseVersion();
 
-                // AssemblyCopyright を SoT として Reflection 取得 (= AssemblyInfo.cs:13 と drift しない)。
-                // 長い 1 行を UI 上は school suffix 直前で soft break、canonical string は AssemblyInfo
-                // の 1 行を維持 (= exe properties の表示は無変更)。
+                // AssemblyCopyright を SoT として Reflection 取得 (= AssemblyInfo.cs:13 が単一 SoT、
+                // UI 側に literal を直書きしないので drift しない)。
+                // 折返しは WinForms の word-wrap に委任 — `MaximumSize.Width` を grpInfo 幅基準で
+                // 設定して `AutoSize=true` と組み合わせると、Label が幅で wrap + 高さ自動拡張する。
+                // AssemblyInfo の文字列内容に対する coupling を持たないため、将来 holder 文字列を
+                // 改変しても表示が壊れない (PR #194 round 2 review M-2 対応)。
                 string copyright = assembly.GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright ?? "";
-                string copyrightDisplay = copyright.Replace(" (Osaka Prefectural", "\n  (Osaka Prefectural");
+                lblVersionInfo.MaximumSize = new System.Drawing.Size(grpInfo.ClientSize.Width - 40, 0);
 
                 lblVersionInfo.Text =
                     $"製品名: {productName}\n" +
                     $"バージョン: {versionStr}\n" +
                     $"データベース構造: v{actualVersion} (ターゲット: v{targetVersion})\n" +
                     "\n" +
-                    $"{copyrightDisplay}\n" +
+                    $"{copyright}\n" +
                     "ライセンス: MIT License";
             }
             catch
