@@ -762,8 +762,12 @@ namespace TonePrism.Manager
         /// </summary>
         private void UpdateBackupStatus(string message, System.Drawing.Color color, bool autoRevert)
         {
+            Logger.Info("[MainForm] UpdateBackupStatus 呼出: text='" + (message ?? "") + "' color=" + color.Name + " autoRevert=" + autoRevert);
             lblBackupStatus.Text = message ?? string.Empty;
             lblBackupStatus.ForeColor = color;
+            // (#170 followup round 2) WinForms StatusStrip の layout を強制 refresh。
+            // AutoSize=true の自動再計算が deferred で初回表示前に再 layout されない path への保険。
+            statusStrip1.Refresh();
 
             // 既存 timer を破棄してから新規 (= 連続呼出時に古い timer が古い message を消すのを防ぐ)
             if (_backupStatusClearTimer != null)

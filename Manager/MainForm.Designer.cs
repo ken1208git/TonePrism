@@ -59,6 +59,7 @@ namespace TonePrism.Manager
             //
             // lblBackupStatus (右固定 = transient backup 状態、Timer で自動消去)
             //
+            this.lblBackupStatus.AutoSize = true;
             this.lblBackupStatus.Name = "lblBackupStatus";
             this.lblBackupStatus.Size = new System.Drawing.Size(0, 17);
             this.lblBackupStatus.Text = "";
