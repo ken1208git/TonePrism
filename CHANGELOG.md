@@ -1171,6 +1171,28 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.6.2] - 2026-05-20
+
+#### Added (#201 — Unified logs root path 設定の Launcher 側受信)
+
+Manager v0.15.0 で導入される `logs_root_path` setting (= 全 component 共通の親 logs root) を Launcher が受信して log dir を移設するための受信経路を追加。
+
+**実装** (`Launcher/scripts/logger.gd`):
+- `_open_log_directory_and_file` 内で project root 解決後、新 helper `_read_logs_root_from_responses(project_root)` を呼出
+- `<project_root>/responses/launcher_logs_root.json` を read、parse 成功 + `logs_root_path` field 非空なら `<custom_root>/launcher/` を log dir に使用
+- JSON 不在 / parse 失敗 / path 空 はすべて既存 default `<project_root>/logs/launcher/` に fallback、`push_warning` のみ + Launcher 起動は阻害しない
+- autoload 順序 (= Logger 最先頭) は維持、本 file read は DB 接続前で完結 (= SPEC §6.5 「Launcher は SQLite write しない」原則維持、read も SQLite ではなく drop file 経由)
+
+**Manager 側の SoT**: Manager v0.15.0 の `LauncherLogsRootBridge.WriteCurrentLogsRoot` が `responses/launcher_logs_root.json` を atomic write する (= SessionHeartbeat と同 pattern)、Manager UI 変更時 + Manager 起動時に file 更新。Launcher は本 PR で受信側 logic のみ実装、書出はしない (= unidirectional Manager → Launcher 設定伝搬)。
+
+**反映タイミング**: 次回 Launcher 起動時。Manager save 時に file は即時更新されるため、Launcher 再起動だけで反映 (Manager 再起動は不要)。
+
+**docstring**: Logger.gd 冒頭の保存先記述を unified semantic に書換え、Manager v0.15.0 との連動 + responses/ drop file pattern + SPEC §6.5 原則維持を明示。
+
+#### Bump 根拠 (v0.6.1 → v0.6.2)
+
+SemVer pre-1.0 patch bump: Launcher 単体 user 視点で UI 変化ゼロ、Manager 連動機能の Launcher 側 contribution は patch 慣例 (= PR #184 manager_sessions / PR #189 launcher heartbeat と同 pattern)。詳細は `## Manager v0.15.0` 参照。
+
 ### [Launcher v0.6.1] - 2026-05-19
 
 #### Changed (#170 — copyright metadata sync)
@@ -1652,6 +1674,54 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.15.0] - 2026-05-20
+
+#### Added (#201 — Unified logs root path 設定)
+
+設定タブ「ログ保存先」の semantic を **Manager-only** から **全 component (Manager / Launcher / Updater / 将来 Monitor) の unified parent root** に変更。設定 1 つで全 component のログを 1 つのフォルダにまとめて保存できるようになる。
+
+**新 setting `logs_root_path`** (`Manager/Services/SettingsKeys.cs`):
+- 空欄なら default `<install>/logs/`、絶対 path で指定すれば custom root
+- 指定先には `manager/` `launcher/` `updater/` (将来 `monitor/`) の subdir が**各 component の Logger によって自動作成**される
+- 旧 v0.14.0 の `log_destination_path` (Manager-only 直配置 semantic) は **auto-migrate で値を copy + DELETE**、旧 key は code から削除済 (= 1 semantic 維持)
+
+**Manager → Launcher path 伝搬** (`Manager/Services/LauncherLogsRootBridge.cs` 新規):
+- Manager は SQLite から読んだ `logs_root_path` 値を `<install>/responses/launcher_logs_root.json` に **atomic write** (= `<file>.tmp` → rename pattern、SessionHeartbeat と同 pattern)
+- 書出 timing: (1) Program.Main の Logger.Initialize 直後 (= 毎起動時 sync)、(2) SettingsSectionPanel.SaveLogDestIfChanged 内 (= UI 変更時即時 sync)
+- Launcher Logger はこの JSON を autoload 最先頭 init 時 (= DB 接続前) に read して log dir を決定、SPEC §6.5「Launcher は SQLite write しない」原則を維持しつつ Manager 設定を反映 (= Launcher は file read のみで完結)
+
+**Auto-migrate + 一回限り MessageBox** (`Manager/Program.cs:TryAutoMigrateLegacyLogPath` + `Manager/MainForm.cs:TryShowLogsRootMigratedDialog`):
+- v0.15.0 初回起動時に SQLite から旧 `log_destination_path` を読み、非空 + 新 `logs_root_path` 空なら value copy + 旧 key DELETE (= 1 transaction)
+- 完了時に `<install>/.logs_root_migrated` sentinel file を atomic write、内容に migration 前の旧値を embed
+- MainForm が sentinel 経由で部員向け subdir 構造説明 MessageBox を表示 + sentinel を削除 (= 次回起動以降は発火しない)
+- 文言は「これまでの設定値はそのまま引き継がれましたが、フォルダ構造が `<old_path>\manager\` `<old_path>\launcher\` `<old_path>\updater\` に変わります」のように subdir 構造を絵で示す
+
+**反映タイミング**:
+| 対象 | 動作 |
+|---|---|
+| Manager | 次回 Manager 起動時 (= Logger.Initialize / PathManager.LogsRootDirectory / LogSectionPanel.Initialize が起動時 1 回 set のため) |
+| Updater | 次回 Updater spawn 時 (= Manager が `--log-dir <PathManager.UpdaterLogDir>` を渡す、新 root 経由で computed) |
+| Launcher | 次回 Launcher 起動時 (= Manager save 時に `launcher_logs_root.json` 即時 sync、Manager 再起動不要) |
+
+**LAN 重複起動 check**: 既存 `SettingsSectionPanel` の immediate save + `CheckBeforeWrite` + rollback pattern を完全踏襲。本 PR では editing model (= immediate save vs commit-on-OK) 自体は変更しない、設定タブ editing model 全面書換えは別 issue (#201 内 note) で後続 PR にて着手予定。
+
+#### Changed
+
+- `Manager/Services/Logger.cs`: `Initialize(customLogDir)` の semantic 変更 (= 引数を「Manager log file 直配置 dir」から「親 logs root」に変更、内部で `manager/` subdir を append)。旧 v0.14.0 直配置 semantic は廃止。
+- `Manager/PathManager.cs`: `LogsRootDirectory` getter + `SetLogsRootDirectory(customRoot)` setter (= 起動時 1 回 set) 追加。`UpdaterLogDir` を hardcode (`<install>/logs/updater/`) から `<LogsRootDirectory>/updater/` 派生に変更。`LauncherLogDir` / `ManagerLogDir` / `MonitorLogDir` 派生 getter も新規追加。
+- `Manager/Controls/LogSectionPanel.cs`: `Initialize(projectRoot)` → `Initialize(logsRoot)` signature 変更 (= `Path.Combine(projectRoot, "logs")` の内部 append を削除、親 root 直接受取)。
+- `Manager/Controls/SettingsSectionPanel.{cs,Designer.cs}`: UI label を unified semantic 用に書換え (note 文に「Manager / Launcher / Updater 全ての保存先」「反映: Manager は次回起動時 / Launcher は次回起動時」を明示)、`_settingsRepo` の get/set key を `LogDestinationPath` → `LogsRootPath` に変更、save 成功時に `LauncherLogsRootBridge.WriteCurrentLogsRoot` 呼出。
+- `Manager/MainForm.cs`: `_logSectionPanel.Initialize(PathManager.BaseDirectory)` を `_logSectionPanel.Initialize(PathManager.LogsRootDirectory)` に変更。`TryShowUpdateCompletedDialog` の隣に `TryShowLogsRootMigratedDialog` 追加。
+- `Manager/Program.cs`: `Logger.Initialize` 前に `TryAutoMigrateLegacyLogPath` 呼出 + `PathManager.SetLogsRootDirectory` + `LauncherLogsRootBridge.WriteCurrentLogsRoot` 呼出を追加。`TryReadInitialLogSettings` の SELECT key を `logs_root_path` に変更。
+
+#### Removed
+
+- 旧 setting key `log_destination_path` は SettingsRepository の get/set callsite から削除 (= 1 semantic 維持)。`SettingsKeys.LogDestinationPath` const は migration code 内 reference のみで残置 (= deprecated marker、docstring で migration 完了後の参照禁止を明示)。
+
+#### Bump 根拠 (v0.14.0 → v0.15.0)
+
+SemVer pre-1.0 minor bump: 設定 semantic の breaking 変更 (= 旧 `log_destination_path` の Manager-only 直配置 → unified parent root) + 新機能 (Launcher への path 伝搬 / migration dialog)。SPEC §3.6 書換えで SPEC 側も v1.10.32 → v1.10.33 を同 PR で bump。
 
 ### [Manager v0.14.0] - 2026-05-19
 
