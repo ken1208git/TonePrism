@@ -58,8 +58,12 @@ namespace TonePrism.Manager.Controls
                     $"{copyright}\n" +
                     "ライセンス: MIT License";
             }
-            catch
+            catch (Exception ex)
             {
+                // AGENTS.md Cross-component Standards: 新規 catch path は Logger 経由で WARN/ERROR を出力する。
+                // 本 catch は version + copyright 両方の取得失敗を吸収するため、debug 容易化のため例外詳細を残す
+                // (round 2 review L-4 対応)。Logger 自体の例外は Logger 内部で握り潰される (再帰ハング回避)。
+                Logger.Warn("[SettingsSectionPanel] バージョン情報の取得に失敗: " + ex.Message);
                 lblVersionInfo.Text = "バージョン情報の取得に失敗しました。";
             }
         }
