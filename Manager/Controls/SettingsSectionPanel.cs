@@ -157,6 +157,7 @@ namespace TonePrism.Manager.Controls
             if (_dbManager == null) return;
             // hook 一時 detach
             txtBackupDest.Leave -= TxtBackupDest_Leave;
+            chkBackupAutoEnabled.CheckedChanged -= ChkBackupAutoEnabled_CheckedChanged;
             numBackupInterval.ValueChanged -= NumBackupInterval_ValueChanged;
             cmbBackupIntervalUnit.SelectedIndexChanged -= CmbBackupIntervalUnit_SelectedIndexChanged;
             numBackupRetention.ValueChanged -= NumBackupRetention_ValueChanged;
@@ -165,6 +166,10 @@ namespace TonePrism.Manager.Controls
                 var repo = _dbManager.SettingsRepository;
                 _lastSavedBackupDest = repo.GetString("backup_destination_path", "");
                 txtBackupDest.Text = _lastSavedBackupDest;
+
+                // (#170 followup round 2) 自動バックアップ有効/無効 checkbox の load
+                string enabledStr = repo.GetString(SettingsKeys.BackupAutoEnabled, "true");
+                chkBackupAutoEnabled.Checked = !string.Equals(enabledStr, "false", StringComparison.OrdinalIgnoreCase);
 
                 int hours = repo.GetInt32("backup_auto_interval_hours", 24);
                 string unit = repo.GetString(SettingsKeys.BackupAutoIntervalUnit, SettingsKeys.BackupAutoIntervalUnitHours);
@@ -184,15 +189,58 @@ namespace TonePrism.Manager.Controls
                 if (retention < numBackupRetention.Minimum) retention = (int)numBackupRetention.Minimum;
                 if (retention > numBackupRetention.Maximum) retention = (int)numBackupRetention.Maximum;
                 numBackupRetention.Value = retention;
+
+                // checkbox に従って interval section の enable/disable
+                ApplyAutoBackupEnabledUi(chkBackupAutoEnabled.Checked);
             }
             catch (Exception ex)
             {
                 Logger.Warn("[SettingsSectionPanel] LoadBackupSettings 読込失敗: " + ex.Message);
             }
             txtBackupDest.Leave += TxtBackupDest_Leave;
+            chkBackupAutoEnabled.CheckedChanged += ChkBackupAutoEnabled_CheckedChanged;
             numBackupInterval.ValueChanged += NumBackupInterval_ValueChanged;
             cmbBackupIntervalUnit.SelectedIndexChanged += CmbBackupIntervalUnit_SelectedIndexChanged;
             numBackupRetention.ValueChanged += NumBackupRetention_ValueChanged;
+        }
+
+        /// <summary>
+        /// (#170 followup round 2) 自動バックアップ checkbox の状態に応じて interval section の
+        /// control を enable/disable する。OFF 時は user 視点で「設定しても無効化されている」のが明確になる。
+        /// 保存先 / 保持世代数は手動バックアップでも使うため対象外。
+        /// </summary>
+        private void ApplyAutoBackupEnabledUi(bool enabled)
+        {
+            lblBackupInterval.Enabled = enabled;
+            numBackupInterval.Enabled = enabled;
+            cmbBackupIntervalUnit.Enabled = enabled;
+            lblBackupIntervalUnit.Enabled = enabled;
+        }
+
+        private void ChkBackupAutoEnabled_CheckedChanged(object sender, EventArgs e)
+        {
+            if (_dbManager == null) return;
+            bool newValue = chkBackupAutoEnabled.Checked;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "自動バックアップ有効化変更") == DialogResult.Cancel)
+            {
+                // rollback (= event 再帰回避のため hook 一時 detach)
+                chkBackupAutoEnabled.CheckedChanged -= ChkBackupAutoEnabled_CheckedChanged;
+                chkBackupAutoEnabled.Checked = !newValue;
+                chkBackupAutoEnabled.CheckedChanged += ChkBackupAutoEnabled_CheckedChanged;
+                return;
+            }
+            try
+            {
+                _dbManager.SettingsRepository.SetString(SettingsKeys.BackupAutoEnabled, newValue ? "true" : "false");
+                ApplyAutoBackupEnabledUi(newValue);
+                Logger.Info("[SettingsSectionPanel] 自動バックアップを " + (newValue ? "有効" : "無効") + " に変更");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[SettingsSectionPanel] BackupAutoEnabled 書込失敗: " + ex.Message);
+                MessageBox.Show("自動バックアップ設定の保存に失敗しました: " + ex.Message,
+                    "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         /// <summary>

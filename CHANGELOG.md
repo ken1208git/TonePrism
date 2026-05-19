@@ -1655,6 +1655,11 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ### [Manager v0.13.0] - 2026-05-19
 
+#### Changed (#170 followup round 2 — review 指摘対応)
+
+- **自動バックアップを ON/OFF できる checkbox を新規追加**: `chkBackupAutoEnabled` を grpBackup 内に配置、`SettingsKeys.BackupAutoEnabled = "backup_auto_enabled"` (default "true") で永続化。OFF にすると `BackupService.IsAutoBackupDue` / `RunAutoBackupIfDue` が起動時 trigger を完全 skip (= 手動バックアップは引き続き使える)。checkbox に従って interval section の controls (lblBackupInterval / numBackupInterval / cmbBackupIntervalUnit / lblBackupIntervalUnit) を `Enabled` で連動 enable/disable、OFF 時は灰色化して「無効」状態を視覚化。保存先 / 保持世代数は手動バックアップでも使うため対象外で常時有効。
+- **設定タブの grpBackup と grpLog の順序を入替**: 旧 round 1 で「ログ (top) → バックアップ」だったが、user 提案で「バックアップ (top) → ログ」に変更。バックアップが日常運用で頻度高い設定であることを反映。
+
 #### Changed (#170 followup round 1 — review 指摘対応)
 
 PR #196 round 1 review で指摘された UI 改善:

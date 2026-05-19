@@ -87,6 +87,15 @@ namespace TonePrism.Manager.Services
         /// </summary>
         public const string LogDestinationPath = "log_destination_path";
 
+        // ----- (#170 followup round 2) 自動バックアップの有効/無効 -----
+
+        /// <summary>
+        /// 自動バックアップを実行するかどうか ("true"/"false")。default "true" (= 有効、既存挙動)。
+        /// UI 設定タブ「バックアップ」section の checkbox から変更可、UI 上で OFF にすると自動 backup の
+        /// 起動時 trigger を完全に skip する (= 手動バックアップは引き続き使える)。
+        /// </summary>
+        public const string BackupAutoEnabled = "backup_auto_enabled";
+
         // ----- (#170 followup round 1) バックアップ自動間隔の表示単位 -----
 
         /// <summary>

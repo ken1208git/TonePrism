@@ -17,6 +17,19 @@ namespace TonePrism.Manager.Controls
 
         private void InitializeComponent()
         {
+            this.grpBackup = new System.Windows.Forms.GroupBox();
+            this.lblBackupDest = new System.Windows.Forms.Label();
+            this.txtBackupDest = new System.Windows.Forms.TextBox();
+            this.btnBackupBrowse = new System.Windows.Forms.Button();
+            this.lblBackupDestHint = new System.Windows.Forms.Label();
+            this.chkBackupAutoEnabled = new System.Windows.Forms.CheckBox();
+            this.lblBackupInterval = new System.Windows.Forms.Label();
+            this.numBackupInterval = new System.Windows.Forms.NumericUpDown();
+            this.cmbBackupIntervalUnit = new System.Windows.Forms.ComboBox();
+            this.lblBackupIntervalUnit = new System.Windows.Forms.Label();
+            this.lblBackupRetention = new System.Windows.Forms.Label();
+            this.numBackupRetention = new System.Windows.Forms.NumericUpDown();
+            this.lblBackupRetentionUnit = new System.Windows.Forms.Label();
             this.grpLog = new System.Windows.Forms.GroupBox();
             this.lblLogDest = new System.Windows.Forms.Label();
             this.txtLogDest = new System.Windows.Forms.TextBox();
@@ -26,24 +39,12 @@ namespace TonePrism.Manager.Controls
             this.numLogRetention = new System.Windows.Forms.NumericUpDown();
             this.lblLogRetentionUnit = new System.Windows.Forms.Label();
             this.lblLogRetentionNote = new System.Windows.Forms.Label();
-            this.grpBackup = new System.Windows.Forms.GroupBox();
-            this.lblBackupDest = new System.Windows.Forms.Label();
-            this.txtBackupDest = new System.Windows.Forms.TextBox();
-            this.btnBackupBrowse = new System.Windows.Forms.Button();
-            this.lblBackupDestHint = new System.Windows.Forms.Label();
-            this.lblBackupInterval = new System.Windows.Forms.Label();
-            this.numBackupInterval = new System.Windows.Forms.NumericUpDown();
-            this.cmbBackupIntervalUnit = new System.Windows.Forms.ComboBox();
-            this.lblBackupIntervalUnit = new System.Windows.Forms.Label();
-            this.lblBackupRetention = new System.Windows.Forms.Label();
-            this.numBackupRetention = new System.Windows.Forms.NumericUpDown();
-            this.lblBackupRetentionUnit = new System.Windows.Forms.Label();
             this.grpDatabase = new System.Windows.Forms.GroupBox();
             this.btnResetDatabase = new System.Windows.Forms.Button();
             this.grpInfo = new System.Windows.Forms.GroupBox();
             this.lblVersionInfo = new System.Windows.Forms.Label();
-            this.grpLog.SuspendLayout();
             this.grpBackup.SuspendLayout();
+            this.grpLog.SuspendLayout();
             this.grpDatabase.SuspendLayout();
             this.grpInfo.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.numLogRetention)).BeginInit();
@@ -51,7 +52,7 @@ namespace TonePrism.Manager.Controls
             ((System.ComponentModel.ISupportInitialize)(this.numBackupRetention)).BeginInit();
             this.SuspendLayout();
             //
-            // grpLog (top、ログ保存先 + 保存日数)
+            // grpLog (バックアップの下、ログ保存先 + 保存日数)
             //
             this.grpLog.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top
             | System.Windows.Forms.AnchorStyles.Left)
@@ -64,7 +65,7 @@ namespace TonePrism.Manager.Controls
             this.grpLog.Controls.Add(this.numLogRetention);
             this.grpLog.Controls.Add(this.lblLogRetentionUnit);
             this.grpLog.Controls.Add(this.lblLogRetentionNote);
-            this.grpLog.Location = new System.Drawing.Point(20, 20);
+            this.grpLog.Location = new System.Drawing.Point(20, 290);
             this.grpLog.Name = "grpLog";
             this.grpLog.Size = new System.Drawing.Size(760, 190);
             this.grpLog.TabIndex = 0;
@@ -140,7 +141,7 @@ namespace TonePrism.Manager.Controls
             this.lblLogRetentionNote.TabIndex = 7;
             this.lblLogRetentionNote.Text = "保存先 / 保存日数の変更は次回 Manager 起動時に反映されます。";
             //
-            // grpBackup (バックアップ保存先 + 自動間隔 + 単位 ComboBox + 世代数)
+            // grpBackup (top、バックアップ保存先 + 自動有効化 + 自動間隔 + 単位 + 世代数)
             //
             this.grpBackup.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top
             | System.Windows.Forms.AnchorStyles.Left)
@@ -149,6 +150,7 @@ namespace TonePrism.Manager.Controls
             this.grpBackup.Controls.Add(this.txtBackupDest);
             this.grpBackup.Controls.Add(this.btnBackupBrowse);
             this.grpBackup.Controls.Add(this.lblBackupDestHint);
+            this.grpBackup.Controls.Add(this.chkBackupAutoEnabled);
             this.grpBackup.Controls.Add(this.lblBackupInterval);
             this.grpBackup.Controls.Add(this.numBackupInterval);
             this.grpBackup.Controls.Add(this.cmbBackupIntervalUnit);
@@ -156,10 +158,10 @@ namespace TonePrism.Manager.Controls
             this.grpBackup.Controls.Add(this.lblBackupRetention);
             this.grpBackup.Controls.Add(this.numBackupRetention);
             this.grpBackup.Controls.Add(this.lblBackupRetentionUnit);
-            this.grpBackup.Location = new System.Drawing.Point(20, 230);
+            this.grpBackup.Location = new System.Drawing.Point(20, 20);
             this.grpBackup.Name = "grpBackup";
-            this.grpBackup.Size = new System.Drawing.Size(760, 220);
-            this.grpBackup.TabIndex = 1;
+            this.grpBackup.Size = new System.Drawing.Size(760, 250);
+            this.grpBackup.TabIndex = 0;
             this.grpBackup.TabStop = false;
             this.grpBackup.Text = "バックアップ";
             //
@@ -197,62 +199,73 @@ namespace TonePrism.Manager.Controls
             this.lblBackupDestHint.TabIndex = 3;
             this.lblBackupDestHint.Text = "空欄にするとデフォルト（データベースファイルの隣の backups/ フォルダ）が使われます";
             //
+            // chkBackupAutoEnabled (自動バックアップ有効/無効)
+            //
+            this.chkBackupAutoEnabled.AutoSize = true;
+            this.chkBackupAutoEnabled.Checked = true;
+            this.chkBackupAutoEnabled.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.chkBackupAutoEnabled.Location = new System.Drawing.Point(20, 110);
+            this.chkBackupAutoEnabled.Size = new System.Drawing.Size(200, 19);
+            this.chkBackupAutoEnabled.TabIndex = 4;
+            this.chkBackupAutoEnabled.Text = "自動バックアップを実行する";
+            this.chkBackupAutoEnabled.UseVisualStyleBackColor = true;
+            //
             // lblBackupInterval
             //
             this.lblBackupInterval.AutoSize = true;
-            this.lblBackupInterval.Location = new System.Drawing.Point(20, 110);
+            this.lblBackupInterval.Location = new System.Drawing.Point(40, 138);
             this.lblBackupInterval.Size = new System.Drawing.Size(280, 15);
-            this.lblBackupInterval.TabIndex = 4;
-            this.lblBackupInterval.Text = "自動バックアップ間隔 (Manager 起動時にチェック):";
+            this.lblBackupInterval.TabIndex = 5;
+            this.lblBackupInterval.Text = "間隔 (Manager 起動時にチェック):";
             //
             // numBackupInterval
             //
-            this.numBackupInterval.Location = new System.Drawing.Point(20, 130);
+            this.numBackupInterval.Location = new System.Drawing.Point(40, 158);
             this.numBackupInterval.Maximum = new decimal(new int[] { 720, 0, 0, 0 });
             this.numBackupInterval.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             this.numBackupInterval.Size = new System.Drawing.Size(80, 23);
-            this.numBackupInterval.TabIndex = 5;
+            this.numBackupInterval.TabIndex = 6;
             this.numBackupInterval.Value = new decimal(new int[] { 24, 0, 0, 0 });
             //
             // cmbBackupIntervalUnit (時間 / 日 selector)
             //
             this.cmbBackupIntervalUnit.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.cmbBackupIntervalUnit.Location = new System.Drawing.Point(110, 130);
+            this.cmbBackupIntervalUnit.Location = new System.Drawing.Point(130, 158);
             this.cmbBackupIntervalUnit.Size = new System.Drawing.Size(70, 23);
-            this.cmbBackupIntervalUnit.TabIndex = 6;
+            this.cmbBackupIntervalUnit.TabIndex = 7;
             this.cmbBackupIntervalUnit.Items.AddRange(new object[] { "時間", "日" });
             //
             // lblBackupIntervalUnit
             //
             this.lblBackupIntervalUnit.AutoSize = true;
-            this.lblBackupIntervalUnit.Location = new System.Drawing.Point(190, 133);
+            this.lblBackupIntervalUnit.Location = new System.Drawing.Point(210, 161);
             this.lblBackupIntervalUnit.Size = new System.Drawing.Size(170, 15);
-            this.lblBackupIntervalUnit.TabIndex = 7;
+            this.lblBackupIntervalUnit.TabIndex = 8;
             this.lblBackupIntervalUnit.Text = "以上経過していたら実行";
             //
             // lblBackupRetention
             //
             this.lblBackupRetention.AutoSize = true;
-            this.lblBackupRetention.Location = new System.Drawing.Point(20, 165);
+            this.lblBackupRetention.Location = new System.Drawing.Point(20, 195);
             this.lblBackupRetention.Size = new System.Drawing.Size(95, 15);
-            this.lblBackupRetention.TabIndex = 8;
+            this.lblBackupRetention.TabIndex = 9;
             this.lblBackupRetention.Text = "保持する世代数:";
             //
             // numBackupRetention
             //
-            this.numBackupRetention.Location = new System.Drawing.Point(20, 185);
+            this.numBackupRetention.Location = new System.Drawing.Point(20, 215);
             this.numBackupRetention.Maximum = new decimal(new int[] { 999, 0, 0, 0 });
             this.numBackupRetention.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             this.numBackupRetention.Size = new System.Drawing.Size(80, 23);
-            this.numBackupRetention.TabIndex = 9;
+            this.numBackupRetention.TabIndex = 10;
             this.numBackupRetention.Value = new decimal(new int[] { 30, 0, 0, 0 });
             //
             // lblBackupRetentionUnit
             //
             this.lblBackupRetentionUnit.AutoSize = true;
-            this.lblBackupRetentionUnit.Location = new System.Drawing.Point(108, 188);
+            this.lblBackupRetentionUnit.Location = new System.Drawing.Point(108, 218);
             this.lblBackupRetentionUnit.Size = new System.Drawing.Size(280, 15);
-            this.lblBackupRetentionUnit.TabIndex = 10;
+            this.lblBackupRetentionUnit.TabIndex = 11;
             this.lblBackupRetentionUnit.Text = "個 (これを超えた古いバックアップは自動削除されます)";
             //
             // grpDatabase (一番下手前、destructive)
@@ -261,7 +274,7 @@ namespace TonePrism.Manager.Controls
             | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
             this.grpDatabase.Controls.Add(this.btnResetDatabase);
-            this.grpDatabase.Location = new System.Drawing.Point(20, 470);
+            this.grpDatabase.Location = new System.Drawing.Point(20, 500);
             this.grpDatabase.Name = "grpDatabase";
             this.grpDatabase.Size = new System.Drawing.Size(760, 80);
             this.grpDatabase.TabIndex = 2;
@@ -287,7 +300,7 @@ namespace TonePrism.Manager.Controls
             | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
             this.grpInfo.Controls.Add(this.lblVersionInfo);
-            this.grpInfo.Location = new System.Drawing.Point(20, 570);
+            this.grpInfo.Location = new System.Drawing.Point(20, 600);
             this.grpInfo.Name = "grpInfo";
             this.grpInfo.Size = new System.Drawing.Size(760, 200);
             this.grpInfo.TabIndex = 3;
@@ -307,16 +320,16 @@ namespace TonePrism.Manager.Controls
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.AutoScroll = true;
-            this.Controls.Add(this.grpLog);
             this.Controls.Add(this.grpBackup);
+            this.Controls.Add(this.grpLog);
             this.Controls.Add(this.grpDatabase);
             this.Controls.Add(this.grpInfo);
             this.Name = "SettingsSectionPanel";
-            this.Size = new System.Drawing.Size(800, 800);
-            this.grpLog.ResumeLayout(false);
-            this.grpLog.PerformLayout();
+            this.Size = new System.Drawing.Size(800, 830);
             this.grpBackup.ResumeLayout(false);
             this.grpBackup.PerformLayout();
+            this.grpLog.ResumeLayout(false);
+            this.grpLog.PerformLayout();
             this.grpDatabase.ResumeLayout(false);
             this.grpInfo.ResumeLayout(false);
             this.grpInfo.PerformLayout();
@@ -328,6 +341,19 @@ namespace TonePrism.Manager.Controls
 
         #endregion
 
+        private System.Windows.Forms.GroupBox grpBackup;
+        private System.Windows.Forms.Label lblBackupDest;
+        private System.Windows.Forms.TextBox txtBackupDest;
+        private System.Windows.Forms.Button btnBackupBrowse;
+        private System.Windows.Forms.Label lblBackupDestHint;
+        private System.Windows.Forms.CheckBox chkBackupAutoEnabled;
+        private System.Windows.Forms.Label lblBackupInterval;
+        private System.Windows.Forms.NumericUpDown numBackupInterval;
+        private System.Windows.Forms.ComboBox cmbBackupIntervalUnit;
+        private System.Windows.Forms.Label lblBackupIntervalUnit;
+        private System.Windows.Forms.Label lblBackupRetention;
+        private System.Windows.Forms.NumericUpDown numBackupRetention;
+        private System.Windows.Forms.Label lblBackupRetentionUnit;
         private System.Windows.Forms.GroupBox grpLog;
         private System.Windows.Forms.Label lblLogDest;
         private System.Windows.Forms.TextBox txtLogDest;
@@ -337,18 +363,6 @@ namespace TonePrism.Manager.Controls
         private System.Windows.Forms.NumericUpDown numLogRetention;
         private System.Windows.Forms.Label lblLogRetentionUnit;
         private System.Windows.Forms.Label lblLogRetentionNote;
-        private System.Windows.Forms.GroupBox grpBackup;
-        private System.Windows.Forms.Label lblBackupDest;
-        private System.Windows.Forms.TextBox txtBackupDest;
-        private System.Windows.Forms.Button btnBackupBrowse;
-        private System.Windows.Forms.Label lblBackupDestHint;
-        private System.Windows.Forms.Label lblBackupInterval;
-        private System.Windows.Forms.NumericUpDown numBackupInterval;
-        private System.Windows.Forms.ComboBox cmbBackupIntervalUnit;
-        private System.Windows.Forms.Label lblBackupIntervalUnit;
-        private System.Windows.Forms.Label lblBackupRetention;
-        private System.Windows.Forms.NumericUpDown numBackupRetention;
-        private System.Windows.Forms.Label lblBackupRetentionUnit;
         private System.Windows.Forms.GroupBox grpDatabase;
         private System.Windows.Forms.Button btnResetDatabase;
         private System.Windows.Forms.GroupBox grpInfo;

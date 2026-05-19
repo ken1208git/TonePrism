@@ -60,6 +60,12 @@ namespace TonePrism.Manager.Services
         /// </summary>
         public BackupResult RunAutoBackupIfDue(IProgress<ProgressInfo> progress, CancellationToken token)
         {
+            // (#170 followup round 2) 自動バックアップ無効化 checkbox。OFF なら起動時 trigger を skip。
+            string enabledStr = _settingsRepo.GetString(SettingsKeys.BackupAutoEnabled, "true");
+            if (string.Equals(enabledStr, "false", StringComparison.OrdinalIgnoreCase))
+            {
+                return BackupResult.Skipped("自動バックアップが無効に設定されています (設定タブから有効化可能)");
+            }
             int intervalHours = _settingsRepo.GetInt32("backup_auto_interval_hours", 24);
             long intervalSeconds = (long)intervalHours * 3600;
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
