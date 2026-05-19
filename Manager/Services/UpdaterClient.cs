@@ -75,6 +75,17 @@ namespace TonePrism.Manager.Services
                 "--restart-exe",    Quote(managerExe),
                 "--log-dir",        Quote(PathManager.UpdaterLogDir),
                 "--caller-pid",     callerPid.ToString(),
+                // (#170 followup v0.13.1) Updater の Manager 終了待ち timeout を **0 = 無制限** に明示。
+                // default 60s だと UpdateSectionPanel の再起動予告 dialog (Application.Exit 前) で user が
+                // OK を遅延 click した場合 + defer 化された CHANGELOG / .bak cleanup の SMB latency で
+                // Updater が exit 3 (TimedOutNoForceKill) を返して abort → 次回 Manager 起動時に
+                // 「Manager が時間内に閉じませんでした」失敗 banner が出る race があった。
+                // 0 (= 無制限) を選んだ根拠: Manager UI freeze (WebBrowser / SQLite latency / WindowProc
+                // 応答不能 等) で永久 polling し続ける zombie Updater リスクはあるが、Windows user 常識として
+                // 「ソフトが固まったら task manager で kill」が確立しており、自動 abort で謎の「時間内に
+                // 閉じませんでした」banner を出すより、user 自身が手動 recovery する path のほうが clean。
+                // 学校 LAN 運用でも来場スタッフ / 顧問が task manager 操作可能な前提で OK。
+                "--wait-timeout",   "0",
             };
             if (forceKill) args.Add("--force-kill");
             string argLine = string.Join(" ", args);
@@ -90,8 +101,14 @@ namespace TonePrism.Manager.Services
                     // (#170 followup) `CreateNoWindow = true`。旧設計は「Updater console を visible にして
                     // user 安心感」だったが、実態は `RedirectStandardOutput=true` で stdout/stderr が pipe に
                     // 吸われて visible console が常に empty (= 黒い空 box が表示されるだけで「ウイルスかな?」
-                    // UX 悪化の温床) だった。Updater output は (a) `<install>/logs/updater/*.log` + (b) Manager
-                    // log への redirect 経由で完全 trace 可能、情報損失ゼロで hidden 化。
+                    // UX 悪化の温床) だった。
+                    // Updater output の trace 経路:
+                    // - (a) `<install>/logs/updater/updater_<PC>_<datetime>.log` (= Updater 自身の file log、
+                    //   **完全な全行ログ**)
+                    // - (b) Manager log 経由 `[Updater stdout/stderr] ...` (= 本 Manager process が生きている
+                    //   間だけ redirect で取込まれる、**Manager 死亡後の Updater output は届かない**)
+                    // つまり (a) が full trace の SoT、(b) は Manager 生存中の補助記録。visible console を
+                    // 消しても trace 情報は (a) で完全に残るため情報損失なし。
                     CreateNoWindow = true,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,

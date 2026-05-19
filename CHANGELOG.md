@@ -1661,7 +1661,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 `Application.Exit` 呼出前に新 `MessageBox` を追加して **Manager 再起動を予告**:
 
 > ダウンロードと展開が完了しました。
-> これから Manager を一旦終了して、新しいバージョンで自動的に再起動します。
+> OK を押すと Manager を一旦終了して、新しいバージョンで自動的に再起動します。
 > 再起動には数秒〜数十秒かかる場合があります。
 >
 > 新しい Manager が起動したら、「✓ アップデート完了」のお知らせが表示されます。
@@ -1672,22 +1672,39 @@ user 視点で「あれ?何が起きた?」になりやすかった。本 dialog
 「✓ アップデート完了」 dialog (= Bundle v0.4.0 から存在) と組み合わせて開始 → 終了 → 完了の
 **3 段階通知** を user に提供。
 
-#### Changed (#170 followup — Updater spawn 時の空 console window を hidden 化)
+#### Changed (#170 followup — Updater spawn 時の空 console window を hidden 化 + wait-timeout 無制限化)
 
-`UpdaterClient.cs` の `CreateNoWindow` を `false` → `true` に変更。
+`UpdaterClient.cs` の `CreateNoWindow` を `false` → `true` に変更 + `--wait-timeout 0` (= 無制限待機)
+を明示渡しに追加。
 
 旧設計は「Updater console を visible にして user 安心感 + 進捗 visible」だったが、実態は
 `RedirectStandardOutput=true` で stdout/stderr が Manager の pipe に吸われて
 **visible console が常に empty** (= 黒い空 box が表示されるだけで「ウイルスかな?」「強制終了したい」
 UX 悪化の温床) だった。「visible 設定だが output は redirect されて見えない」という矛盾した状態を fix。
 
-Updater output は以下で完全 trace 可能、情報損失ゼロ:
-- (a) file log `<install>/logs/updater/updater_<PC>_<datetime>.log`
-- (b) Manager の `OutputDataReceived` / `ErrorDataReceived` 経由 Logger.Info / Logger.Warn 出力
+Updater output の trace 経路:
+- (a) `<install>/logs/updater/updater_<PC>_<datetime>.log` (= Updater 自身の file log、**完全な全行ログ、SoT**)
+- (b) Manager log 経由 `[Updater stdout/stderr] ...` (= Manager process が生きている間だけ redirect 取込み、Manager 死亡後の Updater output は届かない)
 
-bump 判断: UI 改善 (= 既存 flow に dialog 1 つ追加 + Updater spawn の `CreateNoWindow` 値変更)、
-behavior の core path には影響なし (= Updater logic / file ops / restart 流れは無変更)、
-SemVer 上 patch (v0.13.0 → v0.13.1)。
+visible console を消しても trace 情報は (a) で完全に残るため、本変更による情報損失なし。
+
+##### `--wait-timeout 0` の根拠
+Updater の Manager 終了待ち timeout を **default 60s → 0 (= 無制限)** に明示拡張。
+旧 default だと UpdateSectionPanel の再起動予告 dialog (Application.Exit 前) で user が OK を遅延 click
+した場合 + defer 化された CHANGELOG / .bak cleanup の SMB latency で Updater が exit 3
+(`TimedOutNoForceKill`) を返して abort → 次回 Manager 起動時に「Manager が時間内に閉じませんでした」
+失敗 banner が出る race があった。
+
+無制限を採用した根拠: Manager UI freeze (= WebBrowser / SQLite latency / WindowProc 応答不能 等) で
+永久 polling し続ける zombie Updater リスクはあるが、Windows user 常識として「ソフトが固まったら
+task manager で kill」が確立しており、自動 abort で謎の失敗 banner を出すより、user 自身が手動 recovery
+する path のほうが clean。学校 LAN 運用でも来場スタッフ / 顧問が task manager 操作可能な前提で OK。
+
+bump 判断: UI artefact のみの変更 (= 再起動予告 dialog 1 つ追加 + Updater spawn の `CreateNoWindow`
+値変更 + `--wait-timeout 0` 渡し追加)。Updater logic / file ops / restart 流れの core path は無変更、
+SemVer 上 patch (v0.13.0 → v0.13.1)。「core path 無変更」の意味は **file 置換 / 再起動 / sentinel 処理
+等の不変式に変更なし** であって、UI / process spawn の observable behavior には変化あり (= 旧版から
+update した user は「黒い console window がなくなる」「再起動予告 dialog が増える」を体験する)。
 
 ### [Manager v0.13.0] - 2026-05-19
 
