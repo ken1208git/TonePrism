@@ -466,17 +466,13 @@ namespace TonePrism.Manager.Controls
                     // 「これから Manager を一旦終了 → 新版で自動起動」を明示してから user の OK で
                     // 確定終了。新 Manager 起動時には sentinel 経由で「✓ アップデート完了」 dialog が出る。
                     //
-                    // (#170 followup round 5) Updater.exe は CreateNoWindow=false (UpdaterClient.cs:90) で
-                    // **黒い console window を visible** で表示する設計 (= 進捗 / debug log が見える方が user
-                    // 安心という設計判断)。dialog 文言に「黒い画面」の出現を明示しないと「ウイルスかな?」と
-                    // 誤解されるリスクあり、本 round で予告文を追加。
+                    // (#170 followup round 6) 旧 round 5 の「黒い画面」予告文は削除。
+                    // UpdaterClient.cs:90 を CreateNoWindow=true に変更したため、Updater の console window
+                    // が visible で表示されなくなった (= 旧実装で出てた「空の黒い box」UX 悪化を fix)。
                     MessageBox.Show(this,
                         "ダウンロードと展開が完了しました。\n\n" +
                         "これから Manager を一旦終了して、新しいバージョンで自動的に再起動します。\n" +
                         "再起動には数秒〜数十秒かかる場合があります (= 共有フォルダ越しの場合は長くなります)。\n\n" +
-                        "【ご注意】処理中、黒い画面 (コマンドプロンプトのようなウィンドウ) が一時的に表示されます。\n" +
-                        "これはアップデート用のツール (Updater) の進捗表示で、自動で閉じます。\n" +
-                        "閉じないでそのままお待ちください。\n\n" +
                         "新しい Manager が起動したら、「✓ アップデート完了」のお知らせが表示されます。",
                         "Manager を再起動します",
                         MessageBoxButtons.OK,
