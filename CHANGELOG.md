@@ -13,6 +13,32 @@
 
 リリース zip 全体に付与する独立バージョン。GitHub Releases の本文として `Release.ps1` がこのセクションを抜き出して使う。エンドユーザー（来場スタッフ / 顧問の先生 / 部員）向けの **summary** を書く。技術詳細は `## Launcher` / `## Manager` / `## Release Tooling` 等の別セクションを参照。詳細仕様は [SPECIFICATION.md §3.7.7](SPECIFICATION.md) を参照。
 
+### [Bundle v0.5.0] - 2026-05-19
+
+**プロジェクト名称を `ゲームセンターTONE Prism (GCTonePrism)` → `TonePrism` に統一** (#168)。他校・他団体への配布も視野に入れた汎用化 rename で、**exe filename / DB filename / namespace / UI 文字列 / repo URL まで全件 sync**:
+- `GCTonePrism_Manager.exe` → `TonePrism_Manager.exe`
+- `GCTonePrism_Launcher.exe` → `TonePrism_Launcher.exe`
+- `GCTonePrism_Updater.exe` → `TonePrism_Updater.exe`
+- DB ファイル: `prism.db` → `toneprism.db` + バックアップ prefix も `prism_*.db` → `toneprism_*.db`
+- ウィンドウタイトル `ゲームセンターTONE Prism 管理ソフト` → `TonePrism 管理ソフト`
+
+あわせて、**copyright 表記を全 component / 全 surface で統一** + Manager 設定タブ「バージョン情報」に copyright + ライセンス情報を表示する経路を追加 (#170)。配布バイナリ 3 か所 (Launcher / Manager / Updater) の exe properties に焼き込まれる Copyright が `Copyright © 2025-2026 TonePrism Project — Lead maintainer: Kenshiro Kuroga (Osaka Prefectural Toneyama Upper Secondary School PC Club)` に統一、Manager の設定タブからも runtime で確認可能。
+
+**⚠ 重要: 本リリースは自動アップデート非対応** (= brand rename + DB filename rename を伴う破壊的変更のため、auto-update 経路は意図的に閉鎖)。**手動で再 install が必要**:
+1. [リリースページ](https://github.com/ken1208git/TonePrism/releases/tag/v0.5.0) から `TonePrism_v0.5.0.zip` を DL
+2. **空の新しい親フォルダ** に解凍 (= 既存 install dir には流さない、新版 Manager の旧版検出 guard で起動 block されます)
+3. `Install.bat` をダブルクリック → 親フォルダを GUI 選択 → インストール
+4. ゲームデータ移行が必要な場合: 旧 install から `games/` / `backups/` / `responses/` / `logs/` を新 install dir に手動 copy、`prism.db` は新 install dir に `toneprism.db` という名前で copy
+
+旧版 (Bundle v0.4.0 以前) の install dir に新 zip を上書き展開してしまった場合、新 Manager 起動時に「旧版検出 — 手動再 install が必要です」MessageBox が出て `Environment.Exit(1)` で停止します (= 物理的に旧版混在を防ぐ guard 動作)。空の新フォルダに展開し直してください。
+
+- Launcher: v0.5.18 → v0.6.1 (brand rename + copyright sync、3 SoT [version.gd / project.godot / export_presets.cfg] 同期)
+- Manager: v0.11.0 → v0.12.1 (brand rename + 旧版 detect guard + 設定タブ copyright 表示 + copyright sync)
+- Updater: v0.1.0 → v0.2.1 (brand rename + copyright sync)
+- Release Tooling: v0.1.18 → v0.1.19 (brand rename URL slug + zip filename + build script 内 exe filename literal sweep)
+
+**Notes**: Bundle v0.5.0 は brand rename の transition release。v0.6.0 以降は通常の自動アップデート経路に復帰します (= 旧版検出 guard は brand rename 専用 fail-safe、新版 install 完了後は再発火しません)。1.0.0 への bump は「API 安定保証 + 配布実績」の milestone として後の release に温存、本リリースは brand 統一 + 他校配布可能化への準備として位置付け。
+
 ### [Bundle v0.4.0] - 2026-05-19
 
 **LAN 上の同時起動を自動検出して警告する機構が完成** (#179)。学校 LAN の SMB 共有 `prism.db` で、これまで「同時起動するとデータが壊れる可能性あり、毎回 MessageBox で注意喚起」だった人間頼り運用から、**他 PC で Manager / Launcher が動いている時にだけ自動で警告 dialog を出す** 方式に upgrade。Manager 起動時 + ゲーム編集 / バックアップ / 設定変更等の前で「【危険】他 PC で Manager / Launcher が稼働中です: PC-A (Manager v0.11.0、最終確認: 5 秒前) / PC-B (Launcher v0.5.18、最終確認: 12 秒前)」のように **検出された PC を具体的に表示** し、user は OK (続行) / キャンセル (中止) を都度判断できるようになりました。
@@ -75,6 +101,19 @@
 `Release.ps1` / `Release.bat` / `Install.bat` / `templates/*.bat` / `show_folder_dialog.ps1` / `INSTALL_README.txt` 等の **build / 配布スクリプト** の変更履歴。エンドユーザー向けではなく、開発者が「リリーススクリプトのこの挙動はいつから？」を辿るために残す。
 
 **注意 (#160 で section 責務分離)**: `Updater` 等の **runtime exe 群** (= SPEC §2.4 Companions 配置) の changelog は本 section ではなく **`## Companions`** (旧 `## Updater (Companions/Updater)`、本 PR で section 名を一般化) に記載する。本 section は build / 配布スクリプトのみ対象。Bundle v0.4.0 以前 (= 本 PR merge 前) の Updater 変更履歴は `## Release Tooling` の過去 entry (= round 1〜8 review 詳細等) に retain、retroactive consolidation は scope creep のため見送り (= PR #159 round 4 「SPEC 1 PR 1 bump 規約」導入時と同 pattern)。
+
+### [Release Tooling v0.1.19] - 2026-05-19
+
+#### Changed (#168 — brand rename URL slug + exe filename literals sweep)
+
+`Release.ps1` 内の brand 関連 literal を `GCTonePrism` → `TonePrism` に全件 sweep。本 section は build / 配布 script 専属で、runtime exe (Updater 等) の brand rename は `## Companions Updater v0.2.0` に記載済、本 entry は **build script 側の文字列同期** のみ対象。
+
+- `$GitHubRepoSlug = 'ken1208git/GCTonePrism'` → `'ken1208git/TonePrism'` (`Release.ps1:290` の SoT 定数、`Assert-ChangelogLinkDefs` の URL 組立てに使用)
+- zip filename: `"GCTonePrism_v$Version.zip"` → `"TonePrism_v$Version.zip"` (`$ZipPath` 組立て、本変更で配布 zip filename も brand 統一)
+- exe filename literal: `Build-Launcher` / `Build-Manager` / `Build-Updater` 内の `GCTonePrism_*.exe` / `GCTonePrism_*.csproj` → `TonePrism_*.exe` / `TonePrism_*.csproj` 全件 sweep (= csproj rename + AssemblyName 変更に追従)
+- docstring 内の `GCTonePrism のリリース zip` → `TonePrism のリリース zip` 表記更新
+
+bump 判断: 文字列 sweep のみで behavior 無変更、SemVer 上 patch (v0.1.18 → v0.1.19)。Release.ps1 の関数 signature / Assert-* logic / build flow は全件無変更、参照する exe filename と GitHub URL slug が brand 統一されただけ。Bundle v0.5.0 リリース実行時に本 v0.1.19 が同梱される。
 
 ### [Release Tooling v0.1.18] - 2026-05-18
 
@@ -2840,6 +2879,7 @@ Release.ps1 の $FooterSentinel 定数も同期更新すること。
 
 <!-- GCTONEPRISM-CHANGELOG-FOOTER-BEGIN-V1 -->
 
+[Bundle v0.5.0]: https://github.com/ken1208git/TonePrism/releases/tag/v0.5.0
 [Bundle v0.4.0]: https://github.com/ken1208git/TonePrism/releases/tag/v0.4.0
 [Bundle v0.3.1]: https://github.com/ken1208git/TonePrism/releases/tag/v0.3.1
 [Bundle v0.3.0]: https://github.com/ken1208git/TonePrism/releases/tag/v0.3.0
