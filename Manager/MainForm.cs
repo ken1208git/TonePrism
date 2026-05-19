@@ -762,20 +762,26 @@ namespace TonePrism.Manager
         /// </summary>
         private void UpdateBackupStatus(string message, System.Drawing.Color color, bool autoRevert)
         {
-            Logger.Info("[MainForm] UpdateBackupStatus 呼出 (前): lblBackupStatus.Size=" + lblBackupStatus.Size + " Bounds=" + lblBackupStatus.Bounds + " Visible=" + lblBackupStatus.Visible + " AutoSize=" + lblBackupStatus.AutoSize);
             lblBackupStatus.Text = message ?? string.Empty;
             lblBackupStatus.ForeColor = color;
-            // [TEMP DEBUG] BackColor=Yellow で label の物理位置を可視化 (= text 不可視でも黄色 box が見える)。
-            // 解決後に削除予定。
-            lblBackupStatus.BackColor = System.Drawing.Color.Yellow;
-            // (#170 followup round 2) WinForms StatusStrip の layout を強制再計算。
-            // Spring=true の spacer が AutoSize 計算より先に space を greedy に取る path で
-            // lblBackupStatus が 0 width のままになる症状への保険。PerformLayout で layout 再計算 →
-            // Refresh で redraw。
+            // (#170 followup round 2) Spring spacer 廃止 → 手動で spacer.Width を計算する方式に切替。
+            // 旧実装: lblStatusSpacer.Spring=true で残り space を greedy に消費 → AutoSize 後の
+            // lblBackupStatus expand 量を考慮せず spacer width 不変 → 合計 width が strip width を
+            // 超過して lblBackupStatus が右端外にはみ出す bug (= log の Bounds.X=827 vs strip Width=825 で確認)。
+            // 新実装: spacer.Spring=false (= Designer 側で設定済) + ここで explicit Width 計算で
+            // lblStatus と lblBackupStatus の自然 width を引いた残りを spacer に割当。
+            //   spacer.Width = max(0, statusStrip.Width - lblStatus.Width - lblBackupStatus.Width - margins)
+            int margin = 8; // 端の余白
+            int spacerWidth = statusStrip1.Width - lblStatus.Width - lblBackupStatus.Width - margin;
+            if (spacerWidth < 0) spacerWidth = 0;
+            lblStatusSpacer.Width = spacerWidth;
             statusStrip1.PerformLayout();
             statusStrip1.Refresh();
-            Logger.Info("[MainForm] UpdateBackupStatus 呼出 (後): lblBackupStatus.Size=" + lblBackupStatus.Size + " Bounds=" + lblBackupStatus.Bounds + " Text='" + lblBackupStatus.Text + "'");
-            Logger.Info("[MainForm] statusStrip1.Bounds=" + statusStrip1.Bounds + " Size=" + statusStrip1.Size + " Dock=" + statusStrip1.Dock + " Visible=" + statusStrip1.Visible);
+            Logger.Info("[MainForm] UpdateBackupStatus: strip.Width=" + statusStrip1.Width
+                + " lblStatus.Width=" + lblStatus.Width
+                + " lblBackupStatus.Width=" + lblBackupStatus.Width
+                + " spacer.Width=" + spacerWidth
+                + " lblBackupStatus.Bounds=" + lblBackupStatus.Bounds);
 
             // 既存 timer を破棄してから新規 (= 連続呼出時に古い timer が古い message を消すのを防ぐ)
             if (_backupStatusClearTimer != null)
