@@ -1653,6 +1653,35 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.13.0] - 2026-05-19
+
+#### Added (#170 followup — UI brushup PR)
+
+Bundle v0.5.0 受入テストで見つかった UX / safety 課題 5 件をまとめた brushup。**5 commit 構成** で、各 commit は項目別の独立変更:
+
+- **ログ保存日数を 設定タブから設定可能に**: 旧 `Logger.cs:RetentionDays = 30` hardcode を `settings` table の `log_retention_days` 経由に移行、新 `grpLog` group box (NumericUpDown 1-365 日、default 30) を設定タブに追加。変更は次回 Manager 起動時に反映 (= UI label で明示)。CleanupOldLogs は `public static void CleanupOldLogs(int retentionDays)` に signature 変更、MainForm の `ContinueLoadAfterSessionCheck` で DB 値を読んで明示呼出。
+- **バックアップ設定を設定タブに inline 統合**: 旧 modal Form `BackupSettingsForm` を廃止、新 `grpBackup` group box (3 設定 + 保存ボタン) を設定タブに inline 統合。BackupSettingsForm.cs / .Designer.cs / csproj 該当行を削除。バックアップタブ「設定」ボタンは「設定タブで変更してください」info dialog に置換 (= 旧 user 動線の学習 cost 最小化)。保存 button 経由で 3 値一括 commit (= 旧 modal の OK 1 click 1 commit pattern を維持)。
+- **status bar を 2 ラベル分割 + 自動消去 timer**: 旧実装は `lblStatus` 1 ラベルで自動バックアップ message が「ゲーム数: N 件」を上書きして元情報一時消失。新 layout は左 zone (lblStatus = DB + ゲーム数 永続) + 中央 spacer (Spring) + 右 zone (lblBackupStatus = transient backup 状態)。`UpdateBackupStatus(message, color, autoRevert)` 関数新設、autoRevert=true で 7 秒 Timer 自動消去。完了 ✓ 緑 / 失敗 ✗ 赤の color + text prefix (accessibility 補強)。
+
+#### Fixed (#170 followup)
+
+- **アップデートタブ cache stale バグの defense-in-depth 修正**: Bundle v0.5.0 受入テストで「GitHub API rate limit hit 時に **既に適用済の v0.4.0 release** を『これから適用される変更』と誤表示する」バグ発見。2 layer で修正:
+  1. UpdateChecker 側 (`Services/UpdateChecker.cs`): cache hydrate 3 経路 (`CheckAsync` / `LoadCacheOnly` / `CheckFromApiAsync` failure path) で `FilterStaleFromCumulative(cumulative, current)` 新 helper を呼出、`release.Version > current` の release のみ残す
+  2. UpdateSectionPanel 側 (`Controls/UpdateSectionPanel.cs:ApplyResult`): 「これから適用される変更」見出しの表示条件に `Status == UpdateAvailable || Status == Skipped` を追加、UpToDate / 各種 error 時は CumulativeReleases が残っていても UI で表示しない fallback
+  - あわせて cache 経由情報の disclaimer 強化: `FromCache && LastError != null` 時に「最新バージョン」欄に `(キャッシュ)` suffix + 灰色化、`UpToDate` status message を「最新版を実行中 (キャッシュ比較、再確認失敗中)」+ DimGray に降格 (緑文字「最新版を実行中です。」断言を回避)
+- **Update check 系の DB write race fence を `btnSkip_Click` に追加**: `Controls/UpdateSectionPanel.cs:btnSkip_Click` で `_updateChecker.Skip(...)` 直前に `SessionConflictHelper.CheckBeforeWrite(this, "アップデートスキップ")` 追加 (= BackupSettingsForm.btnOk_Click と同 pattern の 1 段目 fence)。`StartBackgroundUpdateCheckIfDue:checker.MarkNotified(...)` への追加は意図的に skip (= background thread + auto side-effect + 非破壊性 / BackupService `last_backup_at` 自動書込の precedent と整合)、該当箇所に 12 行コメントで理由文書化。
+
+#### Changed (#170 followup)
+
+- `Services/Logger.cs`: `private const int RetentionDays = 30` 削除、`CleanupOldLogs` を public + parametrized 化。`Logger.Initialize` から `CleanupOldLogs` 呼出を削除 (= Logger は SettingsRepository 依存ゼロを維持、DB 初期化前に動く invariant 保持)。
+- `Services/SettingsKeys.cs`: 新 const `LogRetentionDays = "log_retention_days"` + `DefaultLogRetentionDays = 30`。
+- `Controls/SettingsSectionPanel`: GroupBox 4 件構成 (grpDatabase / grpInfo / grpLog / grpBackup) に拡張、Panel Size 500 → 700、AutoScroll=true。
+- `Controls/BackupSectionPanel.cs:btnSettings_Click`: modal Form 開く処理 → info dialog に置換。
+- `MainForm.cs:UpdateStatusBar`: signature を `(string additionalInfo = null)` → 引数なし `()` に簡略化 (= 右 zone 上書き path を排除)。新 `UpdateBackupStatus` で右 zone 専用 API 提供。
+- `Manager/TonePrism_Manager.csproj`: `<Compile Include="BackupSettingsForm.*">` 2 行削除。
+
+bump 判断: 新機能追加 (UI / API signature 変更) を含むため SemVer minor (0.12.1 → 0.13.0)。pre-1.0 minor bump 規約 (AGENTS.md) と整合。配布物 layout / DB schema / 既存 user data は無変更、user data migration 不要。
+
 ### [Manager v0.12.1] - 2026-05-19
 
 #### Changed (#170 — copyright metadata sync + 設定タブ UI 追加)
