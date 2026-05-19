@@ -1672,16 +1672,16 @@ milestone marker pattern: `[Step N/M]` ヘッダ / `Manager spawn` 結果 / `Man
 
 **2. LogSectionPanel を tab 式 component selector に変更** (`Manager/Controls/LogSectionPanel.{cs,Designer.cs}`):
 
-旧 `chkManager` / `chkLauncher` checkbox 式 component filter を **`TabControl` (3 tab: Launcher / Manager / Monitor)** に置換。tab 切替で grid に表示する component が切り替わる。default tab は Launcher (= 部員が普段 trouble shoot する対象が Launcher 側であろう想定、後で変更余地あり)。
+旧 `chkManager` / `chkLauncher` checkbox 式 component filter を **`TabControl` (Launcher / Manager の 2 tab)** に置換。tab 切替で grid に表示する component が切り替わる。default tab は Launcher (= 部員が普段 trouble shoot する対象が Launcher 側であろう想定、後で変更余地あり)。Monitor は SPEC では 3 component 収束方針の 1 つだが、Monitor 実装着手前なので tab UI には現段階で含めない (= 動かないボタンを表に出さない方針)、`FileNameRegex` のみ将来 readiness で `monitor` 含む。
 
 設計判断:
-- **3 component 収束方針**: Manager GUI で見える log source は Launcher / Manager / Monitor の 3 component に固定、Companion 用 tab は追加しない (= SPEC §3.6 Companions ログ管理規約)。将来 Monitor 実装で tab を有効化、`FileNameRegex` も `monitor` を含めて readiness 確保。
+- **3 component 収束方針**: Manager GUI で見える log source は Launcher / Manager / Monitor の 3 component に固定、Companion 用 tab は追加しない (= SPEC §3.6 Companions ログ管理規約)。Monitor tab は Monitor component 実装着手と同 PR で UI 追加予定。
 - **checkbox 撤廃の妥当性**: 旧 checkbox 「両方 ON」状態は grid 上で Manager session と Launcher session の file 一覧を時刻順に並べていたが、log line レベルでの時系列 cross-correlate 機能は存在しなかった (= `RenderContent` は 1 file の内容のみ表示)。tab 式に切替えても失う UX なし、3 component 収束が UI 上に明示される利得のみ。
 - **`HasAnyMatchingLine` / `UpdateRowGreyout` / `UpdateFileCountLabel` から component filter logic を削除** (= tab で既に絞込済)、code path 簡素化。
 
 #### Changed
 
-- `Manager/Controls/LogSectionPanel.Designer.cs`: `chkManager` / `chkLauncher` field 削除、`tabComponent` (TabControl) + `tabLauncher` / `tabManager` / `tabMonitor` (TabPage) field 追加。layout は `tabComponent` を最上端 (Dock=Top) に配置、既存 `toolStrip` + `splitContainer` は下に shift。
+- `Manager/Controls/LogSectionPanel.Designer.cs`: `chkManager` / `chkLauncher` field 削除、`tabComponent` (TabControl) + `tabLauncher` / `tabManager` (TabPage、Monitor は未追加) field 追加。layout は `tabComponent` を最上端 (Dock=Top) に配置、既存 `toolStrip` + `splitContainer` は下に shift。
 - `Manager/Controls/LogSectionPanel.cs`: `FileNameRegex` を `(?<component>manager|launcher|monitor)` に拡張 (= 将来 Monitor file が落ちてきた時に parse 可能、現状 file 不在で実害なし)、`_currentComponent` field + `tabComponent_SelectedIndexChanged` handler 追加、`ScanLogFiles(logsRoot)` を `ScanLogFiles(logsRoot, component)` に signature 変更。
 - `Manager/MainForm.cs`: `MainForm_Load` の `TryShowUpdateCompletedDialog()` 直後に `Services.UpdaterLogAbsorber.AbsorbPendingLogs()` 呼出を追加。
 - `Manager/TonePrism_Manager.csproj`: `Services\UpdaterLogAbsorber.cs` の `<Compile Include>` 追加。

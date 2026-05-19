@@ -20,7 +20,6 @@ namespace TonePrism.Manager.Controls
             this.tabComponent = new System.Windows.Forms.TabControl();
             this.tabLauncher = new System.Windows.Forms.TabPage();
             this.tabManager = new System.Windows.Forms.TabPage();
-            this.tabMonitor = new System.Windows.Forms.TabPage();
             this.toolStrip = new System.Windows.Forms.Panel();
             this.row2Panel = new System.Windows.Forms.Panel();
             this.txtSearch = new System.Windows.Forms.TextBox();
@@ -174,7 +173,6 @@ namespace TonePrism.Manager.Controls
             //
             this.tabComponent.Controls.Add(this.tabLauncher);
             this.tabComponent.Controls.Add(this.tabManager);
-            this.tabComponent.Controls.Add(this.tabMonitor);
             this.tabComponent.Dock = System.Windows.Forms.DockStyle.Top;
             this.tabComponent.Location = new System.Drawing.Point(0, 0);
             this.tabComponent.Name = "tabComponent";
@@ -194,11 +192,6 @@ namespace TonePrism.Manager.Controls
             //
             this.tabManager.Name = "manager";
             this.tabManager.Text = "Manager";
-            //
-            // tabMonitor
-            //
-            this.tabMonitor.Name = "monitor";
-            this.tabMonitor.Text = "Monitor";
             //
             // splitContainer (横割り: 上=ファイル一覧 / 下=本文)
             //
@@ -279,7 +272,6 @@ namespace TonePrism.Manager.Controls
         private System.Windows.Forms.TabControl tabComponent;
         private System.Windows.Forms.TabPage tabLauncher;
         private System.Windows.Forms.TabPage tabManager;
-        private System.Windows.Forms.TabPage tabMonitor;
         private System.Windows.Forms.Label lblSearch;
         private System.Windows.Forms.TextBox txtSearch;
         private System.Windows.Forms.Label lblFileCount;
