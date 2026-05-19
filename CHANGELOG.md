@@ -13,6 +13,29 @@
 
 リリース zip 全体に付与する独立バージョン。GitHub Releases の本文として `Release.ps1` がこのセクションを抜き出して使う。エンドユーザー（来場スタッフ / 顧問の先生 / 部員）向けの **summary** を書く。技術詳細は `## Launcher` / `## Manager` / `## Release Tooling` 等の別セクションを参照。詳細仕様は [SPECIFICATION.md §3.7.7](SPECIFICATION.md) を参照。
 
+### [Bundle v0.6.0] - 2026-05-19
+
+**Manager の設定タブを大幅に整理 + 自動バックアップの進捗を画面右下に表示** (#170)。Bundle v0.5.0 受入テストで見つかった 5 つの UX / 安全性課題をまとめて改善。
+
+主な変更:
+- **自動バックアップの進捗が画面右下に表示** されるようになりました (例: 「✓ 自動バックアップ完了: toneprism_20260519_120000.db」、完了 7 秒で自動消去)。旧仕様は左下「ゲーム数: N 件」が一時的に上書きされて消える挙動だったのを、左右 2 zone に分離して同時表示できるように。
+- **設定タブを大幅整理** — 「バックアップ」「ログ」「データベース」「バージョン情報」の 4 section 構成に再編。これまで個別 dialog や hardcode だった以下の設定がすべて設定タブから一画面で変更可能に:
+  - バックアップ: 保存先 / 自動間隔 (時間 or 日 単位選択) / 保持世代数 / **自動バックアップの ON/OFF**
+  - ログ: 保存先 / 保存日数 (1-365 日)
+- **アップデート画面のリリースノート表示が正確に**: GitHub から最新版情報が取れない時 (= 通信エラー / API 利用上限) でも、現在実行中の Bundle 版の release notes を `<install>/CHANGELOG.md` から正しく表示するように (= 旧仕様は古いキャッシュの release notes が「これから適用される変更」として誤表示)。
+- **「データベースリセット」ボタンを赤色** で表示し、誤操作リスク低減。
+
+その他の改善:
+- 自動アップデート check が現在版 (= キャッシュより新しい版) を検出した時、TTL (6 時間) 内でも GitHub に再問い合わせするように (= 「最新版 v0.4.0」表示が古いまま固定化される問題を解消)
+- アップデート関連 / 設定変更の race safety 強化 (= LAN 上の他 PC が同時操作中の DB write を CheckBeforeWrite で検出)
+
+- Launcher: 変更なし (v0.6.1 同梱)
+- Manager: v0.12.1 → v0.13.0 (UI 大幅 brushup、5 課題 bundle + 4 round review 対応)
+- Updater: 変更なし (v0.2.1 同梱)
+- Release Tooling: 変更なし (v0.1.19 同梱)
+
+**[v0.5.0 をインストール済みの方へ]** Manager の「アップデート」タブから「今すぐアップデート」で適用してください (= Bundle v0.5.0 で自動アップデート復帰済)。**ゲームデータ (DB、ゲーム、バックアップ、回答、ログ) は自動で保護されます**。
+
 ### [Bundle v0.5.0] - 2026-05-19
 
 **プロジェクト名称を `ゲームセンターTONE Prism (GCTonePrism)` → `TonePrism` に統一** (#168)。他校・他団体への配布も視野に入れた汎用化 rename で、**exe filename / DB filename / namespace / UI 文字列 / repo URL まで全件 sync**:
@@ -2924,6 +2947,7 @@ Release.ps1 の $FooterSentinel 定数も同期更新すること。
 
 <!-- GCTONEPRISM-CHANGELOG-FOOTER-BEGIN-V1 -->
 
+[Bundle v0.6.0]: https://github.com/ken1208git/TonePrism/releases/tag/v0.6.0
 [Bundle v0.5.0]: https://github.com/ken1208git/TonePrism/releases/tag/v0.5.0
 [Bundle v0.4.0]: https://github.com/ken1208git/TonePrism/releases/tag/v0.4.0
 [Bundle v0.3.1]: https://github.com/ken1208git/TonePrism/releases/tag/v0.3.1
