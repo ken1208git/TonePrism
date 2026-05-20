@@ -29,7 +29,7 @@ namespace TonePrism.Manager.Services
     ///
     /// 呼出箇所:
     /// 1. `Program.Main` の Logger.Initialize 直後 (= 毎起動時 sync、user が直接 file を削除した case を回復)
-    /// 2. `SettingsSectionPanel.SaveLogsRootIfChanged` 内 (= UI 変更時即時 sync、Launcher 次回起動で picked up)
+    /// 2. `SettingsSectionPanel.ApplyLogSection` 内 (= UI 変更時即時 sync、Launcher 次回起動で picked up)
     ///
     /// 例外は内部で握り潰し、Manager 起動 / UI 操作を阻害しない (= SPEC §3.6 「Logger 自身の障害は
     /// 握り潰す」と同じ defensive 規約)。
@@ -50,7 +50,7 @@ namespace TonePrism.Manager.Services
         /// 等で window 衝突確率が無視できない場合、別 PR で `MoveFileEx` P/Invoke 化を検討すべき。
         ///
         /// **multi-Manager race による transient mismatch (R4 review H-2)**: LAN で複数 PC の Manager が
-        /// ほぼ同時に `SaveLogsRootIfChanged` 通過 (= CheckBeforeWrite 通過後 race) した場合、SQLite write
+        /// ほぼ同時に `ApplyLogSection` 通過 (= CheckBeforeWrite 通過後 race) した場合、SQLite write
         /// → bridge write の順で **caller の local 値を書出**ているため、(1) PC-A SetString → (2) PC-B
         /// SetString → (3) PC-A WriteCurrentLogsRoot(自分の値) → (4) PC-B WriteCurrentLogsRoot(自分の値) の
         /// interleave で bridge file 内容と SQLite 最新値が transient に食い違う path がある。**Self-heal**:
@@ -59,7 +59,7 @@ namespace TonePrism.Manager.Services
         /// 受容、Bridge を SQLite re-read 化は別 PR で検討。
         ///
         /// **UI 経路の silent swallow (R4 review L-3)**: 全例外を catch → `Logger.Warn` 試行のみで return void。
-        /// `SaveLogsRootIfChanged` の UI save 経路で bridge write 失敗時、user は「保存成功」UI feedback を
+        /// `ApplyLogSection` の UI save 経路で bridge write 失敗時、user は「保存成功」UI feedback を
         /// 受けるが Launcher は次回 Manager 再起動まで新値を見ない (= self-heal するが timing 遅延)。
         /// 本 PR では受容、UI に dialog 通知する強化は別 PR で検討 (= 当面 Logger trail で十分)。
         /// </summary>

@@ -396,7 +396,7 @@ namespace TonePrism.Manager.Controls
         /// <summary>
         /// (#201) バックアップ section の「適用」: CheckBeforeWrite → 5 key を DB flush → dirty clear。
         /// 戻り値: true = 適用成功 / false = CheckBeforeWrite Cancel or DB 書込失敗 (= dirty 維持)。
-        /// 間隔は `_prevIntervalUnit` の factor で display → hours に換算して保存 (= 旧 SaveBackupIntervalDirect logic)。
+        /// 間隔は `_prevIntervalUnit` の factor で display → hours に換算して保存 (= 換算 logic は旧 immediate-save 実装から移植)。
         /// </summary>
         private bool ApplyBackupSection()
         {

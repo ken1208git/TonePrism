@@ -1675,6 +1675,36 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.16.0] - 2026-05-20
+
+#### Added (#201 — 設定タブ editing model を「適用 / 元に戻す」式に改修)
+
+設定タブのログ / バックアップ section を **immediate save (= control 変更ごとに即 DB 保存 + LAN 重複起動確認 dialog)** から **per-section「適用 / 元に戻す」式 (commit-on-Apply)** に改修。
+
+**UI** (`SettingsSectionPanel.Designer.cs`):
+- grpLog / grpBackup 各々の末尾に「適用」「元に戻す」ボタン + 「● 未保存の変更があります」マーカー (DarkOrange) を追加。初期状態はマーカー hidden + ボタン disabled。
+
+**editing model** (`SettingsSectionPanel.cs`):
+- **「dirty flag + UI-is-buffer」モデル**: 別 buffer dict を持たず、UI control 自身が pending 値を保持。control 変更は即 DB 保存せず `SetXxxSectionDirty(true)` で dirty flag + マーカー + ボタン enable。
+- TextBox.Leave は直前 save 値と異なる時のみ dirty mark (= no-op Leave で未保存マーカーが誤点灯しない)。
+- UI-internal interaction は即時維持 (DB write しない): 自動バックアップ checkbox の interval section enable/disable、間隔単位の hours↔display 換算 + Max 切替。
+- **「適用」** (`ApplyLogSection` / `ApplyBackupSection`): validate (ログは絶対 path check) → `CheckBeforeWrite` **1 回** → DB flush → 副作用 (ログは `launcher_logs_root.json` 伝搬) → dirty clear。
+- **「元に戻す」** (`RevertLogSection` / `RevertBackupSection`): 既存 `LoadLogSettings` / `LoadBackupSettings` を再利用して DB 値を再読込 (= DB write しないため CheckBeforeWrite 不要)。
+- **未保存ガード** (`HasUnsavedChanges` / `PromptAndResolveUnsavedChanges` public API): tab 切替 / フォーム終了時に未保存があれば 3-button 確認 dialog (保存 / 破棄 / キャンセル)。「保存」は Apply を呼ぶ (= そこで CheckBeforeWrite)、「破棄」は Revert、「キャンセル」は留まる。
+
+**MainForm hook** (`MainForm.cs`):
+- `tabControl1.Selecting` を新規 subscribe、設定タブ「から」別タブへ遷移時のみ未保存判定 → user「キャンセル」で `e.Cancel=true` で切替中断。
+- `MainForm_FormClosing` 冒頭に未保存判定 → user「キャンセル」で `e.Cancel=true` で終了中断 (= 既存コメントが予期していた設計)。
+
+#### Changed
+
+- **CheckBeforeWrite (LAN 重複起動確認) の発火を「変更ごと (最大 7 回)」→「section 適用ごと 1 回」に集約**。検出範囲 (同 PC Launcher / 他 PC Manager・Launcher) は不変、発火タイミングのみ変更。同 PC の Manager 2 個目は従来通り起動時 Named Mutex で物理 block。
+- 旧即時保存 method (`SaveLogsRootIfChanged` / `SaveBackupDestIfChanged` / `SaveBackupIntervalWithGuard` / `SaveBackupIntervalDirect`) を撤廃、Apply / Revert / dirty-mark handler に再構成。
+
+#### Bump 根拠 (v0.15.0 → v0.16.0)
+
+SemVer pre-1.0 minor bump: editing model の新機能追加 (= 適用 / 元に戻す + 未保存ガード)。SPEC §3.8.2 に commit-on-Apply 追記で SPEC 側も v1.10.33 → v1.10.34 を同 PR で bump。
+
 ### [Manager v0.15.0] - 2026-05-20
 
 #### Added (#201 — Unified logs root path 設定)
