@@ -30,6 +30,9 @@ namespace TonePrism.Manager.Controls
             this.lblBackupRetention = new System.Windows.Forms.Label();
             this.numBackupRetention = new System.Windows.Forms.NumericUpDown();
             this.lblBackupRetentionUnit = new System.Windows.Forms.Label();
+            this.lblBackupUnsaved = new System.Windows.Forms.Label();
+            this.btnBackupRevert = new System.Windows.Forms.Button();
+            this.btnBackupApply = new System.Windows.Forms.Button();
             this.grpLog = new System.Windows.Forms.GroupBox();
             this.lblLogDest = new System.Windows.Forms.Label();
             this.txtLogsRoot = new System.Windows.Forms.TextBox();
@@ -39,6 +42,9 @@ namespace TonePrism.Manager.Controls
             this.numLogRetention = new System.Windows.Forms.NumericUpDown();
             this.lblLogRetentionUnit = new System.Windows.Forms.Label();
             this.lblLogRetentionNote = new System.Windows.Forms.Label();
+            this.lblLogUnsaved = new System.Windows.Forms.Label();
+            this.btnLogRevert = new System.Windows.Forms.Button();
+            this.btnLogApply = new System.Windows.Forms.Button();
             this.grpDatabase = new System.Windows.Forms.GroupBox();
             this.btnResetDatabase = new System.Windows.Forms.Button();
             this.grpInfo = new System.Windows.Forms.GroupBox();
@@ -65,9 +71,12 @@ namespace TonePrism.Manager.Controls
             this.grpLog.Controls.Add(this.numLogRetention);
             this.grpLog.Controls.Add(this.lblLogRetentionUnit);
             this.grpLog.Controls.Add(this.lblLogRetentionNote);
-            this.grpLog.Location = new System.Drawing.Point(20, 290);
+            this.grpLog.Controls.Add(this.lblLogUnsaved);
+            this.grpLog.Controls.Add(this.btnLogRevert);
+            this.grpLog.Controls.Add(this.btnLogApply);
+            this.grpLog.Location = new System.Drawing.Point(20, 325);
             this.grpLog.Name = "grpLog";
-            this.grpLog.Size = new System.Drawing.Size(760, 190);
+            this.grpLog.Size = new System.Drawing.Size(760, 205);
             this.grpLog.TabIndex = 0;
             this.grpLog.TabStop = false;
             this.grpLog.Text = "ログ";
@@ -141,6 +150,40 @@ namespace TonePrism.Manager.Controls
             this.lblLogRetentionNote.TabIndex = 7;
             this.lblLogRetentionNote.Text = "保存先の変更は次回 Manager / Launcher 起動時、保存日数の変更は次回 Manager 起動時に反映されます。";
             //
+            // lblLogUnsaved (未保存マーカー、初期 hidden)
+            //
+            this.lblLogUnsaved.AutoSize = true;
+            this.lblLogUnsaved.ForeColor = System.Drawing.Color.DarkOrange;
+            this.lblLogUnsaved.Location = new System.Drawing.Point(20, 172);
+            this.lblLogUnsaved.Size = new System.Drawing.Size(180, 15);
+            this.lblLogUnsaved.TabIndex = 8;
+            this.lblLogUnsaved.Text = "● 未保存の変更があります";
+            this.lblLogUnsaved.Visible = false;
+            //
+            // btnLogRevert (元に戻す、初期 disabled)
+            //
+            this.btnLogRevert.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnLogRevert.Enabled = false;
+            this.btnLogRevert.Location = new System.Drawing.Point(550, 166);
+            this.btnLogRevert.Name = "btnLogRevert";
+            this.btnLogRevert.Size = new System.Drawing.Size(90, 28);
+            this.btnLogRevert.TabIndex = 9;
+            this.btnLogRevert.Text = "元に戻す";
+            this.btnLogRevert.UseVisualStyleBackColor = true;
+            this.btnLogRevert.Click += new System.EventHandler(this.btnLogRevert_Click);
+            //
+            // btnLogApply (適用、初期 disabled)
+            //
+            this.btnLogApply.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnLogApply.Enabled = false;
+            this.btnLogApply.Location = new System.Drawing.Point(650, 166);
+            this.btnLogApply.Name = "btnLogApply";
+            this.btnLogApply.Size = new System.Drawing.Size(90, 28);
+            this.btnLogApply.TabIndex = 10;
+            this.btnLogApply.Text = "適用";
+            this.btnLogApply.UseVisualStyleBackColor = true;
+            this.btnLogApply.Click += new System.EventHandler(this.btnLogApply_Click);
+            //
             // grpBackup (top、バックアップ保存先 + 自動有効化 + 自動間隔 + 単位 + 世代数)
             //
             this.grpBackup.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top
@@ -158,9 +201,12 @@ namespace TonePrism.Manager.Controls
             this.grpBackup.Controls.Add(this.lblBackupRetention);
             this.grpBackup.Controls.Add(this.numBackupRetention);
             this.grpBackup.Controls.Add(this.lblBackupRetentionUnit);
+            this.grpBackup.Controls.Add(this.lblBackupUnsaved);
+            this.grpBackup.Controls.Add(this.btnBackupRevert);
+            this.grpBackup.Controls.Add(this.btnBackupApply);
             this.grpBackup.Location = new System.Drawing.Point(20, 20);
             this.grpBackup.Name = "grpBackup";
-            this.grpBackup.Size = new System.Drawing.Size(760, 250);
+            this.grpBackup.Size = new System.Drawing.Size(760, 295);
             this.grpBackup.TabIndex = 0;
             this.grpBackup.TabStop = false;
             this.grpBackup.Text = "バックアップ";
@@ -267,13 +313,47 @@ namespace TonePrism.Manager.Controls
             this.lblBackupRetentionUnit.TabIndex = 11;
             this.lblBackupRetentionUnit.Text = "個 (これを超えた古いバックアップは自動削除されます)";
             //
+            // lblBackupUnsaved (未保存マーカー、初期 hidden)
+            //
+            this.lblBackupUnsaved.AutoSize = true;
+            this.lblBackupUnsaved.ForeColor = System.Drawing.Color.DarkOrange;
+            this.lblBackupUnsaved.Location = new System.Drawing.Point(20, 262);
+            this.lblBackupUnsaved.Size = new System.Drawing.Size(180, 15);
+            this.lblBackupUnsaved.TabIndex = 12;
+            this.lblBackupUnsaved.Text = "● 未保存の変更があります";
+            this.lblBackupUnsaved.Visible = false;
+            //
+            // btnBackupRevert (元に戻す、初期 disabled)
+            //
+            this.btnBackupRevert.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnBackupRevert.Enabled = false;
+            this.btnBackupRevert.Location = new System.Drawing.Point(550, 256);
+            this.btnBackupRevert.Name = "btnBackupRevert";
+            this.btnBackupRevert.Size = new System.Drawing.Size(90, 28);
+            this.btnBackupRevert.TabIndex = 13;
+            this.btnBackupRevert.Text = "元に戻す";
+            this.btnBackupRevert.UseVisualStyleBackColor = true;
+            this.btnBackupRevert.Click += new System.EventHandler(this.btnBackupRevert_Click);
+            //
+            // btnBackupApply (適用、初期 disabled)
+            //
+            this.btnBackupApply.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnBackupApply.Enabled = false;
+            this.btnBackupApply.Location = new System.Drawing.Point(650, 256);
+            this.btnBackupApply.Name = "btnBackupApply";
+            this.btnBackupApply.Size = new System.Drawing.Size(90, 28);
+            this.btnBackupApply.TabIndex = 14;
+            this.btnBackupApply.Text = "適用";
+            this.btnBackupApply.UseVisualStyleBackColor = true;
+            this.btnBackupApply.Click += new System.EventHandler(this.btnBackupApply_Click);
+            //
             // grpDatabase (一番下手前、destructive)
             //
             this.grpDatabase.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top
             | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
             this.grpDatabase.Controls.Add(this.btnResetDatabase);
-            this.grpDatabase.Location = new System.Drawing.Point(20, 500);
+            this.grpDatabase.Location = new System.Drawing.Point(20, 540);
             this.grpDatabase.Name = "grpDatabase";
             this.grpDatabase.Size = new System.Drawing.Size(760, 80);
             this.grpDatabase.TabIndex = 2;
@@ -299,7 +379,7 @@ namespace TonePrism.Manager.Controls
             | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
             this.grpInfo.Controls.Add(this.lblVersionInfo);
-            this.grpInfo.Location = new System.Drawing.Point(20, 600);
+            this.grpInfo.Location = new System.Drawing.Point(20, 640);
             this.grpInfo.Name = "grpInfo";
             this.grpInfo.Size = new System.Drawing.Size(760, 200);
             this.grpInfo.TabIndex = 3;
@@ -324,7 +404,7 @@ namespace TonePrism.Manager.Controls
             this.Controls.Add(this.grpDatabase);
             this.Controls.Add(this.grpInfo);
             this.Name = "SettingsSectionPanel";
-            this.Size = new System.Drawing.Size(800, 830);
+            this.Size = new System.Drawing.Size(800, 860);
             this.grpBackup.ResumeLayout(false);
             this.grpBackup.PerformLayout();
             this.grpLog.ResumeLayout(false);
@@ -353,6 +433,9 @@ namespace TonePrism.Manager.Controls
         private System.Windows.Forms.Label lblBackupRetention;
         private System.Windows.Forms.NumericUpDown numBackupRetention;
         private System.Windows.Forms.Label lblBackupRetentionUnit;
+        private System.Windows.Forms.Label lblBackupUnsaved;
+        private System.Windows.Forms.Button btnBackupRevert;
+        private System.Windows.Forms.Button btnBackupApply;
         private System.Windows.Forms.GroupBox grpLog;
         private System.Windows.Forms.Label lblLogDest;
         private System.Windows.Forms.TextBox txtLogsRoot;
@@ -362,6 +445,9 @@ namespace TonePrism.Manager.Controls
         private System.Windows.Forms.NumericUpDown numLogRetention;
         private System.Windows.Forms.Label lblLogRetentionUnit;
         private System.Windows.Forms.Label lblLogRetentionNote;
+        private System.Windows.Forms.Label lblLogUnsaved;
+        private System.Windows.Forms.Button btnLogRevert;
+        private System.Windows.Forms.Button btnLogApply;
         private System.Windows.Forms.GroupBox grpDatabase;
         private System.Windows.Forms.Button btnResetDatabase;
         private System.Windows.Forms.GroupBox grpInfo;
