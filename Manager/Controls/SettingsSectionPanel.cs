@@ -23,6 +23,12 @@ namespace TonePrism.Manager.Controls
         // (#201, v0.16.0) editing model = commit-on-Apply。control 変更は即 DB 保存せず本 dirty flag を
         // 立てるだけ、per-section「適用」ボタンで CheckBeforeWrite 1 回 + DB flush、「元に戻す」で
         // Load* 再読込。tab 切替 / フォーム終了時に dirty なら 3-button 確認 dialog (= MainForm が呼ぶ)。
+        //
+        // **dirty の意味 (R1 review Low-2)**: 「DB と差分あり」ではなく **「user が control を touch 済」**。
+        // numeric / checkbox / combo は値を DB 値に戻しても dirty が解除されない (= ON→OFF→ON トグルで
+        // 実効値が DB と一致しても dirty 維持)。TextBox 系のみ `_lastSaved*` 比較で no-op Leave を除外。
+        // commit-on-Apply モデルでは「touched = 適用候補」として扱う一般的な許容挙動、baseline 値比較を
+        // 全 control に足す cost を回避。「元に戻す」で確実に dirty clear できるので user は脱出可能。
         private bool _logSectionDirty;
         private bool _backupSectionDirty;
 
@@ -553,6 +559,12 @@ namespace TonePrism.Manager.Controls
             // (Codex P2 #121: 警告を例外で表現すると ProcessingDialog で Abort 扱いされて
             //  リフレッシュフックがスキップされ、UI が古いまま「失敗」と誤報告されていたため)
             UpdateVersionInfo();
+            // (#201 R1 review Low-3) DB リセットで settings は全て default に戻るため、ログ / バックアップ
+            // section も再ロードして UI を新 DB 値に同期 + dirty clear。commit-on-Apply モデルでは UI が
+            // pending buffer なので、再ロードしないと stale 値表示 + (dirty 状態だった場合) 次回「適用」で
+            // 新規 DB に stale pending を書込む path があった。LoadXxxSettings 末尾で SetXxxSectionDirty(false)。
+            LoadLogSettings();
+            LoadBackupSettings();
             DatabaseReset?.Invoke();
 
             // 退避フォルダ削除に失敗した場合は再試行 UI を出す (#122)

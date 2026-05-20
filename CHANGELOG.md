@@ -1701,6 +1701,12 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **CheckBeforeWrite (LAN 重複起動確認) の発火を「変更ごと (最大 7 回)」→「section 適用ごと 1 回」に集約**。検出範囲 (同 PC Launcher / 他 PC Manager・Launcher) は不変、発火タイミングのみ変更。同 PC の Manager 2 個目は従来通り起動時 Named Mutex で物理 block。
 - 旧即時保存 method (`SaveLogsRootIfChanged` / `SaveBackupDestIfChanged` / `SaveBackupIntervalWithGuard` / `SaveBackupIntervalDirect`) を撤廃、Apply / Revert / dirty-mark handler に再構成。
 
+#### Round 1 review fix (Medium-1 + Low-2 + Low-3)
+
+- **Medium-1**: `Launcher/scripts/logger.gd:152` のコメントに旧 method 名 `SaveLogsRootIfChanged` が残置していた sweep 漏れ (= C# のみ Grep して `.gd` を漏らした) を `ApplyLogSection` に修正。`SPECIFICATION.md` v1.10.33 履歴 entry + 本 CHANGELOG v0.15.0 entry の同名参照は当時 (= PR #202 時点) の名前を記録した履歴のため残置。
+- **Low-2**: `_logSectionDirty` / `_backupSectionDirty` の意味を「DB と差分あり」ではなく「user が control を touch 済」と field docstring で明示。numeric / checkbox / combo は値を DB 値に戻しても dirty 維持 (= TextBox 系のみ `_lastSaved*` 比較で no-op 除外、非対称) が commit-on-Apply の一般的許容挙動である旨を明文化、「元に戻す」で確実に脱出可能。
+- **Low-3**: DB リセット完了直後に `LoadLogSettings` / `LoadBackupSettings` を呼んでログ / バックアップ section を新 DB (= default) 値に再ロード + dirty clear。commit-on-Apply モデルでは UI が pending buffer のため、再ロードしないとリセット後も UI が stale 値表示 + (dirty 状態だった場合) 次回「適用」で新規 DB に stale pending を書込む path があった。
+
 #### Bump 根拠 (v0.15.0 → v0.16.0)
 
 SemVer pre-1.0 minor bump: editing model の新機能追加 (= 適用 / 元に戻す + 未保存ガード)。SPEC §3.8.2 に commit-on-Apply 追記で SPEC 側も v1.10.33 → v1.10.34 を同 PR で bump。
