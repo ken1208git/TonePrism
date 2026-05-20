@@ -1171,6 +1171,28 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.6.2] - 2026-05-20
+
+#### Added (#201 — Unified logs root path 設定の Launcher 側受信)
+
+Manager v0.15.0 で導入される `logs_root_path` setting (= 全 component 共通の親 logs root) を Launcher が受信して log dir を移設するための受信経路を追加。
+
+**実装** (`Launcher/scripts/logger.gd`):
+- `_open_log_directory_and_file` 内で project root 解決後、新 helper `_read_logs_root_from_responses(project_root)` を呼出
+- `<project_root>/responses/launcher_logs_root.json` を read、parse 成功 + `logs_root_path` field 非空なら `<custom_root>/launcher/` を log dir に使用
+- JSON 不在 / parse 失敗 / path 空 はすべて既存 default `<project_root>/logs/launcher/` に fallback、`push_warning` のみ + Launcher 起動は阻害しない
+- autoload 順序 (= Logger 最先頭) は維持、本 file read は DB 接続前で完結 (= SPEC §6.5 「Launcher は SQLite write しない」原則維持、read も SQLite ではなく drop file 経由)
+
+**Manager 側の SoT**: Manager v0.15.0 の `LauncherLogsRootBridge.WriteCurrentLogsRoot` が `responses/launcher_logs_root.json` を atomic write する (= SessionHeartbeat と同 pattern)、Manager UI 変更時 + Manager 起動時に file 更新。Launcher は本 PR で受信側 logic のみ実装、書出はしない (= unidirectional Manager → Launcher 設定伝搬)。
+
+**反映タイミング**: 次回 Launcher 起動時。Manager save 時に file は即時更新されるため、Launcher 再起動だけで反映 (Manager 再起動は不要)。
+
+**docstring**: Logger.gd 冒頭の保存先記述を unified semantic に書換え、Manager v0.15.0 との連動 + responses/ drop file pattern + SPEC §6.5 原則維持を明示。
+
+#### Bump 根拠 (v0.6.1 → v0.6.2)
+
+SemVer pre-1.0 patch bump: Launcher 単体 user 視点で UI 変化ゼロ、Manager 連動機能の Launcher 側 contribution は patch 慣例 (= PR #184 manager_sessions / PR #189 launcher heartbeat と同 pattern)。詳細は `## Manager v0.15.0` 参照。
+
 ### [Launcher v0.6.1] - 2026-05-19
 
 #### Changed (#170 — copyright metadata sync)
@@ -1652,6 +1674,115 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.15.0] - 2026-05-20
+
+#### Added (#201 — Unified logs root path 設定)
+
+設定タブ「ログ保存先」の semantic を **Manager-only** から **全 component (Manager / Launcher / Updater / 将来 Monitor) の unified parent root** に変更。設定 1 つで全 component のログを 1 つのフォルダにまとめて保存できるようになる。
+
+**新 setting `logs_root_path`** (`Manager/Services/SettingsKeys.cs`):
+- 空欄なら default `<install>/logs/`、絶対 path で指定すれば custom root
+- 指定先には `manager/` `launcher/` `updater/` (将来 `monitor/`) の subdir が**各 component の Logger によって自動作成**される
+- 旧 v0.14.0 の `log_destination_path` (Manager-only 直配置 semantic) は **auto-migrate で値を copy + DELETE**、旧 key は code から削除済 (= 1 semantic 維持)
+
+**Manager → Launcher path 伝搬** (`Manager/Services/LauncherLogsRootBridge.cs` 新規):
+- Manager は SQLite から読んだ `logs_root_path` 値を `<install>/responses/launcher_logs_root.json` に **atomic write** (= `<file>.tmp` → rename pattern、SessionHeartbeat と同 pattern)
+- 書出 timing: (1) Program.Main の Logger.Initialize 直後 (= 毎起動時 sync)、(2) SettingsSectionPanel.SaveLogsRootIfChanged 内 (= UI 変更時即時 sync)
+- Launcher Logger はこの JSON を autoload 最先頭 init 時 (= DB 接続前) に read して log dir を決定、SPEC §6.5「Launcher は SQLite write しない」原則を維持しつつ Manager 設定を反映 (= Launcher は file read のみで完結)
+
+**Auto-migrate + 一回限り MessageBox** (`Manager/Program.cs:ReadInitialLogSettingsWithMigration` + `Manager/Program.cs:WriteLogsRootMigrationSentinel` + `Manager/MainForm.cs:TryShowLogsRootMigratedDialog`):
+- v0.15.0 初回起動時に SQLite から旧 `log_destination_path` を読み、非空 + 新 `logs_root_path` 空なら value copy + 旧 key DELETE (= 1 transaction)
+- 完了時に `<install>/.logs_root_migrated` sentinel file を atomic write、内容に migration 前の旧値を embed
+- MainForm が sentinel 経由で部員向け subdir 構造説明 MessageBox を表示 + sentinel を削除 (= 次回起動以降は発火しない)
+- 文言は「これまでの設定値はそのまま引き継がれましたが、フォルダ構造が `<old_path>\manager\` `<old_path>\launcher\` `<old_path>\updater\` に変わります」のように subdir 構造を絵で示す
+
+**反映タイミング**:
+| 対象 | 動作 |
+|---|---|
+| Manager | 次回 Manager 起動時 (= Logger.Initialize / PathManager.LogsRootDirectory / LogSectionPanel.Initialize が起動時 1 回 set のため) |
+| Updater | 次回 Updater spawn 時 (= Manager が `--log-dir <PathManager.UpdaterLogDir>` を渡す、新 root 経由で computed) |
+| Launcher | 次回 Launcher 起動時 (= Manager save 時に `launcher_logs_root.json` 即時 sync、Manager 再起動不要) |
+
+**LAN 重複起動 check**: 既存 `SettingsSectionPanel` の immediate save + `CheckBeforeWrite` + rollback pattern を完全踏襲。本 PR では editing model (= immediate save vs commit-on-OK) 自体は変更しない、設定タブ editing model 全面書換えは別 issue (#201 内 note) で後続 PR にて着手予定。
+
+#### Changed
+
+- `Manager/Services/Logger.cs`: `Initialize(customLogDir)` の semantic 変更 (= 引数を「Manager log file 直配置 dir」から「親 logs root」に変更、内部で `manager/` subdir を append)。旧 v0.14.0 直配置 semantic は廃止。
+- `Manager/PathManager.cs`: `LogsRootDirectory` getter + `SetLogsRootDirectory(customRoot)` setter (= 起動時 1 回 set) 追加。`UpdaterLogDir` を hardcode (`<install>/logs/updater/`) から `<LogsRootDirectory>/updater/` 派生に変更。`LauncherLogDir` / `ManagerLogDir` / `MonitorLogDir` 派生 getter も新規追加。
+- `Manager/Controls/LogSectionPanel.cs`: `Initialize(projectRoot)` → `Initialize(logsRoot)` signature 変更 (= `Path.Combine(projectRoot, "logs")` の内部 append を削除、親 root 直接受取)。
+- `Manager/Controls/SettingsSectionPanel.{cs,Designer.cs}`: UI label を unified semantic 用に書換え (note 文に「Manager / Launcher / Updater 全ての保存先」「反映: Manager は次回起動時 / Launcher は次回起動時」を明示)、`_settingsRepo` の get/set key を `LogDestinationPath` → `LogsRootPath` に変更、save 成功時に `LauncherLogsRootBridge.WriteCurrentLogsRoot` 呼出。
+- `Manager/MainForm.cs`: `_logSectionPanel.Initialize(PathManager.BaseDirectory)` を `_logSectionPanel.Initialize(PathManager.LogsRootDirectory)` に変更。`TryShowUpdateCompletedDialog` の隣に `TryShowLogsRootMigratedDialog` 追加。
+- `Manager/Program.cs`: `Logger.Initialize` 前に `ReadInitialLogSettingsWithMigration` (= migration check + read + sentinel 書出を 1 SQLite 接続で統合した関数、R2 review Medium #4) 呼出 + `PathManager.SetLogsRootDirectory` + `LauncherLogsRootBridge.WriteCurrentLogsRoot` 呼出を追加。SELECT key は `log_destination_path` (legacy) / `logs_root_path` (current) / `log_retention_days` を 1 query で取得。
+
+#### Removed
+
+- 旧 setting key `log_destination_path` は SettingsRepository の get/set callsite から削除 (= 1 semantic 維持)。`SettingsKeys.LogDestinationPath` const は migration code 内 reference のみで残置 (= deprecated marker、docstring で migration 完了後の参照禁止を明示)。
+
+#### Round 6 review fix (Medium-1 + Low-1 + Low-2)
+
+- **Medium-1**: R4 M-2 で `SaveLogDestIfChanged` → `SaveLogsRootIfChanged` に rename した際の sweep 漏れを解消。現在状態を説明する docstring / SPEC / CHANGELOG 本文に旧名 `SaveLogDestIfChanged` が残置 (`LauncherLogsRootBridge.cs` 3 箇所 + SPEC v1.10.33 entry + CHANGELOG bridge timing 行) し、特に `LauncherLogsRootBridge.cs:32` の「呼出箇所」が読者を実在しないメソッド名へ誘導する forward pointer だった。`SaveLogsRootIfChanged` に統一。CHANGELOG の Round 2 Low #8 履歴記述のみ「R2 当時の名前、R4 M-2 で rename」と注記して残置 (= 現在状態 vs 履歴の区別明示で過剰 sweep 回避)。
+- **Low-1**: 絶対 path invariant の defense-in-depth を migration 経路に追加。旧 v0.14.0 UI の save 経路には IsPathRooted ガードが無かった (= 本 PR で新規追加) ため相対 path を持つ v0.14.0 install が存在しうる。migration で相対値をそのまま `logs_root_path` に copy すると「常に絶対 path」invariant が migration 経路だけ破れ Launcher が CWD 依存に倒れるため、`ReadInitialLogSettingsWithMigration` で legacyValue を `Path.IsPathRooted` 判定、相対なら value copy を skip + 旧 key DELETE のみ (= default 化、sentinel なし silent)。
+- **Low-2**: Launcher reader (`_read_logs_root_from_responses`) に `is_absolute_path()` 検証を defense-in-depth で追加。Manager 側 enforce (SaveLogsRootIfChanged + migration) を抜けた相対値 (= 手動 file 編集 / 旧 install 残置) が bridge file に載る path に備え、絶対 path でなければ warn + default fallback (= 既存 `["", msg]` 経路に乗せ session log にも転送)。
+
+#### Round 5 review fix (Medium-1 + Low-1 〜 Low-5)
+
+- **Medium-1**: `PathManager.SetLogsRootDirectory` の早期 throw による silent crash regression を解消。customRoot 空時に `Path.Combine(BaseDirectory, "logs")` を eager 評価していたため、broken install (= Manager.exe を `<install>/Manager/` 外起動 → BaseDirectory lazy 解決が `DirectoryNotFoundException`) で本 setter が mutex try-catch 外で uncaught throw → friendly MessageBox なしの silent crash になっていた。customRoot 空時は field を set せず getter の lazy default に委ねる形に変更、後続 `VerifyPaths` (= mutex try-catch 内) が DirectoryNotFoundException を friendly「起動エラー」MessageBox で拾う pre-PR 経路を維持。
+- **Low-1**: Launcher `_read_logs_root_from_responses` の bridge file 読込 warn が `push_warning` のみで Launcher session log に転送されない silent diagnostics loss を解消。warn は `_init_godot_log_tail` の baseline 記録前に発火するため godot.log baseline に飲まれて session log に来なかった。戻り値を `[path, warn_msg]` Array 化し、`_open_session_file` 完了後に `_initialize_logger` が `_write_safely("WARN", ...)` で session log に直書き (push_warning も保持で godot.log 冗長性も担保)。
+- **Low-2**: `LogSectionPanel.btnOpenLogFolder_Click` docstring の stale な `<install>/logs/` 表現を unified semantic (`_logsRoot` = 現在の logs root、default または custom) に sync (R4 M-2 rename の sweep 漏れ)。
+- **Low-3**: `btnLogBrowse_Click` / `btnBackupBrowse_Click` の `FolderBrowserDialog.SelectedPath` set を try-catch で囲み、textbox にゴミ値 (= 無効 path / 構文不正) が残る state で「参照...」押下時の `ArgumentException` crash path を予防 (= 失敗時は dialog を default location で開く)。
+- **Low-4**: `SaveLogsRootIfChanged` に `Path.IsPathRooted` validation を追加。相対 path (`logs\custom`) / traverse (`..\elsewhere`) を textbox 直接入力された場合、Manager Logger は CWD 相対で `Directory.CreateDirectory`、Launcher は `path_join` で CWD 依存の予測不能 path に倒れるため、MessageBox + rollback で reject (= docstring「絶対 path」制約を code enforce)。
+- **Low-5**: `LauncherLogsRootBridge` docstring に `schema_version` field の forward-compat 意図 (= 将来 v2 format break 時の Launcher 側 gating 用予約 field、現状 v1 固定で reader 未参照、gating guard は別 issue) を明文化。
+
+#### Round 4 review fix (H-1 + H-2 + M-1 + M-2 + M-3 + M-4 + L-1 + L-2 + L-3 + L-4)
+
+- **H-1**: SPEC §3.6「既知制約」fence を 3 経路 (Logger fallback + Manager 側 bridge file 書出 + Launcher 側 bridge file 読込) に拡張。dev 環境 (`.git` 直下起動) で bridge IPC が silent に Launcher に届かない path も明文化。
+- **H-2**: `WriteCurrentLogsRoot` docstring に「multi-Manager race による transient mismatch」path を追記。LAN で複数 Manager が CheckBeforeWrite 通過後の interleave で bridge file 内容と SQLite 最新値が transient に食い違う、次回 Manager 起動の Program.Main で self-heal、Bridge を SQLite re-read 化は別 PR で検討。
+- **M-1**: `EscapeJsonString` 2 callsite (`Program.cs` + `LauncherLogsRootBridge.cs`) の重複を `Services/JsonEscape.cs` (新 helper) に集約。将来 schema 拡張 (Unicode escape 等) で片方だけ更新する silent drift を予防。
+- **M-2**: `SettingsSectionPanel` 内 control / field / method 名を `LogDest*` → `LogsRoot*` に rename (`txtLogsRoot` / `lblLogsRootHint` / `_lastSavedLogsRoot` / `SaveLogsRootIfChanged` / `TxtLogsRoot_Leave`)。UI hint / `SettingsKeys.LogsRootPath` / CHANGELOG が新 semantic に揃った状態で内部 control 名のみ旧 semantic 残置だった drift を解消、後続 #201 PR の editing model 全面書換え時の戻り作業を予防。
+- **M-3**: csproj `<Compile>` 順序 alphabetical 違反訂正 (`Services\LauncherLogsRootBridge.cs` を `Services\ImagePreviewHelper.cs` と `Services\LauncherSessionService.cs` の間に移動 + `Services\JsonEscape.cs` も alphabetical 位置に追加)。
+- **M-4**: `WriteLogsRootMigrationSentinel` docstring に「tx commit 成功 + sentinel 書出前 crash で dialog 永久不発火」path を fence。発生確率は μs オーダーだが silent failure path として明示、recovery 経路 (= sentinel pre-write pattern) は別 PR で検討。
+- **L-1**: Program.Main コメント「SetLogsRootDirectory は immutable 保証 (= 2 回目以降 no-op)」を「2 回目以降は `InvalidOperationException` で fail-fast」に R2 M-5 throw 化と sync 訂正。
+- **L-2**: `SettingsKeys.cs` 冒頭 docstring に「SQL literal 埋込制約: const 値は alphanumeric + underscore のみ許容」規約を明文化、`'` 含めると SQL 構文 break + injection hazard を予防。
+- **L-3**: `WriteCurrentLogsRoot` docstring に「UI 経路の silent swallow」path を追記。`SaveLogsRootIfChanged` 経路で bridge write 失敗時、user は「保存成功」UI feedback 受けるが Launcher は次回 Manager 再起動まで新値を見ない self-heal 遅延、本 PR では受容 + UI dialog 通知強化は別 PR で検討。
+- **L-4**: `TryShowLogsRootMigratedDialog` 内で `migratedFrom = migratedFrom.TrimEnd('\\', '/')` 正規化を追加。FolderBrowserDialog の `SelectedPath` 末尾 `\` 込み値で dialog 本文に `D:\logs\\` の `\\` 混在表示が出る cosmetic 問題を予防。
+
+#### Round 3 review fix (Critical-1 + High-1 + High-2 + Medium-1 + Medium-2 + Medium-3 + Low-1 + Low-2) — 整合性 sweep
+
+R2 round で fix した内容と矛盾する docstring / CHANGELOG / SPEC が他箇所に残っていた整合性問題を一括 sweep:
+
+- **Critical-1**: MainForm.cs:953-954 の `TryShowLogsRootMigratedDialog` docstring が「sentinel JSON schema: `{"migrated_from", "migrated_at"}`」と snake_case で書かれていた R2 fix 漏れを camelCase (`migratedFrom` / `migratedAt`) に書換え。R2 review Critical #1 と完全に同 pattern の silent failure 再発 risk を予防。
+- **High-1**: 廃止関数名 `TryAutoMigrateLegacyLogPath` (= R2 で `ReadInitialLogSettingsWithMigration` に統合済) が docstring / CHANGELOG / SPEC §10.x に 9 箇所残置していたのを sweep。sentinel writer は `WriteLogsRootMigrationSentinel` (= 統合 helper) として別関数名で参照。`Manager/MainForm.cs:217, 954, 1017` + `Manager/PathManager.cs:85` + `Manager/Services/Logger.cs:59` + `Manager/Services/SettingsKeys.cs:88` + `CHANGELOG.md:1694, 1716` + `SPECIFICATION.md:3309`。R2 Medium #4 fix の catalog ↔ call-site drift 解消。
+- **High-2**: Logger.cs:212-227 (`FindProjectRootForLogs`) と PathManager.cs:248-353 (`FindBaseDirectory`) の project root resolution が `toneprism.db` 不在 case で divergence する pre-existing 問題を SPEC §3.6 「検出方法」記述に「既知制約」fence で明文化。健全 install では発火しない (= `toneprism.db` 存在) ため本 PR では受容、根本解消は別 PR で Logger 側 resolution を PathManager 経由に揃える要。本 PR で `LogSectionPanel.Initialize(PathManager.LogsRootDirectory)` に変更したため hidden divergence が visible 化したことを明示。
+- **Medium-1 + Low-2**: migration dialog 本文に「Launcher / Updater の古いログは `<install>/logs/launcher/` / `<install>/logs/updater/` にあります (これまで Manager 設定とは別場所で管理されていたため)」を追記、v0.14.0 で `log_destination_path` を custom 設定していた user が「migratedFrom 配下を全部消せば clean」と誤読 + Launcher / Updater の旧 log を orphan 化させる path を文言レベルで予防。「古いログファイル」の表現も「古い Manager ログ」に specific 化。
+- **Medium-2**: `LauncherLogsRootBridge.WriteCurrentLogsRoot` docstring の「実害なし」表現を「Launcher 1 セッション分が user 意図と異なる場所に書かれる、user 通知一切なし」と honest 化。LAN 50 PC 同時起動等の window 衝突 case を明示、`MoveFileEx(MOVEFILE_REPLACE_EXISTING)` P/Invoke 化を別 PR 候補として note。
+- **Medium-3**: SettingsKeys.LogDestinationPath docstring の関数名 drift 訂正 (High-1 と一括) + 「廃止条件: 旧 v0.14.0 setting を持つ install が事実上全て v0.15.0+ に migration 済と見なせる段階で本 const + migration code を一括削除可能」を明示。
+- **Low-1**: SPEC §3.6 移設例から `monitor/` 列挙を除外、UI hint label「manager/ launcher/ updater/ のフォルダが自動で作られます」と一致させて Manager v0.15.0 時点の user 体験を統一。Monitor component 実装 PR で再追加予定。
+
+#### Round 2 review fix (Critical #1 + High #2 + High #3 + Medium #4 + Medium #5 + Medium #6 + Low #7 + Low #8 + Low #9)
+
+- **Critical #1 + Medium #6**: migration sentinel JSON の wire format が snake_case (`migrated_from`) で書出されていたが、reader 側 DTO は PascalCase property (`MigratedFrom`) で `JavaScriptSerializer.Deserialize<T>` の case-insensitive match に underscore stripping が含まれないため `dto.MigratedFrom == null` → 早期 return で **migration dialog が永久不発火** する Critical bug。wire format を真の camelCase (`migratedFrom` / `migratedAt`) に修正、既存 `UpdateCompletedSentinel` と統一。DTO docstring の「camelCase」誤記も訂正。
+- **High #2**: migration dialog 文言「30 日後に自動的に削除されます」が嘘 promise だった。`CleanupOldLogs` は新 subdir (`<root>/manager/`) のみ sweep するため、migration 元 dir 直下の旧 `manager_*.log` は永続残留。dialog 文言を「(不要であれば手動で削除してください)」に書換え。
+- **High #3**: `LogSectionPanel` クラス header docstring が旧 hardcode path 表現 (`<project_root>/logs/manager/` と `<project_root>/logs/launcher/`) を残置していた。unified root semantic 反映で「`<PathManager.LogsRootDirectory>/<component>/` を ... scan」表現に書換え。
+- **Medium #4**: round 3 review L-3 で確立した「1 起動 1 SQLite 接続」最適化を本 PR で 2 関数分離 (= `TryAutoMigrateLegacyLogPath` + `TryReadInitialLogSettings`) により毎起動 2 接続に退行させていた。両関数を `ReadInitialLogSettingsWithMigration` 1 関数 + 1 接続に統合、migration 完了後の通常 boot も SMB 共有 DB の latency 最適化を継承。
+- **Medium #5**: `PathManager.LogsRootDirectory` getter の「set 前 fallback で field に書込む」設計が、setter 後行で呼ばれた case に silent ignore hazard を生んでいた。getter は default を return するだけで field に書込まない設計に変更 + setter は 2 回目以降 `InvalidOperationException` で discipline 厳格化 (= setter→getter 順序逆転 / 重複呼出を dev / test で発覚させる)。
+- **Low #7**: `LauncherLogsRootBridge.WriteCurrentLogsRoot` docstring の「atomic write」表現を「near-atomic (Delete + Move pattern、reader 側は不在 / parse 失敗で default fallback の safe path のため許容)」に正確化。真の atomic 化は `MoveFileEx(MOVEFILE_REPLACE_EXISTING)` 要、別 PR で検討。
+- **Low #8**: `SettingsSectionPanel.SaveLogDestIfChanged` (= R2 当時の名前、R4 M-2 で `SaveLogsRootIfChanged` に rename) 内の Logger メッセージ「Manager は次回起動時反映、Launcher は次回起動時反映」を「Manager は次回 Manager 起動時、Launcher は次回 Launcher 起動時に反映」に明確化 (= UI hint label の表現と同期、catalog ↔ call-site drift 解消)。
+- **Low #9**: `SettingsKeys.LogDestinationPath` const が hardcoded SQL literal 経由で参照されない orphan 状態だった (= docstring「auto-migrate code 内でのみ参照」が嘘) を解消、`ReadInitialLogSettingsWithMigration` の SQL 構築を const concatenation に書換え、4 箇所 (SELECT key list / WHERE clause / DELETE / dual-set cleanup) で const を SoT 参照。
+
+#### Also Changed: `responses/` directory layout 規約 (= β 化)
+
+User レビューで「`responses/` 直下に `launcher_logs_root.json` (本 PR 新規 IPC file) を置くと、将来 SPEC §6.5 のプレイ記録取り込み logic (= 直下 sweep + `imported/` / `failed/` move) と誤認衝突する」hazard を発見、本 PR scope 内で SPEC §6.5 directory layout 規約を **β 化** (= 直下 vs subfolder の責務分離):
+
+- **直下** = Manager ↔ Launcher の **system / IPC 用 file** 専用 (= `launcher_logs_root.json` 等の single-file write、取り込み logic の sweep 対象外)
+- **subfolder (category 別)** = **data drop 用** (= プレイ記録は `responses/play_records/{,imported/,failed/}`、アンケートは `responses/surveys/{,imported/,failed/}`、各 subfolder 内が 3-state folder pattern)
+- **SessionHeartbeat** (`responses/launcher_sessions/`) も「IPC 用 subfolder」として旧版の「例外」表現から一般化規約に乗る整理
+
+プレイ記録 / アンケートの実装はまだ未着手 (= Launcher / Manager 両側で SQLite write / 取り込み logic はゼロ、SPEC で設計のみ) のため **code 変更ゼロ、SPEC §6.5 書換えのみで完結**。将来 plays/surveys 取り込み実装時に新 layout で着手される。
+
+#### Bump 根拠 (v0.14.0 → v0.15.0)
+
+SemVer pre-1.0 minor bump: 設定 semantic の breaking 変更 (= 旧 `log_destination_path` の Manager-only 直配置 → unified parent root) + 新機能 (Launcher への path 伝搬 / migration dialog) + SPEC §6.5 directory layout 規約 β 化。SPEC §3.6 + §6.5 書換えで SPEC 側も v1.10.32 → v1.10.33 を同 PR で bump。
 
 ### [Manager v0.14.0] - 2026-05-19
 

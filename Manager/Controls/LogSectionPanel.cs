@@ -10,9 +10,11 @@ using TonePrism.Manager.Services;
 namespace TonePrism.Manager.Controls
 {
     /// <summary>
-    /// ログビューア (#129)。
-    /// `<project_root>/logs/manager/` と `<project_root>/logs/launcher/` をスキャンし、
-    /// セッション単位のログファイルを一覧表示 + 内容を行レベル別に色分けして表示。
+    /// ログビューア (#129、v0.15.0 で unified logs root semantic に refactor)。
+    /// `<PathManager.LogsRootDirectory>/<component>/` (= `<root>/manager/` / `<root>/launcher/` 等) を
+    /// 現在 tab で選択中の component 単位で scan、セッション単位のログファイルを一覧表示 + 内容を
+    /// 行レベル別に色分けして表示。`<root>` は user 設定 `logs_root_path` (= 親 logs root) に従い
+    /// `<install>/logs/` (default) または custom path に解決される。
     /// レベルフィルタ・全文検索を組み合わせ、現在のフィルタで「内容なし」になるファイルは
     /// 一覧で灰色化して「開いても何も出ない」と一目で分かるようにする。
     /// </summary>
@@ -51,9 +53,16 @@ namespace TonePrism.Manager.Controls
             }
         }
 
-        public void Initialize(string projectRoot)
+        /// <summary>
+        /// (#201, v0.15.0) 引数を `projectRoot` から `logsRoot` (= 親 logs root 直接) に変更。
+        /// 旧 semantic は `Path.Combine(projectRoot, "logs")` を内部で append していたが、
+        /// 統一 logs root setting 導入で path 計算は PathManager.LogsRootDirectory に集約、
+        /// 本 panel は親 root を直接受取って `<root>/manager/` `<root>/launcher/` `<root>/monitor/`
+        /// の subdir を scan する責務のみ。
+        /// </summary>
+        public void Initialize(string logsRoot)
         {
-            _logsRoot = Path.Combine(projectRoot ?? "", "logs");
+            _logsRoot = logsRoot ?? "";
             RefreshDisplay();
         }
 
@@ -408,8 +417,9 @@ namespace TonePrism.Manager.Controls
         }
 
         /// <summary>
-        /// `<install>/logs/` をエクスプローラで開く。部員がエラー発生時にログを zip して送る際の動線。
-        /// logs/ dir が存在しない場合は親 dir (`<install>/`) を fallback として開く。失敗時は MessageBox。
+        /// `_logsRoot` (= 現在の logs root、default `<install>/logs/` または user 設定 `logs_root_path`) を
+        /// エクスプローラで開く。部員がエラー発生時にログを zip して送る際の動線。
+        /// logs root dir が存在しない場合は親 dir を fallback として開く。失敗時は MessageBox。
         /// </summary>
         private void btnOpenLogFolder_Click(object sender, EventArgs e)
         {

@@ -56,6 +56,10 @@ safety_before_restore_*.db
 # ゲームファイル（容量が大きいため除外）
 games/
 
+# ランタイム生成ファイル: SPEC §6.5 + §3.8.7 の drop folder / heartbeat 等。
+# Launcher session JSON / unified logs root JSON 等は runtime に生成され、commit 対象ではない。
+responses/
+
 # リリース成果物（自動生成、git 追跡しない）
 release/
 

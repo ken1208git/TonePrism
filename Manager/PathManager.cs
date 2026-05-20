@@ -77,10 +77,87 @@ namespace TonePrism.Manager
             get { return Path.Combine(UpdaterDir, "TonePrism_Updater.exe"); }
         }
 
-        /// <summary>Updater のログ出力先 (`<install>/logs/updater/`)。SPEC §3.7.4 default と一致。</summary>
+        // ===== Unified logs root (v0.15.0、#201 前提の logs_root_path 設定) =====
+        // SPEC §3.6: 全 component の log は `<LogsRootDirectory>/<component>/<file>.log` に統一配置。
+        // LogsRootDirectory は Program.Main が SQLite から `logs_root_path` setting を読込んで
+        // 起動時 1 回 set する (空 / 未設定なら default の `<BaseDirectory>/logs/`)。
+        // 旧 v0.14.0 までの `log_destination_path` (Manager log 直配置 semantic) は廃止、起動時に
+        // auto-migrate (Program.ReadInitialLogSettingsWithMigration) で値を `logs_root_path` に copy。
+
+        private static string _logsRootDirectory;
+
+        /// <summary>
+        /// ログ全体の親 dir (`<BaseDirectory>/logs/` または user 設定 `logs_root_path`)。
+        /// Program.Main が SQLite を読込んで起動時に SetLogsRootDirectory() で 1 回 set、以降は immutable。
+        /// SettingsRepository には依存しない (Logger SoT 一元化)。
+        ///
+        /// **R2 review Medium #5 対応**: 旧 R1 実装は getter で「未 set なら default を field に書込む」
+        /// defensive fallback を持っていたが、これは setter が後行で呼ばれた時に no-op 化させる silent
+        /// ignore hazard だった。本実装は **getter は default を return するが field には書込まない**、
+        /// setter は 2 回目以降 throw で discipline 強制 (= setter→getter 順序逆転を test / dev で検出)。
+        /// </summary>
+        public static string LogsRootDirectory
+        {
+            get
+            {
+                // Set 前 fallback: default (BaseDirectory/logs/) を return するが field には書込まない。
+                // これにより後続の SetLogsRootDirectory(custom) が正しく custom 値を反映できる。
+                if (_logsRootDirectory == null) return Path.Combine(BaseDirectory, "logs");
+                return _logsRootDirectory;
+            }
+        }
+
+        /// <summary>
+        /// LogsRootDirectory を起動時に 1 回 set する。Program.Main が SQLite 読込結果で呼出。
+        /// 空文字 / null 時は **field を set せず**、getter の lazy default (`<BaseDirectory>/logs/`) に委ねる。
+        /// **2 回目以降 (= 既に custom 値 set 済) の呼出は InvalidOperationException** (= immutable invariant
+        /// 厳守、Program.Main の順序逆転や重複呼出を発覚させる discipline)。
+        ///
+        /// **R5 review Medium-1 対応**: 旧実装は customRoot 空時に `Path.Combine(BaseDirectory, "logs")` を
+        /// eager 評価していたが、broken install (= Manager.exe を `<install>/Manager/` 外から起動 → BaseDirectory
+        /// の lazy 解決が `DirectoryNotFoundException` throw) で本 setter が **mutex try-catch 外で uncaught throw**
+        /// → friendly MessageBox なしの silent crash regression があった。customRoot 空時は field を set せず
+        /// getter の lazy default に委ねることで、broken install では後続の `VerifyPaths` (= mutex try-catch 内)
+        /// が DirectoryNotFoundException を friendly「起動エラー」MessageBox で拾う pre-PR 経路を維持する。
+        /// </summary>
+        public static void SetLogsRootDirectory(string customRoot)
+        {
+            if (_logsRootDirectory != null)
+            {
+                throw new InvalidOperationException(
+                    "PathManager.SetLogsRootDirectory は起動時に 1 回のみ呼出可能、既に set 済の状態で再呼出された。"
+                    + " Program.Main の呼出順序を確認のこと (= getter 先行 / 重複 set 呼出は禁止)。");
+            }
+            // customRoot 非空時のみ即 set。空時は field を null のまま残し、getter の lazy default 計算に委ねる
+            // (= BaseDirectory の eager 解決を回避、broken install で setter から throw しない)。
+            if (!string.IsNullOrWhiteSpace(customRoot))
+            {
+                _logsRootDirectory = customRoot;
+            }
+        }
+
+        /// <summary>Manager のログ出力先 (`<LogsRootDirectory>/manager/`)。SPEC §3.6 unified logs root 規約。</summary>
+        public static string ManagerLogDir
+        {
+            get { return Path.Combine(LogsRootDirectory, "manager"); }
+        }
+
+        /// <summary>Launcher のログ出力先 (`<LogsRootDirectory>/launcher/`)。Launcher Logger は `responses/launcher_logs_root.json` 経由で同 path を resolve。</summary>
+        public static string LauncherLogDir
+        {
+            get { return Path.Combine(LogsRootDirectory, "launcher"); }
+        }
+
+        /// <summary>Updater のログ出力先 (`<LogsRootDirectory>/updater/`)。Manager spawn 時に `--log-dir` 引数で Updater に渡される。SPEC §3.7.4 + §3.6 unified logs root 規約。</summary>
         public static string UpdaterLogDir
         {
-            get { return Path.Combine(BaseDirectory, "logs", "updater"); }
+            get { return Path.Combine(LogsRootDirectory, "updater"); }
+        }
+
+        /// <summary>Monitor のログ出力先 (`<LogsRootDirectory>/monitor/`)。Monitor component 実装着手時に使用 (現状 readiness)。</summary>
+        public static string MonitorLogDir
+        {
+            get { return Path.Combine(LogsRootDirectory, "monitor"); }
         }
 
         /// <summary>

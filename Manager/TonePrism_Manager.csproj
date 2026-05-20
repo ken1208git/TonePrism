@@ -235,6 +235,8 @@
     <Compile Include="Services\FolderDeletionService.cs" />
     <Compile Include="Services\GameFormHelper.cs" />
     <Compile Include="Services\ImagePreviewHelper.cs" />
+    <Compile Include="Services\JsonEscape.cs" />
+    <Compile Include="Services\LauncherLogsRootBridge.cs" />
     <Compile Include="Services\LauncherSessionService.cs" />
     <Compile Include="Services\Logger.cs" />
     <Compile Include="Services\LogLineFormat.cs" />

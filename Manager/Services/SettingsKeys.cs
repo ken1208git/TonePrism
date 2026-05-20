@@ -9,6 +9,11 @@ namespace TonePrism.Manager.Services
     ///
     /// Phase 4 (#108) で導入: アップデート check の cache、skip 機能、background check の頻度
     /// 設定をすべて settings テーブル経由で永続化する (Manager 再起動を跨いでも保持されるよう)。
+    ///
+    /// **SQL literal 埋込制約 (R4 review L-2)**: 一部 const は `Program.ReadInitialLogSettingsWithMigration`
+    /// 等で SQL 文字列に **string concatenation で埋込まれる** (= parameterized query ではない、`AddWithValue`
+    /// は value のみ)。そのため **const 値は alphanumeric + underscore のみ** に制限すること。`'` 含めると
+    /// SQL 構文 break + 仮に外部流入時は injection hazard。新 key 追加時に literal を遵守。
     /// </summary>
     internal static class SettingsKeys
     {
@@ -83,12 +88,25 @@ namespace TonePrism.Manager.Services
         public const int DefaultLogRetentionDays = 30;
 
         /// <summary>
-        /// (#170 followup round 1) ログファイル保存先 directory の絶対 path (空文字 / 不在 = default の
-        /// `&lt;project_root&gt;/logs/manager/` を使用)。設定 UI から変更可、**反映は次回 Manager 起動時**。
-        /// バックアップ保存先 (`backup_destination_path`) と同 semantic、Program.Main で Logger.Initialize 前に
-        /// SQLite 直接 read で取り出して Logger に渡す (= Logger は SettingsRepository に依存しない invariant を維持)。
+        /// **DEPRECATED (v0.15.0 で `LogsRootPath` に統合、auto-migrate 対象)**。
+        /// 旧 semantic: Manager log だけが直配置される dir (= `<value>/manager_*.log` 直書き、Launcher / Updater
+        /// は別管理)。v0.15.0 起動時に `ReadInitialLogSettingsWithMigration` で値を `logs_root_path` に copy + 旧 key DELETE。
+        /// 本 const は **`ReadInitialLogSettingsWithMigration` 内の SQL 構築 (= SELECT key list / WHERE / DELETE / dual-set cleanup の 4 箇所) でのみ参照**、UI / runtime path 解決からは削除済。
+        /// **廃止条件**: 旧 v0.14.0 setting を持つ install が事実上全て v0.15.0+ に migration 済と見なせる段階で本 const + migration code を一括削除可能。
         /// </summary>
         public const string LogDestinationPath = "log_destination_path";
+
+        /// <summary>
+        /// (#201、v0.15.0) ログ全体の親 root directory の絶対 path (空文字 / 不在 = default の
+        /// `&lt;project_root&gt;/logs/` を使用)。指定先には `manager/` `launcher/` `updater/` `monitor/` の
+        /// subdir が **各 component の Logger により自動作成**される (= subdir append は consumer 側責務)。
+        /// 設定 UI から変更可、**反映は次回 Manager 起動時 + 次回 Launcher 起動時の 2 段**。
+        /// Manager は Program.Main で Logger.Initialize 前に SQLite 直接 read で取り出して
+        /// PathManager.SetLogsRootDirectory に渡す (= Logger は SettingsRepository に依存しない invariant を維持)。
+        /// Launcher は同値を `responses/launcher_logs_root.json` 経由で受取 (= SPEC §6.5 Launcher SQLite write 禁止
+        /// 原則維持、Logger の autoload 最先頭 init 時に DB 接続前で完結する file read のみ)。
+        /// </summary>
+        public const string LogsRootPath = "logs_root_path";
 
         // ----- (#170 followup round 2) 自動バックアップの有効/無効 -----
 

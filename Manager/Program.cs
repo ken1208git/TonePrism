@@ -25,13 +25,22 @@ namespace TonePrism.Manager
             // ログ機構を最初に初期化することで、PathManager 以降のすべての Console.WriteLine が
             // 自動的にファイル (logs/manager_YYYY-MM-DD.log) にも残る (#116)。
             //
-            // (#170 followup round 1) `log_destination_path` を SQLite 直接 read で先取得。
-            // SettingsRepository / DatabaseManager は使わない (= Logger は SettingsRepository に依存しない
-            // invariant 維持、DB 不在時の fallback 経路もシンプル)。失敗時は null fallback で default path。
-            // (#170 followup round 3 review L-3) customLogDir + log_retention_days を 1 SQLite 接続で
-            // 取得 (= 2 接続/起動を 1 接続/起動に削減、SMB 共有 DB の latency 軽減)。
-            var initialSettings = TryReadInitialLogSettings();
-            Logger.Initialize(initialSettings.CustomLogDir);
+            // (#201, v0.15.0) `logs_root_path` を SQLite 直接 read + 旧 `log_destination_path` の auto-migrate
+            // を **1 接続**で完結。SettingsRepository / DatabaseManager は使わない (= Logger は
+            // SettingsRepository に依存しない invariant 維持、DB 不在時の fallback 経路もシンプル)。
+            // SMB 共有 DB の latency 削減のため 2 関数分離前の round 3 review L-3 最適化 (= 1 起動 1 接続) を継承。
+            // 失敗時は null fallback で default path。
+            var initialSettings = ReadInitialLogSettingsWithMigration();
+            Logger.Initialize(initialSettings.LogsRootPath);
+            // (#201) PathManager.LogsRootDirectory も同じ値で 1 回 set (= UpdaterLogDir / LauncherLogDir 等の
+            // 派生 getter が一貫した値を返すように)。SetLogsRootDirectory は **2 回目以降は
+            // `InvalidOperationException` で fail-fast** (= R2 review M-5 で immutable invariant 厳守、
+            // setter→getter 順序逆転 / 重複呼出を dev/test で発覚させる discipline)。
+            PathManager.SetLogsRootDirectory(initialSettings.LogsRootPath);
+            // (#201) Launcher への path 伝搬: `responses/launcher_logs_root.json` を atomic write。
+            // Launcher Logger は autoload 最先頭 init 時に DB 接続前で本 file を読込、log dir を決定する。
+            // 例外は内部で握り潰し済、Manager 起動を阻害しない。
+            Services.LauncherLogsRootBridge.WriteCurrentLogsRoot(initialSettings.LogsRootPath);
 
             // (#170 followup round 2 review H-1) 古いログ削除を **MainForm 経由ではなく Program.Main で実行**。
             // 旧実装 (round 1) は MainForm.ContinueLoadAfterSessionCheck から呼んでいたが、
@@ -139,44 +148,136 @@ namespace TonePrism.Manager
         }
 
         /// <summary>
-        /// (#170 followup round 1 / round 3 review L-3) Logger.Initialize の前に `log_destination_path` +
-        /// `log_retention_days` を **1 SQLite 接続で同時取得**。SettingsRepository を経由しないのは
-        /// Logger が SettingsRepository に依存しない invariant を維持するため (= Logger は最早期に初期化する
-        /// 責務、DB が無くても動く必要がある)。
+        /// (#201, v0.15.0) Logger.Initialize の前に `log_destination_path` (旧 v0.14.0) / `logs_root_path` /
+        /// `log_retention_days` を **1 SQLite 接続**で同時取得 + 必要なら旧 key auto-migrate。
+        /// SettingsRepository を経由しないのは Logger が SettingsRepository に依存しない invariant を
+        /// 維持するため (= Logger は最早期に初期化する責務、DB が無くても動く必要がある)。
         ///
-        /// 失敗時 (DB 不在 / 解析失敗 / key 不在) は CustomLogDir=null + LogRetentionDays=DefaultLogRetentionDays
-        /// に fallback。Logger.Warn は Logger 未初期化時 no-op で flag できないため try-catch で握り潰し。
+        /// **接続 1 つに統合した理由 (R2 review Medium #4 対応)**: 旧 R1 実装は migration check と read を
+        /// 別関数 + 別接続にしていたが、毎起動 2 接続に増えて round 3 review L-3 の最適化 (= 1 接続/起動で
+        /// SMB 共有 DB latency 軽減) を退行させていた。本実装で migration 完了後の通常 boot も 1 接続を維持。
+        ///
+        /// **auto-migrate 条件 + 副作用**:
+        /// - 旧 key 値が非空 + 新 key 値が空 → INSERT new / DELETE old を 1 transaction、return は migrated 値
+        ///   + sentinel file `&lt;BaseDirectory&gt;/.logs_root_migrated` を書出 (MainForm 経由で 1 回限り MessageBox)
+        /// - 旧 key 値が非空 + 新 key 値も非空 → 二重設定状態、旧 key DELETE のみ (新値を正として尊重)
+        /// - その他 (= 旧 key 空 / 全 key 不在) → no-op
+        ///
+        /// 失敗時 (DB 不在 / 解析失敗 / migration SQL 失敗) は default fallback で起動継続、
+        /// Logger 未初期化のため warn 不可、try-catch で握り潰し。
         /// </summary>
-        private static (string CustomLogDir, int LogRetentionDays) TryReadInitialLogSettings()
+        private static (string LogsRootPath, int LogRetentionDays) ReadInitialLogSettingsWithMigration()
         {
-            string customLogDir = null;
+            string logsRootPath = null;
             int retentionDays = Services.SettingsKeys.DefaultLogRetentionDays;
             try
             {
                 string dbPath = PathManager.DatabasePath;
                 if (string.IsNullOrEmpty(dbPath) || !System.IO.File.Exists(dbPath))
-                    return (customLogDir, retentionDays);
+                    return (logsRootPath, retentionDays);
 
-                using (var conn = new System.Data.SQLite.SQLiteConnection("Data Source=" + dbPath + ";Version=3;Read Only=True;"))
+                // migration の可能性があるため Read Only=True を外す (= 同 1 接続で read + write 両方やる)
+                using (var conn = new System.Data.SQLite.SQLiteConnection("Data Source=" + dbPath + ";Version=3;"))
                 {
                     conn.Open();
+
+                    string legacyValue = null;
                     using (var cmd = new System.Data.SQLite.SQLiteCommand(
-                        "SELECT key, value FROM settings WHERE key IN ('log_destination_path', 'log_retention_days')", conn))
+                        "SELECT key, value FROM settings WHERE key IN ('"
+                        + Services.SettingsKeys.LogDestinationPath + "', '"
+                        + Services.SettingsKeys.LogsRootPath + "', '"
+                        + Services.SettingsKeys.LogRetentionDays + "')", conn))
                     using (var reader = cmd.ExecuteReader())
                     {
                         while (reader.Read())
                         {
                             string key = reader.IsDBNull(0) ? null : reader.GetString(0);
                             string val = reader.IsDBNull(1) ? null : reader.GetString(1);
-                            if (key == "log_destination_path")
+                            if (key == Services.SettingsKeys.LogDestinationPath)
                             {
-                                if (!string.IsNullOrWhiteSpace(val)) customLogDir = val;
+                                legacyValue = val;
                             }
-                            else if (key == "log_retention_days")
+                            else if (key == Services.SettingsKeys.LogsRootPath)
+                            {
+                                if (!string.IsNullOrWhiteSpace(val)) logsRootPath = val;
+                            }
+                            else if (key == Services.SettingsKeys.LogRetentionDays)
                             {
                                 if (int.TryParse(val, out int days) && days > 0) retentionDays = days;
                             }
                         }
+                    }
+
+                    // Migration: 旧値あり + 新値なし → INSERT new / DELETE old + sentinel 書出
+                    if (!string.IsNullOrWhiteSpace(legacyValue) && string.IsNullOrWhiteSpace(logsRootPath))
+                    {
+                        // (R6 review Low-1) 絶対 path invariant の defense-in-depth。旧 v0.14.0 UI の save 経路
+                        // には IsPathRooted ガードが無かった (= 本 PR の SaveLogsRootIfChanged で新規追加) ため、
+                        // 相対 path を持つ v0.14.0 install が存在しうる。相対値をそのまま `logs_root_path` に
+                        // copy すると「logs_root_path は常に絶対 path」invariant が migration 経路だけ破れ、
+                        // Launcher 側が CWD 依存の予測不能 path に倒れる。相対値の場合は **value copy を skip
+                        // (= default 化) しつつ旧 key は DELETE** (= 再 migration loop 防止)、sentinel も書かない
+                        // (= 引き継ぐ値がないので「そのまま引き継がれました」dialog は出さず silent に default)。
+                        bool legacyIsAbsolute = false;
+                        try { legacyIsAbsolute = System.IO.Path.IsPathRooted(legacyValue); }
+                        catch { legacyIsAbsolute = false; } // 構文不正 path 等は相対扱いで default 化
+
+                        try
+                        {
+                            if (legacyIsAbsolute)
+                            {
+                                using (var tx = conn.BeginTransaction())
+                                {
+                                    using (var insertCmd = new System.Data.SQLite.SQLiteCommand(
+                                        "INSERT OR REPLACE INTO settings (key, value) VALUES ('"
+                                        + Services.SettingsKeys.LogsRootPath + "', @v)", conn, tx))
+                                    {
+                                        insertCmd.Parameters.AddWithValue("@v", legacyValue);
+                                        insertCmd.ExecuteNonQuery();
+                                    }
+                                    using (var deleteCmd = new System.Data.SQLite.SQLiteCommand(
+                                        "DELETE FROM settings WHERE key = '"
+                                        + Services.SettingsKeys.LogDestinationPath + "'", conn, tx))
+                                    {
+                                        deleteCmd.ExecuteNonQuery();
+                                    }
+                                    tx.Commit();
+                                }
+                                WriteLogsRootMigrationSentinel(legacyValue);
+                                // migrated 値を return 値に reflect (= Logger は新 root で init される)
+                                logsRootPath = legacyValue;
+                            }
+                            else
+                            {
+                                // 相対 path: value copy skip + 旧 key DELETE のみ (= default 化、sentinel なし)
+                                using (var deleteCmd = new System.Data.SQLite.SQLiteCommand(
+                                    "DELETE FROM settings WHERE key = '"
+                                    + Services.SettingsKeys.LogDestinationPath + "'", conn))
+                                {
+                                    deleteCmd.ExecuteNonQuery();
+                                }
+                                // logsRootPath は空のまま (= Logger は default `<install>/logs/` で init)
+                            }
+                        }
+                        catch
+                        {
+                            // migration SQL 失敗時: 旧 key も新 key も触らず、Logger は default path で init。
+                            // 次回起動で再 migration が試みられる (idempotent)。
+                        }
+                    }
+                    // 二重設定 cleanup: 旧 key 残存 + 新 key 設定済 → 旧 key DELETE のみ
+                    else if (!string.IsNullOrWhiteSpace(legacyValue) && !string.IsNullOrWhiteSpace(logsRootPath))
+                    {
+                        try
+                        {
+                            using (var deleteCmd = new System.Data.SQLite.SQLiteCommand(
+                                "DELETE FROM settings WHERE key = '"
+                                + Services.SettingsKeys.LogDestinationPath + "'", conn))
+                            {
+                                deleteCmd.ExecuteNonQuery();
+                            }
+                        }
+                        catch { /* swallow */ }
                     }
                 }
             }
@@ -184,7 +285,41 @@ namespace TonePrism.Manager
             {
                 // DB 不在 / 解析失敗時は default fallback、Logger 未初期化のため warn 不可
             }
-            return (customLogDir, retentionDays);
+            return (logsRootPath, retentionDays);
+        }
+
+        /// <summary>
+        /// migration 完了 sentinel file `&lt;BaseDirectory&gt;/.logs_root_migrated` を atomic write。
+        /// MainForm.TryShowLogsRootMigratedDialog が読込んで 1 回限り MessageBox 表示 + sentinel 削除。
+        /// wire format は **真の camelCase** (`migratedFrom` / `migratedAt`) — JavaScriptSerializer は
+        /// underscore stripping を行わないため、snake_case を書くと PascalCase DTO property に bind できず
+        /// dialog 永久不発火 (R2 review Critical #1 対応)。
+        ///
+        /// **crash window (R4 review M-4)**: caller (`ReadInitialLogSettingsWithMigration`) で `tx.Commit()`
+        /// 成功直後 + 本関数呼出前に process crash した場合、次回起動で legacyValue は DELETE 済 +
+        /// logsRootPath は新値 set 済 → migration 条件 (`legacyValue 非空 && logsRootPath 空`) 不成立 +
+        /// cleanup 条件 (`両方非空`) も不成立 → silent に migration スキップ + sentinel 書出されない →
+        /// **MainForm dialog 永久不発火 (= user は migration が起きたことに気付かない)**。
+        /// 発生確率は μs オーダーで極めて低いが、user 通知欠落 path として明示。本 PR では受容、recovery
+        /// 経路 (= sentinel を tx commit より前に書出 + commit 失敗時に sentinel 削除 pattern) は別 PR で検討。
+        /// </summary>
+        private static void WriteLogsRootMigrationSentinel(string migratedFrom)
+        {
+            try
+            {
+                string sentinelPath = System.IO.Path.Combine(PathManager.BaseDirectory, ".logs_root_migrated");
+                string sentinelTmp = sentinelPath + ".tmp";
+                string sentinelJson = "{\"migratedFrom\":\"" + Services.JsonEscape.EscapeString(migratedFrom) + "\","
+                    + "\"migratedAt\":\"" + DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") + "\"}";
+                System.IO.File.WriteAllText(sentinelTmp, sentinelJson, new System.Text.UTF8Encoding(false));
+                if (System.IO.File.Exists(sentinelPath)) System.IO.File.Delete(sentinelPath);
+                System.IO.File.Move(sentinelTmp, sentinelPath);
+            }
+            catch
+            {
+                // sentinel 書出失敗時は migration MessageBox 出ないだけで migration 自体は完了済、
+                // 起動阻害なし。Logger 未初期化のため warn 不可。
+            }
         }
 
         /// <summary>

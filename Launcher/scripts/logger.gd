@@ -1,7 +1,12 @@
 ## Launcher のファイルログ機構 (#116, #85 の土台)
 ##
 ## - 1 起動セッション = 1 ファイル (`launcher_<PCname>_<YYYY-MM-DD_HHmmss>.log`)
-## - 保存先: `<project_root>/logs/launcher/`（toneprism.db のあるディレクトリの隣）
+## - 保存先: default `<project_root>/logs/launcher/`、
+##   Manager 側で `logs_root_path` setting が設定されていれば `<custom_root>/launcher/` を使用
+##   (= #201, v0.15.0 unified logs root)
+##   Manager → Launcher への path 伝搬は `<project_root>/responses/launcher_logs_root.json`
+##   atomic write file 経由。autoload 最先頭 init 時に DB 接続前で file read のみで完結
+##   (= SPEC §6.5 「Launcher は SQLite write しない」原則維持)
 ##   → 共有上の toneprism.db と同じ場所に集約することで、複数 PC の Launcher / Manager ログを 1 箇所で見られる
 ##   → セッション単位でファイルが分かれるので書き込み競合・行間 interleaving が発生しない
 ## - INFO / WARN / ERROR の 3 段階
@@ -38,6 +43,12 @@ var _godot_log_path: String = ""
 var _godot_log_pos: int = 0
 var _sync_timer: Timer = null
 
+# (#201, v0.15.0, R5 review Low-1) bridge file 読込時の warn message を一時保持。
+# `_read_logs_root_from_responses` は `_open_session_file` より前 + `_init_godot_log_tail` の baseline
+# 記録前に呼ばれるため、push_warning だけだと godot.log baseline に飲まれて session log に転送されない。
+# warn を本 field に貯め、`_open_session_file` 完了後に `_write_safely("WARN", ...)` で session log に直書きする。
+var _logs_root_warn_msg: String = ""
+
 
 func _init() -> void:
 	# autoload の _init は engine 起動の極めて早い段階で呼ばれる
@@ -62,6 +73,11 @@ func _initialize_logger() -> void:
 
 	_initialized = true
 	_write_safely("INFO", "[Logger] Launcher 起動 (PC=" + _get_pc_name() + ")")
+	# (#201, R5 review Low-1) bridge file 読込で warn が出ていれば session log に直書き
+	# (= push_warning は godot.log baseline に飲まれるため、session log には別途転送)。
+	if not _logs_root_warn_msg.is_empty():
+		_write_safely("WARN", _logs_root_warn_msg)
+		_logs_root_warn_msg = ""
 	_cleanup_old_logs()
 
 
@@ -70,7 +86,18 @@ func _open_log_directory_and_file() -> bool:
 	if project_root.is_empty():
 		return false
 
-	_log_directory = project_root.path_join("logs").path_join(LOG_SUBDIRECTORY)
+	# (#201, v0.15.0 unified logs root) Manager 側 setting `logs_root_path` を
+	# `<project_root>/responses/launcher_logs_root.json` 経由で受取。
+	# parse 成功 + path 非空 → `<custom_root>/launcher/`、それ以外は default `<project_root>/logs/launcher/`。
+	# JSON 不在 / parse 失敗 / path 空 はすべて default fallback、Launcher 起動阻害しない。
+	# 戻り値は [path: String, warn_msg: String]。warn は session log open 後に _initialize_logger が flush。
+	var read_result = _read_logs_root_from_responses(project_root)
+	var logs_root = read_result[0] as String
+	_logs_root_warn_msg = read_result[1] as String
+	if logs_root.is_empty():
+		_log_directory = project_root.path_join("logs").path_join(LOG_SUBDIRECTORY)
+	else:
+		_log_directory = logs_root.path_join(LOG_SUBDIRECTORY)
 
 	if not DirAccess.dir_exists_absolute(_log_directory):
 		var err = DirAccess.make_dir_recursive_absolute(_log_directory)
@@ -78,6 +105,60 @@ func _open_log_directory_and_file() -> bool:
 			return false
 
 	return _open_session_file()
+
+
+# (#201, v0.15.0) Manager → Launcher 設定伝搬 file を読込んで logs root path を返す。
+# 失敗時 (file 不在 / parse 失敗 / path 空) はすべて空 path を返し、caller が default fallback する。
+# DB 接続前の autoload 最先頭 init で呼ばれる前提、file read のみで完結。
+#
+# 戻り値: `[path: String, warn_msg: String]` (= R5 review Low-1)。
+#   - path: 解決した logs root (空 = default 使用)
+#   - warn_msg: 異常検出時の WARN message (空 = 正常)。caller (`_open_log_directory_and_file`) が
+#     field に保持し、`_initialize_logger` が session log open 後に `_write_safely` で flush する
+#     (= push_warning だけだと godot.log baseline に飲まれて session log に転送されないため)。
+#   file 不在 (= 通常 path、Manager 未起動 / setting default) は warn なしの正常 fallback。
+func _read_logs_root_from_responses(project_root: String) -> Array:
+	var responses_dir = project_root.path_join("responses")
+	var bridge_path = responses_dir.path_join("launcher_logs_root.json")
+	if not FileAccess.file_exists(bridge_path):
+		return ["", ""]  # file 不在 = 正常 (default 使用)、warn なし
+
+	var f = FileAccess.open(bridge_path, FileAccess.READ)
+	if f == null:
+		var msg = "[Logger] launcher_logs_root.json open 失敗、default 使用"
+		push_warning(msg)
+		return ["", msg]
+
+	var content = f.get_as_text()
+	f.close()
+
+	var json = JSON.new()
+	var parse_result = json.parse(content)
+	if parse_result != OK:
+		var msg = "[Logger] launcher_logs_root.json parse 失敗 (line=%d msg=%s)、default 使用" % [json.get_error_line(), json.get_error_message()]
+		push_warning(msg)
+		return ["", msg]
+
+	var data = json.data
+	if typeof(data) != TYPE_DICTIONARY:
+		var msg = "[Logger] launcher_logs_root.json 内容が dictionary でない、default 使用"
+		push_warning(msg)
+		return ["", msg]
+
+	var value = data.get("logs_root_path", "")
+	if typeof(value) != TYPE_STRING or (value as String).is_empty():
+		return ["", ""]  # path 空 = default 使用 (Manager が default 設定中)、warn なし
+
+	# (#201, R6 review Low-2) 絶対 path invariant の defense-in-depth。Manager 側 (SaveLogsRootIfChanged
+	# + migration) で絶対 path を enforce 済だが、手動 file 編集 / 旧 install の相対値残置に備えて Launcher
+	# 側でも検証。相対 path を path_join(LOG_SUBDIRECTORY) に渡すと CWD 相対解決で起動毎に場所が変わる
+	# silent hazard になるため、絶対 path でなければ warn + default fallback。
+	var path_str = value as String
+	if not path_str.is_absolute_path():
+		var msg = "[Logger] launcher_logs_root.json の logs_root_path が絶対 path でない (\"%s\")、default 使用" % path_str
+		push_warning(msg)
+		return ["", msg]
+	return [path_str, ""]
 
 
 # 1 セッション 1 ファイル: launcher_<PCname>_<YYYY-MM-DD_HHmmss>.log

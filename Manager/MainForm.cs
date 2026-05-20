@@ -213,6 +213,12 @@ namespace TonePrism.Manager
             // で session 機構が silent に永久 disabled になる bug があった。
             TryShowUpdateCompletedDialog();
 
+            // (#201, v0.15.0) ログ保存先 setting auto-migrate 完了 (v0.14.0 → v0.15.0 移行) の一回限り通知。
+            // Program.Main の ReadInitialLogSettingsWithMigration が migration 完了時に `<install>/.logs_root_migrated`
+            // sentinel file を書出している。本関数で sentinel を読込 → 部員向け subdir 構造説明 MessageBox →
+            // sentinel を削除する flow。次回起動以降は sentinel 不在で発火しない。
+            TryShowLogsRootMigratedDialog();
+
             // (R3 review M-2) Updater log absorb は ContinueLoadAfterSessionCheck 経由に移設済 (= session
             // conflict check 通過後)。MainForm_Load の早期で absorb すると同一 PC で複数 Manager が同時起動
             // した極端 case で `.absorbed` の append race + 重複 absorb が発生し得る path があった (実害は
@@ -440,7 +446,7 @@ namespace TonePrism.Manager
             CleanupStaleBackupEntries();
 
             _backupSectionPanel.Initialize(dbManager);
-            _logSectionPanel.Initialize(PathManager.BaseDirectory);
+            _logSectionPanel.Initialize(PathManager.LogsRootDirectory);
             _updateSectionPanel.Initialize(dbManager);
 
             _gameSectionPanel.LoadGames();
@@ -937,6 +943,101 @@ namespace TonePrism.Manager
                 "✓ アップデート完了",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
+        }
+
+        /// <summary>
+        /// (#201, v0.15.0) ログ保存先 setting auto-migrate 完了通知 dialog。
+        /// `<install>/.logs_root_migrated` sentinel ファイル存在 check → 部員向け subdir 構造説明 MessageBox 表示
+        /// → sentinel 削除。次回起動以降は sentinel 不在で発火しない。
+        ///
+        /// sentinel JSON schema: `{"migratedFrom": "<oldValue>", "migratedAt": "<ISO 8601 UTC>"}`
+        /// (= `Program.WriteLogsRootMigrationSentinel` で書出済、wire format は **真の camelCase** で
+        /// PascalCase DTO と `JavaScriptSerializer` の case-insensitive deserialize で互換、R2 review
+        /// Critical #1 で snake_case → camelCase に修正済)。
+        /// 例外は内部で握り潰し (= Manager 起動を阻害しない)、parse 失敗時も sentinel は finally で削除する
+        /// (永続 dialog 再表示バグ防止、TryShowUpdateCompletedDialog と同 pattern)。
+        /// </summary>
+        private void TryShowLogsRootMigratedDialog()
+        {
+            string sentinelPath = System.IO.Path.Combine(PathManager.BaseDirectory, ".logs_root_migrated");
+            if (!System.IO.File.Exists(sentinelPath)) return;
+
+            string migratedFrom = null;
+            try
+            {
+                string json = System.IO.File.ReadAllText(sentinelPath, System.Text.Encoding.UTF8);
+                var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
+                var dto = ser.Deserialize<LogsRootMigratedSentinel>(json);
+                if (dto != null) migratedFrom = dto.MigratedFrom;
+            }
+            catch (Exception ex)
+            {
+                Services.Logger.Warn("[MainForm] logs_root_migrated sentinel parse 失敗 (dialog 表示 skip): " + ex.Message);
+            }
+            finally
+            {
+                // 読込結果に関わらず sentinel は必ず削除する (永続 dialog 再表示バグ防止)。
+                try { System.IO.File.Delete(sentinelPath); }
+                catch (Exception delEx) { Services.Logger.Warn("[MainForm] logs_root_migrated sentinel 削除失敗: " + delEx.Message); }
+            }
+
+            if (string.IsNullOrEmpty(migratedFrom))
+            {
+                // parse 失敗 / migratedFrom 不在は dialog 出さず終了 (sentinel は finally で削除済)。
+                return;
+            }
+
+            // (R4 review L-4) trailing backslash 正規化: FolderBrowserDialog の SelectedPath は末尾 `\` を
+            // 含む慣習があり、dialog 本文構築時に `migratedFrom + "\\\n"` が `D:\logs\\` のような `\\` 混在
+            // 表示になる cosmetic 問題を予防。Trim 後に再度 path 構築する。
+            migratedFrom = migratedFrom.TrimEnd('\\', '/');
+
+            Services.Logger.Info("[MainForm] logs_root_migrated dialog 表示: migratedFrom=" + migratedFrom);
+            string body =
+                "これまでのバージョンでは、Manager のログだけが指定したフォルダに保存されていました。\n" +
+                "このバージョンから、Manager / Launcher / Updater など 全コンポーネントのログを\n" +
+                "1 つのフォルダにまとめて保存できるようになりました。\n" +
+                "\n" +
+                "【設定の自動引き継ぎ】\n" +
+                "これまでの設定値 (" + migratedFrom + ") はそのまま引き継がれましたが、\n" +
+                "フォルダ構造が以下のように変わります:\n" +
+                "\n" +
+                "  " + migratedFrom + "\\\n" +
+                "    ├ manager\\    ← Manager のログ\n" +
+                "    ├ launcher\\   ← Launcher のログ (新規追加)\n" +
+                "    └ updater\\    ← Updater のログ (新規追加)\n" +
+                "\n" +
+                "これまで " + migratedFrom + " 直下に保存されていた古い Manager ログはそのまま残ります\n" +
+                "(不要であれば手動で削除してください)。\n" +
+                "\n" +
+                "※ Launcher / Updater の古いログは " + PathManager.BaseDirectory + "\\logs\\launcher\\ と\n" +
+                "   " + PathManager.BaseDirectory + "\\logs\\updater\\ にあります (これまで Manager 設定とは\n" +
+                "   別場所で管理されていたため)。\n" +
+                "\n" +
+                "設定タブの「ログ」セクションから保存先を変更できます。";
+            MessageBox.Show(
+                this,
+                body,
+                "ログの保存先の構造が変わりました",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+
+        /// <summary>
+        /// `<install>/.logs_root_migrated` sentinel ファイルの JSON deserialize 用 DTO (#201, v0.15.0)。
+        /// writer 側は `Program.WriteLogsRootMigrationSentinel`、wire format は **真の camelCase**
+        /// (`migratedFrom` / `migratedAt`)、`JavaScriptSerializer` の case-insensitive deserialize で
+        /// PascalCase property と互換受理 (UpdateCompletedSentinel と同 pattern)。
+        /// 注: 旧 R1 docstring で「camelCase」と称しつつ実態が snake_case (`migrated_from`) だった drift を
+        /// R2 review Critical #1 で解消、JavaScriptSerializer は underscore stripping を行わないため
+        /// snake_case 採用は silent dialog 不発火を招くことが判明。
+        /// </summary>
+        private sealed class LogsRootMigratedSentinel
+        {
+            /// <summary>migration 前の旧 `log_destination_path` 値 (= dialog に embed して user に表示する)。</summary>
+            public string MigratedFrom { get; set; }
+            /// <summary>migration 実行時刻 (ISO 8601 UTC、現状は dialog 表示には使わず audit trail 用)。</summary>
+            public string MigratedAt { get; set; }
         }
 
         /// <summary>

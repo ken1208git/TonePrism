@@ -32,9 +32,9 @@ namespace TonePrism.Manager.Controls
             this.lblBackupRetentionUnit = new System.Windows.Forms.Label();
             this.grpLog = new System.Windows.Forms.GroupBox();
             this.lblLogDest = new System.Windows.Forms.Label();
-            this.txtLogDest = new System.Windows.Forms.TextBox();
+            this.txtLogsRoot = new System.Windows.Forms.TextBox();
             this.btnLogBrowse = new System.Windows.Forms.Button();
-            this.lblLogDestHint = new System.Windows.Forms.Label();
+            this.lblLogsRootHint = new System.Windows.Forms.Label();
             this.lblLogRetentionPrompt = new System.Windows.Forms.Label();
             this.numLogRetention = new System.Windows.Forms.NumericUpDown();
             this.lblLogRetentionUnit = new System.Windows.Forms.Label();
@@ -58,9 +58,9 @@ namespace TonePrism.Manager.Controls
             | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
             this.grpLog.Controls.Add(this.lblLogDest);
-            this.grpLog.Controls.Add(this.txtLogDest);
+            this.grpLog.Controls.Add(this.txtLogsRoot);
             this.grpLog.Controls.Add(this.btnLogBrowse);
-            this.grpLog.Controls.Add(this.lblLogDestHint);
+            this.grpLog.Controls.Add(this.lblLogsRootHint);
             this.grpLog.Controls.Add(this.lblLogRetentionPrompt);
             this.grpLog.Controls.Add(this.numLogRetention);
             this.grpLog.Controls.Add(this.lblLogRetentionUnit);
@@ -80,12 +80,12 @@ namespace TonePrism.Manager.Controls
             this.lblLogDest.TabIndex = 0;
             this.lblLogDest.Text = "ログ保存先:";
             //
-            // txtLogDest
+            // txtLogsRoot
             //
-            this.txtLogDest.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) | System.Windows.Forms.AnchorStyles.Right)));
-            this.txtLogDest.Location = new System.Drawing.Point(20, 45);
-            this.txtLogDest.Size = new System.Drawing.Size(560, 23);
-            this.txtLogDest.TabIndex = 1;
+            this.txtLogsRoot.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) | System.Windows.Forms.AnchorStyles.Right)));
+            this.txtLogsRoot.Location = new System.Drawing.Point(20, 45);
+            this.txtLogsRoot.Size = new System.Drawing.Size(560, 23);
+            this.txtLogsRoot.TabIndex = 1;
             //
             // btnLogBrowse
             //
@@ -97,14 +97,14 @@ namespace TonePrism.Manager.Controls
             this.btnLogBrowse.UseVisualStyleBackColor = true;
             this.btnLogBrowse.Click += new System.EventHandler(this.btnLogBrowse_Click);
             //
-            // lblLogDestHint
+            // lblLogsRootHint
             //
-            this.lblLogDestHint.AutoSize = true;
-            this.lblLogDestHint.ForeColor = System.Drawing.Color.DimGray;
-            this.lblLogDestHint.Location = new System.Drawing.Point(20, 75);
-            this.lblLogDestHint.Size = new System.Drawing.Size(420, 15);
-            this.lblLogDestHint.TabIndex = 3;
-            this.lblLogDestHint.Text = "空欄にするとデフォルト（DB ファイルの隣の logs/manager/）。指定先には manager_YYYY-MM-DD_HHmmss.log が直配置されます";
+            this.lblLogsRootHint.AutoSize = true;
+            this.lblLogsRootHint.ForeColor = System.Drawing.Color.DimGray;
+            this.lblLogsRootHint.Location = new System.Drawing.Point(20, 75);
+            this.lblLogsRootHint.Size = new System.Drawing.Size(420, 15);
+            this.lblLogsRootHint.TabIndex = 3;
+            this.lblLogsRootHint.Text = "空欄にするとデフォルト（DB ファイルの隣の logs/）。指定先に manager/ launcher/ updater/ のフォルダが自動で作られます";
             //
             // lblLogRetentionPrompt
             //
@@ -139,7 +139,7 @@ namespace TonePrism.Manager.Controls
             this.lblLogRetentionNote.Location = new System.Drawing.Point(20, 145);
             this.lblLogRetentionNote.Size = new System.Drawing.Size(330, 15);
             this.lblLogRetentionNote.TabIndex = 7;
-            this.lblLogRetentionNote.Text = "保存先 / 保存日数の変更は次回 Manager 起動時に反映されます。";
+            this.lblLogRetentionNote.Text = "保存先の変更は次回 Manager / Launcher 起動時、保存日数の変更は次回 Manager 起動時に反映されます。";
             //
             // grpBackup (top、バックアップ保存先 + 自動有効化 + 自動間隔 + 単位 + 世代数)
             //
@@ -355,9 +355,9 @@ namespace TonePrism.Manager.Controls
         private System.Windows.Forms.Label lblBackupRetentionUnit;
         private System.Windows.Forms.GroupBox grpLog;
         private System.Windows.Forms.Label lblLogDest;
-        private System.Windows.Forms.TextBox txtLogDest;
+        private System.Windows.Forms.TextBox txtLogsRoot;
         private System.Windows.Forms.Button btnLogBrowse;
-        private System.Windows.Forms.Label lblLogDestHint;
+        private System.Windows.Forms.Label lblLogsRootHint;
         private System.Windows.Forms.Label lblLogRetentionPrompt;
         private System.Windows.Forms.NumericUpDown numLogRetention;
         private System.Windows.Forms.Label lblLogRetentionUnit;
