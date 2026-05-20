@@ -1675,6 +1675,60 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.16.0] - 2026-05-20
+
+#### Added (#201 — 設定タブ editing model を「適用 / 元に戻す」式に改修)
+
+設定タブのログ / バックアップ section を **immediate save (= control 変更ごとに即 DB 保存 + LAN 重複起動確認 dialog)** から **per-section「適用 / 元に戻す」式 (commit-on-Apply)** に改修。
+
+**UI** (`SettingsSectionPanel.Designer.cs`):
+- grpLog / grpBackup 各々の末尾に「適用」「元に戻す」ボタン + 「● 未保存の変更があります」マーカー (DarkOrange) を追加。初期状態はマーカー hidden + ボタン disabled。
+
+**editing model** (`SettingsSectionPanel.cs`):
+- **「dirty flag + UI-is-buffer」モデル**: 別 buffer dict を持たず、UI control 自身が pending 値を保持。control 変更は即 DB 保存せず `SetXxxSectionDirty(true)` で dirty flag + マーカー + ボタン enable。
+- TextBox.Leave は直前 save 値と異なる時のみ dirty mark (= no-op Leave で未保存マーカーが誤点灯しない)。
+- UI-internal interaction は即時維持 (DB write しない): 自動バックアップ checkbox の interval section enable/disable、間隔単位の hours↔display 換算 + Max 切替。
+- **「適用」** (`ApplyLogSection` / `ApplyBackupSection`): validate (ログは絶対 path check) → `CheckBeforeWrite` **1 回** → DB flush → 副作用 (ログは `launcher_logs_root.json` 伝搬) → dirty clear。
+- **「元に戻す」** (`RevertLogSection` / `RevertBackupSection`): 既存 `LoadLogSettings` / `LoadBackupSettings` を再利用して DB 値を再読込 (= DB write しないため CheckBeforeWrite 不要)。
+- **未保存ガード** (`HasUnsavedChanges` / `PromptAndResolveUnsavedChanges` public API): tab 切替 / フォーム終了時に未保存があれば 3-button 確認 dialog (保存 / 破棄 / キャンセル)。「保存」は Apply を呼ぶ (= そこで CheckBeforeWrite)、「破棄」は Revert、「キャンセル」は留まる。
+
+**MainForm hook** (`MainForm.cs`):
+- `tabControl1.Deselecting` を新規 subscribe、`e.TabPage`(= 離脱するタブ)が設定タブの時のみ未保存判定 → user「キャンセル」で `e.Cancel=true` で切替中断 (= `Selecting` だと発火時点で SelectedTab が新タブに変わっており判定 timing が不安定なため `Deselecting` を採用、後述 Round 3 fix 参照)。
+- `MainForm_FormClosing` 冒頭に未保存判定 → user「キャンセル」で `e.Cancel=true` で終了中断 (= 既存コメントが予期していた設計)。
+
+#### Changed
+
+- **CheckBeforeWrite (LAN 重複起動確認) の発火を「変更ごと (最大 7 回)」→「section 適用ごと 1 回」に集約**。検出範囲 (同 PC Launcher / 他 PC Manager・Launcher) は不変、発火タイミングのみ変更。同 PC の Manager 2 個目は従来通り起動時 Named Mutex で物理 block。
+- 旧即時保存 method (`SaveLogsRootIfChanged` / `SaveBackupDestIfChanged` / `SaveBackupIntervalWithGuard` / `SaveBackupIntervalDirect`) を撤廃、Apply / Revert / dirty-mark handler に再構成。
+
+#### Round 4 review fix (Medium-1 + Low-1 + Low-2)
+
+- **Medium-1**: `MainForm_FormClosing` にも `ActiveControl = null` の focus 強制 commit を tab 切替経路 (`TabControl1_Deselecting`) と**対称**に配置。× ボタン close 時に active control の `Leave` が `FormClosing` より先に発火する保証は WinForms version / focus 状態依存のため、「設定 textbox / numeric を編集途中で × クリック」で dirty 未確定のまま未保存 warning が skip される脆い前提を消去 (= tab 経路で実機検証済の focus-未確定問題と同型を FormClosing でも事前に潰す)。
+- **Low-1**: CHANGELOG / SPEC「Added」本文の tab 切替 event 名を shipped code に合わせ `tabControl1.Selecting` → `tabControl1.Deselecting` に訂正 (= Round 3 fix で切替えた最終 code と整合、Added 本文が drift していた catalog ↔ implementation 不一致を解消)。
+- **Low-2**: `lblLogUnsaved` / `lblBackupUnsaved` に `Name` プロパティ設定を追加 (= 同時追加した btnApply / btnRevert 群と Designer 一貫性、VS Designer 再生成時の差分ノイズ予防)。
+
+#### Round 3 review fix (実機 smoke test 指摘: tab 切替で警告出ない bug + dialog 文言冗長)
+
+- **タブ切替で未保存警告が出ない bug 修正** (`MainForm` tab 切替 hook): 2 つの原因が重なっていた。(1) **`Selecting` event 発火時点で `SelectedTab` が既に新タブに変わっており**、`if (tabControl1.SelectedTab == tabSettings ...)` 判定が false になってガードブロック全体が skip されていた → `Selecting` から **`Deselecting`** に切替え、`e.TabPage`(= 離脱するタブ)が `tabSettings` か判定する timing 非依存の形に修正。(2) TextBox.Leave / NumericUpDown 入力確定は focus-leave 時発火だが tab 切替 event はそれより先に走るため dirty 未確定 → `this.ActiveControl = null` で focus を強制 commit してから `HasUnsavedChanges()` 判定。FormClosing はフォーム非アクティブ化で focus が先に抜けるため警告が出ていた非対称も併せて解消。
+- **未保存確認 dialog を custom 3-button (保存 / 破棄 / キャンセル) 化** (`UnsavedSettingsDialog.cs` 新規): 標準 `MessageBox` は button label を「はい / いいえ / キャンセル」固定でしか出せず、本文で「はい=保存 / いいえ=破棄 / ...」と注記する冗長な文言になっていた。button に直接「保存」「破棄」「キャンセル」を表示する custom Form に置換 (= 既存 `ResetDatabaseConfirmForm` 等の custom dialog pattern と同様)。
+
+#### Round 2 review fix (Medium-1 + Low-1 + Low-2 + Low-3)
+
+- **Medium-1**: `MainForm_FormClosing` の未保存ガード新規コメント「subscription 順序に依存せず確実に最初に走る」が、ガード本体が `if (e.Cancel) return;` の **後**にある実態と矛盾していた drift を解消。コメントを「他 handler が既に e.Cancel=true なら skip、現状 FormClosing hook は本 handler のみなので最初に走るが、将来 cancel 判定 handler を先に subscribe したら skip される (= round 4 review L-3 の順序前提と同じ制約)」に訂正。
+- **Low-1** (受容 + 明示): `PromptAndResolveUnsavedChanges` の「保存」分岐は両 section dirty 時に `ApplyLogSection` → `ApplyBackupSection` を順に呼ぶため CheckBeforeWrite が最大 2 連続 + 片側 Cancel で部分適用 (= ログ保存済 / バックアップ dirty 維持で留まる) になりうる。per-section 集約の一貫粒度として受容、本 CHANGELOG + SPEC §3.8.2 に期待値を明記。
+- **Low-2**: `btnResetDatabase_Click` 冒頭に未保存ガード (`HasUnsavedChanges() && !PromptAndResolveUnsavedChanges()` で中止) を追加。DB リセットは completion 後に LoadLogSettings / LoadBackupSettings で設定 section を再ロードするため、未保存編集が無確認破棄される穴があった (= tab 切替 / フォーム終了にはガードがあるのにより破壊的なリセットだけ対象外だった整合性穴)。
+- **Low-3**: `lblLogUnsaved` / `lblBackupUnsaved` の `AutoSize=true` + 明示 `Size` 併記を解消、明示 Size 行を削除 (= AutoSize 時は無視される + round 3 review L-1 で chkBackupAutoEnabled に適用した規約と一貫)。
+
+#### Round 1 review fix (Medium-1 + Low-2 + Low-3)
+
+- **Medium-1**: `Launcher/scripts/logger.gd:152` のコメントに旧 method 名 `SaveLogsRootIfChanged` が残置していた sweep 漏れ (= C# のみ Grep して `.gd` を漏らした) を `ApplyLogSection` に修正。`SPECIFICATION.md` v1.10.33 履歴 entry + 本 CHANGELOG v0.15.0 entry の同名参照は当時 (= PR #202 時点) の名前を記録した履歴のため残置。
+- **Low-2**: `_logSectionDirty` / `_backupSectionDirty` の意味を「DB と差分あり」ではなく「user が control を touch 済」と field docstring で明示。numeric / checkbox / combo は値を DB 値に戻しても dirty 維持 (= TextBox 系のみ `_lastSaved*` 比較で no-op 除外、非対称) が commit-on-Apply の一般的許容挙動である旨を明文化、「元に戻す」で確実に脱出可能。
+- **Low-3**: DB リセット完了直後に `LoadLogSettings` / `LoadBackupSettings` を呼んでログ / バックアップ section を新 DB (= default) 値に再ロード + dirty clear。commit-on-Apply モデルでは UI が pending buffer のため、再ロードしないとリセット後も UI が stale 値表示 + (dirty 状態だった場合) 次回「適用」で新規 DB に stale pending を書込む path があった。
+
+#### Bump 根拠 (v0.15.0 → v0.16.0)
+
+SemVer pre-1.0 minor bump: editing model の新機能追加 (= 適用 / 元に戻す + 未保存ガード)。SPEC §3.8.2 に commit-on-Apply 追記で SPEC 側も v1.10.33 → v1.10.34 を同 PR で bump。
+
 ### [Manager v0.15.0] - 2026-05-20
 
 #### Added (#201 — Unified logs root path 設定)

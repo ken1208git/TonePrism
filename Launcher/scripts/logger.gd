@@ -149,7 +149,7 @@ func _read_logs_root_from_responses(project_root: String) -> Array:
 	if typeof(value) != TYPE_STRING or (value as String).is_empty():
 		return ["", ""]  # path 空 = default 使用 (Manager が default 設定中)、warn なし
 
-	# (#201, R6 review Low-2) 絶対 path invariant の defense-in-depth。Manager 側 (SaveLogsRootIfChanged
+	# (#201, R6 review Low-2) 絶対 path invariant の defense-in-depth。Manager 側 (ApplyLogSection
 	# + migration) で絶対 path を enforce 済だが、手動 file 編集 / 旧 install の相対値残置に備えて Launcher
 	# 側でも検証。相対 path を path_join(LOG_SUBDIRECTORY) に渡すと CWD 相対解決で起動毎に場所が変わる
 	# silent hazard になるため、絶対 path でなければ warn + default fallback。

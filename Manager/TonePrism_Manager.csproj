@@ -105,6 +105,9 @@
     <Compile Include="ResetDatabaseConfirmForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="UnsavedSettingsDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="ResetDatabaseConfirmForm.Designer.cs">
       <DependentUpon>ResetDatabaseConfirmForm.cs</DependentUpon>
     </Compile>

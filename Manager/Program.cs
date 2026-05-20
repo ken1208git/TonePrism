@@ -212,7 +212,7 @@ namespace TonePrism.Manager
                     if (!string.IsNullOrWhiteSpace(legacyValue) && string.IsNullOrWhiteSpace(logsRootPath))
                     {
                         // (R6 review Low-1) 絶対 path invariant の defense-in-depth。旧 v0.14.0 UI の save 経路
-                        // には IsPathRooted ガードが無かった (= 本 PR の SaveLogsRootIfChanged で新規追加) ため、
+                        // には IsPathRooted ガードが無かった (= Manager 設定 UI の ApplyLogSection で enforce) ため、
                         // 相対 path を持つ v0.14.0 install が存在しうる。相対値をそのまま `logs_root_path` に
                         // copy すると「logs_root_path は常に絶対 path」invariant が migration 経路だけ破れ、
                         // Launcher 側が CWD 依存の予測不能 path に倒れる。相対値の場合は **value copy を skip

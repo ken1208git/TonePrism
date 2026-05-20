@@ -58,6 +58,36 @@ namespace TonePrism.Manager
             // (#170 followup round 2 review L-3) backup status auto-revert timer の cleanup は Dispose 前に
             // 走らせたいので FormClosing を hook (= FormClosed は Dispose 後で意味薄)。
             this.FormClosing += MainForm_FormClosing;
+            // (#201) 設定タブから他タブへ切替える際、未保存変更があれば確認 dialog (保存/破棄/キャンセル)。
+            // **Deselecting** を使う (= 離脱するタブが e.TabPage で確実に取れる)。`Selecting` だと発火時点で
+            // SelectedTab が既に新タブに変わっていて「設定タブから離脱したか」判定が timing 依存になる (= R3 fix bug)。
+            this.tabControl1.Deselecting += TabControl1_Deselecting;
+        }
+
+        // (#201) 設定タブ離脱時の未保存変更ガード。Deselecting の e.TabPage は「離脱するタブ」なので、
+        // それが tabSettings の時のみ判定。未保存あり + user「キャンセル」で e.Cancel=true → 切替中断 (= 留まる)。
+        private void TabControl1_Deselecting(object sender, TabControlCancelEventArgs e)
+        {
+            // 設定タブ「から」離脱する遷移のみ対象
+            if (e.TabPage != tabSettings) return;
+            if (_settingsSectionPanel == null) return;
+
+            // (R3 review fix) **focus 強制 commit**: TextBox.Leave / NumericUpDown のテキスト入力確定は
+            // focus が抜けた時に発火するが、tab 切替 event は **focus-leave より先**に走るため、この時点では
+            // 編集中 control の dirty mark がまだ立っていない (= TextBox に入力途中 / NumericUpDown に手打ち後
+            // Enter 押さず tab click した case)。`ActiveControl = null` で active control の focus を抜いて
+            // Leave / ValueChanged を同期発火させ、HasUnsavedChanges() 判定前に dirty を確定する。
+            // (R4 review Medium-1: FormClosing 経路にも同じ `ActiveControl = null` を対称配置済 = focus-leave
+            //  の発火順が version / focus 状態依存である前提を両経路で消去)。
+            this.ActiveControl = null;
+
+            if (_settingsSectionPanel.HasUnsavedChanges())
+            {
+                if (!_settingsSectionPanel.PromptAndResolveUnsavedChanges())
+                {
+                    e.Cancel = true; // 留まる
+                }
+            }
         }
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
@@ -71,7 +101,31 @@ namespace TonePrism.Manager
             // (= 「保存して閉じますか?」等) は **本 handler より先に subscribe** された場合のみ「timer を
             // 生かしたまま return」が成立する。`+=` の subscription 順で event 発火するため、後付け時は
             // ctor (L57-60) の `FormClosing` hook 行より前に新 handler の `+=` を追加すること。
+            //
+            // (#201) 設定タブの未保存変更ガード。**他 handler が既に e.Cancel=true を立てている場合は
+            // skip** (= 下記 `if (e.Cancel) return;` で先に return)。現状 FormClosing を hook するのは本
+            // handler のみなので未保存ガードが最初に走るが、将来 cancel 判定 handler を**先に** subscribe
+            // した場合は本ガードが skip される点に注意 (= 上記 round 4 review L-3 の subscription 順序前提と
+            // 同じ制約)。その場合は未保存判定を本ブロックより前 (= cancel-capable handler 群の最先頭) に
+            // 移すか、未保存判定を独立 handler 化して subscribe 順を制御すること。
             if (e.Cancel) return;
+            if (_settingsSectionPanel != null)
+            {
+                // (R4 review Medium-1) focus 強制 commit を tab 切替経路と**対称**に配置。× ボタン close 時、
+                // active control の Leave が FormClosing より先に発火する保証は WinForms version / focus 状態に
+                // 依存するため、「設定 textbox/numeric を編集途中で × クリック」で dirty 未確定のまま warning が
+                // skip される脆い前提を消す。`ActiveControl = null` で Leave/ValueChanged を同期発火 → dirty 確定。
+                this.ActiveControl = null;
+
+                if (_settingsSectionPanel.HasUnsavedChanges())
+                {
+                    if (!_settingsSectionPanel.PromptAndResolveUnsavedChanges())
+                    {
+                        e.Cancel = true;
+                        return; // 終了中断、timer は生かす
+                    }
+                }
+            }
             try
             {
                 if (_backupStatusClearTimer != null)
