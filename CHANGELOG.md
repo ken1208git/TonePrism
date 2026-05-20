@@ -1688,7 +1688,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 **Manager → Launcher path 伝搬** (`Manager/Services/LauncherLogsRootBridge.cs` 新規):
 - Manager は SQLite から読んだ `logs_root_path` 値を `<install>/responses/launcher_logs_root.json` に **atomic write** (= `<file>.tmp` → rename pattern、SessionHeartbeat と同 pattern)
-- 書出 timing: (1) Program.Main の Logger.Initialize 直後 (= 毎起動時 sync)、(2) SettingsSectionPanel.SaveLogDestIfChanged 内 (= UI 変更時即時 sync)
+- 書出 timing: (1) Program.Main の Logger.Initialize 直後 (= 毎起動時 sync)、(2) SettingsSectionPanel.SaveLogsRootIfChanged 内 (= UI 変更時即時 sync)
 - Launcher Logger はこの JSON を autoload 最先頭 init 時 (= DB 接続前) に read して log dir を決定、SPEC §6.5「Launcher は SQLite write しない」原則を維持しつつ Manager 設定を反映 (= Launcher は file read のみで完結)
 
 **Auto-migrate + 一回限り MessageBox** (`Manager/Program.cs:ReadInitialLogSettingsWithMigration` + `Manager/Program.cs:WriteLogsRootMigrationSentinel` + `Manager/MainForm.cs:TryShowLogsRootMigratedDialog`):
@@ -1718,6 +1718,12 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 #### Removed
 
 - 旧 setting key `log_destination_path` は SettingsRepository の get/set callsite から削除 (= 1 semantic 維持)。`SettingsKeys.LogDestinationPath` const は migration code 内 reference のみで残置 (= deprecated marker、docstring で migration 完了後の参照禁止を明示)。
+
+#### Round 6 review fix (Medium-1 + Low-1 + Low-2)
+
+- **Medium-1**: R4 M-2 で `SaveLogDestIfChanged` → `SaveLogsRootIfChanged` に rename した際の sweep 漏れを解消。現在状態を説明する docstring / SPEC / CHANGELOG 本文に旧名 `SaveLogDestIfChanged` が残置 (`LauncherLogsRootBridge.cs` 3 箇所 + SPEC v1.10.33 entry + CHANGELOG bridge timing 行) し、特に `LauncherLogsRootBridge.cs:32` の「呼出箇所」が読者を実在しないメソッド名へ誘導する forward pointer だった。`SaveLogsRootIfChanged` に統一。CHANGELOG の Round 2 Low #8 履歴記述のみ「R2 当時の名前、R4 M-2 で rename」と注記して残置 (= 現在状態 vs 履歴の区別明示で過剰 sweep 回避)。
+- **Low-1**: 絶対 path invariant の defense-in-depth を migration 経路に追加。旧 v0.14.0 UI の save 経路には IsPathRooted ガードが無かった (= 本 PR で新規追加) ため相対 path を持つ v0.14.0 install が存在しうる。migration で相対値をそのまま `logs_root_path` に copy すると「常に絶対 path」invariant が migration 経路だけ破れ Launcher が CWD 依存に倒れるため、`ReadInitialLogSettingsWithMigration` で legacyValue を `Path.IsPathRooted` 判定、相対なら value copy を skip + 旧 key DELETE のみ (= default 化、sentinel なし silent)。
+- **Low-2**: Launcher reader (`_read_logs_root_from_responses`) に `is_absolute_path()` 検証を defense-in-depth で追加。Manager 側 enforce (SaveLogsRootIfChanged + migration) を抜けた相対値 (= 手動 file 編集 / 旧 install 残置) が bridge file に載る path に備え、絶対 path でなければ warn + default fallback (= 既存 `["", msg]` 経路に乗せ session log にも転送)。
 
 #### Round 5 review fix (Medium-1 + Low-1 〜 Low-5)
 
@@ -1761,7 +1767,7 @@ R2 round で fix した内容と矛盾する docstring / CHANGELOG / SPEC が他
 - **Medium #4**: round 3 review L-3 で確立した「1 起動 1 SQLite 接続」最適化を本 PR で 2 関数分離 (= `TryAutoMigrateLegacyLogPath` + `TryReadInitialLogSettings`) により毎起動 2 接続に退行させていた。両関数を `ReadInitialLogSettingsWithMigration` 1 関数 + 1 接続に統合、migration 完了後の通常 boot も SMB 共有 DB の latency 最適化を継承。
 - **Medium #5**: `PathManager.LogsRootDirectory` getter の「set 前 fallback で field に書込む」設計が、setter 後行で呼ばれた case に silent ignore hazard を生んでいた。getter は default を return するだけで field に書込まない設計に変更 + setter は 2 回目以降 `InvalidOperationException` で discipline 厳格化 (= setter→getter 順序逆転 / 重複呼出を dev / test で発覚させる)。
 - **Low #7**: `LauncherLogsRootBridge.WriteCurrentLogsRoot` docstring の「atomic write」表現を「near-atomic (Delete + Move pattern、reader 側は不在 / parse 失敗で default fallback の safe path のため許容)」に正確化。真の atomic 化は `MoveFileEx(MOVEFILE_REPLACE_EXISTING)` 要、別 PR で検討。
-- **Low #8**: `SettingsSectionPanel.SaveLogDestIfChanged` 内の Logger メッセージ「Manager は次回起動時反映、Launcher は次回起動時反映」を「Manager は次回 Manager 起動時、Launcher は次回 Launcher 起動時に反映」に明確化 (= UI hint label の表現と同期、catalog ↔ call-site drift 解消)。
+- **Low #8**: `SettingsSectionPanel.SaveLogDestIfChanged` (= R2 当時の名前、R4 M-2 で `SaveLogsRootIfChanged` に rename) 内の Logger メッセージ「Manager は次回起動時反映、Launcher は次回起動時反映」を「Manager は次回 Manager 起動時、Launcher は次回 Launcher 起動時に反映」に明確化 (= UI hint label の表現と同期、catalog ↔ call-site drift 解消)。
 - **Low #9**: `SettingsKeys.LogDestinationPath` const が hardcoded SQL literal 経由で参照されない orphan 状態だった (= docstring「auto-migrate code 内でのみ参照」が嘘) を解消、`ReadInitialLogSettingsWithMigration` の SQL 構築を const concatenation に書換え、4 箇所 (SELECT key list / WHERE clause / DELETE / dual-set cleanup) で const を SoT 参照。
 
 #### Also Changed: `responses/` directory layout 規約 (= β 化)

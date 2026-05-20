@@ -148,7 +148,17 @@ func _read_logs_root_from_responses(project_root: String) -> Array:
 	var value = data.get("logs_root_path", "")
 	if typeof(value) != TYPE_STRING or (value as String).is_empty():
 		return ["", ""]  # path 空 = default 使用 (Manager が default 設定中)、warn なし
-	return [value as String, ""]
+
+	# (#201, R6 review Low-2) 絶対 path invariant の defense-in-depth。Manager 側 (SaveLogsRootIfChanged
+	# + migration) で絶対 path を enforce 済だが、手動 file 編集 / 旧 install の相対値残置に備えて Launcher
+	# 側でも検証。相対 path を path_join(LOG_SUBDIRECTORY) に渡すと CWD 相対解決で起動毎に場所が変わる
+	# silent hazard になるため、絶対 path でなければ warn + default fallback。
+	var path_str = value as String
+	if not path_str.is_absolute_path():
+		var msg = "[Logger] launcher_logs_root.json の logs_root_path が絶対 path でない (\"%s\")、default 使用" % path_str
+		push_warning(msg)
+		return ["", msg]
+	return [path_str, ""]
 
 
 # 1 セッション 1 ファイル: launcher_<PCname>_<YYYY-MM-DD_HHmmss>.log

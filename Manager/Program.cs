@@ -211,28 +211,53 @@ namespace TonePrism.Manager
                     // Migration: 旧値あり + 新値なし → INSERT new / DELETE old + sentinel 書出
                     if (!string.IsNullOrWhiteSpace(legacyValue) && string.IsNullOrWhiteSpace(logsRootPath))
                     {
+                        // (R6 review Low-1) 絶対 path invariant の defense-in-depth。旧 v0.14.0 UI の save 経路
+                        // には IsPathRooted ガードが無かった (= 本 PR の SaveLogsRootIfChanged で新規追加) ため、
+                        // 相対 path を持つ v0.14.0 install が存在しうる。相対値をそのまま `logs_root_path` に
+                        // copy すると「logs_root_path は常に絶対 path」invariant が migration 経路だけ破れ、
+                        // Launcher 側が CWD 依存の予測不能 path に倒れる。相対値の場合は **value copy を skip
+                        // (= default 化) しつつ旧 key は DELETE** (= 再 migration loop 防止)、sentinel も書かない
+                        // (= 引き継ぐ値がないので「そのまま引き継がれました」dialog は出さず silent に default)。
+                        bool legacyIsAbsolute = false;
+                        try { legacyIsAbsolute = System.IO.Path.IsPathRooted(legacyValue); }
+                        catch { legacyIsAbsolute = false; } // 構文不正 path 等は相対扱いで default 化
+
                         try
                         {
-                            using (var tx = conn.BeginTransaction())
+                            if (legacyIsAbsolute)
                             {
-                                using (var insertCmd = new System.Data.SQLite.SQLiteCommand(
-                                    "INSERT OR REPLACE INTO settings (key, value) VALUES ('"
-                                    + Services.SettingsKeys.LogsRootPath + "', @v)", conn, tx))
+                                using (var tx = conn.BeginTransaction())
                                 {
-                                    insertCmd.Parameters.AddWithValue("@v", legacyValue);
-                                    insertCmd.ExecuteNonQuery();
+                                    using (var insertCmd = new System.Data.SQLite.SQLiteCommand(
+                                        "INSERT OR REPLACE INTO settings (key, value) VALUES ('"
+                                        + Services.SettingsKeys.LogsRootPath + "', @v)", conn, tx))
+                                    {
+                                        insertCmd.Parameters.AddWithValue("@v", legacyValue);
+                                        insertCmd.ExecuteNonQuery();
+                                    }
+                                    using (var deleteCmd = new System.Data.SQLite.SQLiteCommand(
+                                        "DELETE FROM settings WHERE key = '"
+                                        + Services.SettingsKeys.LogDestinationPath + "'", conn, tx))
+                                    {
+                                        deleteCmd.ExecuteNonQuery();
+                                    }
+                                    tx.Commit();
                                 }
+                                WriteLogsRootMigrationSentinel(legacyValue);
+                                // migrated 値を return 値に reflect (= Logger は新 root で init される)
+                                logsRootPath = legacyValue;
+                            }
+                            else
+                            {
+                                // 相対 path: value copy skip + 旧 key DELETE のみ (= default 化、sentinel なし)
                                 using (var deleteCmd = new System.Data.SQLite.SQLiteCommand(
                                     "DELETE FROM settings WHERE key = '"
-                                    + Services.SettingsKeys.LogDestinationPath + "'", conn, tx))
+                                    + Services.SettingsKeys.LogDestinationPath + "'", conn))
                                 {
                                     deleteCmd.ExecuteNonQuery();
                                 }
-                                tx.Commit();
+                                // logsRootPath は空のまま (= Logger は default `<install>/logs/` で init)
                             }
-                            WriteLogsRootMigrationSentinel(legacyValue);
-                            // migrated 値を return 値に reflect (= Logger は新 root で init される)
-                            logsRootPath = legacyValue;
                         }
                         catch
                         {
