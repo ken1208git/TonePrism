@@ -59,32 +59,32 @@ namespace TonePrism.Manager
             // 走らせたいので FormClosing を hook (= FormClosed は Dispose 後で意味薄)。
             this.FormClosing += MainForm_FormClosing;
             // (#201) 設定タブから他タブへ切替える際、未保存変更があれば確認 dialog (保存/破棄/キャンセル)。
-            this.tabControl1.Selecting += TabControl1_Selecting;
+            // **Deselecting** を使う (= 離脱するタブが e.TabPage で確実に取れる)。`Selecting` だと発火時点で
+            // SelectedTab が既に新タブに変わっていて「設定タブから離脱したか」判定が timing 依存になる (= R3 fix bug)。
+            this.tabControl1.Deselecting += TabControl1_Deselecting;
         }
 
-        // (#201) 設定タブ離脱時の未保存変更ガード。設定タブから別タブへ移ろうとした時のみ判定、
-        // 未保存あり + user が「キャンセル」を選んだら e.Cancel=true で切替を中断 (= 設定タブに留まる)。
-        private void TabControl1_Selecting(object sender, TabControlCancelEventArgs e)
+        // (#201) 設定タブ離脱時の未保存変更ガード。Deselecting の e.TabPage は「離脱するタブ」なので、
+        // それが tabSettings の時のみ判定。未保存あり + user「キャンセル」で e.Cancel=true → 切替中断 (= 留まる)。
+        private void TabControl1_Deselecting(object sender, TabControlCancelEventArgs e)
         {
-            // 設定タブ「から」「別タブへ」の遷移のみ対象 (= 設定タブ内 / 他タブ間の遷移は無関係)
-            if (tabControl1.SelectedTab == tabSettings && e.TabPage != tabSettings)
+            // 設定タブ「から」離脱する遷移のみ対象
+            if (e.TabPage != tabSettings) return;
+            if (_settingsSectionPanel == null) return;
+
+            // (R3 review fix) **focus 強制 commit**: TextBox.Leave / NumericUpDown のテキスト入力確定は
+            // focus が抜けた時に発火するが、tab 切替 event は **focus-leave より先**に走るため、この時点では
+            // 編集中 control の dirty mark がまだ立っていない (= TextBox に入力途中 / NumericUpDown に手打ち後
+            // Enter 押さず tab click した case)。`ActiveControl = null` で active control の focus を抜いて
+            // Leave / ValueChanged を同期発火させ、HasUnsavedChanges() 判定前に dirty を確定する。
+            // (FormClosing 経路はフォーム非アクティブ化で focus が先に抜けるため本処理は不要だった = 整合)。
+            this.ActiveControl = null;
+
+            if (_settingsSectionPanel.HasUnsavedChanges())
             {
-                if (_settingsSectionPanel == null) return;
-
-                // (R3 review fix) **focus 強制 commit**: TextBox.Leave / NumericUpDown のテキスト入力確定は
-                // focus が抜けた時に発火するが、tab の `Selecting` event は **focus-leave より先**に走るため、
-                // この時点では編集中 control の dirty mark がまだ立っていない (= TextBox に入力途中 / NumericUpDown
-                // に手打ち後 Enter 押さず tab click した case)。`ActiveControl = null` で active control の focus を
-                // 抜いて Leave / ValueChanged を同期発火させ、HasUnsavedChanges() 判定前に dirty を確定する。
-                // (FormClosing 経路はフォーム非アクティブ化で focus が先に抜けるため本処理は不要だった = 整合)。
-                this.ActiveControl = null;
-
-                if (_settingsSectionPanel.HasUnsavedChanges())
+                if (!_settingsSectionPanel.PromptAndResolveUnsavedChanges())
                 {
-                    if (!_settingsSectionPanel.PromptAndResolveUnsavedChanges())
-                    {
-                        e.Cancel = true; // 留まる
-                    }
+                    e.Cancel = true; // 留まる
                 }
             }
         }

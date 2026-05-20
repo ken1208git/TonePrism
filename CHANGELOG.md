@@ -1703,7 +1703,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 #### Round 3 review fix (実機 smoke test 指摘: tab 切替で警告出ない bug + dialog 文言冗長)
 
-- **タブ切替で未保存警告が出ない bug 修正** (`MainForm.TabControl1_Selecting`): TextBox.Leave / NumericUpDown のテキスト入力確定は focus が抜けた時に発火するが、`TabControl.Selecting` event は focus-leave より**先**に走るため、編集中 control の dirty mark がまだ立っておらず `HasUnsavedChanges()` が false を返していた (= FormClosing はフォーム非アクティブ化で focus が先に抜けるため警告が出ていた、非対称)。`this.ActiveControl = null` で active control の focus を抜いて Leave / ValueChanged を同期発火させ、dirty 判定前に確定するよう修正。
+- **タブ切替で未保存警告が出ない bug 修正** (`MainForm` tab 切替 hook): 2 つの原因が重なっていた。(1) **`Selecting` event 発火時点で `SelectedTab` が既に新タブに変わっており**、`if (tabControl1.SelectedTab == tabSettings ...)` 判定が false になってガードブロック全体が skip されていた → `Selecting` から **`Deselecting`** に切替え、`e.TabPage`(= 離脱するタブ)が `tabSettings` か判定する timing 非依存の形に修正。(2) TextBox.Leave / NumericUpDown 入力確定は focus-leave 時発火だが tab 切替 event はそれより先に走るため dirty 未確定 → `this.ActiveControl = null` で focus を強制 commit してから `HasUnsavedChanges()` 判定。FormClosing はフォーム非アクティブ化で focus が先に抜けるため警告が出ていた非対称も併せて解消。
 - **未保存確認 dialog を custom 3-button (保存 / 破棄 / キャンセル) 化** (`UnsavedSettingsDialog.cs` 新規): 標準 `MessageBox` は button label を「はい / いいえ / キャンセル」固定でしか出せず、本文で「はい=保存 / いいえ=破棄 / ...」と注記する冗長な文言になっていた。button に直接「保存」「破棄」「キャンセル」を表示する custom Form に置換 (= 既存 `ResetDatabaseConfirmForm` 等の custom dialog pattern と同様)。
 
 #### Round 2 review fix (Medium-1 + Low-1 + Low-2 + Low-3)
