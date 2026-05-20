@@ -13,6 +13,24 @@
 
 リリース zip 全体に付与する独立バージョン。GitHub Releases の本文として `Release.ps1` がこのセクションを抜き出して使う。エンドユーザー（来場スタッフ / 顧問の先生 / 部員）向けの **summary** を書く。技術詳細は `## Launcher` / `## Manager` / `## Release Tooling` 等の別セクションを参照。詳細仕様は [SPECIFICATION.md §3.7.7](SPECIFICATION.md) を参照。
 
+### [Bundle v0.6.0] - 2026-05-20
+
+**Manager の使い勝手まわりをまとめて改善**したリリースです。brand rename (v0.5.0) 以降に溜まった Manager の UX / 安全性改善を 1 本に束ねました。
+
+主な変更:
+- **アップデートが「消えて再起動」から「予告 + 完了通知」に**: 「今すぐアップデート」を押すと、Manager が一旦終了して新バージョンで再起動する旨を事前に dialog で予告し、再起動後に「✓ アップデート完了」のお知らせが出るようになりました (= 旧版は無言で Manager が消えて不安だった)。アップデート作業中の黒いウィンドウ (Updater) も非表示に。
+- **ログの保存先を 1 フォルダにまとめて指定可能に**: 設定タブの「ログ保存先」が Manager だけでなく **Launcher / Updater 含む全コンポーネントのログ**をまとめた親フォルダの指定になりました。Manager のログ閲覧ツールもアプリ別のタブ表示に整理。
+- **設定タブが「適用 / 元に戻す」式に**: 設定を変更しても即保存ではなく、各セクションの「適用」ボタンで確定 / 「元に戻す」で取り消しできるようになりました。未保存のままタブを移動 / ウィンドウを閉じようとすると確認 dialog が出ます。
+- **バックアップ履歴の表示を整理**: ほぼ常に「成功」しか出ず情報量のなかった「状態」列を削除して見やすく。
+
+**アップデート方法**: Manager の「アップデート」タブから「今すぐアップデート」で適用できます (= Bundle v0.5.0 以降は自動アップデート対応に復帰、手動 re-install は不要)。**ゲームデータ (DB / ゲーム / バックアップ / 回答 / ログ) は自動で保護**されます。
+
+- Launcher: v0.6.1 → v0.6.2 (ログ保存先の統一に伴う Launcher 側の対応)
+- Manager: v0.12.1 → v0.16.1 (アップデート予告 dialog / Companions ログ管理 / ログ保存先統一 / 設定タブ editing model / バックアップ履歴整理)
+- Updater: v0.2.1 (変更なし)
+
+**Notes**: 本リリースは機能追加を含むため Bundle minor bump (v0.5.0 → v0.6.0)。brand rename のような破壊的変更は無く、自動アップデートで適用できます。
+
 ### [Bundle v0.5.0] - 2026-05-19
 
 **プロジェクト名称を `ゲームセンターTONE Prism (GCTonePrism)` → `TonePrism` に統一** (#168)。他校・他団体への配布も視野に入れた汎用化 rename で、**exe filename / DB filename / namespace / UI 文字列 / repo URL まで全件 sync**:
@@ -3236,6 +3254,7 @@ Release.ps1 の $FooterSentinel 定数も同期更新すること。
 
 <!-- GCTONEPRISM-CHANGELOG-FOOTER-BEGIN-V1 -->
 
+[Bundle v0.6.0]: https://github.com/ken1208git/TonePrism/releases/tag/v0.6.0
 [Bundle v0.5.0]: https://github.com/ken1208git/TonePrism/releases/tag/v0.5.0
 [Bundle v0.4.0]: https://github.com/ken1208git/TonePrism/releases/tag/v0.4.0
 [Bundle v0.3.1]: https://github.com/ken1208git/TonePrism/releases/tag/v0.3.1
