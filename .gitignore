@@ -66,3 +66,6 @@ release/
 # Release.ps1 が自動ダウンロードするツールチェーン
 tools/godot/
 tools/nuget-*.exe
+
+# MkDocs のビルド出力 (docs サイト、CI で生成するためコミット不要)
+site/

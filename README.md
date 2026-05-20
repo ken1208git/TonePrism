@@ -3,17 +3,31 @@
 TonePrism は、大阪府立刀根山高校パソコン部の文化祭展示向けに作っている統合ランチャーシステムです。
 来場者がスタッフの補助なしでもゲームを選んで起動できること、展示運営を少ない人数でも回しやすくすることを目的としています。
 
+## はじめにお読みください（入口の案内）
+
+このリポジトリには **2 種類の読み手** に向けた情報が混在しています。目的に応じて入口を選んでください。
+
+- **運営スタッフ・部員・顧問の方（インストール / 運用）**
+  - 運用マニュアル（日々の起動・Manager の使い方・当日運用・トラブル対応）: **[部員向けマニュアル](https://ken1208git.github.io/TonePrism/)**
+  - インストール: [GitHub Releases](https://github.com/ken1208git/TonePrism/releases) から最新の zip をダウンロードし、解凍して `Install.bat` を実行（詳細手順は zip 同梱の `INSTALL_README.txt`）。
+  - ※ このリポジトリを `git clone` する必要はありません。
+- **開発者の方（ソースの編集・ビルド）**
+  - 下記「[開発環境のセットアップ](#開発環境のセットアップ)」へ。
+
 ## このリポジトリにあるもの
 
 - **Launcher**: 来場者向けのゲーム選択・起動アプリです。Godot Engine 4.6 で実装しています。
 - **Manager**: スタッフ向けの管理ツールです。ゲーム情報、開発者情報、バージョン情報、ストア表示用データなどを管理します。C# WinForms / .NET Framework 4.8 で実装しています。
-- **Monitor**: 先生PC向けの監視ソフトです。仕様は [SPECIFICATION.md](SPECIFICATION.md) にありますが、2026-04-01 時点ではこのリポジトリに実装は含まれていません。
+- **Monitor**: 先生PC向けの監視ソフトです。仕様は [SPECIFICATION.md](SPECIFICATION.md) にありますが、現時点ではこのリポジトリに実装は含まれていません（仕様策定・Issue 分解が進行中）。
+- **Companions**: 主要アプリを補助する独立 exe 群です（SPEC §2.4）。現在は Manager の自己置換に使う **Updater** を含みます。
 
 ## 現在の状態
 
 - Launcher はゲーム選択画面、Store Browse 画面、スクリーンセーバー、ダイアログ表示、エラー表示、画面遷移などの実装が進んでいます。
-- Manager は Windows Forms アプリとして実装済みで、各種データ編集フォームやストアセクション管理画面を含みます。
+- Manager は Windows Forms アプリとして実装済みで、ゲーム / 開発者 / ストアセクションの編集、設定（ログ保存先・バックアップ等）、ログ閲覧、Manager UI からの自動アップデート適用などを備えます。
+- Companions（Updater）は Manager の自動アップデート適用フローで使用されます。
 - Monitor は仕様策定と Issue 分解が進行中です。
+- リリースは Bundle 単位で配布しています（最新は [GitHub Releases](https://github.com/ken1208git/TonePrism/releases) を参照）。
 
 詳細な仕様は [SPECIFICATION.md](SPECIFICATION.md)、変更履歴は [CHANGELOG.md](CHANGELOG.md) を参照してください。
 
@@ -27,8 +41,13 @@ TonePrism/
 ├── Companions/             # 補助 exe 集約 (SPEC §2.4)
 │   └── Updater/            # Manager 置換用 (SPEC §3.7.4、#108 Phase 3)
 ├── games/                  # 展示対象ゲームやサンプルデータ
-├── docs/                   # 補助ドキュメント
-├── toneprism.db                # SQLite データベース
+├── docs/                   # 部員向けマニュアル (MkDocs ソース、GitHub Pages で公開)
+├── templates/              # 配布物テンプレート (Install.bat / INSTALL_README.txt 等)
+├── .github/workflows/      # CI (encoding チェック / docs サイト公開)
+├── mkdocs.yml              # docs サイト設定
+├── requirements-docs.txt   # docs サイトのビルド依存
+├── toneprism.db            # SQLite データベース
+├── Release.ps1             # リリースビルド・配布スクリプト
 ├── SPECIFICATION.md        # 仕様書
 └── CHANGELOG.md            # 変更履歴
 ```
@@ -79,6 +98,7 @@ git clone https://github.com/ken1208git/TonePrism.git
 
 ## 関連ドキュメント
 
+- [部員向けマニュアル](https://ken1208git.github.io/TonePrism/): 運営スタッフ・部員向けの運用マニュアル（`docs/` を MkDocs で公開）
 - [SPECIFICATION.md](SPECIFICATION.md): 全体仕様、画面仕様、マイルストーン、バージョン方針
 - [CHANGELOG.md](CHANGELOG.md): 実装変更の履歴
 - [ERROR_CODES_MANUAL.txt](ERROR_CODES_MANUAL.txt): エラーコード運用メモ

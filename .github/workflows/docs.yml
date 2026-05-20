@@ -1,0 +1,86 @@
+# ============================================================================
+# Build & deploy the club-member manual (MkDocs Material) to GitHub Pages.
+#
+# Source of truth for the manual is docs/ (Markdown). On push to main that
+# touches the manual, this builds with `mkdocs build --strict` (broken internal
+# links / missing pages fail the build = drift detection, AGENTS.md
+# ## Documentation 第3層) and publishes to GitHub Pages.
+#
+# On pull_request it only builds (no deploy) so reviewers get strict-build
+# validation before merge.
+#
+# Prerequisite (one-time, manual): repository Settings → Pages → Build and
+# deployment → Source = "GitHub Actions".
+# ============================================================================
+
+name: Docs (MkDocs)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'requirements-docs.txt'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'requirements-docs.txt'
+      - '.github/workflows/docs.yml'
+
+# Least-privilege at top level: only repo read for checkout. Pages write /
+# OIDC are granted on the deploy job only (build / PR runs never deploy).
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # git-revision-date-localized reads commit history for each page's
+          # "最終更新日"; full history is required (shallow clone breaks it).
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: pip install -r requirements-docs.txt
+
+      - name: Build (strict)
+        run: mkdocs build --strict
+
+      - name: Upload Pages artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    # Only publish on push to main; pull_request runs build-only above.
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    # Pages write + OIDC are needed only here (deploy). Keep them off build/PR.
+    permissions:
+      pages: write
+      id-token: write
+    # Don't cancel an in-progress deploy; queue the newer one so deploys don't
+    # clobber each other. Scoped to deploy so PR build runs aren't serialized.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

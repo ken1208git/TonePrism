@@ -1,0 +1,6 @@
+# 部員向けマニュアル docs サイト (MkDocs Material) のビルド依存。
+# CI (.github/workflows/docs.yml) とローカルプレビュー (mkdocs serve) で共用。
+# メジャー境界で破壊的変更を遮断（minor/patch の更新は許容）。完全な再現性が要るなら別途 lock を検討。
+mkdocs-material>=9,<10
+mkdocs-glightbox>=0.4,<1
+mkdocs-git-revision-date-localized-plugin>=1.2,<2

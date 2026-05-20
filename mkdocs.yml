@@ -1,0 +1,85 @@
+site_name: 刀根山パソコン部 TonePrism 運用マニュアル
+site_description: 大阪府立刀根山高校パソコン部の文化祭展示で TonePrism を運営するスタッフ・部員向けの運用マニュアル
+site_url: https://ken1208git.github.io/TonePrism/
+site_author: TonePrism Project
+
+repo_url: https://github.com/ken1208git/TonePrism
+repo_name: ken1208git/TonePrism
+edit_uri: edit/main/docs/
+
+# docs サイトのソースは docs/ 配下の Markdown。執筆は Claude が SPECIFICATION.md を
+# 同セッションで参照しながら行う（ドリフト防止 第1層は AGENTS.md ## Documentation を参照）。
+docs_dir: docs
+
+# 内部リンク / アンカー切れを検証対象に。`mkdocs build --strict` で warn→error に
+# 昇格し、CI (docs.yml) がドリフトで Fail する（AGENTS.md ## Documentation 第3層）。
+validation:
+  links:
+    not_found: warn
+    anchors: warn
+
+theme:
+  name: material
+  language: ja
+  # 配色は Launcher（Godot）に寄せる: Launcher はライトモードを持たない黒基調 +
+  # Play ボタンの緑 #00CC00 がアクセント。それに揃えてダーク固定 (ライトトグルなし)。
+  # 実際の色値は docs/stylesheets/extra.css の custom palette で定義。
+  palette:
+    - scheme: slate
+      primary: custom
+      accent: custom
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.instant
+    - navigation.tracking
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  # 日本語は単語境界が無いため separator で CJK をトークナイズして全文検索を効かせる
+  - search:
+      separator: '[\s​\-、。：；！？「」（）]+'
+  - glightbox
+  # 各ページ下部に「最終更新日」を git 履歴から自動表示（ドリフト可視化 第2層）。
+  # CI の checkout は fetch-depth: 0（全履歴）が必要。
+  - git-revision-date-localized:
+      type: date
+      fallback_to_build_date: true
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+      # 既定の slugify は日本語見出しを落として anchor がずれる。Unicode 対応の
+      # pymdownx slugify に切替え、`#日本語見出し` リンクを効かせる。
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+
+nav:
+  - はじめに: index.md
+  - 使い方:
+      - インストール: usage/install.md
+      - 日々の起動と終了: usage/startup.md
+      - Manager の使い方: usage/manager.md
+      - ゲームの追加・編集・更新: usage/games.md
+      - ストアの設定: usage/store.md
+      - トラブル対応: usage/troubleshooting.md
+  - 運用（刀根山）:
+      - 当日運用: operations/overview.md
