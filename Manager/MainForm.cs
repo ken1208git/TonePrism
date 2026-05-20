@@ -58,6 +58,25 @@ namespace TonePrism.Manager
             // (#170 followup round 2 review L-3) backup status auto-revert timer の cleanup は Dispose 前に
             // 走らせたいので FormClosing を hook (= FormClosed は Dispose 後で意味薄)。
             this.FormClosing += MainForm_FormClosing;
+            // (#201) 設定タブから他タブへ切替える際、未保存変更があれば確認 dialog (保存/破棄/キャンセル)。
+            this.tabControl1.Selecting += TabControl1_Selecting;
+        }
+
+        // (#201) 設定タブ離脱時の未保存変更ガード。設定タブから別タブへ移ろうとした時のみ判定、
+        // 未保存あり + user が「キャンセル」を選んだら e.Cancel=true で切替を中断 (= 設定タブに留まる)。
+        private void TabControl1_Selecting(object sender, TabControlCancelEventArgs e)
+        {
+            // 設定タブ「から」「別タブへ」の遷移のみ対象 (= 設定タブ内 / 他タブ間の遷移は無関係)
+            if (tabControl1.SelectedTab == tabSettings && e.TabPage != tabSettings)
+            {
+                if (_settingsSectionPanel != null && _settingsSectionPanel.HasUnsavedChanges())
+                {
+                    if (!_settingsSectionPanel.PromptAndResolveUnsavedChanges())
+                    {
+                        e.Cancel = true; // 留まる
+                    }
+                }
+            }
         }
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
@@ -71,7 +90,18 @@ namespace TonePrism.Manager
             // (= 「保存して閉じますか?」等) は **本 handler より先に subscribe** された場合のみ「timer を
             // 生かしたまま return」が成立する。`+=` の subscription 順で event 発火するため、後付け時は
             // ctor (L57-60) の `FormClosing` hook 行より前に新 handler の `+=` を追加すること。
+            //
+            // (#201) 設定タブの未保存変更ガード。本 handler 内冒頭で判定 (= 別 handler の subscription 順序に
+            // 依存せず確実に最初に走る)。未保存あり + user「キャンセル」で e.Cancel=true → 終了中断 + timer 生存。
             if (e.Cancel) return;
+            if (_settingsSectionPanel != null && _settingsSectionPanel.HasUnsavedChanges())
+            {
+                if (!_settingsSectionPanel.PromptAndResolveUnsavedChanges())
+                {
+                    e.Cancel = true;
+                    return; // 終了中断、timer は生かす
+                }
+            }
             try
             {
                 if (_backupStatusClearTimer != null)
