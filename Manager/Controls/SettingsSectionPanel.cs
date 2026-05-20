@@ -12,17 +12,87 @@ namespace TonePrism.Manager.Controls
         public event Action DatabaseReset;
 
         // (#170 followup round 1) Text 系 control の Leave event は focus 移動ごとに発火するため、
-        // 値が前回 save 時から変更されていない場合は save を skip する。これらの field は
-        // 「最後に DB に書込んだ値」を tracking する。
+        // 値が前回 save 時から変更されていない場合は dirty mark を skip する (= no-op Leave で
+        // 「未保存」マーカーが誤点灯するのを防ぐ)。これらの field は「最後に DB に書込んだ値」を tracking。
         private string _lastSavedLogsRoot = "";
         private string _lastSavedBackupDest = "";
-        // (#170 followup round 1) 単位 ComboBox の SelectedIndexChanged は値の rollback で
-        // 再帰発火するため、現在の選択を tracking して「実際の unit change か revert か」を区別する。
+        // (#170 followup round 1) 単位 ComboBox の SelectedIndexChanged は値の換算で
+        // 再帰発火するため、現在の選択を tracking して「実際の unit change か」を区別する。
         private string _prevIntervalUnit = "時間";
+
+        // (#201, v0.16.0) editing model = commit-on-Apply。control 変更は即 DB 保存せず本 dirty flag を
+        // 立てるだけ、per-section「適用」ボタンで CheckBeforeWrite 1 回 + DB flush、「元に戻す」で
+        // Load* 再読込。tab 切替 / フォーム終了時に dirty なら 3-button 確認 dialog (= MainForm が呼ぶ)。
+        private bool _logSectionDirty;
+        private bool _backupSectionDirty;
 
         public SettingsSectionPanel()
         {
             InitializeComponent();
+        }
+
+        // ----- dirty 制御 helper (#201) -----
+
+        /// <summary>ログ section の dirty 状態を set + 未保存マーカー / 適用・元に戻すボタンの表示を同期。</summary>
+        private void SetLogSectionDirty(bool dirty)
+        {
+            _logSectionDirty = dirty;
+            lblLogUnsaved.Visible = dirty;
+            btnLogApply.Enabled = dirty;
+            btnLogRevert.Enabled = dirty;
+        }
+
+        /// <summary>バックアップ section の dirty 状態を set + 未保存マーカー / 適用・元に戻すボタンの表示を同期。</summary>
+        private void SetBackupSectionDirty(bool dirty)
+        {
+            _backupSectionDirty = dirty;
+            lblBackupUnsaved.Visible = dirty;
+            btnBackupApply.Enabled = dirty;
+            btnBackupRevert.Enabled = dirty;
+        }
+
+        // ----- 未保存解決 API (MainForm の tab 切替 / FormClosing から呼ぶ) -----
+
+        /// <summary>いずれかの section に未保存変更があるか。</summary>
+        public bool HasUnsavedChanges()
+        {
+            return _logSectionDirty || _backupSectionDirty;
+        }
+
+        /// <summary>
+        /// 未保存変更がある場合に 3-button 確認 dialog (保存 / 破棄 / キャンセル) を出して解決する。
+        /// 戻り値: true = 移動してよい (保存成功 or 破棄完了 or 未保存なし) / false = 留まる (キャンセル or 保存失敗)。
+        /// 「保存」時に各 section の Apply を呼ぶため、その中で CheckBeforeWrite が走る (= LAN race fence)。
+        /// </summary>
+        public bool PromptAndResolveUnsavedChanges()
+        {
+            if (!HasUnsavedChanges()) return true;
+
+            var r = MessageBox.Show(this,
+                "設定に未保存の変更があります。\n\n" +
+                "「はい」= 保存して移動\n" +
+                "「いいえ」= 破棄して移動\n" +
+                "「キャンセル」= このタブに留まる",
+                "未保存の変更",
+                MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
+
+            if (r == DialogResult.Yes)
+            {
+                // 保存: dirty な各 section を Apply。Apply 内の validate / CheckBeforeWrite が失敗 (= false)
+                // したら留まる (= dirty 維持で編集継続)。
+                if (_logSectionDirty && !ApplyLogSection()) return false;
+                if (_backupSectionDirty && !ApplyBackupSection()) return false;
+                return true;
+            }
+            if (r == DialogResult.No)
+            {
+                // 破棄: dirty な各 section を DB 値に Revert。
+                if (_logSectionDirty) RevertLogSection();
+                if (_backupSectionDirty) RevertBackupSection();
+                return true;
+            }
+            // キャンセル: 留まる
+            return false;
         }
 
         public void Initialize(DatabaseManager dbManager)
@@ -65,39 +135,14 @@ namespace TonePrism.Manager.Controls
             }
             numLogRetention.ValueChanged += NumLogRetention_ValueChanged;
             txtLogsRoot.Leave += TxtLogsRoot_Leave;
+            // (#201) load 完了時点では UI = DB なので未保存なし
+            SetLogSectionDirty(false);
         }
 
+        // (#201) control 変更は即 DB 保存せず dirty mark のみ。NumericUpDown の ValueChanged は実値変化時のみ発火。
         private void NumLogRetention_ValueChanged(object sender, EventArgs e)
         {
-            if (_dbManager == null) return;
-            int newValue = (int)numLogRetention.Value;
-            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ログ保存日数変更") == DialogResult.Cancel)
-            {
-                // rollback
-                numLogRetention.ValueChanged -= NumLogRetention_ValueChanged;
-                try
-                {
-                    int previous = _dbManager.SettingsRepository.GetInt32(
-                        SettingsKeys.LogRetentionDays, SettingsKeys.DefaultLogRetentionDays);
-                    if (previous < numLogRetention.Minimum) previous = (int)numLogRetention.Minimum;
-                    if (previous > numLogRetention.Maximum) previous = (int)numLogRetention.Maximum;
-                    numLogRetention.Value = previous;
-                }
-                catch { }
-                numLogRetention.ValueChanged += NumLogRetention_ValueChanged;
-                return;
-            }
-            try
-            {
-                _dbManager.SettingsRepository.SetInt32(SettingsKeys.LogRetentionDays, newValue);
-                Logger.Info("[SettingsSectionPanel] ログ保存日数を " + newValue + " 日に変更 (次回起動時反映)");
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn("[SettingsSectionPanel] LogRetentionDays 書込失敗: " + ex.Message);
-                MessageBox.Show("ログ保存日数の保存に失敗しました: " + ex.Message,
-                    "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            SetLogSectionDirty(true);
         }
 
         private void btnLogBrowse_Click(object sender, EventArgs e)
@@ -116,64 +161,80 @@ namespace TonePrism.Manager.Controls
                 if (dialog.ShowDialog(this) == DialogResult.OK)
                 {
                     txtLogsRoot.Text = dialog.SelectedPath;
-                    SaveLogsRootIfChanged();
+                    SetLogSectionDirty(true);
                 }
             }
         }
 
+        // (#201) Leave は値が直前 save 値と異なる時だけ dirty mark (= no-op Leave で誤点灯しない)。
         private void TxtLogsRoot_Leave(object sender, EventArgs e)
         {
-            SaveLogsRootIfChanged();
+            string current = (txtLogsRoot.Text ?? string.Empty).Trim();
+            if (current != _lastSavedLogsRoot) SetLogSectionDirty(true);
         }
 
-        private void SaveLogsRootIfChanged()
+        /// <summary>
+        /// (#201) ログ section の「適用」: validate → CheckBeforeWrite → DB flush → launcher 伝搬 → dirty clear。
+        /// 戻り値: true = 適用成功 / false = validate 失敗 or CheckBeforeWrite Cancel or DB 書込失敗 (= dirty 維持)。
+        /// </summary>
+        private bool ApplyLogSection()
         {
-            if (_dbManager == null) return;
+            if (_dbManager == null) return false;
             string newValue = (txtLogsRoot.Text ?? string.Empty).Trim();
-            if (newValue == _lastSavedLogsRoot) return;
 
-            // (R5 review Low-4) 絶対 path 制約の enforce。空文字 (= default) 以外は `Path.IsPathRooted` で
-            // 絶対 path を要求する。相対 path (`logs\custom`) / traverse (`..\elsewhere`) を許すと、Manager
-            // Logger は CWD 相対で `Directory.CreateDirectory`、Launcher は `path_join` で CWD 依存の予測不能
-            // path に倒れるため。FolderBrowserDialog 経由は絶対 path 保証だが textbox 直接入力経路は無防備。
+            // (R5 review Low-4) 絶対 path 制約の enforce。空文字 (= default) 以外は絶対 path を要求。
+            // 相対 path / traverse を許すと Manager Logger / Launcher が CWD 依存の予測不能 path に倒れる。
             if (!string.IsNullOrEmpty(newValue) && !System.IO.Path.IsPathRooted(newValue))
             {
                 MessageBox.Show(this,
                     "ログ保存先は絶対パス (例: D:\\TonePrism_logs) で入力してください。\n" +
                     "空欄にするとデフォルト (DB ファイルの隣の logs/) を使用します。",
                     "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                // rollback (= 直前 save 値に戻す)
-                txtLogsRoot.Leave -= TxtLogsRoot_Leave;
-                txtLogsRoot.Text = _lastSavedLogsRoot;
-                txtLogsRoot.Leave += TxtLogsRoot_Leave;
-                return;
+                return false; // dirty 維持
             }
 
-            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ログ保存先変更") == DialogResult.Cancel)
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ログ設定の適用") == DialogResult.Cancel)
             {
-                // rollback
-                txtLogsRoot.Leave -= TxtLogsRoot_Leave;
-                txtLogsRoot.Text = _lastSavedLogsRoot;
-                txtLogsRoot.Leave += TxtLogsRoot_Leave;
-                return;
+                return false; // dirty 維持 (= UI 値そのまま、編集継続)
             }
             try
             {
-                _dbManager.SettingsRepository.SetString(SettingsKeys.LogsRootPath, newValue);
+                var repo = _dbManager.SettingsRepository;
+                repo.SetString(SettingsKeys.LogsRootPath, newValue);
+                repo.SetInt32(SettingsKeys.LogRetentionDays, (int)numLogRetention.Value);
                 _lastSavedLogsRoot = newValue;
-                Logger.Info("[SettingsSectionPanel] ログ保存先を変更 (Manager は次回 Manager 起動時、Launcher は次回 Launcher 起動時に反映): " + newValue);
 
-                // (#201, v0.15.0) Launcher への path 伝搬: responses/launcher_logs_root.json を即時 atomic write。
-                // Launcher が autoload 最先頭 init 時に DB 接続前で読込んで log dir を決定する。
-                // Manager 自身の log dir は本 process の Logger 初期化済値を据置 (= 次回 Manager 起動時に反映)。
+                // (#201, v0.15.0) Launcher への path 伝搬: responses/launcher_logs_root.json を atomic write。
                 Services.LauncherLogsRootBridge.WriteCurrentLogsRoot(newValue);
+
+                Logger.Info("[SettingsSectionPanel] ログ設定を適用 (保存先=" + newValue + " / 保存日数="
+                    + (int)numLogRetention.Value + " 日、Manager は次回 Manager 起動時、Launcher は次回 Launcher 起動時に反映)");
+                SetLogSectionDirty(false);
+                return true;
             }
             catch (Exception ex)
             {
-                Logger.Warn("[SettingsSectionPanel] LogsRootPath 書込失敗: " + ex.Message);
-                MessageBox.Show("ログ保存先の保存に失敗しました: " + ex.Message,
+                Logger.Warn("[SettingsSectionPanel] ログ設定の適用に失敗: " + ex.Message);
+                MessageBox.Show("ログ設定の保存に失敗しました: " + ex.Message,
                     "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false; // dirty 維持
             }
+        }
+
+        /// <summary>(#201) ログ section の「元に戻す」: DB 値を再読込 (= LoadLogSettings、末尾で dirty clear)。</summary>
+        private void RevertLogSection()
+        {
+            LoadLogSettings();
+        }
+
+        private void btnLogApply_Click(object sender, EventArgs e)
+        {
+            ApplyLogSection();
+        }
+
+        private void btnLogRevert_Click(object sender, EventArgs e)
+        {
+            RevertLogSection();
         }
 
         // ----- バックアップ section -----
@@ -233,6 +294,8 @@ namespace TonePrism.Manager.Controls
             numBackupInterval.ValueChanged += NumBackupInterval_ValueChanged;
             cmbBackupIntervalUnit.SelectedIndexChanged += CmbBackupIntervalUnit_SelectedIndexChanged;
             numBackupRetention.ValueChanged += NumBackupRetention_ValueChanged;
+            // (#201) load 完了時点では UI = DB なので未保存なし
+            SetBackupSectionDirty(false);
         }
 
         /// <summary>
@@ -253,47 +316,12 @@ namespace TonePrism.Manager.Controls
             lblBackupIntervalUnit.Enabled = enabled;
         }
 
+        // (#201) checkbox 変更: interval section の enable/disable は UI-internal なので即時反映、
+        // DB 保存は dirty mark のみ (= Apply 時に flush)。
         private void ChkBackupAutoEnabled_CheckedChanged(object sender, EventArgs e)
         {
-            if (_dbManager == null) return;
-            bool newValue = chkBackupAutoEnabled.Checked;
-            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "自動バックアップ有効化変更") == DialogResult.Cancel)
-            {
-                // rollback (= event 再帰回避のため hook 一時 detach)
-                chkBackupAutoEnabled.CheckedChanged -= ChkBackupAutoEnabled_CheckedChanged;
-                chkBackupAutoEnabled.Checked = !newValue;
-                chkBackupAutoEnabled.CheckedChanged += ChkBackupAutoEnabled_CheckedChanged;
-                return;
-            }
-            try
-            {
-                _dbManager.SettingsRepository.SetString(SettingsKeys.BackupAutoEnabled, newValue ? "true" : "false");
-                // (#170 followup round 2 review M-4) UI 更新は **SetString 成功後** に行う。
-                // 旧実装は SetString 前 / 例外時に Apply 呼出されると UI 内部矛盾 (checkbox ON 表示なのに
-                // interval section disable 状態) になる drift 路があった。
-                ApplyAutoBackupEnabledUi(newValue);
-                Logger.Info("[SettingsSectionPanel] 自動バックアップを " + (newValue ? "有効" : "無効") + " に変更");
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn("[SettingsSectionPanel] BackupAutoEnabled 書込失敗: " + ex.Message);
-                // (#170 followup round 2 review M-4 + round 3 review M-2) UI 値を rollback (= DB 状態に
-                // 再同期、UI 内部矛盾を解消)。SetString 失敗時 + Apply 失敗時 (極稀: child control disposed 等)
-                // の両方で発火、checkbox と interval section の両方を rollback 後の値 (!newValue) に
-                // 揃えて UI 内部矛盾 (checkbox / interval section の disable 状態の片寄せ) を完全閉鎖。
-                chkBackupAutoEnabled.CheckedChanged -= ChkBackupAutoEnabled_CheckedChanged;
-                chkBackupAutoEnabled.Checked = !newValue;
-                chkBackupAutoEnabled.CheckedChanged += ChkBackupAutoEnabled_CheckedChanged;
-                try { ApplyAutoBackupEnabledUi(!newValue); }
-                catch (Exception applyEx)
-                {
-                    // ApplyAutoBackupEnabledUi 自体が throw する path (= 全 control が dispose 済の極稀 race) は
-                    // form 全体が破棄中の状態、UI 内部矛盾を完全に直すのは不可能。Warn だけ残して continue。
-                    Logger.Warn("[SettingsSectionPanel] BackupAutoEnabled rollback の Apply で例外 (= form 破棄中の race の可能性、log のみ残して諦め): " + applyEx.Message);
-                }
-                MessageBox.Show("自動バックアップ設定の保存に失敗しました: " + ex.Message,
-                    "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            ApplyAutoBackupEnabledUi(chkBackupAutoEnabled.Checked);
+            SetBackupSectionDirty(true);
         }
 
         /// <summary>
@@ -323,64 +351,28 @@ namespace TonePrism.Manager.Controls
                 if (dialog.ShowDialog(this) == DialogResult.OK)
                 {
                     txtBackupDest.Text = dialog.SelectedPath;
-                    SaveBackupDestIfChanged();
+                    SetBackupSectionDirty(true);
                 }
             }
         }
 
+        // (#201) Leave は値が直前 save 値と異なる時だけ dirty mark。
         private void TxtBackupDest_Leave(object sender, EventArgs e)
         {
-            SaveBackupDestIfChanged();
-        }
-
-        private void SaveBackupDestIfChanged()
-        {
-            if (_dbManager == null) return;
-            string newValue = (txtBackupDest.Text ?? string.Empty).Trim();
-            if (newValue == _lastSavedBackupDest) return;
-            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ保存先変更") == DialogResult.Cancel)
-            {
-                txtBackupDest.Leave -= TxtBackupDest_Leave;
-                txtBackupDest.Text = _lastSavedBackupDest;
-                txtBackupDest.Leave += TxtBackupDest_Leave;
-                return;
-            }
-            try
-            {
-                _dbManager.SettingsRepository.SetString("backup_destination_path", newValue);
-                _lastSavedBackupDest = newValue;
-                Logger.Info("[SettingsSectionPanel] バックアップ保存先を変更: " + newValue);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn("[SettingsSectionPanel] backup_destination_path 書込失敗: " + ex.Message);
-                MessageBox.Show("バックアップ保存先の保存に失敗しました: " + ex.Message,
-                    "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            string current = (txtBackupDest.Text ?? string.Empty).Trim();
+            if (current != _lastSavedBackupDest) SetBackupSectionDirty(true);
         }
 
         private void NumBackupInterval_ValueChanged(object sender, EventArgs e)
         {
-            SaveBackupIntervalWithGuard();
+            SetBackupSectionDirty(true);
         }
 
+        // (#201) 単位変更: hours↔display 換算 + Max 切替 は UI-internal なので即時実行 (DB 保存は Apply 時)。
         private void CmbBackupIntervalUnit_SelectedIndexChanged(object sender, EventArgs e)
         {
             string newUnit = cmbBackupIntervalUnit.SelectedItem as string ?? "時間";
             if (newUnit == _prevIntervalUnit) return;
-            if (_dbManager == null)
-            {
-                _prevIntervalUnit = newUnit;
-                return;
-            }
-            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ間隔単位変更") == DialogResult.Cancel)
-            {
-                // revert ComboBox (= event 再帰回避のため hook 一時 detach)
-                cmbBackupIntervalUnit.SelectedIndexChanged -= CmbBackupIntervalUnit_SelectedIndexChanged;
-                cmbBackupIntervalUnit.SelectedItem = _prevIntervalUnit;
-                cmbBackupIntervalUnit.SelectedIndexChanged += CmbBackupIntervalUnit_SelectedIndexChanged;
-                return;
-            }
             // 換算: 現在 displayed 値 × 旧 factor = effective hours → 新 factor で割って新 display
             int oldFactor = _prevIntervalUnit == "日" ? 24 : 1;
             int newFactor = newUnit == "日" ? 24 : 1;
@@ -393,83 +385,71 @@ namespace TonePrism.Manager.Controls
             numBackupInterval.Value = newDisplay;
             numBackupInterval.ValueChanged += NumBackupInterval_ValueChanged;
             _prevIntervalUnit = newUnit;
-            // 単位 + 換算後 hours を一括 save
-            SaveBackupIntervalDirect();
-        }
-
-        private void SaveBackupIntervalWithGuard()
-        {
-            if (_dbManager == null) return;
-            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ間隔変更") == DialogResult.Cancel)
-            {
-                // rollback to saved value
-                numBackupInterval.ValueChanged -= NumBackupInterval_ValueChanged;
-                try
-                {
-                    int hours = _dbManager.SettingsRepository.GetInt32("backup_auto_interval_hours", 24);
-                    int factor = _prevIntervalUnit == "日" ? 24 : 1;
-                    int displayValue = Math.Max(1, hours / factor);
-                    if (displayValue > numBackupInterval.Maximum) displayValue = (int)numBackupInterval.Maximum;
-                    numBackupInterval.Value = displayValue;
-                }
-                catch { }
-                numBackupInterval.ValueChanged += NumBackupInterval_ValueChanged;
-                return;
-            }
-            SaveBackupIntervalDirect();
-        }
-
-        private void SaveBackupIntervalDirect()
-        {
-            if (_dbManager == null) return;
-            try
-            {
-                int factor = _prevIntervalUnit == "日" ? 24 : 1;
-                int hours = (int)numBackupInterval.Value * factor;
-                _dbManager.SettingsRepository.SetInt32("backup_auto_interval_hours", hours);
-                string unitKey = _prevIntervalUnit == "日"
-                    ? SettingsKeys.BackupAutoIntervalUnitDays
-                    : SettingsKeys.BackupAutoIntervalUnitHours;
-                _dbManager.SettingsRepository.SetString(SettingsKeys.BackupAutoIntervalUnit, unitKey);
-                Logger.Info("[SettingsSectionPanel] バックアップ間隔を変更: " + (int)numBackupInterval.Value + " " + _prevIntervalUnit + " (= " + hours + " 時間)");
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn("[SettingsSectionPanel] backup_auto_interval_hours 書込失敗: " + ex.Message);
-                MessageBox.Show("バックアップ間隔の保存に失敗しました: " + ex.Message,
-                    "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            SetBackupSectionDirty(true);
         }
 
         private void NumBackupRetention_ValueChanged(object sender, EventArgs e)
         {
-            if (_dbManager == null) return;
-            int newValue = (int)numBackupRetention.Value;
-            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ世代数変更") == DialogResult.Cancel)
+            SetBackupSectionDirty(true);
+        }
+
+        /// <summary>
+        /// (#201) バックアップ section の「適用」: CheckBeforeWrite → 5 key を DB flush → dirty clear。
+        /// 戻り値: true = 適用成功 / false = CheckBeforeWrite Cancel or DB 書込失敗 (= dirty 維持)。
+        /// 間隔は `_prevIntervalUnit` の factor で display → hours に換算して保存 (= 旧 SaveBackupIntervalDirect logic)。
+        /// </summary>
+        private bool ApplyBackupSection()
+        {
+            if (_dbManager == null) return false;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ設定の適用") == DialogResult.Cancel)
             {
-                numBackupRetention.ValueChanged -= NumBackupRetention_ValueChanged;
-                try
-                {
-                    int previous = _dbManager.SettingsRepository.GetInt32("backup_retention_count", 30);
-                    if (previous < numBackupRetention.Minimum) previous = (int)numBackupRetention.Minimum;
-                    if (previous > numBackupRetention.Maximum) previous = (int)numBackupRetention.Maximum;
-                    numBackupRetention.Value = previous;
-                }
-                catch { }
-                numBackupRetention.ValueChanged += NumBackupRetention_ValueChanged;
-                return;
+                return false; // dirty 維持
             }
             try
             {
-                _dbManager.SettingsRepository.SetInt32("backup_retention_count", newValue);
-                Logger.Info("[SettingsSectionPanel] バックアップ世代数を " + newValue + " 個に変更");
+                var repo = _dbManager.SettingsRepository;
+                string destValue = (txtBackupDest.Text ?? string.Empty).Trim();
+                repo.SetString("backup_destination_path", destValue);
+                repo.SetString(SettingsKeys.BackupAutoEnabled, chkBackupAutoEnabled.Checked ? "true" : "false");
+
+                int factor = _prevIntervalUnit == "日" ? 24 : 1;
+                int hours = (int)numBackupInterval.Value * factor;
+                repo.SetInt32("backup_auto_interval_hours", hours);
+                repo.SetString(SettingsKeys.BackupAutoIntervalUnit,
+                    _prevIntervalUnit == "日" ? SettingsKeys.BackupAutoIntervalUnitDays : SettingsKeys.BackupAutoIntervalUnitHours);
+                repo.SetInt32("backup_retention_count", (int)numBackupRetention.Value);
+
+                _lastSavedBackupDest = destValue;
+                Logger.Info("[SettingsSectionPanel] バックアップ設定を適用 (保存先=" + destValue
+                    + " / 自動=" + (chkBackupAutoEnabled.Checked ? "有効" : "無効")
+                    + " / 間隔=" + (int)numBackupInterval.Value + " " + _prevIntervalUnit + " (= " + hours + " 時間)"
+                    + " / 世代数=" + (int)numBackupRetention.Value + " 個)");
+                SetBackupSectionDirty(false);
+                return true;
             }
             catch (Exception ex)
             {
-                Logger.Warn("[SettingsSectionPanel] backup_retention_count 書込失敗: " + ex.Message);
-                MessageBox.Show("バックアップ世代数の保存に失敗しました: " + ex.Message,
+                Logger.Warn("[SettingsSectionPanel] バックアップ設定の適用に失敗: " + ex.Message);
+                MessageBox.Show("バックアップ設定の保存に失敗しました: " + ex.Message,
                     "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false; // dirty 維持
             }
+        }
+
+        /// <summary>(#201) バックアップ section の「元に戻す」: DB 値を再読込 (= LoadBackupSettings、末尾で dirty clear)。</summary>
+        private void RevertBackupSection()
+        {
+            LoadBackupSettings();
+        }
+
+        private void btnBackupApply_Click(object sender, EventArgs e)
+        {
+            ApplyBackupSection();
+        }
+
+        private void btnBackupRevert_Click(object sender, EventArgs e)
+        {
+            RevertBackupSection();
         }
 
         // ----- バージョン情報 + DB リセット -----
