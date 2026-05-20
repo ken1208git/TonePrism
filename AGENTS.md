@@ -75,7 +75,7 @@
 - **新規実装は `Logger.Info / Warn / Error` を直接使うこと。`Console.WriteLine` (.NET) / `print` (Godot) は legacy** — Manager は `Console.SetOut` フックで INFO 自動転送、Launcher は Godot 標準ログテール経由で自動転送されるため動作はするが、**レベル指定不能** で WARN/ERROR の選別を放棄することになる。レビュー時のレベルフィルタ追跡が効かなくなるため、新コードでは明示 API を使うこと。pre-existing の `Console.WriteLine` / `print` は段階的に移行する (PR #162 で Manager は全件 sweep 済、Launcher は #85 で対応予定)。
 
 ## Documentation (部員向けマニュアル)
-- 部員・運営スタッフ向けの運用マニュアルは `docs/` 配下の Markdown が SoT。MkDocs Material で GitHub Pages に公開する（設定は `mkdocs.yml`、公開 CI は `.github/workflows/docs.yml`）。インストール手順の**詳細**は従来通り zip 同梱 `templates/INSTALL_README.txt`（版数固定・オフライン安全）が SoT で、`docs/install.md` は概要 + 誘導に留め二重管理しない。
+- 部員・運営スタッフ向けの運用マニュアルは `docs/` 配下の Markdown が SoT。MkDocs Material で GitHub Pages に公開する（設定は `mkdocs.yml`、公開 CI は `.github/workflows/docs.yml`）。インストール手順の**詳細**は従来通り zip 同梱 `templates/INSTALL_README.txt`（版数固定・オフライン安全）が SoT で、`docs/usage/install.md` は概要 + 誘導に留め二重管理しない。
 - **ドリフト防止（重要）**: UI・操作フロー・エラーコード・インストール手順・設定項目に影響する変更を行ったら、対応する `docs/` 章の更新要否を**必ず提案する**（更新不要なら理由を述べる）。コードと docs を同セッションで保守できる強みを活かし、実体との乖離を残さない。
 - 各ページの「最終更新日」は `git-revision-date-localized` プラグインが git 履歴から自動表示する（手動の版数マーカーと違い陳腐化しない）。`docs/index.md` 冒頭の「対象 Bundle 版数」のみ意図的に手動更新する。
 - `mkdocs build --strict` が内部リンク切れ・見出しアンカー切れ・ページ削除を Fail 扱いにする（CI で enforce）。ページ間リンクは相対 `.md` リンクで書き、リンク切れを strict build に検知させる。

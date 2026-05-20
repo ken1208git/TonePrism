@@ -25,11 +25,6 @@
   --md-accent-fg-color--transparent: rgba(0, 204, 0, 0.1);
 }
 
-/* ライト配色: 白背景ではコントラスト確保のためリンクをやや濃い緑に。 */
-[data-md-color-scheme=default] {
-  --md-typeset-a-color: #00a300;
-}
-
 /* ダーク配色(既定/固定): 背景を Launcher の黒系に寄せ、リンクは明るい緑に。
  * - 本文背景      : #141414 (Launcher の暗いタイル)
  * - カード/コード : #262626 (Launcher の store tile 背景)

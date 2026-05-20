@@ -30,16 +30,10 @@ on:
       - 'requirements-docs.txt'
       - '.github/workflows/docs.yml'
 
-# Allow Pages deployment via OIDC. contents:read for checkout.
+# Least-privilege at top level: only repo read for checkout. Pages write /
+# OIDC are granted on the deploy job only (build / PR runs never deploy).
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-# Avoid overlapping deploys clobbering each other; let the newest win.
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
   build:
@@ -74,6 +68,15 @@ jobs:
     if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
+    # Pages write + OIDC are needed only here (deploy). Keep them off build/PR.
+    permissions:
+      pages: write
+      id-token: write
+    # Don't cancel an in-progress deploy; queue the newer one so deploys don't
+    # clobber each other. Scoped to deploy so PR build runs aren't serialized.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
