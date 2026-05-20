@@ -120,6 +120,23 @@
 
 **注意 (#160 で section 責務分離)**: `Updater` 等の **runtime exe 群** (= SPEC §2.4 Companions 配置) の changelog は本 section ではなく **`## Companions`** (旧 `## Updater (Companions/Updater)`、本 PR で section 名を一般化) に記載する。本 section は build / 配布スクリプトのみ対象。Bundle v0.4.0 以前 (= 本 PR merge 前) の Updater 変更履歴は `## Release Tooling` の過去 entry (= round 1〜8 review 詳細等) に retain、retroactive consolidation は scope creep のため見送り (= PR #159 round 4 「SPEC 1 PR 1 bump 規約」導入時と同 pattern)。
 
+### [Release Tooling v0.1.20] - 2026-05-21
+
+#### Added (#106 — 部員向けマニュアル docs サイト基盤 + README 配布物方針の区分け)
+
+- **部員向けマニュアルの docs サイト基盤を新設** (MkDocs Material → GitHub Pages)。執筆ソースは `docs/` 配下の Markdown（SoT）、公開は `mkdocs.yml` + 新規 CI `.github/workflows/docs.yml`。公開 URL: `https://ken1208git.github.io/TonePrism/`。配色は Launcher（Godot）に寄せたダーク + 緑アクセント（`docs/stylesheets/extra.css`）。
+  - **刀根山パソコン部専用**として作成（公開リポのため個人情報は載せず役割ベース）。`docs/` を `usage/`（製品の使い方＝汎用）と `operations/`（刀根山固有の運用）に分離。将来の一般版は別リポ/別サイトで `usage/` を種にする方針（共有機構は作らない、SPEC §3.7.10）。
+  - **本文は実装済み機能のみ記載**: `usage/`（インストール / 起動と終了 / Manager 操作 / **ゲームの追加・編集・更新** / **ストア設定** / トラブル対応）を SPEC・コード・`ERROR_CODES_MANUAL.txt`・`INSTALL_README.txt` 準拠で執筆（フォーム各項目・エラーコード・SemVer の決め方・ストアのセクション/ソース/最大表示数などを実 UI に合わせて詳説）。未実装の Launcher 運用機能（終了制御 #84 / スタッフ呼び出し #83 / 音量 #82 / フィルター #29 等）は「実装予定」と明示し、動作するものとしては書かない。`operations/`（当日運用）は刀根山の実情（生徒用 PC 40 台・サーバー一元運用・役割・開場前チェックリスト等）で記述。
+  - 全ページから **フィードバックフォーム**（バグ報告・改善要望）への導線を設置（「はじめに」関連リンク + トラブル対応）。
+  - 執筆中に洗い出した Manager/Launcher の改善点を issue 化（#206 ゲームID 検証文言 / #207 thumbnail.jpg 自動検出 / #208 製作者氏名どちらか必須 / #209 個別バージョン削除 / #210 タイルグリッド複数行 / #211 最大表示数のソース別グレーアウト / #212 自動ソースは通常カテゴリ行のみ）。
+  - `docs.yml` は `mkdocs build --strict` で内部リンク切れ / 見出しアンカー切れ / ページ削除を Fail 扱いにし、構造ドリフトを CI で検知。各ページの「最終更新日」は `git-revision-date-localized` プラグインが git 履歴から自動表示（手動マーカーと違い陳腐化しない）。
+  - **インストール手順の詳細は従来通り zip 同梱 `templates/INSTALL_README.txt`（版数固定・オフライン安全）が SoT**。`docs/install.md` は概要 + 誘導に留め、二重管理しない。
+- **README.md を「開発者向け / 部員向け」の入口で区分け** (#106)。冒頭に 2 種類の読み手の案内を追加し、部員導線を「運用マニュアル(Pages) + GitHub Releases の zip + INSTALL_README.txt」へ、開発者導線を「開発環境のセットアップ」へ振り分け。「現在の状態」を最新進捗（Companions/Updater 追加等）に更新、ディレクトリ構成を実体（`docs/` 実体化・`mkdocs.yml`・`.github/workflows/` 等）と整合。
+  - 手動配布版 `README.txt`（旧 v0.5.7 / v0.7.6 同梱想定）の時代は終了し、部員向けインストール説明は `INSTALL_README.txt`（zip 同梱）に一本化済であることを明記（物理ファイルは既に不在）。
+- **ドリフト防止ルールを AGENTS.md に追加**: `## Documentation (部員向けマニュアル)` 節 + 「作業完了時」チェックに「UI / 操作 / エラーコード / インストール手順 / 設定に影響する変更時は `docs/` 更新要否を提案」を追記。ドキュメント役割分担は SPEC §3.7 に追記。
+
+bump 判断: docs 公開インフラ + 配布物方針ドキュメントの追加で、アプリ component（Launcher / Manager / Updater）のコード・挙動は無変更。配布インフラへの機能追加として patch (v0.1.19 → v0.1.20)。Bundle への反映は次回リリース実行時。
+
 ### [Release Tooling v0.1.19] - 2026-05-19
 
 #### Changed (#168 — brand rename URL slug + exe filename literals sweep)
