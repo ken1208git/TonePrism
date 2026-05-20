@@ -74,13 +74,13 @@ namespace TonePrism.Manager.Controls
         {
             if (!HasUnsavedChanges()) return true;
 
-            var r = MessageBox.Show(this,
-                "設定に未保存の変更があります。\n\n" +
-                "「はい」= 保存して移動\n" +
-                "「いいえ」= 破棄して移動\n" +
-                "「キャンセル」= このタブに留まる",
-                "未保存の変更",
-                MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
+            // (R3 review) 「保存 / 破棄」を button label に直接出す custom dialog
+            // (= 標準 MessageBox は「はい/いいえ/キャンセル」固定で文言が冗長になるため)。
+            DialogResult r;
+            using (var dialog = new UnsavedSettingsDialog())
+            {
+                r = dialog.ShowDialog(this);
+            }
 
             if (r == DialogResult.Yes)
             {

@@ -69,7 +69,17 @@ namespace TonePrism.Manager
             // 設定タブ「から」「別タブへ」の遷移のみ対象 (= 設定タブ内 / 他タブ間の遷移は無関係)
             if (tabControl1.SelectedTab == tabSettings && e.TabPage != tabSettings)
             {
-                if (_settingsSectionPanel != null && _settingsSectionPanel.HasUnsavedChanges())
+                if (_settingsSectionPanel == null) return;
+
+                // (R3 review fix) **focus 強制 commit**: TextBox.Leave / NumericUpDown のテキスト入力確定は
+                // focus が抜けた時に発火するが、tab の `Selecting` event は **focus-leave より先**に走るため、
+                // この時点では編集中 control の dirty mark がまだ立っていない (= TextBox に入力途中 / NumericUpDown
+                // に手打ち後 Enter 押さず tab click した case)。`ActiveControl = null` で active control の focus を
+                // 抜いて Leave / ValueChanged を同期発火させ、HasUnsavedChanges() 判定前に dirty を確定する。
+                // (FormClosing 経路はフォーム非アクティブ化で focus が先に抜けるため本処理は不要だった = 整合)。
+                this.ActiveControl = null;
+
+                if (_settingsSectionPanel.HasUnsavedChanges())
                 {
                     if (!_settingsSectionPanel.PromptAndResolveUnsavedChanges())
                     {

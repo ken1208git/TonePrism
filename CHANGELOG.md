@@ -1701,6 +1701,11 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **CheckBeforeWrite (LAN 重複起動確認) の発火を「変更ごと (最大 7 回)」→「section 適用ごと 1 回」に集約**。検出範囲 (同 PC Launcher / 他 PC Manager・Launcher) は不変、発火タイミングのみ変更。同 PC の Manager 2 個目は従来通り起動時 Named Mutex で物理 block。
 - 旧即時保存 method (`SaveLogsRootIfChanged` / `SaveBackupDestIfChanged` / `SaveBackupIntervalWithGuard` / `SaveBackupIntervalDirect`) を撤廃、Apply / Revert / dirty-mark handler に再構成。
 
+#### Round 3 review fix (実機 smoke test 指摘: tab 切替で警告出ない bug + dialog 文言冗長)
+
+- **タブ切替で未保存警告が出ない bug 修正** (`MainForm.TabControl1_Selecting`): TextBox.Leave / NumericUpDown のテキスト入力確定は focus が抜けた時に発火するが、`TabControl.Selecting` event は focus-leave より**先**に走るため、編集中 control の dirty mark がまだ立っておらず `HasUnsavedChanges()` が false を返していた (= FormClosing はフォーム非アクティブ化で focus が先に抜けるため警告が出ていた、非対称)。`this.ActiveControl = null` で active control の focus を抜いて Leave / ValueChanged を同期発火させ、dirty 判定前に確定するよう修正。
+- **未保存確認 dialog を custom 3-button (保存 / 破棄 / キャンセル) 化** (`UnsavedSettingsDialog.cs` 新規): 標準 `MessageBox` は button label を「はい / いいえ / キャンセル」固定でしか出せず、本文で「はい=保存 / いいえ=破棄 / ...」と注記する冗長な文言になっていた。button に直接「保存」「破棄」「キャンセル」を表示する custom Form に置換 (= 既存 `ResetDatabaseConfirmForm` 等の custom dialog pattern と同様)。
+
 #### Round 2 review fix (Medium-1 + Low-1 + Low-2 + Low-3)
 
 - **Medium-1**: `MainForm_FormClosing` の未保存ガード新規コメント「subscription 順序に依存せず確実に最初に走る」が、ガード本体が `if (e.Cancel) return;` の **後**にある実態と矛盾していた drift を解消。コメントを「他 handler が既に e.Cancel=true なら skip、現状 FormClosing hook は本 handler のみなので最初に走るが、将来 cancel 判定 handler を先に subscribe したら skip される (= round 4 review L-3 の順序前提と同じ制約)」に訂正。
