@@ -1701,6 +1701,13 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **CheckBeforeWrite (LAN 重複起動確認) の発火を「変更ごと (最大 7 回)」→「section 適用ごと 1 回」に集約**。検出範囲 (同 PC Launcher / 他 PC Manager・Launcher) は不変、発火タイミングのみ変更。同 PC の Manager 2 個目は従来通り起動時 Named Mutex で物理 block。
 - 旧即時保存 method (`SaveLogsRootIfChanged` / `SaveBackupDestIfChanged` / `SaveBackupIntervalWithGuard` / `SaveBackupIntervalDirect`) を撤廃、Apply / Revert / dirty-mark handler に再構成。
 
+#### Round 2 review fix (Medium-1 + Low-1 + Low-2 + Low-3)
+
+- **Medium-1**: `MainForm_FormClosing` の未保存ガード新規コメント「subscription 順序に依存せず確実に最初に走る」が、ガード本体が `if (e.Cancel) return;` の **後**にある実態と矛盾していた drift を解消。コメントを「他 handler が既に e.Cancel=true なら skip、現状 FormClosing hook は本 handler のみなので最初に走るが、将来 cancel 判定 handler を先に subscribe したら skip される (= round 4 review L-3 の順序前提と同じ制約)」に訂正。
+- **Low-1** (受容 + 明示): `PromptAndResolveUnsavedChanges` の「保存」分岐は両 section dirty 時に `ApplyLogSection` → `ApplyBackupSection` を順に呼ぶため CheckBeforeWrite が最大 2 連続 + 片側 Cancel で部分適用 (= ログ保存済 / バックアップ dirty 維持で留まる) になりうる。per-section 集約の一貫粒度として受容、本 CHANGELOG + SPEC §3.8.2 に期待値を明記。
+- **Low-2**: `btnResetDatabase_Click` 冒頭に未保存ガード (`HasUnsavedChanges() && !PromptAndResolveUnsavedChanges()` で中止) を追加。DB リセットは completion 後に LoadLogSettings / LoadBackupSettings で設定 section を再ロードするため、未保存編集が無確認破棄される穴があった (= tab 切替 / フォーム終了にはガードがあるのにより破壊的なリセットだけ対象外だった整合性穴)。
+- **Low-3**: `lblLogUnsaved` / `lblBackupUnsaved` の `AutoSize=true` + 明示 `Size` 併記を解消、明示 Size 行を削除 (= AutoSize 時は無視される + round 3 review L-1 で chkBackupAutoEnabled に適用した規約と一貫)。
+
 #### Round 1 review fix (Medium-1 + Low-2 + Low-3)
 
 - **Medium-1**: `Launcher/scripts/logger.gd:152` のコメントに旧 method 名 `SaveLogsRootIfChanged` が残置していた sweep 漏れ (= C# のみ Grep して `.gd` を漏らした) を `ApplyLogSection` に修正。`SPECIFICATION.md` v1.10.33 履歴 entry + 本 CHANGELOG v0.15.0 entry の同名参照は当時 (= PR #202 時点) の名前を記録した履歴のため残置。

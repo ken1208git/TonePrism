@@ -91,8 +91,12 @@ namespace TonePrism.Manager
             // 生かしたまま return」が成立する。`+=` の subscription 順で event 発火するため、後付け時は
             // ctor (L57-60) の `FormClosing` hook 行より前に新 handler の `+=` を追加すること。
             //
-            // (#201) 設定タブの未保存変更ガード。本 handler 内冒頭で判定 (= 別 handler の subscription 順序に
-            // 依存せず確実に最初に走る)。未保存あり + user「キャンセル」で e.Cancel=true → 終了中断 + timer 生存。
+            // (#201) 設定タブの未保存変更ガード。**他 handler が既に e.Cancel=true を立てている場合は
+            // skip** (= 下記 `if (e.Cancel) return;` で先に return)。現状 FormClosing を hook するのは本
+            // handler のみなので未保存ガードが最初に走るが、将来 cancel 判定 handler を**先に** subscribe
+            // した場合は本ガードが skip される点に注意 (= 上記 round 4 review L-3 の subscription 順序前提と
+            // 同じ制約)。その場合は未保存判定を本ブロックより前 (= cancel-capable handler 群の最先頭) に
+            // 移すか、未保存判定を独立 handler 化して subscribe 順を制御すること。
             if (e.Cancel) return;
             if (_settingsSectionPanel != null && _settingsSectionPanel.HasUnsavedChanges())
             {

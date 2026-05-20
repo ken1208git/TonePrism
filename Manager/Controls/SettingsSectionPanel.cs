@@ -508,6 +508,12 @@ namespace TonePrism.Manager.Controls
 
         private void btnResetDatabase_Click(object sender, EventArgs e)
         {
+            // (#201 R2 review Low-2) DB リセットは completion 後に LoadLogSettings / LoadBackupSettings で
+            // 設定 section を新 DB 値に再ロードするため、未保存編集があると無確認で破棄される。tab 切替 /
+            // フォーム終了と同じ 3-button ガードを冒頭で通す (= リセット前に「保存 / 破棄 / キャンセル」)。
+            // user「キャンセル」(= PromptAndResolve が false) ならリセット自体を中止。
+            if (HasUnsavedChanges() && !PromptAndResolveUnsavedChanges()) return;
+
             // (round 5 M-1) 最 destructive (DB 全削除 + 再構築) なので **2 段階 check**:
             //   (1) ConfirmForm 開く前 = user 親切性 (= 他 PC 起動中なら confirm 開かず早期 abort)
             //   (2) ConfirmForm OK 後 + ProcessingDialog 起動前 = race fence (= confirm 読んでる間に
