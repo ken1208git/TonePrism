@@ -33,7 +33,9 @@ namespace TonePrism.Manager
             var initialSettings = ReadInitialLogSettingsWithMigration();
             Logger.Initialize(initialSettings.LogsRootPath);
             // (#201) PathManager.LogsRootDirectory も同じ値で 1 回 set (= UpdaterLogDir / LauncherLogDir 等の
-            // 派生 getter が一貫した値を返すように)。SetLogsRootDirectory は immutable 保証 (= 2 回目以降 no-op)。
+            // 派生 getter が一貫した値を返すように)。SetLogsRootDirectory は **2 回目以降は
+            // `InvalidOperationException` で fail-fast** (= R2 review M-5 で immutable invariant 厳守、
+            // setter→getter 順序逆転 / 重複呼出を dev/test で発覚させる discipline)。
             PathManager.SetLogsRootDirectory(initialSettings.LogsRootPath);
             // (#201) Launcher への path 伝搬: `responses/launcher_logs_root.json` を atomic write。
             // Launcher Logger は autoload 最先頭 init 時に DB 接続前で本 file を読込、log dir を決定する。
@@ -267,6 +269,14 @@ namespace TonePrism.Manager
         /// wire format は **真の camelCase** (`migratedFrom` / `migratedAt`) — JavaScriptSerializer は
         /// underscore stripping を行わないため、snake_case を書くと PascalCase DTO property に bind できず
         /// dialog 永久不発火 (R2 review Critical #1 対応)。
+        ///
+        /// **crash window (R4 review M-4)**: caller (`ReadInitialLogSettingsWithMigration`) で `tx.Commit()`
+        /// 成功直後 + 本関数呼出前に process crash した場合、次回起動で legacyValue は DELETE 済 +
+        /// logsRootPath は新値 set 済 → migration 条件 (`legacyValue 非空 && logsRootPath 空`) 不成立 +
+        /// cleanup 条件 (`両方非空`) も不成立 → silent に migration スキップ + sentinel 書出されない →
+        /// **MainForm dialog 永久不発火 (= user は migration が起きたことに気付かない)**。
+        /// 発生確率は μs オーダーで極めて低いが、user 通知欠落 path として明示。本 PR では受容、recovery
+        /// 経路 (= sentinel を tx commit より前に書出 + commit 失敗時に sentinel 削除 pattern) は別 PR で検討。
         /// </summary>
         private static void WriteLogsRootMigrationSentinel(string migratedFrom)
         {
@@ -274,7 +284,7 @@ namespace TonePrism.Manager
             {
                 string sentinelPath = System.IO.Path.Combine(PathManager.BaseDirectory, ".logs_root_migrated");
                 string sentinelTmp = sentinelPath + ".tmp";
-                string sentinelJson = "{\"migratedFrom\":\"" + EscapeJsonString(migratedFrom) + "\","
+                string sentinelJson = "{\"migratedFrom\":\"" + Services.JsonEscape.EscapeString(migratedFrom) + "\","
                     + "\"migratedAt\":\"" + DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") + "\"}";
                 System.IO.File.WriteAllText(sentinelTmp, sentinelJson, new System.Text.UTF8Encoding(false));
                 if (System.IO.File.Exists(sentinelPath)) System.IO.File.Delete(sentinelPath);
@@ -285,16 +295,6 @@ namespace TonePrism.Manager
                 // sentinel 書出失敗時は migration MessageBox 出ないだけで migration 自体は完了済、
                 // 起動阻害なし。Logger 未初期化のため warn 不可。
             }
-        }
-
-        /// <summary>
-        /// minimal JSON string escape (`\` と `"` のみ)。sentinel JSON は内部 generated path のみ書き出すので
-        /// surrogate pair / unicode escape まで対応する必要なし。
-        /// </summary>
-        private static string EscapeJsonString(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return string.Empty;
-            return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
 
         /// <summary>

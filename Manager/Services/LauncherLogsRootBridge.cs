@@ -41,8 +41,21 @@ namespace TonePrism.Manager.Services
         /// **Launcher 側影響**: reader (Launcher Logger) が **ちょうど window 中に init で読込んだ場合**、
         /// file 不在 → default fallback path に倒れ、**Launcher 1 セッション分の log が user 意図と異なる
         /// 場所に書かれる**。user 通知一切なし、Launcher 起動は阻害されない (= safe path)。LAN 50 PC 同時起動
-        /// 等で window 衝突確率が無視できない場合、別 PR で `MoveFileEx` P/Invoke 化を検討すべき (= R2
-        /// review Low #7 の note 通り)。本 PR では実装据置、表現のみ「実害なし」から honest 化。
+        /// 等で window 衝突確率が無視できない場合、別 PR で `MoveFileEx` P/Invoke 化を検討すべき。
+        ///
+        /// **multi-Manager race による transient mismatch (R4 review H-2)**: LAN で複数 PC の Manager が
+        /// ほぼ同時に `SaveLogDestIfChanged` 通過 (= CheckBeforeWrite 通過後 race) した場合、SQLite write
+        /// → bridge write の順で **caller の local 値を書出**ているため、(1) PC-A SetString → (2) PC-B
+        /// SetString → (3) PC-A WriteCurrentLogsRoot(自分の値) → (4) PC-B WriteCurrentLogsRoot(自分の値) の
+        /// interleave で bridge file 内容と SQLite 最新値が transient に食い違う path がある。**Self-heal**:
+        /// 次回 Manager 起動の Program.Main で SQLite SoT から再書出されるため恒久 hazard ではない。
+        /// **user 通知なし、Launcher 1 セッション分の log dir が SQLite SoT と食い違う**可能性。本 PR では
+        /// 受容、Bridge を SQLite re-read 化は別 PR で検討。
+        ///
+        /// **UI 経路の silent swallow (R4 review L-3)**: 全例外を catch → `Logger.Warn` 試行のみで return void。
+        /// `SaveLogDestIfChanged` の UI save 経路で bridge write 失敗時、user は「保存成功」UI feedback を
+        /// 受けるが Launcher は次回 Manager 再起動まで新値を見ない (= self-heal するが timing 遅延)。
+        /// 本 PR では受容、UI に dialog 通知する強化は別 PR で検討 (= 当面 Logger trail で十分)。
         /// </summary>
         public static void WriteCurrentLogsRoot(string logsRootPath)
         {
@@ -57,7 +70,7 @@ namespace TonePrism.Manager.Services
                 string normalized = logsRootPath ?? string.Empty;
                 string json = "{"
                     + "\"schema_version\":1,"
-                    + "\"logs_root_path\":\"" + EscapeJsonString(normalized) + "\","
+                    + "\"logs_root_path\":\"" + JsonEscape.EscapeString(normalized) + "\","
                     + "\"updated_at_unix_ms\":" + unixMs
                     + "}";
 
@@ -71,16 +84,6 @@ namespace TonePrism.Manager.Services
                 try { Logger.Warn("[LauncherLogsRootBridge] launcher_logs_root.json 書込失敗: " + ex.Message); }
                 catch { /* swallow (= Logger 自体が未初期化 / 失敗中) */ }
             }
-        }
-
-        /// <summary>
-        /// minimal JSON string escape (`\` と `"` のみ)。schema_version 1 で文字列値は path のみなので、
-        /// surrogate pair / unicode escape まで対応する必要なし (= Windows path に含まれない)。
-        /// </summary>
-        private static string EscapeJsonString(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return string.Empty;
-            return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
     }
 }

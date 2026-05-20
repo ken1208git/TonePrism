@@ -9,6 +9,11 @@ namespace TonePrism.Manager.Services
     ///
     /// Phase 4 (#108) で導入: アップデート check の cache、skip 機能、background check の頻度
     /// 設定をすべて settings テーブル経由で永続化する (Manager 再起動を跨いでも保持されるよう)。
+    ///
+    /// **SQL literal 埋込制約 (R4 review L-2)**: 一部 const は `Program.ReadInitialLogSettingsWithMigration`
+    /// 等で SQL 文字列に **string concatenation で埋込まれる** (= parameterized query ではない、`AddWithValue`
+    /// は value のみ)。そのため **const 値は alphanumeric + underscore のみ** に制限すること。`'` 含めると
+    /// SQL 構文 break + 仮に外部流入時は injection hazard。新 key 追加時に literal を遵守。
     /// </summary>
     internal static class SettingsKeys
     {

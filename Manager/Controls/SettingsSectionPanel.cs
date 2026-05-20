@@ -14,7 +14,7 @@ namespace TonePrism.Manager.Controls
         // (#170 followup round 1) Text 系 control の Leave event は focus 移動ごとに発火するため、
         // 値が前回 save 時から変更されていない場合は save を skip する。これらの field は
         // 「最後に DB に書込んだ値」を tracking する。
-        private string _lastSavedLogDest = "";
+        private string _lastSavedLogsRoot = "";
         private string _lastSavedBackupDest = "";
         // (#170 followup round 1) 単位 ComboBox の SelectedIndexChanged は値の rollback で
         // 再帰発火するため、現在の選択を tracking して「実際の unit change か revert か」を区別する。
@@ -44,15 +44,15 @@ namespace TonePrism.Manager.Controls
             if (_dbManager == null) return;
             // hook 一時 detach
             numLogRetention.ValueChanged -= NumLogRetention_ValueChanged;
-            txtLogDest.Leave -= TxtLogDest_Leave;
+            txtLogsRoot.Leave -= TxtLogsRoot_Leave;
             try
             {
                 var repo = _dbManager.SettingsRepository;
                 // (#170 followup round 2 review M-3) 初期値も trim して比較側 (newValue = Text.Trim()) と
                 // 揃える。DB に末尾 whitespace が混入していた case で起動直後の focus 移動 1 回で
                 // 「変更扱い」になり CheckBeforeWrite dialog が空発火する race を構造閉鎖。
-                _lastSavedLogDest = (repo.GetString(SettingsKeys.LogsRootPath, "") ?? "").Trim();
-                txtLogDest.Text = _lastSavedLogDest;
+                _lastSavedLogsRoot = (repo.GetString(SettingsKeys.LogsRootPath, "") ?? "").Trim();
+                txtLogsRoot.Text = _lastSavedLogsRoot;
 
                 int days = repo.GetInt32(SettingsKeys.LogRetentionDays, SettingsKeys.DefaultLogRetentionDays);
                 if (days < numLogRetention.Minimum) days = (int)numLogRetention.Minimum;
@@ -64,7 +64,7 @@ namespace TonePrism.Manager.Controls
                 Logger.Warn("[SettingsSectionPanel] LoadLogSettings 読込失敗: " + ex.Message);
             }
             numLogRetention.ValueChanged += NumLogRetention_ValueChanged;
-            txtLogDest.Leave += TxtLogDest_Leave;
+            txtLogsRoot.Leave += TxtLogsRoot_Leave;
         }
 
         private void NumLogRetention_ValueChanged(object sender, EventArgs e)
@@ -105,40 +105,40 @@ namespace TonePrism.Manager.Controls
             using (var dialog = new FolderBrowserDialog())
             {
                 dialog.Description = "ログ保存先フォルダを選択してください";
-                if (!string.IsNullOrEmpty(txtLogDest.Text))
+                if (!string.IsNullOrEmpty(txtLogsRoot.Text))
                 {
-                    dialog.SelectedPath = txtLogDest.Text;
+                    dialog.SelectedPath = txtLogsRoot.Text;
                 }
                 if (dialog.ShowDialog(this) == DialogResult.OK)
                 {
-                    txtLogDest.Text = dialog.SelectedPath;
-                    SaveLogDestIfChanged();
+                    txtLogsRoot.Text = dialog.SelectedPath;
+                    SaveLogsRootIfChanged();
                 }
             }
         }
 
-        private void TxtLogDest_Leave(object sender, EventArgs e)
+        private void TxtLogsRoot_Leave(object sender, EventArgs e)
         {
-            SaveLogDestIfChanged();
+            SaveLogsRootIfChanged();
         }
 
-        private void SaveLogDestIfChanged()
+        private void SaveLogsRootIfChanged()
         {
             if (_dbManager == null) return;
-            string newValue = (txtLogDest.Text ?? string.Empty).Trim();
-            if (newValue == _lastSavedLogDest) return;
+            string newValue = (txtLogsRoot.Text ?? string.Empty).Trim();
+            if (newValue == _lastSavedLogsRoot) return;
             if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ログ保存先変更") == DialogResult.Cancel)
             {
                 // rollback
-                txtLogDest.Leave -= TxtLogDest_Leave;
-                txtLogDest.Text = _lastSavedLogDest;
-                txtLogDest.Leave += TxtLogDest_Leave;
+                txtLogsRoot.Leave -= TxtLogsRoot_Leave;
+                txtLogsRoot.Text = _lastSavedLogsRoot;
+                txtLogsRoot.Leave += TxtLogsRoot_Leave;
                 return;
             }
             try
             {
                 _dbManager.SettingsRepository.SetString(SettingsKeys.LogsRootPath, newValue);
-                _lastSavedLogDest = newValue;
+                _lastSavedLogsRoot = newValue;
                 Logger.Info("[SettingsSectionPanel] ログ保存先を変更 (Manager は次回 Manager 起動時、Launcher は次回 Launcher 起動時に反映): " + newValue);
 
                 // (#201, v0.15.0) Launcher への path 伝搬: responses/launcher_logs_root.json を即時 atomic write。

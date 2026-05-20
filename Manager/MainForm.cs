@@ -987,6 +987,11 @@ namespace TonePrism.Manager
                 return;
             }
 
+            // (R4 review L-4) trailing backslash 正規化: FolderBrowserDialog の SelectedPath は末尾 `\` を
+            // 含む慣習があり、dialog 本文構築時に `migratedFrom + "\\\n"` が `D:\logs\\` のような `\\` 混在
+            // 表示になる cosmetic 問題を予防。Trim 後に再度 path 構築する。
+            migratedFrom = migratedFrom.TrimEnd('\\', '/');
+
             Services.Logger.Info("[MainForm] logs_root_migrated dialog 表示: migratedFrom=" + migratedFrom);
             string body =
                 "これまでのバージョンでは、Manager のログだけが指定したフォルダに保存されていました。\n" +

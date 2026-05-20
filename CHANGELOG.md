@@ -1719,6 +1719,19 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 - 旧 setting key `log_destination_path` は SettingsRepository の get/set callsite から削除 (= 1 semantic 維持)。`SettingsKeys.LogDestinationPath` const は migration code 内 reference のみで残置 (= deprecated marker、docstring で migration 完了後の参照禁止を明示)。
 
+#### Round 4 review fix (H-1 + H-2 + M-1 + M-2 + M-3 + M-4 + L-1 + L-2 + L-3 + L-4)
+
+- **H-1**: SPEC §3.6「既知制約」fence を 3 経路 (Logger fallback + Manager 側 bridge file 書出 + Launcher 側 bridge file 読込) に拡張。dev 環境 (`.git` 直下起動) で bridge IPC が silent に Launcher に届かない path も明文化。
+- **H-2**: `WriteCurrentLogsRoot` docstring に「multi-Manager race による transient mismatch」path を追記。LAN で複数 Manager が CheckBeforeWrite 通過後の interleave で bridge file 内容と SQLite 最新値が transient に食い違う、次回 Manager 起動の Program.Main で self-heal、Bridge を SQLite re-read 化は別 PR で検討。
+- **M-1**: `EscapeJsonString` 2 callsite (`Program.cs` + `LauncherLogsRootBridge.cs`) の重複を `Services/JsonEscape.cs` (新 helper) に集約。将来 schema 拡張 (Unicode escape 等) で片方だけ更新する silent drift を予防。
+- **M-2**: `SettingsSectionPanel` 内 control / field / method 名を `LogDest*` → `LogsRoot*` に rename (`txtLogsRoot` / `lblLogsRootHint` / `_lastSavedLogsRoot` / `SaveLogsRootIfChanged` / `TxtLogsRoot_Leave`)。UI hint / `SettingsKeys.LogsRootPath` / CHANGELOG が新 semantic に揃った状態で内部 control 名のみ旧 semantic 残置だった drift を解消、後続 #201 PR の editing model 全面書換え時の戻り作業を予防。
+- **M-3**: csproj `<Compile>` 順序 alphabetical 違反訂正 (`Services\LauncherLogsRootBridge.cs` を `Services\ImagePreviewHelper.cs` と `Services\LauncherSessionService.cs` の間に移動 + `Services\JsonEscape.cs` も alphabetical 位置に追加)。
+- **M-4**: `WriteLogsRootMigrationSentinel` docstring に「tx commit 成功 + sentinel 書出前 crash で dialog 永久不発火」path を fence。発生確率は μs オーダーだが silent failure path として明示、recovery 経路 (= sentinel pre-write pattern) は別 PR で検討。
+- **L-1**: Program.Main コメント「SetLogsRootDirectory は immutable 保証 (= 2 回目以降 no-op)」を「2 回目以降は `InvalidOperationException` で fail-fast」に R2 M-5 throw 化と sync 訂正。
+- **L-2**: `SettingsKeys.cs` 冒頭 docstring に「SQL literal 埋込制約: const 値は alphanumeric + underscore のみ許容」規約を明文化、`'` 含めると SQL 構文 break + injection hazard を予防。
+- **L-3**: `WriteCurrentLogsRoot` docstring に「UI 経路の silent swallow」path を追記。`SaveLogsRootIfChanged` 経路で bridge write 失敗時、user は「保存成功」UI feedback 受けるが Launcher は次回 Manager 再起動まで新値を見ない self-heal 遅延、本 PR では受容 + UI dialog 通知強化は別 PR で検討。
+- **L-4**: `TryShowLogsRootMigratedDialog` 内で `migratedFrom = migratedFrom.TrimEnd('\\', '/')` 正規化を追加。FolderBrowserDialog の `SelectedPath` 末尾 `\` 込み値で dialog 本文に `D:\logs\\` の `\\` 混在表示が出る cosmetic 問題を予防。
+
 #### Round 3 review fix (Critical-1 + High-1 + High-2 + Medium-1 + Medium-2 + Medium-3 + Low-1 + Low-2) — 整合性 sweep
 
 R2 round で fix した内容と矛盾する docstring / CHANGELOG / SPEC が他箇所に残っていた整合性問題を一括 sweep:
