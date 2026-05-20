@@ -1001,7 +1001,7 @@ namespace TonePrism.Manager
                 "    └ updater\\    ← Updater のログ (新規追加)\n" +
                 "\n" +
                 "これまで " + migratedFrom + " 直下に保存されていた古いログファイルはそのまま残ります\n" +
-                "(30 日後に自動的に削除されます)。\n" +
+                "(不要であれば手動で削除してください)。\n" +
                 "\n" +
                 "設定タブの「ログ」セクションから保存先を変更できます。";
             MessageBox.Show(
@@ -1014,9 +1014,12 @@ namespace TonePrism.Manager
 
         /// <summary>
         /// `<install>/.logs_root_migrated` sentinel ファイルの JSON deserialize 用 DTO (#201, v0.15.0)。
-        /// writer 側は Program.TryAutoMigrateLegacyLogPath、wire format は camelCase
-        /// (`migrated_from` / `migrated_at`)、`JavaScriptSerializer` の case-insensitive deserialize で
+        /// writer 側は Program.TryAutoMigrateLegacyLogPath、wire format は **真の camelCase**
+        /// (`migratedFrom` / `migratedAt`)、`JavaScriptSerializer` の case-insensitive deserialize で
         /// PascalCase property と互換受理 (UpdateCompletedSentinel と同 pattern)。
+        /// 注: 旧 R1 docstring で「camelCase」と称しつつ実態が snake_case (`migrated_from`) だった drift を
+        /// R2 review Critical #1 で解消、JavaScriptSerializer は underscore stripping を行わないため
+        /// snake_case 採用は silent dialog 不発火を招くことが判明。
         /// </summary>
         private sealed class LogsRootMigratedSentinel
         {

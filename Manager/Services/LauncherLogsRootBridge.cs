@@ -33,8 +33,12 @@ namespace TonePrism.Manager.Services
         private const string FileName = "launcher_logs_root.json";
 
         /// <summary>
-        /// 現在の `logs_root_path` 値 (= 設定が空なら "" を渡す) を JSON file に atomic write する。
+        /// 現在の `logs_root_path` 値 (= 設定が空なら "" を渡す) を JSON file に **near-atomic** write する。
         /// 書出先 dir が存在しなければ作成、既存 file は overwrite。
+        /// **near-atomic 制約**: `.tmp` 書出 → Delete + Move pattern で Delete と Move の間に target が一瞬
+        /// 不在になる window が残る (= .NET Framework 4.x の `File.Move` が overwrite 対応していないため
+        /// 真の atomic 化には Win32 `MoveFileEx(MOVEFILE_REPLACE_EXISTING)` が必要)。reader 側 (Launcher
+        /// Logger) は file 不在 / parse 失敗で default fallback する safe path のため実害なし、本実装で許容。
         /// </summary>
         public static void WriteCurrentLogsRoot(string logsRootPath)
         {

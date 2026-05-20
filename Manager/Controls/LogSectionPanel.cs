@@ -10,9 +10,11 @@ using TonePrism.Manager.Services;
 namespace TonePrism.Manager.Controls
 {
     /// <summary>
-    /// ログビューア (#129)。
-    /// `<project_root>/logs/manager/` と `<project_root>/logs/launcher/` をスキャンし、
-    /// セッション単位のログファイルを一覧表示 + 内容を行レベル別に色分けして表示。
+    /// ログビューア (#129、v0.15.0 で unified logs root semantic に refactor)。
+    /// `<PathManager.LogsRootDirectory>/<component>/` (= `<root>/manager/` / `<root>/launcher/` 等) を
+    /// 現在 tab で選択中の component 単位で scan、セッション単位のログファイルを一覧表示 + 内容を
+    /// 行レベル別に色分けして表示。`<root>` は user 設定 `logs_root_path` (= 親 logs root) に従い
+    /// `<install>/logs/` (default) または custom path に解決される。
     /// レベルフィルタ・全文検索を組み合わせ、現在のフィルタで「内容なし」になるファイルは
     /// 一覧で灰色化して「開いても何も出ない」と一目で分かるようにする。
     /// </summary>

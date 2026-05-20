@@ -89,19 +89,20 @@ namespace TonePrism.Manager
         /// <summary>
         /// ログ全体の親 dir (`<BaseDirectory>/logs/` または user 設定 `logs_root_path`)。
         /// Program.Main が SQLite を読込んで起動時に SetLogsRootDirectory() で 1 回 set、以降は immutable。
-        /// Get 時に未設定なら default 計算 fallback、SettingsRepository には依存しない (Logger SoT 一元化)。
+        /// SettingsRepository には依存しない (Logger SoT 一元化)。
+        ///
+        /// **R2 review Medium #5 対応**: 旧 R1 実装は getter で「未 set なら default を field に書込む」
+        /// defensive fallback を持っていたが、これは setter が後行で呼ばれた時に no-op 化させる silent
+        /// ignore hazard だった。本実装は **getter は default を return するが field には書込まない**、
+        /// setter は 2 回目以降 throw で discipline 強制 (= setter→getter 順序逆転を test / dev で検出)。
         /// </summary>
         public static string LogsRootDirectory
         {
             get
             {
-                if (_logsRootDirectory == null)
-                {
-                    // Set 前 fallback: default (BaseDirectory/logs/)。Program.Main 経由の正規 path では
-                    // SetLogsRootDirectory が必ず先に呼ばれるが、test や異常 path で getter が先に走った
-                    // case の defensive fallback。
-                    _logsRootDirectory = Path.Combine(BaseDirectory, "logs");
-                }
+                // Set 前 fallback: default (BaseDirectory/logs/) を return するが field には書込まない。
+                // これにより後続の SetLogsRootDirectory(custom) が正しく custom 値を反映できる。
+                if (_logsRootDirectory == null) return Path.Combine(BaseDirectory, "logs");
                 return _logsRootDirectory;
             }
         }
@@ -109,11 +110,17 @@ namespace TonePrism.Manager
         /// <summary>
         /// LogsRootDirectory を起動時に 1 回 set する。Program.Main が SQLite 読込結果で呼出。
         /// 空文字 / null 時は default `<BaseDirectory>/logs/` を採用 (= 旧 v0.14.0 と同じ default 挙動)。
-        /// 2 回目以降の呼出は no-op (= 上書き禁止、immutable 保証)。
+        /// **2 回目以降の呼出は InvalidOperationException** (= immutable invariant 厳守、Program.Main の
+        /// 順序逆転や重複呼出を発覚させる discipline)。
         /// </summary>
         public static void SetLogsRootDirectory(string customRoot)
         {
-            if (_logsRootDirectory != null) return; // 既 set、上書き禁止
+            if (_logsRootDirectory != null)
+            {
+                throw new InvalidOperationException(
+                    "PathManager.SetLogsRootDirectory は起動時に 1 回のみ呼出可能、既に set 済の状態で再呼出された。"
+                    + " Program.Main の呼出順序を確認のこと (= getter 先行 / 重複 set 呼出は禁止)。");
+            }
             _logsRootDirectory = string.IsNullOrWhiteSpace(customRoot)
                 ? Path.Combine(BaseDirectory, "logs")
                 : customRoot;

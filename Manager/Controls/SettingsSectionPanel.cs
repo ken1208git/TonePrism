@@ -139,7 +139,7 @@ namespace TonePrism.Manager.Controls
             {
                 _dbManager.SettingsRepository.SetString(SettingsKeys.LogsRootPath, newValue);
                 _lastSavedLogDest = newValue;
-                Logger.Info("[SettingsSectionPanel] ログ保存先を変更 (Manager は次回起動時反映、Launcher は次回起動時反映): " + newValue);
+                Logger.Info("[SettingsSectionPanel] ログ保存先を変更 (Manager は次回 Manager 起動時、Launcher は次回 Launcher 起動時に反映): " + newValue);
 
                 // (#201, v0.15.0) Launcher への path 伝搬: responses/launcher_logs_root.json を即時 atomic write。
                 // Launcher が autoload 最先頭 init 時に DB 接続前で読込んで log dir を決定する。

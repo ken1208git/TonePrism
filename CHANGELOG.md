@@ -1719,6 +1719,17 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 - 旧 setting key `log_destination_path` は SettingsRepository の get/set callsite から削除 (= 1 semantic 維持)。`SettingsKeys.LogDestinationPath` const は migration code 内 reference のみで残置 (= deprecated marker、docstring で migration 完了後の参照禁止を明示)。
 
+#### Round 2 review fix (Critical #1 + High #2 + High #3 + Medium #4 + Medium #5 + Medium #6 + Low #7 + Low #8 + Low #9)
+
+- **Critical #1 + Medium #6**: migration sentinel JSON の wire format が snake_case (`migrated_from`) で書出されていたが、reader 側 DTO は PascalCase property (`MigratedFrom`) で `JavaScriptSerializer.Deserialize<T>` の case-insensitive match に underscore stripping が含まれないため `dto.MigratedFrom == null` → 早期 return で **migration dialog が永久不発火** する Critical bug。wire format を真の camelCase (`migratedFrom` / `migratedAt`) に修正、既存 `UpdateCompletedSentinel` と統一。DTO docstring の「camelCase」誤記も訂正。
+- **High #2**: migration dialog 文言「30 日後に自動的に削除されます」が嘘 promise だった。`CleanupOldLogs` は新 subdir (`<root>/manager/`) のみ sweep するため、migration 元 dir 直下の旧 `manager_*.log` は永続残留。dialog 文言を「(不要であれば手動で削除してください)」に書換え。
+- **High #3**: `LogSectionPanel` クラス header docstring が旧 hardcode path 表現 (`<project_root>/logs/manager/` と `<project_root>/logs/launcher/`) を残置していた。unified root semantic 反映で「`<PathManager.LogsRootDirectory>/<component>/` を ... scan」表現に書換え。
+- **Medium #4**: round 3 review L-3 で確立した「1 起動 1 SQLite 接続」最適化を本 PR で 2 関数分離 (= `TryAutoMigrateLegacyLogPath` + `TryReadInitialLogSettings`) により毎起動 2 接続に退行させていた。両関数を `ReadInitialLogSettingsWithMigration` 1 関数 + 1 接続に統合、migration 完了後の通常 boot も SMB 共有 DB の latency 最適化を継承。
+- **Medium #5**: `PathManager.LogsRootDirectory` getter の「set 前 fallback で field に書込む」設計が、setter 後行で呼ばれた case に silent ignore hazard を生んでいた。getter は default を return するだけで field に書込まない設計に変更 + setter は 2 回目以降 `InvalidOperationException` で discipline 厳格化 (= setter→getter 順序逆転 / 重複呼出を dev / test で発覚させる)。
+- **Low #7**: `LauncherLogsRootBridge.WriteCurrentLogsRoot` docstring の「atomic write」表現を「near-atomic (Delete + Move pattern、reader 側は不在 / parse 失敗で default fallback の safe path のため許容)」に正確化。真の atomic 化は `MoveFileEx(MOVEFILE_REPLACE_EXISTING)` 要、別 PR で検討。
+- **Low #8**: `SettingsSectionPanel.SaveLogDestIfChanged` 内の Logger メッセージ「Manager は次回起動時反映、Launcher は次回起動時反映」を「Manager は次回 Manager 起動時、Launcher は次回 Launcher 起動時に反映」に明確化 (= UI hint label の表現と同期、catalog ↔ call-site drift 解消)。
+- **Low #9**: `SettingsKeys.LogDestinationPath` const が hardcoded SQL literal 経由で参照されない orphan 状態だった (= docstring「auto-migrate code 内でのみ参照」が嘘) を解消、`ReadInitialLogSettingsWithMigration` の SQL 構築を const concatenation に書換え、4 箇所 (SELECT key list / WHERE clause / DELETE / dual-set cleanup) で const を SoT 参照。
+
 #### Also Changed: `responses/` directory layout 規約 (= β 化)
 
 User レビューで「`responses/` 直下に `launcher_logs_root.json` (本 PR 新規 IPC file) を置くと、将来 SPEC §6.5 のプレイ記録取り込み logic (= 直下 sweep + `imported/` / `failed/` move) と誤認衝突する」hazard を発見、本 PR scope 内で SPEC §6.5 directory layout 規約を **β 化** (= 直下 vs subfolder の責務分離):
