@@ -77,7 +77,8 @@ namespace TonePrism.Manager
             // 編集中 control の dirty mark がまだ立っていない (= TextBox に入力途中 / NumericUpDown に手打ち後
             // Enter 押さず tab click した case)。`ActiveControl = null` で active control の focus を抜いて
             // Leave / ValueChanged を同期発火させ、HasUnsavedChanges() 判定前に dirty を確定する。
-            // (FormClosing 経路はフォーム非アクティブ化で focus が先に抜けるため本処理は不要だった = 整合)。
+            // (R4 review Medium-1: FormClosing 経路にも同じ `ActiveControl = null` を対称配置済 = focus-leave
+            //  の発火順が version / focus 状態依存である前提を両経路で消去)。
             this.ActiveControl = null;
 
             if (_settingsSectionPanel.HasUnsavedChanges())
@@ -108,12 +109,21 @@ namespace TonePrism.Manager
             // 同じ制約)。その場合は未保存判定を本ブロックより前 (= cancel-capable handler 群の最先頭) に
             // 移すか、未保存判定を独立 handler 化して subscribe 順を制御すること。
             if (e.Cancel) return;
-            if (_settingsSectionPanel != null && _settingsSectionPanel.HasUnsavedChanges())
+            if (_settingsSectionPanel != null)
             {
-                if (!_settingsSectionPanel.PromptAndResolveUnsavedChanges())
+                // (R4 review Medium-1) focus 強制 commit を tab 切替経路と**対称**に配置。× ボタン close 時、
+                // active control の Leave が FormClosing より先に発火する保証は WinForms version / focus 状態に
+                // 依存するため、「設定 textbox/numeric を編集途中で × クリック」で dirty 未確定のまま warning が
+                // skip される脆い前提を消す。`ActiveControl = null` で Leave/ValueChanged を同期発火 → dirty 確定。
+                this.ActiveControl = null;
+
+                if (_settingsSectionPanel.HasUnsavedChanges())
                 {
-                    e.Cancel = true;
-                    return; // 終了中断、timer は生かす
+                    if (!_settingsSectionPanel.PromptAndResolveUnsavedChanges())
+                    {
+                        e.Cancel = true;
+                        return; // 終了中断、timer は生かす
+                    }
                 }
             }
             try

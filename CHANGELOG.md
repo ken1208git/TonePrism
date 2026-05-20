@@ -1693,13 +1693,19 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **未保存ガード** (`HasUnsavedChanges` / `PromptAndResolveUnsavedChanges` public API): tab 切替 / フォーム終了時に未保存があれば 3-button 確認 dialog (保存 / 破棄 / キャンセル)。「保存」は Apply を呼ぶ (= そこで CheckBeforeWrite)、「破棄」は Revert、「キャンセル」は留まる。
 
 **MainForm hook** (`MainForm.cs`):
-- `tabControl1.Selecting` を新規 subscribe、設定タブ「から」別タブへ遷移時のみ未保存判定 → user「キャンセル」で `e.Cancel=true` で切替中断。
+- `tabControl1.Deselecting` を新規 subscribe、`e.TabPage`(= 離脱するタブ)が設定タブの時のみ未保存判定 → user「キャンセル」で `e.Cancel=true` で切替中断 (= `Selecting` だと発火時点で SelectedTab が新タブに変わっており判定 timing が不安定なため `Deselecting` を採用、後述 Round 3 fix 参照)。
 - `MainForm_FormClosing` 冒頭に未保存判定 → user「キャンセル」で `e.Cancel=true` で終了中断 (= 既存コメントが予期していた設計)。
 
 #### Changed
 
 - **CheckBeforeWrite (LAN 重複起動確認) の発火を「変更ごと (最大 7 回)」→「section 適用ごと 1 回」に集約**。検出範囲 (同 PC Launcher / 他 PC Manager・Launcher) は不変、発火タイミングのみ変更。同 PC の Manager 2 個目は従来通り起動時 Named Mutex で物理 block。
 - 旧即時保存 method (`SaveLogsRootIfChanged` / `SaveBackupDestIfChanged` / `SaveBackupIntervalWithGuard` / `SaveBackupIntervalDirect`) を撤廃、Apply / Revert / dirty-mark handler に再構成。
+
+#### Round 4 review fix (Medium-1 + Low-1 + Low-2)
+
+- **Medium-1**: `MainForm_FormClosing` にも `ActiveControl = null` の focus 強制 commit を tab 切替経路 (`TabControl1_Deselecting`) と**対称**に配置。× ボタン close 時に active control の `Leave` が `FormClosing` より先に発火する保証は WinForms version / focus 状態依存のため、「設定 textbox / numeric を編集途中で × クリック」で dirty 未確定のまま未保存 warning が skip される脆い前提を消去 (= tab 経路で実機検証済の focus-未確定問題と同型を FormClosing でも事前に潰す)。
+- **Low-1**: CHANGELOG / SPEC「Added」本文の tab 切替 event 名を shipped code に合わせ `tabControl1.Selecting` → `tabControl1.Deselecting` に訂正 (= Round 3 fix で切替えた最終 code と整合、Added 本文が drift していた catalog ↔ implementation 不一致を解消)。
+- **Low-2**: `lblLogUnsaved` / `lblBackupUnsaved` に `Name` プロパティ設定を追加 (= 同時追加した btnApply / btnRevert 群と Designer 一貫性、VS Designer 再生成時の差分ノイズ予防)。
 
 #### Round 3 review fix (実機 smoke test 指摘: tab 切替で警告出ない bug + dialog 文言冗長)
 

@@ -155,6 +155,7 @@ namespace TonePrism.Manager.Controls
             this.lblLogUnsaved.AutoSize = true;
             this.lblLogUnsaved.ForeColor = System.Drawing.Color.DarkOrange;
             this.lblLogUnsaved.Location = new System.Drawing.Point(20, 172);
+            this.lblLogUnsaved.Name = "lblLogUnsaved";
             this.lblLogUnsaved.TabIndex = 8;
             this.lblLogUnsaved.Text = "● 未保存の変更があります";
             this.lblLogUnsaved.Visible = false;
@@ -317,6 +318,7 @@ namespace TonePrism.Manager.Controls
             this.lblBackupUnsaved.AutoSize = true;
             this.lblBackupUnsaved.ForeColor = System.Drawing.Color.DarkOrange;
             this.lblBackupUnsaved.Location = new System.Drawing.Point(20, 262);
+            this.lblBackupUnsaved.Name = "lblBackupUnsaved";
             this.lblBackupUnsaved.TabIndex = 12;
             this.lblBackupUnsaved.Text = "● 未保存の変更があります";
             this.lblBackupUnsaved.Visible = false;
