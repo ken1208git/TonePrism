@@ -107,7 +107,11 @@ namespace TonePrism.Manager.Controls
                 dialog.Description = "ログ保存先フォルダを選択してください";
                 if (!string.IsNullOrEmpty(txtLogsRoot.Text))
                 {
-                    dialog.SelectedPath = txtLogsRoot.Text;
+                    // (R5 review Low-3) txtLogsRoot にゴミ値 (= 無効 path / 構文不正) が残っている state で
+                    // SelectedPath set が ArgumentException を throw する path を防ぐ。失敗時は dialog を
+                    // default location で開く (= 初期 path 指定を諦めるだけ、機能影響なし)。
+                    try { dialog.SelectedPath = txtLogsRoot.Text; }
+                    catch { /* 無効 path → 初期 path 指定なしで dialog 起動 */ }
                 }
                 if (dialog.ShowDialog(this) == DialogResult.OK)
                 {
@@ -127,6 +131,24 @@ namespace TonePrism.Manager.Controls
             if (_dbManager == null) return;
             string newValue = (txtLogsRoot.Text ?? string.Empty).Trim();
             if (newValue == _lastSavedLogsRoot) return;
+
+            // (R5 review Low-4) 絶対 path 制約の enforce。空文字 (= default) 以外は `Path.IsPathRooted` で
+            // 絶対 path を要求する。相対 path (`logs\custom`) / traverse (`..\elsewhere`) を許すと、Manager
+            // Logger は CWD 相対で `Directory.CreateDirectory`、Launcher は `path_join` で CWD 依存の予測不能
+            // path に倒れるため。FolderBrowserDialog 経由は絶対 path 保証だが textbox 直接入力経路は無防備。
+            if (!string.IsNullOrEmpty(newValue) && !System.IO.Path.IsPathRooted(newValue))
+            {
+                MessageBox.Show(this,
+                    "ログ保存先は絶対パス (例: D:\\TonePrism_logs) で入力してください。\n" +
+                    "空欄にするとデフォルト (DB ファイルの隣の logs/) を使用します。",
+                    "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                // rollback (= 直前 save 値に戻す)
+                txtLogsRoot.Leave -= TxtLogsRoot_Leave;
+                txtLogsRoot.Text = _lastSavedLogsRoot;
+                txtLogsRoot.Leave += TxtLogsRoot_Leave;
+                return;
+            }
+
             if (Services.SessionConflictHelper.CheckBeforeWrite(this, "ログ保存先変更") == DialogResult.Cancel)
             {
                 // rollback
@@ -293,7 +315,10 @@ namespace TonePrism.Manager.Controls
                 dialog.Description = "バックアップ保存先フォルダを選択してください";
                 if (!string.IsNullOrEmpty(txtBackupDest.Text))
                 {
-                    dialog.SelectedPath = txtBackupDest.Text;
+                    // (R5 review Low-3) ログ保存先側と同 pattern、無効 path で SelectedPath set が
+                    // ArgumentException を throw する path を防ぐ。
+                    try { dialog.SelectedPath = txtBackupDest.Text; }
+                    catch { /* 無効 path → 初期 path 指定なしで dialog 起動 */ }
                 }
                 if (dialog.ShowDialog(this) == DialogResult.OK)
                 {

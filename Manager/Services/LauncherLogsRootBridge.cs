@@ -21,6 +21,12 @@ namespace TonePrism.Manager.Services
     /// }
     /// </code>
     ///
+    /// **`schema_version` の forward-compat 意図 (R5 review Low-5)**: 現状 Launcher reader は本 field を
+    /// 読まず `logs_root_path` を直接参照する (= v1 のみなので gating 不要)。将来 format 互換性 break が
+    /// 必要になった時 (= v2 で field 構造変更等)、Launcher 側に「`schema_version > 1` なら warn + default
+    /// fallback」guard を追加するための予約 field。本 PR では writer が version を書き、reader 側 gating は
+    /// 別 issue で追加検討 (= 当面 v1 固定のため無害)。
+    ///
     /// 呼出箇所:
     /// 1. `Program.Main` の Logger.Initialize 直後 (= 毎起動時 sync、user が直接 file を削除した case を回復)
     /// 2. `SettingsSectionPanel.SaveLogDestIfChanged` 内 (= UI 変更時即時 sync、Launcher 次回起動で picked up)

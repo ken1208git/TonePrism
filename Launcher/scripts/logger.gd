@@ -43,6 +43,12 @@ var _godot_log_path: String = ""
 var _godot_log_pos: int = 0
 var _sync_timer: Timer = null
 
+# (#201, v0.15.0, R5 review Low-1) bridge file 読込時の warn message を一時保持。
+# `_read_logs_root_from_responses` は `_open_session_file` より前 + `_init_godot_log_tail` の baseline
+# 記録前に呼ばれるため、push_warning だけだと godot.log baseline に飲まれて session log に転送されない。
+# warn を本 field に貯め、`_open_session_file` 完了後に `_write_safely("WARN", ...)` で session log に直書きする。
+var _logs_root_warn_msg: String = ""
+
 
 func _init() -> void:
 	# autoload の _init は engine 起動の極めて早い段階で呼ばれる
@@ -67,6 +73,11 @@ func _initialize_logger() -> void:
 
 	_initialized = true
 	_write_safely("INFO", "[Logger] Launcher 起動 (PC=" + _get_pc_name() + ")")
+	# (#201, R5 review Low-1) bridge file 読込で warn が出ていれば session log に直書き
+	# (= push_warning は godot.log baseline に飲まれるため、session log には別途転送)。
+	if not _logs_root_warn_msg.is_empty():
+		_write_safely("WARN", _logs_root_warn_msg)
+		_logs_root_warn_msg = ""
 	_cleanup_old_logs()
 
 
@@ -79,7 +90,10 @@ func _open_log_directory_and_file() -> bool:
 	# `<project_root>/responses/launcher_logs_root.json` 経由で受取。
 	# parse 成功 + path 非空 → `<custom_root>/launcher/`、それ以外は default `<project_root>/logs/launcher/`。
 	# JSON 不在 / parse 失敗 / path 空 はすべて default fallback、Launcher 起動阻害しない。
-	var logs_root = _read_logs_root_from_responses(project_root)
+	# 戻り値は [path: String, warn_msg: String]。warn は session log open 後に _initialize_logger が flush。
+	var read_result = _read_logs_root_from_responses(project_root)
+	var logs_root = read_result[0] as String
+	_logs_root_warn_msg = read_result[1] as String
 	if logs_root.is_empty():
 		_log_directory = project_root.path_join("logs").path_join(LOG_SUBDIRECTORY)
 	else:
@@ -94,18 +108,26 @@ func _open_log_directory_and_file() -> bool:
 
 
 # (#201, v0.15.0) Manager → Launcher 設定伝搬 file を読込んで logs root path を返す。
-# 失敗時 (file 不在 / parse 失敗 / path 空) はすべて空文字を返し、caller が default fallback する。
+# 失敗時 (file 不在 / parse 失敗 / path 空) はすべて空 path を返し、caller が default fallback する。
 # DB 接続前の autoload 最先頭 init で呼ばれる前提、file read のみで完結。
-func _read_logs_root_from_responses(project_root: String) -> String:
+#
+# 戻り値: `[path: String, warn_msg: String]` (= R5 review Low-1)。
+#   - path: 解決した logs root (空 = default 使用)
+#   - warn_msg: 異常検出時の WARN message (空 = 正常)。caller (`_open_log_directory_and_file`) が
+#     field に保持し、`_initialize_logger` が session log open 後に `_write_safely` で flush する
+#     (= push_warning だけだと godot.log baseline に飲まれて session log に転送されないため)。
+#   file 不在 (= 通常 path、Manager 未起動 / setting default) は warn なしの正常 fallback。
+func _read_logs_root_from_responses(project_root: String) -> Array:
 	var responses_dir = project_root.path_join("responses")
 	var bridge_path = responses_dir.path_join("launcher_logs_root.json")
 	if not FileAccess.file_exists(bridge_path):
-		return ""
+		return ["", ""]  # file 不在 = 正常 (default 使用)、warn なし
 
 	var f = FileAccess.open(bridge_path, FileAccess.READ)
 	if f == null:
-		push_warning("[Logger] launcher_logs_root.json open 失敗、default 使用")
-		return ""
+		var msg = "[Logger] launcher_logs_root.json open 失敗、default 使用"
+		push_warning(msg)
+		return ["", msg]
 
 	var content = f.get_as_text()
 	f.close()
@@ -113,18 +135,20 @@ func _read_logs_root_from_responses(project_root: String) -> String:
 	var json = JSON.new()
 	var parse_result = json.parse(content)
 	if parse_result != OK:
-		push_warning("[Logger] launcher_logs_root.json parse 失敗 (line=%d msg=%s)、default 使用" % [json.get_error_line(), json.get_error_message()])
-		return ""
+		var msg = "[Logger] launcher_logs_root.json parse 失敗 (line=%d msg=%s)、default 使用" % [json.get_error_line(), json.get_error_message()]
+		push_warning(msg)
+		return ["", msg]
 
 	var data = json.data
 	if typeof(data) != TYPE_DICTIONARY:
-		push_warning("[Logger] launcher_logs_root.json 内容が dictionary でない、default 使用")
-		return ""
+		var msg = "[Logger] launcher_logs_root.json 内容が dictionary でない、default 使用"
+		push_warning(msg)
+		return ["", msg]
 
 	var value = data.get("logs_root_path", "")
 	if typeof(value) != TYPE_STRING or (value as String).is_empty():
-		return ""
-	return value as String
+		return ["", ""]  # path 空 = default 使用 (Manager が default 設定中)、warn なし
+	return [value as String, ""]
 
 
 # 1 セッション 1 ファイル: launcher_<PCname>_<YYYY-MM-DD_HHmmss>.log

@@ -1719,6 +1719,15 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 - 旧 setting key `log_destination_path` は SettingsRepository の get/set callsite から削除 (= 1 semantic 維持)。`SettingsKeys.LogDestinationPath` const は migration code 内 reference のみで残置 (= deprecated marker、docstring で migration 完了後の参照禁止を明示)。
 
+#### Round 5 review fix (Medium-1 + Low-1 〜 Low-5)
+
+- **Medium-1**: `PathManager.SetLogsRootDirectory` の早期 throw による silent crash regression を解消。customRoot 空時に `Path.Combine(BaseDirectory, "logs")` を eager 評価していたため、broken install (= Manager.exe を `<install>/Manager/` 外起動 → BaseDirectory lazy 解決が `DirectoryNotFoundException`) で本 setter が mutex try-catch 外で uncaught throw → friendly MessageBox なしの silent crash になっていた。customRoot 空時は field を set せず getter の lazy default に委ねる形に変更、後続 `VerifyPaths` (= mutex try-catch 内) が DirectoryNotFoundException を friendly「起動エラー」MessageBox で拾う pre-PR 経路を維持。
+- **Low-1**: Launcher `_read_logs_root_from_responses` の bridge file 読込 warn が `push_warning` のみで Launcher session log に転送されない silent diagnostics loss を解消。warn は `_init_godot_log_tail` の baseline 記録前に発火するため godot.log baseline に飲まれて session log に来なかった。戻り値を `[path, warn_msg]` Array 化し、`_open_session_file` 完了後に `_initialize_logger` が `_write_safely("WARN", ...)` で session log に直書き (push_warning も保持で godot.log 冗長性も担保)。
+- **Low-2**: `LogSectionPanel.btnOpenLogFolder_Click` docstring の stale な `<install>/logs/` 表現を unified semantic (`_logsRoot` = 現在の logs root、default または custom) に sync (R4 M-2 rename の sweep 漏れ)。
+- **Low-3**: `btnLogBrowse_Click` / `btnBackupBrowse_Click` の `FolderBrowserDialog.SelectedPath` set を try-catch で囲み、textbox にゴミ値 (= 無効 path / 構文不正) が残る state で「参照...」押下時の `ArgumentException` crash path を予防 (= 失敗時は dialog を default location で開く)。
+- **Low-4**: `SaveLogsRootIfChanged` に `Path.IsPathRooted` validation を追加。相対 path (`logs\custom`) / traverse (`..\elsewhere`) を textbox 直接入力された場合、Manager Logger は CWD 相対で `Directory.CreateDirectory`、Launcher は `path_join` で CWD 依存の予測不能 path に倒れるため、MessageBox + rollback で reject (= docstring「絶対 path」制約を code enforce)。
+- **Low-5**: `LauncherLogsRootBridge` docstring に `schema_version` field の forward-compat 意図 (= 将来 v2 format break 時の Launcher 側 gating 用予約 field、現状 v1 固定で reader 未参照、gating guard は別 issue) を明文化。
+
 #### Round 4 review fix (H-1 + H-2 + M-1 + M-2 + M-3 + M-4 + L-1 + L-2 + L-3 + L-4)
 
 - **H-1**: SPEC §3.6「既知制約」fence を 3 経路 (Logger fallback + Manager 側 bridge file 書出 + Launcher 側 bridge file 読込) に拡張。dev 環境 (`.git` 直下起動) で bridge IPC が silent に Launcher に届かない path も明文化。

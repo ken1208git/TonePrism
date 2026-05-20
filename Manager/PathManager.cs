@@ -109,9 +109,16 @@ namespace TonePrism.Manager
 
         /// <summary>
         /// LogsRootDirectory を起動時に 1 回 set する。Program.Main が SQLite 読込結果で呼出。
-        /// 空文字 / null 時は default `<BaseDirectory>/logs/` を採用 (= 旧 v0.14.0 と同じ default 挙動)。
-        /// **2 回目以降の呼出は InvalidOperationException** (= immutable invariant 厳守、Program.Main の
-        /// 順序逆転や重複呼出を発覚させる discipline)。
+        /// 空文字 / null 時は **field を set せず**、getter の lazy default (`<BaseDirectory>/logs/`) に委ねる。
+        /// **2 回目以降 (= 既に custom 値 set 済) の呼出は InvalidOperationException** (= immutable invariant
+        /// 厳守、Program.Main の順序逆転や重複呼出を発覚させる discipline)。
+        ///
+        /// **R5 review Medium-1 対応**: 旧実装は customRoot 空時に `Path.Combine(BaseDirectory, "logs")` を
+        /// eager 評価していたが、broken install (= Manager.exe を `<install>/Manager/` 外から起動 → BaseDirectory
+        /// の lazy 解決が `DirectoryNotFoundException` throw) で本 setter が **mutex try-catch 外で uncaught throw**
+        /// → friendly MessageBox なしの silent crash regression があった。customRoot 空時は field を set せず
+        /// getter の lazy default に委ねることで、broken install では後続の `VerifyPaths` (= mutex try-catch 内)
+        /// が DirectoryNotFoundException を friendly「起動エラー」MessageBox で拾う pre-PR 経路を維持する。
         /// </summary>
         public static void SetLogsRootDirectory(string customRoot)
         {
@@ -121,9 +128,12 @@ namespace TonePrism.Manager
                     "PathManager.SetLogsRootDirectory は起動時に 1 回のみ呼出可能、既に set 済の状態で再呼出された。"
                     + " Program.Main の呼出順序を確認のこと (= getter 先行 / 重複 set 呼出は禁止)。");
             }
-            _logsRootDirectory = string.IsNullOrWhiteSpace(customRoot)
-                ? Path.Combine(BaseDirectory, "logs")
-                : customRoot;
+            // customRoot 非空時のみ即 set。空時は field を null のまま残し、getter の lazy default 計算に委ねる
+            // (= BaseDirectory の eager 解決を回避、broken install で setter から throw しない)。
+            if (!string.IsNullOrWhiteSpace(customRoot))
+            {
+                _logsRootDirectory = customRoot;
+            }
         }
 
         /// <summary>Manager のログ出力先 (`<LogsRootDirectory>/manager/`)。SPEC §3.6 unified logs root 規約。</summary>

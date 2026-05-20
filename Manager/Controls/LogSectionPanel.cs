@@ -417,8 +417,9 @@ namespace TonePrism.Manager.Controls
         }
 
         /// <summary>
-        /// `<install>/logs/` をエクスプローラで開く。部員がエラー発生時にログを zip して送る際の動線。
-        /// logs/ dir が存在しない場合は親 dir (`<install>/`) を fallback として開く。失敗時は MessageBox。
+        /// `_logsRoot` (= 現在の logs root、default `<install>/logs/` または user 設定 `logs_root_path`) を
+        /// エクスプローラで開く。部員がエラー発生時にログを zip して送る際の動線。
+        /// logs root dir が存在しない場合は親 dir を fallback として開く。失敗時は MessageBox。
         /// </summary>
         private void btnOpenLogFolder_Click(object sender, EventArgs e)
         {
