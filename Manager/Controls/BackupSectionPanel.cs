@@ -1,6 +1,5 @@
 using System;
 using System.Data.SQLite;
-using System.Drawing;
 using System.IO;
 using System.Threading;
 using System.Windows.Forms;
@@ -384,10 +383,5 @@ namespace TonePrism.Manager.Controls
             double gb = mb / 1024.0;
             return $"{gb:F2} GB";
         }
-
-        // (#200) 「状態」列削除に伴い、表示文字列 / tooltip / 背景色を返す 4 helper
-        // (GetStatusDisplay / GetStatusTooltip / GetStatusBackColor / GetStatusSelectionBackColor) を撤去。
-        // status の DB 上 3 値 (success / failed / in_progress) + reconcile logic 自体は不変
-        // (= RefreshDisplay 冒頭の in_progress → success/failed 確定処理 / 実在チェックは維持)。
     }
 }
