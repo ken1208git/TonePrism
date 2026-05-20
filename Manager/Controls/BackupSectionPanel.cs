@@ -38,7 +38,9 @@ namespace TonePrism.Manager.Controls
             gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "completed", HeaderText = "完了日時", Width = 150 });
             gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "pc", HeaderText = "実行PC", Width = 110 });
             gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "trigger", HeaderText = "トリガ", Width = 60 });
-            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "status", HeaderText = "状態", Width = 70 });
+            // (#200) 「状態」列は削除。failed は AutoCleanupFailedEntries で DB + 物理削除され、in_progress は
+            // 数秒〜数十秒のみのため、grid を開いた時点で実質ほぼ全行「成功」になり情報量ゼロだった。
+            // 失敗通知は status bar (PR #196 G 系) で覆える。DB schema / status reconcile logic は不変。
             gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "size", HeaderText = "サイズ", Width = 90 });
             gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "file", HeaderText = "ファイルパス", Width = 380 });
         }
@@ -102,7 +104,6 @@ namespace TonePrism.Manager.Controls
 
                 // 履歴 (#126: パス解決 + 実在チェックして不在は非表示)
                 var entries = _dbManager.BackupLogRepository.GetRecent(100);
-                long nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 string dbPath = _dbManager.DatabasePath;
                 gridHistory.Rows.Clear();
                 foreach (var entry in entries)
@@ -117,8 +118,6 @@ namespace TonePrism.Manager.Controls
                         continue;
                     }
 
-                    string status = GetStatusDisplay(entry, nowUnix);
-                    string statusTooltip = GetStatusTooltip(entry, nowUnix);
                     string trigger;
                     switch (entry.TriggerType)
                     {
@@ -131,24 +130,16 @@ namespace TonePrism.Manager.Controls
                     string completed = entry.CompletedAtLocal.HasValue
                         ? entry.CompletedAtLocal.Value.ToString("yyyy/MM/dd HH:mm:ss")
                         : "-";
+                    // (#200) 「状態」列削除に伴い status / color / tooltip の cell 設定も撤去。
                     int rowIndex = gridHistory.Rows.Add(
                         entry.StartedAtLocal.ToString("yyyy/MM/dd HH:mm:ss"),
                         completed,
                         entry.PcName,
                         trigger,
-                        status,
                         size,
                         resolvedPath);
                     // 行のTagに元データを保存（Restore で取り出す）
                     gridHistory.Rows[rowIndex].Tag = entry;
-                    // 状態セルにツールチップと色を適用
-                    var statusCell = gridHistory.Rows[rowIndex].Cells["status"];
-                    if (!string.IsNullOrEmpty(statusTooltip))
-                    {
-                        statusCell.ToolTipText = statusTooltip;
-                    }
-                    statusCell.Style.BackColor = GetStatusBackColor(entry);
-                    statusCell.Style.SelectionBackColor = GetStatusSelectionBackColor(entry);
                 }
             }
             catch (Exception ex)
@@ -394,75 +385,9 @@ namespace TonePrism.Manager.Controls
             return $"{gb:F2} GB";
         }
 
-        /// <summary>
-        /// 状態の表示文字列。DB上は3状態 (success / failed / in_progress) のままシンプルに保つ。
-        /// </summary>
-        private static string GetStatusDisplay(BackupLogEntry entry, long nowUnixSec)
-        {
-            switch (entry.Status)
-            {
-                case "success": return "成功";
-                case "failed": return "失敗";
-                case "in_progress": return "実行中";
-                default: return entry.Status ?? "";
-            }
-        }
-
-        /// <summary>
-        /// 状態セルのツールチップ。in_progress については経過時間と「本当に実行中 vs 残骸の可能性」を文脈で出す。
-        /// </summary>
-        private static string GetStatusTooltip(BackupLogEntry entry, long nowUnixSec)
-        {
-            switch (entry.Status)
-            {
-                case "success":
-                    return "バックアップは完了済みです。この行から復元できます。";
-                case "failed":
-                    return string.IsNullOrEmpty(entry.ErrorMessage)
-                        ? "バックアップに失敗しました。実ファイルが存在しないため復元には使えません。"
-                        : $"中断理由: {entry.ErrorMessage}";
-                case "in_progress":
-                    long age = nowUnixSec - entry.StartedAt;
-                    if (age < 30)
-                    {
-                        return $"現在実行中です（経過: {age} 秒）。完了まで少々お待ちください。";
-                    }
-                    string elapsed = age < 60
-                        ? $"{age} 秒"
-                        : (age < 3600 ? $"{age / 60} 分" : $"{age / 3600} 時間");
-                    return $"前回 Manager 異常終了の残骸の可能性があります（経過: {elapsed}）。" +
-                           "更新ボタンを押すと実ファイルの有無で 成功/失敗 が確定します。";
-                default:
-                    return "";
-            }
-        }
-
-        /// <summary>
-        /// 状態セルの背景色（非選択時）
-        /// </summary>
-        private static Color GetStatusBackColor(BackupLogEntry entry)
-        {
-            switch (entry.Status)
-            {
-                case "success": return Color.FromArgb(220, 245, 220); // 淡い緑
-                case "failed": return Color.FromArgb(250, 220, 220);  // 淡い赤
-                case "in_progress": return Color.FromArgb(220, 232, 250); // 淡い青
-                default: return Color.White;
-            }
-        }
-
-        /// <summary>
-        /// 状態セルの背景色（選択時）。標準の青選択色だと色分けが見えなくなるので、選択中も色味を保つ。
-        /// </summary>
-        private static Color GetStatusSelectionBackColor(BackupLogEntry entry)
-        {
-            switch (entry.Status)
-            {
-                case "success": return Color.FromArgb(150, 210, 150); // 中緑
-                case "failed": return Color.FromArgb(220, 150, 150);  // 中赤
-                case "in_progress": return Color.FromArgb(150, 180, 220); // 中青
-                default: return Color.LightGray;
-            }
-        }
+        // (#200) 「状態」列削除に伴い、表示文字列 / tooltip / 背景色を返す 4 helper
+        // (GetStatusDisplay / GetStatusTooltip / GetStatusBackColor / GetStatusSelectionBackColor) を撤去。
+        // status の DB 上 3 値 (success / failed / in_progress) + reconcile logic 自体は不変
+        // (= RefreshDisplay 冒頭の in_progress → success/failed 確定処理 / 実在チェックは維持)。
     }
 }

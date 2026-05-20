@@ -1675,6 +1675,22 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.16.1] - 2026-05-20
+
+#### Changed (#200 — バックアップ履歴の「状態」列削除)
+
+バックアップ履歴 grid (`BackupSectionPanel`) から「状態」列を削除。`failed` は起動時 `AutoCleanupFailedEntries` で DB + 物理ファイル両方が自動掃除され、`in_progress` は backup 実行中の数秒〜数十秒のみのため、grid を開いた時点で実質ほぼ全行「成功」になり情報量ゼロ (= 部員視点で「全部成功と書いてある列」のノイズ) だった。
+
+- `ConfigureGrid` から `status` 列定義を削除、列構成は 開始日時 / 完了日時 / 実行PC / トリガ / サイズ / ファイルパス に
+- `RefreshDisplay` から status 文字列 / tooltip / 背景色の cell 設定を撤去 + 未使用になった `nowUnix` 局所変数を削除
+- 未使用化した 4 helper (`GetStatusDisplay` / `GetStatusTooltip` / `GetStatusBackColor` / `GetStatusSelectionBackColor`) を削除
+- **不変**: `status` の DB 3 値 (success / failed / in_progress) + `RefreshDisplay` 冒頭の reconcile logic (= in_progress → success/failed 確定 / 実在チェック / failed auto-cleanup)。失敗通知は status bar (PR #196 G 系) で覆える
+- issue #200 の (a) 列ごと削除案を採用 ((c) color chip 案より素直、「全件 OK」の緑 cue は失うが実運用ほぼ全行成功で情報損失なし)
+
+#### Bump 根拠 (v0.16.0 → v0.16.1)
+
+SemVer pre-1.0 patch bump: 機能追加でなく UI 冗長列の削除 (UX refinement)。SPEC §3.x 列定義更新で SPEC 側も v1.10.34 → v1.10.35。
+
 ### [Manager v0.16.0] - 2026-05-20
 
 #### Added (#201 — 設定タブ editing model を「適用 / 元に戻す」式に改修)
