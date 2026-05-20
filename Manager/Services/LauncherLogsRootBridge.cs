@@ -37,8 +37,12 @@ namespace TonePrism.Manager.Services
         /// 書出先 dir が存在しなければ作成、既存 file は overwrite。
         /// **near-atomic 制約**: `.tmp` 書出 → Delete + Move pattern で Delete と Move の間に target が一瞬
         /// 不在になる window が残る (= .NET Framework 4.x の `File.Move` が overwrite 対応していないため
-        /// 真の atomic 化には Win32 `MoveFileEx(MOVEFILE_REPLACE_EXISTING)` が必要)。reader 側 (Launcher
-        /// Logger) は file 不在 / parse 失敗で default fallback する safe path のため実害なし、本実装で許容。
+        /// 真の atomic 化には Win32 `MoveFileEx(MOVEFILE_REPLACE_EXISTING)` が必要)。
+        /// **Launcher 側影響**: reader (Launcher Logger) が **ちょうど window 中に init で読込んだ場合**、
+        /// file 不在 → default fallback path に倒れ、**Launcher 1 セッション分の log が user 意図と異なる
+        /// 場所に書かれる**。user 通知一切なし、Launcher 起動は阻害されない (= safe path)。LAN 50 PC 同時起動
+        /// 等で window 衝突確率が無視できない場合、別 PR で `MoveFileEx` P/Invoke 化を検討すべき (= R2
+        /// review Low #7 の note 通り)。本 PR では実装据置、表現のみ「実害なし」から honest 化。
         /// </summary>
         public static void WriteCurrentLogsRoot(string logsRootPath)
         {

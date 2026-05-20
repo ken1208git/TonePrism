@@ -82,7 +82,7 @@ namespace TonePrism.Manager
         // LogsRootDirectory は Program.Main が SQLite から `logs_root_path` setting を読込んで
         // 起動時 1 回 set する (空 / 未設定なら default の `<BaseDirectory>/logs/`)。
         // 旧 v0.14.0 までの `log_destination_path` (Manager log 直配置 semantic) は廃止、起動時に
-        // auto-migrate (Program.TryAutoMigrateLegacyLogPath) で値を `logs_root_path` に copy。
+        // auto-migrate (Program.ReadInitialLogSettingsWithMigration) で値を `logs_root_path` に copy。
 
         private static string _logsRootDirectory;
 

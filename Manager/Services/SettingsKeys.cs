@@ -85,8 +85,9 @@ namespace TonePrism.Manager.Services
         /// <summary>
         /// **DEPRECATED (v0.15.0 で `LogsRootPath` に統合、auto-migrate 対象)**。
         /// 旧 semantic: Manager log だけが直配置される dir (= `<value>/manager_*.log` 直書き、Launcher / Updater
-        /// は別管理)。v0.15.0 起動時に `TryAutoMigrateLegacyLogPath` で値を `logs_root_path` に copy + 旧 key DELETE。
-        /// 本 const は **auto-migrate code 内でのみ参照**、UI / runtime path 解決からは削除済。
+        /// は別管理)。v0.15.0 起動時に `ReadInitialLogSettingsWithMigration` で値を `logs_root_path` に copy + 旧 key DELETE。
+        /// 本 const は **`ReadInitialLogSettingsWithMigration` 内の SQL 構築 (= SELECT key list / WHERE / DELETE / dual-set cleanup の 4 箇所) でのみ参照**、UI / runtime path 解決からは削除済。
+        /// **廃止条件**: 旧 v0.14.0 setting を持つ install が事実上全て v0.15.0+ に migration 済と見なせる段階で本 const + migration code を一括削除可能。
         /// </summary>
         public const string LogDestinationPath = "log_destination_path";
 

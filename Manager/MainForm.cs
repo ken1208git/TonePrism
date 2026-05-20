@@ -214,7 +214,7 @@ namespace TonePrism.Manager
             TryShowUpdateCompletedDialog();
 
             // (#201, v0.15.0) ログ保存先 setting auto-migrate 完了 (v0.14.0 → v0.15.0 移行) の一回限り通知。
-            // Program.Main の TryAutoMigrateLegacyLogPath が migration 完了時に `<install>/.logs_root_migrated`
+            // Program.Main の ReadInitialLogSettingsWithMigration が migration 完了時に `<install>/.logs_root_migrated`
             // sentinel file を書出している。本関数で sentinel を読込 → 部員向け subdir 構造説明 MessageBox →
             // sentinel を削除する flow。次回起動以降は sentinel 不在で発火しない。
             TryShowLogsRootMigratedDialog();
@@ -950,8 +950,10 @@ namespace TonePrism.Manager
         /// `<install>/.logs_root_migrated` sentinel ファイル存在 check → 部員向け subdir 構造説明 MessageBox 表示
         /// → sentinel 削除。次回起動以降は sentinel 不在で発火しない。
         ///
-        /// sentinel JSON schema: `{"migrated_from": "<oldValue>", "migrated_at": "<ISO 8601 UTC>"}`
-        /// (= Program.TryAutoMigrateLegacyLogPath で書出済)
+        /// sentinel JSON schema: `{"migratedFrom": "<oldValue>", "migratedAt": "<ISO 8601 UTC>"}`
+        /// (= `Program.WriteLogsRootMigrationSentinel` で書出済、wire format は **真の camelCase** で
+        /// PascalCase DTO と `JavaScriptSerializer` の case-insensitive deserialize で互換、R2 review
+        /// Critical #1 で snake_case → camelCase に修正済)。
         /// 例外は内部で握り潰し (= Manager 起動を阻害しない)、parse 失敗時も sentinel は finally で削除する
         /// (永続 dialog 再表示バグ防止、TryShowUpdateCompletedDialog と同 pattern)。
         /// </summary>
@@ -1000,8 +1002,12 @@ namespace TonePrism.Manager
                 "    ├ launcher\\   ← Launcher のログ (新規追加)\n" +
                 "    └ updater\\    ← Updater のログ (新規追加)\n" +
                 "\n" +
-                "これまで " + migratedFrom + " 直下に保存されていた古いログファイルはそのまま残ります\n" +
+                "これまで " + migratedFrom + " 直下に保存されていた古い Manager ログはそのまま残ります\n" +
                 "(不要であれば手動で削除してください)。\n" +
+                "\n" +
+                "※ Launcher / Updater の古いログは " + PathManager.BaseDirectory + "\\logs\\launcher\\ と\n" +
+                "   " + PathManager.BaseDirectory + "\\logs\\updater\\ にあります (これまで Manager 設定とは\n" +
+                "   別場所で管理されていたため)。\n" +
                 "\n" +
                 "設定タブの「ログ」セクションから保存先を変更できます。";
             MessageBox.Show(
@@ -1014,7 +1020,7 @@ namespace TonePrism.Manager
 
         /// <summary>
         /// `<install>/.logs_root_migrated` sentinel ファイルの JSON deserialize 用 DTO (#201, v0.15.0)。
-        /// writer 側は Program.TryAutoMigrateLegacyLogPath、wire format は **真の camelCase**
+        /// writer 側は `Program.WriteLogsRootMigrationSentinel`、wire format は **真の camelCase**
         /// (`migratedFrom` / `migratedAt`)、`JavaScriptSerializer` の case-insensitive deserialize で
         /// PascalCase property と互換受理 (UpdateCompletedSentinel と同 pattern)。
         /// 注: 旧 R1 docstring で「camelCase」と称しつつ実態が snake_case (`migrated_from`) だった drift を

@@ -56,7 +56,7 @@ namespace TonePrism.Manager.Services
         /// (= `<root>/manager/` `<root>/launcher/` `<root>/updater/` の親) で、Manager Logger は
         /// 内部で `<root>/manager/` を append してそこに `manager_*.log` を書く。
         /// 旧 v0.14.0 までの「直配置 semantic」(= `<customLogDir>/manager_*.log` 直書き) は廃止、
-        /// Program.Main の `TryAutoMigrateLegacyLogPath` で旧 `log_destination_path` setting 値を
+        /// Program.Main の `ReadInitialLogSettingsWithMigration` で旧 `log_destination_path` setting 値を
         /// 新 `logs_root_path` に copy 済 (= 旧 setting の値はそのまま新 root として再解釈される、
         /// 旧 log file は当該 dir 直下に残置されるが新 file は `manager/` subdir に書き出される)。
         /// 未指定時は default `&lt;project_root&gt;/logs/manager/`。
