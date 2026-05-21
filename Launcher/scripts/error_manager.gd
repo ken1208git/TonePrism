@@ -33,3 +33,13 @@ func show_error(code: int):
 	_current_dialog = dialog
 
 	DialogAnimator.animate_in(dialog, self, "Panel", "ColorRect")
+
+## 表示中のエラーをフェードアウトして閉じる。
+## 自己回復するエラー（例: ランチャー前面化異常 #216 が解消したとき）に使う。
+## 表示中でなければ何もしない。
+func hide_error() -> void:
+	if _current_dialog == null:
+		return
+	var dialog := _current_dialog
+	_current_dialog = null
+	DialogAnimator.animate_out(dialog, self, Callable(), "Panel", "ColorRect")

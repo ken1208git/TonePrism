@@ -19,7 +19,8 @@
 
     Phase 2 (#108) 完成: templates/Install.bat / INSTALL_README.txt / Launcher.bat / Manager.bat 同梱
     Phase 3 (#108) 完成: Companions/Updater/ の build + staging を `Build-Updater` で実装済
-    TODO #101:           Companions/WindowProbe/ のループを追加 (#30 PauseOverlay 等が増えたら配列化)
+    #101/#216 完成:      Companions/WindowProbe/ の build + staging を `Build-WindowProbe` で実装済
+                         (#30 PauseOverlay 等が増えたら Build-* を配列化して回す余地あり)
     TODO Monitor:        Monitor/ 追加時にビルドステップ追加
 
     依存ツールのバージョン管理方針:
@@ -1612,6 +1613,70 @@ function Build-Updater {
     }
 }
 
+function Build-WindowProbe {
+    Write-Step "WindowProbe を msbuild で Release ビルド"
+
+    # Build-Updater と同じ思想 (clean build → 成果物 / 特定 exe 名 check → staging copy)。
+    # WindowProbe は Launcher 補助 Companion (SPEC §2.4 / #101 / #216)。
+    $probeDir = Join-Path $RepoRoot 'Companions\WindowProbe'
+    $csproj = Join-Path $probeDir 'TonePrism_WindowProbe.csproj'
+    $binRelease = Join-Path $probeDir 'bin\Release'
+
+    if (-not (Test-Path $csproj)) {
+        Fail "TonePrism_WindowProbe.csproj が見つかりません: $csproj"
+    }
+
+    if (Test-Path $binRelease) {
+        Write-Info "bin/Release/ を削除して clean build"
+        Remove-Item -Recurse -Force $binRelease
+    }
+
+    Write-Info "msbuild /p:Configuration=Release"
+    $exitCode = Invoke-ExternalProcess -FilePath $script:ResolvedMsBuild -Arguments @(
+        $csproj,
+        '/p:Configuration=Release',
+        '/verbosity:minimal',
+        '/nologo'
+    )
+    if ($exitCode -ne 0) {
+        Fail "WindowProbe の msbuild に失敗しました (exit code: $exitCode)"
+    }
+    Write-Ok "msbuild 完了"
+
+    if (-not (Test-Path $binRelease)) {
+        Fail "WindowProbe ビルド出力が見つかりません: $binRelease"
+    }
+    $exeCount = (Get-ChildItem $binRelease -Recurse -File -Filter '*.exe' -ErrorAction SilentlyContinue | Measure-Object).Count
+    if ($exeCount -lt 1) {
+        Fail "WindowProbe ビルド出力に .exe が見つかりません ($binRelease 内): msbuild は exit 0 だが成果物が生成されていない可能性"
+    }
+    $expectedExe = Join-Path $binRelease 'TonePrism_WindowProbe.exe'
+    if (-not (Test-Path $expectedExe)) {
+        Fail "WindowProbe ビルド出力に TonePrism_WindowProbe.exe が見つかりません: csproj の AssemblyName が変更された可能性 (期待 path: $expectedExe)"
+    }
+    $outDir = Join-Path $FilesDir 'Companions\WindowProbe'
+    New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+
+    Get-ChildItem $binRelease -Recurse | Where-Object {
+        -not $_.PSIsContainer -and $_.Extension -ne '.pdb'
+    } | ForEach-Object {
+        $rel = $_.FullName.Substring($binRelease.Length + 1)
+        $dest = Join-Path $outDir $rel
+        $destDir = Split-Path $dest -Parent
+        if (-not (Test-Path $destDir)) {
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+        }
+        Copy-Item $_.FullName $dest
+    }
+    Write-Ok "WindowProbe 成果物コピー完了"
+
+    Write-Info "出力ファイル一覧:"
+    Get-ChildItem $outDir -Recurse -File | ForEach-Object {
+        $rel = $_.FullName.Substring($outDir.Length + 1)
+        Write-Host "        $rel ($($_.Length) bytes)" -ForegroundColor DarkGray
+    }
+}
+
 # ============================================================================
 # Phase 6: Install.bat / INSTALL_README.txt + Launcher.bat / Manager.bat 同梱
 # ============================================================================
@@ -1745,6 +1810,9 @@ $script:BundleManifestFiles = @(
     # Updater (Phase 3、SPEC §3.7.4): Manager 置換 + 再起動の最小 CLI、Companions/ 配下に配置
     'files\Companions\Updater\TonePrism_Updater.exe',
     'files\Companions\Updater\TonePrism_Updater.exe.config',
+    # WindowProbe (#101 / #216、SPEC §2.4): Launcher 補助、可視/前面ウィンドウ検知の単発 CLI
+    'files\Companions\WindowProbe\TonePrism_WindowProbe.exe',
+    'files\Companions\WindowProbe\TonePrism_WindowProbe.exe.config',
     # CHANGELOG.md (Phase 4 #108、SPEC §3.7.7): Manager UI が installed Bundle version 抽出に使う SoT、
     # `<install>/CHANGELOG.md` 直下配置で `Launcher/` `Manager/` 等と同階層 (project-wide な SoT semantic)
     'files\CHANGELOG.md'
@@ -2027,6 +2095,7 @@ Clear-Staging
 Build-Launcher
 Build-Manager
 Build-Updater
+Build-WindowProbe
 Copy-Templates
 New-BundleManifest        # (#175 Phase 4.1) bundle/bundle_manifest.json 生成、Assert より前
 Assert-ExpectedFiles

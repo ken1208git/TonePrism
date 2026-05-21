@@ -305,6 +305,9 @@ func _exit_tree():
 		_thumb_load_thread.wait_to_finish()
 	if DialogManager and DialogManager.has_method("close_current_dialog"):
 		DialogManager.close_current_dialog()
+	# WindowProbe 監視スレッドを join（ゲーム実行中にランチャーが閉じられた場合の保険）
+	if _game_launcher:
+		_game_launcher.shutdown()
 
 # --- サムネイル非同期読み込み ---
 

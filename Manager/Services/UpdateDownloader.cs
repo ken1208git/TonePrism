@@ -386,6 +386,8 @@ namespace TonePrism.Manager.Services
                 Path.Combine("files", "CHANGELOG.md"),
                 Path.Combine("files", "Companions", "Updater", "TonePrism_Updater.exe"),
                 Path.Combine("files", "Companions", "Updater", "TonePrism_Updater.exe.config"),
+                Path.Combine("files", "Companions", "WindowProbe", "TonePrism_WindowProbe.exe"),
+                Path.Combine("files", "Companions", "WindowProbe", "TonePrism_WindowProbe.exe.config"),
             };
             foreach (var rel in rootExpected)
             {

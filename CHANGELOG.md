@@ -1143,6 +1143,22 @@ Release.bat の編集は **UTF-8 (no BOM) + CRLF** 厳守 (SPEC §3.7.9.1 参照
 
 SPEC §2.4 で定義される「主要 (Launcher / Manager / Monitor) を補助する独立 exe 群」の **runtime exe** の変更履歴。`Companions/Updater/TonePrism_Updater.exe` (Manager 自身の dir 置換用) + 将来追加される `WindowProbe` (#101) / `PauseOverlay` (#30) 等の deployment 配置と整合。本 section は **#160 で `## Updater (Companions/Updater)` から rename + 一般化**、`## Release Tooling` (= build / 配布スクリプト) と責務分離 (= 後者は build 時のみ動く scripts、本 section は runtime exe)。SPEC §2.4 / §3.7.4 参照。
 
+### [WindowProbe v0.1.0] - 2026-05-21
+
+初回リリース (#101 / #216)。指定 PID の**プロセスツリー (PID + 全子孫)** が可視ウィンドウ / 前面ウィンドウを持つかを判定する単発 CLI。Launcher の「ゲーム起動中 → プレイ中」遷移検知 (#101) と、ゲーム実行中のランチャー前面化異常検知 (#216) の共通基盤。
+
+**CLI**: `TonePrism_WindowProbe.exe <pid>` → stdout 1 行で `visible_foreground` / `visible_background` / `not_visible` / `not_found` のいずれかを出力。終了コード 0=成功 / 2=引数エラー / 1=実行時例外。
+
+**構成** (5 ファイル): `Program.cs` (entry + 引数 parse + 結果出力) / `Win32Windows.cs` (P/Invoke + 判定ロジック) / csproj / App.config / AssemblyInfo.cs。
+
+**設計判断**:
+- **プロセスツリー走査** (`CreateToolhelp32Snapshot` で PID + 全子孫を BFS): Launcher は `cmd.exe /C "cd /d <dir> && game.exe"` でゲームを起動するため握る PID は cmd.exe で、ゲームウィンドウは子の game.exe に属する。ランチャー型ゲームが孫プロセスを生むケースもあるため、PID 単体ではなく子孫まで辿る。
+- **可視ウィンドウの判定** (`EnumWindows` + `GetWindowThreadProcessId` + `IsWindowVisible`): オーナーウィンドウを持つもの / `ConsoleWindowClass` (cmd 経由起動時に一瞬出るコンソール) を除外し、タイトルあり or 十分な大きさ (200px 以上) を「実ウィンドウ」とみなす。
+- **前面判定** (`GetForegroundWindow`): 前面ウィンドウの所有 PID がツリーに含まれれば `visible_foreground`。#216 の前面化異常検知に使う。
+- **ログファイルを作らない**: Launcher が ~150ms / プレイ確定後 ~1s 間隔で繰り返し呼ぶ高頻度ツールのため、起動毎ログファイル (Updater の `Logger.cs` 方式) は採らず stdout/stderr のみ。意味のある遷移ログは呼び出し元 Launcher 側で記録する。
+
+**Updater との非対称**: CompanionsCommon 共有 lib は作らず P/Invoke を WindowProbe 単体に直接実装 (YAGNI、現状これを使う Companion は WindowProbe のみ。PauseOverlay #30 追加時に共通化を再検討)。.NET Framework 4.8 / `TonePrism_<Name>` 命名 (SPEC §2.4) は Updater 同様。
+
 ### [Updater v0.2.1] - 2026-05-19
 
 #### Changed (#170 — copyright metadata sync)
@@ -1205,6 +1221,28 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 ---
 
 ## Launcher（ランチャー本体）
+
+### [Launcher v0.7.0] - 2026-05-21
+
+#### Added (#101 / #216 — WindowProbe による起動中→プレイ中の遷移同期 + ランチャー前面化異常検知)
+
+WindowProbe Companion (`## Companions WindowProbe v0.1.0` 参照) を Launcher に統合。
+
+**起動中→プレイ中の遷移同期 (#101)**: 旧来は `OS.create_process` 直後に即「プレイ中」表示へ切り替えていたため、Windows Defender スキャンやゲーム初期化で実際のウィンドウ出現が遅れると表示と実態にラグがあった。新たに probe を専用スレッドで ~150ms 間隔に呼び、ゲームのプロセスツリーに可視ウィンドウが出現した時点で `LaunchingOverlay.State.PLAYING` へ遷移する。10 秒経っても可視ウィンドウを検出できない場合はフォールバックで強制 PLAYING。spawn 前の固定 1 秒待機は最低表示時間としてそのまま残す。
+
+**ランチャー前面化異常検知 (#216)**: ゲーム実行中に「ランチャーが前面 (`window.has_focus()`) かつゲームが前面でない」状態が 2 秒継続したら、新エラーコード `2005 (GAME_LAUNCHER_FOREGROUND_ANOMALY)` でスタッフ向けエラーを表示する。ゲームが前面に戻れば自動でエラーをクリア。誤検知対策として (a) **異常監視を arm するのは「WindowProbe が可視ゲーム窓を実際に一度でも観測した」時のみ** — 初回起動の Defender / SmartScreen スキャン等で窓出現が遅れている間 (= 窓が無い) に「窓が無い＝異常」と誤発報するのを防ぐ。フォールバックタイムアウト (下記) で PLAYING ラベルにしただけでは arm しない、(b) プロセス消滅は既存の終了処理に委ね「プロセス生存 × 前面喪失」のみ異常とする、(c) 2 秒デバウンスで一瞬の Alt-Tab を除外。
+
+**フォールバック**: 可視窓を検出できないまま 1 分経過したら「起動中」で固まらないよう強制的に PLAYING ラベルへ (初回スキャンが長引くケースを許容するため 60s に設定)。ただし上記のとおりこの強制 PLAYING では異常監視を arm しないため、窓が出ないゲームで誤ってスタッフ呼び出しが出ることはない。
+
+**実装**:
+- 新規 `scripts/window_probe_client.gd` (`WindowProbeClient`): exe path 解決 + `OS.execute` 実行 + 出力 → enum 変換。exe は本番配置 (`Companions/WindowProbe/TonePrism_WindowProbe.exe`) と **dev ビルド出力** (`Companions/WindowProbe/bin/{Release,Debug}/`) の候補を順に探索し、Godot エディタ実行でも probe が効くようにする。いずれも不在なら `UNAVAILABLE` を返し、呼出し元は従来挙動 (即 PLAYING / 異常検知なし) にフォールバック。
+- `scripts/game_launcher.gd`: spawn 後に probe 専用 `Thread` を起動し結果を `Mutex` 保護の共有変数に格納。PLAYING 遷移判定 / 前面化異常判定はメインスレッド (`monitor_process`) で共有結果 + `has_focus()` を読んで行い、全 UI/Window アクセスをメインスレッドに集約 (call_deferred 不要)。プレイ確定後は poll 間隔を ~1s に粗くして i3 実機の負荷を抑える (#214 関連)。未使用だった `_has_lost_focus_since_launch` を異常検知に活用。
+- `scenes/game_selection.gd`: `_exit_tree` で probe スレッドを join (ゲーム実行中にランチャーが閉じられた場合の保険)。
+- `scripts/error_code.gd`: `GAME_LAUNCHER_FOREGROUND_ANOMALY = 2005` 追加。
+- `scripts/error_manager.gd`: `hide_error()` を追加 (自己回復するエラーの自動クローズ用)。
+- `scenes/components/error_dialog.gd`: コード別の文言上書きマップを追加し、2005 にスタッフ向け文言を表示 (既存コードは tscn 静的文言を維持)。
+
+**ログ方針**: Launcher の Logger API 直接呼び出し (#85 で対応予定) は未整備のため、本実装も既存どおり `print()` (godot.log tail 経由で INFO 取り込み) を使用。異常検知のみ `push_warning()` で WARN レベルに振り分け。
 
 ### [Launcher v0.6.2] - 2026-05-20
 
