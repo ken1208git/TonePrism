@@ -1758,6 +1758,20 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.16.2] - 2026-05-21
+
+#### Fixed (#221 — ゲーム編集でバージョン未変更でも self-rename 例外)
+
+バージョン番号を変えずに（例: 起動オプションだけ編集して）OK を押すと、`game_versions.version` が `v` prefix 無し（例 `"1.0.0"`）で保存されているゲームで「フォルダリネーム失敗（ソース パスとターゲット パスを同じにすることはできません）」が出て保存できない不具合を修正。
+
+- 原因: rename skip guard（renamePlan 構築ループの `originalVer` vs `v.Version` の raw 文字列比較）は生比較だが、フォルダ leaf は `ToVersionLeaf` で正規化 (`"1.0.0"` も `"v1.0.0"` も leaf `"v1.0.0"`)。raw 比較は不一致で skip されず、`oldDir == newDir` の self-rename plan が作られ Phase 2 の `Directory.Move(同, 同)` が IOException → 失敗ダイアログ。
+- 修正: (1) `oldDir`/`newDir` 算出直後に leaf 正規化後が同一 (`string.Equals(oldDir, newDir, OrdinalIgnoreCase)`) なら rename plan から除外 (`continue`)。(2) 同じ非対称が `reservedOldDirs` 構築ループにもあり（raw guard のままだと「rename されず空かない leaf」を予約済みとして登録し、別 version が同一 leaf を target にした衝突を Phase 1 衝突 check で見逃す）、こちらも leaf 比較に統一。DB は後続の `UpdateGameVersion` ループが全 version を normalized 値で書き戻すため、disk を触らず DB だけ正規化される正しい挙動になる。
+- 影響: `v` prefix 無しで DB 保存された既存ゲーム全般（バージョン未変更の編集が全て詰んでいた）。
+
+#### Bump 根拠 (v0.16.1 → v0.16.2)
+
+SemVer pre-1.0 patch bump: bugfix のみ。
+
 ### [Manager v0.16.1] - 2026-05-20
 
 #### Changed (#200 — バックアップ履歴の「状態」列削除)

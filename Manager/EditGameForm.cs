@@ -924,8 +924,15 @@ namespace TonePrism.Manager
                             Logger.Warn("[EditGameForm] (#158 round 8 Med #3) reservedOldDirs build: snapshot 不在 version id=" + vR.Id + " ('" + (vR.Version ?? "(null)") + "')、rename plan skip");
                             continue;
                         }
-                        if (string.Equals(origR, vR.Version, StringComparison.OrdinalIgnoreCase)) continue;
-                        reservedOldDirs.Add(System.IO.Path.Combine(gameFolder, ToVersionLeaf(origR)));
+                        // (#221) raw 文字列比較ではなく leaf 正規化後で「実際に rename されるか」を判定する。
+                        // v prefix 有無や大文字 V のみの差 ("1.0.0"/"V1.0.0" vs "v1.0.0") は raw 不一致だが
+                        // ToVersionLeaf で同一 leaf に畳まれ rename されない = この slot は空かない。raw guard の
+                        // ままだと「空かない leaf」を予約済み (rename で空く予定) として登録してしまい、別 version
+                        // が同一 leaf を target にした衝突を下の Phase 1 衝突 check で見逃す非対称が生じる
+                        // (renamePlan ループは leaf 同一を skip するのに、こちらは登録してしまう)。
+                        string oldLeafR = ToVersionLeaf(origR);
+                        if (string.Equals(oldLeafR, ToVersionLeaf(vR.Version), StringComparison.OrdinalIgnoreCase)) continue;
+                        reservedOldDirs.Add(System.IO.Path.Combine(gameFolder, oldLeafR));
                     }
                     foreach (var item in cmbVersionList.Items)
                     {
@@ -950,6 +957,17 @@ namespace TonePrism.Manager
                         string newLeaf = ToVersionLeaf(v.Version);
                         string oldDir = System.IO.Path.Combine(gameFolder, oldLeaf);
                         string newDir = System.IO.Path.Combine(gameFolder, newLeaf);
+
+                        // (#221) ToVersionLeaf 正規化後に old/new が同一フォルダになるケースは disk rename 不要。
+                        // 例: DB の version が "1.0.0" (v prefix 無し) のゲームは、save 時に
+                        // SemverInputControl.VersionString が v.Version へ正規化形 "v1.0.0" を書き戻すため、
+                        // 上の raw 文字列比較 guard (originalVer vs v.Version) は不一致で skip されないが、
+                        // ToVersionLeaf はどちらも "v1.0.0" → oldDir == newDir の self-rename plan が作られ、
+                        // Phase 2 の Directory.Move(oldDir, newDir) が "source == dest" 例外で
+                        // 「フォルダリネーム失敗」になっていた (バージョン未変更の編集が全て詰む)。
+                        // 下の UpdateGameVersion ループが全 version を normalized 値で DB 書き戻すので、
+                        // ここで rename plan から除外すれば disk は触らず DB だけ正規化される正しい挙動になる。
+                        if (string.Equals(oldDir, newDir, StringComparison.OrdinalIgnoreCase)) continue;
 
                         // (#158 round 6 M-2) reservedOldDirs に含まれる newDir は他 plan の oldDir、
                         // = rename 実行で空く予定なので衝突 skip。それ以外 (= 純粋に既存 disk フォルダ)
