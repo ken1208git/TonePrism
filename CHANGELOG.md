@@ -120,6 +120,16 @@
 
 **注意 (#160 で section 責務分離)**: `Updater` 等の **runtime exe 群** (= SPEC §2.4 Companions 配置) の changelog は本 section ではなく **`## Companions`** (旧 `## Updater (Companions/Updater)`、本 PR で section 名を一般化) に記載する。本 section は build / 配布スクリプトのみ対象。Bundle v0.4.0 以前 (= 本 PR merge 前) の Updater 変更履歴は `## Release Tooling` の過去 entry (= round 1〜8 review 詳細等) に retain、retroactive consolidation は scope creep のため見送り (= PR #159 round 4 「SPEC 1 PR 1 bump 規約」導入時と同 pattern)。
 
+### [Release Tooling v0.1.21] - 2026-05-21
+
+#### Added (#101 / #216 — WindowProbe の build / 配布統合)
+
+- **`Build-WindowProbe` 関数を新設** (`Release.ps1`、`Build-Updater` をテンプレに): `Companions/WindowProbe/TonePrism_WindowProbe.csproj` を msbuild Release ビルド → bin/Release/ から `<staging>/files/Companions/WindowProbe/` へコピー。clean build（bin/Release 削除）+ 成果物 dir / `.exe` 1 件以上 / 特定 exe 名（`TonePrism_WindowProbe.exe`）の 3 段 fail-fast を `Build-Updater` と同型で実装。Main のビルド列に `Build-Updater` の直後で挿入。
+- **`$script:BundleManifestFiles` に WindowProbe 2 entry を追加** (`files\Companions\WindowProbe\TonePrism_WindowProbe.exe` + `.exe.config`): `Assert-ExpectedFiles`（staging 検証）と `New-BundleManifest`（manifest 生成）の両方が本配列を参照するため、これだけで Manager 側 validate（manifest 経由）も自動同期される。`$script:BundleLayout` は変更不要（Manager apply の Companions 一括ループが `companions_dir` 経由で WindowProbe を自動列挙するため、Updater のような専用 key は不要）。
+- 冒頭 docstring の `TODO #101` を実装済表記に更新。
+
+bump 判断: 新規 Companion の build / 配布統合で、Release.ps1 への build step + manifest entry 追加。配布インフラへの機能追加として patch (v0.1.20 → v0.1.21)。WindowProbe コンポーネント本体の CLI 仕様 / 設計判断は `## Companions WindowProbe v0.1.0`、Launcher 統合は `## Launcher v0.7.0` に記載。Bundle への反映は次回リリース実行時。
+
 ### [Release Tooling v0.1.20] - 2026-05-21
 
 #### Added (#106 — 部員向けマニュアル docs サイト基盤 + README 配布物方針の区分け)

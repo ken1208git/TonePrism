@@ -226,10 +226,12 @@ namespace TonePrism.WindowProbe
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
 
-        [DllImport("kernel32.dll", SetLastError = true)]
+        // CharSet.Unicode で Process32FirstW / Process32NextW にバインドし、
+        // PROCESSENTRY32 (CharSet.Unicode、szExeFile = ByValTStr 260 → 520 byte) と文字幅を揃える。
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern bool Process32First(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
 
-        [DllImport("kernel32.dll", SetLastError = true)]
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern bool Process32Next(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
 
         [DllImport("kernel32.dll", SetLastError = true)]

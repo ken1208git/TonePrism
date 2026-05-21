@@ -16,10 +16,12 @@ var _current_code: int = 0  # 表示中ダイアログのエラーコード（hi
 func is_error_showing() -> bool:
 	return _current_dialog != null
 
-func show_error(code: int):
+## エラーを表示する。実際に表示できたら true、既に別ダイアログ表示中で
+## 抑止された場合は false を返す（呼び出し側が再試行可否を判断できるように）。
+func show_error(code: int) -> bool:
 	# 既に表示されている場合は何もしない
 	if _current_dialog != null:
-		return
+		return false
 
 	# コードが0（初期値やOK）の場合は、不明なエラーとして扱う
 	if code == 0:
@@ -35,6 +37,7 @@ func show_error(code: int):
 	_current_code = code
 
 	DialogAnimator.animate_in(dialog, self, "Panel", "ColorRect")
+	return true
 
 ## 表示中のエラーをフェードアウトして閉じる。
 ## 自己回復するエラー（例: ランチャー前面化異常 #216 が解消したとき）に使う。
