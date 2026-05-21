@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -112,15 +113,20 @@ namespace TonePrism.WindowProbe
         }
 
         /// <summary>
-        /// rootPid + 全子孫 PID の集合を返す。rootPid が存在しなければ null。
+        /// rootPid + 全子孫 PID の集合を返す。rootPid が存在しなければ null (= プロセス不在)。
         /// CreateToolhelp32Snapshot で全プロセスの (PID, ParentPID) を集め、BFS で子孫を辿る。
+        ///
+        /// 「プロセス不在」(null 返却 → not_found) と「スナップショット API の失敗」(throw → exit 1 →
+        /// 呼び出し元 Launcher では UNAVAILABLE 扱い) を区別する。両者を not_found に丸めると、
+        /// プロセス生存中の一時的 API 失敗を「プロセスが消えた／窓が無い」と誤判定し、
+        /// 前面化異常 (#216) の誤発報につながりうるため。
         /// </summary>
         private static HashSet<uint> GetProcessTree(uint rootPid)
         {
             IntPtr snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
             if (snapshot == INVALID_HANDLE_VALUE)
             {
-                return null;
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateToolhelp32Snapshot failed");
             }
 
             try
@@ -132,7 +138,7 @@ namespace TonePrism.WindowProbe
                 var entry = new PROCESSENTRY32 { dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32)) };
                 if (!Process32First(snapshot, ref entry))
                 {
-                    return null;
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Process32First failed");
                 }
                 do
                 {
