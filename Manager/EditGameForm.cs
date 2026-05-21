@@ -951,6 +951,16 @@ namespace TonePrism.Manager
                         string oldDir = System.IO.Path.Combine(gameFolder, oldLeaf);
                         string newDir = System.IO.Path.Combine(gameFolder, newLeaf);
 
+                        // (#221) ToVersionLeaf 正規化後に old/new が同一フォルダになるケースは disk rename 不要。
+                        // 例: DB の version が "1.0.0" (v prefix 無し) で VersionString getter は "v1.0.0" を
+                        // 返すと、946 行の raw 文字列比較 guard は不一致 (skip されない) だが
+                        // ToVersionLeaf はどちらも "v1.0.0" → OldDir == NewDir の self-rename plan が作られ、
+                        // Phase 2 の Directory.Move(oldDir, newDir) が "source == dest" 例外で
+                        // 「フォルダリネーム失敗」になっていた (バージョン未変更の編集が全て詰む)。
+                        // 下の UpdateGameVersion ループが全 version を normalized 値で DB 書き戻すので、
+                        // ここで rename plan から除外すれば disk は触らず DB だけ正規化される正しい挙動になる。
+                        if (string.Equals(oldDir, newDir, StringComparison.OrdinalIgnoreCase)) continue;
+
                         // (#158 round 6 M-2) reservedOldDirs に含まれる newDir は他 plan の oldDir、
                         // = rename 実行で空く予定なので衝突 skip。それ以外 (= 純粋に既存 disk フォルダ)
                         // のみ真の衝突として block する。
