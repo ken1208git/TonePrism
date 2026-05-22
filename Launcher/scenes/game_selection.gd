@@ -152,17 +152,11 @@ func _ready():
 	_input_handler.focus_to_card_requested.connect(_update_focus_to_current_card)
 	_input_handler.idle_reset_requested.connect(func(): _idle_mgr.reset())
 
-	# ゲームセッション (autoload GameSession) のシグナル接続。監視・状態は GameSession が保持し、
-	# 表示 (PLAYING ラベル / 復帰演出) は本シーンが反映する。
+	# ゲームセッション (autoload GameSession) のシグナル接続。監視・状態は GameSession が保持。
+	# PLAYING 確定 → 軽量プレイ中シーンへ切替。起動中のままゲームが落ちた場合 (PLAYING 前) は復帰。
+	# (中断オーバーレイの resume/quit/退出 は OverlayManager が GameSession を直接呼ぶ。)
 	GameSession.playing_confirmed.connect(_on_session_playing)
 	GameSession.game_exited.connect(_on_session_exited)
-
-	# 中断オーバーレイ (#30) の選択結果を GameSession につなぐ
-	OverlayManager.resume_requested.connect(func(): GameSession.resume())
-	OverlayManager.quit_to_selection_requested.connect(func(): GameSession.quit())
-	OverlayManager.exit_to_screensaver_requested.connect(func():
-		GameSession.quit()
-		IdleManager.transition_to_screensaver(get_tree()))
 
 	# カルーセルの上下矢印ボタンを追加
 	_add_carousel_arrow_buttons()
@@ -489,14 +483,19 @@ func _session_busy() -> bool:
 	return GameSession.is_running() or (_game_launcher != null and _game_launcher.is_returning())
 
 
-## GameSession: PLAYING 確定 → LAUNCHING オーバーレイを「プレイ中」表示に。
+## GameSession: PLAYING 確定 → 軽量プレイ中シーンへ切替 (重いカルーセルを解放, #214)。
 func _on_session_playing() -> void:
-	if _launching_overlay:
-		_launching_overlay.set_state(LaunchingOverlay.State.PLAYING)
+	if not is_inside_tree():
+		return
+	TransitionManager.change_scene("res://scenes/playing.tscn")
 
 
-## GameSession: ゲーム終了 → オーバーレイを閉じ通常表示へ復帰。
+## GameSession: ゲーム終了。ここに来るのは「PLAYING 前 (起動中) にゲームが落ちた」場合のみ
+## (PLAYING 後はプレイ中シーンが処理する)。退出先に応じてスクリーンセーバー or 通常表示復帰。
 func _on_session_exited() -> void:
+	if GameSession.should_exit_to_screensaver():
+		IdleManager.transition_to_screensaver(get_tree())
+		return
 	if _launching_overlay:
 		_launching_overlay.hide_overlay()
 	_game_launcher.switch_to_normal_view(_carousel.card_nodes, _info_panel,

@@ -28,6 +28,9 @@ var _anomaly_active: bool = false
 var _anomaly_logged: bool = false
 var _launch_time_ms: int = 0
 var _probe_failure_logged: bool = false
+# 終了後の遷移先: true=スクリーンセーバー / false=ゲーム選択画面。退出メニュー選択で true。
+# 実際の change_scene は終了時に現シーン (playing / game_selection) が本フラグを見て行う。
+var _exit_to_screensaver: bool = false
 
 
 func _ready() -> void:
@@ -50,6 +53,7 @@ func begin_launch(game: GameInfo) -> bool:
 		return false
 	_is_launching = true
 	current_game = game
+	_exit_to_screensaver = false
 	return true
 
 
@@ -151,6 +155,17 @@ func _process(_delta: float) -> void:
 func resume() -> void:
 	if running_pid != -1 and _probe_available:
 		LauncherCompanion.focus(running_pid)
+
+
+## 退出メニュー: 終了後スクリーンセーバーへ。フラグを立てて quit (game_exited 時に現シーンが判定)。
+func request_exit_to_screensaver() -> void:
+	_exit_to_screensaver = true
+	quit()
+
+
+## 終了後にスクリーンセーバーへ遷移すべきか (現シーンが game_exited で参照)。
+func should_exit_to_screensaver() -> bool:
+	return _exit_to_screensaver
 
 
 ## ゲームプロセスツリーを終了する。kill 後、_process がプロセス消失を検出 → game_exited 発火。

@@ -104,16 +104,18 @@ func close() -> void:
 	print("[OverlayManager] 中断メニューを閉じた")
 
 
+## 中断メニューの選択結果は autoload GameSession を直接呼ぶ (シーン切替で配線が切れないように)。
+## 終了後の遷移先 (選択画面/スクリーンセーバー) は GameSession のフラグを見て現シーンが決める。
 func _on_resume() -> void:
 	close()
-	resume_requested.emit()
+	GameSession.resume()
 
 
 func _on_quit() -> void:
 	close()
-	quit_to_selection_requested.emit()
+	GameSession.quit()
 
 
 func _on_exit() -> void:
 	close()
-	exit_to_screensaver_requested.emit()
+	GameSession.request_exit_to_screensaver()

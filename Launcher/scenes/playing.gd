@@ -81,6 +81,10 @@ func _load_into(rect: TextureRect, path: String) -> void:
 ## ゲーム終了 (GameSession.game_exited) → 選択画面へ復帰。
 ## 復帰時に直前ゲームへフォーカスを戻すため initial_game_id を設定 (filtered_games は AppState に残存)。
 func _on_game_exited() -> void:
+	# 退出メニュー選択時はスクリーンセーバーへ。それ以外 (続行終了/ホーム/自然終了) は選択画面へ。
+	if GameSession.should_exit_to_screensaver():
+		IdleManager.transition_to_screensaver(get_tree())
+		return
 	if _game != null:
 		AppState.initial_game_id = _game.game_id
 	TransitionManager.change_scene("res://scenes/game_selection.tscn")
