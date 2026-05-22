@@ -43,13 +43,22 @@ func is_playing() -> bool:
 	return running_pid != -1 and _playing_confirmed
 
 
-## ゲームプロセスを起動する。exe 探索・引数パース・cmd 経由起動・companion watch まで担う。
-## 表示 (LAUNCHING overlay / 起動演出) は呼び出し側 (game_selection) が行う。戻り値=成功可否。
-func start(game: GameInfo) -> bool:
+## 起動シーケンス開始を宣言する (実プロセスはまだ起動しない)。起動演出の「前」に呼ぶことで、
+## 演出中 (await) も is_running()=true となり、カルーセル更新が modulate を戻して演出を打ち消すのを防ぐ。
+func begin_launch(game: GameInfo) -> bool:
 	if running_pid != -1 or _is_launching:
 		return false
 	_is_launching = true
 	current_game = game
+	return true
+
+
+## begin_launch 済み前提で実プロセスを起動する (exe 探索・引数・cmd 経由起動・companion watch)。
+## 起動演出 (await) の後に呼ぶ。戻り値=成功可否。
+func start_process() -> bool:
+	if not _is_launching or current_game == null:
+		return false
+	var game := current_game
 
 	var exe_path := GamePathResolver.find_executable(game)
 	if exe_path.is_empty():

@@ -510,9 +510,13 @@ func _launch_game() -> void:
 	if _games.is_empty() or _session_busy():
 		return
 	var game: GameInfo = _games[_selected_index]
+	# 起動シーケンス開始を先に宣言 (演出中も is_running=true にして、カルーセル更新が
+	# modulate を戻してフェードアウトを打ち消すのを防ぐ)。
+	if not GameSession.begin_launch(game):
+		return
 	# 中断メニュー (#30) に表示する走行中ゲーム情報を登録。
 	OverlayManager.set_current_game(game)
-	# LAUNCHING 表示 + 起動演出 (本シーンのノード)。プロセス起動自体は GameSession (autoload)。
+	# LAUNCHING 表示 + 起動演出 (本シーンのノード)。
 	if _launching_overlay:
 		_launching_overlay.show_for_game(game.title, LaunchingOverlay.State.LAUNCHING)
 	_game_launcher.switch_to_running_view(_carousel.card_nodes, _selected_index,
@@ -520,9 +524,8 @@ func _launch_game() -> void:
 		_carousel_container, _bottom_bar.get_panel(), _background_texture)
 	# 演出を見せてからプロセス起動 (旧 launch_game の await 1.0s 相当)
 	await get_tree().create_timer(1.0).timeout
-	if not is_inside_tree():
-		return
-	if not GameSession.start(game):
+	# 実プロセス起動 (autoload GameSession)。
+	if not GameSession.start_process():
 		# 起動失敗: 表示を戻す
 		if _launching_overlay:
 			_launching_overlay.hide_overlay()
