@@ -30,11 +30,16 @@ func _ready() -> void:
 	if _status_label:
 		ShimmerHelper.apply_with_params(_status_label, 0.15, 0.55, 0.25, 1.5)
 
-func show_for_game(game_title: String, state: State = State.LAUNCHING) -> void:
+func show_for_game(game_title: String, state: State = State.LAUNCHING, instant: bool = false) -> void:
 	if _title_label:
 		_title_label.text = game_title
 	set_state(state)
 	visible = true
+
+	# instant: フェード無しで即可視 (プレイ中シーンからの復帰で、直後に hide_overlay へ繋ぐ用)。
+	if instant:
+		modulate.a = 1.0
+		return
 
 	# フェードイン（QUINT easing で映画的に）
 	var tween := create_tween()

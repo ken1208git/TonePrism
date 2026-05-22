@@ -100,11 +100,8 @@ func _on_game_exited() -> void:
 		return
 	if _game != null:
 		AppState.initial_game_id = _game.game_id
-	# 「プレイ中」表示を消し、背景を 1.05 → 1.0 へなめらかにズームアウトしてからカルーセルへ戻る。
-	if _launching_overlay:
-		_launching_overlay.hide_overlay()
-	var tween := create_tween()
-	tween.tween_property(_bg, "scale", Vector2.ONE, BG_ZOOM_DURATION)\
-		.set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
-	tween.finished.connect(func():
-		TransitionManager.change_scene("res://scenes/game_selection.tscn"))
+	# トランジション無しで瞬時に game_selection へ。game_selection 側が起動中画面と同じ
+	# running-view 静止状態 (プレイ中表示・背景 1.05) を再現し、起動モーションの逆再生
+	# (switch_to_normal_view: 背景ズームアウト + カルーセルフェードイン) でカルーセルへ戻る。
+	AppState.returning_from_game = true
+	get_tree().change_scene_to_file("res://scenes/game_selection.tscn")
