@@ -15,6 +15,7 @@ extends Node
 ## Manager のログ閲覧「Launcher タブ」に出る (Manager 改修不要)。
 
 signal trigger_received(source: String)  ## "home" | "guide"
+signal capture_ready(path: String, ok: bool)  ## capture コマンドの結果 (中断オーバーレイのすりガラス背景用)
 
 enum WindowState { UNAVAILABLE, NOT_FOUND, NOT_VISIBLE, VISIBLE_BACKGROUND, VISIBLE_FOREGROUND }
 
@@ -98,6 +99,8 @@ func _handle_event(txt: String) -> void:
 			if seq > _last_trigger_seq:  # 連送/取りこぼしを seq で吸収
 				_last_trigger_seq = seq
 				trigger_received.emit(String(data.get("event", "")))
+		"captured":
+			capture_ready.emit(String(data.get("path", "")), bool(data.get("ok", false)))
 		"log":
 			_forward_log(String(data.get("level", "info")), String(data.get("msg", "")))
 
@@ -152,6 +155,11 @@ func focus(pid: int) -> void:
 ## 指定 HWND の窓だけを強制前面化 (overlay 窓用、メインのランチャー窓を巻き込まない)。
 func focus_hwnd(hwnd: int) -> void:
 	_send("focus_hwnd %d" % hwnd)
+
+
+## 指定スクリーン rect (ランチャーのある画面の物理座標) を path に PNG キャプチャ要求。結果は capture_ready で返る。
+func capture(x: int, y: int, w: int, h: int, path: String) -> void:
+	_send("capture %d %d %d %d %s" % [x, y, w, h, path])
 
 
 func _send(cmd: String) -> void:

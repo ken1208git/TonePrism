@@ -161,6 +161,9 @@ func _ready():
 	# 中断オーバーレイ (#30) の選択結果を game_launcher につなぐ
 	OverlayManager.resume_requested.connect(func(): _game_launcher.resume_game())
 	OverlayManager.quit_to_selection_requested.connect(func(): _game_launcher.quit_game())
+	OverlayManager.exit_to_screensaver_requested.connect(func():
+		_game_launcher.quit_game()
+		IdleManager.transition_to_screensaver(get_tree()))
 
 	# カルーセルの上下矢印ボタンを追加
 	_add_carousel_arrow_buttons()
@@ -491,6 +494,8 @@ func _update_focus_state() -> void:
 func _launch_game() -> void:
 	if _games.is_empty() or _game_launcher.is_running():
 		return
+	# 中断メニュー (#30) に表示する走行中ゲーム情報を登録。
+	OverlayManager.set_current_game(_games[_selected_index])
 	_game_launcher.launch_game(_games[_selected_index], null, _launching_overlay,
 		_carousel_container, _info_panel, _top_bar.get_panel(),
 		_static_focus_border, _carousel.card_nodes, _selected_index,

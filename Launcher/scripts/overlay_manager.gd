@@ -7,10 +7,19 @@ extends Node
 
 signal resume_requested()
 signal quit_to_selection_requested()
+signal exit_to_screensaver_requested()
 
 var _overlay: Window = null
 var _open: bool = false
 var _companion: Node = null
+
+# 走行中ゲームの表示情報 (中断メニューのタイトル/アイコン用)。launch_game 時に set_current_game で設定。
+var _game_title: String = ""
+var _game_thumb_path: String = ""
+
+# すりガラス背景用キャプチャ (companion 撮影) の待ち合わせ。
+var _capture_done: bool = false
+var _capture_ok: bool = false
 
 
 func _ready() -> void:
@@ -22,13 +31,30 @@ func _ready() -> void:
 	add_child(_overlay)
 	_overlay.resume_requested.connect(_on_resume)
 	_overlay.quit_to_selection_requested.connect(_on_quit)
+	_overlay.exit_to_screensaver_requested.connect(_on_exit)
+
+
+## ゲーム起動時に呼ぶ。中断メニューに表示するタイトルとサムネイル (解決済み絶対パス) を覚える。
+func set_current_game(game: GameInfo) -> void:
+	if game == null:
+		_game_title = ""
+		_game_thumb_path = ""
+		return
+	_game_title = game.title
+	_game_thumb_path = GamePathResolver.resolve_path(game.thumbnail_path, game.game_id)
 
 	# トリガ (HOME / Guide) で開閉トグル。autoload 順で LauncherCompanion が先に居る前提だが防御的に確認。
 	_companion = get_node_or_null("/root/LauncherCompanion")
 	if _companion:
 		_companion.trigger_received.connect(_on_trigger)
+		_companion.capture_ready.connect(_on_capture_ready)
 	else:
 		push_warning("[OverlayManager] LauncherCompanion 不在、トリガ連携なし")
+
+
+func _on_capture_ready(_path: String, ok: bool) -> void:
+	_capture_done = true
+	_capture_ok = ok
 
 
 func _on_trigger(_source: String) -> void:
@@ -52,7 +78,13 @@ func open() -> void:
 	if _open or _overlay == null:
 		return
 	_open = true
-	_overlay.show_overlay()
+
+	# 背景は「ライブのゲーム + 濃い白の半透明パネル」方式 (動的・静止画なし)。
+	# ぼかしは別プロセスのゲームをライブに blur できず静止キャプチャが必要で「止まって見える」ため不採用。
+	# (capture 機構自体は残置・休眠。再びぼかしにする時は set_backdrop にパスを渡す。)
+	if _overlay.has_method("set_backdrop"):
+		_overlay.set_backdrop("")
+	_overlay.show_overlay(_game_title, _game_thumb_path)
 	# ゲームが前面 (フォーカス保持) のままだと overlay が前に出ない/フォーカスを取れないため、
 	# companion 経由で **overlay 窓だけ** を強制前面化し foreground-lock を回避する
 	# (PID 指定だとメインのランチャー窓を巻き込むため HWND 指定にする)。窓生成を 1 フレーム待つ。
@@ -80,3 +112,8 @@ func _on_resume() -> void:
 func _on_quit() -> void:
 	close()
 	quit_to_selection_requested.emit()
+
+
+func _on_exit() -> void:
+	close()
+	exit_to_screensaver_requested.emit()

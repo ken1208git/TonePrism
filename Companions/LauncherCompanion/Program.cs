@@ -41,6 +41,9 @@ namespace TonePrism.LauncherCompanion
         private static int Main(string[] args)
         {
             try { Console.OutputEncoding = Encoding.UTF8; } catch { }
+            // スクリーンキャプチャ座標を Godot (DisplayServer 物理座標) と一致させるため Per-Monitor v2 DPI-aware に。
+            // 非対応 OS では失敗しても無視 (その場合は論理座標、blur 用途なので実害小)。
+            try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch { }
 
             int eventPort = GetIntArg(args, "--event-port", 0);
             int cmdPort = GetIntArg(args, "--cmd-port", 0);
@@ -138,6 +141,19 @@ namespace TonePrism.LauncherCompanion
                                     Logger.Milestone("[main] focus_hwnd " + hwndVal + " ok=" + ok);
                                 }
                                 break;
+                            case "capture":
+                                // 中断オーバーレイのすりガラス背景用に、指定 rect (ランチャーのある画面) を PNG 保存し captured で返す。
+                                // 形式: capture <x> <y> <w> <h> <path> (path は末尾、スペース可)
+                                if (parts.Length >= 6
+                                    && int.TryParse(parts[1], out int cx) && int.TryParse(parts[2], out int cy)
+                                    && int.TryParse(parts[3], out int cw) && int.TryParse(parts[4], out int chh))
+                                {
+                                    string capPath = string.Join(" ", parts, 5, parts.Length - 5);
+                                    bool okCap = ScreenCapture.CaptureRegion(cx, cy, cw, chh, capPath);
+                                    SendCaptured(capPath, okCap);
+                                    Logger.Milestone("[main] capture rect=" + cx + "," + cy + " " + cw + "x" + chh + " ok=" + okCap);
+                                }
+                                break;
                             case "quit":
                                 Logger.Milestone("[main] quit コマンド受信、終了");
                                 sensor.Stop();
@@ -212,6 +228,11 @@ namespace TonePrism.LauncherCompanion
             string json = "{\"type\":\"trigger\",\"seq\":" + seq + ",\"event\":\"" + source + "\",\"at_unix_ms\":" + UnixMs() + "}";
             for (int i = 0; i < 3; i++) Send(json); // loopback でも保険で連送、受信側は seq で重複吸収
             Logger.Milestone("[main] trigger seq=" + seq + " event=" + source);
+        }
+
+        private static void SendCaptured(string path, bool ok)
+        {
+            Send("{\"type\":\"captured\",\"ok\":" + (ok ? "true" : "false") + ",\"path\":\"" + JsonEscape(path) + "\",\"at_unix_ms\":" + UnixMs() + "}");
         }
 
         private static void SendLog(string level, string msg)
@@ -290,6 +311,7 @@ namespace TonePrism.LauncherCompanion
             public IntPtr lParam; public uint time; public POINT pt;
         }
         private const uint PM_REMOVE = 0x0001;
+        [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
         [DllImport("user32.dll")] private static extern bool PeekMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax, uint wRemoveMsg);
         [DllImport("user32.dll")] private static extern bool TranslateMessage(ref MSG lpMsg);
         [DllImport("user32.dll")] private static extern IntPtr DispatchMessage(ref MSG lpMsg);
