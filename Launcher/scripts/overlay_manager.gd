@@ -40,8 +40,10 @@ func is_open() -> bool:
 
 
 func toggle() -> void:
+	# 開いている時のトグル閉じは「ゲームを再開」と同じ扱い (ゲーム窓を前面に戻す)。
+	# 単に hide するだけだと前面が OS 任せになり、メイン窓が出てしまうため。
 	if _open:
-		close()
+		_on_resume()
 	else:
 		open()
 
@@ -52,9 +54,13 @@ func open() -> void:
 	_open = true
 	_overlay.show_overlay()
 	# ゲームが前面 (フォーカス保持) のままだと overlay が前に出ない/フォーカスを取れないため、
-	# companion 経由でランチャー(=最前面の overlay 窓)を強制前面化し foreground-lock を回避する。
-	if _companion:
-		_companion.focus(OS.get_process_id())
+	# companion 経由で **overlay 窓だけ** を強制前面化し foreground-lock を回避する
+	# (PID 指定だとメインのランチャー窓を巻き込むため HWND 指定にする)。窓生成を 1 フレーム待つ。
+	await get_tree().process_frame
+	if _open and _companion:
+		var hwnd: int = _overlay.get_overlay_hwnd()
+		if hwnd != 0:
+			_companion.focus_hwnd(hwnd)
 	print("[OverlayManager] 中断メニューを開いた")
 
 

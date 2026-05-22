@@ -149,6 +149,11 @@ func focus(pid: int) -> void:
 	_send("focus %d" % pid)
 
 
+## 指定 HWND の窓だけを強制前面化 (overlay 窓用、メインのランチャー窓を巻き込まない)。
+func focus_hwnd(hwnd: int) -> void:
+	_send("focus_hwnd %d" % hwnd)
+
+
 func _send(cmd: String) -> void:
 	if _cmd_peer == null:
 		return

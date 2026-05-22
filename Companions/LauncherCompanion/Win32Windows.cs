@@ -68,7 +68,16 @@ namespace TonePrism.LauncherCompanion
             if (tree == null) return false;
             IntPtr target = FindTopLevelWindow(tree);
             if (target == IntPtr.Zero) return false;
+            return ForceForegroundHwnd(target);
+        }
 
+        /// <summary>
+        /// 指定 HWND を直接強制前面化する (PID 列挙せず、その窓だけを対象)。
+        /// overlay 窓のように「同一プロセスの特定の窓だけ前面化したい (メイン窓を巻き込みたくない)」用途。
+        /// </summary>
+        public static bool ForceForegroundHwnd(IntPtr target)
+        {
+            if (target == IntPtr.Zero) return false;
             IntPtr beforeFg = GetForegroundWindow();
             uint fgThread = GetWindowThreadProcessId(beforeFg, out _);
             uint thisThread = GetCurrentThreadId();

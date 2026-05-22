@@ -130,6 +130,14 @@ namespace TonePrism.LauncherCompanion
                                     Logger.Milestone("[main] focus pid=" + fpid + " ok=" + ok);
                                 }
                                 break;
+                            case "focus_hwnd":
+                                // overlay 窓など特定 HWND だけを前面化 (メイン窓を巻き込まない)。HWND は 64bit ありうるので long parse。
+                                if (parts.Length >= 2 && long.TryParse(parts[1], out long hwndVal) && hwndVal != 0)
+                                {
+                                    bool ok = Win32Windows.ForceForegroundHwnd(new IntPtr(hwndVal));
+                                    Logger.Milestone("[main] focus_hwnd " + hwndVal + " ok=" + ok);
+                                }
+                                break;
                             case "quit":
                                 Logger.Milestone("[main] quit コマンド受信、終了");
                                 sensor.Stop();

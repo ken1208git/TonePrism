@@ -98,6 +98,12 @@ func hide_overlay() -> void:
 	visible = false
 
 
+## この overlay 窓の OS ネイティブハンドル (Windows: HWND)。companion に渡して
+## 「overlay 窓だけ」を前面化するのに使う (メインのランチャー窓を巻き込まないため)。
+func get_overlay_hwnd() -> int:
+	return DisplayServer.window_get_native_handle(DisplayServer.WINDOW_HANDLE, get_window_id())
+
+
 func _input(event: InputEvent) -> void:
 	if not visible:
 		return
