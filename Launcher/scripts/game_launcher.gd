@@ -271,6 +271,21 @@ func _update_anomaly_detection(launcher_foreground: bool, res: int) -> void:
 			print("[GameLauncher] ランチャー前面化異常が解消、エラーをクリア")
 			ErrorManager.hide_error(ErrorCode.GAME_LAUNCHER_FOREGROUND_ANOMALY)
 
+## 背景レイヤー (BackgroundTexture / BackgroundTextureOld など同 parent の TextureRect) を全部返す。
+## カルーセルのクロスフェードで「どちらが可視か」が入れ替わるため、ズームは可視・不可視問わず
+## 全層に掛ける (片方だけだと modulate.a=0 の層をズームして「拡大されない」ことがある — 実機ログで確認)。
+func _bg_layers(bg_node: Control) -> Array:
+	var layers: Array = []
+	var parent := bg_node.get_parent()
+	if parent:
+		for child in parent.get_children():
+			if child is TextureRect:
+				layers.append(child)
+	if layers.is_empty():
+		layers.append(bg_node)
+	return layers
+
+
 ## 起動中表示に切り替え（UIをフェードアウト + 背景ズームイン）
 func _switch_to_running_view(card_nodes: Array[Panel],
 		selected_index: int, info_panel: Panel, top_bar: Control,
@@ -309,11 +324,17 @@ func _switch_to_running_view(card_nodes: Array[Panel],
 		if down_btn:
 			tween.tween_property(down_btn, "modulate:a", 0.0, LAUNCH_TRANSITION_DURATION).set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
 
-	# 背景画像を中心からほんのちょっとズームイン（同じ easing でオーバーレイ演出と同期）
+	# 背景画像を中心からほんのちょっとズームイン（クロスフェードの2層とも掛ける）。
+	# pivot は中心。初回 size 未確定 (0) は viewport サイズで代替。前回の戻し残りを避けるため必ず等倍開始。
 	if background_texture:
-		background_texture.pivot_offset = background_texture.size / 2.0
-		tween.tween_property(background_texture, "scale", Vector2(LAUNCH_BG_ZOOM_SCALE, LAUNCH_BG_ZOOM_SCALE), LAUNCH_TRANSITION_DURATION)\
-			.set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
+		for bg in _bg_layers(background_texture):
+			var bg_size: Vector2 = bg.size
+			if bg_size.x <= 0.0 or bg_size.y <= 0.0:
+				bg_size = bg.get_viewport_rect().size
+			bg.pivot_offset = bg_size / 2.0
+			bg.scale = Vector2.ONE
+			tween.tween_property(bg, "scale", Vector2(LAUNCH_BG_ZOOM_SCALE, LAUNCH_BG_ZOOM_SCALE), LAUNCH_TRANSITION_DURATION)\
+				.from(Vector2.ONE).set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
 
 ## 通常表示に戻す（UIをフェードイン + 背景ズームアウト）
 func _switch_to_normal_view(card_nodes: Array[Panel],
@@ -392,11 +413,15 @@ func _switch_to_normal_view(card_nodes: Array[Panel],
 			down_btn.visible = true
 			tween.tween_property(down_btn, "modulate:a", 1.0, LAUNCH_TRANSITION_DURATION).from(0.0).set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
 
-	# 背景画像をズームアウトして元のスケールに戻す
+	# 背景画像をズームアウトして元のスケールに戻す (2層とも)
 	if background_texture:
-		background_texture.pivot_offset = background_texture.size / 2.0
-		tween.tween_property(background_texture, "scale", Vector2.ONE, LAUNCH_TRANSITION_DURATION)\
-			.set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
+		for bg in _bg_layers(background_texture):
+			var bg_size: Vector2 = bg.size
+			if bg_size.x <= 0.0 or bg_size.y <= 0.0:
+				bg_size = bg.get_viewport_rect().size
+			bg.pivot_offset = bg_size / 2.0
+			tween.tween_property(bg, "scale", Vector2.ONE, LAUNCH_TRANSITION_DURATION)\
+				.set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
 
 	# フェードインアニメーション完了後に状態を戻す
 	tween.finished.connect(func():
