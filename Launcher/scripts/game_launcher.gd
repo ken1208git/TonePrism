@@ -98,7 +98,7 @@ func launch_game(game: GameInfo, status_label: Label, launching_overlay: Launchi
 		running_pid = pid
 		_is_launching = false
 
-		# WindowProbe が使えるなら、可視ウィンドウ出現まで「起動中」を保ち、
+		# Companion が使えるなら、可視ウィンドウ出現まで「起動中」を保ち、
 		# 出現を検出した時点で PLAYING へ遷移する (#101)。
 		# 使えない場合 (エディタ実行 / exe 未同梱) は従来どおり即 PLAYING にフォールバック。
 		_reset_probe_state()
@@ -132,7 +132,7 @@ func monitor_process(window: Window, status_label: Label, game: GameInfo,
 	# ランチャーが前面かどうか（前面でない＝ゲームが前面、が正常）
 	var launcher_foreground := window.has_focus()
 
-	# WindowProbe 有効時のみ: 起動中→プレイ中の遷移と前面化異常を判定する
+	# Companion 有効時のみ: 起動中→プレイ中の遷移と前面化異常を判定する
 	if _probe_available:
 		var res := LauncherCompanion.get_window_state()
 		var game_visible := (res == LauncherCompanion.WindowState.VISIBLE_BACKGROUND
@@ -153,7 +153,7 @@ func monitor_process(window: Window, status_label: Label, game: GameInfo,
 		# 検出できないままタイムアウトしたら「起動中」で固まるのを防ぐため強制的にプレイ中へ。
 		if not _playing_confirmed:
 			if game_visible:
-				_confirm_playing(launching_overlay, "WindowProbe が可視ウィンドウを検出")
+				_confirm_playing(launching_overlay, "Companion が可視ウィンドウを検出")
 			elif Time.get_ticks_msec() - _launch_time_ms >= PLAYING_FALLBACK_TIMEOUT_MS:
 				_confirm_playing(launching_overlay, "フォールバックタイムアウト (%dms)" % PLAYING_FALLBACK_TIMEOUT_MS)
 

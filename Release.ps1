@@ -19,8 +19,8 @@
 
     Phase 2 (#108) 完成: templates/Install.bat / INSTALL_README.txt / Launcher.bat / Manager.bat 同梱
     Phase 3 (#108) 完成: Companions/Updater/ の build + staging を `Build-Updater` で実装済
-    #101/#216 完成:      Companions/WindowProbe/ の build + staging を `Build-WindowProbe` で実装済
-                         (#30 PauseOverlay 等が増えたら Build-* を配列化して回す余地あり)
+    #101/#216/#30 完成:  Companions/LauncherCompanion/ の build + staging を `Build-LauncherCompanion` で実装済
+                         (旧 WindowProbe を統合・置換。Companion が増えたら Build-* を配列化して回す余地あり)
     TODO Monitor:        Monitor/ 追加時にビルドステップ追加
 
     依存ツールのバージョン管理方針:
@@ -1613,17 +1613,17 @@ function Build-Updater {
     }
 }
 
-function Build-WindowProbe {
-    Write-Step "WindowProbe を msbuild で Release ビルド"
+function Build-LauncherCompanion {
+    Write-Step "LauncherCompanion を msbuild で Release ビルド"
 
     # Build-Updater と同じ思想 (clean build → 成果物 / 特定 exe 名 check → staging copy)。
-    # WindowProbe は Launcher 補助 Companion (SPEC §2.4 / #101 / #216)。
-    $probeDir = Join-Path $RepoRoot 'Companions\WindowProbe'
-    $csproj = Join-Path $probeDir 'TonePrism_WindowProbe.csproj'
-    $binRelease = Join-Path $probeDir 'bin\Release'
+    # LauncherCompanion は Launcher 補助の常駐エージェント (probe/sensor/focus 統合、旧 WindowProbe、SPEC §2.4 / #101 / #216 / #30)。
+    $companionDir = Join-Path $RepoRoot 'Companions\LauncherCompanion'
+    $csproj = Join-Path $companionDir 'TonePrism_LauncherCompanion.csproj'
+    $binRelease = Join-Path $companionDir 'bin\Release'
 
     if (-not (Test-Path $csproj)) {
-        Fail "TonePrism_WindowProbe.csproj が見つかりません: $csproj"
+        Fail "TonePrism_LauncherCompanion.csproj が見つかりません: $csproj"
     }
 
     if (Test-Path $binRelease) {
@@ -1639,22 +1639,22 @@ function Build-WindowProbe {
         '/nologo'
     )
     if ($exitCode -ne 0) {
-        Fail "WindowProbe の msbuild に失敗しました (exit code: $exitCode)"
+        Fail "LauncherCompanion の msbuild に失敗しました (exit code: $exitCode)"
     }
     Write-Ok "msbuild 完了"
 
     if (-not (Test-Path $binRelease)) {
-        Fail "WindowProbe ビルド出力が見つかりません: $binRelease"
+        Fail "LauncherCompanion ビルド出力が見つかりません: $binRelease"
     }
     $exeCount = (Get-ChildItem $binRelease -Recurse -File -Filter '*.exe' -ErrorAction SilentlyContinue | Measure-Object).Count
     if ($exeCount -lt 1) {
-        Fail "WindowProbe ビルド出力に .exe が見つかりません ($binRelease 内): msbuild は exit 0 だが成果物が生成されていない可能性"
+        Fail "LauncherCompanion ビルド出力に .exe が見つかりません ($binRelease 内): msbuild は exit 0 だが成果物が生成されていない可能性"
     }
-    $expectedExe = Join-Path $binRelease 'TonePrism_WindowProbe.exe'
+    $expectedExe = Join-Path $binRelease 'TonePrism_LauncherCompanion.exe'
     if (-not (Test-Path $expectedExe)) {
-        Fail "WindowProbe ビルド出力に TonePrism_WindowProbe.exe が見つかりません: csproj の AssemblyName が変更された可能性 (期待 path: $expectedExe)"
+        Fail "LauncherCompanion ビルド出力に TonePrism_LauncherCompanion.exe が見つかりません: csproj の AssemblyName が変更された可能性 (期待 path: $expectedExe)"
     }
-    $outDir = Join-Path $FilesDir 'Companions\WindowProbe'
+    $outDir = Join-Path $FilesDir 'Companions\LauncherCompanion'
     New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
     Get-ChildItem $binRelease -Recurse | Where-Object {
@@ -1668,7 +1668,7 @@ function Build-WindowProbe {
         }
         Copy-Item $_.FullName $dest
     }
-    Write-Ok "WindowProbe 成果物コピー完了"
+    Write-Ok "LauncherCompanion 成果物コピー完了"
 
     Write-Info "出力ファイル一覧:"
     Get-ChildItem $outDir -Recurse -File | ForEach-Object {
@@ -1810,9 +1810,9 @@ $script:BundleManifestFiles = @(
     # Updater (Phase 3、SPEC §3.7.4): Manager 置換 + 再起動の最小 CLI、Companions/ 配下に配置
     'files\Companions\Updater\TonePrism_Updater.exe',
     'files\Companions\Updater\TonePrism_Updater.exe.config',
-    # WindowProbe (#101 / #216、SPEC §2.4): Launcher 補助、可視/前面ウィンドウ検知の単発 CLI
-    'files\Companions\WindowProbe\TonePrism_WindowProbe.exe',
-    'files\Companions\WindowProbe\TonePrism_WindowProbe.exe.config',
+    # LauncherCompanion (#101 / #216 / #30、SPEC §2.4): Launcher 補助の常駐エージェント (probe/sensor/focus 統合、旧 WindowProbe)
+    'files\Companions\LauncherCompanion\TonePrism_LauncherCompanion.exe',
+    'files\Companions\LauncherCompanion\TonePrism_LauncherCompanion.exe.config',
     # CHANGELOG.md (Phase 4 #108、SPEC §3.7.7): Manager UI が installed Bundle version 抽出に使う SoT、
     # `<install>/CHANGELOG.md` 直下配置で `Launcher/` `Manager/` 等と同階層 (project-wide な SoT semantic)
     'files\CHANGELOG.md'
@@ -2095,7 +2095,7 @@ Clear-Staging
 Build-Launcher
 Build-Manager
 Build-Updater
-Build-WindowProbe
+Build-LauncherCompanion
 Copy-Templates
 New-BundleManifest        # (#175 Phase 4.1) bundle/bundle_manifest.json 生成、Assert より前
 Assert-ExpectedFiles

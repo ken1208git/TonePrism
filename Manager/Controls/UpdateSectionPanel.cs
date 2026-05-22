@@ -635,7 +635,7 @@ namespace TonePrism.Manager.Controls
                 }
                 replacedDirs.Add(PathManager.LauncherDir);
 
-                // [6] Companions (Updater 以外) 置換 — 現状 dir 列挙で対象なし、将来 WindowProbe / PauseOverlay 用
+                // [6] Companions (Updater 以外) 置換 — dir 列挙で LauncherCompanion (旧 WindowProbe 統合) を置換、将来 PauseOverlay 等も対象
                 Services.Logger.Info("[UpdateSectionPanel] [Step 6/10] Companions (Updater 以外) 置換 (SPEC §3.7.3 [8])");
                 progress.Report(new ProgressInfo(67, "Companions を更新中..."));
                 string stagingCompanionsRoot = System.IO.Path.Combine(bundleRoot, (manifest?.Layout?.CompanionsDir ?? "files/Companions").Replace('/', System.IO.Path.DirectorySeparatorChar));
