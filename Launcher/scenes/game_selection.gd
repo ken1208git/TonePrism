@@ -428,8 +428,7 @@ func _on_selection_moved(dir: int) -> void:
 	var new_index = clampi(_selected_index + dir, 0, _games.size() - 1)
 	if new_index != _selected_index:
 		_selected_index = new_index
-		var dir_y = -1 if dir > 0 else 1
-		_update_info_display(_selected_index, dir_y)
+		_update_info_display(_selected_index)
 		_update_arrow_visibility()
 		_input_handler.reset_desc_scroll()
 	elif dir < 0 and _selected_index == 0 and _input_handler.back_button:
@@ -444,13 +443,12 @@ func _on_free_scroll(delta_amount: float) -> void:
 	_last_trackpad_time = Time.get_ticks_msec() / 1000.0
 	_idle_mgr.reset()
 
-func _update_info_display(index: int, slide_dir_y: int = 0) -> void:
-	_info_display.update_display(_games[index], slide_dir_y,
+func _update_info_display(index: int) -> void:
+	_info_display.update_display(_games[index],
 		_title_label, _creator_tags_container, _desc_label,
 		_players_label, _difficulty_val_label,
 		_playtime_val_label,
-		_controller_label, _online_label,
-		_background_texture, _background_old, self)
+		_controller_label, _online_label)
 
 ## カルーセルの scroll_index に応じて2枚の bg をクロスフェードする。
 ## 整数の前後ゲームの背景を BackgroundTexture / BackgroundTextureOld に割り当て、

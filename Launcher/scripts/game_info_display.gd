@@ -1,18 +1,14 @@
 class_name GameInfoDisplay
 extends RefCounted
-## ゲーム情報の表示・背景アニメーション
+## ゲーム情報パネルの表示 (背景は game_selection が連続クロスフェードするため本クラスは扱わない)。
 ## フォーマットヘルパーは GameInfoFormatter を参照
 
-var _bg_tween: Tween = null
-
 ## ゲーム情報パネルを更新する
-func update_display(game: GameInfo, slide_dir_y: int,
+func update_display(game: GameInfo,
 		title_label: Label, creator_tags_container: Container, desc_label: Label,
 		players_label: Label, difficulty_val_label: Label,
 		playtime_val_label: Label,
-		controller_label: Label, online_label: Label,
-		background_texture: TextureRect, background_old: TextureRect,
-		owner_node: Node) -> void:
+		controller_label: Label, online_label: Label) -> void:
 
 	# --- タイトル ---
 	var title_text = game.title
@@ -176,51 +172,6 @@ func update_display(game: GameInfo, slide_dir_y: int,
 		creator_tags_container.get_parent().reset()
 
 	desc_label.text = desc_text
-
-	# 背景画像は game_selection 側でカルーセル位置に応じて連続クロスフェードする方式に変更したため、
-	# ここでは何もしない（背景パラメータは互換性のため残置）。
-
-## 背景画像のTweenアニメーション
-func _update_background(game: GameInfo, slide_dir_y: int,
-		background_texture: TextureRect, background_old: TextureRect,
-		owner_node: Node) -> void:
-	if _bg_tween and _bg_tween.is_valid():
-		_bg_tween.kill()
-
-	# 現在の背景を古いテクスチャに移す
-	if background_texture.texture != null:
-		background_old.texture = background_texture.texture
-		background_old.modulate = background_texture.modulate
-		background_old.position = background_texture.position
-	else:
-		background_old.texture = null
-		background_old.modulate = Color(1, 1, 1, 0)
-
-	var bg_path = GamePathResolver.resolve_path(game.background_path, game.game_id)
-	if not bg_path.is_empty() and FileAccess.file_exists(bg_path):
-		var img = Image.load_from_file(bg_path)
-		background_texture.texture = ImageTexture.create_from_image(img)
-	else:
-		background_texture.texture = null
-		if not game.background_path.is_empty():
-			push_warning("[GameInfoDisplay] Background not found: %s" % bg_path)
-
-	# Tweenアニメーション
-	# bg_current の位置は game_selection._process が visual_displacement で連続駆動するので、
-	# ここでは modulate のフェードインのみ。bg_old は従来通り tween でスライドアウト + フェード。
-	_bg_tween = owner_node.create_tween()
-	_bg_tween.set_parallel(true)
-
-	background_texture.modulate = Color(1, 1, 1, 0)
-	_bg_tween.tween_property(background_texture, "modulate", Color(1, 1, 1, 1), 0.3)
-
-	if slide_dir_y != 0:
-		var old_target_y = background_old.position.y + (50 * slide_dir_y)
-		_bg_tween.tween_property(background_old, "position", Vector2(0, old_target_y), 0.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-		_bg_tween.tween_property(background_old, "modulate", Color(1, 1, 1, 0), 0.3)
-	else:
-		# 初回（slide_dir_y == 0）は old は表示しない
-		background_old.modulate = Color(1, 1, 1, 0)
 
 ## 値に応じたバッジ背景色をラベルに適用（1=緑, 2=黄, 3=赤）
 func _apply_badge_color(label: Label, value: int) -> void:
