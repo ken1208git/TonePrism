@@ -1,0 +1,217 @@
+extends Node
+## Autoload: ゲームセッションを一元管理する (#30 / #214)。
+## 起動・監視・PLAYING確定・前面化異常(#216)・resume/quit・プロセス死活を、シーンをまたいで保持する。
+## これにより「プレイ中は game_selection (重いカルーセル) を破棄して軽量シーンに切替」してもゲームの
+## 監視が途切れない (#214 メモリ削減の前提)。
+##
+## 本 autoload は **ノードに依存しない**。launching_overlay の状態表示や起動/復帰演出は、本 autoload の
+## signal を購読する現シーン (game_selection / playing) が各自反映する。
+## (旧: game_selection 所有の GameLauncher。RefCounted からの移管。)
+
+signal game_started()          ## プロセス起動直後 (LAUNCHING 相当)
+signal playing_confirmed()     ## 可視ウィンドウ検出 or タイムアウトで PLAYING 確定
+signal game_exited()           ## プロセス終了 (自然終了 / quit)
+
+# 可視ウィンドウ未検出でも「起動中」で固まらないよう強制 PLAYING にするまでの時間 (初回スキャン対策で長め)。
+const PLAYING_FALLBACK_TIMEOUT_MS: int = 60000
+const ANOMALY_DEBOUNCE_MS: int = 2000  # 前面化異常を発報するまでの継続時間 (一瞬の Alt-Tab 除外)
+
+var running_pid: int = -1
+var current_game: GameInfo = null
+
+var _is_launching: bool = false
+var _probe_available: bool = false      # Companion が使えるか
+var _playing_confirmed: bool = false
+var _anomaly_armed: bool = false
+var _anomaly_since_ms: int = 0
+var _anomaly_active: bool = false
+var _anomaly_logged: bool = false
+var _launch_time_ms: int = 0
+var _probe_failure_logged: bool = false
+
+
+func _ready() -> void:
+	# ポーズ中 (中断オーバーレイで tree.paused) でも監視を継続する。
+	process_mode = Node.PROCESS_MODE_ALWAYS
+
+
+func is_running() -> bool:
+	return running_pid != -1 or _is_launching
+
+
+func is_playing() -> bool:
+	return running_pid != -1 and _playing_confirmed
+
+
+## ゲームプロセスを起動する。exe 探索・引数パース・cmd 経由起動・companion watch まで担う。
+## 表示 (LAUNCHING overlay / 起動演出) は呼び出し側 (game_selection) が行う。戻り値=成功可否。
+func start(game: GameInfo) -> bool:
+	if running_pid != -1 or _is_launching:
+		return false
+	_is_launching = true
+	current_game = game
+
+	var exe_path := GamePathResolver.find_executable(game)
+	if exe_path.is_empty():
+		print("❌ Executable not found: ", game.executable_path)
+		ErrorManager.show_error(ErrorCode.GAME_EXECUTABLE_NOT_FOUND)
+		_is_launching = false
+		current_game = null
+		return false
+
+	var args := GamePathResolver.parse_arguments(game.arguments)
+	var working_dir := exe_path.get_base_dir()
+	var cmd_command := 'cd /d "%s" && "%s"' % [working_dir, exe_path]
+	if not args.is_empty():
+		var escaped: Array = []
+		for a in args:
+			escaped.append('"%s"' % a.replace('"', '\\"'))
+		cmd_command += " " + " ".join(escaped)
+	print("[GameSession] CMD Command: ", cmd_command)
+
+	var pid := OS.create_process("cmd.exe", ["/C", cmd_command])
+	if pid == -1:
+		print("❌ Failed to create process.")
+		ErrorManager.show_error(ErrorCode.GAME_EXECUTION_FAILED)
+		_is_launching = false
+		current_game = null
+		return false
+
+	print("[GameSession] Process started. PID: %d" % pid)
+	running_pid = pid
+	_is_launching = false
+	_reset_probe_state()
+	_probe_available = LauncherCompanion.is_available()
+	if _probe_available:
+		LauncherCompanion.watch(pid)
+		print("[GameSession] LauncherCompanion 監視を開始 (PLAYING 遷移はウィンドウ出現で確定)")
+	else:
+		# Companion 不在 (エディタ実行 / exe 未同梱): 従来どおり即 PLAYING。
+		_playing_confirmed = true
+		print("[GameSession] LauncherCompanion 不在のため即 PLAYING (従来挙動)")
+		playing_confirmed.emit()
+	game_started.emit()
+	return true
+
+
+## 毎フレーム監視。プロセス死活 / Companion 窓状態 → PLAYING確定・前面化異常(#216) を判定。
+func _process(_delta: float) -> void:
+	if running_pid == -1:
+		return
+
+	# プロセス終了判定 (最優先)
+	if not OS.is_process_running(running_pid):
+		_on_exited()
+		return
+
+	if not _probe_available:
+		return
+
+	var res := LauncherCompanion.get_window_state()
+	var game_visible := (res == LauncherCompanion.WindowState.VISIBLE_BACKGROUND
+		or res == LauncherCompanion.WindowState.VISIBLE_FOREGROUND)
+
+	if res == LauncherCompanion.WindowState.UNAVAILABLE:
+		if not _probe_failure_logged:
+			_probe_failure_logged = true
+			push_warning("[GameSession] LauncherCompanion が UNAVAILABLE を返した (window event 未達 or Companion 異常)")
+	elif _probe_failure_logged:
+		_probe_failure_logged = false
+
+	# 起動中 → プレイ中確定: 可視ウィンドウ検出 or タイムアウト。
+	if not _playing_confirmed:
+		if game_visible:
+			_confirm_playing("Companion が可視ウィンドウを検出")
+		elif Time.get_ticks_msec() - _launch_time_ms >= PLAYING_FALLBACK_TIMEOUT_MS:
+			_confirm_playing("フォールバックタイムアウト (%dms)" % PLAYING_FALLBACK_TIMEOUT_MS)
+
+	# 前面化異常監視の arm は「実際にゲーム窓を観測した」時のみ (スキャン中の誤発報防止)。
+	if not _anomaly_armed and game_visible:
+		_anomaly_armed = true
+		print("[GameSession] ゲーム窓を確認、前面化異常監視を有効化")
+
+	if _anomaly_armed:
+		# 中断オーバーレイ表示中はランチャーが意図的に前面化するため異常カウントしない (#30/#216 whitelist)。
+		if OverlayManager.is_open():
+			_anomaly_since_ms = 0
+		else:
+			_update_anomaly_detection(_launcher_is_foreground(), res)
+
+
+## オーバーレイ「ゲームを再開」: ゲーム窓を前面に戻す。
+func resume() -> void:
+	if running_pid != -1 and _probe_available:
+		LauncherCompanion.focus(running_pid)
+
+
+## ゲームプロセスツリーを終了する。kill 後、_process がプロセス消失を検出 → game_exited 発火。
+func quit() -> void:
+	if running_pid == -1:
+		return
+	print("[GameSession] ゲーム終了 (PID %d ツリーを taskkill)" % running_pid)
+	# cmd.exe 経由起動のため running_pid は cmd。/T でツリー (game.exe 含む) ごと終了。
+	OS.create_process("taskkill", ["/PID", str(running_pid), "/T", "/F"])
+
+
+## ランチャー終了時などの後始末 (監視停止)。Companion 自体の kill は autoload が管理。
+func shutdown() -> void:
+	if _probe_available:
+		LauncherCompanion.unwatch()
+
+
+func _on_exited() -> void:
+	print("[GameSession] Game process %d finished." % running_pid)
+	if _probe_available:
+		LauncherCompanion.unwatch()
+	running_pid = -1
+	current_game = null
+	if _anomaly_active:
+		_anomaly_active = false
+		ErrorManager.hide_error(ErrorCode.GAME_LAUNCHER_FOREGROUND_ANOMALY)
+	game_exited.emit()
+
+
+func _confirm_playing(reason: String) -> void:
+	_playing_confirmed = true
+	_anomaly_since_ms = 0
+	print("[GameSession] PLAYING 確定: %s" % reason)
+	playing_confirmed.emit()
+
+
+func _reset_probe_state() -> void:
+	_playing_confirmed = false
+	_anomaly_armed = false
+	_anomaly_since_ms = 0
+	_anomaly_active = false
+	_anomaly_logged = false
+	_probe_failure_logged = false
+	_launch_time_ms = Time.get_ticks_msec()
+
+
+## ランチャー (メインウィンドウ) が前面か。前面でない (=ゲームが前面) が正常。
+func _launcher_is_foreground() -> bool:
+	var w := get_window()
+	return w != null and w.has_focus()
+
+
+## プレイ中の前面化異常を検知する。異常 = ランチャー前面 かつ ゲームが前面でない、がデバウンス継続。
+func _update_anomaly_detection(launcher_foreground: bool, res: int) -> void:
+	var game_not_front := (res == LauncherCompanion.WindowState.NOT_VISIBLE
+		or res == LauncherCompanion.WindowState.VISIBLE_BACKGROUND)
+	var anomaly := launcher_foreground and game_not_front
+
+	if anomaly:
+		if _anomaly_since_ms == 0:
+			_anomaly_since_ms = Time.get_ticks_msec()
+		elif not _anomaly_active and Time.get_ticks_msec() - _anomaly_since_ms >= ANOMALY_DEBOUNCE_MS:
+			if not _anomaly_logged:
+				_anomaly_logged = true
+				push_warning("[GameSession] ランチャー前面化異常を検出 (PID %d 生存中、要スタッフ対応)" % running_pid)
+			_anomaly_active = ErrorManager.show_error(ErrorCode.GAME_LAUNCHER_FOREGROUND_ANOMALY)
+	else:
+		_anomaly_since_ms = 0
+		_anomaly_logged = false
+		if _anomaly_active:
+			_anomaly_active = false
+			print("[GameSession] ランチャー前面化異常が解消、エラーをクリア")
+			ErrorManager.hide_error(ErrorCode.GAME_LAUNCHER_FOREGROUND_ANOMALY)

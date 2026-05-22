@@ -152,17 +152,16 @@ func _ready():
 	_input_handler.focus_to_card_requested.connect(_update_focus_to_current_card)
 	_input_handler.idle_reset_requested.connect(func(): _idle_mgr.reset())
 
-	# ゲームランチャーのシグナル接続
-	_game_launcher.game_ended.connect(func():
-		_update_focus_to_current_card()
-		_update_arrow_visibility()
-	)
+	# ゲームセッション (autoload GameSession) のシグナル接続。監視・状態は GameSession が保持し、
+	# 表示 (PLAYING ラベル / 復帰演出) は本シーンが反映する。
+	GameSession.playing_confirmed.connect(_on_session_playing)
+	GameSession.game_exited.connect(_on_session_exited)
 
-	# 中断オーバーレイ (#30) の選択結果を game_launcher につなぐ
-	OverlayManager.resume_requested.connect(func(): _game_launcher.resume_game())
-	OverlayManager.quit_to_selection_requested.connect(func(): _game_launcher.quit_game())
+	# 中断オーバーレイ (#30) の選択結果を GameSession につなぐ
+	OverlayManager.resume_requested.connect(func(): GameSession.resume())
+	OverlayManager.quit_to_selection_requested.connect(func(): GameSession.quit())
 	OverlayManager.exit_to_screensaver_requested.connect(func():
-		_game_launcher.quit_game()
+		GameSession.quit()
 		IdleManager.transition_to_screensaver(get_tree()))
 
 	# カルーセルの上下矢印ボタンを追加
@@ -196,15 +195,10 @@ func _process(delta):
 	# グローアニメーション
 	_glow_animator.update(delta)
 
-	# ゲーム実行中の監視
-	_game_launcher.monitor_process(get_window(), null,
-		_games[_selected_index] if not _games.is_empty() else null,
-		_launching_overlay, _carousel.card_nodes,
-		_info_panel, _top_bar.get_panel(), _static_focus_border,
-		_carousel_container, _bottom_bar.get_panel(), _background_texture)
+	# ゲーム実行中の監視は autoload GameSession が _process で行う (シーンをまたいで継続)。
 
 	# アイドルタイマー
-	if _game_launcher.is_running():
+	if _session_busy():
 		_idle_mgr.reset()
 	elif _idle_mgr.update(delta, get_tree().paused):
 		IdleManager.transition_to_screensaver(get_tree())
@@ -217,14 +211,14 @@ func _process(delta):
 		return
 
 	# ドラムロール入力
-	_input_handler.process_drum_roll(delta, _play_button, _exit_button, _game_launcher.is_running())
+	_input_handler.process_drum_roll(delta, _play_button, _exit_button, _session_busy())
 	_input_handler.update_desc_scroll(delta)
 
 	if _games.is_empty():
 		return
 
 	# 起動中・プレイ中はトラックパッドの残留オフセットも処理しない
-	if _game_launcher.is_running():
+	if _session_busy():
 		_trackpad_offset = 0.0
 
 	# トラックパッド・フリースクロール: 視覚位置がゲーム1つ分進む度に _selected_index を更新
@@ -254,7 +248,7 @@ func _process(delta):
 	var container_center_x = _carousel_container.size.x / 2
 	var new_active = _carousel.update_cards(delta, _selected_index, _trackpad_offset,
 		get_viewport_rect().size, container_center_x,
-		_input_handler.using_mouse, _static_focus_border, _game_launcher.is_running())
+		_input_handler.using_mouse, _static_focus_border, _session_busy())
 
 	if new_active != _active_index:
 		_active_index = new_active
@@ -264,7 +258,7 @@ func _process(delta):
 	# scroll_index = N (整数) → 完全に game[N] の背景
 	# scroll_index = N + 0.5 → game[N] と game[N+1] が 50/50 で混ざる
 	# scroll_index = N + 1 → 完全に game[N+1] の背景
-	if not _game_launcher.is_running():
+	if not _session_busy():
 		_update_continuous_background()
 
 	# フォーカスモーフ更新
@@ -292,13 +286,13 @@ func _input(event):
 				return
 	_input_handler.handle_input(event, get_viewport(),
 		_play_button, _exit_button,
-		_game_launcher.is_running(), _games.is_empty())
+		_session_busy(), _games.is_empty())
 
 func _unhandled_input(event):
 	if get_tree().paused:
 		return
 	# 起動中・プレイ中はカルーセルへの入力を完全にブロック
-	if _game_launcher.is_running():
+	if _session_busy():
 		return
 	_input_handler.handle_unhandled_input(event, get_viewport())
 
@@ -313,8 +307,7 @@ func _exit_tree():
 	if DialogManager and DialogManager.has_method("close_current_dialog"):
 		DialogManager.close_current_dialog()
 	# Companion の監視停止（ゲーム実行中にランチャーが閉じられた場合の保険、unwatch を送る）
-	if _game_launcher:
-		_game_launcher.shutdown()
+	GameSession.shutdown()
 
 # --- サムネイル非同期読み込み ---
 
@@ -491,15 +484,51 @@ func _update_focus_state() -> void:
 	if focus_owner and (focus_owner is Panel and focus_owner in _carousel.card_nodes):
 		_update_focus_to_current_card()
 
+## セッション (起動/プレイ中) または復帰演出中か。この間はカルーセル入力・アイドルを止める。
+func _session_busy() -> bool:
+	return GameSession.is_running() or (_game_launcher != null and _game_launcher.is_returning())
+
+
+## GameSession: PLAYING 確定 → LAUNCHING オーバーレイを「プレイ中」表示に。
+func _on_session_playing() -> void:
+	if _launching_overlay:
+		_launching_overlay.set_state(LaunchingOverlay.State.PLAYING)
+
+
+## GameSession: ゲーム終了 → オーバーレイを閉じ通常表示へ復帰。
+func _on_session_exited() -> void:
+	if _launching_overlay:
+		_launching_overlay.hide_overlay()
+	_game_launcher.switch_to_normal_view(_carousel.card_nodes, _info_panel,
+		_top_bar.get_panel(), _static_focus_border, get_tree(),
+		_carousel_container, _bottom_bar.get_panel(), _background_texture)
+	_update_focus_to_current_card()
+	_update_arrow_visibility()
+
+
 func _launch_game() -> void:
-	if _games.is_empty() or _game_launcher.is_running():
+	if _games.is_empty() or _session_busy():
 		return
+	var game: GameInfo = _games[_selected_index]
 	# 中断メニュー (#30) に表示する走行中ゲーム情報を登録。
-	OverlayManager.set_current_game(_games[_selected_index])
-	_game_launcher.launch_game(_games[_selected_index], null, _launching_overlay,
-		_carousel_container, _info_panel, _top_bar.get_panel(),
-		_static_focus_border, _carousel.card_nodes, _selected_index,
-		get_tree(), _bottom_bar.get_panel(), _background_texture)
+	OverlayManager.set_current_game(game)
+	# LAUNCHING 表示 + 起動演出 (本シーンのノード)。プロセス起動自体は GameSession (autoload)。
+	if _launching_overlay:
+		_launching_overlay.show_for_game(game.title, LaunchingOverlay.State.LAUNCHING)
+	_game_launcher.switch_to_running_view(_carousel.card_nodes, _selected_index,
+		_info_panel, _top_bar.get_panel(), _static_focus_border, get_tree(),
+		_carousel_container, _bottom_bar.get_panel(), _background_texture)
+	# 演出を見せてからプロセス起動 (旧 launch_game の await 1.0s 相当)
+	await get_tree().create_timer(1.0).timeout
+	if not is_inside_tree():
+		return
+	if not GameSession.start(game):
+		# 起動失敗: 表示を戻す
+		if _launching_overlay:
+			_launching_overlay.hide_overlay()
+		_game_launcher.switch_to_normal_view(_carousel.card_nodes, _info_panel,
+			_top_bar.get_panel(), _static_focus_border, get_tree(),
+			_carousel_container, _bottom_bar.get_panel(), _background_texture)
 
 func _go_back() -> void:
 	if TransitionManager._transitioning:
