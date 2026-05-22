@@ -10,6 +10,7 @@ signal quit_to_selection_requested()
 
 var _overlay: Window = null
 var _open: bool = false
+var _companion: Node = null
 
 
 func _ready() -> void:
@@ -23,9 +24,9 @@ func _ready() -> void:
 	_overlay.quit_to_selection_requested.connect(_on_quit)
 
 	# トリガ (HOME / Guide) で開閉トグル。autoload 順で LauncherCompanion が先に居る前提だが防御的に確認。
-	var companion := get_node_or_null("/root/LauncherCompanion")
-	if companion:
-		companion.trigger_received.connect(_on_trigger)
+	_companion = get_node_or_null("/root/LauncherCompanion")
+	if _companion:
+		_companion.trigger_received.connect(_on_trigger)
 	else:
 		push_warning("[OverlayManager] LauncherCompanion 不在、トリガ連携なし")
 
@@ -50,6 +51,10 @@ func open() -> void:
 		return
 	_open = true
 	_overlay.show_overlay()
+	# ゲームが前面 (フォーカス保持) のままだと overlay が前に出ない/フォーカスを取れないため、
+	# companion 経由でランチャー(=最前面の overlay 窓)を強制前面化し foreground-lock を回避する。
+	if _companion:
+		_companion.focus(OS.get_process_id())
 	print("[OverlayManager] 中断メニューを開いた")
 
 

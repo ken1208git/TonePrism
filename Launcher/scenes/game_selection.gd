@@ -158,6 +158,10 @@ func _ready():
 		_update_arrow_visibility()
 	)
 
+	# 中断オーバーレイ (#30) の選択結果を game_launcher につなぐ
+	OverlayManager.resume_requested.connect(func(): _game_launcher.resume_game())
+	OverlayManager.quit_to_selection_requested.connect(func(): _game_launcher.quit_game())
+
 	# カルーセルの上下矢印ボタンを追加
 	_add_carousel_arrow_buttons()
 	_update_arrow_visibility()

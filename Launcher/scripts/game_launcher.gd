@@ -166,7 +166,13 @@ func monitor_process(window: Window, status_label: Label, game: GameInfo,
 			print("[GameLauncher] ゲーム窓を確認、前面化異常監視を有効化")
 
 		if _anomaly_armed:
-			_update_anomaly_detection(launcher_foreground, res)
+			# 中断オーバーレイ表示中はランチャーが意図的に前面化するため異常カウントしない
+			# (#30 / #216 whitelist)。閉じた後はゲーム前面化が即時でないが、ここで _anomaly_since_ms を
+			# 0 に戻すので close 後は既存の 2000ms デバウンスぶんのグレースから再計測される (誤発報防止)。
+			if OverlayManager.is_open():
+				_anomaly_since_ms = 0
+			else:
+				_update_anomaly_detection(launcher_foreground, res)
 
 ## ゲーム終了時の後始末（probe スレッド停止 + 異常エラークリア + 通常表示復帰）
 func _on_game_exited(window: Window, launching_overlay: LaunchingOverlay,
@@ -187,6 +193,24 @@ func _on_game_exited(window: Window, launching_overlay: LaunchingOverlay,
 		launching_overlay.hide_overlay()
 	_switch_to_normal_view(card_nodes, info_panel, top_bar, static_focus_border, window.get_tree(), carousel_container, bottom_bar, background_texture)
 	game_ended.emit()
+
+# ============================================================================
+# 中断オーバーレイ連携 (#30)
+# ============================================================================
+
+## オーバーレイ「ゲームを再開」: ゲーム窓を前面に戻して操作をゲームへ返す。
+func resume_game() -> void:
+	if running_pid != -1 and _probe_available:
+		LauncherCompanion.focus(running_pid)
+
+## オーバーレイ「ゲームを終了して選択画面に戻る」: ゲームプロセスツリーを終了する。
+## kill 後、monitor_process が終了を検出 → _on_game_exited で通常の後始末・選択画面復帰する。
+func quit_game() -> void:
+	if running_pid == -1:
+		return
+	print("[GameLauncher] 中断メニューからゲーム終了 (PID %d ツリーを taskkill)" % running_pid)
+	# cmd.exe 経由起動のため running_pid は cmd。/T でツリー (game.exe 含む) ごと終了。
+	OS.create_process("taskkill", ["/PID", str(running_pid), "/T", "/F"])
 
 # ============================================================================
 # LauncherCompanion 連携 (#101 / #216)
