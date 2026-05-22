@@ -7,15 +7,28 @@ extends Control
 const ICON_CENTER_X := 250.0   # carousel コンテナ幅 500 / 2 (= 選択カードの中心 x)
 const ICON_SIZE := 360.0       # CARD_SIZE 200 × SCALE_ACTIVE 1.8
 const ICON_RADIUS := 36        # CORNER_RADIUS 20 × 1.8
+const BG_ZOOM := 1.05          # 起動中 (game_launcher.LAUNCH_BG_ZOOM_SCALE) と一致させる
+const BG_ZOOM_DURATION := 0.55 # game_launcher.LAUNCH_TRANSITION_DURATION と一致
 
 var _game: GameInfo = null
 var _launching_overlay: LaunchingOverlay = null
+var _bg: TextureRect = null
 
 
 func _ready() -> void:
 	_game = GameSession.current_game
 	_build_ui()
+	# 背景を起動中画面と同じく少し拡大した状態で開始 (瞬時切替なので継続して見える)。
+	_bg.pivot_offset = _bg_pivot()
+	_bg.scale = Vector2(BG_ZOOM, BG_ZOOM)
 	GameSession.game_exited.connect(_on_game_exited)
+
+
+func _bg_pivot() -> Vector2:
+	var sz: Vector2 = _bg.size
+	if sz.x <= 0.0 or sz.y <= 0.0:
+		sz = _bg.get_viewport_rect().size
+	return sz / 2.0
 
 
 func _build_ui() -> void:
@@ -27,12 +40,12 @@ func _build_ui() -> void:
 	add_child(bg_color)
 
 	# 背景画像 (走行中ゲームの background)
-	var bg := TextureRect.new()
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(bg)
+	_bg = TextureRect.new()
+	_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_bg)
 
 	# サムネ (carousel 選択カードと同位置: 左中央・360×360・角丸36)
 	var thumb_panel := Panel.new()
@@ -63,7 +76,7 @@ func _build_ui() -> void:
 	add_child(_launching_overlay)
 
 	if _game != null:
-		_load_into(bg, GamePathResolver.resolve_path(_game.background_path, _game.game_id))
+		_load_into(_bg, GamePathResolver.resolve_path(_game.background_path, _game.game_id))
 		_load_into(thumb, GamePathResolver.resolve_path(_game.thumbnail_path, _game.game_id))
 		_launching_overlay.show_for_game(_game.title, LaunchingOverlay.State.PLAYING)
 	else:
@@ -87,4 +100,11 @@ func _on_game_exited() -> void:
 		return
 	if _game != null:
 		AppState.initial_game_id = _game.game_id
-	TransitionManager.change_scene("res://scenes/game_selection.tscn")
+	# 「プレイ中」表示を消し、背景を 1.05 → 1.0 へなめらかにズームアウトしてからカルーセルへ戻る。
+	if _launching_overlay:
+		_launching_overlay.hide_overlay()
+	var tween := create_tween()
+	tween.tween_property(_bg, "scale", Vector2.ONE, BG_ZOOM_DURATION)\
+		.set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
+	tween.finished.connect(func():
+		TransitionManager.change_scene("res://scenes/game_selection.tscn"))

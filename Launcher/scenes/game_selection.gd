@@ -485,10 +485,11 @@ func _session_busy() -> bool:
 
 
 ## GameSession: PLAYING 確定 → 軽量プレイ中シーンへ切替 (重いカルーセルを解放, #214)。
+## 背景は両シーンとも 1.05 拡大なので、フェード無しの瞬時切替で継続させる (TransitionManager を使わない)。
 func _on_session_playing() -> void:
 	if not is_inside_tree():
 		return
-	TransitionManager.change_scene("res://scenes/playing.tscn")
+	get_tree().change_scene_to_file("res://scenes/playing.tscn")
 
 
 ## GameSession: ゲーム終了。ここに来るのは「PLAYING 前 (起動中) にゲームが落ちた」場合のみ
