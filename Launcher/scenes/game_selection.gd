@@ -300,8 +300,9 @@ func _exit_tree():
 		_thumb_load_thread.wait_to_finish()
 	if DialogManager and DialogManager.has_method("close_current_dialog"):
 		DialogManager.close_current_dialog()
-	# Companion の監視停止（ゲーム実行中にランチャーが閉じられた場合の保険、unwatch を送る）
-	GameSession.shutdown()
+	# 注: ここで GameSession.shutdown()(unwatch) は呼ばない。プレイ中シーンへの切替で game_selection は
+	# 破棄されるが、ゲームは実行中で監視 (HOME/Guide 検知) を継続する必要があるため。アプリ終了時の
+	# companion 停止は LauncherCompanion の PREDELETE が担う。
 
 # --- サムネイル非同期読み込み ---
 
