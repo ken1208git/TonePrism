@@ -10,33 +10,24 @@ var running_pid: int = -1
 var _is_launching: bool = false
 var _is_returning: bool = false
 
-# --- WindowProbe 連携 (#101 起動中→プレイ中の遷移同期 / #216 前面化異常検知) ---
-# probe は OS.execute がブロッキングなので専用スレッドで回し、結果を Mutex 保護の共有変数に置く。
-# 遷移判定・異常判定はメインスレッド (monitor_process) で共有結果を読んで行う。
-const PROBE_POLL_INTERVAL_LAUNCHING_MS: int = 150  # 起動中: ウィンドウ出現を素早く検出
-const PROBE_POLL_INTERVAL_PLAYING_MS: int = 1000   # プレイ中: 異常検知は粗くてよい (i3 負荷軽減 #214)
+# --- LauncherCompanion 連携 (#101 起動中→プレイ中の遷移同期 / #216 前面化異常検知) ---
+# 窓状態監視は常駐 Companion (autoload LauncherCompanion) が内部ポーリングし、変化を UDP event で push する。
+# Launcher は monitor_process で最新状態 (LauncherCompanion.get_window_state()) を読み、遷移・異常を判定する。
+# (旧実装は WindowProbe を専用スレッドから OS.execute で叩いていた。Companion 統合で thread/Mutex を撤去。)
 # 可視ウィンドウ未検出でも「起動中」で固まらないよう強制 PLAYING にするまでの時間。
 # 初回起動の Defender / SmartScreen スキャンで窓出現が遅れるため長めに取る (1 分)。
 # 注意: タイムアウトで PLAYING ラベルにしても前面化異常監視は arm しない (窓を実際に観測した時のみ arm)。
-# 計測起点は spawn 後 (_launch_time_ms)。spawn 前の固定 1 秒演出待機 (launch_game の
-# create_timer) とは別軸で、体感の「起動中」最小時間は 1s + ウィンドウ検出時間になる。
 const PLAYING_FALLBACK_TIMEOUT_MS: int = 60000
 const ANOMALY_DEBOUNCE_MS: int = 2000              # 前面化異常を発報するまでの継続時間 (一瞬の Alt-Tab 除外)
-const PROBE_STOP_CHECK_CHUNK_MS: int = 50          # 待機を小刻みにして停止要求へ素早く応答 (ゲーム終了時の join 短縮)
 
-var _probe_available: bool = false
-var _probe_thread: Thread = null
-var _probe_mutex: Mutex = Mutex.new()
-var _probe_pid: int = -1
-var _probe_stop: bool = false
-var _probe_result: int = WindowProbeClient.Result.UNAVAILABLE
+var _probe_available: bool = false     # Companion が使えるか (起動・ハンドシェイク済)
 var _playing_confirmed: bool = false   # 可視検出 or タイムアウトで PLAYING 確定済み
 var _anomaly_armed: bool = false       # PLAYING 確定後に異常監視を有効化
 var _anomaly_since_ms: int = 0         # 異常状態が継続し始めた時刻 (0 = 非異常)
 var _anomaly_active: bool = false      # 異常エラーを表示中
 var _anomaly_logged: bool = false      # 異常検出ログを episode ごとに 1 回だけ出すためのガード
 var _launch_time_ms: int = 0
-var _probe_failure_logged: bool = false # exe 存在下の UNAVAILABLE を 1 回だけ警告するためのガード
+var _probe_failure_logged: bool = false # 想定外の UNAVAILABLE を 1 回だけ警告するためのガード
 
 func is_running() -> bool:
 	return running_pid != -1 or _is_launching or _is_returning
@@ -111,15 +102,15 @@ func launch_game(game: GameInfo, status_label: Label, launching_overlay: Launchi
 		# 出現を検出した時点で PLAYING へ遷移する (#101)。
 		# 使えない場合 (エディタ実行 / exe 未同梱) は従来どおり即 PLAYING にフォールバック。
 		_reset_probe_state()
-		_probe_available = WindowProbeClient.is_available()
+		_probe_available = LauncherCompanion.is_available()
 		if _probe_available:
-			_start_probe_thread(pid)
-			print("[GameLauncher] WindowProbe 監視を開始 (PLAYING 遷移はウィンドウ出現で確定)")
+			LauncherCompanion.watch(pid)
+			print("[GameLauncher] LauncherCompanion 監視を開始 (PLAYING 遷移はウィンドウ出現で確定)")
 		else:
 			if launching_overlay:
 				launching_overlay.set_state(LaunchingOverlay.State.PLAYING)
 			_playing_confirmed = true
-			print("[GameLauncher] WindowProbe 不在のため即 PLAYING (従来挙動)")
+			print("[GameLauncher] LauncherCompanion 不在のため即 PLAYING (従来挙動)")
 
 		game_started.emit()
 
@@ -143,18 +134,18 @@ func monitor_process(window: Window, status_label: Label, game: GameInfo,
 
 	# WindowProbe 有効時のみ: 起動中→プレイ中の遷移と前面化異常を判定する
 	if _probe_available:
-		var res := _get_probe_result()
-		var game_visible := (res == WindowProbeClient.Result.VISIBLE_BACKGROUND
-			or res == WindowProbeClient.Result.VISIBLE_FOREGROUND)
+		var res := LauncherCompanion.get_window_state()
+		var game_visible := (res == LauncherCompanion.WindowState.VISIBLE_BACKGROUND
+			or res == LauncherCompanion.WindowState.VISIBLE_FOREGROUND)
 
-		# exe は起動時に存在確認済 (_probe_available)。それでも UNAVAILABLE が返るのは
-		# 「exe はあるが実行時例外 / 引数エラー等で非ゼロ終了」= 想定外の失敗。
+		# Companion は起動・ハンドシェイク確認済 (_probe_available)。それでも UNAVAILABLE が続くのは
+		# watch 直後でまだ最初の window event が届いていない (起動演出中) か、Companion 異常。
 		# 切り分け不能のまま silent に従来挙動へ落ちるのを防ぐため、状態変化時に 1 回だけ警告する
-		# (毎 poll では氾濫するため _probe_failure_logged でガード)。
-		if res == WindowProbeClient.Result.UNAVAILABLE:
+		# (毎フレームでは氾濫するため _probe_failure_logged でガード)。
+		if res == LauncherCompanion.WindowState.UNAVAILABLE:
 			if not _probe_failure_logged:
 				_probe_failure_logged = true
-				push_warning("[GameLauncher] WindowProbe が exe 存在下で UNAVAILABLE を返した (実行失敗の可能性、遷移はフォールバック依存)")
+				push_warning("[GameLauncher] LauncherCompanion が UNAVAILABLE を返した (window event 未達 or Companion 異常、遷移はフォールバック依存)")
 		elif _probe_failure_logged:
 			_probe_failure_logged = false  # 復帰したら次の失敗を再度ログできるようリセット
 
@@ -183,7 +174,8 @@ func _on_game_exited(window: Window, launching_overlay: LaunchingOverlay,
 		static_focus_border: Panel, carousel_container: Control,
 		bottom_bar: Control, background_texture: TextureRect) -> void:
 	print("[GameLauncher] Game process %d finished." % running_pid)
-	_stop_probe_thread()
+	if _probe_available:
+		LauncherCompanion.unwatch()
 	running_pid = -1
 
 	# 前面化異常エラーを表示中なら閉じる（ゲーム終了で意味を失うため）
@@ -197,14 +189,10 @@ func _on_game_exited(window: Window, launching_overlay: LaunchingOverlay,
 	game_ended.emit()
 
 # ============================================================================
-# WindowProbe 連携 (#101 / #216)
+# LauncherCompanion 連携 (#101 / #216)
 # ============================================================================
 
 func _reset_probe_state() -> void:
-	_probe_mutex.lock()
-	_probe_result = WindowProbeClient.Result.UNAVAILABLE
-	_probe_stop = false
-	_probe_mutex.unlock()
 	_playing_confirmed = false
 	_anomaly_armed = false
 	_anomaly_since_ms = 0
@@ -213,68 +201,15 @@ func _reset_probe_state() -> void:
 	_probe_failure_logged = false
 	_launch_time_ms = Time.get_ticks_msec()
 
-func _start_probe_thread(pid: int) -> void:
-	_probe_pid = pid
-	_probe_thread = Thread.new()
-	_probe_thread.start(_probe_loop)
-
-## probe 専用スレッド本体。結果を共有変数に書くだけ（UI/Window には触らない）。
-func _probe_loop() -> void:
-	while true:
-		_probe_mutex.lock()
-		var stop := _probe_stop
-		var playing := _playing_confirmed
-		_probe_mutex.unlock()
-		if stop:
-			break
-
-		var res := WindowProbeClient.probe(_probe_pid)
-		_probe_mutex.lock()
-		_probe_result = res
-		_probe_mutex.unlock()
-
-		# 待機は小刻みにして毎回 stop を確認する。これでゲーム終了時の
-		# wait_to_finish が最大 ~1 chunk + probe 1 回分しかブロックしない
-		# (旧実装は OS.delay_msec(1000) を待ち切るためメインスレッドが最大 ~1s 固まった)。
-		var interval := PROBE_POLL_INTERVAL_PLAYING_MS if playing else PROBE_POLL_INTERVAL_LAUNCHING_MS
-		var waited := 0
-		while waited < interval:
-			_probe_mutex.lock()
-			var stop2 := _probe_stop
-			_probe_mutex.unlock()
-			if stop2:
-				return
-			var chunk := mini(PROBE_STOP_CHECK_CHUNK_MS, interval - waited)
-			OS.delay_msec(chunk)
-			waited += chunk
-
-func _stop_probe_thread() -> void:
-	if _probe_thread == null:
-		return
-	_probe_mutex.lock()
-	_probe_stop = true
-	_probe_mutex.unlock()
-	_probe_thread.wait_to_finish()
-	_probe_thread = null
-
-## ランチャー終了時などに外部から呼ぶ後始末（probe スレッドの join）。
+## ランチャー終了時などに外部から呼ぶ後始末（監視停止）。Companion 自体の kill は autoload が管理。
 func shutdown() -> void:
-	_stop_probe_thread()
-
-func _get_probe_result() -> int:
-	_probe_mutex.lock()
-	var res := _probe_result
-	_probe_mutex.unlock()
-	return res
+	if _probe_available:
+		LauncherCompanion.unwatch()
 
 func _confirm_playing(launching_overlay: LaunchingOverlay, reason: String) -> void:
-	# _playing_confirmed を立てると _probe_loop が次周回で poll 間隔を粗く切り替える。
-	# probe スレッドも mutex 下で読むため、書き込みも mutex で囲って対称にする。
 	# 注意: ここでは異常監視を arm しない。arm は「実際にゲーム窓を観測した」時のみ
 	# (monitor_process 側)。タイムアウト確定では arm せず、スキャン中の誤発報を防ぐ。
-	_probe_mutex.lock()
 	_playing_confirmed = true
-	_probe_mutex.unlock()
 	_anomaly_since_ms = 0
 	if launching_overlay:
 		launching_overlay.set_state(LaunchingOverlay.State.PLAYING)
@@ -288,8 +223,8 @@ func _update_anomaly_detection(launcher_foreground: bool, res: int) -> void:
 	# 「ゲームが前面でない」と positive に確証できる結果のみで異常カウントする。
 	# NOT_FOUND / UNAVAILABLE は probe の一時失敗 (スナップショット失敗等) の可能性があるため
 	# 判定不能扱いとし、「窓が無い＝異常」と誤カウントしない (= デバウンスをリセット)。
-	var game_not_front := (res == WindowProbeClient.Result.NOT_VISIBLE
-		or res == WindowProbeClient.Result.VISIBLE_BACKGROUND)
+	var game_not_front := (res == LauncherCompanion.WindowState.NOT_VISIBLE
+		or res == LauncherCompanion.WindowState.VISIBLE_BACKGROUND)
 	var anomaly := launcher_foreground and game_not_front
 
 	if anomaly:

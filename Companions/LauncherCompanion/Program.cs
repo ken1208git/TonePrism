@@ -47,20 +47,22 @@ namespace TonePrism.LauncherCompanion
             int parentPid = GetIntArg(args, "--parent-pid", 0);
             string logsRoot = GetStrArg(args, "--logs-root", null);
 
-            if (eventPort <= 0 || cmdPort <= 0)
+            if (eventPort <= 0)
             {
-                Console.Error.WriteLine("usage: TonePrism_LauncherCompanion.exe --event-port <L> --cmd-port <C> [--parent-pid <P>] [--logs-root <path>]");
+                Console.Error.WriteLine("usage: TonePrism_LauncherCompanion.exe --event-port <L> [--cmd-port <C>] [--parent-pid <P>] [--logs-root <path>]");
                 return 2;
             }
 
             Logger.Init(logsRoot);
             Logger.Forwarder = SendLog;
-            Logger.Milestone("[main] 起動 event-port=" + eventPort + " cmd-port=" + cmdPort + " parent-pid=" + parentPid);
 
             UdpClient cmdReceiver;
+            int actualCmdPort;
             try
             {
-                cmdReceiver = new UdpClient(new IPEndPoint(IPAddress.Loopback, cmdPort));
+                // cmd-port 省略/0 なら OS 任せの空きポートを使い、hello イベントで Launcher に通知する。
+                cmdReceiver = new UdpClient(new IPEndPoint(IPAddress.Loopback, cmdPort < 0 ? 0 : cmdPort));
+                actualCmdPort = ((IPEndPoint)cmdReceiver.Client.LocalEndPoint).Port;
                 _eventSender = new UdpClient();
                 _eventEp = new IPEndPoint(IPAddress.Loopback, eventPort);
             }
@@ -69,6 +71,12 @@ namespace TonePrism.LauncherCompanion
                 Logger.Error("[main] UDP bind 失敗、終了", ex);
                 return 1;
             }
+            Logger.Milestone("[main] 起動 event-port=" + eventPort + " cmd-port=" + actualCmdPort + " parent-pid=" + parentPid);
+
+            // hello を起動直後に連送 + cmd を受け取るまで毎秒再送 (取りこぼし対策、Launcher に cmd-port を確実に伝える)。
+            bool cmdReceived = false;
+            int lastHello = Environment.TickCount;
+            for (int i = 0; i < 3; i++) SendHello(actualCmdPort);
 
             var sensor = new InputSensor();
             sensor.OnTrigger = SendTrigger;
@@ -97,6 +105,7 @@ namespace TonePrism.LauncherCompanion
                         byte[] data = cmdReceiver.Receive(ref remoteEp);
                         string line = Encoding.UTF8.GetString(data).Trim();
                         if (line.Length == 0) continue;
+                        cmdReceived = true; // hello 再送を止める
                         string[] parts = line.Split(' ');
                         switch (parts[0])
                         {
@@ -129,6 +138,13 @@ namespace TonePrism.LauncherCompanion
                     }
 
                     int now = Environment.TickCount;
+
+                    // (2.5) cmd 未受信なら hello を毎秒再送 (Launcher に cmd-port を確実に届ける)
+                    if (!cmdReceived && TickElapsed(lastHello, now, 1000))
+                    {
+                        lastHello = now;
+                        SendHello(actualCmdPort);
+                    }
 
                     // (3) watch 中: ゲームパッド poll + 窓状態 probe
                     if (watchPid > 0)
@@ -172,6 +188,11 @@ namespace TonePrism.LauncherCompanion
         }
 
         // ---- event 送信 ----
+        private static void SendHello(int cmdPort)
+        {
+            Send("{\"type\":\"hello\",\"cmd_port\":" + cmdPort + ",\"at_unix_ms\":" + UnixMs() + "}");
+        }
+
         private static void SendWindow(string state)
         {
             Send("{\"type\":\"window\",\"state\":\"" + state + "\",\"at_unix_ms\":" + UnixMs() + "}");
