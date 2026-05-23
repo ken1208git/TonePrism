@@ -13,6 +13,9 @@ const BG_ZOOM_DURATION := 0.55 # game_launcher.LAUNCH_TRANSITION_DURATION と一
 var _game: GameInfo = null
 var _launching_overlay: LaunchingOverlay = null
 var _bg: TextureRect = null
+# 中断オーバーレイ表示中にライブゲームを透かすため隠す、本シーンの不透明アート群。
+var _art_nodes: Array[CanvasItem] = []
+var _passthrough: bool = false
 
 
 func _ready() -> void:
@@ -22,6 +25,9 @@ func _ready() -> void:
 	_bg.pivot_offset = _bg_pivot()
 	_bg.scale = Vector2(BG_ZOOM, BG_ZOOM)
 	GameSession.game_exited.connect(_on_game_exited)
+	# 中断オーバーレイ (HOME) の開閉でライブゲーム透過を反映する。
+	OverlayManager.opened.connect(_on_overlay_opened)
+	OverlayManager.closed.connect(_on_overlay_closed)
 
 
 func _bg_pivot() -> Vector2:
@@ -75,6 +81,9 @@ func _build_ui() -> void:
 	_launching_overlay = preload("res://scenes/components/launching_overlay.tscn").instantiate()
 	add_child(_launching_overlay)
 
+	# 透過時に隠す不透明アート群 (これらを隠すと透明窓越しにライブゲームが見える)。
+	_art_nodes = [bg_color, _bg, thumb_panel, _launching_overlay]
+
 	if _game != null:
 		_load_into(_bg, GamePathResolver.resolve_path(_game.background_path, _game.game_id))
 		_load_into(thumb, GamePathResolver.resolve_path(_game.thumbnail_path, _game.game_id))
@@ -89,6 +98,40 @@ func _load_into(rect: TextureRect, path: String) -> void:
 		var img := Image.load_from_file(path)
 		if img != null and not img.is_empty():
 			rect.texture = ImageTexture.create_from_image(img)
+
+
+## 中断オーバーレイ HOME: 本シーンの背景アートを隠し、メイン窓を per-pixel 透明化して、
+## topmost で前面に居る launcher 越しに背後のライブゲームを透かす。
+func _on_overlay_opened() -> void:
+	_set_live_passthrough(true)
+
+
+func _on_overlay_closed() -> void:
+	# 即復元するとゲーム窓が前面に戻る前に「プレイ中」が一瞬見えてちらつく。透明+アート非表示のまま
+	# (ライブゲームが見える) ゲーム復帰を待ち、ゲームが前面に戻って launcher を覆ってから不可視に復元する。
+	await get_tree().create_timer(0.3).timeout
+	# 0.3s 内に再度開かれた / シーン離脱した場合は復元しない (離脱時は _exit_tree が即復元する)。
+	if is_inside_tree() and not OverlayManager.is_open():
+		_set_live_passthrough(false)
+
+
+## ライブゲーム透過の on/off。背景アート (bg色/背景画像/サムネ/「プレイ中」) の表示と窓透明を切り替える。
+func _set_live_passthrough(on: bool) -> void:
+	if _passthrough == on:
+		return
+	_passthrough = on
+	for n in _art_nodes:
+		if is_instance_valid(n):
+			n.visible = not on
+	var w := get_window()
+	if w:
+		w.transparent_bg = on
+		w.set_flag(Window.FLAG_TRANSPARENT, on)
+
+
+func _exit_tree() -> void:
+	# シーン離脱時に透明窓のまま次シーンへ持ち越さないよう、必ず不透明へ戻す。
+	_set_live_passthrough(false)
 
 
 ## ゲーム終了 (GameSession.game_exited) → 選択画面へ復帰。
