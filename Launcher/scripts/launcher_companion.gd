@@ -157,6 +157,12 @@ func focus_hwnd(hwnd: int) -> void:
 	_send("focus_hwnd %d" % hwnd)
 
 
+## 指定 HWND の最前面 (topmost) フラグを on/off。中断オーバーレイ表示で、フルスクリーンの
+## メイン窓を即座にゲーム窓の上へ出す用 (SetForegroundWindow の foreground-lock 遅延回避)。
+func set_topmost(hwnd: int, on: bool) -> void:
+	_send("topmost %d %d" % [hwnd, 1 if on else 0])
+
+
 ## 指定スクリーン rect (ランチャーのある画面の物理座標) を path に PNG キャプチャ要求。結果は capture_ready で返る。
 func capture(x: int, y: int, w: int, h: int, path: String) -> void:
 	_send("capture %d %d %d %d %s" % [x, y, w, h, path])

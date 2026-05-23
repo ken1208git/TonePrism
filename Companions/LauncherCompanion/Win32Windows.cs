@@ -98,6 +98,18 @@ namespace TonePrism.LauncherCompanion
             return ok && recovered;
         }
 
+        /// <summary>
+        /// 指定 HWND の最前面 (topmost) フラグを on/off する。SetForegroundWindow と違い z-order の
+        /// 変更なので foreground-lock の制約を受けず、背面の既存窓 (フルスクリーンの launcher 等) を
+        /// 即座にゲーム窓の上へ出せる。中断オーバーレイ表示時に launcher メイン窓へ使う。
+        /// </summary>
+        public static void SetTopmost(IntPtr hwnd, bool on)
+        {
+            if (hwnd == IntPtr.Zero) return;
+            IntPtr insertAfter = on ? HWND_TOPMOST : HWND_NOTOPMOST;
+            SetWindowPos(hwnd, insertAfter, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+
         private static IntPtr FindTopLevelWindow(HashSet<uint> tree)
         {
             IntPtr found = IntPtr.Zero;
@@ -204,9 +216,17 @@ namespace TonePrism.LauncherCompanion
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
         [DllImport("user32.dll")] private static extern int GetWindowTextLength(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+        [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
         private const uint GW_OWNER = 4;
         private const int SW_SHOW = 5;
+
+        // SetWindowPos: topmost 切替 (z-order のみ、移動/リサイズ/アクティブ化はしない)
+        private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+        private static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
+        private const uint SWP_NOSIZE = 0x0001;
+        private const uint SWP_NOMOVE = 0x0002;
+        private const uint SWP_NOACTIVATE = 0x0010;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT { public int Left; public int Top; public int Right; public int Bottom; }

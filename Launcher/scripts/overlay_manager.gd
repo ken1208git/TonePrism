@@ -9,17 +9,13 @@ signal resume_requested()
 signal quit_to_selection_requested()
 signal exit_to_screensaver_requested()
 
-var _overlay: Window = null
+var _overlay: CanvasLayer = null
 var _open: bool = false
 var _companion: Node = null
 
 # 走行中ゲームの表示情報 (中断メニューのタイトル/アイコン用)。launch_game 時に set_current_game で設定。
 var _game_title: String = ""
 var _game_thumb_path: String = ""
-
-# すりガラス背景用キャプチャ (companion 撮影) の待ち合わせ。
-var _capture_done: bool = false
-var _capture_ok: bool = false
 
 
 func _ready() -> void:
@@ -47,14 +43,8 @@ func set_current_game(game: GameInfo) -> void:
 	_companion = get_node_or_null("/root/LauncherCompanion")
 	if _companion:
 		_companion.trigger_received.connect(_on_trigger)
-		_companion.capture_ready.connect(_on_capture_ready)
 	else:
 		push_warning("[OverlayManager] LauncherCompanion 不在、トリガ連携なし")
-
-
-func _on_capture_ready(_path: String, ok: bool) -> void:
-	_capture_done = true
-	_capture_ok = ok
 
 
 func _on_trigger(_source: String) -> void:
@@ -79,21 +69,27 @@ func open() -> void:
 		return
 	_open = true
 
-	# 背景は「ライブのゲーム + 濃い白の半透明パネル」方式 (動的・静止画なし)。
-	# ぼかしは別プロセスのゲームをライブに blur できず静止キャプチャが必要で「止まって見える」ため不採用。
-	# (capture 機構自体は残置・休眠。再びぼかしにする時は set_backdrop にパスを渡す。)
-	if _overlay.has_method("set_backdrop"):
-		_overlay.set_backdrop("")
 	_overlay.show_overlay(_game_title, _game_thumb_path)
-	# ゲームが前面 (フォーカス保持) のままだと overlay が前に出ない/フォーカスを取れないため、
-	# companion 経由で **overlay 窓だけ** を強制前面化し foreground-lock を回避する
-	# (PID 指定だとメインのランチャー窓を巻き込むため HWND 指定にする)。窓生成を 1 フレーム待つ。
+	# 単一ウィンドウ化 (#214): overlay は launcher メイン窓内の CanvasLayer。プレイ中はゲーム窓が前面
+	# なので、メイン窓を前へ出さないと overlay が見えない/フォーカスを取れない。
+	# 旧オーバーレイは always_on_top の別窓で一瞬で出ていたが、Godot のフルスクリーン窓は always_on_top を
+	# 無視するため、companion 経由で **topmost (z-order)** を立てて即座にゲーム窓の上へ。SetForegroundWindow
+	# だけだと foreground-lock で大きく遅延/失敗するための対策。topmost に加え focus_hwnd で入力フォーカスも奪う。
+	var hwnd: int = _main_window_hwnd()
+	if _companion and hwnd != 0:
+		_companion.set_topmost(hwnd, true)
 	await get_tree().process_frame
-	if _open and _companion:
-		var hwnd: int = _overlay.get_overlay_hwnd()
-		if hwnd != 0:
-			_companion.focus_hwnd(hwnd)
+	if _open and _companion and hwnd != 0:
+		_companion.focus_hwnd(hwnd)
 	print("[OverlayManager] 中断メニューを開いた")
+
+
+## launcher メイン窓の OS ネイティブハンドル (Windows: HWND)。companion に渡して前面化する。
+func _main_window_hwnd() -> int:
+	var win := get_window()
+	if win == null:
+		return 0
+	return DisplayServer.window_get_native_handle(DisplayServer.WINDOW_HANDLE, win.get_window_id())
 
 
 func close() -> void:
@@ -101,6 +97,10 @@ func close() -> void:
 		return
 	_open = false
 	_overlay.hide_overlay()
+	# メイン窓の topmost を解除 (この後 GameSession.resume() がゲーム窓を前面に戻せるように)。
+	var hwnd: int = _main_window_hwnd()
+	if _companion and hwnd != 0:
+		_companion.set_topmost(hwnd, false)
 	print("[OverlayManager] 中断メニューを閉じた")
 
 
