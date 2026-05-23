@@ -6,13 +6,13 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
-namespace TonePrism.LauncherCompanion
+namespace TonePrism.LauncherAgent
 {
     /// <summary>
-    /// TonePrism_LauncherCompanion エントリ。Launcher 系 Win32 機能を集約した常駐エージェント。
+    /// TonePrism_LauncherAgent エントリ。Launcher 系 Win32 機能を集約した常駐エージェント。
     ///
     /// 起動 (Launcher が OS.create_process で 1 個だけ常駐起動):
-    ///   TonePrism_LauncherCompanion.exe --event-port &lt;L&gt; --cmd-port &lt;C&gt; --parent-pid &lt;P&gt; [--logs-root &lt;path&gt;]
+    ///   TonePrism_LauncherAgent.exe --event-port &lt;L&gt; --cmd-port &lt;C&gt; --parent-pid &lt;P&gt; [--logs-root &lt;path&gt;]
     ///     --cmd-port C   : この port で Launcher からのコマンド (テキスト) を受信
     ///     --event-port L : この port (127.0.0.1) へ event (JSON) を送信
     ///     --parent-pid P : Launcher の PID。消失したら self-exit (孤児防止)
@@ -51,7 +51,7 @@ namespace TonePrism.LauncherCompanion
 
             if (eventPort <= 0)
             {
-                Console.Error.WriteLine("usage: TonePrism_LauncherCompanion.exe --event-port <L> [--cmd-port <C>] [--parent-pid <P>] [--logs-root <path>]");
+                Console.Error.WriteLine("usage: TonePrism_LauncherAgent.exe --event-port <L> [--cmd-port <C>] [--parent-pid <P>] [--logs-root <path>]");
                 return 2;
             }
 

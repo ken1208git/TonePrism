@@ -1,6 +1,6 @@
 extends Node
 ## Autoload: 中断メニュー (overlay_menu) の表示制御 (#30)。
-## LauncherCompanion.trigger_received (HOME / Guide) で開閉トグルする。
+## LauncherAgent.trigger_received (HOME / Guide) で開閉トグルする。
 ## Companion の sensor は watch 中 (=ゲーム実行中) のみ発火するため、トリガはゲーム中限定。
 ## メニューの選択結果 (再開 / 終了して選択画面へ) を signal で再発火し、game_selection 側が
 ## game_launcher につなぐ (配線)。
@@ -43,12 +43,12 @@ func set_current_game(game: GameInfo) -> void:
 	_game_title = game.title
 	_game_thumb_path = GamePathResolver.resolve_path(game.thumbnail_path, game.game_id)
 
-	# トリガ (HOME / Guide) で開閉トグル。autoload 順で LauncherCompanion が先に居る前提だが防御的に確認。
-	_companion = get_node_or_null("/root/LauncherCompanion")
+	# トリガ (HOME / Guide) で開閉トグル。autoload 順で LauncherAgent が先に居る前提だが防御的に確認。
+	_companion = get_node_or_null("/root/LauncherAgent")
 	if _companion:
 		_companion.trigger_received.connect(_on_trigger)
 	else:
-		push_warning("[OverlayManager] LauncherCompanion 不在、トリガ連携なし")
+		push_warning("[OverlayManager] LauncherAgent 不在、トリガ連携なし")
 
 
 func _on_trigger(_source: String) -> void:

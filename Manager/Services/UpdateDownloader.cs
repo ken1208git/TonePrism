@@ -386,7 +386,7 @@ namespace TonePrism.Manager.Services
                 Path.Combine("files", "CHANGELOG.md"),
                 Path.Combine("files", "Companions", "Updater", "TonePrism_Updater.exe"),
                 Path.Combine("files", "Companions", "Updater", "TonePrism_Updater.exe.config"),
-                // NOTE: LauncherCompanion 等の新規 Companion は本 legacy list に追加しない (SPEC §3.7.8)。
+                // NOTE: LauncherAgent 等の新規 Companion は本 legacy list に追加しない (SPEC §3.7.8)。
                 // 本 list は manifest 不在の v0.3.0 旧構造 zip 専用 fallback で、新コンポーネントの
                 // validate は manifest 経由 (ValidateStaging + Release.ps1 $script:BundleManifestFiles) で自動成立する。
             };

@@ -24,7 +24,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 Logger="*res://scripts/logger.gd"
-LauncherCompanion="*res://scripts/launcher_companion.gd"
+LauncherAgent="*res://scripts/launcher_agent.gd"
 SessionHeartbeat="*res://scripts/session_heartbeat.gd"
 ErrorManager="*res://scripts/error_manager.gd"
 DialogManager="*res://scripts/dialog_manager.gd"

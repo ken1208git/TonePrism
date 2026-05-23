@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace TonePrism.LauncherCompanion
+namespace TonePrism.LauncherAgent
 {
     /// <summary>
     /// ゲーム前面時でも拾えるグローバルホットキー検知。

@@ -1,5 +1,5 @@
 extends Node
-## Autoload: 常駐 Companion (TonePrism_LauncherCompanion.exe) を起動・管理し、双方向 localhost UDP で
+## Autoload: 常駐 Companion (TonePrism_LauncherAgent.exe) を起動・管理し、双方向 localhost UDP で
 ## - 窓状態 (起動中→プレイ中 #101 / 前面化異常 #216 の駆動材料) を受信
 ## - HOME / Guide トリガ (オーバーレイ開閉 #30) を受信し signal で通知
 ## - watch / unwatch / focus コマンドを送信
@@ -11,7 +11,7 @@ extends Node
 ## 127.0.0.1:C へ cmd を送る。
 ##
 ## ログ転送: Companion の WARN/ERROR/主要イベントは log イベントで届くので、print/push_warning/push_error で
-## 出す → logger.gd の godot.log テールが拾って launcher ログに [LauncherCompanion] 付きで記録 →
+## 出す → logger.gd の godot.log テールが拾って launcher ログに [LauncherAgent] 付きで記録 →
 ## Manager のログ閲覧「Launcher タブ」に出る (Manager 改修不要)。
 
 signal trigger_received(source: String)  ## "home" | "guide"
@@ -19,9 +19,9 @@ signal trigger_received(source: String)  ## "home" | "guide"
 enum WindowState { UNAVAILABLE, NOT_FOUND, NOT_VISIBLE, VISIBLE_BACKGROUND, VISIBLE_FOREGROUND }
 
 const _EXE_CANDIDATES: Array[String] = [
-	"Companions/LauncherCompanion/TonePrism_LauncherCompanion.exe",
-	"Companions/LauncherCompanion/bin/Release/TonePrism_LauncherCompanion.exe",
-	"Companions/LauncherCompanion/bin/Debug/TonePrism_LauncherCompanion.exe",
+	"Companions/LauncherAgent/TonePrism_LauncherAgent.exe",
+	"Companions/LauncherAgent/bin/Release/TonePrism_LauncherAgent.exe",
+	"Companions/LauncherAgent/bin/Debug/TonePrism_LauncherAgent.exe",
 ]
 
 var _proc_pid: int = -1
@@ -41,14 +41,14 @@ func _ready() -> void:
 func _start_companion() -> void:
 	var exe := _get_exe_path()
 	if not FileAccess.file_exists(exe):
-		print("[LauncherCompanion] exe 不在のため probe/overlay 無効 (従来挙動): ", exe)
+		print("[LauncherAgent] exe 不在のため probe/overlay 無効 (従来挙動): ", exe)
 		return
 	_exe_ok = true
 
 	_event_peer = PacketPeerUDP.new()
 	var err := _event_peer.bind(0, "127.0.0.1")
 	if err != OK:
-		push_warning("[LauncherCompanion] event UDP bind 失敗 (probe/overlay 無効): err=%d" % err)
+		push_warning("[LauncherAgent] event UDP bind 失敗 (probe/overlay 無効): err=%d" % err)
 		_event_peer = null
 		_exe_ok = false
 		return
@@ -63,10 +63,10 @@ func _start_companion() -> void:
 	# open_console=false (既定) で常駐コンソール窓を出さない (WindowProbe の OS.execute 同様)。
 	_proc_pid = OS.create_process(exe, args)
 	if _proc_pid == -1:
-		push_warning("[LauncherCompanion] Companion 起動失敗 (probe/overlay 無効)")
+		push_warning("[LauncherAgent] Companion 起動失敗 (probe/overlay 無効)")
 		_exe_ok = false
 		return
-	print("[LauncherCompanion] 常駐起動 pid=%d event-port=%d" % [_proc_pid, event_port])
+	print("[LauncherAgent] 常駐起動 pid=%d event-port=%d" % [_proc_pid, event_port])
 
 
 func _process(_delta: float) -> void:
@@ -90,7 +90,7 @@ func _handle_event(txt: String) -> void:
 					_cmd_peer = PacketPeerUDP.new()
 					_cmd_peer.set_dest_address("127.0.0.1", _cmd_port)
 					_handshaked = true
-					print("[LauncherCompanion] handshake 完了 cmd-port=%d" % _cmd_port)
+					print("[LauncherAgent] handshake 完了 cmd-port=%d" % _cmd_port)
 		"window":
 			_window_state = _map_state(String(data.get("state", "")))
 		"trigger":
@@ -104,7 +104,7 @@ func _handle_event(txt: String) -> void:
 
 func _forward_log(level: String, msg: String) -> void:
 	# logger.gd の godot.log テールがレベル分類して launcher ログに転送する。
-	var line := "[LauncherCompanion] " + msg
+	var line := "[LauncherAgent] " + msg
 	match level:
 		"error": push_error(line)
 		"warn": push_warning(line)

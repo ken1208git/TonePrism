@@ -94,14 +94,14 @@ func start_process() -> bool:
 	running_pid = pid
 	_is_launching = false
 	_reset_probe_state()
-	_probe_available = LauncherCompanion.is_available()
+	_probe_available = LauncherAgent.is_available()
 	if _probe_available:
-		LauncherCompanion.watch(pid)
-		print("[GameSession] LauncherCompanion 監視を開始 (PLAYING 遷移はウィンドウ出現で確定)")
+		LauncherAgent.watch(pid)
+		print("[GameSession] LauncherAgent 監視を開始 (PLAYING 遷移はウィンドウ出現で確定)")
 	else:
 		# Companion 不在 (エディタ実行 / exe 未同梱): 従来どおり即 PLAYING。
 		_playing_confirmed = true
-		print("[GameSession] LauncherCompanion 不在のため即 PLAYING (従来挙動)")
+		print("[GameSession] LauncherAgent 不在のため即 PLAYING (従来挙動)")
 		playing_confirmed.emit()
 	game_started.emit()
 	return true
@@ -120,14 +120,14 @@ func _process(_delta: float) -> void:
 	if not _probe_available:
 		return
 
-	var res := LauncherCompanion.get_window_state()
-	var game_visible := (res == LauncherCompanion.WindowState.VISIBLE_BACKGROUND
-		or res == LauncherCompanion.WindowState.VISIBLE_FOREGROUND)
+	var res := LauncherAgent.get_window_state()
+	var game_visible := (res == LauncherAgent.WindowState.VISIBLE_BACKGROUND
+		or res == LauncherAgent.WindowState.VISIBLE_FOREGROUND)
 
-	if res == LauncherCompanion.WindowState.UNAVAILABLE:
+	if res == LauncherAgent.WindowState.UNAVAILABLE:
 		if not _probe_failure_logged:
 			_probe_failure_logged = true
-			push_warning("[GameSession] LauncherCompanion が UNAVAILABLE を返した (window event 未達 or Companion 異常)")
+			push_warning("[GameSession] LauncherAgent が UNAVAILABLE を返した (window event 未達 or Companion 異常)")
 	elif _probe_failure_logged:
 		_probe_failure_logged = false
 
@@ -154,7 +154,7 @@ func _process(_delta: float) -> void:
 ## オーバーレイ「ゲームを再開」: ゲーム窓を前面に戻す。
 func resume() -> void:
 	if running_pid != -1 and _probe_available:
-		LauncherCompanion.focus(running_pid)
+		LauncherAgent.focus(running_pid)
 
 
 ## 退出メニュー: 終了後スクリーンセーバーへ。フラグを立てて quit (game_exited 時に現シーンが判定)。
@@ -180,13 +180,13 @@ func quit() -> void:
 ## ランチャー終了時などの後始末 (監視停止)。Companion 自体の kill は autoload が管理。
 func shutdown() -> void:
 	if _probe_available:
-		LauncherCompanion.unwatch()
+		LauncherAgent.unwatch()
 
 
 func _on_exited() -> void:
 	print("[GameSession] Game process %d finished." % running_pid)
 	if _probe_available:
-		LauncherCompanion.unwatch()
+		LauncherAgent.unwatch()
 	running_pid = -1
 	current_game = null
 	if _anomaly_active:
@@ -220,8 +220,8 @@ func _launcher_is_foreground() -> bool:
 
 ## プレイ中の前面化異常を検知する。異常 = ランチャー前面 かつ ゲームが前面でない、がデバウンス継続。
 func _update_anomaly_detection(launcher_foreground: bool, res: int) -> void:
-	var game_not_front := (res == LauncherCompanion.WindowState.NOT_VISIBLE
-		or res == LauncherCompanion.WindowState.VISIBLE_BACKGROUND)
+	var game_not_front := (res == LauncherAgent.WindowState.NOT_VISIBLE
+		or res == LauncherAgent.WindowState.VISIBLE_BACKGROUND)
 	var anomaly := launcher_foreground and game_not_front
 
 	if anomaly:

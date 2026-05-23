@@ -2,14 +2,14 @@ using System;
 using System.IO;
 using System.Text;
 
-namespace TonePrism.LauncherCompanion
+namespace TonePrism.LauncherAgent
 {
     /// <summary>
-    /// LauncherCompanion 専用のファイルロガー (Companions/Updater/Logger.cs を簡略移植)。
+    /// LauncherAgent 専用のファイルロガー (Companions/Updater/Logger.cs を簡略移植)。
     /// - 出力先: &lt;logsRoot&gt;/launchercompanion/launchercompanion_&lt;PC&gt;_&lt;時刻&gt;.log (UTF-8 no BOM)
     /// - 1 起動 = 1 ファイル / 30 日 retention / lock で thread-safe / **自身の例外は握り潰し** (再帰ハング防止)
     /// - WARN / ERROR / Milestone は <see cref="Forwarder"/> 経由で Launcher に転送される
-    ///   (Launcher 側が自分のログに [LauncherCompanion] 付きで記録 → Manager の Launcher タブに出る)。
+    ///   (Launcher 側が自分のログに [LauncherAgent] 付きで記録 → Manager の Launcher タブに出る)。
     ///   詳細 (Info) は本ファイルのみ。
     /// </summary>
     internal static class Logger

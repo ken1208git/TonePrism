@@ -338,7 +338,7 @@ func _exit_tree():
 		DialogManager.close_current_dialog()
 	# 注: ここで GameSession.shutdown()(unwatch) は呼ばない。プレイ中シーンへの切替で game_selection は
 	# 破棄されるが、ゲームは実行中で監視 (HOME/Guide 検知) を継続する必要があるため。アプリ終了時の
-	# companion 停止は LauncherCompanion の PREDELETE が担う。
+	# companion 停止は LauncherAgent の PREDELETE が担う。
 
 # --- サムネイル非同期読み込み ---
 

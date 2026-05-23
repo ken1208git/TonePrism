@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- TonePrism_LauncherCompanion (#30 / #101 / #216): Launcher 系の Win32 機能を集約した常駐エージェント。
+<!-- TonePrism_LauncherAgent (#30 / #101 / #216): Launcher 系の Win32 機能を集約した常駐エージェント。
      probe(窓状態監視) + sensor(HOME/Guide 検知) + focus(強制前面化) を 1 プロセスに統合し、
      双方向 localhost UDP で Launcher と通信する。旧 WindowProbe を置換・廃止。 -->
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
@@ -9,8 +9,8 @@
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProjectGuid>{B2D4E6F8-1A3C-4E5D-9F70-2C4A6E8D0B1F}</ProjectGuid>
     <OutputType>Exe</OutputType>
-    <RootNamespace>TonePrism.LauncherCompanion</RootNamespace>
-    <AssemblyName>TonePrism_LauncherCompanion</AssemblyName>
+    <RootNamespace>TonePrism.LauncherAgent</RootNamespace>
+    <AssemblyName>TonePrism_LauncherAgent</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>

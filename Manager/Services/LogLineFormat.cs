@@ -5,7 +5,7 @@ namespace TonePrism.Manager.Services
     /// <summary>
     /// Logger 出力 format `[YYYY-MM-DD HH:mm:ss] [LEVEL] message` の parse 用 SoT。
     ///
-    /// 同 format は Manager `Services/Logger.cs` + Companions/Updater・LauncherCompanion `Logger.cs` (= 各
+    /// 同 format は Manager `Services/Logger.cs` + Companions/Updater・LauncherAgent `Logger.cs` (= 各
     /// Companion も同 format に揃える規約、SPEC §3.6) で共通。Manager UI 側 consumer (= LogSectionPanel
     /// + UpdaterLogAbsorber) が 2 callsite で同 regex を hardcode していたのを SoT 化、SPEC §3.6
     /// 「将来 DEBUG level 追加」等の format 拡張時に **1 ファイル更新で両 consumer が同期** する。

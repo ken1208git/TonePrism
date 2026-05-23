@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
-namespace TonePrism.LauncherCompanion
+namespace TonePrism.LauncherAgent
 {
     /// <summary>
     /// 指定 PID のプロセスツリー (PID + 全子孫) の「可視ウィンドウ / 前面ウィンドウ」状態の判定 (probe) と、
