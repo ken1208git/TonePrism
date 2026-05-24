@@ -31,6 +31,9 @@ var _probe_failure_logged: bool = false
 # 終了後の遷移先: true=スクリーンセーバー / false=ゲーム選択画面。退出メニュー選択で true。
 # 実際の change_scene は終了時に現シーン (playing / game_selection) が本フラグを見て行う。
 var _exit_to_screensaver: bool = false
+# quit/exit 実行中 (taskkill 発行〜プロセス消失まで)。この過渡状態はランチャーが前面でゲームが
+# まだ生きており #216 前面化異常を誤検知するため、検知を抑止する。
+var _quitting: bool = false
 
 
 func _ready() -> void:
@@ -54,6 +57,7 @@ func begin_launch(game: GameInfo) -> bool:
 	_is_launching = true
 	current_game = game
 	_exit_to_screensaver = false
+	_quitting = false
 	return true
 
 
@@ -145,7 +149,7 @@ func _process(_delta: float) -> void:
 
 	if _anomaly_armed:
 		# 中断オーバーレイ表示中はランチャーが意図的に前面化するため異常カウントしない (#30/#216 whitelist)。
-		if OverlayManager.is_open():
+		if OverlayManager.is_open() or _quitting:
 			_anomaly_since_ms = 0
 		else:
 			_update_anomaly_detection(_launcher_is_foreground(), res)
@@ -172,6 +176,7 @@ func should_exit_to_screensaver() -> bool:
 func quit() -> void:
 	if running_pid == -1:
 		return
+	_quitting = true  # taskkill 完了 (プロセス消失) までは #216 異常検知を止める (意図的終了の過渡状態)
 	print("[GameSession] ゲーム終了 (PID %d ツリーを taskkill)" % running_pid)
 	# cmd.exe 経由起動のため running_pid は cmd。/T でツリー (game.exe 含む) ごと終了。
 	OS.create_process("taskkill", ["/PID", str(running_pid), "/T", "/F"])
@@ -189,6 +194,7 @@ func _on_exited() -> void:
 		LauncherAgent.unwatch()
 	running_pid = -1
 	current_game = null
+	_quitting = false
 	if _anomaly_active:
 		_anomaly_active = false
 		ErrorManager.hide_error(ErrorCode.GAME_LAUNCHER_FOREGROUND_ANOMALY)

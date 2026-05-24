@@ -2,6 +2,6 @@
 
 [ext_resource type="Script" path="res://scripts/overlay_menu.gd" id="1_overlay"]
 
-[node name="OverlayMenu" type="CanvasLayer"]
+[node name="OverlayMenu" type="Window"]
 visible = false
 script = ExtResource("1_overlay")

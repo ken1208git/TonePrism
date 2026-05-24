@@ -9,11 +9,12 @@ signal resume_requested()
 signal quit_to_selection_requested()
 signal exit_to_screensaver_requested()
 
-## 中断オーバーレイの開閉。現シーン (playing) が購読し、ライブゲーム透過 (窓透明化 + 背景アート非表示) を反映する。
+## 中断メニューの開閉。playing シーンが購読し、メニュー窓が自前アイコンを出す間は重複する
+## 自身のサムネを隠す (二重表示・二重影の回避)。
 signal opened()
 signal closed()
 
-var _overlay: CanvasLayer = null
+var _overlay: Window = null
 var _open: bool = false
 var _companion: Node = null
 
@@ -73,34 +74,20 @@ func open() -> void:
 		return
 	_open = true
 
+	# 2 枚構成 (#214): overlay は透明・always_on_top の別ウィンドウ。show_overlay でゲームの上へ
+	# 一瞬で出る (always_on_top の z-order、foreground-lock 不要)。背面の launcher 本体 (playing) は
+	# 不透明なまま据え置き = ウィンドウゲームの隙間を背景アートで埋めるのでデスクトップが透けない。
 	_overlay.show_overlay(_game_title, _game_thumb_path)
-	# 現シーン (playing) がライブゲーム透過を反映できるよう通知 (背景アート非表示 + 窓透明化)。
+	# playing シーンに通知 (重複する自身のサムネを隠す)。
 	opened.emit()
-	# 透明化した状態を数フレーム コンポジットさせてから前面化する。プレイ中メイン窓はゲームに隠れて
-	# (occluded) いて描画キャッシュが「プレイ中」のままなので、即 topmost すると前面化直後に一瞬
-	# 「プレイ中」が見えてちらつく。透明フレームをキャッシュへ反映させてから出すことで防ぐ。
+	# ゲームがフォーカスを保持したままだと overlay 窓が入力を取れないため、companion 経由で overlay 窓
+	# **だけ** を強制前面化しフォーカスを奪う (PID 指定だとメイン窓を巻き込むため HWND 指定)。窓生成を 1 フレーム待つ。
 	await get_tree().process_frame
-	await get_tree().process_frame
-	if not _open:
-		return
-	# 単一ウィンドウ化 (#214): overlay は launcher メイン窓内の CanvasLayer。プレイ中はゲーム窓が前面
-	# なので、メイン窓を前へ出さないと overlay が見えない/フォーカスを取れない。
-	# 旧オーバーレイは always_on_top の別窓で一瞬で出ていたが、Godot のフルスクリーン窓は always_on_top を
-	# 無視するため、companion 経由で **topmost (z-order)** を立てて即座にゲーム窓の上へ。SetForegroundWindow
-	# だけだと foreground-lock で大きく遅延/失敗するための対策。topmost に加え focus_hwnd で入力フォーカスも奪う。
-	var hwnd: int = _main_window_hwnd()
-	if _companion and hwnd != 0:
-		_companion.set_topmost(hwnd, true)
-		_companion.focus_hwnd(hwnd)
+	if _open and _companion:
+		var hwnd: int = _overlay.get_overlay_hwnd()
+		if hwnd != 0:
+			_companion.focus_hwnd(hwnd)
 	print("[OverlayManager] 中断メニューを開いた")
-
-
-## launcher メイン窓の OS ネイティブハンドル (Windows: HWND)。companion に渡して前面化する。
-func _main_window_hwnd() -> int:
-	var win := get_window()
-	if win == null:
-		return 0
-	return DisplayServer.window_get_native_handle(DisplayServer.WINDOW_HANDLE, win.get_window_id())
 
 
 func close() -> void:
@@ -108,13 +95,8 @@ func close() -> void:
 		return
 	_open = false
 	_overlay.hide_overlay()
-	# 現シーン (playing) に透過解除を通知 (背景アート復元 + 窓不透明化)。topmost 解除より先に行い、
-	# ゲーム窓が前面に戻る前に launcher 側を通常表示へ戻す。
+	# playing シーンに通知 (隠していた自身のサムネを戻す)。
 	closed.emit()
-	# メイン窓の topmost を解除 (この後 GameSession.resume() がゲーム窓を前面に戻せるように)。
-	var hwnd: int = _main_window_hwnd()
-	if _companion and hwnd != 0:
-		_companion.set_topmost(hwnd, false)
 	print("[OverlayManager] 中断メニューを閉じた")
 
 
