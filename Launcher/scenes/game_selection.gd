@@ -660,6 +660,12 @@ func _on_session_exited() -> void:
 ## 見た目: playing シーンの最終フレームと連続 → なめらかに通常表示へ。
 func _enter_from_game_exit() -> void:
 	AppState.returning_from_game = false
+	# 中断メニュー終了 (終了中画面を見せた) 由来なら running-view 再現も「終了中」で連続させる。
+	# 自然終了は「プレイ中」(起動モーションの素直な逆再生)。
+	var overlay_state: LaunchingOverlay.State = (
+		LaunchingOverlay.State.QUITTING if AppState.returning_from_quit
+		else LaunchingOverlay.State.PLAYING)
+	AppState.returning_from_quit = false
 	if _games.is_empty():
 		return
 	# --- running-view 静止状態を瞬時にセット ---
@@ -702,10 +708,10 @@ func _enter_from_game_exit() -> void:
 				bg_size = bg.get_viewport_rect().size
 			bg.pivot_offset = bg_size / 2.0
 			bg.scale = Vector2(GameLauncher.LAUNCH_BG_ZOOM_SCALE, GameLauncher.LAUNCH_BG_ZOOM_SCALE)
-	# 「プレイ中」表示を瞬時に出す (instant=true でフェードイン無し)。
+	# 直前の playing 画面と同じ状態 (プレイ中 / 終了中) を瞬時に出す (instant=true でフェードイン無し)。
 	if _launching_overlay:
 		var game := _games[_selected_index]
-		_launching_overlay.show_for_game(game.title, LaunchingOverlay.State.PLAYING, true)
+		_launching_overlay.show_for_game(game.title, overlay_state, true)
 
 	# --- 起動モーションの逆再生でカルーセルへ ---
 	if _launching_overlay:

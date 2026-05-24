@@ -23,6 +23,8 @@ func _ready() -> void:
 	_bg.pivot_offset = _bg_pivot()
 	_bg.scale = Vector2(BG_ZOOM, BG_ZOOM)
 	GameSession.game_exited.connect(_on_game_exited)
+	# 中断メニューからの終了開始 → 「ゲーム終了中…」表示に切替 (メイン窓は GameSession が前面化する)。
+	GameSession.game_quitting.connect(_on_game_quitting)
 	# 2 枚構成 (#214): 本シーンは常に不透明な背景のまま据え置く。中断メニューは別ウィンドウ
 	# (透明・最前面) として上に重なり、本シーンはその背面でゲーム窓の隙間 (ウィンドウゲーム) を
 	# 埋める背景になる。よって透過トグルは行わない (旧 4b のメイン窓透明化は撤去)。
@@ -117,6 +119,18 @@ func _load_into(rect: TextureRect, path: String) -> void:
 			rect.texture = ImageTexture.create_from_image(img)
 
 
+## 中断メニューからの終了開始 (GameSession.game_quitting): 「プレイ中」→「ゲーム終了中…」表示へ。
+## メイン窓の前面化は GameSession 側が行うので、ここは表示切替のみ。サムネはメニューを閉じた際に
+## 再表示済み (closed シグナル)。
+var _quit_shown: bool = false  # 中断メニューからの終了で「終了中」を表示したか (復帰再現の状態判別用)
+
+
+func _on_game_quitting() -> void:
+	_quit_shown = true
+	if _launching_overlay:
+		_launching_overlay.set_state(LaunchingOverlay.State.QUITTING)
+
+
 ## ゲーム終了 (GameSession.game_exited) → 選択画面へ復帰。
 ## 復帰時に直前ゲームへフォーカスを戻すため initial_game_id を設定 (filtered_games は AppState に残存)。
 func _on_game_exited() -> void:
@@ -130,4 +144,5 @@ func _on_game_exited() -> void:
 	# running-view 静止状態 (プレイ中表示・背景 1.05) を再現し、起動モーションの逆再生
 	# (switch_to_normal_view: 背景ズームアウト + カルーセルフェードイン) でカルーセルへ戻る。
 	AppState.returning_from_game = true
+	AppState.returning_from_quit = _quit_shown  # 終了中を見せた場合は復帰再現も「終了中」で連続させる
 	get_tree().change_scene_to_file("res://scenes/game_selection.tscn")

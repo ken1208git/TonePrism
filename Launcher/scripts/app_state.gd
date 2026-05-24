@@ -20,6 +20,10 @@ var section_title: String = ""
 ## switch_to_normal_view (起動モーションの逆再生) でカルーセルへ戻る。
 var returning_from_game: bool = false
 
+## 上記復帰が「中断メニューからの終了 (= 終了中画面を見せた)」由来か。
+## true なら running-view 再現も「ゲーム終了中…」で出して連続させる (false=自然終了は「プレイ中」)。
+var returning_from_quit: bool = false
+
 ## データをクリアする
 func clear() -> void:
 	filtered_games = []
@@ -27,3 +31,4 @@ func clear() -> void:
 	return_scene = ""
 	section_title = ""
 	returning_from_game = false
+	returning_from_quit = false

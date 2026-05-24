@@ -11,6 +11,7 @@ extends Control
 enum State {
 	LAUNCHING,
 	PLAYING,
+	QUITTING,
 }
 
 @export var fade_duration: float = 0.55
@@ -53,10 +54,13 @@ func set_state(state: State) -> void:
 	match state:
 		State.LAUNCHING:
 			_status_label.text = "ゲーム起動中..."
-			_set_shimmer_speed(1.8)  # 起動中は速めに流れる
+			_set_shimmer_speed(0.7)  # プレイ中と同じ速度に統一
 		State.PLAYING:
 			_status_label.text = "プレイ中"
-			_set_shimmer_speed(0.7)  # プレイ中はゆっくり
+			_set_shimmer_speed(0.7)
+		State.QUITTING:
+			_status_label.text = "ゲーム終了中..."
+			_set_shimmer_speed(0.7)
 
 func _set_shimmer_speed(speed: float) -> void:
 	if _status_label and _status_label.material is ShaderMaterial:
