@@ -16,11 +16,13 @@ signal closed()
 
 var _overlay: Window = null
 var _open: bool = false
+var _showing_quitting: bool = false  # 別のゲーム/退出 で overlay を「終了中」表示に morph 中 (game_exited まで)
 var _companion: Node = null
 
 # 走行中ゲームの表示情報 (中断メニューのタイトル/アイコン用)。launch_game 時に set_current_game で設定。
 var _game_title: String = ""
 var _game_thumb_path: String = ""
+var _game_bg_path: String = ""  # 終了中 morph 用の背景アート (playing/カルーセルと揃える)
 
 
 func _ready() -> void:
@@ -40,9 +42,11 @@ func set_current_game(game: GameInfo) -> void:
 	if game == null:
 		_game_title = ""
 		_game_thumb_path = ""
+		_game_bg_path = ""
 		return
 	_game_title = game.title
 	_game_thumb_path = GamePathResolver.resolve_path(game.thumbnail_path, game.game_id)
+	_game_bg_path = GamePathResolver.resolve_path(game.background_path, game.game_id)
 
 	# トリガ (HOME / Guide) で開閉トグル。autoload 順で LauncherAgent が先に居る前提だが防御的に確認。
 	_companion = get_node_or_null("/root/LauncherAgent")
@@ -50,9 +54,15 @@ func set_current_game(game: GameInfo) -> void:
 		_companion.trigger_received.connect(_on_trigger)
 	else:
 		push_warning("[OverlayManager] LauncherAgent 不在、トリガ連携なし")
+	# ゲーム終了 (プロセス消失) で「終了中」overlay を隠す handoff 用。重複接続を防ぐ。
+	if not GameSession.game_exited.is_connected(_on_game_session_exited):
+		GameSession.game_exited.connect(_on_game_session_exited)
 
 
 func _on_trigger(_source: String) -> void:
+	# 終了中 morph 中は HOME/Guide を無視 (終了処理中なので開閉しない)。
+	if _showing_quitting:
+		return
 	toggle()
 
 
@@ -102,16 +112,57 @@ func close() -> void:
 
 ## 中断メニューの選択結果は autoload GameSession を直接呼ぶ (シーン切替で配線が切れないように)。
 ## 終了後の遷移先 (選択画面/スクリーンセーバー) は GameSession のフラグを見て現シーンが決める。
+## いずれも退場アニメを再生し、その完了を待ってからゲーム側の処理に進む (アニメ中にゲームを前面化すると
+## launcher が背面化して FPS が落ち、退場モーションがカクつく/一瞬で消えるため)。
 func _on_resume() -> void:
-	close()
-	GameSession.resume()
+	if _showing_quitting:
+		return  # 終了中 morph 中は不可視ボタンの誤クリック等を無視
+	await _close_then_wait()
+	if not _open:
+		GameSession.resume()
 
 
+## 別のゲーム/退出: 閉じずに overlay を「終了中」へ morph (前面のまま=フォーカス移動なしで滑らか)。
+## ゲーム消失 (game_exited) で _on_game_session_exited が overlay を隠し、裏のメイン窓の同じ終了中へ
+## シームレスに handoff される。
 func _on_quit() -> void:
-	close()
+	if not _open or _showing_quitting:
+		return
+	_enter_quitting()
 	GameSession.quit()
 
 
 func _on_exit() -> void:
-	close()
+	if not _open or _showing_quitting:
+		return
+	_enter_quitting()
 	GameSession.request_exit_to_screensaver()
+
+
+## 「終了中」morph 開始の共通処理。
+func _enter_quitting() -> void:
+	_showing_quitting = true
+	closed.emit()  # playing の隠していたサムネを戻す (終了中の下地 + handoff のアイコン連続性)
+	if _overlay:
+		_overlay.show_quitting(_game_title, _game_bg_path)
+
+
+## ゲーム消失で「終了中」overlay を即時非表示にし、裏のメイン窓 (同じ終了中) へ handoff する。
+func _on_game_session_exited() -> void:
+	if not (_open or _showing_quitting):
+		return
+	_open = false
+	_showing_quitting = false
+	if _overlay:
+		_overlay.hide_now()
+
+
+## 退場アニメを再生し、その長さぶん待つ。待機中はゲームを前面に戻さない (launcher を前面のまま保ち
+## 退場モーションを滑らかに見せる)。待機中に再オープンされた場合は呼び出し側が _open で判定して中断する。
+func _close_then_wait() -> void:
+	if not _open:
+		return
+	var dur: float = _overlay.get_close_anim_duration() if _overlay else 0.0
+	close()
+	if dur > 0.0:
+		await get_tree().create_timer(dur).timeout

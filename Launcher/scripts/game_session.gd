@@ -178,13 +178,9 @@ func quit() -> void:
 	if running_pid == -1:
 		return
 	_quitting = true  # taskkill 完了 (プロセス消失) までは #216 異常検知を止める (意図的終了の過渡状態)
-	# 現シーン (playing) に「終了中」表示を要求 → メイン窓を前面化して、taskkill 中の死にかけゲームを覆う。
-	# この時点で中断メニュー窓 (同一アプリ・最前面) が前面を握っているため、メイン窓の前面化は
-	# foreground-lock を受けず確実 (#214、design B)。状態を先に切替えてから前面化する。
+	# 現シーン (playing) に「終了中」表示を要求 (handoff の下地。前面化はしない — 中断メニュー窓が前面で
+	# 終了中を出し、game_exited で overlay を隠してメイン窓へシームレスに引き継ぐ #214)。
 	game_quitting.emit()
-	var w := get_window()
-	if w:
-		w.move_to_foreground()
 	print("[GameSession] ゲーム終了 (PID %d ツリーを taskkill)" % running_pid)
 	# cmd.exe 経由起動のため running_pid は cmd。/T でツリー (game.exe 含む) ごと終了。
 	OS.create_process("taskkill", ["/PID", str(running_pid), "/T", "/F"])
