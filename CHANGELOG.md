@@ -1252,6 +1252,20 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.8.1] - 2026-05-25
+
+#### Changed (#219 — ゲーム中のランチャー誤前面化を自動復旧)
+
+#216 (前面化異常検知) のフォローアップ。従来は「異常検知 → 即スタッフ警告」だったのを、**警告の前にゲーム窓を強制前面化して自己修復を試み、リトライを尽くしても background のままなら警告**する二段構えに変更。
+
+- `GameSession._update_anomaly_detection`: 異常がデバウンス (2s) を超えて確定したら、即 `ErrorManager.show_error` せず `LauncherAgent.focus(running_pid)` でゲーム窓を強制前面化。`ANOMALY_RECOVERY_INTERVAL_MS` (500ms) 間隔で最大 `ANOMALY_RECOVERY_MAX_ATTEMPTS` (3) 回リトライし、次 probe で復旧 (ゲーム前面) を確認できたら警告なしでリセット。尽きても background ならスタッフ警告 (`GAME_LAUNCHER_FOREGROUND_ANOMALY`) を出す。
+- Windows の foreground-lock 制限で `SetForegroundWindow` が効かないケース (タスクバー点滅のみ等) があるため、復旧は 100% 保証せず「トライ → 失敗時のみ警告」を前提とする。
+- 意図的な前面化 (中断オーバーレイ表示 #30 / quit 中) は既存の whitelist (`OverlayManager.is_open() or _quitting`) で異常カウントから除外済み (#219 タスク項目4)。
+
+#### Bump 根拠 (v0.8.0 → v0.8.1)
+
+既存 #216 セーフガードの挙動強化 (自己修復の追加) で新規 UI/機能面はないため SemVer patch (`version.gd` PATCH 0→1)。
+
 ### [Launcher v0.8.0] - 2026-05-22
 
 #### Added (#30 — ゲーム実行中の中断オーバーレイメニュー)
