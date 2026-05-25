@@ -84,6 +84,17 @@ func _input(event: InputEvent) -> void:
 			_hide_test()
 			get_viewport().set_input_as_handled()
 		return
+	# カーソル表示切替 (ランチャー他画面と同じ): マウス移動/クリックで出す・キー/パッドで隠す。
+	if event is InputEventMouseMotion and event.relative.length() > 1.0:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	elif event is InputEventMouseButton and event.pressed:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	elif event is InputEventKey and event.pressed and not event.echo:
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+	elif event is InputEventJoypadButton and event.pressed:
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+	elif event is InputEventJoypadMotion and absf(event.axis_value) > 0.5:
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 	# B / Esc: 詳細ペインなら左リストへ戻る、左リストならサービスモード終了。
 	if event.is_action_pressed("ui_cancel"):
 		get_viewport().set_input_as_handled()

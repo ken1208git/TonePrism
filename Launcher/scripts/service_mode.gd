@@ -13,6 +13,7 @@ var _overlay: CanvasLayer = null
 var _open: bool = false
 var _idle_sec: float = 0.0
 var _prev_paused: bool = false  # 開く前の pause 状態 (閉じる時に復元)
+var _prev_mouse_mode: int = Input.MOUSE_MODE_VISIBLE  # 開く前のカーソル表示状態 (閉じる時に復元)
 
 
 func _ready() -> void:
@@ -64,6 +65,10 @@ func open() -> void:
 	# 本 autoload と overlay は PROCESS_MODE_ALWAYS なので paused でも動き続ける。
 	_prev_paused = get_tree().paused
 	get_tree().paused = true
+	# Ctrl+Alt+F12 (キーボード) で開くのでカーソルは隠して開始。以後 overlay 側がマウス移動で表示・
+	# キー/パッドで非表示に切替 (ランチャー他画面と同じ挙動)。閉じる時に元の状態へ戻す。
+	_prev_mouse_mode = Input.mouse_mode
+	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 	_overlay.open_overlay()
 	print("[ServiceMode] サービスモードを開いた")
 
@@ -75,4 +80,5 @@ func close() -> void:
 	if _overlay:
 		_overlay.close_overlay()
 	get_tree().paused = _prev_paused  # pause 状態を復元 (開く前が paused でなければ解除)
+	Input.mouse_mode = _prev_mouse_mode  # カーソル表示状態を復元
 	print("[ServiceMode] サービスモードを閉じた")
