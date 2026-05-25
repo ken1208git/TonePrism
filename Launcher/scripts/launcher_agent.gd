@@ -24,7 +24,10 @@ const _EXE_CANDIDATES: Array[String] = [
 	"Companions/LauncherAgent/bin/Debug/TonePrism_LauncherAgent.exe",
 ]
 
+const LIVENESS_CHECK_MS := 1000  # companion 死活確認の間隔 (毎フレーム syscall を避ける)
+
 var _proc_pid: int = -1
+var _last_liveness_ms: int = 0
 var _event_peer: PacketPeerUDP = null
 var _cmd_peer: PacketPeerUDP = null
 var _cmd_port: int = 0
@@ -76,6 +79,25 @@ func _process(_delta: float) -> void:
 	while _event_peer.get_available_packet_count() > 0:
 		var txt := _event_peer.get_packet().get_string_from_utf8()
 		_handle_event(txt)
+	_check_companion_liveness()
+
+
+## Companion プロセスの死活を定期確認し、消失していたら probe/overlay を無効化する。
+## これがないと crash/kill 後も is_available() が true を返し続け、GameSession が死んだ peer に watch を送って
+## window イベントを待ち続ける (HOME/Guide と前面化異常監視がそのセッション無効になる)。
+func _check_companion_liveness() -> void:
+	if not _exe_ok or _proc_pid == -1:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_liveness_ms < LIVENESS_CHECK_MS:
+		return
+	_last_liveness_ms = now
+	if not OS.is_process_running(_proc_pid):
+		push_warning("[LauncherAgent] Companion プロセス消失を検知、probe/overlay を無効化 (is_available=false)")
+		_exe_ok = false
+		_handshaked = false
+		_cmd_peer = null
+		_window_state = WindowState.UNAVAILABLE
 
 
 func _handle_event(txt: String) -> void:
