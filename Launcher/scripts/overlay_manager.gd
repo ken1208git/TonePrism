@@ -61,6 +61,11 @@ func _on_trigger(_source: String) -> void:
 	# 終了中 morph 中は HOME/Guide を無視 (終了処理中なので開閉しない)。
 	if _showing_quitting:
 		return
+	# 起動中 (PLAYING 未確定) は無視。sensor は watch 開始 (=プロセス起動直後) から発火するため、
+	# ゲーム窓が出る前の「起動中」画面でも届くが、そこでメニューを開くと起動中表示に重なるだけ。
+	# プレイ中になってから開閉できるようにする。ただし開いている最中の閉じトグルは常に許可。
+	if not _open and not GameSession.is_playing():
+		return
 	toggle()
 
 
