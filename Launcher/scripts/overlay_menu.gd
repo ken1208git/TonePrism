@@ -99,7 +99,7 @@ func _ready() -> void:
 	content_scale_size = Vector2i(1920, 1080)
 	content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
 	content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
-	# 中断中に tree.paused にしても glow/入力を効かせる。
+	# tree.paused (ダイアログ等) でも glow アニメ/入力処理を止めない (本窓も同じ tree に属するため防御的に)。
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_build_ui()
 

@@ -23,7 +23,8 @@ func _ready() -> void:
 	_bg.pivot_offset = _bg_pivot()
 	_bg.scale = Vector2(BG_ZOOM, BG_ZOOM)
 	GameSession.game_exited.connect(_on_game_exited)
-	# 中断メニューからの終了開始 → 「ゲーム終了中…」表示に切替 (メイン窓は GameSession が前面化する)。
+	# 中断メニューからの終了開始 → 「ゲーム終了中…」表示に切替 (メイン窓の能動的前面化はしない。overlay 窓を
+	# 隠すと背面にいた本シーンがそのまま見える handoff #214)。
 	GameSession.game_quitting.connect(_on_game_quitting)
 	# 終了開始に失敗 (taskkill 起動不可) → 「終了中」表示を「プレイ中」へ戻す (誤った復帰演出を防ぐ)。
 	GameSession.game_quit_aborted.connect(_on_game_quit_aborted)
@@ -106,6 +107,9 @@ func _build_ui() -> void:
 	add_child(_launching_overlay)
 
 	if _game != null:
+		# 背景 + サムネは同期デコード (各 1 枚)。game_selection の非同期ローダーと違いここは許容: PLAYING 確定で
+		# このシーンに入る時点でゲーム窓が前面 = 本シーンは背面の下地で、入場時の一瞬のデコードは見えない。
+		# (本シーンが前面に出るのは overlay を開いた時や終了 handoff 時で、その頃には既にデコード済み。)
 		_load_into(_bg, GamePathResolver.resolve_path(_game.background_path, _game.game_id))
 		_load_into(thumb, GamePathResolver.resolve_path(_game.thumbnail_path, _game.game_id))
 		_launching_overlay.show_for_game(_game.title, LaunchingOverlay.State.PLAYING)
@@ -122,8 +126,8 @@ func _load_into(rect: TextureRect, path: String) -> void:
 
 
 ## 中断メニューからの終了開始 (GameSession.game_quitting): 「プレイ中」→「ゲーム終了中…」表示へ。
-## メイン窓の前面化は GameSession 側が行うので、ここは表示切替のみ。サムネはメニューを閉じた際に
-## 再表示済み (closed シグナル)。
+## メイン窓の能動的前面化はしない (overlay 窓を隠すと背面の本シーンが見える handoff)。ここは表示切替のみ。
+## サムネはメニューを閉じた際に再表示済み (closed シグナル)。
 var _quit_shown: bool = false  # 中断メニューからの終了で「終了中」を表示したか (復帰再現の状態判別用)
 
 

@@ -46,7 +46,7 @@ var _quit_started_ms: int = 0  # taskkill 発行時刻 (quit watchdog 用)。プ
 
 
 func _ready() -> void:
-	# ポーズ中 (中断オーバーレイで tree.paused) でも監視を継続する。
+	# ダイアログ表示等で tree.paused になっても監視 (プロセス死活 / PLAYING 確定 / 前面化異常) を止めない。
 	process_mode = Node.PROCESS_MODE_ALWAYS
 
 
