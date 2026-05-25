@@ -12,6 +12,7 @@ const ServiceModeOverlay := preload("res://scripts/service_mode_overlay.gd")
 var _overlay: CanvasLayer = null
 var _open: bool = false
 var _idle_sec: float = 0.0
+var _prev_paused: bool = false  # 開く前の pause 状態 (閉じる時に復元)
 
 
 func _ready() -> void:
@@ -59,6 +60,10 @@ func open() -> void:
 		add_child(_overlay)
 	_open = true
 	_idle_sec = 0.0
+	# 裏のシーン (ブラウズ/カルーセル等) を凍結して入力競合・背面の動作を止める。
+	# 本 autoload と overlay は PROCESS_MODE_ALWAYS なので paused でも動き続ける。
+	_prev_paused = get_tree().paused
+	get_tree().paused = true
 	_overlay.open_overlay()
 	print("[ServiceMode] サービスモードを開いた")
 
@@ -69,4 +74,5 @@ func close() -> void:
 	_open = false
 	if _overlay:
 		_overlay.close_overlay()
+	get_tree().paused = _prev_paused  # pause 状態を復元 (開く前が paused でなければ解除)
 	print("[ServiceMode] サービスモードを閉じた")

@@ -9,7 +9,7 @@ extends CanvasLayer
 ##
 ## 表示制御・トリガ・60 秒自動復帰は autoload ServiceMode。UI は項目数が多く動的なため code-built。
 
-const C_BG := Color(0.05, 0.05, 0.07, 0.98)
+const C_BG := Color(0.05, 0.05, 0.07, 1.0)  # 完全不透明 (裏のシーンは pause + 不可視で凍結)
 const C_PANEL := Color(0.10, 0.10, 0.13, 1.0)
 const C_TEXT := Color(0.90, 0.90, 0.90)
 const C_MUTED := Color(0.55, 0.55, 0.60)
