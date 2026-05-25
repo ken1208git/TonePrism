@@ -12,8 +12,9 @@ namespace TonePrism.LauncherAgent
     /// TonePrism_LauncherAgent エントリ。Launcher 系 Win32 機能を集約した常駐エージェント。
     ///
     /// 起動 (Launcher が OS.create_process で 1 個だけ常駐起動):
-    ///   TonePrism_LauncherAgent.exe --event-port &lt;L&gt; --cmd-port &lt;C&gt; --parent-pid &lt;P&gt; [--logs-root &lt;path&gt;]
-    ///     --cmd-port C   : この port で Launcher からのコマンド (テキスト) を受信
+    ///   TonePrism_LauncherAgent.exe --event-port &lt;L&gt; [--cmd-port &lt;C&gt;] --parent-pid &lt;P&gt; [--logs-root &lt;path&gt;]
+    ///     --cmd-port C   : この port で Launcher からのコマンド (テキスト) を受信。省略時は OS 任せの空きポートを
+    ///                      bind し hello イベントで Launcher に通知する (実際の Launcher 呼び出しは省略する)
     ///     --event-port L : この port (127.0.0.1) へ event (JSON) を送信
     ///     --parent-pid P : Launcher の PID。消失したら self-exit (孤児防止)
     ///

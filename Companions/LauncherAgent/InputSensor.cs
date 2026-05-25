@@ -51,7 +51,7 @@ namespace TonePrism.LauncherAgent
             {
                 Logger.Warn("[sensor] SetWindowsHookEx 失敗 (HOME 検知不可): " + Marshal.GetLastWin32Error());
             }
-            ResolveXInput();
+            if (_xinput == null) ResolveXInput(); // 関数ポインタはプロセス寿命中不変。watch 毎の再 LoadLibrary を避ける
             _homeDown = false;
             _guidePrev = false;
             _xinputConnectedMask = 0;

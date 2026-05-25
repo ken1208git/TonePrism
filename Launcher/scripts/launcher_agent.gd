@@ -98,6 +98,8 @@ func _handle_event(txt: String) -> void:
 			var h := int(data.get("h", 0))
 			if w > 0 and h > 0:
 				_game_window_rect = Rect2i(int(data.get("x", 0)), int(data.get("y", 0)), w, h)
+			else:
+				_game_window_rect = Rect2i()  # 窓消失 (not_visible/not_found) 時は stale 矩形を残さない
 		"trigger":
 			var seq := int(data.get("seq", 0))
 			if seq > _last_trigger_seq:  # 連送/取りこぼしを seq で吸収

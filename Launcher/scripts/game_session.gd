@@ -11,6 +11,7 @@ extends Node
 signal game_started()          ## プロセス起動直後 (LAUNCHING 相当)
 signal playing_confirmed()     ## 可視ウィンドウ検出 or タイムアウトで PLAYING 確定
 signal game_quitting()         ## 中断メニューからの終了開始 (taskkill 直前)。現シーンが「終了中」表示に使う
+signal game_quit_aborted()     ## 終了開始に失敗 (taskkill 起動不可)。game_quitting で出した「終了中」表示を戻す
 signal game_exited()           ## プロセス終了 (自然終了 / quit)
 
 # 可視ウィンドウ未検出でも「起動中」で固まらないよう強制 PLAYING にするまでの時間 (初回スキャン対策で長め)。
@@ -166,6 +167,7 @@ func _process(_delta: float) -> void:
 		# 中断オーバーレイ表示中はランチャーが意図的に前面化するため異常カウントしない (#30/#216 whitelist)。
 		if OverlayManager.is_open() or _quitting:
 			_anomaly_since_ms = 0
+			_anomaly_logged = false  # episode をリセット (オーバーレイ閉じ後に再発したら再ログできるように)
 		else:
 			_update_anomaly_detection(_launcher_is_foreground(), res)
 
@@ -210,6 +212,8 @@ func quit() -> bool:
 		# 呼び出し側に morph 巻き戻しを委ねる (game_quitting は発火済だが、復帰時に再表示で上書きされる)。
 		_quitting = false
 		push_error("[GameSession] taskkill 起動失敗、ゲームを終了できませんでした (PID %d)" % running_pid)
+		# game_quitting で現シーン (playing) が「終了中」表示にしたので、それを戻すよう通知する。
+		game_quit_aborted.emit()
 		return false
 	return true
 

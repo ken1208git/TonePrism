@@ -25,6 +25,8 @@ func _ready() -> void:
 	GameSession.game_exited.connect(_on_game_exited)
 	# 中断メニューからの終了開始 → 「ゲーム終了中…」表示に切替 (メイン窓は GameSession が前面化する)。
 	GameSession.game_quitting.connect(_on_game_quitting)
+	# 終了開始に失敗 (taskkill 起動不可) → 「終了中」表示を「プレイ中」へ戻す (誤った復帰演出を防ぐ)。
+	GameSession.game_quit_aborted.connect(_on_game_quit_aborted)
 	# 2 枚構成 (#214): 本シーンは常に不透明な背景のまま据え置く。中断メニューは別ウィンドウ
 	# (透明・最前面) として上に重なり、本シーンはその背面でゲーム窓の隙間 (ウィンドウゲーム) を
 	# 埋める背景になる。よって透過トグルは行わない (旧 4b のメイン窓透明化は撤去)。
@@ -129,6 +131,15 @@ func _on_game_quitting() -> void:
 	_quit_shown = true
 	if _launching_overlay:
 		_launching_overlay.set_state(LaunchingOverlay.State.QUITTING)
+
+
+## 終了開始に失敗 (taskkill 起動不可) → 「終了中」を「プレイ中」へ戻し、復帰再現フラグも取り消す。
+## これがないと後でゲームが自然終了した際に returning_from_quit=true となり、カルーセル復帰が誤って
+## 「終了中」morph で再生される。
+func _on_game_quit_aborted() -> void:
+	_quit_shown = false
+	if _launching_overlay:
+		_launching_overlay.set_state(LaunchingOverlay.State.PLAYING)
 
 
 ## ゲーム終了 (GameSession.game_exited) → 選択画面へ復帰。

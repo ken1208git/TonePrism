@@ -102,7 +102,10 @@ namespace TonePrism.LauncherAgent
 
             if (attached) AttachThreadInput(fgThread, thisThread, false);
 
-            Thread.Sleep(60); // 反映待ち
+            // 反映待ち。Program の単一ループスレッド上で実行されるため、この 60ms はメッセージポンプ /
+            // cmd 受信 / gamepad poll / probe を止める (overlay open ごとに 1 回)。HOME/Guide 検知が一瞬鈍るが
+            // 許容範囲 (open 直後で連打される場面ではない)。気になるなら短い sleep×数回の polling に変更可。
+            Thread.Sleep(60);
             bool recovered = GetForegroundWindow() == target;
             return ok && recovered;
         }

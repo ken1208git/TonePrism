@@ -333,9 +333,15 @@ func _exit_tree():
 		_thumb_load_queue.clear()
 		_thumb_load_mutex.unlock()
 		_thumb_load_thread.wait_to_finish()
-	# 背景ローダースレッドを停止 (semaphore を起こして exit させる)
+	# 背景ローダースレッドを停止 (semaphore を起こして exit させる)。
+	# 未処理要求を捨ててから起こすことで、join 待ちを「in-flight の 1 枚デコード完了」までに抑える
+	# (PLAYING 確定でこのシーンを破棄する瞬間のヒッチを最小化。worker は pop 前に exit を見るので
+	#  キュー残があっても本来 1 枚で抜けるが、意図を明示し将来の改変にも頑健にする)。
 	if _bg_load_thread and _bg_load_thread.is_started():
 		_bg_thread_exit = true
+		_bg_load_mutex.lock()
+		_bg_load_queue.clear()
+		_bg_load_mutex.unlock()
 		_bg_load_sem.post()
 		_bg_load_thread.wait_to_finish()
 	if DialogManager and DialogManager.has_method("close_current_dialog"):
