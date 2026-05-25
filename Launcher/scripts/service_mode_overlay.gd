@@ -15,6 +15,7 @@ const C_TEXT := Color(0.90, 0.90, 0.90)
 const C_MUTED := Color(0.55, 0.55, 0.60)
 const C_ACCENT := Color(0.40, 0.75, 1.0)
 const C_DANGER := Color(1.0, 0.45, 0.40)
+const C_OK := Color(0.45, 0.90, 0.55)
 
 # SPEC §機能23 の 16 項目。未実装は _build_detail の match で stub 表示。
 const ITEMS := [
@@ -286,6 +287,7 @@ func _build_detail(id: String) -> void:
 	_clear_content()
 	match id:
 		"system_info": _build_system_info()
+		"games_check": _build_games_check()
 		"screen_test": _build_screen_test()
 		"fullscreen": _build_fullscreen()
 		"monitor": _build_monitor()
@@ -313,6 +315,32 @@ func _build_system_info() -> void:
 	]
 	for ln in lines:
 		_add_text(ln)
+
+
+func _build_games_check() -> void:
+	# 各ゲームの実行ファイル(exe)が存在するか (= パス切れ/ファイル欠落がないか) を起動せずチェックする。
+	var db := DatabaseManager.new()
+	if not db.open():
+		_add_text("⚠ データベースを開けませんでした。Manager での初期化が必要かもしれません。", C_DANGER)
+		return
+	var repo := GameRepository.new(db)
+	var games := repo.get_all_games()
+	db.close()
+	if games.is_empty():
+		_add_text("登録ゲームがありません (または DB 読み込みに失敗)。", C_MUTED)
+		return
+	var ng := 0
+	for g in games:
+		if GamePathResolver.find_executable(g) == "":
+			ng += 1
+	_add_text("登録 %d 件中  OK %d / NG %d" % [games.size(), games.size() - ng, ng],
+		C_OK if ng == 0 else C_DANGER)
+	_add_text("（各ゲームの exe が存在するかを確認。NG はパス切れ/ファイル欠落。起動はしません）", C_MUTED)
+	for g in games:
+		if GamePathResolver.find_executable(g) == "":
+			_add_text("✗ %s  [%s]  exe 不明: %s" % [g.title, g.game_id, g.executable_path], C_DANGER)
+		else:
+			_add_text("✓ %s  [%s]" % [g.title, g.game_id], C_OK)
 
 
 func _build_screen_test() -> void:
