@@ -16,7 +16,10 @@ signal game_exited()           ## プロセス終了 (自然終了 / quit)
 
 # 可視ウィンドウ未検出でも「起動中」で固まらないよう強制 PLAYING にするまでの時間 (初回スキャン対策で長め)。
 const PLAYING_FALLBACK_TIMEOUT_MS: int = 60000
-const ANOMALY_DEBOUNCE_MS: int = 2000  # 前面化異常を発報するまでの継続時間 (一瞬の Alt-Tab 除外)
+const ANOMALY_DEBOUNCE_MS: int = 2000  # 前面化異常を「異常」と判定するまでの継続時間 (一瞬の Alt-Tab 除外)
+# #219: 異常確定後、スタッフ警告の前にゲーム窓の強制前面化で自己修復を試みる二段構え。
+const ANOMALY_RECOVERY_MAX_ATTEMPTS: int = 3  # 強制前面化のリトライ上限。尽きても background なら警告へ
+const ANOMALY_RECOVERY_INTERVAL_MS: int = 500  # リトライ間隔 (focus 反映 + 次 probe 更新を待つ)
 # Companion ハンドシェイク待ちの上限 (起動直後にゲームを起動した race 対策)。超過したら probe 無しで継続。
 const PROBE_HANDSHAKE_TIMEOUT_MS: int = 5000
 # quit() で taskkill 発行後、これだけ経ってもプロセスが消えない場合は終了失敗とみなして固着を解く
@@ -34,6 +37,8 @@ var _anomaly_armed: bool = false
 var _anomaly_since_ms: int = 0
 var _anomaly_active: bool = false
 var _anomaly_logged: bool = false
+var _recovery_attempts: int = 0    # #219: 今回の異常エピソードでの強制前面化リトライ回数
+var _last_recovery_ms: int = 0     # 直近の強制前面化時刻 (リトライ間隔の判定用)
 var _launch_time_ms: int = 0
 var _probe_failure_logged: bool = false
 # 終了後の遷移先: true=スクリーンセーバー / false=ゲーム選択画面。退出メニュー選択で true。
@@ -274,6 +279,8 @@ func _reset_probe_state() -> void:
 	_anomaly_since_ms = 0
 	_anomaly_active = false
 	_anomaly_logged = false
+	_recovery_attempts = 0
+	_last_recovery_ms = 0
 	_probe_failure_logged = false
 	_launch_time_ms = Time.get_ticks_msec()
 
@@ -298,16 +305,33 @@ func _update_anomaly_detection(launcher_foreground: bool, res: int) -> void:
 	var anomaly := launcher_foreground and game_not_front
 
 	if anomaly:
+		var now := Time.get_ticks_msec()
 		if _anomaly_since_ms == 0:
-			_anomaly_since_ms = Time.get_ticks_msec()
-		elif not _anomaly_active and Time.get_ticks_msec() - _anomaly_since_ms >= ANOMALY_DEBOUNCE_MS:
-			if not _anomaly_logged:
-				_anomaly_logged = true
-				push_warning("[GameSession] ランチャー前面化異常を検出 (PID %d 生存中、要スタッフ対応)" % running_pid)
-			_anomaly_active = ErrorManager.show_error(ErrorCode.GAME_LAUNCHER_FOREGROUND_ANOMALY)
+			_anomaly_since_ms = now
+			_recovery_attempts = 0
+			_last_recovery_ms = 0
+		elif not _anomaly_active and now - _anomaly_since_ms >= ANOMALY_DEBOUNCE_MS:
+			# 異常確定。#219: まずゲーム窓の強制前面化で自己修復を試み、リトライを尽くしても
+			# background のままなら従来どおりスタッフ警告を出す (Windows の foreground-lock で
+			# focus が効かないケースがあるため「トライ → 失敗時のみ警告」の二段構え)。
+			if _recovery_attempts < ANOMALY_RECOVERY_MAX_ATTEMPTS:
+				if _last_recovery_ms == 0 or now - _last_recovery_ms >= ANOMALY_RECOVERY_INTERVAL_MS:
+					_recovery_attempts += 1
+					_last_recovery_ms = now
+					if _probe_available:
+						LauncherAgent.focus(running_pid)
+					print("[GameSession] 前面化異常 → ゲーム窓を強制前面化で自己修復を試行 (%d/%d)" % [_recovery_attempts, ANOMALY_RECOVERY_MAX_ATTEMPTS])
+				# まだ警告は出さない (次 probe で復旧したか確認。復旧すれば else 分岐でリセット)。
+			else:
+				if not _anomaly_logged:
+					_anomaly_logged = true
+					push_warning("[GameSession] ランチャー前面化異常を検出、自己修復に失敗 (PID %d 生存中、要スタッフ対応)" % running_pid)
+				_anomaly_active = ErrorManager.show_error(ErrorCode.GAME_LAUNCHER_FOREGROUND_ANOMALY)
 	else:
 		_anomaly_since_ms = 0
 		_anomaly_logged = false
+		_recovery_attempts = 0
+		_last_recovery_ms = 0
 		if _anomaly_active:
 			_anomaly_active = false
 			print("[GameSession] ランチャー前面化異常が解消、エラーをクリア")
