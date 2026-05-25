@@ -16,12 +16,15 @@ signal game_exited()           ## プロセス終了 (自然終了 / quit)
 # 可視ウィンドウ未検出でも「起動中」で固まらないよう強制 PLAYING にするまでの時間 (初回スキャン対策で長め)。
 const PLAYING_FALLBACK_TIMEOUT_MS: int = 60000
 const ANOMALY_DEBOUNCE_MS: int = 2000  # 前面化異常を発報するまでの継続時間 (一瞬の Alt-Tab 除外)
+# Companion ハンドシェイク待ちの上限 (起動直後にゲームを起動した race 対策)。超過したら probe 無しで継続。
+const PROBE_HANDSHAKE_TIMEOUT_MS: int = 5000
 
 var running_pid: int = -1
 var current_game: GameInfo = null
 
 var _is_launching: bool = false
 var _probe_available: bool = false      # Companion が使えるか
+var _probe_pending: bool = false        # exe 起動済だがハンドシェイク未完了で watch 待ち (起動直後 race)
 var _playing_confirmed: bool = false
 var _anomaly_armed: bool = false
 var _anomaly_since_ms: int = 0
@@ -99,12 +102,17 @@ func start_process() -> bool:
 	running_pid = pid
 	_is_launching = false
 	_reset_probe_state()
-	_probe_available = LauncherAgent.is_available()
-	if _probe_available:
+	if LauncherAgent.is_available():
+		_probe_available = true
 		LauncherAgent.watch(pid)
 		print("[GameSession] LauncherAgent 監視を開始 (PLAYING 遷移はウィンドウ出現で確定)")
+	elif LauncherAgent.is_expected():
+		# exe は起動済みだがハンドシェイク未完了 (起動直後にゲームを起動した race)。完了を _process で待ってから
+		# watch する。それまで PLAYING は未確定のまま (確定 → watch 前に anomaly 監視が始まり誤検知し得るため)。
+		_probe_pending = true
+		print("[GameSession] LauncherAgent ハンドシェイク待ち (完了後に監視を開始)")
 	else:
-		# Companion 不在 (エディタ実行 / exe 未同梱): 従来どおり即 PLAYING。
+		# Companion 不在 (エディタ実行 / exe 未同梱): ハンドシェイクは来ないので従来どおり即 PLAYING。
 		_playing_confirmed = true
 		print("[GameSession] LauncherAgent 不在のため即 PLAYING (従来挙動)")
 		playing_confirmed.emit()
@@ -120,6 +128,12 @@ func _process(_delta: float) -> void:
 	# プロセス終了判定 (最優先)
 	if not OS.is_process_running(running_pid):
 		_on_exited()
+		return
+
+	# Companion ハンドシェイク待ち (起動直後 race 対策, Codex P1 / review #5): 完了で watch 開始、
+	# タイムアウトで probe 無しの即 PLAYING にフォールバック。解決まで以降の probe 処理はスキップ。
+	if _probe_pending:
+		_resolve_pending_probe()
 		return
 
 	if not _probe_available:
@@ -212,7 +226,23 @@ func _confirm_playing(reason: String) -> void:
 	playing_confirmed.emit()
 
 
+## ハンドシェイク待ちの解決: 完了したら watch 開始 (probe 有効化)、タイムアウトしたら probe 無しで即 PLAYING。
+func _resolve_pending_probe() -> void:
+	if LauncherAgent.is_available():
+		_probe_pending = false
+		_probe_available = true
+		LauncherAgent.watch(running_pid)
+		print("[GameSession] LauncherAgent ハンドシェイク完了、監視を開始")
+	elif Time.get_ticks_msec() - _launch_time_ms >= PROBE_HANDSHAKE_TIMEOUT_MS:
+		_probe_pending = false
+		_probe_available = false
+		_playing_confirmed = true
+		push_warning("[GameSession] LauncherAgent ハンドシェイク未完了 (%dms 経過)、probe 無しで PLAYING 継続" % PROBE_HANDSHAKE_TIMEOUT_MS)
+		playing_confirmed.emit()
+
+
 func _reset_probe_state() -> void:
+	_probe_pending = false
 	_playing_confirmed = false
 	_anomaly_armed = false
 	_anomaly_since_ms = 0

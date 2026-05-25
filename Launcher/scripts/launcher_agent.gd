@@ -127,6 +127,13 @@ func is_available() -> bool:
 	return _exe_ok and _handshaked
 
 
+## exe を起動済みで、ハンドシェイク完了が今後見込めるか (= is_available() がいずれ true になり得る)。
+## エディタ実行 / exe 未同梱 (_exe_ok=false) ではハンドシェイクは来ないため false。
+## 起動直後にゲームを起動した場合 (handshake 未完了) の待ち判定に使う。
+func is_expected() -> bool:
+	return _exe_ok
+
+
 ## 最新の窓状態 (WindowState)。
 func get_window_state() -> int:
 	return _window_state

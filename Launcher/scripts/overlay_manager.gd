@@ -51,7 +51,9 @@ func set_current_game(game: GameInfo) -> void:
 	# トリガ (HOME / Guide) で開閉トグル。autoload 順で LauncherAgent が先に居る前提だが防御的に確認。
 	_companion = get_node_or_null("/root/LauncherAgent")
 	if _companion:
-		_companion.trigger_received.connect(_on_trigger)
+		# set_current_game はゲーム起動ごとに呼ばれる。重複接続 (Godot の「既に接続済み」エラー連発) を防ぐ。
+		if not _companion.trigger_received.is_connected(_on_trigger):
+			_companion.trigger_received.connect(_on_trigger)
 	else:
 		push_warning("[OverlayManager] LauncherAgent 不在、トリガ連携なし")
 	# ゲーム終了 (プロセス消失) で「終了中」overlay を隠す handoff 用。重複接続を防ぐ。
