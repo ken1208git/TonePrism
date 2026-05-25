@@ -25,5 +25,7 @@ void fragment() {
 
 	float brightness = mix(base_brightness, shimmer_peak, shimmer);
 
-	COLOR = vec4(vec3(brightness), tex.a);
+	// tex.a だけで alpha を決めると親の modulate (フェードアウト等) を無視してしまうため、
+	// 入力 COLOR.a (modulate チェーンを含む) を掛けてフェードに追従させる。
+	COLOR = vec4(vec3(brightness), tex.a * COLOR.a);
 }

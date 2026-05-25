@@ -1,0 +1,7 @@
+[gd_scene format=3 uid="uid://c508x2oou5w6s"]
+
+[ext_resource type="Script" path="res://scripts/overlay_menu.gd" id="1_overlay"]
+
+[node name="OverlayMenu" type="Window"]
+visible = false
+script = ExtResource("1_overlay")

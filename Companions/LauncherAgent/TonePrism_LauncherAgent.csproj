@@ -1,13 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- TonePrism_LauncherAgent (#30 / #101 / #216): Launcher 系の Win32 機能を集約した常駐エージェント。
+     probe(窓状態監視) + sensor(HOME/Guide 検知) + focus(強制前面化) を 1 プロセスに統合し、
+     双方向 localhost UDP で Launcher と通信する。旧 WindowProbe を置換・廃止。 -->
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProjectGuid>{C7A2F3E1-8B4D-4A6C-9E2F-3D5A1B7C9E0F}</ProjectGuid>
+    <ProjectGuid>{B2D4E6F8-1A3C-4E5D-9F70-2C4A6E8D0B1F}</ProjectGuid>
     <OutputType>Exe</OutputType>
-    <RootNamespace>TonePrism.WindowProbe</RootNamespace>
-    <AssemblyName>TonePrism_WindowProbe</AssemblyName>
+    <RootNamespace>TonePrism.LauncherAgent</RootNamespace>
+    <AssemblyName>TonePrism_LauncherAgent</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
@@ -39,6 +42,8 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="Win32Windows.cs" />
+    <Compile Include="InputSensor.cs" />
+    <Compile Include="Logger.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

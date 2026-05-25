@@ -1151,7 +1151,27 @@ Release.bat の編集は **UTF-8 (no BOM) + CRLF** 厳守 (SPEC §3.7.9.1 参照
 
 ## Companions（runtime exe 群）
 
-SPEC §2.4 で定義される「主要 (Launcher / Manager / Monitor) を補助する独立 exe 群」の **runtime exe** の変更履歴。`Companions/Updater/TonePrism_Updater.exe` (Manager 自身の dir 置換用) + 将来追加される `WindowProbe` (#101) / `PauseOverlay` (#30) 等の deployment 配置と整合。本 section は **#160 で `## Updater (Companions/Updater)` から rename + 一般化**、`## Release Tooling` (= build / 配布スクリプト) と責務分離 (= 後者は build 時のみ動く scripts、本 section は runtime exe)。SPEC §2.4 / §3.7.4 参照。
+SPEC §2.4 で定義される「主要 (Launcher / Manager / Monitor) を補助する独立 exe 群」の **runtime exe** の変更履歴。`Companions/Updater/TonePrism_Updater.exe` (Manager 自身の dir 置換用) + `LauncherAgent` (#30/#101/#216、probe/sensor/focus を統合した Launcher 補助の常駐エージェント、旧 WindowProbe を吸収) の deployment 配置と整合。本 section は **#160 で `## Updater (Companions/Updater)` から rename + 一般化**、`## Release Tooling` (= build / 配布スクリプト) と責務分離 (= 後者は build 時のみ動く scripts、本 section は runtime exe)。SPEC §2.4 / §3.7.4 参照。
+
+### [LauncherAgent v0.1.0] - 2026-05-23
+
+> **命名**: 当初 `LauncherCompanion` で実装したが、`Companions/` 配下の命名一貫性 (Updater と同じ機能/役割ベース、カテゴリ名 "Companion" のスタッター回避) のため **`LauncherAgent`** にリネーム (#214、folder/csproj/AssemblyName/namespace `TonePrism.LauncherAgent`/exe `TonePrism_LauncherAgent.exe`/Godot autoload/ログ prefix `[LauncherAgent]` を一括更新)。本 entry は初版 v0.1.0 を最終形で記載。
+
+#### Added (#30 / #101 / #216 — WindowProbe を統合した常駐エージェント)
+
+Launcher 系の Win32 機能を 1 プロセスに集約した**常駐エージェント**。旧 WindowProbe (単発 CLI) を**置換・廃止**し、probe (窓状態監視) + sensor (HOME/Guide グローバル検知) + focus (前面化) を統合、Godot ランチャーと**双方向 localhost UDP** で通信する。
+
+- **probe**: watch 中、指定 PID ツリーの可視/前面窓状態を内部ポーリングし、変化時 + 1 秒 keepalive で `window` イベント送出 (#101 起動中→プレイ中 / #216 前面化異常)。150ms ごとの WindowProbe プロセス spawn を廃し常駐ポーリング化。
+- **sensor**: watch 中のみ HOME (`WH_KEYBOARD_LL`, down 遷移で 1 回) / コントローラ Guide (`XInputGetStateEx` ordinal #100) をグローバル検知し `trigger` イベント送出 → 中断オーバーレイ (#30) の開閉。同時押しコンボ (L3+R3 / START+BACK) は不採用 (HOME / Guide の 2 系統)。
+- **focus**: `SetForegroundWindow` + `AttachThreadInput` でゲーム窓を強制前面化 (foreground-lock 回避、`focus <pid>`)。中断オーバーレイ窓だけを前面化する `focus_hwnd <hwnd>` も持つ (メイン窓を巻き込まない、2 枚構成 #214)。マルチモニタでは `watch <pid> <x> <y> <w> <h>` でゲーム窓をランチャーのモニタへ寄せる (`PlaceWindowCentered`)。
+- **IPC**: 起動時に Launcher が event 受信ポートを bind → companion が cmd 受信ポートを自動 bind し hello イベントで通知 (固定ポート衝突なし)。event (window/trigger/log, JSON) ← / cmd (watch/unwatch/focus/focus_hwnd/quit, テキスト) →。Godot 4 は子プロセス stdout を逐次読めないため UDP を採用。
+- **ログ**: 専用ファイルログ (`logs/launcheragent/`) + WARN/ERROR/主要イベントを UDP で Launcher へ転送 → launcher ログに `[LauncherAgent]` 付きで記録 (Manager のログ閲覧「Launcher タブ」に出る、Manager 改修不要)。
+- **ライフサイクル**: Launcher 起動時に 1 個だけ常駐起動、parent-pid 監視で孤児時 self-exit、Launcher 終了で kill。
+- **構成**: `Program.cs` / `Win32Windows.cs` (WindowProbe から移植) / `InputSensor.cs` / `Logger.cs` / csproj / App.config / AssemblyInfo。.NET Framework 4.8 / `TonePrism_<Name>` 命名 (SPEC §2.4)。中断オーバーレイのすりガラス背景用に試作した `ScreenCapture.cs` (画面キャプチャ) は、オーバーレイをライブゲーム透過方式 (#214) に変更したため撤去 (本 PR 内で追加→撤去、net zero)。
+
+#### Removed — WindowProbe 廃止
+
+`Companions/WindowProbe/` を削除し本 Component に統合。Release.ps1 を `Build-WindowProbe` → `Build-LauncherAgent`、`$script:BundleManifestFiles` / 実行順も WindowProbe → LauncherAgent に更新。Manager update-apply の Companions 置換 step は dir 列挙のため LauncherAgent を自動的に deploy/更新する。
 
 ### [WindowProbe v0.1.0] - 2026-05-21
 
@@ -1231,6 +1251,40 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 ---
 
 ## Launcher（ランチャー本体）
+
+### [Launcher v0.8.0] - 2026-05-22
+
+#### Added (#30 — ゲーム実行中の中断オーバーレイメニュー)
+
+ゲーム実行中に **HOME キー / コントローラ Guide ボタン**で開く透明・最前面の中断メニューを実装。メニュー項目は「**続ける** / **別のゲームをあそぶ** / **退出する**」の 3 つ (spike #218 当時は「再開 / 選択画面に戻る」の 2 項目 MVP、その後 #214 の作り替えで 3 項目に拡張)。spike #218 で「Godot 透明オーバーレイ (同一プロセス) でゲームの上にメニューを描き、ゲームは裏で描画継続」が実機 (Only Up) で成立することを確認のうえ採用 (WPF 別窓案は不採用)。
+
+- **描画**: `scenes/overlay_menu.tscn` + `scripts/overlay_menu.gd` — 透明・最前面・borderless の実 OS `Window` (`project.godot` に `per_pixel_transparency/allowed=true` + `subwindows/embed_subwindows=false`)。中央に減光パネル + メニュー、show 時に最前面再アサート、初期フォーカスは「再開」(誤決定が安全側)、`ui_cancel` (Esc / コントローラ B) で再開。
+- **トリガ**: 常駐 `LauncherAgent` (sensor) が watch 中のみ HOME/Guide をグローバル検知 → UDP `trigger` → `OverlayManager` (autoload) が開閉トグル。Companion sensor は watch 中=ゲーム実行中のみ発火するため、トリガはゲーム中限定。同時押しコンボ (L3+R3/START+BACK) は不採用 (#30 議論)。
+- **操作 (停止 OK 案)**: メニューに排他入力を渡す＝ゲームからフォーカスを奪う＝ゲームは一時停止しうる (ポーズメニューとして許容)。再開時は `LauncherAgent.focus` でゲーム窓を前面復帰、終了時は `taskkill /T` でゲームプロセスツリー終了 → 既存 `_on_game_exited` で選択画面復帰 (#84 連動)。
+- **#216 連携**: 中断オーバーレイ表示中はランチャーが意図的に前面化するため、前面化異常検知を whitelist (表示中は異常カウントせず、close 後はデバウンスから再計測)。
+
+#### Changed (#101 / #216 — probe を常駐 LauncherAgent へ移行)
+
+旧 `WindowProbe` (単発 `OS.execute` を専用スレッドで poll) を**常駐 `LauncherAgent` + 双方向 UDP** に置換。150ms ごとのプロセス spawn を廃し、Companion 内部ポーリングの `window` イベント push を `GameSession._process` が消費する形に。起動中→プレイ中遷移 (#101) / 前面化異常検知 (#216) の判定ロジックは温存 (#214 で `GameSession` autoload へ移管)。
+
+- 新 autoload `scripts/launcher_agent.gd` (`LauncherAgent`): Companion を起動時に 1 個常駐起動、hello ハンドシェイクで cmd-port 取得、`window` 状態保持 + `WindowState` enum 提供、`trigger` を signal 発火、`log` を `[LauncherAgent]` 付きで launcher ログへ転送 (Manager の Launcher タブに出る、Manager 改修不要)、`watch`/`unwatch`/`focus` cmd 送信。
+- probe スレッド/Mutex を撤去し `LauncherAgent.watch/unwatch/get_window_state` に置換 (#214 で監視は `scripts/game_session.gd` (`GameSession`) に移管、`game_launcher.gd` は演出ヘルパーに縮小)。`scripts/window_probe_client.gd` 削除。
+- WindowProbe の撤去・Release.ps1 同期は `## Companions` の `### [LauncherAgent v0.1.0]` を参照。
+
+#### Changed (#214 — プレイ中軽量シーン化 + 中断オーバーレイの 2 枚構成 + 背景非同期ロード)
+
+i3 内蔵GPU・8GB のメモリ逼迫 (#214) 対策と、中断オーバーレイの描画方式の整理のため以下に作り替えた:
+
+- **ゲームセッションの autoload 化**: 起動/監視/PLAYING 確定/前面化異常(#216)/resume/quit/プロセス死活を `scripts/game_session.gd` (`GameSession` autoload) に移管。シーンをまたいで監視が途切れない。`game_launcher.gd` は起動/復帰の画面演出ヘルパーに縮小。
+- **プレイ中軽量シーン**: PLAYING 確定で重い `game_selection` (全ゲーム分のカルーセル/サムネ) を破棄し、背景+選択ゲームのサムネだけの軽量 `scenes/playing.tscn` へ `change_scene` (メモリ削減)。ゲーム終了で `game_selection` へ復帰し、起動モーションの逆再生でカルーセルに戻る。
+- **中断オーバーレイの 2 枚構成**: 中断メニューは**透明・最前面・borderless の別 OS Window** (`overlay_menu`、`per_pixel_transparency/allowed=true` + `embed_subwindows=false`) として走行中ゲームの上に重ね、背面に**不透明・全画面の playing シーン (背景アート)** を据え置く。透明窓部分はゲーム窓のところ=ライブゲーム / ウィンドウゲームの隙間=背景アートを映すため、デスクトップが透けない (2 枚サンドイッチ)。overlay 窓のフォーカス奪取は companion の `focus_hwnd` で overlay 窓だけを前面化 (メイン窓を巻き込まない)。メニュー項目は「続ける / 別のゲームをあそぶ / 退出する」の 3 つ。
+  - 試行錯誤の経緯: 当初は別 OS Window、次に「メイン窓内の単一 `CanvasLayer` + メイン窓 per-pixel 透明化 + companion topmost」案を試したが、ウィンドウ起動ゲームの隙間にデスクトップが漏れる退行のため**上記 2 枚構成 (別窓 + 不透明 playing 背景) に戻した**。単一ウィンドウ案で要した companion `topmost` cmd・すりガラス用 `ScreenCapture.cs` / `frosted_image.gdshader` / `capture` cmd は撤去 (本 PR 内で追加→撤去、net zero)。
+- **背景ロードの非同期キャッシュ化**: カルーセルの背景画像をワーカースレッドでデコード + 上限付き LRU キャッシュ化し、スクロール時のメインスレッドブロック (フルHD 同期デコード) を解消。あわせて死んでいた背景描画の旧経路 (`GameInfoDisplay._update_background`) を削除。
+- **マルチモニタ対応**: ゲームが別モニタに開いても 2 枚構成が崩れないよう、(a) overlay をゲーム窓のいるモニタへ追従表示 + (b) watch 開始時にゲーム窓をランチャーのモニタへ寄せる (`Win32Windows.PlaceWindowCentered`)。本番=単一モニタでは無害。
+
+#### Bump 根拠 (v0.7.0 → v0.8.0)
+
+中断オーバーレイ (#30) + プレイ中メモリ削減アーキ (#214) の新機能追加のため SemVer pre-1.0 minor bump (`version.gd` MINOR 7→8)。#214 のオーバーレイ構成見直し + プレイ中軽量シーン化は #30 と同一 PR (feature/overlay-menu) 内の継続作業のため、AGENTS.md「1 PR 1 bump」原則に従い本 v0.8.0 entry に加筆 (新 version は起こさない)。
 
 ### [Launcher v0.7.0] - 2026-05-21
 

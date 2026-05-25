@@ -15,9 +15,20 @@ var return_scene: String = ""
 ## カルーセル画面に表示するセクション名
 var section_title: String = ""
 
+## プレイ中シーン (playing) からゲーム終了で game_selection へ復帰中か (#214)。
+## true の場合 game_selection は起動直後に running-view 静止状態を再現し、
+## switch_to_normal_view (起動モーションの逆再生) でカルーセルへ戻る。
+var returning_from_game: bool = false
+
+## 上記復帰が「中断メニューからの終了 (= 終了中画面を見せた)」由来か。
+## true なら running-view 再現も「ゲーム終了中…」で出して連続させる (false=自然終了は「プレイ中」)。
+var returning_from_quit: bool = false
+
 ## データをクリアする
 func clear() -> void:
 	filtered_games = []
 	initial_game_id = ""
 	return_scene = ""
 	section_title = ""
+	returning_from_game = false
+	returning_from_quit = false

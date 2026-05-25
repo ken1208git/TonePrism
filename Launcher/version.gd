@@ -11,7 +11,7 @@ class_name Version
 ## 形式変更時は SPEC §3.7.8 チェックリストに従って Manager 側 regex も同期更新すること。
 
 const MAJOR: int = 0
-const MINOR: int = 7
+const MINOR: int = 8
 const PATCH: int = 0
 
 static func get_version_string() -> String:
