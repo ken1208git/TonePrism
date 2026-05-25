@@ -89,7 +89,8 @@ func open() -> void:
 	# 2 枚構成 (#214): overlay は透明・always_on_top の別ウィンドウ。show_overlay でゲームの上へ
 	# 一瞬で出る (always_on_top の z-order、foreground-lock 不要)。背面の launcher 本体 (playing) は
 	# 不透明なまま据え置き = ウィンドウゲームの隙間を背景アートで埋めるのでデスクトップが透けない。
-	_overlay.show_overlay(_game_title, _game_thumb_path)
+	# マルチモニタ (部員の動作確認等): ゲーム窓のいるモニタへ overlay を出す (本番=単一モニタでは現状と同じ画面)。
+	_overlay.show_overlay(_game_title, _game_thumb_path, _resolve_overlay_screen())
 	# playing シーンに通知 (重複する自身のサムネを隠す)。
 	opened.emit()
 	# ゲームがフォーカスを保持したままだと overlay 窓が入力を取れないため、companion 経由で overlay 窓
@@ -100,6 +101,24 @@ func open() -> void:
 		if hwnd != 0:
 			_companion.focus_hwnd(hwnd)
 	print("[OverlayManager] 中断メニューを開いた")
+
+
+## overlay を出すべきモニタ (screen index) を返す。companion が報告したゲーム窓の中心を含むモニタ。
+## 取得できなければランチャーのいるモニタ (current_screen) にフォールバック (本番=単一モニタはここに一致)。
+func _resolve_overlay_screen() -> int:
+	var fallback: int = get_tree().root.current_screen
+	if _companion == null:
+		return fallback
+	var rect: Rect2i = _companion.get_game_window_rect()
+	if rect.size.x <= 0 or rect.size.y <= 0:
+		return fallback
+	var center := rect.position + rect.size / 2
+	for i in range(DisplayServer.get_screen_count()):
+		var pos := DisplayServer.screen_get_position(i)
+		var sz := DisplayServer.screen_get_size(i)
+		if center.x >= pos.x and center.x < pos.x + sz.x and center.y >= pos.y and center.y < pos.y + sz.y:
+			return i
+	return fallback
 
 
 func close() -> void:

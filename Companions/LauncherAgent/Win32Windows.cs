@@ -28,9 +28,13 @@ namespace TonePrism.LauncherAgent
 
         // ============================ probe ============================
 
-        /// <summary>rootPid + 全子孫の窓状態を 1 回判定する。</summary>
-        public static string Probe(int rootPid)
+        /// <summary>
+        /// rootPid + 全子孫の窓状態を 1 回判定する。あわせて代表窓 (前面があれば前面、無ければ最初の可視窓) の
+        /// 画面矩形を out で返す (マルチモニタで中断オーバーレイをゲーム窓のいるモニタに出すため)。窓が無ければ 0。
+        /// </summary>
+        public static string Probe(int rootPid, out int winX, out int winY, out int winW, out int winH)
         {
+            winX = winY = winW = winH = 0;
             HashSet<uint> tree = GetProcessTree((uint)rootPid);
             if (tree == null || tree.Count == 0)
             {
@@ -40,6 +44,7 @@ namespace TonePrism.LauncherAgent
             IntPtr foreground = GetForegroundWindow();
             bool hasVisible = false;
             bool isForeground = false;
+            IntPtr chosen = IntPtr.Zero; // 代表窓: 前面の対象窓があればそれ、無ければ最初の可視窓
 
             EnumWindows((hwnd, lparam) =>
             {
@@ -47,11 +52,16 @@ namespace TonePrism.LauncherAgent
                 GetWindowThreadProcessId(hwnd, out uint winPid);
                 if (!tree.Contains(winPid)) return true;
                 hasVisible = true;
-                if (hwnd == foreground) isForeground = true;
+                if (chosen == IntPtr.Zero) chosen = hwnd;
+                if (hwnd == foreground) { isForeground = true; chosen = hwnd; }
                 return true;
             }, IntPtr.Zero);
 
             if (!hasVisible) return NotVisible;
+            if (chosen != IntPtr.Zero && GetWindowRect(chosen, out RECT r))
+            {
+                winX = r.Left; winY = r.Top; winW = r.Right - r.Left; winH = r.Bottom - r.Top;
+            }
             return isForeground ? VisibleForeground : VisibleBackground;
         }
 

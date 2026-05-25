@@ -31,6 +31,7 @@ var _cmd_port: int = 0
 var _handshaked: bool = false
 var _exe_ok: bool = false
 var _window_state: int = WindowState.UNAVAILABLE
+var _game_window_rect: Rect2i = Rect2i()  # 代表ゲーム窓の画面矩形 (OS 仮想デスクトップ座標)。overlay のモニタ決定用。
 var _last_trigger_seq: int = 0
 
 
@@ -93,6 +94,10 @@ func _handle_event(txt: String) -> void:
 					print("[LauncherAgent] handshake 完了 cmd-port=%d" % _cmd_port)
 		"window":
 			_window_state = _map_state(String(data.get("state", "")))
+			var w := int(data.get("w", 0))
+			var h := int(data.get("h", 0))
+			if w > 0 and h > 0:
+				_game_window_rect = Rect2i(int(data.get("x", 0)), int(data.get("y", 0)), w, h)
 		"trigger":
 			var seq := int(data.get("seq", 0))
 			if seq > _last_trigger_seq:  # 連送/取りこぼしを seq で吸収
@@ -137,6 +142,12 @@ func is_expected() -> bool:
 ## 最新の窓状態 (WindowState)。
 func get_window_state() -> int:
 	return _window_state
+
+
+## 最新の代表ゲーム窓の画面矩形 (OS 仮想デスクトップ座標)。未取得なら size 0 の Rect2i。
+## マルチモニタで中断オーバーレイをゲーム窓のいるモニタに出すために使う。
+func get_game_window_rect() -> Rect2i:
+	return _game_window_rect
 
 
 ## 指定ゲーム PID の窓状態監視 + HOME/Guide 検知を開始。

@@ -435,7 +435,7 @@ func _activate(id: String) -> void:
 
 
 ## 表示: 走行中ゲームのタイトル/サムネを反映し、画面全面を覆って最前面化＋フォーカス取得。
-func show_overlay(game_title: String = "", thumb_path: String = "") -> void:
+func show_overlay(game_title: String = "", thumb_path: String = "", screen: int = -1) -> void:
 	if _title_label:
 		_title_label.text = game_title
 	_set_thumbnail(thumb_path)
@@ -450,8 +450,9 @@ func show_overlay(game_title: String = "", thumb_path: String = "") -> void:
 		_bg.visible = false
 		_bg.modulate.a = 0.0
 
-	# ランチャー本体 (playing) のある画面に合わせて、この透明窓を全面に広げる。
-	var scr := get_tree().root.current_screen
+	# ゲーム窓のいるモニタ (OverlayManager が解決して渡す) に合わせて、この透明窓を全面に広げる。
+	# screen 未指定 (-1) はランチャーのいる画面にフォールバック (単体テスト等)。
+	var scr := screen if screen >= 0 else get_tree().root.current_screen
 	position = DisplayServer.screen_get_position(scr)
 	size = DisplayServer.screen_get_size(scr)
 	visible = true

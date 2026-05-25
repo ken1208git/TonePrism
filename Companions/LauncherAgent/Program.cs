@@ -26,7 +26,7 @@ namespace TonePrism.LauncherAgent
     ///   quit                 : 終了
     ///
     /// イベント (companion → Launcher, 1 行 JSON):
-    ///   {"type":"window","state":"...","at_unix_ms":..}    窓状態変化 (#101/#216 駆動) + 1秒 keepalive
+    ///   {"type":"window","state":"...","x":..,"y":..,"w":..,"h":..,"at_unix_ms":..}  窓状態変化 (#101/#216 駆動) + 1秒 keepalive。x/y/w/h=代表ゲーム窓の画面矩形 (overlay のモニタ決定用)
     ///   {"type":"trigger","seq":N,"event":"home|guide",..} メニュー開閉トリガ (保険で連送)
     ///   {"type":"log","level":"..","msg":"..","at_unix_ms":..} WARN/ERROR/主要イベントの転送
     /// </summary>
@@ -175,13 +175,13 @@ namespace TonePrism.LauncherAgent
                         if (TickElapsed(lastProbe, now, ProbeIntervalMs))
                         {
                             lastProbe = now;
-                            string state = Win32Windows.Probe(watchPid);
+                            string state = Win32Windows.Probe(watchPid, out int wx, out int wy, out int ww, out int wh);
                             bool changed = state != lastState;
                             if (changed || TickElapsed(lastKeepalive, now, WindowKeepaliveMs))
                             {
                                 lastState = state;
                                 lastKeepalive = now;
-                                SendWindow(state);
+                                SendWindow(state, wx, wy, ww, wh);
                             }
                         }
                     }
@@ -214,9 +214,10 @@ namespace TonePrism.LauncherAgent
             Send("{\"type\":\"hello\",\"cmd_port\":" + cmdPort + ",\"at_unix_ms\":" + UnixMs() + "}");
         }
 
-        private static void SendWindow(string state)
+        private static void SendWindow(string state, int x, int y, int w, int h)
         {
-            Send("{\"type\":\"window\",\"state\":\"" + state + "\",\"at_unix_ms\":" + UnixMs() + "}");
+            // x/y/w/h = 代表ゲーム窓の画面矩形 (マルチモニタで overlay をゲーム窓のモニタへ出すため。窓無しは 0)。
+            Send("{\"type\":\"window\",\"state\":\"" + state + "\",\"x\":" + x + ",\"y\":" + y + ",\"w\":" + w + ",\"h\":" + h + ",\"at_unix_ms\":" + UnixMs() + "}");
         }
 
         private static void SendTrigger(string source)
