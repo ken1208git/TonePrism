@@ -346,9 +346,9 @@ func _exit_tree():
 		_bg_load_thread.wait_to_finish()
 	if DialogManager and DialogManager.has_method("close_current_dialog"):
 		DialogManager.close_current_dialog()
-	# 注: ここで GameSession.shutdown()(unwatch) は呼ばない。プレイ中シーンへの切替で game_selection は
-	# 破棄されるが、ゲームは実行中で監視 (HOME/Guide 検知) を継続する必要があるため。アプリ終了時の
-	# companion 停止は LauncherAgent の PREDELETE が担う。
+	# 注: ここで companion の監視停止 (unwatch) はしない。プレイ中シーンへの切替で game_selection は
+	# 破棄されるが、ゲームは実行中で監視 (HOME/Guide 検知) を継続する必要があるため。監視停止はゲーム終了時
+	# (GameSession._on_exited の unwatch)、アプリ終了時の companion 停止は LauncherAgent の PREDELETE が担う。
 
 # --- サムネイル非同期読み込み ---
 

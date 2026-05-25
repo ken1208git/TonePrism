@@ -55,6 +55,9 @@ func set_current_game(game: GameInfo) -> void:
 	# ゲーム終了 (プロセス消失) で「終了中」overlay を隠す handoff 用。重複接続を防ぐ。
 	if not GameSession.game_exited.is_connected(_on_game_session_exited):
 		GameSession.game_exited.connect(_on_game_session_exited)
+	# 終了開始の失敗 / 中断 (taskkill 起動失敗 or watchdog タイムアウト) で終了中 morph を巻き戻す。
+	if not GameSession.game_quit_aborted.is_connected(_on_quit_aborted):
+		GameSession.game_quit_aborted.connect(_on_quit_aborted)
 
 
 func _on_trigger(_source: String) -> void:
@@ -151,15 +154,21 @@ func _on_quit() -> void:
 	if not _open or _showing_quitting:
 		return
 	_enter_quitting()
-	if not GameSession.quit():
-		_abort_quitting()  # taskkill 起動失敗: ゲームが死なず game_exited が来ないので morph を巻き戻す
+	# 失敗時 (taskkill 起動失敗 = 同期 / kill できず固着 = watchdog) は game_quit_aborted で _on_quit_aborted が巻き戻す。
+	GameSession.quit()
 
 
 func _on_exit() -> void:
 	if not _open or _showing_quitting:
 		return
 	_enter_quitting()
-	if not GameSession.request_exit_to_screensaver():
+	GameSession.request_exit_to_screensaver()
+
+
+## 終了開始の失敗 / 中断時の復帰 (GameSession.game_quit_aborted)。終了中 morph を巻き戻してメニューへ戻す。
+## 同期失敗 (spawn -1) は quit() 中に即発火、kill 失敗の固着は GameSession の watchdog が後から発火する。
+func _on_quit_aborted() -> void:
+	if _showing_quitting:
 		_abort_quitting()
 
 

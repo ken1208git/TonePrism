@@ -19,6 +19,9 @@ const PLAYING_FALLBACK_TIMEOUT_MS: int = 60000
 const ANOMALY_DEBOUNCE_MS: int = 2000  # 前面化異常を発報するまでの継続時間 (一瞬の Alt-Tab 除外)
 # Companion ハンドシェイク待ちの上限 (起動直後にゲームを起動した race 対策)。超過したら probe 無しで継続。
 const PROBE_HANDSHAKE_TIMEOUT_MS: int = 5000
+# quit() で taskkill 発行後、これだけ経ってもプロセスが消えない場合は終了失敗とみなして固着を解く
+# (taskkill は起動できたが権限/昇格/ハングで kill できずゲームが生き残る稀ケース。固着すると #216 抑止が続く)。
+const QUIT_FALLBACK_TIMEOUT_MS: int = 10000
 
 var running_pid: int = -1
 var current_game: GameInfo = null
@@ -39,6 +42,7 @@ var _exit_to_screensaver: bool = false
 # quit/exit 実行中 (taskkill 発行〜プロセス消失まで)。この過渡状態はランチャーが前面でゲームが
 # まだ生きており #216 前面化異常を誤検知するため、検知を抑止する。
 var _quitting: bool = false
+var _quit_started_ms: int = 0  # taskkill 発行時刻 (quit watchdog 用)。プロセスが消えない固着の検知に使う
 
 
 func _ready() -> void:
@@ -131,6 +135,15 @@ func _process(_delta: float) -> void:
 		_on_exited()
 		return
 
+	# quit watchdog: taskkill は起動できたが実際に kill できず (権限/昇格/ハング) ゲームが生き残ると、
+	# game_exited が永久に来ず _quitting のまま固着 → #216 検知も無期限抑止される。一定時間で諦めて
+	# 固着を解き (anomaly 再有効化)、game_quit_aborted で overlay/playing の「終了中」表示も巻き戻す。
+	if _quitting and Time.get_ticks_msec() - _quit_started_ms >= QUIT_FALLBACK_TIMEOUT_MS:
+		_quitting = false
+		_exit_to_screensaver = false  # 退出失敗扱い (次の遷移判定で誤ってスクリーンセーバーへ行かない)
+		push_error("[GameSession] taskkill 後 %dms 経ってもプロセスが終了せず (PID %d)、終了処理を中断" % [QUIT_FALLBACK_TIMEOUT_MS, running_pid])
+		game_quit_aborted.emit()
+
 	# Companion ハンドシェイク待ち (起動直後にゲームを起動した race 対策): 完了で watch 開始、
 	# タイムアウトで probe 無しの即 PLAYING にフォールバック。解決まで以降の probe 処理はスキップ。
 	if _probe_pending:
@@ -215,13 +228,8 @@ func quit() -> bool:
 		# game_quitting で現シーン (playing) が「終了中」表示にしたので、それを戻すよう通知する。
 		game_quit_aborted.emit()
 		return false
+	_quit_started_ms = Time.get_ticks_msec()  # quit watchdog 起点 (これ以降プロセス消失を待つ)
 	return true
-
-
-## ランチャー終了時などの後始末 (監視停止)。Companion 自体の kill は autoload が管理。
-func shutdown() -> void:
-	if _probe_available:
-		LauncherAgent.unwatch()
 
 
 func _on_exited() -> void:
