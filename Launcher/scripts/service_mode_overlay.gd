@@ -37,6 +37,7 @@ const ITEMS := [
 ]
 
 var _root: Control = null
+var _focus_sb: StyleBoxFlat = null   # フォーカス枠 (ボタン内側に描く=ScrollContainer のクリップで見切れない)
 var _detail_title: Label = null
 var _detail_content: VBoxContainer = null
 var _footer: Label = null
@@ -101,6 +102,15 @@ func _input(event: InputEvent) -> void:
 
 
 func _build_ui() -> void:
+	# フォーカス枠: ボタン矩形の内側にアクセント色のボーダーを描く。デフォルトの focus 枠は矩形の外側に
+	# はみ出して描かれ、全幅ボタン + ScrollContainer のクリップで左右が見切れるため自前に差し替える。
+	_focus_sb = StyleBoxFlat.new()
+	_focus_sb.draw_center = false
+	_focus_sb.bg_color = Color(0, 0, 0, 0)
+	_focus_sb.set_border_width_all(2)
+	_focus_sb.border_color = C_ACCENT
+	_focus_sb.set_corner_radius_all(4)
+
 	_root = Control.new()
 	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_root.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -157,6 +167,7 @@ func _build_ui() -> void:
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.custom_minimum_size = Vector2(0, 44)
 		btn.add_theme_font_size_override("font_size", 18)
+		btn.add_theme_stylebox_override("focus", _focus_sb)  # 内側ボーダーの focus 枠 (見切れ防止)
 		btn.focus_entered.connect(_select.bind(i))   # ↑↓ で移動すると詳細がライブ更新
 		btn.pressed.connect(_on_menu_pressed.bind(i)) # A/Enter/クリックで詳細ペインへ
 		menu_vbox.add_child(btn)
@@ -416,6 +427,7 @@ func _add_button(text: String, on_pressed: Callable) -> Button:
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.focus_mode = Control.FOCUS_ALL
 	b.custom_minimum_size = Vector2(0, 40)
+	b.add_theme_stylebox_override("focus", _focus_sb)  # 内側ボーダーの focus 枠 (見切れ防止)
 	b.pressed.connect(on_pressed)
 	_detail_content.add_child(b)
 	return b
