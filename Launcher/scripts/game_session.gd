@@ -298,7 +298,9 @@ func _launcher_is_foreground() -> bool:
 	return w != null and w.has_focus()
 
 
-## プレイ中の前面化異常を検知する。異常 = ランチャー前面 かつ ゲームが前面でない、がデバウンス継続。
+## プレイ中の前面化異常を検知し、確定後はまず強制前面化で自己修復を試み、リトライを尽くしても復旧
+## しなければスタッフ警告へエスカレーションする (#216 検知 + #219 自己修復)。
+## 異常 = ランチャー前面 かつ ゲームが前面でない、がデバウンス継続。
 func _update_anomaly_detection(launcher_foreground: bool, res: int) -> void:
 	var game_not_front := (res == LauncherAgent.WindowState.NOT_VISIBLE
 		or res == LauncherAgent.WindowState.VISIBLE_BACKGROUND)
@@ -318,11 +320,14 @@ func _update_anomaly_detection(launcher_foreground: bool, res: int) -> void:
 				if _last_recovery_ms == 0 or now - _last_recovery_ms >= ANOMALY_RECOVERY_INTERVAL_MS:
 					_recovery_attempts += 1
 					_last_recovery_ms = now
-					if _probe_available:
-						LauncherAgent.focus(running_pid)
+					# 呼び出し元 (_process) が _probe_available 真を保証済み。
+					LauncherAgent.focus(running_pid)
+					# print 使用は意図的: autoload `Logger` は Godot 組み込み `Logger` クラスと名前衝突し
+					# GDScript から `Logger.info()` を呼べない (#85 で明示 API 移行予定)。print は log tail で INFO 分類。
 					print("[GameSession] 前面化異常 → ゲーム窓を強制前面化で自己修復を試行 (%d/%d)" % [_recovery_attempts, ANOMALY_RECOVERY_MAX_ATTEMPTS])
 				# まだ警告は出さない (次 probe で復旧したか確認。復旧すれば else 分岐でリセット)。
-			else:
+			elif now - _last_recovery_ms >= ANOMALY_RECOVERY_INTERVAL_MS:
+				# 全リトライ後も INTERVAL 経過して復旧せず (最終試行にも検証猶予を与えてから警告)。
 				if not _anomaly_logged:
 					_anomaly_logged = true
 					push_warning("[GameSession] ランチャー前面化異常を検出、自己修復に失敗 (PID %d 生存中、要スタッフ対応)" % running_pid)
