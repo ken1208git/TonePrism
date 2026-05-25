@@ -130,7 +130,7 @@ func _process(_delta: float) -> void:
 		_on_exited()
 		return
 
-	# Companion ハンドシェイク待ち (起動直後 race 対策, Codex P1 / review #5): 完了で watch 開始、
+	# Companion ハンドシェイク待ち (起動直後にゲームを起動した race 対策): 完了で watch 開始、
 	# タイムアウトで probe 無しの即 PLAYING にフォールバック。解決まで以降の probe 処理はスキップ。
 	if _probe_pending:
 		_resolve_pending_probe()
@@ -177,9 +177,13 @@ func resume() -> void:
 
 
 ## 退出メニュー: 終了後スクリーンセーバーへ。フラグを立てて quit (game_exited 時に現シーンが判定)。
-func request_exit_to_screensaver() -> void:
+## 戻り値=終了処理を開始できたか (taskkill 起動失敗時は false)。失敗時はフラグを戻して誤遷移を防ぐ。
+func request_exit_to_screensaver() -> bool:
 	_exit_to_screensaver = true
-	quit()
+	if quit():
+		return true
+	_exit_to_screensaver = false  # 失敗時は戻す (次の quit で誤ってスクリーンセーバーへ行かないように)
+	return false
 
 
 ## 終了後にスクリーンセーバーへ遷移すべきか (現シーンが game_exited で参照)。
@@ -188,9 +192,11 @@ func should_exit_to_screensaver() -> bool:
 
 
 ## ゲームプロセスツリーを終了する。kill 後、_process がプロセス消失を検出 → game_exited 発火。
-func quit() -> void:
+## 戻り値=taskkill を起動できたか。false の場合ゲームは生存し game_exited は来ないため、呼び出し側
+## (OverlayManager) は終了中 morph を巻き戻して操作可能状態へ復帰させること (overlay 固着防止)。
+func quit() -> bool:
 	if running_pid == -1:
-		return
+		return false
 	_quitting = true  # taskkill 完了 (プロセス消失) までは #216 異常検知を止める (意図的終了の過渡状態)
 	# 現シーン (playing) に「終了中」表示を要求 (handoff の下地。前面化はしない — 中断メニュー窓が前面で
 	# 終了中を出し、game_exited で overlay を隠してメイン窓へシームレスに引き継ぐ #214)。
@@ -200,10 +206,12 @@ func quit() -> void:
 	var tk_pid := OS.create_process("taskkill", ["/PID", str(running_pid), "/T", "/F"])
 	if tk_pid == -1:
 		# taskkill 自体を起動できない (PATH/権限等)。このままだとゲームが死なず _quitting のまま固まり
-		# #216 前面化異常検知も抑止され続ける。抑止を解除してスタッフに異常を気づかせる
-		# (ゲームは生存のままだが、少なくとも「ランチャー前面化異常」エラーが出る縮退動作にする)。
+		# #216 前面化異常検知も抑止され続ける。抑止を解除し (スタッフに異常を気づかせる) false を返して
+		# 呼び出し側に morph 巻き戻しを委ねる (game_quitting は発火済だが、復帰時に再表示で上書きされる)。
 		_quitting = false
 		push_error("[GameSession] taskkill 起動失敗、ゲームを終了できませんでした (PID %d)" % running_pid)
+		return false
+	return true
 
 
 ## ランチャー終了時などの後始末 (監視停止)。Companion 自体の kill は autoload が管理。

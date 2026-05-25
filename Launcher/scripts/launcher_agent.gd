@@ -197,7 +197,7 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE:
 		# 後始末は graceful な quit コマンド送信のみ。OS.kill での強制終了はしない:
 		# _proc_pid は起動時に捕捉した値で、Companion が先に死んで OS に PID が再利用されると
-		# is_process_running が無関係なプロセスを true と判定し、それを kill してしまう (P1)。
+		# is_process_running が無関係なプロセスを true と判定し、それを kill してしまうため。
 		# Companion は --parent-pid で Launcher 消失を 1 秒以内に検知し self-exit するため、
 		# quit が取りこぼされても確実に終了する (二重の後始末経路)。
 		_send("quit")

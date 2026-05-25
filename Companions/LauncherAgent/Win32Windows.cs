@@ -122,6 +122,11 @@ namespace TonePrism.LauncherAgent
             if (!GetWindowRect(hwnd, out RECT r)) return false;
             int winW = r.Right - r.Left;
             int winH = r.Bottom - r.Top;
+            // 窓の中心が既に対象モニタ内にあるなら動かさない。これにより単一モニタ (= 必ず対象内) や
+            // 既に正しいモニタに開いた窓を無駄に動かさず、別モニタに開いた時だけ寄せる (windowed 含め真の no-op)。
+            int cx = r.Left + winW / 2;
+            int cy = r.Top + winH / 2;
+            if (cx >= x && cx < x + w && cy >= y && cy < y + h) return true;
             int newX = x + (w - winW) / 2;
             int newY = y + (h - winH) / 2;
             // 移動のみ (サイズ/z-order/アクティブ化は変えない = ゲーム描画やフォーカスと喧嘩しない)。

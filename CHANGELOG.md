@@ -1256,7 +1256,7 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 #### Added (#30 — ゲーム実行中の中断オーバーレイメニュー)
 
-ゲーム実行中に **HOME キー / コントローラ Guide ボタン**で開く透明・最前面の中断メニューを実装。メニューは「**▶ ゲームを再開** / **🏠 ゲームを終了して選択画面に戻る**」(MVP)。spike #218 で「Godot 透明オーバーレイ (同一プロセス) でゲームの上にメニューを描き、ゲームは裏で描画継続」が実機 (Only Up) で成立することを確認のうえ採用 (WPF 別窓案は不採用)。
+ゲーム実行中に **HOME キー / コントローラ Guide ボタン**で開く透明・最前面の中断メニューを実装。メニュー項目は「**続ける** / **別のゲームをあそぶ** / **退出する**」の 3 つ (spike #218 当時は「再開 / 選択画面に戻る」の 2 項目 MVP、その後 #214 の作り替えで 3 項目に拡張)。spike #218 で「Godot 透明オーバーレイ (同一プロセス) でゲームの上にメニューを描き、ゲームは裏で描画継続」が実機 (Only Up) で成立することを確認のうえ採用 (WPF 別窓案は不採用)。
 
 - **描画**: `scenes/overlay_menu.tscn` + `scripts/overlay_menu.gd` — 透明・最前面・borderless の実 OS `Window` (`project.godot` に `per_pixel_transparency/allowed=true` + `subwindows/embed_subwindows=false`)。中央に減光パネル + メニュー、show 時に最前面再アサート、初期フォーカスは「再開」(誤決定が安全側)、`ui_cancel` (Esc / コントローラ B) で再開。
 - **トリガ**: 常駐 `LauncherAgent` (sensor) が watch 中のみ HOME/Guide をグローバル検知 → UDP `trigger` → `OverlayManager` (autoload) が開閉トグル。Companion sensor は watch 中=ゲーム実行中のみ発火するため、トリガはゲーム中限定。同時押しコンボ (L3+R3/START+BACK) は不採用 (#30 議論)。

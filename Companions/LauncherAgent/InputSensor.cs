@@ -30,6 +30,11 @@ namespace TonePrism.LauncherAgent
         private bool _homeDown;
         private bool _guidePrev;
         private XInputGetStateExDelegate _xinput;
+        // 接続済みスロット (bit i = スロット i) を覚え、未接続スロットの毎ループ poll を避ける。
+        // 未接続コントローラを毎フレーム XInputGetStateEx すると polling penalty があるため (Microsoft 文書)。
+        private int _xinputConnectedMask;
+        private int _lastFullScanTick;
+        private const int FullScanIntervalMs = 1000; // 未接続スロットの再スキャン間隔 (= 接続検知の遅延上限)
 
         public bool Active { get; private set; }
 
@@ -49,6 +54,8 @@ namespace TonePrism.LauncherAgent
             ResolveXInput();
             _homeDown = false;
             _guidePrev = false;
+            _xinputConnectedMask = 0;
+            _lastFullScanTick = unchecked(Environment.TickCount - FullScanIntervalMs); // 初回 poll で全スロットを走査
             Active = true;
             Logger.Milestone("[sensor] 開始 (HOME / Guide 検知)");
         }
@@ -65,13 +72,23 @@ namespace TonePrism.LauncherAgent
         public void PollGamepad()
         {
             if (!Active || _xinput == null) return;
+            int now = Environment.TickCount;
+            bool fullScan = unchecked(now - _lastFullScanTick) >= FullScanIntervalMs;
+            if (fullScan) _lastFullScanTick = now;
             bool guideNow = false;
             for (int i = 0; i < 4; i++)
             {
-                if (_xinput(i, out XINPUT_STATE st) == 0 && (st.Gamepad.wButtons & XINPUT_GAMEPAD_GUIDE) != 0)
+                bool known = (_xinputConnectedMask & (1 << i)) != 0;
+                // 接続済みスロットは毎ループ (Guide を即応検知)、未接続スロットは full scan 時のみ叩く。
+                if (!known && !fullScan) continue;
+                if (_xinput(i, out XINPUT_STATE st) == 0)
                 {
-                    guideNow = true;
-                    break;
+                    _xinputConnectedMask |= (1 << i);
+                    if ((st.Gamepad.wButtons & XINPUT_GAMEPAD_GUIDE) != 0) guideNow = true;
+                }
+                else
+                {
+                    _xinputConnectedMask &= ~(1 << i); // 切断を反映 (次は full scan 時のみ再確認)
                 }
             }
             if (guideNow && !_guidePrev) Fire("guide");

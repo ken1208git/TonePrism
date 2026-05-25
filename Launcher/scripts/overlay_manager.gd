@@ -150,14 +150,16 @@ func _on_quit() -> void:
 	if not _open or _showing_quitting:
 		return
 	_enter_quitting()
-	GameSession.quit()
+	if not GameSession.quit():
+		_abort_quitting()  # taskkill 起動失敗: ゲームが死なず game_exited が来ないので morph を巻き戻す
 
 
 func _on_exit() -> void:
 	if not _open or _showing_quitting:
 		return
 	_enter_quitting()
-	GameSession.request_exit_to_screensaver()
+	if not GameSession.request_exit_to_screensaver():
+		_abort_quitting()
 
 
 ## 「終了中」morph 開始の共通処理。
@@ -166,6 +168,16 @@ func _enter_quitting() -> void:
 	closed.emit()  # playing の隠していたサムネを戻す (終了中の下地 + handoff のアイコン連続性)
 	if _overlay:
 		_overlay.show_quitting(_game_title, _game_bg_path)
+
+
+## 終了処理が開始できなかった (taskkill 起動失敗等でゲームが生存) 場合の復帰。終了中 morph を巻き戻して
+## メニューを再表示し、_showing_quitting による HOME/Guide 無視で操作不能になる固着を防ぐ (キオスク復帰性)。
+func _abort_quitting() -> void:
+	_showing_quitting = false
+	if _overlay:
+		_overlay.show_overlay(_game_title, _game_thumb_path, _resolve_overlay_screen())
+		opened.emit()  # 再びメニューの自前アイコンを出すので playing 側サムネを隠す
+	push_warning("[OverlayManager] ゲーム終了に失敗、中断メニューに復帰しました")
 
 
 ## ゲーム消失で「終了中」overlay を即時非表示にし、裏のメイン窓 (同じ終了中) へ handoff する。
