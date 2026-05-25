@@ -155,6 +155,7 @@ func get_game_window_rect() -> Rect2i:
 ## 別モニタに開いてもランチャーと同じモニタに揃え、2 枚構成の隙間漏れを防ぐ)。本番=単一モニタでは無害。
 func watch(pid: int, place_rect: Rect2i = Rect2i()) -> void:
 	_window_state = WindowState.UNAVAILABLE  # 次の window イベントまで未確定
+	_game_window_rect = Rect2i()  # 前セッションの矩形を持ち越さない (古いモニタに overlay が出るのを防ぐ)
 	if place_rect.size.x > 0 and place_rect.size.y > 0:
 		_send("watch %d %d %d %d %d" % [pid, place_rect.position.x, place_rect.position.y, place_rect.size.x, place_rect.size.y])
 	else:
@@ -194,6 +195,9 @@ func _get_exe_path() -> String:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE:
+		# 後始末は graceful な quit コマンド送信のみ。OS.kill での強制終了はしない:
+		# _proc_pid は起動時に捕捉した値で、Companion が先に死んで OS に PID が再利用されると
+		# is_process_running が無関係なプロセスを true と判定し、それを kill してしまう (P1)。
+		# Companion は --parent-pid で Launcher 消失を 1 秒以内に検知し self-exit するため、
+		# quit が取りこぼされても確実に終了する (二重の後始末経路)。
 		_send("quit")
-		if _proc_pid != -1 and OS.is_process_running(_proc_pid):
-			OS.kill(_proc_pid)

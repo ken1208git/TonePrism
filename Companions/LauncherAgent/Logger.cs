@@ -6,7 +6,7 @@ namespace TonePrism.LauncherAgent
 {
     /// <summary>
     /// LauncherAgent 専用のファイルロガー (Companions/Updater/Logger.cs を簡略移植)。
-    /// - 出力先: &lt;logsRoot&gt;/launchercompanion/launchercompanion_&lt;PC&gt;_&lt;時刻&gt;.log (UTF-8 no BOM)
+    /// - 出力先: &lt;logsRoot&gt;/launcheragent/launcheragent_&lt;PC&gt;_&lt;時刻&gt;.log (UTF-8 no BOM)
     /// - 1 起動 = 1 ファイル / 30 日 retention / lock で thread-safe / **自身の例外は握り潰し** (再帰ハング防止)
     /// - WARN / ERROR / Milestone は <see cref="Forwarder"/> 経由で Launcher に転送される
     ///   (Launcher 側が自分のログに [LauncherAgent] 付きで記録 → Manager の Launcher タブに出る)。
@@ -26,14 +26,14 @@ namespace TonePrism.LauncherAgent
             try
             {
                 string dir = string.IsNullOrEmpty(logsRoot)
-                    ? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs", "launchercompanion")
-                    : Path.Combine(logsRoot, "launchercompanion");
+                    ? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs", "launcheragent")
+                    : Path.Combine(logsRoot, "launcheragent");
                 Directory.CreateDirectory(dir);
                 CleanupOld(dir);
 
                 string pc = SafePcName();
                 string stamp = DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
-                string path = Path.Combine(dir, "launchercompanion_" + pc + "_" + stamp + ".log");
+                string path = Path.Combine(dir, "launcheragent_" + pc + "_" + stamp + ".log");
                 _writer = new StreamWriter(path, true, new UTF8Encoding(false)) { AutoFlush = true };
             }
             catch
@@ -76,7 +76,7 @@ namespace TonePrism.LauncherAgent
             try
             {
                 DateTime cutoff = DateTime.Now.AddDays(-30);
-                foreach (string f in Directory.GetFiles(dir, "launchercompanion_*.log"))
+                foreach (string f in Directory.GetFiles(dir, "launcheragent_*.log"))
                 {
                     try { if (File.GetLastWriteTime(f) < cutoff) File.Delete(f); } catch { }
                 }

@@ -197,7 +197,13 @@ func quit() -> void:
 	game_quitting.emit()
 	print("[GameSession] ゲーム終了 (PID %d ツリーを taskkill)" % running_pid)
 	# cmd.exe 経由起動のため running_pid は cmd。/T でツリー (game.exe 含む) ごと終了。
-	OS.create_process("taskkill", ["/PID", str(running_pid), "/T", "/F"])
+	var tk_pid := OS.create_process("taskkill", ["/PID", str(running_pid), "/T", "/F"])
+	if tk_pid == -1:
+		# taskkill 自体を起動できない (PATH/権限等)。このままだとゲームが死なず _quitting のまま固まり
+		# #216 前面化異常検知も抑止され続ける。抑止を解除してスタッフに異常を気づかせる
+		# (ゲームは生存のままだが、少なくとも「ランチャー前面化異常」エラーが出る縮退動作にする)。
+		_quitting = false
+		push_error("[GameSession] taskkill 起動失敗、ゲームを終了できませんでした (PID %d)" % running_pid)
 
 
 ## ランチャー終了時などの後始末 (監視停止)。Companion 自体の kill は autoload が管理。

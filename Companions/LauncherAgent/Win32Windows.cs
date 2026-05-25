@@ -108,18 +108,6 @@ namespace TonePrism.LauncherAgent
         }
 
         /// <summary>
-        /// 指定 HWND の最前面 (topmost) フラグを on/off する。SetForegroundWindow と違い z-order の
-        /// 変更なので foreground-lock の制約を受けず、背面の既存窓 (フルスクリーンの launcher 等) を
-        /// 即座にゲーム窓の上へ出せる。中断オーバーレイ表示時に launcher メイン窓へ使う。
-        /// </summary>
-        public static void SetTopmost(IntPtr hwnd, bool on)
-        {
-            if (hwnd == IntPtr.Zero) return;
-            IntPtr insertAfter = on ? HWND_TOPMOST : HWND_NOTOPMOST;
-            SetWindowPos(hwnd, insertAfter, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        }
-
-        /// <summary>
         /// rootPid ツリーのトップレベル可視窓を、指定矩形 (= ランチャーのモニタ) の中央へ移動する (リサイズはしない)。
         /// マルチモニタで、ゲームが別モニタに開いた場合にランチャーと同じモニタへ寄せ、2 枚構成
         /// (不透明背景 + ゲーム + overlay) を同一モニタに揃えるため (#30 B案)。排他的フルスクリーンは
@@ -255,11 +243,8 @@ namespace TonePrism.LauncherAgent
         private const uint GW_OWNER = 4;
         private const int SW_SHOW = 5;
 
-        // SetWindowPos: topmost 切替 (z-order のみ、移動/リサイズ/アクティブ化はしない)
-        private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
-        private static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
+        // SetWindowPos フラグ (PlaceWindowCentered の移動用: サイズ/z-order/アクティブ化は変えない)
         private const uint SWP_NOSIZE = 0x0001;
-        private const uint SWP_NOMOVE = 0x0002;
         private const uint SWP_NOZORDER = 0x0004;
         private const uint SWP_NOACTIVATE = 0x0010;
 

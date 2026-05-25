@@ -22,7 +22,6 @@ namespace TonePrism.LauncherAgent
     ///   unwatch              : 監視・検知を停止 (常駐は維持)
     ///   focus &lt;pid&gt;          : 指定 PID ツリーの窓を強制前面化
     ///   focus_hwnd &lt;hwnd&gt;    : 指定 HWND だけを強制前面化
-    ///   topmost &lt;hwnd&gt; &lt;0|1&gt; : 指定 HWND の topmost (最前面) フラグを on/off
     ///   quit                 : 終了
     ///
     /// イベント (companion → Launcher, 1 行 JSON):
@@ -157,17 +156,6 @@ namespace TonePrism.LauncherAgent
                                 {
                                     bool ok = Win32Windows.ForceForegroundHwnd(new IntPtr(hwndVal));
                                     Logger.Milestone("[main] focus_hwnd " + hwndVal + " ok=" + ok);
-                                }
-                                break;
-                            case "topmost":
-                                // 指定 HWND の topmost フラグを on/off。形式: topmost <hwnd> <0|1>。
-                                // プレイ中の中断オーバーレイ表示で、フルスクリーンの launcher メイン窓を即座に
-                                // ゲーム窓の上へ出す (SetForegroundWindow は foreground-lock で遅延/失敗しうるため z-order で確実に)。
-                                if (parts.Length >= 3 && long.TryParse(parts[1], out long tHwnd) && tHwnd != 0)
-                                {
-                                    bool on = parts[2] == "1";
-                                    Win32Windows.SetTopmost(new IntPtr(tHwnd), on);
-                                    Logger.Milestone("[main] topmost " + tHwnd + " on=" + on);
                                 }
                                 break;
                             case "quit":
