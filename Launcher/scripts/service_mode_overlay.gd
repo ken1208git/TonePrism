@@ -409,7 +409,11 @@ func _do_restart() -> void:
 # ---------------- UI ヘルパー ----------------
 
 func _clear_content() -> void:
+	# remove_child を即時に行ってから queue_free する。queue_free だけだとフレーム末まで子が get_children に
+	# 残り、直後の _first_focusable が「解放予定の古いボタン」を掴んでフォーカスを当て、フレーム末に消えて
+	# フォーカス喪失で詰む (キーボード操作で「アプリを終了」→確認画面のフォーカスが出ない不具合)。
 	for c in _detail_content.get_children():
+		_detail_content.remove_child(c)
 		c.queue_free()
 
 
