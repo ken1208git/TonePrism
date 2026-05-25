@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -149,10 +148,14 @@ namespace TonePrism.LauncherAgent
         /// <summary>rootPid + 全子孫 PID の集合を返す。rootPid が不在なら null。</summary>
         private static HashSet<uint> GetProcessTree(uint rootPid)
         {
+            // toolhelp スナップショットはプロセス churn 下で一時的に失敗しうる (ERROR_BAD_LENGTH 等)。
+            // 例外を投げると Program の main ループ catch に飛んで 50ms スリープ + その tick の窓状態が
+            // 送られず、PLAYING 確定 / 前面化異常検知が滞る。そこで失敗時は null を返し、Probe 側で
+            // 1 tick だけ not_found 扱い (= 害がなく次 probe で復帰) にする。
             IntPtr snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
             if (snapshot == INVALID_HANDLE_VALUE)
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateToolhelp32Snapshot failed");
+                return null;
             }
             try
             {
@@ -161,7 +164,7 @@ namespace TonePrism.LauncherAgent
                 var entry = new PROCESSENTRY32 { dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32)) };
                 if (!Process32First(snapshot, ref entry))
                 {
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Process32First failed");
+                    return null;
                 }
                 do
                 {

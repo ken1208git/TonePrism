@@ -100,6 +100,10 @@ func _ready():
 	_input_handler = InputHandler.new()
 
 	if not _load_games_from_db() or _games.is_empty():
+		# 復帰フラグが立っていても running-view を再現できないので、ここで消費して
+		# 次回の正常な entry に持ち越さない (持ち越すと終了中/プレイ中の morph を誤再生する)。
+		AppState.returning_from_game = false
+		AppState.returning_from_quit = false
 		return
 
 	# ダイアログ表示中もアイドルタイマーを動かすため
@@ -539,6 +543,10 @@ func _request_bg(index: int) -> void:
 	var game: GameInfo = _games[index]
 	var path: String = GamePathResolver.resolve_path(game.background_path, game.game_id)
 	if path.is_empty() or not FileAccess.file_exists(path):
+		# 設定されているのにファイルが無い場合はアセット欠落のミスコンフィグなので警告 (旧 GameInfoDisplay の
+		# 診断ログを復活)。_bg_cache に null を入れるので以降 _request_bg は早期 return し、1 ゲーム 1 回のみ。
+		if not path.is_empty():
+			push_warning("[GameSelection] 背景画像が見つかりません (game_id=%s): %s" % [game.game_id, path])
 		_bg_cache[index] = null
 		_touch_lru(index)
 		_evict_lru()
