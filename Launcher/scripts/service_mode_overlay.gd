@@ -38,6 +38,8 @@ const ITEMS := [
 
 var _root: Control = null
 var _focus_sb: StyleBoxFlat = null   # フォーカス枠 (ボタン内側に描く=ScrollContainer のクリップで見切れない)
+var _focus_off_sb: StyleBox = null   # マウス操作時の透明 focus (枠を出さない)
+var _using_mouse: bool = false       # マウス操作中はフォーカス枠を出さない (他画面と同じ分離)
 var _detail_title: Label = null
 var _detail_content: VBoxContainer = null
 var _footer: Label = null
@@ -60,6 +62,8 @@ func open_overlay() -> void:
 	visible = true
 	_in_detail = false
 	_exit_armed = false
+	_using_mouse = false  # Ctrl+Alt+F12 (キーボード) で開く → フォーカス枠あり
+	_apply_focus_style()
 	# 先頭項目を選択 + 詳細表示 + 左リストにフォーカス。
 	_selected_index = -1
 	if not _menu_buttons.is_empty():
@@ -84,17 +88,23 @@ func _input(event: InputEvent) -> void:
 			_hide_test()
 			get_viewport().set_input_as_handled()
 		return
-	# カーソル表示切替 (ランチャー他画面と同じ): マウス移動/クリックで出す・キー/パッドで隠す。
+	# 入力デバイス分離 (ランチャー他画面と同じ): マウス=カーソル表示+フォーカス枠なし /
+	# キー・パッド=カーソル非表示+フォーカス枠あり。
 	if event is InputEventMouseMotion and event.relative.length() > 1.0:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		_set_using_mouse(true)
 	elif event is InputEventMouseButton and event.pressed:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		_set_using_mouse(true)
 	elif event is InputEventKey and event.pressed and not event.echo:
 		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+		_set_using_mouse(false)
 	elif event is InputEventJoypadButton and event.pressed:
 		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+		_set_using_mouse(false)
 	elif event is InputEventJoypadMotion and absf(event.axis_value) > 0.5:
 		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+		_set_using_mouse(false)
 	# B / Esc: 詳細ペインなら左リストへ戻る、左リストならサービスモード終了。
 	if event.is_action_pressed("ui_cancel"):
 		get_viewport().set_input_as_handled()
@@ -121,6 +131,7 @@ func _build_ui() -> void:
 	_focus_sb.set_border_width_all(2)
 	_focus_sb.border_color = C_ACCENT
 	_focus_sb.set_corner_radius_all(4)
+	_focus_off_sb = StyleBoxEmpty.new()  # マウス時: 何も描かない focus 枠
 
 	_root = Control.new()
 	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -178,7 +189,7 @@ func _build_ui() -> void:
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.custom_minimum_size = Vector2(0, 44)
 		btn.add_theme_font_size_override("font_size", 18)
-		btn.add_theme_stylebox_override("focus", _focus_sb)  # 内側ボーダーの focus 枠 (見切れ防止)
+		_apply_focus_style_to(btn)  # キー/パッド時=枠 / マウス時=透明
 		btn.focus_entered.connect(_select.bind(i))   # ↑↓ で移動すると詳細がライブ更新
 		btn.pressed.connect(_on_menu_pressed.bind(i)) # A/Enter/クリックで詳細ペインへ
 		menu_vbox.add_child(btn)
@@ -419,6 +430,29 @@ func _do_restart() -> void:
 
 # ---------------- UI ヘルパー ----------------
 
+## 入力デバイス変更時にフォーカス枠の表示/非表示を全ボタンへ反映する。
+func _set_using_mouse(v: bool) -> void:
+	if _using_mouse == v:
+		return
+	_using_mouse = v
+	_apply_focus_style()
+
+
+## 現在の _using_mouse に応じて 1 ボタンの focus stylebox を切り替える。
+func _apply_focus_style_to(b: Button) -> void:
+	b.add_theme_stylebox_override("focus", _focus_off_sb if _using_mouse else _focus_sb)
+
+
+## メニュー + 詳細の全ボタンに現在のフォーカス枠スタイルを適用する。
+func _apply_focus_style() -> void:
+	for b in _menu_buttons:
+		_apply_focus_style_to(b)
+	if _detail_content:
+		for c in _detail_content.get_children():
+			if c is Button:
+				_apply_focus_style_to(c)
+
+
 func _clear_content() -> void:
 	# remove_child を即時に行ってから queue_free する。queue_free だけだとフレーム末まで子が get_children に
 	# 残り、直後の _first_focusable が「解放予定の古いボタン」を掴んでフォーカスを当て、フレーム末に消えて
@@ -442,7 +476,7 @@ func _add_button(text: String, on_pressed: Callable) -> Button:
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.focus_mode = Control.FOCUS_ALL
 	b.custom_minimum_size = Vector2(0, 40)
-	b.add_theme_stylebox_override("focus", _focus_sb)  # 内側ボーダーの focus 枠 (見切れ防止)
+	_apply_focus_style_to(b)  # キー/パッド時=枠 / マウス時=透明
 	b.pressed.connect(on_pressed)
 	_detail_content.add_child(b)
 	return b
