@@ -1265,10 +1265,10 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 #### Changed (#101 / #216 — probe を常駐 LauncherAgent へ移行)
 
-旧 `WindowProbe` (単発 `OS.execute` を専用スレッドで poll) を**常駐 `LauncherAgent` + 双方向 UDP** に置換。150ms ごとのプロセス spawn を廃し、Companion 内部ポーリングの `window` イベント push を `monitor_process` が消費する形に。起動中→プレイ中遷移 (#101) / 前面化異常検知 (#216) の判定ロジックは温存。
+旧 `WindowProbe` (単発 `OS.execute` を専用スレッドで poll) を**常駐 `LauncherAgent` + 双方向 UDP** に置換。150ms ごとのプロセス spawn を廃し、Companion 内部ポーリングの `window` イベント push を `GameSession._process` が消費する形に。起動中→プレイ中遷移 (#101) / 前面化異常検知 (#216) の判定ロジックは温存 (#214 で `GameSession` autoload へ移管)。
 
 - 新 autoload `scripts/launcher_agent.gd` (`LauncherAgent`): Companion を起動時に 1 個常駐起動、hello ハンドシェイクで cmd-port 取得、`window` 状態保持 + `WindowState` enum 提供、`trigger` を signal 発火、`log` を `[LauncherAgent]` 付きで launcher ログへ転送 (Manager の Launcher タブに出る、Manager 改修不要)、`watch`/`unwatch`/`focus` cmd 送信。
-- `scripts/game_launcher.gd`: probe スレッド/Mutex を撤去し `LauncherAgent.watch/unwatch/get_window_state` に置換。`scripts/window_probe_client.gd` 削除。
+- probe スレッド/Mutex を撤去し `LauncherAgent.watch/unwatch/get_window_state` に置換 (#214 で監視は `scripts/game_session.gd` (`GameSession`) に移管、`game_launcher.gd` は演出ヘルパーに縮小)。`scripts/window_probe_client.gd` 削除。
 - WindowProbe の撤去・Release.ps1 同期は `## Companions` の `### [LauncherAgent v0.1.0]` を参照。
 
 #### Changed (#214 — プレイ中軽量シーン化 + 中断オーバーレイの 2 枚構成 + 背景非同期ロード)

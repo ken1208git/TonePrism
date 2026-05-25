@@ -2,12 +2,8 @@ extends Node
 ## Autoload: 中断メニュー (overlay_menu) の表示制御 (#30)。
 ## LauncherAgent.trigger_received (HOME / Guide) で開閉トグルする。
 ## Companion の sensor は watch 中 (=ゲーム実行中) のみ発火するため、トリガはゲーム中限定。
-## メニューの選択結果 (再開 / 終了して選択画面へ) を signal で再発火し、game_selection 側が
-## game_launcher につなぐ (配線)。
-
-signal resume_requested()
-signal quit_to_selection_requested()
-signal exit_to_screensaver_requested()
+## メニューの選択結果 (再開 / 別のゲーム / 退出) は overlay_menu の signal を _on_resume / _on_quit /
+## _on_exit で受け、autoload GameSession を直接呼ぶ (シーンを跨いでも配線が切れないように)。
 
 ## 中断メニューの開閉。playing シーンが購読し、メニュー窓が自前アイコンを出す間は重複する
 ## 自身のサムネを隠す (二重表示・二重影の回避)。
