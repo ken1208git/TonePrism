@@ -119,6 +119,27 @@ namespace TonePrism.LauncherAgent
             SetWindowPos(hwnd, insertAfter, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
 
+        /// <summary>
+        /// rootPid ツリーのトップレベル可視窓を、指定矩形 (= ランチャーのモニタ) の中央へ移動する (リサイズはしない)。
+        /// マルチモニタで、ゲームが別モニタに開いた場合にランチャーと同じモニタへ寄せ、2 枚構成
+        /// (不透明背景 + ゲーム + overlay) を同一モニタに揃えるため (#30 B案)。排他的フルスクリーンは
+        /// そもそも overlay 非対応 + 移動不可なので対象外 (no-op になるだけで害はない)。
+        /// </summary>
+        public static bool PlaceWindowCentered(int rootPid, int x, int y, int w, int h)
+        {
+            HashSet<uint> tree = GetProcessTree((uint)rootPid);
+            if (tree == null) return false;
+            IntPtr hwnd = FindTopLevelWindow(tree);
+            if (hwnd == IntPtr.Zero) return false;
+            if (!GetWindowRect(hwnd, out RECT r)) return false;
+            int winW = r.Right - r.Left;
+            int winH = r.Bottom - r.Top;
+            int newX = x + (w - winW) / 2;
+            int newY = y + (h - winH) / 2;
+            // 移動のみ (サイズ/z-order/アクティブ化は変えない = ゲーム描画やフォーカスと喧嘩しない)。
+            return SetWindowPos(hwnd, IntPtr.Zero, newX, newY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+
         private static IntPtr FindTopLevelWindow(HashSet<uint> tree)
         {
             IntPtr found = IntPtr.Zero;
@@ -239,6 +260,7 @@ namespace TonePrism.LauncherAgent
         private static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
         private const uint SWP_NOSIZE = 0x0001;
         private const uint SWP_NOMOVE = 0x0002;
+        private const uint SWP_NOZORDER = 0x0004;
         private const uint SWP_NOACTIVATE = 0x0010;
 
         [StructLayout(LayoutKind.Sequential)]

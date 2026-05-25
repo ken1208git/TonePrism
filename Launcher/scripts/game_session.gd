@@ -104,7 +104,7 @@ func start_process() -> bool:
 	_reset_probe_state()
 	if LauncherAgent.is_available():
 		_probe_available = true
-		LauncherAgent.watch(pid)
+		LauncherAgent.watch(pid, _launcher_monitor_rect())
 		print("[GameSession] LauncherAgent 監視を開始 (PLAYING 遷移はウィンドウ出現で確定)")
 	elif LauncherAgent.is_expected():
 		# exe は起動済みだがハンドシェイク未完了 (起動直後にゲームを起動した race)。完了を _process で待ってから
@@ -231,7 +231,7 @@ func _resolve_pending_probe() -> void:
 	if LauncherAgent.is_available():
 		_probe_pending = false
 		_probe_available = true
-		LauncherAgent.watch(running_pid)
+		LauncherAgent.watch(running_pid, _launcher_monitor_rect())
 		print("[GameSession] LauncherAgent ハンドシェイク完了、監視を開始")
 	elif Time.get_ticks_msec() - _launch_time_ms >= PROBE_HANDSHAKE_TIMEOUT_MS:
 		_probe_pending = false
@@ -250,6 +250,13 @@ func _reset_probe_state() -> void:
 	_anomaly_logged = false
 	_probe_failure_logged = false
 	_launch_time_ms = Time.get_ticks_msec()
+
+
+## ランチャー本体 (メイン窓) が表示されているモニタの矩形 (OS 仮想デスクトップ座標)。
+## B案 (#30 マルチモニタ): ゲーム窓をこのモニタへ寄せて 2 枚構成を同一モニタに揃える。
+func _launcher_monitor_rect() -> Rect2i:
+	var scr: int = get_tree().root.current_screen
+	return Rect2i(DisplayServer.screen_get_position(scr), DisplayServer.screen_get_size(scr))
 
 
 ## ランチャー (メインウィンドウ) が前面か。前面でない (=ゲームが前面) が正常。

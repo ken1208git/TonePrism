@@ -84,6 +84,11 @@ namespace TonePrism.LauncherAgent
             sensor.OnTrigger = SendTrigger;
 
             int watchPid = 0;
+            // ゲーム窓をランチャーのモニタへ寄せる (#30 B案) ための状態。watch で受け取り、最初に可視になった
+            // 時に 1 回だけ適用する (毎フレーム動かすとゲームと喧嘩するため placed で 1 回限定)。
+            bool placeValid = false;
+            bool placed = false;
+            int placeX = 0, placeY = 0, placeW = 0, placeH = 0;
             string lastState = null;
             int lastProbe = Environment.TickCount;
             int lastKeepalive = Environment.TickCount;
@@ -116,12 +121,26 @@ namespace TonePrism.LauncherAgent
                                 {
                                     watchPid = wpid;
                                     lastState = null; // 次 probe で必ず emit
+                                    // 任意引数: watch <pid> <x> <y> <w> <h> = ランチャーのモニタ矩形。最初の可視窓を
+                                    // このモニタ中央へ寄せる (#30 マルチモニタ B案)。省略時は移動しない。
+                                    placeValid = false;
+                                    placed = false;
+                                    if (parts.Length >= 6
+                                        && int.TryParse(parts[2], out placeX) && int.TryParse(parts[3], out placeY)
+                                        && int.TryParse(parts[4], out placeW) && int.TryParse(parts[5], out placeH)
+                                        && placeW > 0 && placeH > 0)
+                                    {
+                                        placeValid = true;
+                                    }
                                     sensor.Start();
-                                    Logger.Milestone("[main] watch 開始 pid=" + watchPid);
+                                    Logger.Milestone("[main] watch 開始 pid=" + watchPid
+                                        + (placeValid ? " place=(" + placeX + "," + placeY + "," + placeW + "," + placeH + ")" : ""));
                                 }
                                 break;
                             case "unwatch":
                                 watchPid = 0;
+                                placeValid = false;
+                                placed = false;
                                 sensor.Stop();
                                 Logger.Milestone("[main] unwatch");
                                 break;
@@ -182,6 +201,15 @@ namespace TonePrism.LauncherAgent
                                 lastState = state;
                                 lastKeepalive = now;
                                 SendWindow(state, wx, wy, ww, wh);
+                            }
+
+                            // 最初に可視になったら 1 回だけ、ゲーム窓をランチャーのモニタ中央へ寄せる (#30 B案)。
+                            if (placeValid && !placed
+                                && (state == Win32Windows.VisibleForeground || state == Win32Windows.VisibleBackground))
+                            {
+                                placed = true; // 1 回限定 (毎フレーム動かしてゲームと喧嘩しないため)
+                                bool moved = Win32Windows.PlaceWindowCentered(watchPid, placeX, placeY, placeW, placeH);
+                                Logger.Milestone("[main] ゲーム窓をランチャーのモニタへ寄せた ok=" + moved);
                             }
                         }
                     }

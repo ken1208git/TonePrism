@@ -151,9 +151,14 @@ func get_game_window_rect() -> Rect2i:
 
 
 ## 指定ゲーム PID の窓状態監視 + HOME/Guide 検知を開始。
-func watch(pid: int) -> void:
+## place_rect 指定時は、最初の可視窓をそのモニタ中央へ 1 回だけ寄せる (#30 B案 マルチモニタ: ゲームが
+## 別モニタに開いてもランチャーと同じモニタに揃え、2 枚構成の隙間漏れを防ぐ)。本番=単一モニタでは無害。
+func watch(pid: int, place_rect: Rect2i = Rect2i()) -> void:
 	_window_state = WindowState.UNAVAILABLE  # 次の window イベントまで未確定
-	_send("watch %d" % pid)
+	if place_rect.size.x > 0 and place_rect.size.y > 0:
+		_send("watch %d %d %d %d %d" % [pid, place_rect.position.x, place_rect.position.y, place_rect.size.x, place_rect.size.y])
+	else:
+		_send("watch %d" % pid)
 
 
 ## 監視・検知を停止 (常駐は維持)。
