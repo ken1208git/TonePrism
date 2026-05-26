@@ -1153,6 +1153,13 @@ Release.bat の編集は **UTF-8 (no BOM) + CRLF** 厳守 (SPEC §3.7.9.1 参照
 
 SPEC §2.4 で定義される「主要 (Launcher / Manager / Monitor) を補助する独立 exe 群」の **runtime exe** の変更履歴。`Companions/Updater/TonePrism_Updater.exe` (Manager 自身の dir 置換用) + `LauncherAgent` (#30/#101/#216、probe/sensor/focus を統合した Launcher 補助の常駐エージェント、旧 WindowProbe を吸収) の deployment 配置と整合。本 section は **#160 で `## Updater (Companions/Updater)` から rename + 一般化**、`## Release Tooling` (= build / 配布スクリプト) と責務分離 (= 後者は build 時のみ動く scripts、本 section は runtime exe)。SPEC §2.4 / §3.7.4 参照。
 
+### [LauncherAgent v0.2.0] - 2026-05-26
+
+- **速度計測コマンド `speedtest <共有ファイルパス>` を追加** (サービスモードのネットワーク接続テスト用)。Godot 単体では正確に測れない 2 つを Companion で実施し `{"type":"speedtest","kind":"internet|server","ok":..,"text":".."}` イベントで返す:
+  - **インターネット速度**: `HttpWebRequest` を **4 本並列**で約 5 秒回し合計バイト/秒から Mbps を算出。単一接続だと TCP スロースタート＋接続準備時間で大幅に過小評価される (5MB DL で 50Mbps しか出ない等) ため、測定サイト同様の並列方式にして実速 (例 227Mbps) に近づける。
+  - **共有サーバー読み込み速度**: `CreateFile` に **`FILE_FLAG_NO_BUFFERING`** を指定して **OS ファイルキャッシュを回避**し実 MB/秒を測る (Godot の `FileAccess` はキャッシュ回避不可で、頻繁に読まれる DB は RAM キャッシュから読まれて実態と乖離するため)。`VirtualAlloc` でセクタ境界の 1MB バッファを確保し `ReadFile` でシーケンシャル読み。
+- 計測は専用バックグラウンドスレッドで実行し、メインループ (メッセージポンプ / 親プロセス監視) を止めない。
+
 ### [LauncherAgent v0.1.0] - 2026-05-23
 
 > **命名**: 当初 `LauncherCompanion` で実装したが、`Companions/` 配下の命名一貫性 (Updater と同じ機能/役割ベース、カテゴリ名 "Companion" のスタッター回避) のため **`LauncherAgent`** にリネーム (#214、folder/csproj/AssemblyName/namespace `TonePrism.LauncherAgent`/exe `TonePrism_LauncherAgent.exe`/Godot autoload/ログ prefix `[LauncherAgent]` を一括更新)。本 entry は初版 v0.1.0 を最終形で記載。

@@ -15,6 +15,7 @@ extends Node
 ## Manager のログ閲覧「Launcher タブ」に出る (Manager 改修不要)。
 
 signal trigger_received(source: String)  ## "home" | "guide"
+signal speedtest_result(kind: String, ok: bool, text: String)  ## "internet" | "server" の速度計測結果
 
 enum WindowState { UNAVAILABLE, NOT_FOUND, NOT_VISIBLE, VISIBLE_BACKGROUND, VISIBLE_FOREGROUND }
 
@@ -133,6 +134,8 @@ func _handle_event(txt: String) -> void:
 				trigger_received.emit(String(data.get("event", "")))
 		"log":
 			_forward_log(String(data.get("level", "info")), String(data.get("msg", "")))
+		"speedtest":
+			speedtest_result.emit(String(data.get("kind", "")), bool(data.get("ok", false)), String(data.get("text", "")))
 
 
 func _forward_log(level: String, msg: String) -> void:
@@ -204,6 +207,11 @@ func focus(pid: int) -> void:
 ## 指定 HWND の窓だけを強制前面化 (overlay 窓用、メインのランチャー窓を巻き込まない)。
 func focus_hwnd(hwnd: int) -> void:
 	_send("focus_hwnd %d" % hwnd)
+
+
+## 速度計測を要求する (結果は speedtest_result シグナルで返る)。share_path=共有上の計測対象ファイル。
+func request_speedtest(share_path: String) -> void:
+	_send("speedtest " + share_path)
 
 
 func _send(cmd: String) -> void:

@@ -57,12 +57,14 @@ const SCREEN_SEQ := [
 
 # ネットワーク接続テストの段階 (上から順に確認。最初に × が出た所が原因)。
 const NW_STAGES := [
-	["ip",       "1. ローカルIP取得"],
-	["gateway",  "2. ゲートウェイ疎通"],
-	["dns",      "3. DNS解決"],
-	["internet", "4. インターネット接続"],
-	["server",   "5. 共有サーバー接続"],
-	["monitor",  "6. Monitor接続"],
+	["ip",           "1. ローカルIP取得"],
+	["gateway",      "2. ゲートウェイ疎通"],
+	["dns",          "3. DNS解決"],
+	["internet",     "4. インターネット接続"],
+	["inet_speed",   "5. インターネット速度"],
+	["server",       "6. 共有サーバー接続"],
+	["server_speed", "7. 共有サーバー読み込み速度"],
+	["monitor",      "8. Monitor接続"],
 ]
 
 var _root: Control = null
@@ -147,6 +149,7 @@ var _nw_running: bool = false
 var _nw_run_btn: Button = null
 var _nw_rows: Dictionary = {}          # stage_id -> 結果 Label
 var _nw_db_host: String = ""           # 共有サーバーのホスト (DBパスから抽出、メインスレッドで取得)
+var _nw_db_path: String = ""           # DB ファイルのフルパス (Companion の速度計測対象)
 
 
 func _ready() -> void:
@@ -156,6 +159,10 @@ func _ready() -> void:
 	_build_ui()
 	# コントローラーの抜き差しで入力チェックの接続一覧を更新する (表示中のみ反映)。
 	Input.joy_connection_changed.connect(_on_joy_conn_changed)
+	# Companion からの速度計測結果 (ネットワークテストの速度段に反映)。
+	var agent := get_node_or_null("/root/LauncherAgent")
+	if agent and agent.has_signal("speedtest_result"):
+		agent.speedtest_result.connect(_nw_on_speed)
 
 
 func _notification(what: int) -> void:
@@ -826,7 +833,8 @@ func _nw_set(stage_id: String, text: String, color: Color) -> void:
 func _nw_start() -> void:
 	if _nw_running:
 		return
-	_nw_db_host = _nw_extract_host(PathManager.get_database_path())  # autoload アクセスはメインで済ませる
+	_nw_db_path = PathManager.get_database_path()  # autoload アクセスはメインで済ませる
+	_nw_db_host = _nw_extract_host(_nw_db_path)
 	for s in NW_STAGES:
 		if s[0] != "monitor":
 			_nw_set(s[0], "確認中…", C_TEXT)
@@ -882,15 +890,32 @@ func _nw_run() -> void:
 	call_deferred("_nw_done")
 
 
-## テスト完了 (メインスレッド)。スレッドを join してボタンを戻す。
+## 疎通テスト完了 (メインスレッド)。スレッドを join し、速度計測を Companion へ依頼してボタンを戻す。
 func _nw_done() -> void:
 	if _nw_thread:
 		_nw_thread.wait_to_finish()
 		_nw_thread = null
+	# 速度計測は Companion 側で実施 (キャッシュ回避の正確な測定。結果は speedtest_result シグナル)。
+	var agent := get_node_or_null("/root/LauncherAgent")
+	if agent and agent.has_method("is_available") and agent.is_available():
+		_nw_set("inet_speed", "測定中…", C_TEXT)
+		_nw_set("server_speed", "測定中…", C_TEXT)
+		agent.request_speedtest(_nw_db_path)
+	else:
+		_nw_set("inet_speed", "—（Companion無し）", C_MUTED)
+		_nw_set("server_speed", "—（Companion無し）", C_MUTED)
 	_nw_running = false
 	if _nw_run_btn and is_instance_valid(_nw_run_btn):
 		_nw_run_btn.disabled = false
 		_nw_run_btn.text = "もう一度テスト"
+
+
+## Companion からの速度計測結果。kind="internet"/"server" を対応する段に反映する。
+func _nw_on_speed(kind: String, ok: bool, text: String) -> void:
+	var sid := "inet_speed" if kind == "internet" else ("server_speed" if kind == "server" else "")
+	if sid == "":
+		return
+	_nw_set(sid, text, C_OK if ok else C_DANGER)
 
 
 ## ループバック/APIPA を除いた最初のローカル IPv4。
