@@ -261,7 +261,14 @@ namespace TonePrism.LauncherAgent
         // ---- 速度計測 ----
         private static void StartSpeedTest(string sharePath)
         {
-            if (_speedRunning) return;
+            if (_speedRunning)
+            {
+                // 前回の計測が in-flight。無言で捨てると Launcher 側が結果を一生受け取れず
+                // 「測定中…」で固まる (Launcher にタイムアウトは無い)。busy を ok:false で返して復帰させる。
+                SendSpeedtest("internet", false, "前回の計測中です。数秒待って再実行してください");
+                SendSpeedtest("server", false, "前回の計測中です。数秒待って再実行してください");
+                return;
+            }
             _speedRunning = true;
             var t = new Thread(() => RunSpeedTest(sharePath)) { IsBackground = true };
             t.Start();

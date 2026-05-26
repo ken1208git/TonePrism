@@ -1423,7 +1423,7 @@ func _lt_begin_next() -> void:
 		_lt_set_status(_lt_cur, "NG: 実行ファイルなし", C_DANGER)
 		_lt_begin_next()
 		return
-	var pid := _lt_spawn(exe, g)
+	var pid := _spawn_game_process(exe, g)
 	if pid == -1:
 		_lt_set_status(_lt_cur, "NG: 起動失敗", C_DANGER)
 		_lt_begin_next()
@@ -1437,7 +1437,8 @@ func _lt_begin_next() -> void:
 
 
 ## exe を cmd 経由で起動し PID を返す (GameSession.start_process と同方式)。失敗で -1。
-func _lt_spawn(exe_path: String, game) -> int:
+## 起動テスト(②)と試遊テスト(③)の両方から呼ぶ純粋ヘルパー (内部状態を持たない)。
+func _spawn_game_process(exe_path: String, game) -> int:
 	var working_dir := exe_path.get_base_dir()
 	var cmd := 'cd /d "%s" && "%s"' % [working_dir, exe_path]
 	var args := GamePathResolver.parse_arguments(game.arguments)
@@ -1690,7 +1691,7 @@ func _pt_begin_next() -> void:
 		_set_pt_status(_pt_cur, "× 起動できない", C_DANGER)
 		_pt_begin_next()
 		return
-	var pid := _lt_spawn(exe, g)
+	var pid := _spawn_game_process(exe, g)
 	if pid == -1:
 		_set_pt_status(_pt_cur, "× 起動失敗", C_DANGER)
 		_pt_begin_next()

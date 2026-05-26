@@ -38,12 +38,22 @@ func _process(delta: float) -> void:
 		return
 	_idle_sec += delta
 	if _idle_sec >= IDLE_TIMEOUT_SEC:
-		print("[ServiceMode] 60 秒無操作のため自動的に閉じる")
+		_log("[ServiceMode] 60 秒無操作のため自動的に閉じる")
 		close()
 
 
 func is_open() -> bool:
 	return _open
+
+
+## INFO ログ出力。Godot 4 の built-in Logger クラスと名前衝突するため autoload を /root/Logger 経由で参照する
+## (直接 Logger.info() は呼べない、#85 まで Launcher 全体の移行は保留だが新規ファイルは本経路を使う)。
+func _log(message: String) -> void:
+	var logger := get_node_or_null("/root/Logger")
+	if logger and logger.has_method("info"):
+		logger.info(message)
+	else:
+		print(message)
 
 
 ## アイドルタイマーをリセットする。overlay 側が入力を消費 (set_input_as_handled) すると、
@@ -77,7 +87,7 @@ func open() -> void:
 	_prev_mouse_mode = Input.mouse_mode
 	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 	_overlay.open_overlay()
-	print("[ServiceMode] サービスモードを開いた")
+	_log("[ServiceMode] サービスモードを開いた")
 
 
 func close() -> void:
@@ -88,4 +98,4 @@ func close() -> void:
 		_overlay.close_overlay()
 	get_tree().paused = _prev_paused  # pause 状態を復元 (開く前が paused でなければ解除)
 	Input.mouse_mode = _prev_mouse_mode  # カーソル表示状態を復元
-	print("[ServiceMode] サービスモードを閉じた")
+	_log("[ServiceMode] サービスモードを閉じた")
