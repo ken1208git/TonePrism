@@ -26,7 +26,7 @@ const C_OK := Color(0.45, 0.90, 0.55)         # OK (緑)
 
 # サービスモードに並ぶ項目の一覧。準備中の項目は詳細欄に「実装予定」と表示される。
 const ITEMS := [
-	{"id": "input",        "label": "1. 入力チェック / コントローラー"},
+	{"id": "input",        "label": "1. 入力チェック"},
 	{"id": "audio",        "label": "2. 音声チェック"},
 	{"id": "screen_test",  "label": "3. 画面表示テスト"},
 	{"id": "games_test",   "label": "4. ゲーム動作確認"},
@@ -124,6 +124,9 @@ var _sys_idx_datetime: int = -1      # 現在日時行
 var _sys_idx_uptime: int = -1        # 稼働時間行
 var _audio_player: AudioStreamPlayer = null  # 音声チェックのテスト音再生用
 var _test_tone: AudioStreamWAV = null        # 生成したテスト音 (キャッシュ)
+# 入力チェック (1): 接続中コントローラー一覧 + 最後に来た入力を表示 (表示中だけラベルが有効)。
+var _ic_connected_label: Label = null  # 接続中コントローラー一覧
+var _ic_last_label: Label = null       # 最後に来た入力
 
 
 func _ready() -> void:
@@ -131,6 +134,8 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	visible = false
 	_build_ui()
+	# コントローラーの抜き差しで入力チェックの接続一覧を更新する (表示中のみ反映)。
+	Input.joy_connection_changed.connect(_on_joy_conn_changed)
 
 
 func open_overlay() -> void:
@@ -177,6 +182,11 @@ func _process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if not visible:
 		return
+	# 入力チェック表示中は、来た入力を「最後の入力」欄に反映する (消費はしない=ナビは通常どおり)。
+	if is_instance_valid(_ic_last_label):
+		var desc := _describe_input(event)
+		if desc != "":
+			_ic_last_label.text = desc
 	# 画面表示テスト中: Esc / B で中断してメニューへ。← / Backspace で前のパターンへ戻る。
 	# それ以外のキー / クリック / パッドボタンで次へ送る (最後まで行くと自動でメニューに戻る)。
 	if _test_active:
@@ -542,6 +552,7 @@ func _update_footer() -> void:
 func _build_detail(id: String) -> void:
 	_clear_content()
 	match id:
+		"input": _build_input_check()
 		"system_info": _build_system_info()
 		"games_test": _build_games_test()
 		"db_check": _build_db_check()
@@ -556,6 +567,62 @@ func _build_detail(id: String) -> void:
 		"exit": _build_exit()
 		_: _build_stub()
 	_constrain_detail_focus()
+
+
+## 入力チェック: 接続中コントローラー一覧 + 最後に来た入力をライブ表示する。
+## 「パッドが効かない」を 一覧に出ない(OS未認識) / 出るが反応しない(マッピング等) / 正常 で切り分ける。
+func _build_input_check() -> void:
+	_add_text("ボタンやキー、スティックを操作すると下の「最後の入力」に表示されます。", C_MUTED)
+	_add_text("■ 接続中のコントローラー", C_ACCENT)
+	_ic_connected_label = Label.new()
+	_ic_connected_label.add_theme_color_override("font_color", C_TEXT)
+	_ic_connected_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_detail_content.add_child(_ic_connected_label)
+	_add_text("■ 最後の入力", C_ACCENT)
+	_ic_last_label = Label.new()
+	_ic_last_label.add_theme_color_override("font_color", C_OK)
+	_ic_last_label.add_theme_font_size_override("font_size", 22)
+	_ic_last_label.text = "（まだ入力なし）"
+	_detail_content.add_child(_ic_last_label)
+	_detail_content.add_child(HSeparator.new())
+	_add_text("コントローラーが一覧に出ない場合は、OS がそのパッドを認識していません（ケーブル/レシーバー/電池/ドライバを確認）。", C_MUTED)
+	_add_text("一覧には出るのに操作しても「最後の入力」が変わらない場合は、そのパッドの対応(マッピング)の問題です。", C_MUTED)
+	_ic_refresh_connected()
+
+
+## 接続中コントローラー一覧を更新する。
+func _ic_refresh_connected() -> void:
+	if not is_instance_valid(_ic_connected_label):
+		return
+	var pads := Input.get_connected_joypads()
+	if pads.is_empty():
+		_ic_connected_label.text = "接続なし"
+		_ic_connected_label.add_theme_color_override("font_color", C_MUTED)
+		return
+	var lines: Array[String] = []
+	for p in pads:
+		lines.append("・パッド %d: %s" % [p, Input.get_joy_name(p)])
+	_ic_connected_label.text = "\n".join(lines)
+	_ic_connected_label.add_theme_color_override("font_color", C_TEXT)
+
+
+## コントローラーの抜き差し → 入力チェック表示中なら一覧を更新。
+func _on_joy_conn_changed(_device: int, _connected: bool) -> void:
+	if is_instance_valid(_ic_connected_label):
+		_ic_refresh_connected()
+
+
+## 入力イベントを読みやすい文字列にする (入力チェックの「最後の入力」表示用)。対象外は "" を返す。
+func _describe_input(event: InputEvent) -> String:
+	if event is InputEventKey and event.pressed and not event.echo:
+		return "キーボード: %s" % OS.get_keycode_string(event.keycode)
+	if event is InputEventJoypadButton and event.pressed:
+		return "パッド %d: ボタン %d" % [event.device, event.button_index]
+	if event is InputEventJoypadMotion and absf(event.axis_value) > 0.5:
+		return "パッド %d: 軸 %d (%+.2f)" % [event.device, event.axis, event.axis_value]
+	if event is InputEventMouseButton and event.pressed:
+		return "マウス: ボタン %d" % event.button_index
+	return ""
 
 
 func _build_system_info() -> void:
@@ -1812,6 +1879,8 @@ func _apply_focus_style() -> void:
 
 func _clear_content() -> void:
 	_sysinfo_list = null  # 詳細を作り直すのでシステム情報のリアルタイム更新対象も解除
+	_ic_connected_label = null  # 入力チェックのライブ更新対象も解除
+	_ic_last_label = null
 	_lt_stop()            # 起動テスト実行中なら止める (画面を離れるのでゲームを置き去りにしない)
 	_pt_stop()            # 試遊中なら止める (同上)
 	# remove_child を即時に行ってから queue_free する。queue_free だけだとフレーム末まで子が get_children に
