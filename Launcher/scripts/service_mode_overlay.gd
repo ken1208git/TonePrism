@@ -192,10 +192,10 @@ func _build_ui() -> void:
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.custom_minimum_size = Vector2(0, 44)
 		btn.add_theme_font_size_override("font_size", 18)
-		_apply_focus_style_to(btn)  # キー/パッド時=枠 / マウス時=透明
 		btn.focus_entered.connect(_select.bind(i))   # ↑↓ で移動すると詳細がライブ更新
 		btn.pressed.connect(_on_menu_pressed.bind(i)) # A/Enter/クリックで詳細ペインへ
 		menu_vbox.add_child(btn)
+		_apply_focus_style_to(btn)  # ツリー追加後に呼ぶ (get_theme_stylebox がテーマを正しく解決するため)
 		_menu_buttons.append(btn)
 
 	# 右: 詳細パネル
@@ -767,9 +767,17 @@ func _set_using_mouse(v: bool) -> void:
 	_apply_focus_style()
 
 
-## 現在の _using_mouse に応じて 1 ボタンの focus stylebox を切り替える。
+## 現在の _using_mouse に応じて 1 ボタンの focus / hover スタイルを切り替える。
+## キーボード・パッド操作中はマウスホバーのハイライトも消す: カーソルを隠してもマウスは物理的に
+## ボタンの上に残るため、そのままだとホバー表示が消え残り、キーボードのフォーカス枠と二重に光って
+## 見える。ホバーを通常表示と同じにすることで、残ったホバーを見えなくする。
 func _apply_focus_style_to(b: Button) -> void:
-	b.add_theme_stylebox_override("focus", _focus_off_sb if _using_mouse else _focus_sb)
+	if _using_mouse:
+		b.add_theme_stylebox_override("focus", _focus_off_sb)
+		b.remove_theme_stylebox_override("hover")
+	else:
+		b.add_theme_stylebox_override("focus", _focus_sb)
+		b.add_theme_stylebox_override("hover", b.get_theme_stylebox("normal"))
 
 
 ## メニュー + 詳細の全ボタンに現在のフォーカス枠スタイルを適用する。
@@ -805,9 +813,9 @@ func _add_button(text: String, on_pressed: Callable) -> Button:
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.focus_mode = Control.FOCUS_ALL
 	b.custom_minimum_size = Vector2(0, 40)
-	_apply_focus_style_to(b)  # キー/パッド時=枠 / マウス時=透明
 	b.pressed.connect(on_pressed)
 	_detail_content.add_child(b)
+	_apply_focus_style_to(b)  # ツリー追加後に呼ぶ (get_theme_stylebox がテーマを正しく解決するため)
 	return b
 
 
