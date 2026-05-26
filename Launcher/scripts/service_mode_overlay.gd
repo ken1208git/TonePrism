@@ -26,14 +26,13 @@ const ITEMS := [
 	{"id": "network",      "label": "5. ネットワーク接続テスト"},
 	{"id": "db_check",     "label": "6. データベース整合性チェック"},
 	{"id": "log_view",     "label": "7. 簡易ログ確認"},
-	{"id": "error_manual", "label": "8. エラー内容 + マニュアル"},
-	{"id": "system_info",  "label": "9. システム情報"},
-	{"id": "debug_overlay","label": "10. デバッグオーバーレイ切替"},
-	{"id": "fullscreen",   "label": "11. フルスクリーン切替"},
-	{"id": "monitor",      "label": "12. ランチャー表示モニタ選択"},
-	{"id": "reload",       "label": "13. ランチャーの再読み込み"},
-	{"id": "restart",      "label": "14. アプリの再起動"},
-	{"id": "exit",         "label": "15. アプリ終了"},
+	{"id": "system_info",  "label": "8. システム情報"},
+	{"id": "debug_overlay","label": "9. デバッグオーバーレイ切替"},
+	{"id": "fullscreen",   "label": "10. フルスクリーン切替"},
+	{"id": "monitor",      "label": "11. ランチャー表示モニタ選択"},
+	{"id": "reload",       "label": "12. ランチャーの再読み込み"},
+	{"id": "restart",      "label": "13. アプリの再起動"},
+	{"id": "exit",         "label": "14. アプリ終了"},
 ]
 
 var _root: Control = null
