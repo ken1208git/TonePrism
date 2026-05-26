@@ -569,7 +569,7 @@ func _build_screen_test() -> void:
 
 func _build_debug_overlay() -> void:
 	var on: bool = DebugOverlay.is_enabled()
-	_add_text("画面左上に FPS・メモリ・PC名・シーン状態・DB接続などを常時表示します（マイクラのF3風）。")
+	_add_text("画面左上に FPS・メモリ・PC名・シーン状態・DB接続などを常時表示します。")
 	_add_text("現在: %s" % ("ON" if on else "OFF"), C_OK if on else C_MUTED)
 	_add_text("サービスモードを閉じても表示し続けます。再起動でOFFに戻ります。", C_MUTED)
 	_add_button("デバッグオーバーレイを %s" % ("OFF にする" if on else "ON にする"),

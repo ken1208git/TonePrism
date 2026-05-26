@@ -1,5 +1,5 @@
 extends Node
-## スタッフ向けデバッグオーバーレイ (画面隅の常時表示 HUD、マイクラの F3 風)。
+## スタッフ向けデバッグオーバーレイ (画面隅の常時表示 HUD)。
 ## サービスモードの「デバッグオーバーレイ切替」で ON/OFF する。ON の間はサービスモードを閉じても、
 ## シーンを移動しても画面左上に FPS・メモリ・PC 名・シーン状態・接続状態などを表示し続ける。
 ## 設定はメモリのみ保持 (再起動で OFF に戻る)。本 autoload は表示の生成と毎フレーム更新を担う。
@@ -54,7 +54,7 @@ func _process(delta: float) -> void:
 
 func _build() -> void:
 	_layer = CanvasLayer.new()
-	_layer.layer = 150  # 通常画面の上 / サービスモード (200) の下
+	_layer.layer = 256  # サービスモード (200) より前面 = サービスモード表示中も HUD が見える
 	_layer.visible = false
 	add_child(_layer)
 
@@ -85,7 +85,7 @@ func _refresh_slow() -> void:
 ## 表示テキストを組み立てて更新する。
 func _update_text() -> void:
 	var lines: Array[String] = []
-	lines.append("=== DEBUG (F3) ===")
+	lines.append("=== DEBUG ===")
 	lines.append("FPS: %d   フレーム: %.1f ms" % [
 		Engine.get_frames_per_second(),
 		1000.0 / maxf(1.0, Engine.get_frames_per_second())])
