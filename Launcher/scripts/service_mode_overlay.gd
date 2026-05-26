@@ -8,10 +8,12 @@ extends CanvasLayer
 ##
 ## 表示制御・トリガ・60 秒自動復帰は autoload ServiceMode。UI は項目数が多く動的なため code-built。
 
-# ランチャー他画面と同じ日本語フォント (Noto Sans JP)。指定しないと Godot 既定フォントになり
-# サービスモードだけ見た目が浮くため、UI 全体に既定フォントとして適用する。
-const FONT_REGULAR := preload("res://fonts/NotoSansJP-Regular.ttf")
-const FONT_BOLD := preload("res://fonts/NotoSansJP-Bold.ttf")
+# サービスモードは「整備画面」なので、あえて他画面と違うデバッグ感のあるフォントにする。
+# Windows 標準の MS ゴシック (msgothic.ttc) を アンチエイリアス OFF で読み込み、小さい字の
+# カクカクしたビットマップ風の見た目を出す (本番も Windows のため必ず存在)。
+# 読み込めない環境では Noto Sans JP にフォールバックする。
+const SYS_GOTHIC_PATH := "C:/Windows/Fonts/msgothic.ttc"
+const FONT_FALLBACK := preload("res://fonts/NotoSansJP-Regular.ttf")
 
 const C_BG := Color(0.05, 0.05, 0.07, 1.0)  # 完全不透明 (裏のシーンは pause + 不可視で凍結)
 const C_PANEL := Color(0.10, 0.10, 0.13, 1.0)
@@ -195,9 +197,9 @@ func _build_ui() -> void:
 	_btn_hover_sb.content_margin_top = 6
 	_btn_hover_sb.content_margin_bottom = 6
 
-	# UI 全体の既定フォントを Noto Sans JP に。_root に theme を付けると子の Label/Button 等へ伝播する。
+	# UI 全体の既定フォントをデバッグ風フォントに。_root に theme を付けると子の Label/Button 等へ伝播する。
 	_theme = Theme.new()
-	_theme.default_font = FONT_REGULAR
+	_theme.default_font = _load_debug_font()
 
 	_root = Control.new()
 	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -226,7 +228,6 @@ func _build_ui() -> void:
 	var header := Label.new()
 	header.text = "サービスモード  —  Launcher %s" % Version.get_version_string()
 	header.add_theme_color_override("font_color", C_ACCENT)
-	header.add_theme_font_override("font", FONT_BOLD)
 	header.add_theme_font_size_override("font_size", 26)
 	col.add_child(header)
 
@@ -283,7 +284,6 @@ func _build_ui() -> void:
 
 	_detail_title = Label.new()
 	_detail_title.add_theme_color_override("font_color", C_ACCENT)
-	_detail_title.add_theme_font_override("font", FONT_BOLD)
 	_detail_title.add_theme_font_size_override("font_size", 22)
 	detail_box.add_child(_detail_title)
 	detail_box.add_child(HSeparator.new())
@@ -303,6 +303,20 @@ func _build_ui() -> void:
 	_footer.add_theme_color_override("font_color", C_MUTED)
 	_footer.add_theme_font_size_override("font_size", 14)
 	col.add_child(_footer)
+
+
+## デバッグ風フォントを返す。MS ゴシックをアンチエイリアス OFF で読み込み、小さい字の
+## カクカクした見た目を出す。読み込めない場合は Noto Sans JP を返す。
+func _load_debug_font() -> Font:
+	if FileAccess.file_exists(SYS_GOTHIC_PATH):
+		var f := FontFile.new()
+		if f.load_dynamic_font(SYS_GOTHIC_PATH) == OK:
+			f.antialiasing = TextServer.FONT_ANTIALIASING_NONE  # AA OFF = カクカク
+			f.hinting = TextServer.HINTING_NONE
+			f.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
+			f.force_autohinter = false
+			return f
+	return FONT_FALLBACK
 
 
 # ---------------- 選択 / ペイン移動 ----------------
