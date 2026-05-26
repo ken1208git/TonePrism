@@ -359,11 +359,20 @@ func _render_games_exists_check() -> void:
 	_add_text("登録 %d 件中  OK %d / NG %d" % [games.size(), games.size() - ng, ng],
 		C_OK if ng == 0 else C_DANGER)
 	_add_text("（各ゲームの exe が存在するかを確認。NG はパス切れ/ファイル欠落。起動はしません）", C_MUTED)
+	# 一覧は ItemList で表示。フォーカス可能なのでキーボード/コントローラー (↑↓) でもスクロールできる
+	# (Label の羅列だとフォーカスが移れず長い一覧をスクロールできないため)。
+	var list := ItemList.new()
+	list.focus_mode = Control.FOCUS_ALL
+	list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	list.custom_minimum_size = Vector2(0, 360)
 	for g in games:
-		if GamePathResolver.find_executable(g) == "":
-			_add_text("✗ %s  [%s]  exe 不明: %s" % [g.title, g.game_id, g.executable_path], C_DANGER)
-		else:
-			_add_text("✓ %s  [%s]" % [g.title, g.game_id], C_OK)
+		var ok := GamePathResolver.find_executable(g) != ""
+		var line := "✓ %s  [%s]" % [g.title, g.game_id] if ok \
+			else "✗ %s  [%s]  exe 不明: %s" % [g.title, g.game_id, g.executable_path]
+		var idx := list.add_item(line)
+		list.set_item_custom_fg_color(idx, C_OK if ok else C_DANGER)
+		list.set_item_selectable(idx, true)
+	_detail_content.add_child(list)
 
 
 func _build_screen_test() -> void:
