@@ -382,6 +382,12 @@ func _build_ui() -> void:
 		_apply_focus_style_to(btn)  # ツリー追加後に呼ぶ (get_theme_stylebox がテーマを正しく解決するため)
 		_menu_buttons.append(btn)
 
+	# 主リストは端で上下ラップさせる (一番上で↑→一番下 / 一番下で↓→一番上)。固定メニューで
+	# 端まで素早く回り込めるように。端点のみ neighbor を指定し、中間は自動 neighbor のまま残す。
+	if _menu_buttons.size() >= 2:
+		_menu_buttons[0].focus_neighbor_top = _menu_buttons[-1].get_path()
+		_menu_buttons[-1].focus_neighbor_bottom = _menu_buttons[0].get_path()
+
 	# 右: 詳細パネル
 	var detail_panel := PanelContainer.new()
 	detail_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
