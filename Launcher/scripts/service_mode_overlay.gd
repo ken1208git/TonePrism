@@ -149,7 +149,8 @@ var _nw_running: bool = false
 var _nw_run_btn: Button = null
 var _nw_rows: Dictionary = {}          # stage_id -> 結果 Label
 var _nw_db_host: String = ""           # 共有サーバーのホスト (DBパスから抽出、メインスレッドで取得)
-var _nw_db_path: String = ""           # DB ファイルのフルパス (Companion の速度計測対象)
+var _nw_db_path: String = ""           # DB ファイルのフルパス (共有サーバーのホスト抽出用)
+var _nw_speed_file: String = ""        # 読み込み速度の計測対象 (実ゲームの exe。無ければ DB)
 
 
 func _ready() -> void:
@@ -835,6 +836,7 @@ func _nw_start() -> void:
 		return
 	_nw_db_path = PathManager.get_database_path()  # autoload アクセスはメインで済ませる
 	_nw_db_host = _nw_extract_host(_nw_db_path)
+	_nw_speed_file = _nw_pick_speed_file()  # 読み込み速度は実ゲーム exe で測る (DB は小さすぎるため)
 	for s in NW_STAGES:
 		if s[0] != "monitor":
 			_nw_set(s[0], "確認中…", C_TEXT)
@@ -903,7 +905,7 @@ func _nw_done() -> void:
 	if agent and agent.has_method("is_available") and agent.is_available():
 		_nw_set("inet_speed", "測定中…", C_TEXT)
 		_nw_set("server_speed", "測定中…", C_TEXT)
-		agent.request_speedtest(_nw_db_path)
+		agent.request_speedtest(_nw_speed_file)
 	else:
 		_nw_set("inet_speed", "—（Companion無し）", C_MUTED)
 		_nw_set("server_speed", "—（Companion無し）", C_MUTED)
@@ -986,6 +988,20 @@ func _nw_tcp(host: String, port: int, timeout_ms: int) -> Array:
 			return [false, timeout_ms]
 		OS.delay_msec(50)
 	return [false, timeout_ms]  # 到達しないが GDScript の戻り値検査のため
+
+
+## 読み込み速度の計測対象ファイルを選ぶ。実ゲームの実行ファイル (共有上・サイズ大) を優先し、
+## 無ければ DB にフォールバック (DB は小さすぎて速度がブレるため)。最初に見つかった実在 exe を使う。
+func _nw_pick_speed_file() -> String:
+	var db := DatabaseManager.new()
+	if db.open():
+		var games := GameRepository.new(db).get_all_games()
+		db.close()
+		for g in games:
+			var exe := GamePathResolver.find_executable(g)
+			if exe != "":  # find_executable は実在しなければ "" を返す
+				return exe
+	return _nw_db_path
 
 
 ## DB パスから共有サーバーのホスト名を取り出す (UNC \\HOST\... のみ。それ以外は "")。

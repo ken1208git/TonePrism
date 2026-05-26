@@ -278,7 +278,10 @@ namespace TonePrism.LauncherAgent
 
                 double mbsec; long bytes;
                 if (!string.IsNullOrEmpty(sharePath) && SpeedTest.ServerRead(sharePath, 100L * 1024 * 1024, out mbsec, out bytes))
-                    SendSpeedtest("server", true, "約 " + Math.Round(mbsec, 1) + " MB/秒 (" + (bytes / 1048576) + "MB)");
+                {
+                    string sz = bytes >= 1048576 ? (bytes / 1048576) + "MB" : (Math.Max(1, bytes / 1024)) + "KB";
+                    SendSpeedtest("server", true, "約 " + Math.Round(mbsec, 1) + " MB/秒 (" + sz + " 読込)");
+                }
                 else
                     SendSpeedtest("server", false, string.IsNullOrEmpty(sharePath) ? "対象パス不明" : "測定不可");
             }
