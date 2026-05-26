@@ -124,9 +124,12 @@ var _sys_idx_datetime: int = -1      # 現在日時行
 var _sys_idx_uptime: int = -1        # 稼働時間行
 var _audio_player: AudioStreamPlayer = null  # 音声チェックのテスト音再生用
 var _test_tone: AudioStreamWAV = null        # 生成したテスト音 (キャッシュ)
-# 入力チェック (1): 接続中コントローラー一覧 + 最後に来た入力を表示 (表示中だけラベルが有効)。
+# 入力チェック (1): 一覧表示と、ボタンで入る「確認モード」(入力を捕捉して表示・ナビと競合させない)。
 var _ic_connected_label: Label = null  # 接続中コントローラー一覧
-var _ic_last_label: Label = null       # 最後に来た入力
+var _ic_last_label: Label = null       # 最後に来た入力 (確認モード時のみ)
+var _ic_capture: bool = false          # 確認モード中か (入力を捕捉してナビに渡さない)
+var _ic_guide_count: int = 0           # 確認モード中の Guide ボタン連続押下回数 (3 で戻る)
+const IC_GUIDE_EXIT := 3               # Guide を何回押したら確認モードを抜けるか
 
 
 func _ready() -> void:
@@ -146,6 +149,8 @@ func open_overlay() -> void:
 	_modal_open = false
 	if _modal_layer:
 		_modal_layer.visible = false
+	_ic_capture = false  # 入力確認モードは持ち越さない
+	_set_menu_focusable(true)
 	_using_mouse = false  # Ctrl+Alt+F12 (キーボード) で開く → フォーカス枠あり
 	_apply_focus_style()
 	# 先頭項目を選択 + 詳細表示 + 左リストにフォーカス。
@@ -182,11 +187,10 @@ func _process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if not visible:
 		return
-	# 入力チェック表示中は、来た入力を「最後の入力」欄に反映する (消費はしない=ナビは通常どおり)。
-	if is_instance_valid(_ic_last_label):
-		var desc := _describe_input(event)
-		if desc != "":
-			_ic_last_label.text = desc
+	# 入力確認モード中は全入力を捕捉して表示し、メニューのナビには渡さない。Esc / Guide×3 で戻る。
+	if _ic_capture:
+		_ic_handle_capture(event)
+		return
 	# 画面表示テスト中: Esc / B で中断してメニューへ。← / Backspace で前のパターンへ戻る。
 	# それ以外のキー / クリック / パッドボタンで次へ送る (最後まで行くと自動でメニューに戻る)。
 	if _test_active:
@@ -569,25 +573,34 @@ func _build_detail(id: String) -> void:
 	_constrain_detail_focus()
 
 
-## 入力チェック: 接続中コントローラー一覧 + 最後に来た入力をライブ表示する。
+## 入力チェック: 接続中コントローラー一覧を表示。ボタンで「確認モード」に入ると入力を捕捉して表示する。
 ## 「パッドが効かない」を 一覧に出ない(OS未認識) / 出るが反応しない(マッピング等) / 正常 で切り分ける。
 func _build_input_check() -> void:
-	_add_text("ボタンやキー、スティックを操作すると下の「最後の入力」に表示されます。", C_MUTED)
 	_add_text("■ 接続中のコントローラー", C_ACCENT)
 	_ic_connected_label = Label.new()
 	_ic_connected_label.add_theme_color_override("font_color", C_TEXT)
 	_ic_connected_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_detail_content.add_child(_ic_connected_label)
-	_add_text("■ 最後の入力", C_ACCENT)
+	_ic_refresh_connected()
+	_detail_content.add_child(HSeparator.new())
+
+	if not _ic_capture:
+		# 一覧表示中はメニュー操作と競合させないため、入力捕捉は確認モードに入ってから。
+		_ic_last_label = null
+		_add_text("「入力確認を開始」を押すと、押したボタン/キーが画面に表示される確認モードに入ります。", C_MUTED)
+		_add_button("入力確認を開始", _ic_enter_capture)
+		_add_text("コントローラーが一覧に出ない場合は OS が認識していません（ケーブル/レシーバー/電池/ドライバを確認）。", C_MUTED)
+		return
+
+	# 確認モード: 押した入力をライブ表示。ナビは止まる。
+	_add_text("【入力確認モード】 ボタン/キー/スティックを操作してください。", C_ACCENT)
 	_ic_last_label = Label.new()
 	_ic_last_label.add_theme_color_override("font_color", C_OK)
-	_ic_last_label.add_theme_font_size_override("font_size", 22)
-	_ic_last_label.text = "（まだ入力なし）"
+	_ic_last_label.add_theme_font_size_override("font_size", 26)
+	_ic_last_label.text = "（操作待ち…）"
 	_detail_content.add_child(_ic_last_label)
 	_detail_content.add_child(HSeparator.new())
-	_add_text("コントローラーが一覧に出ない場合は、OS がそのパッドを認識していません（ケーブル/レシーバー/電池/ドライバを確認）。", C_MUTED)
-	_add_text("一覧には出るのに操作しても「最後の入力」が変わらない場合は、そのパッドの対応(マッピング)の問題です。", C_MUTED)
-	_ic_refresh_connected()
+	_add_text("戻る: Esc キー、またはコントローラーの Guide ボタンを %d 回押す。" % IC_GUIDE_EXIT, C_MUTED)
 
 
 ## 接続中コントローラー一覧を更新する。
@@ -612,17 +625,98 @@ func _on_joy_conn_changed(_device: int, _connected: bool) -> void:
 		_ic_refresh_connected()
 
 
-## 入力イベントを読みやすい文字列にする (入力チェックの「最後の入力」表示用)。対象外は "" を返す。
+## 確認モードに入る (入力捕捉開始)。メニューボタンのフォーカスを無効化してナビを止める
+## (入力を「消費」して止めると親 ServiceMode のアイドル計測/Ctrl+Alt+F12 が効かなくなるため)。
+func _ic_enter_capture() -> void:
+	_ic_capture = true
+	_ic_guide_count = 0
+	_set_menu_focusable(false)
+	_build_detail("input")
+
+
+## 確認モードを抜ける。メニューのフォーカスを戻す。
+func _ic_exit_capture() -> void:
+	_ic_capture = false
+	_ic_guide_count = 0
+	_set_menu_focusable(true)
+	_build_detail("input")
+	_refocus_detail()
+
+
+## 左メニューのボタンのフォーカス可否を一括設定する (確認モード中はナビさせない)。
+func _set_menu_focusable(on: bool) -> void:
+	for b in _menu_buttons:
+		if is_instance_valid(b):
+			b.focus_mode = Control.FOCUS_ALL if on else Control.FOCUS_NONE
+
+
+## 確認モード中の入力処理。Esc / Guide×3 は消費して抜ける。テスト入力は消費しない
+## (ServiceMode のアイドル計測/F12 を生かすため。ナビはメニューのフォーカス無効化で止めている)。
+func _ic_handle_capture(event: InputEvent) -> void:
+	# Esc キーで戻る (B ボタンはテスト対象なので使わない)。
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		get_viewport().set_input_as_handled()
+		_ic_exit_capture()
+		return
+	# Guide ボタンを規定回数押したら戻る。
+	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_GUIDE:
+		_ic_guide_count += 1
+		get_viewport().set_input_as_handled()
+		if _ic_guide_count >= IC_GUIDE_EXIT:
+			_ic_exit_capture()
+		elif is_instance_valid(_ic_last_label):
+			_ic_last_label.text = "Guide (あと %d 回で戻る)" % (IC_GUIDE_EXIT - _ic_guide_count)
+		return
+	# テスト入力は表示するだけ (消費しない)。
+	var desc := _describe_input(event)
+	if desc != "" and is_instance_valid(_ic_last_label):
+		_ic_last_label.text = desc
+
+
+## 入力イベントを分かりやすい文字列にする。対象外は "" を返す。
 func _describe_input(event: InputEvent) -> String:
 	if event is InputEventKey and event.pressed and not event.echo:
 		return "キーボード: %s" % OS.get_keycode_string(event.keycode)
 	if event is InputEventJoypadButton and event.pressed:
-		return "パッド %d: ボタン %d" % [event.device, event.button_index]
+		return "パッド %d: %s" % [event.device, _joy_button_name(event.button_index)]
 	if event is InputEventJoypadMotion and absf(event.axis_value) > 0.5:
-		return "パッド %d: 軸 %d (%+.2f)" % [event.device, event.axis, event.axis_value]
+		return "パッド %d: %s" % [event.device, _joy_axis_name(event.axis, event.axis_value)]
 	if event is InputEventMouseButton and event.pressed:
 		return "マウス: ボタン %d" % event.button_index
 	return ""
+
+
+## パッドのボタン番号を分かりやすい名前にする (Xbox 表記基準)。
+func _joy_button_name(idx: int) -> String:
+	match idx:
+		JOY_BUTTON_A: return "A ボタン"
+		JOY_BUTTON_B: return "B ボタン"
+		JOY_BUTTON_X: return "X ボタン"
+		JOY_BUTTON_Y: return "Y ボタン"
+		JOY_BUTTON_BACK: return "戻る (Back/View)"
+		JOY_BUTTON_GUIDE: return "Guide (ガイド)"
+		JOY_BUTTON_START: return "メニュー (Start)"
+		JOY_BUTTON_LEFT_STICK: return "左スティック押し込み"
+		JOY_BUTTON_RIGHT_STICK: return "右スティック押し込み"
+		JOY_BUTTON_LEFT_SHOULDER: return "LB (左ショルダー)"
+		JOY_BUTTON_RIGHT_SHOULDER: return "RB (右ショルダー)"
+		JOY_BUTTON_DPAD_UP: return "十字キー ↑"
+		JOY_BUTTON_DPAD_DOWN: return "十字キー ↓"
+		JOY_BUTTON_DPAD_LEFT: return "十字キー ←"
+		JOY_BUTTON_DPAD_RIGHT: return "十字キー →"
+	return "ボタン %d" % idx
+
+
+## パッドの軸を分かりやすい名前 (方向付き) にする。
+func _joy_axis_name(axis: int, value: float) -> String:
+	match axis:
+		JOY_AXIS_LEFT_X: return "左スティック " + ("→ 右" if value > 0 else "← 左")
+		JOY_AXIS_LEFT_Y: return "左スティック " + ("↓ 下" if value > 0 else "↑ 上")
+		JOY_AXIS_RIGHT_X: return "右スティック " + ("→ 右" if value > 0 else "← 左")
+		JOY_AXIS_RIGHT_Y: return "右スティック " + ("↓ 下" if value > 0 else "↑ 上")
+		JOY_AXIS_TRIGGER_LEFT: return "LT (左トリガー)"
+		JOY_AXIS_TRIGGER_RIGHT: return "RT (右トリガー)"
+	return "軸 %d (%+.2f)" % [axis, value]
 
 
 func _build_system_info() -> void:
