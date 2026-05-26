@@ -36,6 +36,7 @@ const ITEMS := [
 
 # 画面表示テストで順番に表示するパターン。先頭から 1 つずつ全画面表示し、キー送りで次へ進む。
 const SCREEN_SEQ := [
+	{"mode": "monoscope",  "color": Color.BLACK,          "label": "テストカード（モノスコープ）"},
 	{"mode": "grid",       "color": Color.BLACK,          "label": "グリッド + セーフエリア"},
 	{"mode": "colorbar",   "color": Color.BLACK,          "label": "カラーバー"},
 	{"mode": "resolution", "color": Color.BLACK,          "label": "解像度 + グレースケール"},
@@ -58,7 +59,7 @@ var _menu_buttons: Array[Button] = []
 var _selected_index: int = -1        # 左リストで選択中の項目
 var _in_detail: bool = false         # フォーカスが右詳細ペインにあるか
 var _test_canvas: Control = null     # 画面表示テストの全画面描画ノード (単色 / グリッド / カラーバー / グラデ)
-var _test_mode: String = "solid"     # 現在のテスト描画モード ("solid" / "grid" / "colorbar" / "resolution")
+var _test_mode: String = "solid"     # 現在のテスト描画モード ("solid"/"grid"/"colorbar"/"resolution"/"monoscope")
 var _test_color: Color = Color.BLACK # solid モードの表示色
 var _test_active: bool = false
 var _seq_index: int = 0              # 画面表示テストで今表示しているパターンの位置
@@ -642,6 +643,7 @@ func _hide_test() -> void:
 func _draw_test() -> void:
 	var size := _test_canvas.size
 	match _test_mode:
+		"monoscope": _draw_test_monoscope(size)
 		"grid": _draw_test_grid(size)
 		"colorbar": _draw_test_colorbar(size)
 		"resolution": _draw_test_resolution(size)
@@ -820,6 +822,123 @@ func _draw_test_resolution(size: Vector2) -> void:
 	for i in range(seg):
 		var v := float(i) / (seg - 1)
 		cv.draw_rect(Rect2(bw * i, by, bw + 1.0, bh), Color(v, v, v))
+
+
+## 本格的なテストカード (モノスコープ風)。クラシックな放送用調整パターンを 1 枚に凝縮:
+## 灰地のクロスハッチ + 全画面十字 + 中央の大円/内円 + 四隅と中央のブルズアイ (同心円+スポーク) +
+## 周波数縞 (縦/横) + 離散グレースケール + カラー帯 + 中央のステーション名 + 外周キャッスレーション。
+## 幾何 (真円か)・直線性・センター/コーナーの調整・解像度・階調・色・オーバースキャンをまとめて確認する。
+func _draw_test_monoscope(size: Vector2) -> void:
+	var cv := _test_canvas
+	var center := size * 0.5
+	var u := size.y                           # 縦基準の単位 (正方比の図形に使う)
+	var white := Color.WHITE
+	cv.draw_rect(Rect2(Vector2.ZERO, size), Color(0.5, 0.5, 0.5))
+	# クロスハッチ (直線性・幾何)
+	_draw_grid_lines(size, u / 18.0, Color(0.78, 0.78, 0.78))
+	# 全画面十字
+	cv.draw_line(Vector2(center.x, 0), Vector2(center.x, size.y), white, 2.0)
+	cv.draw_line(Vector2(0, center.y), Vector2(size.x, center.y), white, 2.0)
+	# 中央の大円 (真円=縦横比OK) と内円
+	cv.draw_arc(center, u * 0.47, 0, TAU, 180, white, 2.0)
+	cv.draw_arc(center, u * 0.30, 0, TAU, 140, white, 1.5)
+	# 周波数縞 (上=縦線 / 下=横線、1〜4px ピッチ)
+	var gw := u * 0.5
+	var gh := u * 0.07
+	_draw_grating_patch(Rect2(center.x - gw * 0.5, center.y - u * 0.30, gw, gh), [1, 2, 3, 4], true)
+	_draw_grating_patch(Rect2(center.x - gw * 0.5, center.y + u * 0.23, gw, gh), [1, 2, 3, 4], false)
+	# 離散グレースケール 11 段 (中央上)
+	var sw := u * 0.6
+	var sh := u * 0.05
+	var sx := center.x - sw * 0.5
+	var sy := center.y - u * 0.19
+	for i in range(11):
+		var v := float(i) / 10.0
+		cv.draw_rect(Rect2(sx + sw / 11.0 * i, sy, sw / 11.0 + 1.0, sh), Color(v, v, v))
+	# カラー帯 (中央下)
+	var bars := [white, Color.YELLOW, Color.CYAN, Color.GREEN, Color.MAGENTA, Color.RED, Color.BLUE]
+	var cy := center.y + u * 0.14
+	for i in range(bars.size()):
+		cv.draw_rect(Rect2(sx + sw / bars.size() * i, cy, sw / bars.size() + 1.0, sh), bars[i])
+	# ステーション名ボックス (中央やや上)
+	var lw := u * 0.26
+	var lh := u * 0.07
+	var lr := Rect2(center.x - lw * 0.5, center.y - u * 0.10, lw, lh)
+	cv.draw_rect(lr, Color.BLACK)
+	var font: Font = cv.get_theme_default_font()
+	var fs := int(u * 0.04)
+	cv.draw_string(font, Vector2(lr.position.x, lr.position.y + lh * 0.5 + fs * 0.36),
+		"TonePrism", HORIZONTAL_ALIGNMENT_CENTER, lw, fs, white)
+	# 中央 + 四隅のブルズアイ
+	_draw_bullseye(center, u * 0.05, 16)
+	var off := u * 0.17
+	for cpt in [Vector2(off, off), Vector2(size.x - off, off),
+			Vector2(off, size.y - off), Vector2(size.x - off, size.y - off)]:
+		_draw_bullseye(cpt, u * 0.10, 24)
+	# 外周キャッスレーション (オーバースキャン確認)
+	_draw_castellations(size, u * 0.025)
+
+
+## 同心円 + 放射スポーク + 十字 + 中心点。センター/コーナーの位置・収束確認用。
+func _draw_bullseye(c: Vector2, r: float, spokes: int) -> void:
+	var cv := _test_canvas
+	var col := Color.WHITE
+	cv.draw_arc(c, r, 0, TAU, 72, col, 1.5)
+	cv.draw_arc(c, r * 0.6, 0, TAU, 56, col, 1.0)
+	cv.draw_circle(c, r * 0.1, col)
+	cv.draw_line(c - Vector2(r, 0), c + Vector2(r, 0), col, 1.0)
+	cv.draw_line(c - Vector2(0, r), c + Vector2(0, r), col, 1.0)
+	for i in range(spokes):
+		var a := TAU * i / spokes
+		var d := Vector2(cos(a), sin(a))
+		cv.draw_line(c + d * (r * 0.6), c + d * r, col, 1.0)
+
+
+## 周波数縞パッチ。白地に、指定ピッチ (px) ごとの黒線を等分ブロックで描く。縦線/横線を選べる。
+func _draw_grating_patch(rect: Rect2, pitches: Array, vertical: bool) -> void:
+	var cv := _test_canvas
+	cv.draw_rect(rect, Color.WHITE)
+	var seg_w := rect.size.x / pitches.size()
+	for k in range(pitches.size()):
+		var pitch: int = pitches[k]
+		var ox := rect.position.x + seg_w * k
+		var on := true
+		if vertical:
+			var lx := ox
+			while lx < ox + seg_w:
+				if on:
+					cv.draw_rect(Rect2(lx, rect.position.y, float(pitch), rect.size.y), Color.BLACK)
+				on = not on
+				lx += pitch
+		else:
+			var ly := rect.position.y
+			while ly < rect.position.y + rect.size.y:
+				if on:
+					cv.draw_rect(Rect2(ox, ly, seg_w, float(pitch)), Color.BLACK)
+				on = not on
+				ly += pitch
+	cv.draw_rect(rect, Color(0.3, 0.3, 0.3), false, 1.0)
+
+
+## 画面外周に黒白交互のブロックを並べる (オーバースキャン/端の欠けの確認)。
+func _draw_castellations(size: Vector2, b: float) -> void:
+	var cv := _test_canvas
+	var n := 0
+	var x := 0.0
+	while x < size.x:
+		var top := Color.BLACK if n % 2 == 0 else Color.WHITE
+		cv.draw_rect(Rect2(x, 0, b, b), top)
+		cv.draw_rect(Rect2(x, size.y - b, b, b), Color.WHITE if n % 2 == 0 else Color.BLACK)
+		x += b
+		n += 1
+	n = 0
+	var y := 0.0
+	while y < size.y:
+		var left := Color.BLACK if n % 2 == 0 else Color.WHITE
+		cv.draw_rect(Rect2(0, y, b, b), left)
+		cv.draw_rect(Rect2(size.x - b, y, b, b), Color.WHITE if n % 2 == 0 else Color.BLACK)
+		y += b
+		n += 1
 
 
 func _is_fullscreen() -> bool:
