@@ -8,11 +8,10 @@ extends CanvasLayer
 ##
 ## 表示制御・トリガ・60 秒自動復帰は autoload ServiceMode。UI は項目数が多く動的なため code-built。
 
-# サービスモードは Windows の UI フォント (游ゴシック / Yu Gothic) を OS から取得して使う。
-# 取得できない環境では同梱の Noto Sans JP にフォールバック (同梱フォントは OS 非依存で必ず存在)。
-const UI_FONT_CANDIDATES := ["Yu Gothic UI", "Yu Gothic"]
-const FONT_REGULAR := preload("res://fonts/NotoSansJP-Regular.ttf")  # フォールバック (通常)
-const FONT_BOLD := preload("res://fonts/NotoSansJP-Bold.ttf")        # フォールバック (太字)
+# ランチャー他画面と同じ日本語フォント (Noto Sans JP)。指定しないと Godot 既定フォントになり
+# サービスモードだけ見た目が浮くため、UI 全体に既定フォントとして適用する。
+const FONT_REGULAR := preload("res://fonts/NotoSansJP-Regular.ttf")
+const FONT_BOLD := preload("res://fonts/NotoSansJP-Bold.ttf")
 
 const C_BG := Color(0.05, 0.05, 0.07, 1.0)  # 完全不透明 (裏のシーンは pause + 不可視で凍結)
 const C_PANEL := Color(0.10, 0.10, 0.13, 1.0)
@@ -196,10 +195,9 @@ func _build_ui() -> void:
 	_btn_hover_sb.content_margin_top = 6
 	_btn_hover_sb.content_margin_bottom = 6
 
-	# UI 全体の既定フォントを Windows UI フォント (Yu Gothic) に。_root に theme を付けると子へ伝播する。
+	# UI 全体の既定フォントを Noto Sans JP に。_root に theme を付けると子の Label/Button 等へ伝播する。
 	_theme = Theme.new()
-	_theme.default_font = _load_ui_font(false)
-	var f_bold := _load_ui_font(true)
+	_theme.default_font = FONT_REGULAR
 
 	_root = Control.new()
 	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -228,7 +226,7 @@ func _build_ui() -> void:
 	var header := Label.new()
 	header.text = "サービスモード  —  Launcher %s" % Version.get_version_string()
 	header.add_theme_color_override("font_color", C_ACCENT)
-	header.add_theme_font_override("font", f_bold)
+	header.add_theme_font_override("font", FONT_BOLD)
 	header.add_theme_font_size_override("font_size", 26)
 	col.add_child(header)
 
@@ -285,7 +283,7 @@ func _build_ui() -> void:
 
 	_detail_title = Label.new()
 	_detail_title.add_theme_color_override("font_color", C_ACCENT)
-	_detail_title.add_theme_font_override("font", f_bold)
+	_detail_title.add_theme_font_override("font", FONT_BOLD)
 	_detail_title.add_theme_font_size_override("font_size", 22)
 	detail_box.add_child(_detail_title)
 	detail_box.add_child(HSeparator.new())
@@ -305,19 +303,6 @@ func _build_ui() -> void:
 	_footer.add_theme_color_override("font_color", C_MUTED)
 	_footer.add_theme_font_size_override("font_size", 14)
 	col.add_child(_footer)
-
-
-## Windows UI フォント (游ゴシック) を OS から取得して返す。bold=true なら太字ウェイト。
-## 見つからない / 読み込めない場合は同梱の Noto Sans JP を返す。
-func _load_ui_font(bold: bool) -> Font:
-	var weight := 700 if bold else 400
-	for name in UI_FONT_CANDIDATES:
-		var path := OS.get_system_font_path(name, weight)
-		if path != "" and FileAccess.file_exists(path):
-			var f := FontFile.new()
-			if f.load_dynamic_font(path) == OK:
-				return f
-	return FONT_BOLD if bold else FONT_REGULAR
 
 
 # ---------------- 選択 / ペイン移動 ----------------
