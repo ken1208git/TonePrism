@@ -1,14 +1,18 @@
 extends Node
 ## スタッフ向けデバッグオーバーレイ (画面隅の常時表示 HUD)。
 ## サービスモードの「デバッグオーバーレイ切替」で ON/OFF する。ON の間はサービスモードを閉じても、
-## シーンを移動しても画面左上に FPS・メモリ・PC 名・シーン状態・接続状態などを表示し続ける。
-## 設定はメモリのみ保持 (再起動で OFF に戻る)。本 autoload は表示の生成と毎フレーム更新を担う。
+## シーンを移動しても、ゲーム中・中断メニュー中でも画面左上に FPS・メモリ・PC 名・シーン状態・
+## 接続状態などを表示し続ける。設定はメモリのみ保持 (再起動で OFF に戻る)。
+##
+## 何の上にでも出すため、中断メニューと同じ「透明・borderless・最前面 (always_on_top) の別 OS ウィンドウ」
+## として実装する。さらにフォーカスを奪わず (unfocusable)・クリックを透過 (mouse passthrough) するので、
+## 下のランチャー/ゲーム/サービスモードの操作を一切妨げない。
 
 const REFRESH_FAST := 0.25  # FPS・メモリ等の更新間隔 (秒)
-const REFRESH_SLOW := 1.0   # DB ファイル存在チェック等、重めの項目の更新間隔 (秒)
+const REFRESH_SLOW := 1.0   # DB ファイル存在チェック・出すモニタの追従など、重めの処理の間隔 (秒)
 
 var _enabled: bool = false
-var _layer: CanvasLayer = null
+var _win: Window = null
 var _label: Label = null
 var _fast_accum: float = 0.0
 var _slow_accum: float = 0.0
@@ -32,11 +36,13 @@ func toggle() -> void:
 
 func set_enabled(v: bool) -> void:
 	_enabled = v
-	if _layer:
-		_layer.visible = v
 	if v:
+		_place_window()
 		_refresh_slow()
 		_update_text()
+		_win.visible = true
+	elif _win:
+		_win.visible = false
 
 
 func _process(delta: float) -> void:
@@ -47,16 +53,27 @@ func _process(delta: float) -> void:
 	if _slow_accum >= REFRESH_SLOW:
 		_slow_accum = 0.0
 		_refresh_slow()
+		_place_window()  # ゲームが別モニタへ移った場合などに追従
 	if _fast_accum >= REFRESH_FAST:
 		_fast_accum = 0.0
 		_update_text()
 
 
 func _build() -> void:
-	_layer = CanvasLayer.new()
-	_layer.layer = 256  # サービスモード (200) より前面 = サービスモード表示中も HUD が見える
-	_layer.visible = false
-	add_child(_layer)
+	_win = Window.new()
+	_win.transparent = true
+	_win.borderless = true
+	_win.always_on_top = true
+	_win.unresizable = true
+	_win.unfocusable = true  # フォーカスを奪わない (キオスク操作・ゲーム入力を妨げない)
+	_win.set_flag(Window.FLAG_MOUSE_PASSTHROUGH, true)  # クリックを下の窓へ透過
+	_win.visible = false
+	# 別 OS ウィンドウは主窓の content スケーリングを継承しないため、1920 基準を明示 (位置・寸法を主窓と一致)。
+	_win.content_scale_size = Vector2i(1920, 1080)
+	_win.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
+	_win.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
+	_win.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(_win)
 
 	var panel := PanelContainer.new()
 	panel.position = Vector2(12, 12)
@@ -68,12 +85,41 @@ func _build() -> void:
 	sb.content_margin_top = 8
 	sb.content_margin_bottom = 8
 	panel.add_theme_stylebox_override("panel", sb)
-	_layer.add_child(panel)
+	_win.add_child(panel)
 
 	_label = Label.new()
 	_label.add_theme_color_override("font_color", Color(0.85, 1.0, 0.85))
 	_label.add_theme_font_size_override("font_size", 14)
 	panel.add_child(_label)
+
+
+## HUD ウィンドウを出すモニタへ合わせ、画面いっぱいに配置する。ゲーム実行中はゲーム窓のいるモニタ、
+## それ以外はランチャーのいるモニタ (本番=単一モニタではどちらも同じ画面)。
+func _place_window() -> void:
+	if _win == null:
+		return
+	var scr := _resolve_screen()
+	_win.position = DisplayServer.screen_get_position(scr)
+	_win.size = DisplayServer.screen_get_size(scr)
+
+
+## HUD を出すモニタ (screen index) を決める。ゲーム実行中はゲーム窓の中心を含むモニタ、無ければ
+## ランチャーのいるモニタ (本番=単一モニタではどちらも同じ画面)。中断メニューの配置ロジックと同方針。
+func _resolve_screen() -> int:
+	var fallback: int = get_tree().root.current_screen
+	var agent := get_node_or_null("/root/LauncherAgent")
+	if agent == null or not GameSession.is_running() or not agent.has_method("get_game_window_rect"):
+		return fallback
+	var rect: Rect2i = agent.get_game_window_rect()
+	if rect.size.x <= 0 or rect.size.y <= 0:
+		return fallback
+	var center := rect.position + rect.size / 2
+	for i in range(DisplayServer.get_screen_count()):
+		var pos := DisplayServer.screen_get_position(i)
+		var sz := DisplayServer.screen_get_size(i)
+		if center.x >= pos.x and center.x < pos.x + sz.x and center.y >= pos.y and center.y < pos.y + sz.y:
+			return i
+	return fallback
 
 
 ## 重めの項目 (DB ファイルの存在確認など) を間隔を空けて更新する。
