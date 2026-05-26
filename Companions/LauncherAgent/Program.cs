@@ -449,6 +449,10 @@ namespace TonePrism.LauncherAgent
             long total = Interlocked.Read(ref _dlBytes);
             double secs = sw.Elapsed.TotalSeconds;
             if (total <= 0 || secs <= 0) return false;
+            // 403 等のエラーが起きつつ最初の数KBだけ受信したケースを「成功(緑)」と誤認しない。
+            // エラーが記録されていて受信量が極端に少ない (< 1MB) なら測定失敗扱いにする
+            // (エラー無しで <1MB は実際に遅い回線の正当な測定値なので通す)。
+            if (!string.IsNullOrEmpty(LastError) && total < 1048576) return false;
             mbps = (total * 8.0) / secs / 1e6;
             return true;
         }

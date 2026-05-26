@@ -2339,6 +2339,12 @@ func _clear_content() -> void:
 	_ic_connected_label = null  # 入力チェックのライブ更新対象も解除
 	_ic_last_label = null
 	_nw_cancel = true     # ネットワークテスト中に画面を離れたらワーカーを次の段階境界で止める
+	# 速度結果待ち中 (= ワーカースレッドは join 済み) に離脱したら run state を解放しておく。
+	# そうしないと戻った時 _nw_running が true のまま残り、新ボタンを押しても最大 NW_SPEED_TIMEOUT_SEC 秒
+	# サイレント無反応になる。疎通フェーズ中 (thread 実行中, pending=0) は触らず cancel + _nw_done に任せる。
+	if _nw_speed_pending > 0:
+		_nw_running = false
+		_nw_speed_pending = 0
 	_nw_rows = {}         # 解放されるラベルへの参照を捨てる (worker の _nw_set は has() で空振りする)
 	_nw_run_btn = null
 	_lt_stop()            # 起動テスト実行中なら止める (画面を離れるのでゲームを置き去りにしない)
