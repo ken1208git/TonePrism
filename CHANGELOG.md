@@ -1,6 +1,6 @@
 # 変更履歴
 
-このプロジェクト（Prismランチャーシステム）の重要な変更点を全て記録します。
+このプロジェクト（TonePrism）の重要な変更点を全て記録します。
 
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) に従い、
 このプロジェクトは [Semantic Versioning](https://semver.org/lang/ja/) に準拠しています。

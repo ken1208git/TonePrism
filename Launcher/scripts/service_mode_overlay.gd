@@ -1293,7 +1293,7 @@ func _build_games_launch_test() -> void:
 	_add_text("※ テスト中はゲーム画面が一瞬ずつ前面に出ます。", C_MUTED)
 	_add_button("すべてチェック", func(): _lt_set_all(true))
 	_add_button("すべて外す", func(): _lt_set_all(false))
-	_lt_start_btn = _add_button("チェックしたゲームをテスト開始", _lt_start)
+	_lt_start_btn = _add_button("チェックしたゲームをテスト", _lt_start)
 	_lt_stop_btn = _add_button("テストを中止", _lt_abort)
 	_lt_stop_btn.disabled = true  # 実行中のみ有効
 
@@ -1458,7 +1458,7 @@ func _lt_abort() -> void:
 func _lt_restore_buttons() -> void:
 	if _lt_start_btn and is_instance_valid(_lt_start_btn):
 		_lt_start_btn.disabled = false
-		_lt_start_btn.text = "チェックしたゲームをテスト開始"
+		_lt_start_btn.text = "チェックしたゲームをテスト"
 	if _lt_stop_btn and is_instance_valid(_lt_stop_btn):
 		_lt_stop_btn.disabled = true
 
@@ -1935,14 +1935,14 @@ func _build_debug_overlay() -> void:
 
 func _build_fullscreen() -> void:
 	_add_text("現在: %s" % ("フルスクリーン" if _is_fullscreen() else "ウィンドウ"))
-	_add_text("モニター違いでの表示崩れ対応用。再起動で project 設定 (フルスクリーン) に戻ります。", C_MUTED)
+	_add_text("モニター違いでの表示崩れ対応用。再起動で起動時の設定 (フルスクリーン) に戻ります。", C_MUTED)
 	_add_button("フルスクリーン ⇔ ウィンドウ を切り替え", _toggle_fullscreen)
 
 
 func _build_monitor() -> void:
 	var cur := get_window().current_screen
 	_add_text("現在のモニタ: #%d" % cur)
-	_add_text("複数モニタ環境用。メモリのみ保持 (再起動でプライマリに戻る)。", C_MUTED)
+	_add_text("複数モニタ環境用。この変更は一時的で、再起動でプライマリに戻ります。", C_MUTED)
 	for i in range(DisplayServer.get_screen_count()):
 		var sz := DisplayServer.screen_get_size(i)
 		var label := "モニタ #%d  (%dx%d)%s" % [i, sz.x, sz.y, "  ← 現在" if i == cur else ""]
