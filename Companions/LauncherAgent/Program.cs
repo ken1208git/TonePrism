@@ -41,7 +41,9 @@ namespace TonePrism.LauncherAgent
         private static int _seq;
 
         // 速度計測 (サービスモードのネットワークテスト用)。1 回約5秒の並列DL + 共有のキャッシュ無し読み。
-        private const string SpeedUrl = "https://speed.cloudflare.com/__down?bytes=25000000";
+        // bytes は大きく (300MB) して各接続が5秒間「流しっぱなし」になるようにする (小さいと再リクエストの
+        // 隙間 + スロースタート再開で大幅に過小評価される)。締め切りで読み取りを打ち切る。
+        private const string SpeedUrl = "https://speed.cloudflare.com/__down?bytes=100000000";
         private static volatile bool _speedRunning;
 
         private static int Main(string[] args)
@@ -269,7 +271,7 @@ namespace TonePrism.LauncherAgent
             try
             {
                 double mbps;
-                if (SpeedTest.Internet(5000, 4, SpeedUrl, out mbps))
+                if (SpeedTest.Internet(5000, 6, SpeedUrl, out mbps))
                     SendSpeedtest("internet", true, "約 " + Math.Round(mbps) + " Mbps");
                 else
                     SendSpeedtest("internet", false, "測定不可");
