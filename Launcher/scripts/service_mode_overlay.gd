@@ -49,6 +49,8 @@ var _test_rect: ColorRect = null
 var _test_active: bool = false
 var _exit_armed: bool = false
 var _games_test_mode: String = ""    # 「ゲーム動作確認」の選択中モード ("" / exists / auto / play)
+var _audio_player: AudioStreamPlayer = null  # 音声チェックのテスト音再生用
+var _test_tone: AudioStreamWAV = null        # 生成したテスト音 (キャッシュ)
 
 
 func _ready() -> void:
@@ -290,6 +292,7 @@ func _build_detail(id: String) -> void:
 		"games_test": _build_games_test()
 		"db_check": _build_db_check()
 		"log_view": _build_log_view()
+		"audio": _build_audio_check()
 		"screen_test": _build_screen_test()
 		"fullscreen": _build_fullscreen()
 		"monitor": _build_monitor()
@@ -462,6 +465,45 @@ func _build_db_check() -> void:
 		list.add_item("%s: %s" % [n, "%d 件" % cnt if cnt >= 0 else "読み取り失敗"])
 	_detail_content.add_child(list)
 	dbm.close()
+
+
+## 音声チェック: 正弦波のテスト音を生成して再生し、音声出力が機能しているかを確認する。
+## (launcher に音声アセットが無いため毎回生成。音量調整は中断メニュー #82 実装後にここへ追加予定。)
+func _build_audio_check() -> void:
+	_add_text("テスト音を再生して音声出力を確認します。音が出ない問題の切り分け用。", C_MUTED)
+	_add_button("テスト音を再生 (880Hz / 0.6秒)", _play_test_tone)
+	_add_text("音が聞こえない場合: スピーカー/ヘッドホン接続、OS のミュート/音量、出力デバイスを確認してください。", C_MUTED)
+	_add_text("（音量調整は中断メニュー側 (#82) 実装後にここにも追加予定）", C_MUTED)
+
+
+func _play_test_tone() -> void:
+	if _audio_player == null:
+		# overlay (PROCESS_MODE_ALWAYS) 配下に置くので、サービスモードの tree pause 中でも再生される。
+		_audio_player = AudioStreamPlayer.new()
+		add_child(_audio_player)
+	if _test_tone == null:
+		_test_tone = _generate_tone(880.0, 0.6)
+	_audio_player.stream = _test_tone
+	_audio_player.play()
+
+
+## 指定周波数・長さの 16bit モノラル正弦波を生成する (端は短くフェードしてクリック音を防ぐ)。
+func _generate_tone(freq: float, dur: float) -> AudioStreamWAV:
+	var rate := 44100
+	var count := int(rate * dur)
+	var data := PackedByteArray()
+	data.resize(count * 2)
+	for i in count:
+		var t := float(i) / rate
+		var env := minf(1.0, minf(t / 0.02, (dur - t) / 0.02))  # 立ち上がり/終わりをフェード
+		var s := sin(TAU * freq * t) * env * 0.6
+		data.encode_s16(i * 2, int(clampf(s, -1.0, 1.0) * 32767.0))
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = rate
+	wav.stereo = false
+	wav.data = data
+	return wav
 
 
 func _build_screen_test() -> void:
