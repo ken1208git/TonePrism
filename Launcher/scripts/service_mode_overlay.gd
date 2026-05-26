@@ -85,6 +85,7 @@ var _lt_games: Array = []            # 登録ゲーム (GameInfo) 一覧
 var _lt_checks: Array[CheckBox] = [] # 各ゲームのチェックボックス
 var _lt_status: Array[Label] = []    # 各ゲームの結果ラベル
 var _lt_start_btn: Button = null     # 「テスト開始」ボタン
+var _lt_stop_btn: Button = null      # 「テストを中止」ボタン
 var _lt_running: bool = false        # テスト実行中
 var _lt_queue: Array[int] = []       # 残りテスト対象の index キュー
 var _lt_cur: int = -1                # 現在テスト中のゲーム index
@@ -690,6 +691,8 @@ func _build_games_launch_test() -> void:
 	_add_button("すべてチェック", func(): _lt_set_all(true))
 	_add_button("すべて外す", func(): _lt_set_all(false))
 	_lt_start_btn = _add_button("チェックしたゲームをテスト開始", _lt_start)
+	_lt_stop_btn = _add_button("テストを中止", _lt_abort)
+	_lt_stop_btn.disabled = true  # 実行中のみ有効
 
 	var list_box := VBoxContainer.new()
 	list_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -743,6 +746,8 @@ func _lt_start() -> void:
 	if _lt_start_btn and is_instance_valid(_lt_start_btn):
 		_lt_start_btn.disabled = true
 		_lt_start_btn.text = "テスト中…"
+	if _lt_stop_btn and is_instance_valid(_lt_stop_btn):
+		_lt_stop_btn.disabled = false
 	_lt_begin_next()
 
 
@@ -798,9 +803,28 @@ func _lt_finish() -> void:
 	_lt_phase = ""
 	if LauncherAgent.is_available():
 		LauncherAgent.unwatch()
+	_lt_restore_buttons()
+
+
+## ユーザーが「テストを中止」: 進行中のテストを止め、残りを「中止」表示にする。
+func _lt_abort() -> void:
+	if not _lt_running:
+		return
+	if _lt_cur >= 0:
+		_lt_set_status(_lt_cur, "中止", C_MUTED)
+	for i in _lt_queue:
+		_lt_set_status(i, "中止", C_MUTED)
+	_lt_stop()  # 起動中ゲームを終了 + watch 解除 + 実行フラグ解除
+	_lt_restore_buttons()
+
+
+## 開始/中止ボタンの表示を待機状態に戻す。
+func _lt_restore_buttons() -> void:
 	if _lt_start_btn and is_instance_valid(_lt_start_btn):
 		_lt_start_btn.disabled = false
 		_lt_start_btn.text = "チェックしたゲームをテスト開始"
+	if _lt_stop_btn and is_instance_valid(_lt_stop_btn):
+		_lt_stop_btn.disabled = true
 
 
 func _lt_reset_state() -> void:
@@ -809,6 +833,7 @@ func _lt_reset_state() -> void:
 	_lt_checks = []
 	_lt_status = []
 	_lt_start_btn = null
+	_lt_stop_btn = null
 
 
 ## 進行中の起動テストを止める (画面を離れる / 閉じる時)。起動中のゲームは終了させ、watch も解除する。

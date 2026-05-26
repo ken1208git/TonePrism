@@ -39,6 +39,10 @@ var _last_trigger_seq: int = 0
 
 
 func _ready() -> void:
+	# tree.paused (ダイアログ / サービスモード等) でも Companion からの window/trigger イベントを
+	# 受信し続ける。これがないと paused 中に窓状態が更新されず、サービスモードの起動テストで
+	# 「窓は出ているのに検出できず NG」になる (GameSession も監視継続のため ALWAYS)。
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	_start_companion()
 
 
