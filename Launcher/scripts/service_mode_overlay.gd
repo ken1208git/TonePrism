@@ -452,6 +452,18 @@ func _show_modal(message: String, options: PackedStringArray, cb: Callable, colo
 		_modal_btnbox.add_child(b)
 		if first == null:
 			first = b
+	# フォーカスがモーダル外 (背後のボタン等) へ逃げないよう、ボタンの neighbor を相互に固定する。
+	var btns := _modal_btnbox.get_children()
+	for i in range(btns.size()):
+		var b: Control = btns[i]
+		var prev: Control = btns[i - 1] if i > 0 else b
+		var nxt: Control = btns[i + 1] if i < btns.size() - 1 else b
+		b.focus_neighbor_left = prev.get_path()
+		b.focus_previous = prev.get_path()
+		b.focus_neighbor_right = nxt.get_path()
+		b.focus_next = nxt.get_path()
+		b.focus_neighbor_top = b.get_path()
+		b.focus_neighbor_bottom = b.get_path()
 	_modal_open = true
 	_modal_layer.visible = true
 	if first:
