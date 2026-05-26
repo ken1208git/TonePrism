@@ -1073,11 +1073,16 @@ func _sysinfo_header(list: ItemList, text: String) -> void:
 	var idx := list.add_item("── %s ──" % text)
 	list.set_item_custom_fg_color(idx, C_ACCENT)
 	list.set_item_selectable(idx, false)
+	# 既定だと項目ツールチップが空文字→項目テキストにフォールバックし、ホバー時に見出し名が
+	# カーソル付近にフキダシで浮く (中央あたりにセクション名が出る誤解の原因)。行内に全文見えているので無効化。
+	list.set_item_tooltip_enabled(idx, false)
 
 
 ## システム情報の 1 行 ("ラベル: 値")。追加した item の index を返す (リアルタイム更新用)。
 func _sysinfo_line(list: ItemList, label: String, value: String) -> int:
-	return list.add_item("%s: %s" % [label, value])
+	var idx := list.add_item("%s: %s" % [label, value])
+	list.set_item_tooltip_enabled(idx, false)  # 行テキストの重複フキダシを抑止 (見出しと同様)
+	return idx
 
 
 ## 現在の V-Sync モードを日本語で返す。
