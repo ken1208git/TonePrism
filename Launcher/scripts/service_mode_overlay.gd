@@ -433,8 +433,6 @@ func _build_db_check() -> void:
 	_detail_content.add_child(list)
 	dbm.close()
 
-	_add_text("※ 書き込みテストは行いません (Launcher は read-only、書き込みは Manager 専用 / SPEC §6.5)。", C_MUTED)
-
 
 func _build_screen_test() -> void:
 	_add_text("全画面の単色 / グレーを表示します。モニター相性・色・スケーリングの確認用。")
