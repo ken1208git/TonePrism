@@ -705,18 +705,26 @@ func _build_games_launch_test() -> void:
 	_detail_content.add_child(_lt_scroll)
 	var list_box := VBoxContainer.new()
 	list_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list_box.add_theme_constant_override("separation", 2)
+	list_box.add_theme_constant_override("separation", 0)  # 行を詰めてゼブラを連続させる
 	_lt_scroll.add_child(list_box)
+	# ゼブラ (交互背景) でリスト感を出す。行は詰める。
+	var row_a := _lt_row_style(Color(0.07, 0.07, 0.07))
+	var row_b := _lt_row_style(Color(0.11, 0.11, 0.11))
 	_lt_checks.clear()
 	_lt_status.clear()
-	for g in _lt_games:
+	for i in range(_lt_games.size()):
+		var g = _lt_games[i]
+		var panel := PanelContainer.new()
+		panel.add_theme_stylebox_override("panel", row_a if i % 2 == 0 else row_b)
 		var row := HBoxContainer.new()
 		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		panel.add_child(row)
 		var cb := CheckBox.new()
 		cb.text = " " + g.title
 		cb.button_pressed = true  # 既定は全部チェック
 		cb.focus_mode = Control.FOCUS_ALL
 		cb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cb.add_theme_stylebox_override("normal", _lt_empty_sb())  # 行の地を活かす (ボタン地を出さない)
 		_apply_focus_style_to(cb)
 		row.add_child(cb)
 		var st := Label.new()
@@ -724,9 +732,24 @@ func _build_games_launch_test() -> void:
 		st.text = "未"
 		st.custom_minimum_size = Vector2(220, 0)
 		row.add_child(st)
-		list_box.add_child(row)
+		list_box.add_child(panel)
 		_lt_checks.append(cb)
 		_lt_status.append(st)
+
+
+## 起動テスト一覧の行背景スタイル (ゼブラ用)。
+func _lt_row_style(bg: Color) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.content_margin_left = 10
+	sb.content_margin_right = 10
+	sb.content_margin_top = 5
+	sb.content_margin_bottom = 5
+	return sb
+
+
+func _lt_empty_sb() -> StyleBoxEmpty:
+	return StyleBoxEmpty.new()
 
 
 ## 全チェックボックスを一括 ON/OFF。
