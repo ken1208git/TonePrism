@@ -150,7 +150,7 @@ var _nw_run_btn: Button = null
 var _nw_rows: Dictionary = {}          # stage_id -> 結果 Label
 var _nw_db_host: String = ""           # 共有サーバーのホスト (DBパスから抽出、メインスレッドで取得)
 var _nw_db_path: String = ""           # DB ファイルのフルパス (共有サーバーのホスト抽出用)
-var _nw_speed_file: String = ""        # 読み込み速度の計測対象 (実ゲームの exe。無ければ DB)
+var _nw_speed_file: String = ""        # 読み込み速度の計測対象 (games フォルダ。Companion が配下の最大ファイルを測る。無ければ DB)
 
 
 func _ready() -> void:
@@ -990,17 +990,13 @@ func _nw_tcp(host: String, port: int, timeout_ms: int) -> Array:
 	return [false, timeout_ms]  # 到達しないが GDScript の戻り値検査のため
 
 
-## 読み込み速度の計測対象ファイルを選ぶ。実ゲームの実行ファイル (共有上・サイズ大) を優先し、
-## 無ければ DB にフォールバック (DB は小さすぎて速度がブレるため)。最初に見つかった実在 exe を使う。
+## 読み込み速度の計測対象を選ぶ。games フォルダを丸ごと Companion に渡し、配下で最大の
+## ファイル (.pck / プレビュー動画 .mp4 / Unity の .resS 等) を測らせる。exe は Godot ゲームだと
+## 数百KB と小さく速度がブレるため対象にしない。games フォルダが無ければ DB にフォールバック。
 func _nw_pick_speed_file() -> String:
-	var db := DatabaseManager.new()
-	if db.open():
-		var games := GameRepository.new(db).get_all_games()
-		db.close()
-		for g in games:
-			var exe := GamePathResolver.find_executable(g)
-			if exe != "":  # find_executable は実在しなければ "" を返す
-				return exe
+	var games := PathManager.get_games_folder()
+	if DirAccess.dir_exists_absolute(games):
+		return games
 	return _nw_db_path
 
 

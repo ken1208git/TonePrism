@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -277,7 +278,9 @@ namespace TonePrism.LauncherAgent
                     SendSpeedtest("internet", false, "測定不可 (" + (string.IsNullOrEmpty(SpeedTest.LastError) ? "0B" : SpeedTest.LastError) + ")");
 
                 double mbsec; long bytes;
-                if (!string.IsNullOrEmpty(sharePath) && SpeedTest.ServerRead(sharePath, 100L * 1024 * 1024, out mbsec, out bytes))
+                // 受け取ったパスがディレクトリなら配下で最大のファイルを測る (exe は小さく本体は .pck/.mp4/.resS 側)。
+                string target = SpeedTest.ResolveReadTarget(sharePath, 5000);
+                if (!string.IsNullOrEmpty(target) && SpeedTest.ServerRead(target, 100L * 1024 * 1024, out mbsec, out bytes))
                 {
                     string sz = bytes >= 1048576 ? (bytes / 1048576) + "MB" : (Math.Max(1, bytes / 1024)) + "KB";
                     SendSpeedtest("server", true, "約 " + Math.Round(mbsec, 1) + " MB/秒 (" + sz + " 読込)");
@@ -464,6 +467,33 @@ namespace TonePrism.LauncherAgent
                 }
                 catch (Exception ex) { RecordError(ex); Thread.Sleep(150); }
             }
+        }
+
+        // 読み込み速度の計測対象を決める。ファイルならそのまま、ディレクトリなら配下で最も大きいファイルを返す。
+        // ゲーム本体は exe でなく .pck / .mp4 (プレビュー動画) / Unity の .resS 等の巨大データ側にあるため、
+        // ツリーを走査して最大ファイルを選ぶことで意味のある量を読めるようにする。
+        // DirectoryInfo.EnumerateFiles の FileInfo は列挙時にサイズを保持する (WIN32_FIND_DATA 由来) ので
+        // SMB 上でもファイル毎の追加 stat が発生せず速い。巨大ツリー対策に budgetMs の時間予算を設ける。
+        public static string ResolveReadTarget(string pathOrDir, int budgetMs)
+        {
+            try
+            {
+                if (File.Exists(pathOrDir)) return pathOrDir;
+                if (!Directory.Exists(pathOrDir)) return pathOrDir; // 渡されたまま ServerRead 側で失敗扱いさせる
+                FileInfo best = null;
+                var sw = Stopwatch.StartNew();
+                try
+                {
+                    foreach (var f in new DirectoryInfo(pathOrDir).EnumerateFiles("*", SearchOption.AllDirectories))
+                    {
+                        if (best == null || f.Length > best.Length) best = f;
+                        if (sw.ElapsedMilliseconds > budgetMs) break; // 予算超過時はそれまでの最大で打ち切り
+                    }
+                }
+                catch { /* アクセス拒否等で列挙が中断しても best にそれまでの最大が残る */ }
+                return best != null ? best.FullName : pathOrDir;
+            }
+            catch { return pathOrDir; }
         }
 
         // 共有サーバーの読み込み速度 (MB/秒)。FILE_FLAG_NO_BUFFERING でキャッシュを使わず実読み込みを測る。
