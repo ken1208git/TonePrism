@@ -146,6 +146,9 @@ const IC_EXIT_PRESSES := 3             # Esc / Guide を何回押したら確認
 var _nw_thread: Thread = null
 var _nw_running: bool = false
 var _nw_cancel: bool = false           # close / 画面離脱時に true。ワーカーが段階境界で見て早期終了する
+var _nw_speed_pending: int = 0         # 待っている速度結果の数 (internet + server で 2)。0 になったら run 解放
+var _nw_speed_timeout_left: float = 0.0  # 速度結果待ちの残り秒 (Companion 異常死等で結果が来ない保険)
+const NW_SPEED_TIMEOUT_SEC := 20.0     # 速度結果が揃わない場合に強制解放するまでの秒数
 var _nw_run_btn: Button = null
 var _nw_rows: Dictionary = {}          # stage_id -> 結果 Label
 var _nw_db_host: String = ""           # 共有サーバーのホスト (DBパスから抽出、メインスレッドで取得)
@@ -213,6 +216,14 @@ func _process(delta: float) -> void:
 		if _sysinfo_accum >= 0.5:
 			_sysinfo_accum = 0.0
 			_refresh_sysinfo()
+	# 速度結果待ちのタイムアウト (Companion 異常死等で結果が永久に来ない場合の保険)。
+	if _nw_speed_pending > 0:
+		_nw_speed_timeout_left -= delta
+		if _nw_speed_timeout_left <= 0.0:
+			for sid in ["inet_speed", "server_speed"]:
+				if _nw_rows.has(sid) and is_instance_valid(_nw_rows[sid]) and _nw_rows[sid].text == "測定中…":
+					_nw_set(sid, "測定不可 (応答なし)", C_DANGER)
+			_nw_release_run()
 
 
 func _input(event: InputEvent) -> void:
@@ -220,7 +231,8 @@ func _input(event: InputEvent) -> void:
 		return
 	# 何か操作があった = アクティブ。本 overlay が入力を消費 (set_input_as_handled) すると ServiceMode 側の
 	# _input がスキップされ無操作タイマーが進んでしまうため、消費する前にここで明示的にリセットする。
-	ServiceMode.notify_activity()
+	# (意図的入力かの判定は notify_activity 側で行う = スティックドリフト等では復帰タイマーを止めない)
+	ServiceMode.notify_activity(event)
 	# 入力確認モード中は全入力を捕捉して表示し、メニューのナビには渡さない。Esc / Guide×3 で戻る。
 	if _ic_capture:
 		_ic_handle_capture(event)
@@ -929,15 +941,18 @@ func _nw_run() -> void:
 	call_deferred("_nw_done")
 
 
-## 疎通テスト完了 (メインスレッド)。スレッドを join し、速度計測を Companion へ依頼してボタンを戻す。
+## 疎通テスト完了 (メインスレッド)。スレッドを join し、速度計測を Companion へ依頼する。
+## 速度プローブは非同期 (結果は speedtest_result シグナル) なので、両方の結果が届く (または
+## タイムアウトする) まで run state を保持しボタンを無効のままにする。投げた直後に解放すると、
+## 結果到着前の再実行が Companion 側 _speedRunning に弾かれ「測定中…」固着し得るため (Codex #2)。
 func _nw_done() -> void:
 	if _nw_thread:
 		_nw_thread.wait_to_finish()  # ワーカーは既に return 済みなので即座に返る
 		_nw_thread = null
-	_nw_running = false
 	# 閉じられた / 画面を離れた場合は join + フラグ解除だけ行い、速度計測の依頼や UI 復帰はしない
 	# (対象の行/ボタンは解放済みのことがある)。
 	if _nw_cancel:
+		_nw_running = false
 		return
 	# 速度計測は Companion 側で実施 (キャッシュ回避の正確な測定。結果は speedtest_result シグナル)。
 	var agent := get_node_or_null("/root/LauncherAgent")
@@ -945,9 +960,21 @@ func _nw_done() -> void:
 		_nw_set("inet_speed", "測定中…", C_TEXT)
 		_nw_set("server_speed", "測定中…", C_TEXT)
 		agent.request_speedtest(_nw_speed_file)
-	else:
-		_nw_set("inet_speed", "—（Companion無し）", C_MUTED)
-		_nw_set("server_speed", "—（Companion無し）", C_MUTED)
+		_nw_speed_pending = 2  # internet + server の 2 結果を待つ
+		_nw_speed_timeout_left = NW_SPEED_TIMEOUT_SEC
+		if _nw_run_btn and is_instance_valid(_nw_run_btn):
+			_nw_run_btn.text = "計測中…"  # disabled のまま保持
+		return
+	# Companion 無し: 速度測定はできないのでここで解放。
+	_nw_set("inet_speed", "—（Companion無し）", C_MUTED)
+	_nw_set("server_speed", "—（Companion無し）", C_MUTED)
+	_nw_release_run()
+
+
+## ネットワークテスト完了。run state を解放しボタンを再有効化する。
+func _nw_release_run() -> void:
+	_nw_running = false
+	_nw_speed_pending = 0
 	if _nw_run_btn and is_instance_valid(_nw_run_btn):
 		_nw_run_btn.disabled = false
 		_nw_run_btn.text = "もう一度テスト"
@@ -959,6 +986,11 @@ func _nw_on_speed(kind: String, ok: bool, text: String) -> void:
 	if sid == "":
 		return
 	_nw_set(sid, text, C_OK if ok else C_DANGER)
+	# 両方の速度結果が揃ったら run state を解放してボタンを戻す (Codex #2)。
+	if _nw_speed_pending > 0:
+		_nw_speed_pending -= 1
+		if _nw_speed_pending <= 0:
+			_nw_release_run()
 
 
 ## ループバック/APIPA を除いた最初のローカル IPv4。

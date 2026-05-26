@@ -28,9 +28,9 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		toggle()
 		return
-	# 開いている間は何か操作があればアイドルタイマーをリセット (無操作 60 秒で自動復帰)。
+	# 開いている間、意図的な操作があればアイドルタイマーをリセット (無操作 60 秒で自動復帰)。
 	if _open:
-		_idle_sec = 0.0
+		notify_activity(event)
 
 
 func _process(delta: float) -> void:
@@ -56,11 +56,29 @@ func _log(message: String) -> void:
 		print(message)
 
 
-## アイドルタイマーをリセットする。overlay 側が入力を消費 (set_input_as_handled) すると、
-## _input フェーズで子の overlay が親の本 autoload より先に処理され本 _input がスキップされ得る
+## 意図的な操作であればアイドルタイマーをリセットする。overlay 側が入力を消費 (set_input_as_handled)
+## すると、_input フェーズで子の overlay が親の本 autoload より先に処理され本 _input がスキップされ得る
 ## (Esc/←/→ 等)。その経路でも overlay からこれを呼んでもらい無操作判定を確実にリセットする。
-func notify_activity() -> void:
-	_idle_sec = 0.0
+## ジョイパッドのスティックドリフト等のノイズ入力では自動復帰が永久に発火しなくなるので、
+## 意図的入力 (キー/ボタン押下・マウス移動・デッドゾーン超えの軸) に限定する。
+func notify_activity(event: InputEvent) -> void:
+	if _is_intentional_input(event):
+		_idle_sec = 0.0
+
+
+## 操作者の意図的な入力か (スティックドリフト/微小ノイズを無視する)。
+func _is_intentional_input(event: InputEvent) -> bool:
+	if event is InputEventKey:
+		return event.pressed and not event.echo
+	if event is InputEventMouseButton:
+		return event.pressed
+	if event is InputEventJoypadButton:
+		return event.pressed
+	if event is InputEventMouseMotion:
+		return true  # マウス移動は操作者がいる証拠
+	if event is InputEventJoypadMotion:
+		return absf(event.axis_value) > 0.5  # スティックのドリフト/ノイズを無視
+	return false
 
 
 func toggle() -> void:
