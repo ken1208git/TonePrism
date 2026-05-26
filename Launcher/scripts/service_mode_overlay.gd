@@ -66,6 +66,7 @@ var _test_active: bool = false
 var _seq_index: int = 0              # 画面表示テストで今表示しているパターンの位置
 var _exit_armed: bool = false
 var _games_test_mode: String = ""    # 「ゲーム動作確認」の選択中モード ("" / exists / auto / play)
+var _games_test_desc: Label = null   # 確認方法の選択画面で、フォーカス中の選択肢の詳細説明を出すラベル
 var _audio_player: AudioStreamPlayer = null  # 音声チェックのテスト音再生用
 var _test_tone: AudioStreamWAV = null        # 生成したテスト音 (キャッシュ)
 
@@ -407,15 +408,38 @@ func _build_games_test() -> void:
 				_add_text("「ファイルはあるが実際に遊べるか」の最終確認用。", C_MUTED)
 
 
-## ゲーム動作確認の確認方法 選択画面 (3 段階)。
+## ゲーム動作確認の確認方法 選択画面 (3 段階)。3 択の下に、今フォーカスしている選択肢の
+## 詳細説明をライブ表示する (↑↓ で選択肢を移ると説明も切り替わる)。
 func _build_games_test_menu() -> void:
 	_add_text("ゲームの動作を 3 段階で確認できます。確認方法を選んでください。", C_MUTED)
-	_add_button("① ファイル存在チェック（起動しない・全件一括）",
+	var b1 := _add_button("① ファイル存在チェック（起動しない・全件一括）",
 		func(): _games_test_mode = "exists"; _build_detail("games_test"); _refocus_detail())
-	_add_button("② 起動テスト（自動で起動→終了し、起動可否だけ確認）",
+	var b2 := _add_button("② 起動テスト（自動で起動→終了し、起動可否だけ確認）",
 		func(): _games_test_mode = "auto"; _build_detail("games_test"); _refocus_detail())
-	_add_button("③ 試遊確認（起動して実際に遊ぶ・終了は手動）",
+	var b3 := _add_button("③ 試遊確認（起動して実際に遊ぶ・終了は手動）",
 		func(): _games_test_mode = "play"; _build_detail("games_test"); _refocus_detail())
+	b1.focus_entered.connect(func(): _set_games_test_desc("exists"))
+	b2.focus_entered.connect(func(): _set_games_test_desc("auto"))
+	b3.focus_entered.connect(func(): _set_games_test_desc("play"))
+	_detail_content.add_child(HSeparator.new())
+	_games_test_desc = Label.new()
+	_games_test_desc.add_theme_color_override("font_color", C_MUTED)
+	_games_test_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_detail_content.add_child(_games_test_desc)
+	_set_games_test_desc("exists")  # 初期表示 (フォーカスが先頭に乗れば focus_entered で上書きされる)
+
+
+## 確認方法の選択画面で、選択肢の詳細説明を切り替える。
+func _set_games_test_desc(mode: String) -> void:
+	if _games_test_desc == null or not is_instance_valid(_games_test_desc):
+		return
+	match mode:
+		"exists":
+			_games_test_desc.text = "各ゲームの実行ファイル(exe)が実際にあるかを、起動せずに全件まとめて確認します。LAN 共有の未接続・フォルダ移動・パス設定ミスで実行ファイルが見つからないゲームを一覧で洗い出せます。一番手軽で安全な確認です。"
+		"auto":
+			_games_test_desc.text = "（実装予定）各ゲームを自動で起動し、ウィンドウが出るところまで確認してから自動で終了します。起動できるか(OK/NG)だけを一覧で判定。DLL 不足や起動直後のクラッシュなど『そもそも立ち上がらない』問題の検出向けです。"
+		"play":
+			_games_test_desc.text = "（実装予定）選んだ 1 本を実際に起動して遊んで確認します。終了はスタッフが手動で行います。ファイルもあって起動もするゲームが『実際にちゃんと遊べるか』を見る最終確認向けです。"
 
 
 ## モード①: 各ゲームの実行ファイル(exe)が存在するか (= パス切れ/ファイル欠落がないか) を起動せずチェック。
