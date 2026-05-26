@@ -42,8 +42,9 @@ namespace TonePrism.LauncherAgent
         private static int _seq;
 
         // 速度計測 (サービスモードのネットワークテスト用)。1 回約5秒の並列DL + 共有のキャッシュ無し読み。
-        // bytes は大きく (300MB) して各接続が5秒間「流しっぱなし」になるようにする (小さいと再リクエストの
+        // bytes は各接続が5秒間「流しっぱなし」になる十分な大きさにする (小さいと再リクエストの
         // 隙間 + スロースタート再開で大幅に過小評価される)。締め切りで読み取りを打ち切る。
+        // 上限は 75MB: Cloudflare `__down` は bytes が大きすぎると 403 を返す (75MB はOK / 100MB は403)。
         private const string SpeedUrl = "https://speed.cloudflare.com/__down?bytes=75000000";
         private static volatile bool _speedRunning;
 

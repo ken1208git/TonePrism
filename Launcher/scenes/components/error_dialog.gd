@@ -6,7 +6,10 @@ extends Control
 @onready var code_label = $Panel/VBoxContainer/CodeLabel
 
 var _error_code: int = 0
-var _ui_applied: bool = false  # _update_ui の二重適用 (remedy 二重追記) 防止
+# _update_ui の二重適用 (remedy 二重追記) 防止。setup() と _ready() の両方から呼ばれ得るため。
+# 前提: ErrorManager がエラーごとに新規インスタンスを instantiate して使い捨てる (error_manager.gd)。
+# 同一インスタンスを別 code で再 setup する使い方はしない (するなら setup() で本フラグを解除する必要あり)。
+var _ui_applied: bool = false
 
 # コード別の文言上書き。ここに無いコードは tscn の静的文言をそのまま使う。
 # （error_dialog.tscn は汎用文言で設計されているため、スタッフ対応など個別文言が要るコードのみ上書きする）

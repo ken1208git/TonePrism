@@ -145,6 +145,7 @@ const IC_EXIT_PRESSES := 3             # Esc / Guide を何回押したら確認
 # ネットワーク接続テスト (5): 別スレッドで段階チェック (ping/TCP はブロッキングなので画面を固めないため)。
 var _nw_thread: Thread = null
 var _nw_running: bool = false
+var _nw_cancel: bool = false           # close / 画面離脱時に true。ワーカーが段階境界で見て早期終了する
 var _nw_run_btn: Button = null
 var _nw_rows: Dictionary = {}          # stage_id -> 結果 Label
 var _nw_db_host: String = ""           # 共有サーバーのホスト (DBパスから抽出、メインスレッドで取得)
@@ -193,6 +194,7 @@ func close_overlay() -> void:
 	_hide_test()
 	_lt_stop()  # 起動テスト中に閉じてもゲームを置き去りにしない
 	_pt_stop()  # 試遊中に閉じてもゲームを置き去りにしない
+	_nw_cancel = true  # ネットワークテスト実行中なら次の段階境界で早期終了させる
 	visible = false
 
 
@@ -216,6 +218,9 @@ func _process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if not visible:
 		return
+	# 何か操作があった = アクティブ。本 overlay が入力を消費 (set_input_as_handled) すると ServiceMode 側の
+	# _input がスキップされ無操作タイマーが進んでしまうため、消費する前にここで明示的にリセットする。
+	ServiceMode.notify_activity()
 	# 入力確認モード中は全入力を捕捉して表示し、メニューのナビには渡さない。Esc / Guide×3 で戻る。
 	if _ic_capture:
 		_ic_handle_capture(event)
@@ -848,6 +853,7 @@ func _nw_set(stage_id: String, text: String, color: Color) -> void:
 func _nw_start() -> void:
 	if _nw_running:
 		return
+	_nw_cancel = false
 	_nw_db_path = PathManager.get_database_path()  # autoload アクセスはメインで済ませる
 	_nw_db_host = _nw_extract_host(_nw_db_path)
 	_nw_speed_file = _nw_pick_speed_file()  # 読み込み速度は実ゲーム exe で測る (DB は小さすぎるため)
@@ -863,6 +869,8 @@ func _nw_start() -> void:
 
 
 ## ワーカースレッド本体。各段階をブロッキングで確認し、結果は call_deferred でメインへ。
+## 段階境界ごとに _nw_cancel を見て、サービスモードが閉じられた / 画面を離れたら早期終了する
+## (個々のブロッキング呼び出しは中断できないので、次の境界までは進む)。
 func _nw_run() -> void:
 	# 1. ローカルIP
 	var ip := _nw_local_ipv4()
@@ -870,6 +878,9 @@ func _nw_run() -> void:
 		call_deferred("_nw_set", "ip", "OK  %s" % ip, C_OK)
 	else:
 		call_deferred("_nw_set", "ip", "NG  IPなし (LAN未接続/ケーブル確認)", C_DANGER)
+	if _nw_cancel:
+		call_deferred("_nw_done")
+		return
 	# 2. ゲートウェイ
 	var gw := _nw_default_gateway()
 	if gw == "":
@@ -883,6 +894,9 @@ func _nw_run() -> void:
 			call_deferred("_nw_set", "gateway", "OK  %s (ping無応答・ARPで確認)" % gw, C_OK)
 		else:
 			call_deferred("_nw_set", "gateway", "NG  %s 応答なし" % gw, C_DANGER)
+	if _nw_cancel:
+		call_deferred("_nw_done")
+		return
 	# 3. DNS
 	var t0 := Time.get_ticks_msec()
 	var resolved := IP.resolve_hostname("www.google.com", IP.TYPE_IPV4)
@@ -891,12 +905,18 @@ func _nw_run() -> void:
 		call_deferred("_nw_set", "dns", "OK  %s (%dms)" % [resolved, dms], C_OK)
 	else:
 		call_deferred("_nw_set", "dns", "NG  名前解決できない (%dms)" % dms, C_DANGER)
+	if _nw_cancel:
+		call_deferred("_nw_done")
+		return
 	# 4. インターネット (DNS非依存で IP 直 TCP)
 	var inet = _nw_tcp("1.1.1.1", 443, 3000)
 	if inet[0]:
 		call_deferred("_nw_set", "internet", "OK  (%dms)" % inet[1], C_OK)
 	else:
 		call_deferred("_nw_set", "internet", "NG  外部に届かない", C_DANGER)
+	if _nw_cancel:
+		call_deferred("_nw_done")
+		return
 	# 5. 共有サーバー疎通
 	if _nw_db_host == "":
 		call_deferred("_nw_set", "server", "対象外 (ローカル/不明なDBパス)", C_MUTED)
@@ -912,8 +932,13 @@ func _nw_run() -> void:
 ## 疎通テスト完了 (メインスレッド)。スレッドを join し、速度計測を Companion へ依頼してボタンを戻す。
 func _nw_done() -> void:
 	if _nw_thread:
-		_nw_thread.wait_to_finish()
+		_nw_thread.wait_to_finish()  # ワーカーは既に return 済みなので即座に返る
 		_nw_thread = null
+	_nw_running = false
+	# 閉じられた / 画面を離れた場合は join + フラグ解除だけ行い、速度計測の依頼や UI 復帰はしない
+	# (対象の行/ボタンは解放済みのことがある)。
+	if _nw_cancel:
+		return
 	# 速度計測は Companion 側で実施 (キャッシュ回避の正確な測定。結果は speedtest_result シグナル)。
 	var agent := get_node_or_null("/root/LauncherAgent")
 	if agent and agent.has_method("is_available") and agent.is_available():
@@ -923,7 +948,6 @@ func _nw_done() -> void:
 	else:
 		_nw_set("inet_speed", "—（Companion無し）", C_MUTED)
 		_nw_set("server_speed", "—（Companion無し）", C_MUTED)
-	_nw_running = false
 	if _nw_run_btn and is_instance_valid(_nw_run_btn):
 		_nw_run_btn.disabled = false
 		_nw_run_btn.text = "もう一度テスト"
@@ -2281,6 +2305,9 @@ func _clear_content() -> void:
 	_sysinfo_list = null  # 詳細を作り直すのでシステム情報のリアルタイム更新対象も解除
 	_ic_connected_label = null  # 入力チェックのライブ更新対象も解除
 	_ic_last_label = null
+	_nw_cancel = true     # ネットワークテスト中に画面を離れたらワーカーを次の段階境界で止める
+	_nw_rows = {}         # 解放されるラベルへの参照を捨てる (worker の _nw_set は has() で空振りする)
+	_nw_run_btn = null
 	_lt_stop()            # 起動テスト実行中なら止める (画面を離れるのでゲームを置き去りにしない)
 	_pt_stop()            # 試遊中なら止める (同上)
 	# remove_child を即時に行ってから queue_free する。queue_free だけだとフレーム末まで子が get_children に

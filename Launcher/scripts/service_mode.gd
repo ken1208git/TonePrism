@@ -46,6 +46,13 @@ func is_open() -> bool:
 	return _open
 
 
+## アイドルタイマーをリセットする。overlay 側が入力を消費 (set_input_as_handled) すると、
+## _input フェーズで子の overlay が親の本 autoload より先に処理され本 _input がスキップされ得る
+## (Esc/←/→ 等)。その経路でも overlay からこれを呼んでもらい無操作判定を確実にリセットする。
+func notify_activity() -> void:
+	_idle_sec = 0.0
+
+
 func toggle() -> void:
 	if _open:
 		close()
