@@ -97,11 +97,17 @@ func close_overlay() -> void:
 func _input(event: InputEvent) -> void:
 	if not visible:
 		return
-	# 画面表示テスト中: Esc / B で中断してメニューへ。それ以外のキー / クリック / パッドボタンで次へ送る
-	# (最後まで行くと自動でメニューに戻る)。
+	# 画面表示テスト中: Esc / B で中断してメニューへ。← / Backspace で前のパターンへ戻る。
+	# それ以外のキー / クリック / パッドボタンで次へ送る (最後まで行くと自動でメニューに戻る)。
 	if _test_active:
 		if event.is_action_pressed("ui_cancel"):
 			_hide_test()
+			get_viewport().set_input_as_handled()
+			return
+		var back: bool = event.is_action_pressed("ui_left") \
+			or (event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_BACKSPACE)
+		if back:
+			_retreat_screen_seq()
 			get_viewport().set_input_as_handled()
 			return
 		var advance: bool = (event is InputEventKey and event.pressed and not event.echo) \
@@ -535,7 +541,7 @@ func _build_screen_test() -> void:
 	for p in SCREEN_SEQ:
 		names.append(str(p["label"]))
 	_add_text("　" + " → ".join(names), C_MUTED)
-	_add_text("次へ: 任意のキー / クリック / パッドボタン　　中断: Esc / B", C_MUTED)
+	_add_text("次へ: 任意のキー / クリック / パッドボタン　　戻る: ← / Backspace　　中断: Esc / B", C_MUTED)
 	_add_button("テストを開始（順番に表示）", _start_screen_seq)
 
 
@@ -631,6 +637,14 @@ func _advance_screen_seq() -> void:
 		_show_seq_current()
 
 
+## 前のパターンへ戻る (← / Backspace)。先頭では何もしない。
+func _retreat_screen_seq() -> void:
+	if _seq_index <= 0:
+		return
+	_seq_index -= 1
+	_show_seq_current()
+
+
 func _hide_test() -> void:
 	if _test_canvas:
 		_test_canvas.visible = false
@@ -657,7 +671,7 @@ func _draw_test_caption(size: Vector2) -> void:
 	if _seq_index < 0 or _seq_index >= SCREEN_SEQ.size():
 		return
 	var p: Dictionary = SCREEN_SEQ[_seq_index]
-	var text := "[%d/%d] %s    次へ:任意キー / 中断:Esc" % [
+	var text := "[%d/%d] %s    次へ:任意キー / 戻る:← / 中断:Esc" % [
 		_seq_index + 1, SCREEN_SEQ.size(), str(p["label"])]
 	var font: Font = _test_canvas.get_theme_default_font()
 	var fs := 18
