@@ -66,7 +66,8 @@ var _test_active: bool = false
 var _seq_index: int = 0              # 画面表示テストで今表示しているパターンの位置
 var _exit_armed: bool = false
 var _games_test_mode: String = ""    # 「ゲーム動作確認」の選択中モード ("" / exists / auto / play)
-var _games_test_desc: Label = null   # 確認方法の選択画面で、フォーカス中の選択肢の詳細説明を出すラベル
+var _games_test_desc: Label = null   # 確認方法の選択画面で、フォーカス/ホバー中の選択肢の詳細説明を出すラベル
+var _games_method_btns: Array[Button] = []  # 確認方法の 3 択ボタン (フォーカス/ホバー判定用)
 var _audio_player: AudioStreamPlayer = null  # 音声チェックのテスト音再生用
 var _test_tone: AudioStreamWAV = null        # 生成したテスト音 (キャッシュ)
 
@@ -408,25 +409,47 @@ func _build_games_test() -> void:
 				_add_text("「ファイルはあるが実際に遊べるか」の最終確認用。", C_MUTED)
 
 
-## ゲーム動作確認の確認方法 選択画面 (3 段階)。3 択の下に、今フォーカスしている選択肢の
-## 詳細説明をライブ表示する (↑↓ で選択肢を移ると説明も切り替わる)。
+## ゲーム動作確認の確認方法 選択画面 (3 段階)。3 択の下に、今フォーカス (キーボード) または
+## ホバー (マウス) している選択肢の詳細説明をライブ表示する。どれも選んでいない時は何も出さない。
 func _build_games_test_menu() -> void:
 	_add_text("ゲームの動作を 3 段階で確認できます。確認方法を選んでください。", C_MUTED)
+	_games_method_btns.clear()
 	var b1 := _add_button("① ファイル存在チェック（起動しない・全件一括）",
 		func(): _games_test_mode = "exists"; _build_detail("games_test"); _refocus_detail())
 	var b2 := _add_button("② 起動テスト（自動で起動→終了し、起動可否だけ確認）",
 		func(): _games_test_mode = "auto"; _build_detail("games_test"); _refocus_detail())
 	var b3 := _add_button("③ 試遊確認（起動して実際に遊ぶ・終了は手動）",
 		func(): _games_test_mode = "play"; _build_detail("games_test"); _refocus_detail())
-	b1.focus_entered.connect(func(): _set_games_test_desc("exists"))
-	b2.focus_entered.connect(func(): _set_games_test_desc("auto"))
-	b3.focus_entered.connect(func(): _set_games_test_desc("play"))
+	# フォーカス (キーボード/パッド) でもホバー (マウス) でも説明を出し、外れたら (どれも未選択なら) 消す。
+	_connect_games_method(b1, "exists")
+	_connect_games_method(b2, "auto")
+	_connect_games_method(b3, "play")
+	_games_method_btns = [b1, b2, b3]
 	_detail_content.add_child(HSeparator.new())
 	_games_test_desc = Label.new()
 	_games_test_desc.add_theme_color_override("font_color", C_MUTED)
 	_games_test_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_detail_content.add_child(_games_test_desc)
-	_set_games_test_desc("exists")  # 初期表示 (フォーカスが先頭に乗れば focus_entered で上書きされる)
+	# 初期は空。フォーカス/ホバーが乗った時だけ出す。
+
+
+func _connect_games_method(b: Button, mode: String) -> void:
+	b.focus_entered.connect(func(): _set_games_test_desc(mode))
+	b.mouse_entered.connect(func(): _set_games_test_desc(mode))
+	b.focus_exited.connect(_update_games_test_desc)
+	b.mouse_exited.connect(_update_games_test_desc)
+
+
+## 3 択のどれかがフォーカス/ホバー中ならその説明を、どれも未選択なら空にする。
+## (focus/mouse の exit 時に呼ばれ、移動先がまだ無い瞬間は空、移動先の enter で上書きされる)
+func _update_games_test_desc() -> void:
+	for i in range(_games_method_btns.size()):
+		var b := _games_method_btns[i]
+		if is_instance_valid(b) and (b.has_focus() or b.is_hovered()):
+			_set_games_test_desc(["exists", "auto", "play"][i])
+			return
+	if _games_test_desc != null and is_instance_valid(_games_test_desc):
+		_games_test_desc.text = ""
 
 
 ## 確認方法の選択画面で、選択肢の詳細説明を切り替える。
