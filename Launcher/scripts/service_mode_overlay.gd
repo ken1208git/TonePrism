@@ -342,6 +342,7 @@ func _build_detail(id: String) -> void:
 		"log_view": _build_log_view()
 		"audio": _build_audio_check()
 		"screen_test": _build_screen_test()
+		"debug_overlay": _build_debug_overlay()
 		"fullscreen": _build_fullscreen()
 		"monitor": _build_monitor()
 		"reload": _build_reload()
@@ -564,6 +565,15 @@ func _build_screen_test() -> void:
 	_add_text("　" + " → ".join(names), C_MUTED)
 	_add_text("次へ: 任意のキー / クリック / パッドボタン　　戻る: ← / Backspace　　中断: Esc / B", C_MUTED)
 	_add_button("テストを開始（順番に表示）", _start_screen_seq)
+
+
+func _build_debug_overlay() -> void:
+	var on: bool = DebugOverlay.is_enabled()
+	_add_text("画面左上に FPS・メモリ・PC名・シーン状態・DB接続などを常時表示します（マイクラのF3風）。")
+	_add_text("現在: %s" % ("ON" if on else "OFF"), C_OK if on else C_MUTED)
+	_add_text("サービスモードを閉じても表示し続けます。再起動でOFFに戻ります。", C_MUTED)
+	_add_button("デバッグオーバーレイを %s" % ("OFF にする" if on else "ON にする"),
+		func(): DebugOverlay.toggle(); _build_detail("debug_overlay"); _refocus_detail())
 
 
 func _build_fullscreen() -> void:
