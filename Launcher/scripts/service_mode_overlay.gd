@@ -36,9 +36,10 @@ const ITEMS := [
 
 # 画面表示テストで順番に表示するパターン。先頭から 1 つずつ全画面表示し、キー送りで次へ進む。
 const SCREEN_SEQ := [
-	{"mode": "grid",     "color": Color.BLACK,            "label": "グリッド + セーフエリア"},
-	{"mode": "colorbar", "color": Color.BLACK,            "label": "カラーバー"},
-	{"mode": "solid",    "color": Color.WHITE,            "label": "白"},
+	{"mode": "grid",       "color": Color.BLACK,          "label": "グリッド + セーフエリア"},
+	{"mode": "colorbar",   "color": Color.BLACK,          "label": "カラーバー"},
+	{"mode": "resolution", "color": Color.BLACK,          "label": "解像度 + グレースケール"},
+	{"mode": "solid",      "color": Color.WHITE,          "label": "白"},
 	{"mode": "solid",    "color": Color.BLACK,            "label": "黒"},
 	{"mode": "solid",    "color": Color.RED,              "label": "赤"},
 	{"mode": "solid",    "color": Color.GREEN,            "label": "緑"},
@@ -57,7 +58,7 @@ var _menu_buttons: Array[Button] = []
 var _selected_index: int = -1        # 左リストで選択中の項目
 var _in_detail: bool = false         # フォーカスが右詳細ペインにあるか
 var _test_canvas: Control = null     # 画面表示テストの全画面描画ノード (単色 / グリッド / カラーバー / グラデ)
-var _test_mode: String = "solid"     # 現在のテスト描画モード ("solid" / "grid" / "colorbar")
+var _test_mode: String = "solid"     # 現在のテスト描画モード ("solid" / "grid" / "colorbar" / "resolution")
 var _test_color: Color = Color.BLACK # solid モードの表示色
 var _test_active: bool = false
 var _seq_index: int = 0              # 画面表示テストで今表示しているパターンの位置
@@ -643,6 +644,7 @@ func _draw_test() -> void:
 	match _test_mode:
 		"grid": _draw_test_grid(size)
 		"colorbar": _draw_test_colorbar(size)
+		"resolution": _draw_test_resolution(size)
 		_: _test_canvas.draw_rect(Rect2(Vector2.ZERO, size), _test_color)
 	_draw_test_caption(size)
 
@@ -772,6 +774,52 @@ func _draw_test_colorbar(size: Vector2) -> void:
 		cv.draw_rect(Rect2(px, y4, p, r4), pc)
 		px += p
 	cv.draw_rect(Rect2(side + x, y4, side, r4), Color(0.15, 0.15, 0.15))
+
+
+## 解像度 + グレースケール: 中央にシーメンススター (放射状の白黒くさび、中心ほど線が細くなる)、
+## 上部に周波数縞 (1〜4px ピッチの細線パッチ)、下部に離散グレースケール段 (11 段)。
+## シャープネス・スケーリングのボケ/モアレ (native 表示か) とガンマ/階調段差の確認用。
+func _draw_test_resolution(size: Vector2) -> void:
+	var cv := _test_canvas
+	cv.draw_rect(Rect2(Vector2.ZERO, size), Color.BLACK)
+	# 上部: 周波数縞 (縦線) を 1/2/3/4px ピッチで 4 パッチ。中央寄せでキャプション(左上)を避ける
+	var pw := size.x * 0.16
+	var ph := size.y * 0.13
+	var gap := size.x * 0.02
+	var total := pw * 4 + gap * 3
+	var sx := (size.x - total) * 0.5
+	var py := size.y * 0.06
+	for k in range(4):
+		var pitch := k + 1
+		var rx := sx + (pw + gap) * k
+		var on := true
+		var lx := rx
+		while lx < rx + pw:
+			if on:
+				cv.draw_rect(Rect2(lx, py, float(pitch), ph), Color.WHITE)
+			on = not on
+			lx += pitch
+		cv.draw_rect(Rect2(rx, py, pw, ph), Color(0.5, 0.5, 0.5), false, 1.0)
+	# 中央: シーメンススター (白黒のくさび。中心へ向かうほど線が密集 = 解像度限界やモアレが見える)
+	var center := Vector2(size.x * 0.5, size.y * 0.5)
+	var radius := minf(size.x, size.y) * 0.30
+	var wedges := 72
+	for i in range(wedges):
+		var a0 := TAU * (2 * i) / float(2 * wedges)
+		var a1 := TAU * (2 * i + 1) / float(2 * wedges)
+		var tri := PackedVector2Array([center,
+			center + Vector2(cos(a0), sin(a0)) * radius,
+			center + Vector2(cos(a1), sin(a1)) * radius])
+		cv.draw_colored_polygon(tri, Color.WHITE)
+	cv.draw_arc(center, radius, 0, TAU, 128, Color(0.5, 0.5, 0.5), 1.0)
+	# 下部: 離散グレースケール段 (11 段、黒→白)。ガンマ・階調段差の確認
+	var seg := 11
+	var bw := size.x / seg
+	var bh := size.y * 0.15
+	var by := size.y - bh
+	for i in range(seg):
+		var v := float(i) / (seg - 1)
+		cv.draw_rect(Rect2(bw * i, by, bw + 1.0, bh), Color(v, v, v))
 
 
 func _is_fullscreen() -> bool:
