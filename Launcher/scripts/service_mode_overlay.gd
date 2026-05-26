@@ -643,9 +643,20 @@ func _ic_refresh_connected() -> void:
 		return
 	var lines: Array[String] = []
 	for p in pads:
-		lines.append("・パッド %d: %s" % [p, Input.get_joy_name(p)])
+		lines.append("・パッド %d: %s" % [p, _ic_joy_display_name(p)])
 	_ic_connected_label.text = "\n".join(lines)
 	_ic_connected_label.add_theme_color_override("font_color", C_TEXT)
+
+
+## 接続中パッドの表示名。get_joy_name は "XInput Controller" のような総称しか返さないことが多いため、
+## get_joy_info の raw_name (実際の製品名。例: "Xbox Series X Controller") を優先し、無ければ総称にフォールバック。
+func _ic_joy_display_name(p: int) -> String:
+	var info := Input.get_joy_info(p)
+	var raw := String(info.get("raw_name", "")).strip_edges()
+	if raw != "":
+		return raw
+	var n := Input.get_joy_name(p).strip_edges()
+	return n if n != "" else "(不明なコントローラー)"
 
 
 ## コントローラーの抜き差し → 入力チェック表示中なら一覧を更新。
