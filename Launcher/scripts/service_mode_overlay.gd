@@ -311,8 +311,10 @@ func _load_debug_font() -> Font:
 	if FileAccess.file_exists(SYS_GOTHIC_PATH):
 		var f := FontFile.new()
 		if f.load_dynamic_font(SYS_GOTHIC_PATH) == OK:
-			f.antialiasing = TextServer.FONT_ANTIALIASING_NONE  # AA OFF = カクカク
-			f.hinting = TextServer.HINTING_NONE
+			# AA OFF + ヒンティング最強 (Godot は NONE/LIGHT/NORMAL のみ。FULL は無い) +
+			# サブピクセル無効 で、ピクセルグリッドに揃ったカクカク表示にする。
+			f.antialiasing = TextServer.FONT_ANTIALIASING_NONE
+			f.hinting = TextServer.HINTING_NORMAL
 			f.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
 			f.force_autohinter = false
 			return f
