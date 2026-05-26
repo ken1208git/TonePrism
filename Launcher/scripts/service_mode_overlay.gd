@@ -683,7 +683,7 @@ func _ic_handle_capture(event: InputEvent) -> void:
 ## 入力イベントを分かりやすい文字列にする。対象外は "" を返す。
 func _describe_input(event: InputEvent) -> String:
 	if event is InputEventKey and event.pressed and not event.echo:
-		return "キーボード: %s" % OS.get_keycode_string(event.keycode)
+		return "キーボード: %s" % _key_label(event)
 	if event is InputEventJoypadButton and event.pressed:
 		return "パッド %d: %s" % [event.device, _joy_button_name(event.button_index)]
 	if event is InputEventJoypadMotion and absf(event.axis_value) > 0.5:
@@ -691,6 +691,22 @@ func _describe_input(event: InputEvent) -> String:
 	if event is InputEventMouseButton and event.pressed:
 		return "マウス: ボタン %d" % event.button_index
 	return ""
+
+
+## キーイベントの表示名。論理キー名 (配列依存) → 物理キー名 → 生コードの順にフォールバックする。
+## 無変換/変換/半角全角/かな 等の日本語配列キーは Godot に論理名が無く KEY_UNKNOWN になるため、
+## 物理キー名や生コードを出して「検知はできている」ことが分かるようにする。
+func _key_label(event: InputEventKey) -> String:
+	var name := OS.get_keycode_string(event.keycode) if event.keycode != 0 else ""
+	if name == "":
+		var pname := OS.get_keycode_string(event.physical_keycode) if event.physical_keycode != 0 else ""
+		if pname != "":
+			name = pname + "（物理）"
+	if name == "" and event.unicode != 0:
+		name = "「%s」" % char(event.unicode)
+	if name == "":
+		name = "不明 (keycode=%d / 物理=%d)" % [event.keycode, event.physical_keycode]
+	return name
 
 
 ## パッドのボタン番号を分かりやすい名前にする (Xbox 表記基準)。
