@@ -44,7 +44,9 @@ var _footer: Label = null
 var _menu_buttons: Array[Button] = []
 var _selected_index: int = -1        # 左リストで選択中の項目
 var _in_detail: bool = false         # フォーカスが右詳細ペインにあるか
-var _test_rect: ColorRect = null
+var _test_canvas: Control = null     # 画面表示テストの全画面描画ノード (単色 / グリッド / カラーバー / グラデ)
+var _test_mode: String = "solid"     # 現在のテスト描画モード ("solid" / "grid" / "colorbar" / "gradient")
+var _test_color: Color = Color.BLACK # solid モードの表示色
 var _test_active: bool = false
 var _exit_armed: bool = false
 var _games_test_mode: String = ""    # 「ゲーム動作確認」の選択中モード ("" / exists / auto / play)
@@ -506,14 +508,19 @@ func _generate_tone(freq: float, dur: float) -> AudioStreamWAV:
 
 
 func _build_screen_test() -> void:
-	_add_text("全画面の単色 / グレーを表示します。モニター相性・色・スケーリングの確認用。")
-	_add_text("色を選ぶ → 全画面表示。クリック / 任意キー / パッドボタンで戻ります。", C_MUTED)
+	_add_text("全画面にテスト用の表示を出します。モニター相性・色・スケーリングの確認用。")
+	_add_text("項目を選ぶ → 全画面表示。クリック / 任意キー / パッドボタンで戻ります。", C_MUTED)
+	_add_text("■ パターン", C_ACCENT)
+	_add_button("グリッド + セーフエリア（解像度・拡大率・端の見切れ確認）", _show_pattern.bind("grid"))
+	_add_button("カラーバー（色再現・色順の確認）", _show_pattern.bind("colorbar"))
+	_add_button("グラデーション（階調・縞模様の確認）", _show_pattern.bind("gradient"))
+	_add_text("■ 単色", C_ACCENT)
 	var colors := [
 		["黒", Color.BLACK], ["白", Color.WHITE], ["赤", Color.RED],
 		["緑", Color.GREEN], ["青", Color.BLUE], ["グレー50%", Color(0.5, 0.5, 0.5)],
 	]
 	for c in colors:
-		_add_button("%s を全画面表示" % c[0], _show_test.bind(c[1]))
+		_add_button("%s を全画面表示" % c[0], _show_solid.bind(c[1]))
 
 
 func _build_fullscreen() -> void:
@@ -570,21 +577,104 @@ func _build_stub() -> void:
 
 # ---------------- アクション ----------------
 
-func _show_test(color: Color) -> void:
-	if _test_rect == null:
-		_test_rect = ColorRect.new()
-		_test_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
-		_test_rect.mouse_filter = Control.MOUSE_FILTER_STOP
-		add_child(_test_rect)  # CanvasLayer 直下 = サービス UI より後 = 最前面
-	_test_rect.color = color
-	_test_rect.visible = true
+## 全画面テスト表示の描画ノードを用意する (初回のみ生成)。CanvasLayer 直下に置くので
+## サービスモード UI より後 = 最前面に出る。描画内容は _draw_test が _test_mode を見て決める。
+func _ensure_test_canvas() -> void:
+	if _test_canvas != null:
+		return
+	_test_canvas = Control.new()
+	_test_canvas.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_test_canvas.mouse_filter = Control.MOUSE_FILTER_STOP
+	_test_canvas.draw.connect(_draw_test)
+	add_child(_test_canvas)
+
+
+func _show_solid(color: Color) -> void:
+	_ensure_test_canvas()
+	_test_mode = "solid"
+	_test_color = color
+	_test_canvas.visible = true
+	_test_canvas.queue_redraw()
+	_test_active = true
+
+
+func _show_pattern(mode: String) -> void:
+	_ensure_test_canvas()
+	_test_mode = mode
+	_test_canvas.visible = true
+	_test_canvas.queue_redraw()
 	_test_active = true
 
 
 func _hide_test() -> void:
-	if _test_rect:
-		_test_rect.visible = false
+	if _test_canvas:
+		_test_canvas.visible = false
 	_test_active = false
+
+
+## 全画面テストの実描画。_test_canvas の draw シグナルから呼ばれる。画面サイズに追従するので
+## どの解像度・モニタでもくっきり描ける (画像アセット不要)。
+func _draw_test() -> void:
+	var size := _test_canvas.size
+	match _test_mode:
+		"grid": _draw_test_grid(size)
+		"colorbar": _draw_test_colorbar(size)
+		"gradient": _draw_test_gradient(size)
+		_: _test_canvas.draw_rect(Rect2(Vector2.ZERO, size), _test_color)
+
+
+## グリッド: 黒地に 64px 間隔の格子線 + 中央十字 + 四隅対角線 + セーフエリア枠 (90% / 80%)。
+## 解像度・拡大率の確認 (線が均等か) と、UI の端の見切れ確認 (枠内に収まっているか) を兼ねる。
+func _draw_test_grid(size: Vector2) -> void:
+	_test_canvas.draw_rect(Rect2(Vector2.ZERO, size), Color.BLACK)
+	var minor := Color(0.30, 0.30, 0.30)
+	var step := 64.0
+	var x := step
+	while x < size.x:
+		_test_canvas.draw_line(Vector2(x, 0), Vector2(x, size.y), minor, 1.0)
+		x += step
+	var y := step
+	while y < size.y:
+		_test_canvas.draw_line(Vector2(0, y), Vector2(size.x, y), minor, 1.0)
+		y += step
+	# 四隅対角線 (中心ずれの確認)
+	var diag := Color(0.22, 0.22, 0.22)
+	_test_canvas.draw_line(Vector2.ZERO, size, diag, 1.0)
+	_test_canvas.draw_line(Vector2(size.x, 0), Vector2(0, size.y), diag, 1.0)
+	# 中央十字
+	var center := size * 0.5
+	_test_canvas.draw_line(Vector2(center.x, 0), Vector2(center.x, size.y), C_ACCENT, 2.0)
+	_test_canvas.draw_line(Vector2(0, center.y), Vector2(size.x, center.y), C_ACCENT, 2.0)
+	# セーフエリア枠
+	_draw_safe_frame(size, 0.90, Color(0.95, 0.85, 0.30), "90%")
+	_draw_safe_frame(size, 0.80, Color(0.95, 0.55, 0.25), "80%")
+
+
+func _draw_safe_frame(size: Vector2, ratio: float, color: Color, label: String) -> void:
+	var inset := size * (1.0 - ratio) * 0.5
+	var rect := Rect2(inset, size - inset * 2.0)
+	_test_canvas.draw_rect(rect, color, false, 2.0)
+	var font: Font = _test_canvas.get_theme_default_font()
+	_test_canvas.draw_string(font, rect.position + Vector2(8, 22), label,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 18, color)
+
+
+## カラーバー: 放送のテストパターン風の縦色帯。色再現と色順の確認用。
+func _draw_test_colorbar(size: Vector2) -> void:
+	var bars := [Color.WHITE, Color.YELLOW, Color.CYAN, Color.GREEN,
+		Color.MAGENTA, Color.RED, Color.BLUE]
+	var w := size.x / bars.size()
+	for i in range(bars.size()):
+		_test_canvas.draw_rect(Rect2(w * i, 0, w + 1.0, size.y), bars[i])
+
+
+## グラデーション: 黒→白の横方向グラデ。階調飛び (バンディング) や縞模様の確認用。
+func _draw_test_gradient(size: Vector2) -> void:
+	var cols := 256
+	var w := size.x / cols
+	for i in range(cols):
+		var v := float(i) / (cols - 1)
+		_test_canvas.draw_rect(Rect2(w * i, 0, w + 1.0, size.y), Color(v, v, v))
 
 
 func _is_fullscreen() -> bool:
