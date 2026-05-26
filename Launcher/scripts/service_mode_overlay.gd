@@ -1084,7 +1084,7 @@ func _build_games_playtest() -> void:
 		_add_text("登録ゲームがありません (または DB 読み込みに失敗)。", C_MUTED)
 		return
 
-	_add_text("チェックしたゲームを 1 本ずつ起動して試遊します。遊び終わったらゲームを終了するか HOMEボタンで戻り、", C_MUTED)
+	_add_text("チェックしたゲームを 1 本ずつ起動して試遊します。遊び終わったらゲームを終了するか、キーボードの HOMEキー / コントローラーの Guideボタンで戻り、", C_MUTED)
 	_add_text("「正しく遊べたか」を 〇× で記録すると自動で次のゲームに進みます。", C_MUTED)
 	_add_button("すべてチェック", func(): _pt_set_all(true))
 	_add_button("すべて外す", func(): _pt_set_all(false))
@@ -1139,7 +1139,7 @@ func _pt_set_all(on: bool) -> void:
 			cb.button_pressed = on
 
 
-## 試遊開始: まず戻り方 (ゲーム終了 / HOMEボタン) を案内する確認モーダルを出し、開始の同意を取る。
+## 試遊開始: まず戻り方 (ゲーム終了 / HOMEキー・Guideボタン) を案内する確認モーダルを出し、開始の同意を取る。
 func _pt_start() -> void:
 	if _pt_running:
 		return
@@ -1152,7 +1152,7 @@ func _pt_start() -> void:
 	if not any:
 		return
 	_show_modal(
-		"チェックしたゲームを順番に試遊します。\n\nゲームから戻るには、ゲームを終了するか HOMEボタン（コントローラー）を押してください。\n\n開始しますか？",
+		"チェックしたゲームを順番に試遊します。\n\nゲームから戻るには、ゲームを終了するか、キーボードの HOMEキー（またはコントローラーの Guideボタン）を押してください。\n\n開始しますか？",
 		PackedStringArray(["開始する", "キャンセル"]),
 		func(idx):
 			if idx == 0:
