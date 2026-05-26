@@ -1127,8 +1127,28 @@ func _pt_set_all(on: bool) -> void:
 			cb.button_pressed = on
 
 
-## 試遊開始: チェック済みゲームをキューに積んでシーケンス開始。
+## 試遊開始: まず戻り方 (ゲーム終了 / HOMEボタン) を案内する確認モーダルを出し、開始の同意を取る。
 func _pt_start() -> void:
+	if _pt_running:
+		return
+	# 少なくとも 1 つチェックされているか確認 (無ければ何もしない)。
+	var any := false
+	for cb in _pt_checks:
+		if is_instance_valid(cb) and cb.button_pressed:
+			any = true
+			break
+	if not any:
+		return
+	_show_modal(
+		"チェックしたゲームを順番に試遊します。\n\nゲームから戻るには、ゲームを終了するか HOMEボタン（コントローラー）を押してください。\n\n開始しますか？",
+		PackedStringArray(["開始する", "キャンセル"]),
+		func(idx):
+			if idx == 0:
+				_pt_begin_sequence())
+
+
+## 実際に試遊シーケンスを開始する (確認モーダルで「開始する」を選んだ後)。
+func _pt_begin_sequence() -> void:
 	if _pt_running:
 		return
 	_pt_queue.clear()
