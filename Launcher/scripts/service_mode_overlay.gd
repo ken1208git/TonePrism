@@ -38,7 +38,6 @@ const ITEMS := [
 const SCREEN_SEQ := [
 	{"mode": "grid",     "color": Color.BLACK,            "label": "グリッド + セーフエリア"},
 	{"mode": "colorbar", "color": Color.BLACK,            "label": "カラーバー"},
-	{"mode": "gradient", "color": Color.BLACK,            "label": "グラデーション"},
 	{"mode": "solid",    "color": Color.WHITE,            "label": "白"},
 	{"mode": "solid",    "color": Color.BLACK,            "label": "黒"},
 	{"mode": "solid",    "color": Color.RED,              "label": "赤"},
@@ -58,7 +57,7 @@ var _menu_buttons: Array[Button] = []
 var _selected_index: int = -1        # 左リストで選択中の項目
 var _in_detail: bool = false         # フォーカスが右詳細ペインにあるか
 var _test_canvas: Control = null     # 画面表示テストの全画面描画ノード (単色 / グリッド / カラーバー / グラデ)
-var _test_mode: String = "solid"     # 現在のテスト描画モード ("solid" / "grid" / "colorbar" / "gradient")
+var _test_mode: String = "solid"     # 現在のテスト描画モード ("solid" / "grid" / "colorbar")
 var _test_color: Color = Color.BLACK # solid モードの表示色
 var _test_active: bool = false
 var _seq_index: int = 0              # 画面表示テストで今表示しているパターンの位置
@@ -644,7 +643,6 @@ func _draw_test() -> void:
 	match _test_mode:
 		"grid": _draw_test_grid(size)
 		"colorbar": _draw_test_colorbar(size)
-		"gradient": _draw_test_gradient(size)
 		_: _test_canvas.draw_rect(Rect2(Vector2.ZERO, size), _test_color)
 	_draw_test_caption(size)
 
@@ -718,10 +716,9 @@ func _draw_safe_frame(size: Vector2, ratio: float, color: Color, label: String) 
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 18, color)
 
 
-## カラーバー: 放送規格 (SMPTE RP 219 / ARIB) ベースの HD カラーバー。色再現・色順の確認用。
-## 3 段構成: 上=75% カラーバー + 両端 40% グレー袖 (10/12) / リバース (1/12) / 0-100% ランプ (1/12)。
-## 横幅 a=画面幅、中央帯 x=3/4a を 7 列 (各 c=x/7) に分ける。黒レベル (PLUGE) 段は普通のモニタでは
-## 判別できず実用性が無いため省いている。
+## カラーバー: 放送規格 (SMPTE RP 219 / ARIB) の HD カラーバー。色再現・色順・黒レベルの確認用。
+## 4 段構成: 上=75% カラーバー + 両端 40% グレー袖 (7/12) / リバース (1/12) / ランプ (1/12) /
+## PLUGE = 黒レベル調整 (3/12)。横幅 a=画面幅、中央帯 x=3/4a を 7 列 (各 c=x/7) に分ける。
 func _draw_test_colorbar(size: Vector2) -> void:
 	var cv := _test_canvas
 	var a := size.x
@@ -729,11 +726,13 @@ func _draw_test_colorbar(size: Vector2) -> void:
 	var side := a / 8.0          # 両端の袖幅 (a/8)
 	var x := a * 3.0 / 4.0       # 中央のカラー帯領域 (3/4 a)
 	var c := x / 7.0             # 1 列の幅 (x/7)
+	var r1 := y * 7.0 / 12.0     # 上段 (カラーバー) 高さ
 	var r2 := y / 12.0           # リバース段
 	var r3 := y / 12.0           # ランプ段
-	var r1 := y - r2 - r3        # 上段 (カラーバー) 高さ (10/12)
 	var y2 := r1
 	var y3 := r1 + r2
+	var y4 := r1 + r2 + r3
+	var r4 := y - y4             # PLUGE 段 (3/12)
 	var W75 := Color(0.75, 0.75, 0.75)
 	var W40 := Color(0.40, 0.40, 0.40)
 	cv.draw_rect(Rect2(0, 0, a, y), Color.BLACK)
@@ -761,14 +760,18 @@ func _draw_test_colorbar(size: Vector2) -> void:
 		cv.draw_rect(Rect2(side + sw * i, y3, sw + 1.0, r3), Color(v, v, v))
 	cv.draw_rect(Rect2(side + x, y3, side, r3), Color(1, 0, 0))
 
-
-## グラデーション: 黒→白の横方向グラデ。階調飛び (バンディング) や縞模様の確認用。
-func _draw_test_gradient(size: Vector2) -> void:
-	var cols := 256
-	var w := size.x / cols
-	for i in range(cols):
-		var v := float(i) / (cols - 1)
-		_test_canvas.draw_rect(Rect2(w * i, 0, w + 1.0, size.y), Color(v, v, v))
+	# PLUGE 段: 両袖 15%W。中央は Bk(1.5c) | 100%W(2c) | 黒地 + PLUGE(-2/0/+2/0/+4%) | Bk(1c)
+	cv.draw_rect(Rect2(0, y4, side, r4), Color(0.15, 0.15, 0.15))
+	cv.draw_rect(Rect2(side, y4, c * 1.5, r4), Color.BLACK)
+	cv.draw_rect(Rect2(side + c * 1.5, y4, c * 2.0, r4), Color.WHITE)
+	var p := c / 3.0             # PLUGE 各バー幅 (x/21)
+	var px := side + c * 3.5 + c * (5.0 / 6.0)  # 黒地のフィラーぶん右へ寄せる
+	var pluge := [Color.BLACK, Color.BLACK, Color(0.02, 0.02, 0.02),
+		Color.BLACK, Color(0.04, 0.04, 0.04)]
+	for pc in pluge:
+		cv.draw_rect(Rect2(px, y4, p, r4), pc)
+		px += p
+	cv.draw_rect(Rect2(side + x, y4, side, r4), Color(0.15, 0.15, 0.15))
 
 
 func _is_fullscreen() -> bool:
