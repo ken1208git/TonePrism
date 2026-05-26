@@ -917,23 +917,6 @@ func _draw_test() -> void:
 		"colorbar": _draw_test_colorbar(size)
 		"resolution": _draw_test_resolution(size)
 		_: _test_canvas.draw_rect(Rect2(Vector2.ZERO, size), _test_color)
-	_draw_test_caption(size)
-
-
-## 左上に小さく「何枚目 / 全体 + パターン名 + 操作ヒント」を出す。背景に半透明の黒帯を敷くので
-## 白・黒どちらのパターン上でも読める。パターンの邪魔をしないよう隅に小さく描く。
-func _draw_test_caption(size: Vector2) -> void:
-	if _seq_index < 0 or _seq_index >= SCREEN_SEQ.size():
-		return
-	var p: Dictionary = SCREEN_SEQ[_seq_index]
-	var text := "[%d/%d] %s    次へ:任意キー / 戻る:← / 中断:Esc" % [
-		_seq_index + 1, SCREEN_SEQ.size(), str(p["label"])]
-	var font: Font = _test_canvas.get_theme_default_font()
-	var fs := 18
-	var tw := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-	_test_canvas.draw_rect(Rect2(0, 0, tw + 24.0, 34.0), Color(0, 0, 0, 0.6))
-	_test_canvas.draw_string(font, Vector2(12, 24), text,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
 
 
 ## ジオメトリ/クロスハッチ: 放送のモニタ調整パターン風。クロスハッチ (細密+粗) + 四隅対角線 +
