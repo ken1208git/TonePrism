@@ -420,11 +420,11 @@ func _build_games_test_menu() -> void:
 		func(): _games_test_mode = "auto"; _build_detail("games_test"); _refocus_detail())
 	var b3 := _add_button("③ 試遊確認（起動して実際に遊ぶ・終了は手動）",
 		func(): _games_test_mode = "play"; _build_detail("games_test"); _refocus_detail())
-	# フォーカス (キーボード/パッド) でもホバー (マウス) でも説明を出し、外れたら (どれも未選択なら) 消す。
-	_connect_games_method(b1, "exists")
-	_connect_games_method(b2, "auto")
-	_connect_games_method(b3, "play")
+	# フォーカス (キーボード/パッド) でもホバー (マウス) でも、今表示されている方の指標で説明を出し分ける。
 	_games_method_btns = [b1, b2, b3]
+	_connect_games_method(b1)
+	_connect_games_method(b2)
+	_connect_games_method(b3)
 	_detail_content.add_child(HSeparator.new())
 	_games_test_desc = Label.new()
 	_games_test_desc.add_theme_color_override("font_color", C_MUTED)
@@ -433,23 +433,30 @@ func _build_games_test_menu() -> void:
 	# 初期は空。フォーカス/ホバーが乗った時だけ出す。
 
 
-func _connect_games_method(b: Button, mode: String) -> void:
-	b.focus_entered.connect(func(): _set_games_test_desc(mode))
-	b.mouse_entered.connect(func(): _set_games_test_desc(mode))
+func _connect_games_method(b: Button) -> void:
+	# フォーカス (キーボード) / ホバー (マウス) の出入りどちらでも、今アクティブな指標で説明を出し直す。
+	b.focus_entered.connect(_update_games_test_desc)
 	b.focus_exited.connect(_update_games_test_desc)
+	b.mouse_entered.connect(_update_games_test_desc)
 	b.mouse_exited.connect(_update_games_test_desc)
 
 
-## 3 択のどれかがフォーカス/ホバー中ならその説明を、どれも未選択なら空にする。
-## (focus/mouse の exit 時に呼ばれ、移動先がまだ無い瞬間は空、移動先の enter で上書きされる)
+## 今「表示されている方」の指標で選ばれている選択肢の説明を出す。どれも選んでいなければ空にする。
+## キーボード/パッド操作中 (カーソル非表示) はフォーカスのみ、マウス操作中 (フォーカス枠非表示) は
+## ホバーのみを見る。これで、非表示側の指標 (置き去りのマウスホバー等) に反応して説明が出るのを防ぐ。
 func _update_games_test_desc() -> void:
+	if _games_test_desc == null or not is_instance_valid(_games_test_desc):
+		return
+	var modes := ["exists", "auto", "play"]
 	for i in range(_games_method_btns.size()):
 		var b := _games_method_btns[i]
-		if is_instance_valid(b) and (b.has_focus() or b.is_hovered()):
-			_set_games_test_desc(["exists", "auto", "play"][i])
+		if not is_instance_valid(b):
+			continue
+		var active := b.is_hovered() if _using_mouse else b.has_focus()
+		if active:
+			_set_games_test_desc(modes[i])
 			return
-	if _games_test_desc != null and is_instance_valid(_games_test_desc):
-		_games_test_desc.text = ""
+	_games_test_desc.text = ""
 
 
 ## 確認方法の選択画面で、選択肢の詳細説明を切り替える。
@@ -978,6 +985,9 @@ func _set_using_mouse(v: bool) -> void:
 		return
 	_using_mouse = v
 	_apply_focus_style()
+	# 入力が切り替わったら、ゲーム動作確認の説明も「今表示されている方の指標」で出し直す
+	# (キーボード時=フォーカス / マウス時=ホバー)。
+	_update_games_test_desc()
 
 
 ## 現在の _using_mouse に応じて 1 ボタンの focus / hover スタイルを切り替える。
