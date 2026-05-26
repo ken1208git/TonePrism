@@ -1,3 +1,4 @@
+
 extends CanvasLayer
 ## サービスモードの全画面メニュー画面。スタッフが現地で動作確認・診断・終了操作を行うための画面。
 ## 黒背景 + 白文字の素朴な画面。左に項目の一覧、右に選んだ項目の詳細を同時に表示する。
@@ -1475,11 +1476,20 @@ func _first_focusable(node: Node) -> Control:
 ## (Godot の自動 neighbor が幾何的に左リストを拾って選択が変わるのを防ぐ)。
 ## 詳細から一覧へ戻るのは ← / B / Esc に一本化する。
 func _constrain_detail_focus() -> void:
+	# サブツリー全体を再帰的に走査する。スクロール枠等にネストしたフォーカス対象 (起動テストの
+	# チェックボックス等) も拾わないと、直下の最後のボタンの下方向が自分自身に固定され、
+	# ネストした項目へ降りられなくなる。
 	var focusables: Array[Control] = []
-	for c in _detail_content.get_children():
-		if c is Control and (c as Control).focus_mode != Control.FOCUS_NONE:
-			focusables.append(c)
+	_collect_focusables(_detail_content, focusables)
 	if focusables.is_empty():
 		return
 	focusables[0].focus_neighbor_top = focusables[0].get_path()
 	focusables[-1].focus_neighbor_bottom = focusables[-1].get_path()
+
+
+## node 以下のフォーカス可能 Control を、表示順 (深さ優先・子の順) で集める。
+func _collect_focusables(node: Node, out: Array[Control]) -> void:
+	for c in node.get_children():
+		if c is Control and (c as Control).focus_mode != Control.FOCUS_NONE:
+			out.append(c)
+		_collect_focusables(c, out)
