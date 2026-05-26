@@ -659,13 +659,62 @@ func _draw_safe_frame(size: Vector2, ratio: float, color: Color, label: String) 
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 18, color)
 
 
-## カラーバー: 放送のテストパターン風の縦色帯。色再現と色順の確認用。
+## カラーバー: 放送規格 (SMPTE RP 219 / ARIB) の HD カラーバー。色再現・色順・黒レベルの確認用。
+## 4 段構成: 上=75% カラーバー + 両端 40% グレー袖 (7/12) / リバース (1/12) / ランプ (1/12) /
+## PLUGE = 黒レベル調整 (3/12)。横幅 a=画面幅、中央帯 x=3/4a を 7 列 (各 c=x/7) に分ける。
 func _draw_test_colorbar(size: Vector2) -> void:
-	var bars := [Color.WHITE, Color.YELLOW, Color.CYAN, Color.GREEN,
-		Color.MAGENTA, Color.RED, Color.BLUE]
-	var w := size.x / bars.size()
-	for i in range(bars.size()):
-		_test_canvas.draw_rect(Rect2(w * i, 0, w + 1.0, size.y), bars[i])
+	var cv := _test_canvas
+	var a := size.x
+	var y := size.y
+	var side := a / 8.0          # 両端の袖幅 (a/8)
+	var x := a * 3.0 / 4.0       # 中央のカラー帯領域 (3/4 a)
+	var c := x / 7.0             # 1 列の幅 (x/7)
+	var r1 := y * 7.0 / 12.0     # 上段 (カラーバー) 高さ
+	var r2 := y / 12.0           # リバース段
+	var r3 := y / 12.0           # ランプ段
+	var y2 := r1
+	var y3 := r1 + r2
+	var y4 := r1 + r2 + r3
+	var r4 := y - y4             # PLUGE 段 (3/12)
+	var W75 := Color(0.75, 0.75, 0.75)
+	var W40 := Color(0.40, 0.40, 0.40)
+	cv.draw_rect(Rect2(0, 0, a, y), Color.BLACK)
+
+	# 上段: 左袖 40%W + 75% 7色 (白黄シアン緑マゼンタ赤青) + 右袖 40%W
+	cv.draw_rect(Rect2(0, 0, side, r1), W40)
+	var cols := [W75, Color(0.75, 0.75, 0), Color(0, 0.75, 0.75), Color(0, 0.75, 0),
+		Color(0.75, 0, 0.75), Color(0.75, 0, 0), Color(0, 0, 0.75)]
+	for i in range(7):
+		cv.draw_rect(Rect2(side + c * i, 0, c + 1.0, r1), cols[i])
+	cv.draw_rect(Rect2(side + x, 0, side, r1), W40)
+
+	# リバース段: 100%Cy | 100%W(1列) | 75%W(6列) | 100%B
+	cv.draw_rect(Rect2(0, y2, side, r2), Color(0, 1, 1))
+	cv.draw_rect(Rect2(side, y2, c, r2), Color.WHITE)
+	cv.draw_rect(Rect2(side + c, y2, c * 6.0, r2), W75)
+	cv.draw_rect(Rect2(side + x, y2, side, r2), Color(0, 0, 1))
+
+	# ランプ段: 100%Y | 0→100% 黒白ランプ | 100%R
+	cv.draw_rect(Rect2(0, y3, side, r3), Color(1, 1, 0))
+	var steps := 128
+	var sw := x / steps
+	for i in range(steps):
+		var v := float(i) / (steps - 1)
+		cv.draw_rect(Rect2(side + sw * i, y3, sw + 1.0, r3), Color(v, v, v))
+	cv.draw_rect(Rect2(side + x, y3, side, r3), Color(1, 0, 0))
+
+	# PLUGE 段: 両袖 15%W。中央は Bk(1.5c) | 100%W(2c) | 黒地 + PLUGE(-2/0/+2/0/+4%) | Bk(1c)
+	cv.draw_rect(Rect2(0, y4, side, r4), Color(0.15, 0.15, 0.15))
+	cv.draw_rect(Rect2(side, y4, c * 1.5, r4), Color.BLACK)
+	cv.draw_rect(Rect2(side + c * 1.5, y4, c * 2.0, r4), Color.WHITE)
+	var p := c / 3.0             # PLUGE 各バー幅 (x/21)
+	var px := side + c * 3.5 + c * (5.0 / 6.0)  # 黒地のフィラーぶん右へ寄せる
+	var pluge := [Color.BLACK, Color.BLACK, Color(0.02, 0.02, 0.02),
+		Color.BLACK, Color(0.04, 0.04, 0.04)]
+	for pc in pluge:
+		cv.draw_rect(Rect2(px, y4, p, r4), pc)
+		px += p
+	cv.draw_rect(Rect2(side + x, y4, side, r4), Color(0.15, 0.15, 0.15))
 
 
 ## グラデーション: 黒→白の横方向グラデ。階調飛び (バンディング) や縞模様の確認用。
