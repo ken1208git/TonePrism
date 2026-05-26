@@ -289,6 +289,7 @@ func _build_detail(id: String) -> void:
 		"system_info": _build_system_info()
 		"games_test": _build_games_test()
 		"db_check": _build_db_check()
+		"log_view": _build_log_view()
 		"screen_test": _build_screen_test()
 		"fullscreen": _build_fullscreen()
 		"monitor": _build_monitor()
@@ -377,6 +378,36 @@ func _render_games_exists_check() -> void:
 
 ## データベース整合性チェック: ファイル存在→接続→バージョン→テーブル存在/件数→読み取りテスト。
 ## Launcher は read-only (SPEC §6.5) のため書き込みテストはしない。
+## 簡易ログ確認: 現セッションの直近ログ (Logger のメモリバッファ) を一覧表示。WARN/ERROR は色分け。
+## Logger は組み込み Logger クラスと名前衝突するため、autoload ノードを /root/Logger 経由で参照する。
+func _build_log_view() -> void:
+	var logger := get_node_or_null("/root/Logger")
+	if logger == null or not logger.has_method("get_recent_logs"):
+		_add_text("ログ機能が利用できません。", C_DANGER)
+		return
+	_add_button("最新の状態に更新", func(): _build_detail("log_view"); _refocus_detail())
+	var lines: Array = logger.get_recent_logs()
+	if lines.is_empty():
+		_add_text("ログがありません。", C_MUTED)
+		return
+	_add_text("現セッションの直近ログ %d 行 (古い順。最新は最下部)" % lines.size(), C_MUTED)
+	var list := ItemList.new()
+	list.focus_mode = Control.FOCUS_ALL
+	list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	list.custom_minimum_size = Vector2(0, 420)
+	for ln in lines:
+		var idx := list.add_item(str(ln))
+		if "[ERROR]" in ln:
+			list.set_item_custom_fg_color(idx, C_DANGER)
+		elif "[WARN]" in ln:
+			list.set_item_custom_fg_color(idx, Color(1.0, 0.8, 0.4))
+	_detail_content.add_child(list)
+	# 最新行 (最下部) を見せる。
+	if list.item_count > 0:
+		list.select(list.item_count - 1)
+		list.ensure_current_is_visible()
+
+
 func _build_db_check() -> void:
 	var db_path := PathManager.get_database_path()
 	if not FileAccess.file_exists(db_path):
