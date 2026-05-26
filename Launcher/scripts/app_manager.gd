@@ -2,7 +2,7 @@ extends Node
 
 # AppManager
 # アプリケーション全体のライフサイクル管理を行うAutoLoad
-# ・終了リクエスト(Alt+F4 / ×ボタン)の封印。アプリの終了はサービスモードからのみ行える
+# ・終了リクエスト(Alt+F4 / ×ボタン)の封印。ランチャーの終了はサービスモードからのみ行える
 # ・全画面共通の処理
 
 func _ready():
@@ -15,14 +15,14 @@ func _notification(what):
 		_handle_quit_request()
 
 func _handle_quit_request():
-	# Alt+F4 / × ボタンによる終了を完全に封印する。終了はサービスモード (Ctrl+Alt+F12 →「アプリ終了」)
+	# Alt+F4 / × ボタンによる終了を完全に封印する。終了はサービスモード (Ctrl+Alt+F12 →「ランチャー終了」)
 	# からのみ可能にし、生徒の誤操作や勝手な終了を防ぐ。終了要求は「サービスモードから終了して」の案内に変える。
 	# サービスモードはエラー表示中でも開けるので、どんな状況でも終了の入り口をサービスモードに一本化できる。
 	if ErrorManager.is_error_showing():
 		# 既にエラーダイアログ表示中。案内ダイアログを重ねず黙殺する (終了はサービスモードから)。
 		return
 
-	var msg = "この画面からアプリを終了することはできません。\n\n【スタッフの方へ】\n終了するにはサービスモードを開き (Ctrl + Alt + F12)、\n「アプリ終了」から行ってください。"
+	var msg = "この画面からランチャーを終了することはできません。\n\n【スタッフの方へ】\n終了するにはサービスモードを開き (Ctrl + Alt + F12)、\n「ランチャー終了」から行ってください。"
 
 	DialogManager.close_current_dialog()
 	DialogManager.show_message("終了について", msg, ["閉じる"], func(_idx): pass)

@@ -30,8 +30,8 @@ const ITEMS := [
 	{"id": "fullscreen",   "label": "10. フルスクリーン切替"},
 	{"id": "monitor",      "label": "11. ランチャー表示モニタ選択"},
 	{"id": "reload",       "label": "12. ランチャーの再読み込み"},
-	{"id": "restart",      "label": "13. アプリの再起動"},
-	{"id": "exit",         "label": "14. アプリ終了"},
+	{"id": "restart",      "label": "13. ランチャーの再起動"},
+	{"id": "exit",         "label": "14. ランチャー終了"},
 ]
 
 var _root: Control = null
@@ -545,7 +545,7 @@ func _build_restart() -> void:
 	if GameSession.is_running():
 		_add_text("⚠ ゲーム実行中のため再起動できません。", C_DANGER)
 	else:
-		_add_button("アプリを再起動", _do_restart)
+		_add_button("ランチャーを再起動", _do_restart)
 
 
 func _build_exit() -> void:
@@ -559,7 +559,7 @@ func _build_exit() -> void:
 		_add_button("キャンセル", func(): _exit_armed = false; _build_detail("exit"); _refocus_detail())
 		return
 	_add_text("ランチャーを終了します。Alt+F4 / × ボタン封印時はここが唯一の終了手段です。")
-	var btn := _add_button("アプリを終了", func(): _exit_armed = true; _build_detail("exit"); _refocus_detail())
+	var btn := _add_button("ランチャーを終了", func(): _exit_armed = true; _build_detail("exit"); _refocus_detail())
 	btn.add_theme_color_override("font_color", C_DANGER)
 
 
@@ -646,7 +646,7 @@ func _apply_focus_style() -> void:
 func _clear_content() -> void:
 	# remove_child を即時に行ってから queue_free する。queue_free だけだとフレーム末まで子が get_children に
 	# 残り、直後の _first_focusable が「解放予定の古いボタン」を掴んでフォーカスを当て、フレーム末に消えて
-	# フォーカス喪失で詰む (キーボード操作で「アプリを終了」→確認画面のフォーカスが出ない不具合)。
+	# フォーカス喪失で詰む (キーボード操作で「ランチャーを終了」→確認画面のフォーカスが出ない不具合)。
 	for c in _detail_content.get_children():
 		_detail_content.remove_child(c)
 		c.queue_free()
