@@ -57,13 +57,17 @@ const SCREEN_SEQ := [
 
 # ネットワーク接続テストの段階 (上から順に確認。最初に × が出た所が原因)。
 const NW_STAGES := [
-	["ip",       "1. ローカルIP取得"],
-	["gateway",  "2. ゲートウェイ疎通"],
-	["dns",      "3. DNS解決"],
-	["internet", "4. インターネット接続"],
-	["server",   "5. 共有サーバー接続"],
-	["monitor",  "6. Monitor接続"],
+	["ip",           "1. ローカルIP取得"],
+	["gateway",      "2. ゲートウェイ疎通"],
+	["dns",          "3. DNS解決"],
+	["internet",     "4. インターネット接続"],
+	["inet_speed",   "5. インターネット速度"],
+	["server",       "6. 共有サーバー接続"],
+	["server_speed", "7. 共有サーバー読み込み速度"],
+	["monitor",      "8. Monitor接続"],
 ]
+const NW_SPEED_URL := "https://speed.cloudflare.com/__down?bytes=5000000"  # 約5MB
+const NW_READ_CAP := 52428800  # 共有読み込み速度測定で読む上限 (50MB)
 
 var _root: Control = null
 var _theme: Theme = null             # Noto Sans JP を既定フォントにする UI 全体のテーマ
@@ -147,6 +151,10 @@ var _nw_running: bool = false
 var _nw_run_btn: Button = null
 var _nw_rows: Dictionary = {}          # stage_id -> 結果 Label
 var _nw_db_host: String = ""           # 共有サーバーのホスト (DBパスから抽出、メインスレッドで取得)
+var _nw_db_path: String = ""           # DB ファイルのフルパス (共有読み込み速度測定用)
+var _nw_inet_ok: bool = false          # インターネット疎通の結果 (スレッド→main、速度測定の要否判定)
+var _nw_http: HTTPRequest = null       # インターネット速度測定用 (非同期DL)
+var _nw_http_t0: int = 0               # 速度測定の開始時刻
 
 
 func _ready() -> void:
@@ -156,6 +164,11 @@ func _ready() -> void:
 	_build_ui()
 	# コントローラーの抜き差しで入力チェックの接続一覧を更新する (表示中のみ反映)。
 	Input.joy_connection_changed.connect(_on_joy_conn_changed)
+	# インターネット速度測定用 (非同期DL)。
+	_nw_http = HTTPRequest.new()
+	_nw_http.timeout = 8.0
+	add_child(_nw_http)
+	_nw_http.request_completed.connect(_nw_on_http)
 
 
 func _notification(what: int) -> void:
@@ -826,7 +839,8 @@ func _nw_set(stage_id: String, text: String, color: Color) -> void:
 func _nw_start() -> void:
 	if _nw_running:
 		return
-	_nw_db_host = _nw_extract_host(PathManager.get_database_path())  # autoload アクセスはメインで済ませる
+	_nw_db_path = PathManager.get_database_path()  # autoload アクセスはメインで済ませる
+	_nw_db_host = _nw_extract_host(_nw_db_path)
 	for s in NW_STAGES:
 		if s[0] != "monitor":
 			_nw_set(s[0], "確認中…", C_TEXT)
@@ -866,11 +880,13 @@ func _nw_run() -> void:
 		call_deferred("_nw_set", "dns", "NG  名前解決できない (%dms)" % dms, C_DANGER)
 	# 4. インターネット (DNS非依存で IP 直 TCP)
 	var inet = _nw_tcp("1.1.1.1", 443, 3000)
+	_nw_inet_ok = inet[0]
 	if inet[0]:
 		call_deferred("_nw_set", "internet", "OK  (%dms)" % inet[1], C_OK)
 	else:
 		call_deferred("_nw_set", "internet", "NG  外部に届かない", C_DANGER)
-	# 5. 共有サーバー
+	# 5. インターネット速度は疎通OKなら _nw_done から HTTPRequest で測る (ここでは保留)。
+	# 6. 共有サーバー疎通
 	if _nw_db_host == "":
 		call_deferred("_nw_set", "server", "対象外 (ローカル/不明なDBパス)", C_MUTED)
 	else:
@@ -879,14 +895,44 @@ func _nw_run() -> void:
 			call_deferred("_nw_set", "server", "OK  %s (%dms)" % [_nw_db_host, srv[1]], C_OK)
 		else:
 			call_deferred("_nw_set", "server", "NG  %s に届かない" % _nw_db_host, C_DANGER)
+	# 7. 共有サーバー読み込み速度 (DB ファイルを読んで MB/秒)
+	var rs = _nw_read_speed(_nw_db_path)
+	if rs[0]:
+		call_deferred("_nw_set", "server_speed", "%.1f MB/秒 (%.1fMB 読込)" % [rs[1], rs[2] / 1048576.0], C_OK)
+	else:
+		call_deferred("_nw_set", "server_speed", "測定不可", C_MUTED)
 	call_deferred("_nw_done")
 
 
-## テスト完了 (メインスレッド)。スレッドを join してボタンを戻す。
+## スレッド完了 (メインスレッド)。join 後、インターネット疎通OKなら速度測定(非同期DL)へ。
 func _nw_done() -> void:
 	if _nw_thread:
 		_nw_thread.wait_to_finish()
 		_nw_thread = null
+	if _nw_inet_ok:
+		_nw_set("inet_speed", "測定中…", C_TEXT)
+		_nw_http_t0 = Time.get_ticks_msec()
+		if _nw_http.request(NW_SPEED_URL) != OK:
+			_nw_set("inet_speed", "測定不可", C_MUTED)
+			_nw_finish()
+	else:
+		_nw_set("inet_speed", "—（ネット未接続）", C_MUTED)
+		_nw_finish()
+
+
+## インターネット速度測定 (DL完了) のコールバック。
+func _nw_on_http(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	if result == HTTPRequest.RESULT_SUCCESS and code == 200 and body.size() > 0:
+		var ms := maxi(1, Time.get_ticks_msec() - _nw_http_t0)
+		var mbps := (body.size() * 8.0 / 1000000.0) / (ms / 1000.0)
+		_nw_set("inet_speed", "%.1f Mbps (%.1fMB DL)" % [mbps, body.size() / 1048576.0], C_OK)
+	else:
+		_nw_set("inet_speed", "測定不可", C_MUTED)
+	_nw_finish()
+
+
+## テスト全体の完了処理 (ボタンを戻す)。
+func _nw_finish() -> void:
 	_nw_running = false
 	if _nw_run_btn and is_instance_valid(_nw_run_btn):
 		_nw_run_btn.disabled = false
@@ -942,6 +988,28 @@ func _nw_tcp(host: String, port: int, timeout_ms: int) -> Array:
 			return [false, timeout_ms]
 		OS.delay_msec(50)
 	return [false, timeout_ms]  # 到達しないが GDScript の戻り値検査のため
+
+
+## ファイルを読んで読み込み速度 ([ok, MB/秒, 読んだバイト数]) を返す。上限 NW_READ_CAP まで。
+func _nw_read_speed(path: String) -> Array:
+	if path == "" or not FileAccess.file_exists(path):
+		return [false, 0.0, 0]
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return [false, 0.0, 0]
+	var t0 := Time.get_ticks_msec()
+	var total := 0
+	while not f.eof_reached() and total < NW_READ_CAP:
+		var chunk := f.get_buffer(262144)  # 256KB ずつ
+		if chunk.is_empty():
+			break
+		total += chunk.size()
+	var ms := maxi(1, Time.get_ticks_msec() - t0)
+	f.close()
+	if total <= 0:
+		return [false, 0.0, 0]
+	var mbps := (total / 1048576.0) / (ms / 1000.0)
+	return [true, mbps, total]
 
 
 ## DB パスから共有サーバーのホスト名を取り出す (UNC \\HOST\... のみ。それ以外は "")。
