@@ -135,20 +135,23 @@ func _input(event: InputEvent) -> void:
 	elif event is InputEventJoypadMotion and absf(event.axis_value) > 0.5:
 		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 		_set_using_mouse(false)
-	# B / Esc: 詳細ペインなら左リストへ戻る、左リストならサービスモード終了。
+	# B / Esc: 詳細内にサブ画面 (ゲーム動作確認のモード表示等) があればまずそこから戻る。
+	# 無ければ、詳細ペインなら左リストへ戻る / 左リストならサービスモード終了。
 	if event.is_action_pressed("ui_cancel"):
 		get_viewport().set_input_as_handled()
 		if _in_detail:
-			_exit_detail()
+			if not _try_detail_subback():
+				_exit_detail()
 		else:
 			ServiceMode.close()
 		return
-	# → で左リスト→詳細へ、← で詳細→左リストへ (水平のペイン移動)。消費して Godot 自動 h-ナビを抑止。
+	# → で左リスト→詳細へ、← で詳細→左リスト (またはサブ画面から戻る)。消費して Godot 自動 h-ナビを抑止。
 	if not _in_detail and event.is_action_pressed("ui_right"):
 		_enter_detail()
 		get_viewport().set_input_as_handled()
 	elif _in_detail and event.is_action_pressed("ui_left"):
-		_exit_detail()
+		if not _try_detail_subback():
+			_exit_detail()
 		get_viewport().set_input_as_handled()
 
 
@@ -316,6 +319,18 @@ func _enter_detail() -> bool:
 	return true
 
 
+## 詳細ペイン内のサブ画面から一段戻れるなら戻る (詳細ペインからは出ない)。戻したら true。
+## 現状「ゲーム動作確認」のモード表示中のみ: 確認方法の選択へ戻る。
+func _try_detail_subback() -> bool:
+	if _selected_index >= 0 and _selected_index < ITEMS.size() \
+			and ITEMS[_selected_index]["id"] == "games_test" and _games_test_mode != "":
+		_games_test_mode = ""
+		_build_detail("games_test")
+		_refocus_detail()
+		return true
+	return false
+
+
 ## 左リストへフォーカスを戻す。
 func _exit_detail() -> void:
 	_in_detail = false
@@ -372,8 +387,28 @@ func _build_system_info() -> void:
 		_add_text(ln)
 
 
-## ゲーム動作確認: 3 段階の確認方法を選ばせ、選択モードの内容を下に表示する。
+## ゲーム動作確認。まず確認方法を選ぶ画面を出し、選ぶと中身全体がそのモード画面に切り替わる。
+## モード画面で ← / B / Esc を押すと確認方法の選択へ戻る (詳細ペインからは出ない)。
 func _build_games_test() -> void:
+	if _games_test_mode == "":
+		_build_games_test_menu()
+	else:
+		# モード画面: 先頭に「戻る」を置き (操作の起点 + フォーカス先)、その下にモードの中身。
+		_add_button("← 戻る（確認方法の選択へ）",
+			func(): _games_test_mode = ""; _build_detail("games_test"); _refocus_detail())
+		_detail_content.add_child(HSeparator.new())
+		match _games_test_mode:
+			"exists": _render_games_exists_check()
+			"auto":
+				_add_text("（実装予定）各ゲームを自動で起動 → ウィンドウ生成を確認 → 自動終了し、", C_MUTED)
+				_add_text("起動可否 (OK/NG) を一覧表示します。DLL 不足・起動時クラッシュ等の検出用。", C_MUTED)
+			"play":
+				_add_text("（実装予定）選んだ 1 本を実際に起動して試遊します。終了は手動 (プレイ後に閉じる)。", C_MUTED)
+				_add_text("「ファイルはあるが実際に遊べるか」の最終確認用。", C_MUTED)
+
+
+## ゲーム動作確認の確認方法 選択画面 (3 段階)。
+func _build_games_test_menu() -> void:
 	_add_text("ゲームの動作を 3 段階で確認できます。確認方法を選んでください。", C_MUTED)
 	_add_button("① ファイル存在チェック（起動しない・全件一括）",
 		func(): _games_test_mode = "exists"; _build_detail("games_test"); _refocus_detail())
@@ -381,17 +416,6 @@ func _build_games_test() -> void:
 		func(): _games_test_mode = "auto"; _build_detail("games_test"); _refocus_detail())
 	_add_button("③ 試遊確認（起動して実際に遊ぶ・終了は手動）",
 		func(): _games_test_mode = "play"; _build_detail("games_test"); _refocus_detail())
-	_detail_content.add_child(HSeparator.new())
-	match _games_test_mode:
-		"exists": _render_games_exists_check()
-		"auto":
-			_add_text("（実装予定）各ゲームを自動で起動 → ウィンドウ生成を確認 → 自動終了し、", C_MUTED)
-			_add_text("起動可否 (OK/NG) を一覧表示します。DLL 不足・起動時クラッシュ等の検出用。", C_MUTED)
-		"play":
-			_add_text("（実装予定）選んだ 1 本を実際に起動して試遊します。終了は手動 (プレイ後に閉じる)。", C_MUTED)
-			_add_text("「ファイルはあるが実際に遊べるか」の最終確認用。", C_MUTED)
-		_:
-			_add_text("↑ から確認方法を選んでください。", C_MUTED)
 
 
 ## モード①: 各ゲームの実行ファイル(exe)が存在するか (= パス切れ/ファイル欠落がないか) を起動せずチェック。
