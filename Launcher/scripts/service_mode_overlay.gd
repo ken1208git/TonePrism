@@ -862,6 +862,9 @@ func _nw_run() -> void:
 		var g = _nw_ping(gw)
 		if g[0]:
 			call_deferred("_nw_set", "gateway", "OK  %s (%dms)" % [gw, g[1]], C_OK)
+		elif _nw_arp_reachable(gw):
+			# ping を返さないルーターは多い。ARP に MAC があれば L2 到達OK (機能はしている)。
+			call_deferred("_nw_set", "gateway", "OK  %s (到達OK・pingは無応答)" % gw, C_OK)
 		else:
 			call_deferred("_nw_set", "gateway", "NG  %s 応答なし" % gw, C_DANGER)
 	# 3. DNS
@@ -946,6 +949,21 @@ func _nw_ping(host: String) -> Array:
 	var ms := Time.get_ticks_msec() - t0
 	var text := str(out[0]) if not out.is_empty() else ""
 	return [text.contains("TTL=") or text.contains("ttl="), ms]
+
+
+## ARP テーブルに host の MAC があるか (= L2 到達OK)。ping を返さないルーターでも到達確認できる。
+func _nw_arp_reachable(host: String) -> bool:
+	var out: Array = []
+	OS.execute("arp", ["-a", host], out)
+	if out.is_empty():
+		return false
+	var rx := RegEx.new()
+	rx.compile("([0-9a-fA-F]{2}-){5}[0-9a-fA-F]{2}")
+	var m := rx.search(str(out[0]))
+	if m == null:
+		return false
+	var mac := m.get_string(0).to_lower()
+	return mac != "ff-ff-ff-ff-ff-ff" and mac != "00-00-00-00-00-00"
 
 
 ## TCP 接続を試みて成否と所要 ms を返す ([ok, ms])。timeout_ms で打ち切る。
