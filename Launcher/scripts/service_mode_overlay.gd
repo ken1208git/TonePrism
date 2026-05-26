@@ -384,23 +384,91 @@ func _build_detail(id: String) -> void:
 
 
 func _build_system_info() -> void:
+	var list := ItemList.new()
+	list.focus_mode = Control.FOCUS_ALL
+	list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	list.custom_minimum_size = Vector2(0, 460)
+	_detail_content.add_child(list)
+
 	var screen := get_window().current_screen
 	var ev := Engine.get_version_info()
 	var pc := OS.get_environment("COMPUTERNAME")
 	if pc.is_empty():
 		pc = "(不明)"
-	var lines := [
-		"PC 名: %s" % pc,
-		"OS: %s" % OS.get_name(),
-		"Launcher バージョン: %s" % Version.get_version_string(),
-		"Godot バージョン: %s" % str(ev.get("string", "?")),
-		"現在のモニタ: #%d  (%s)" % [screen, str(DisplayServer.screen_get_size(screen))],
-		"ウィンドウサイズ: %s" % str(DisplayServer.window_get_size()),
-		"モニタ数: %d" % DisplayServer.get_screen_count(),
-		"プロセス PID: %d" % OS.get_process_id(),
-	]
-	for ln in lines:
-		_add_text(ln)
+
+	# ── ハードウェア ──
+	_sysinfo_header(list, "ハードウェア")
+	_sysinfo_line(list, "CPU", "%s （%d コア）" % [OS.get_processor_name(), OS.get_processor_count()])
+	_sysinfo_line(list, "GPU", "%s / %s" % [RenderingServer.get_video_adapter_name(), RenderingServer.get_video_adapter_vendor()])
+	var mem := OS.get_memory_info()
+	var phys: int = int(mem.get("physical", -1))
+	var freemem: int = int(mem.get("free", -1))
+	if phys > 0:
+		var s := "%.1f GB" % (phys / 1073741824.0)
+		if freemem > 0:
+			s += "  （空き %.1f GB）" % (freemem / 1073741824.0)
+		_sysinfo_line(list, "物理メモリ", s)
+	_sysinfo_line(list, "アプリ使用メモリ", "%.1f MB" % (Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0))
+
+	# ── ディスプレイ ──
+	_sysinfo_header(list, "ディスプレイ")
+	_sysinfo_line(list, "現在のモニタ", "#%d  %s" % [screen, str(DisplayServer.screen_get_size(screen))])
+	var rr := DisplayServer.screen_get_refresh_rate(screen)
+	_sysinfo_line(list, "リフレッシュレート", ("%.0f Hz" % rr) if rr > 0.0 else "不明")
+	_sysinfo_line(list, "ウィンドウサイズ", str(DisplayServer.window_get_size()))
+	_sysinfo_line(list, "モニタ数", "%d" % DisplayServer.get_screen_count())
+	_sysinfo_line(list, "DPI", "%d" % DisplayServer.screen_get_dpi(screen))
+	_sysinfo_line(list, "V-Sync", _vsync_mode_text())
+	_sysinfo_line(list, "現在のFPS", "%d" % Engine.get_frames_per_second())
+	_sysinfo_line(list, "描画", "%s / %s" % [DisplayServer.get_name(), RenderingServer.get_video_adapter_api_version()])
+
+	# ── システム ──
+	_sysinfo_header(list, "システム")
+	_sysinfo_line(list, "PC 名", pc)
+	_sysinfo_line(list, "OS", "%s  %s" % [OS.get_name(), OS.get_version()])
+	_sysinfo_line(list, "ロケール", OS.get_locale())
+	_sysinfo_line(list, "現在日時", Time.get_datetime_string_from_system(false, true))
+	_sysinfo_line(list, "稼働時間", "%d 秒" % int(Time.get_ticks_msec() / 1000.0))
+	_sysinfo_line(list, "ローカルIP", _local_ipv4())
+
+	# ── バージョン / パス ──
+	_sysinfo_header(list, "バージョン / パス")
+	_sysinfo_line(list, "Launcher", Version.get_version_string())
+	_sysinfo_line(list, "Godot", str(ev.get("string", "?")))
+	_sysinfo_line(list, "プロセス PID", "%d" % OS.get_process_id())
+	_sysinfo_line(list, "実行ファイル", OS.get_executable_path())
+	_sysinfo_line(list, "DB", PathManager.get_database_path())
+
+
+## システム情報の見出し行 (選択不可・アクセント色)。
+func _sysinfo_header(list: ItemList, text: String) -> void:
+	var idx := list.add_item("── %s ──" % text)
+	list.set_item_custom_fg_color(idx, C_ACCENT)
+	list.set_item_selectable(idx, false)
+
+
+## システム情報の 1 行 ("ラベル: 値")。
+func _sysinfo_line(list: ItemList, label: String, value: String) -> void:
+	list.add_item("%s: %s" % [label, value])
+
+
+## 現在の V-Sync モードを日本語で返す。
+func _vsync_mode_text() -> String:
+	match DisplayServer.window_get_vsync_mode():
+		DisplayServer.VSYNC_DISABLED: return "無効"
+		DisplayServer.VSYNC_ENABLED: return "有効"
+		DisplayServer.VSYNC_ADAPTIVE: return "アダプティブ"
+		DisplayServer.VSYNC_MAILBOX: return "メールボックス"
+	return "?"
+
+
+## 主要なローカル IPv4 アドレスを返す (ループバック・APIPA は除外)。
+func _local_ipv4() -> String:
+	var addrs: Array[String] = []
+	for a in IP.get_local_addresses():
+		if "." in a and not a.begins_with("127.") and not a.begins_with("169.254."):
+			addrs.append(a)
+	return ", ".join(addrs) if not addrs.is_empty() else "なし"
 
 
 ## ゲーム動作確認。まず確認方法を選ぶ画面を出し、選ぶと中身全体がそのモード画面に切り替わる。
