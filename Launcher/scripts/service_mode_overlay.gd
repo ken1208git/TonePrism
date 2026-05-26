@@ -50,6 +50,8 @@ const SCREEN_SEQ := [
 var _root: Control = null
 var _focus_sb: StyleBoxFlat = null   # フォーカス枠 (ボタン内側に描く=ScrollContainer のクリップで見切れない)
 var _focus_off_sb: StyleBox = null   # マウス操作時の透明 focus (枠を出さない)
+var _btn_sb: StyleBoxFlat = null     # 詳細ペインのボタン通常スタイル (薄く色を付ける)
+var _btn_hover_sb: StyleBoxFlat = null  # 詳細ペインのボタンホバー/押下スタイル (少し明るく)
 var _using_mouse: bool = false       # マウス操作中はフォーカス枠を出さない (他画面と同じ分離)
 var _detail_title: Label = null
 var _detail_content: VBoxContainer = null
@@ -160,6 +162,26 @@ func _build_ui() -> void:
 	_focus_sb.border_color = C_ACCENT
 	_focus_sb.set_corner_radius_all(4)
 	_focus_off_sb = StyleBoxEmpty.new()  # マウス時: 何も描かない focus 枠
+
+	# 詳細ペインのボタンに薄く色を付けて「押せる項目」だと分かりやすくする (アクセント寄りの暗い青系)。
+	_btn_sb = StyleBoxFlat.new()
+	_btn_sb.bg_color = Color(0.16, 0.19, 0.26)
+	_btn_sb.border_color = Color(0.28, 0.33, 0.44)
+	_btn_sb.set_border_width_all(1)
+	_btn_sb.set_corner_radius_all(6)
+	_btn_sb.content_margin_left = 14
+	_btn_sb.content_margin_right = 14
+	_btn_sb.content_margin_top = 6
+	_btn_sb.content_margin_bottom = 6
+	_btn_hover_sb = StyleBoxFlat.new()
+	_btn_hover_sb.bg_color = Color(0.22, 0.27, 0.37)
+	_btn_hover_sb.border_color = Color(0.40, 0.55, 0.78)
+	_btn_hover_sb.set_border_width_all(1)
+	_btn_hover_sb.set_corner_radius_all(6)
+	_btn_hover_sb.content_margin_left = 14
+	_btn_hover_sb.content_margin_right = 14
+	_btn_hover_sb.content_margin_top = 6
+	_btn_hover_sb.content_margin_bottom = 6
 
 	_root = Control.new()
 	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -882,9 +904,14 @@ func _set_using_mouse(v: bool) -> void:
 ## ボタンの上に残るため、そのままだとホバー表示が消え残り、キーボードのフォーカス枠と二重に光って
 ## 見える。ホバーを通常表示と同じにすることで、残ったホバーを見えなくする。
 func _apply_focus_style_to(b: Button) -> void:
+	# 色付きボタン (詳細ペイン) はマウス時に専用ホバー、プレーンボタン (左メニュー) は既定ホバーに戻す。
+	var colored := b.has_theme_stylebox_override("normal")
 	if _using_mouse:
 		b.add_theme_stylebox_override("focus", _focus_off_sb)
-		b.remove_theme_stylebox_override("hover")
+		if colored:
+			b.add_theme_stylebox_override("hover", _btn_hover_sb)
+		else:
+			b.remove_theme_stylebox_override("hover")
 	else:
 		b.add_theme_stylebox_override("focus", _focus_sb)
 		b.add_theme_stylebox_override("hover", b.get_theme_stylebox("normal"))
@@ -923,6 +950,9 @@ func _add_button(text: String, on_pressed: Callable) -> Button:
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.focus_mode = Control.FOCUS_ALL
 	b.custom_minimum_size = Vector2(0, 40)
+	# 薄く色を付けて「押せる項目」だと分かりやすくする (通常/押下)。ホバー/フォーカスは _apply_focus_style_to。
+	b.add_theme_stylebox_override("normal", _btn_sb)
+	b.add_theme_stylebox_override("pressed", _btn_hover_sb)
 	b.pressed.connect(on_pressed)
 	_detail_content.add_child(b)
 	_apply_focus_style_to(b)  # ツリー追加後に呼ぶ (get_theme_stylebox がテーマを正しく解決するため)
