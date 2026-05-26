@@ -861,7 +861,7 @@ func _nw_run() -> void:
 	else:
 		var g = _nw_ping(gw)
 		if g[0]:
-			call_deferred("_nw_set", "gateway", "OK  %s (%dms)" % [gw, g[1]], C_OK)
+			call_deferred("_nw_set", "gateway", "OK  %s (応答あり)" % gw, C_OK)
 		elif _nw_arp_reachable(gw):
 			# ping を返さないルーターは多い。ARP に MAC があれば L2 到達OK (機能はしている)。
 			call_deferred("_nw_set", "gateway", "OK  %s (到達OK・pingは無応答)" % gw, C_OK)
@@ -943,9 +943,10 @@ func _nw_default_gateway() -> String:
 
 ## ping を 1 回打って応答有無と所要 ms を返す ([ok, ms])。locale に依存しない "TTL=" で判定。
 func _nw_ping(host: String) -> Array:
+	# 3 回打って 1 回でも返れば OK (単発だと不安定/ロスのある回線で取りこぼして誤NGになるため)。
 	var t0 := Time.get_ticks_msec()
 	var out: Array = []
-	OS.execute("ping", ["-n", "1", "-w", "1500", host], out)
+	OS.execute("ping", ["-n", "3", "-w", "1000", host], out)
 	var ms := Time.get_ticks_msec() - t0
 	var text := str(out[0]) if not out.is_empty() else ""
 	return [text.contains("TTL=") or text.contains("ttl="), ms]
