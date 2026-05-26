@@ -18,7 +18,8 @@ const C_BG := Color(0.0, 0.0, 0.0, 1.0)       # 真っ黒 (完全不透明。裏
 const C_PANEL := Color(0.10, 0.10, 0.10, 1.0) # 詳細パネル (黒からわずかに浮かせる)
 const C_TEXT := Color(0.85, 0.85, 0.85)       # 本文
 const C_MUTED := Color(0.55, 0.55, 0.55)      # 補足
-const C_ACCENT := Color(1.0, 1.0, 1.0)        # 見出し・フォーカス枠 (白)
+const C_ACCENT := Color(1.0, 1.0, 1.0)        # 詳細見出し・フォーカス枠 (白)
+const C_TITLE := Color(1.0, 0.85, 0.20)       # 最上部の「サービスモード」見出し (黄)
 const C_DANGER := Color(1.0, 0.45, 0.40)      # 危険/NG (赤)
 const C_OK := Color(0.45, 0.90, 0.55)         # OK (緑)
 
@@ -245,7 +246,7 @@ func _build_ui() -> void:
 
 	var header := Label.new()
 	header.text = "サービスモード  —  Launcher %s" % Version.get_version_string()
-	header.add_theme_color_override("font_color", C_ACCENT)
+	header.add_theme_color_override("font_color", C_TITLE)
 	header.add_theme_font_override("font", FONT_BOLD)
 	header.add_theme_font_size_override("font_size", 26)
 	col.add_child(header)
