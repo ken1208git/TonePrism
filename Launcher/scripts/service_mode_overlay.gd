@@ -863,10 +863,10 @@ func _nw_run() -> void:
 	else:
 		var g = _nw_ping(gw)
 		if g[0]:
-			call_deferred("_nw_set", "gateway", "OK  %s (応答あり)" % gw, C_OK)
+			call_deferred("_nw_set", "gateway", "OK  %s" % gw, C_OK)
 		elif _nw_arp_reachable(gw):
 			# ping を返さないルーターは多い。ARP に MAC があれば L2 到達OK (機能はしている)。
-			call_deferred("_nw_set", "gateway", "OK  %s (到達OK・pingは無応答)" % gw, C_OK)
+			call_deferred("_nw_set", "gateway", "OK  %s (ping無応答・ARPで確認)" % gw, C_OK)
 		else:
 			call_deferred("_nw_set", "gateway", "NG  %s 応答なし" % gw, C_DANGER)
 	# 3. DNS
