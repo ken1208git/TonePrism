@@ -611,7 +611,7 @@ func _build_detail(id: String) -> void:
 ## 入力チェック: 接続中コントローラー一覧を表示。ボタンで「確認モード」に入ると入力を捕捉して表示する。
 ## 「パッドが効かない」を 一覧に出ない(OS未認識) / 出るが反応しない(マッピング等) / 正常 で切り分ける。
 func _build_input_check() -> void:
-	_add_text("■ 接続中のコントローラー", C_ACCENT)
+	_add_text("接続中のコントローラー", C_ACCENT)
 	_ic_connected_label = Label.new()
 	_ic_connected_label.add_theme_color_override("font_color", C_TEXT)
 	_ic_connected_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
