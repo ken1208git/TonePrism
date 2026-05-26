@@ -94,6 +94,15 @@ var _lt_cur: int = -1                # 現在テスト中のゲーム index
 var _lt_phase: String = ""           # "" / "wait" / "kill"
 var _lt_pid: int = -1                # 現在テスト中の cmd プロセス PID
 var _lt_phase_ms: int = 0            # 現フェーズ開始時刻
+# 試遊確認 (4③): 1 本ずつ実際に起動して遊び、戻ったらスタッフが 〇× で「遊べたか」を記録する。
+var _pt_games: Array = []            # 登録ゲーム (GameInfo) 一覧
+var _pt_status_labels: Array[Label] = []  # 各ゲームの結果ラベル
+var _pt_results: Dictionary = {}     # game_id -> "〇 遊べた" / "× 問題あり" (サービスモードを開いている間保持)
+var _pt_running: bool = false        # 試遊中 (ゲーム起動〜復帰まで)
+var _pt_cur: int = -1                # 試遊中のゲーム index
+var _pt_pid: int = -1                # 試遊中の cmd プロセス PID
+var _pt_await: int = -1              # 復帰して 〇× 入力待ちのゲーム index (-1=なし)
+var _pt_trigger_connected: bool = false  # HOME/Guide トリガ購読中か
 # システム情報のリアルタイム更新 (開いている間、変動する行だけ書き換える)。
 var _sysinfo_list: ItemList = null   # 表示中のシステム情報リスト (非表示時は null)
 var _sysinfo_accum: float = 0.0      # 更新間隔の累積
@@ -118,6 +127,8 @@ func open_overlay() -> void:
 	visible = true
 	_in_detail = false
 	_exit_armed = false
+	_pt_await = -1
+	_pt_results = {}  # 試遊の 〇× 記録は開くたびにリセット (メモリのみ保持)
 	_using_mouse = false  # Ctrl+Alt+F12 (キーボード) で開く → フォーカス枠あり
 	_apply_focus_style()
 	# 先頭項目を選択 + 詳細表示 + 左リストにフォーカス。
@@ -130,6 +141,7 @@ func open_overlay() -> void:
 func close_overlay() -> void:
 	_hide_test()
 	_lt_stop()  # 起動テスト中に閉じてもゲームを置き去りにしない
+	_pt_stop()  # 試遊中に閉じてもゲームを置き去りにしない
 	visible = false
 
 
@@ -139,6 +151,9 @@ func _process(delta: float) -> void:
 	# 起動テスト実行中は毎フレーム進行させる (起動→窓検出→終了)。
 	if _lt_running:
 		_lt_tick()
+	# 試遊中はゲーム終了を監視し、終わったら復帰処理へ。
+	if _pt_running:
+		_pt_tick()
 	# システム情報を開いている間、変動する行 (FPS / メモリ / 日時 / 稼働時間) を定期更新する。
 	if _sysinfo_list != null and is_instance_valid(_sysinfo_list):
 		_sysinfo_accum += delta
@@ -564,9 +579,7 @@ func _build_games_test() -> void:
 		match _games_test_mode:
 			"exists": _render_games_exists_check()
 			"auto": _build_games_launch_test()
-			"play":
-				_add_text("（実装予定）選んだ 1 本を実際に起動して試遊します。終了は手動 (プレイ後に閉じる)。", C_MUTED)
-				_add_text("「ファイルはあるが実際に遊べるか」の最終確認用。", C_MUTED)
+			"play": _build_games_playtest()
 
 
 ## ゲーム動作確認の確認方法 選択画面 (3 段階)。3 択の下に、今フォーカス (キーボード) または
@@ -936,6 +949,168 @@ func _lt_after_kill() -> void:
 		LauncherAgent.unwatch()
 	_lt_pid = -1
 	_lt_begin_next()
+
+
+# ---------------- 試遊確認 (4③) ----------------
+
+## モード③: 試遊確認。1 本ずつ実際に起動して遊び、戻ったら 〇× で「正しく遊べたか」を記録する。
+func _build_games_playtest() -> void:
+	var db := DatabaseManager.new()
+	if not db.open():
+		_add_text("⚠ データベースを開けませんでした。Manager での初期化が必要かもしれません。", C_DANGER)
+		return
+	var repo := GameRepository.new(db)
+	_pt_games = repo.get_all_games()
+	db.close()
+	if _pt_games.is_empty():
+		_add_text("登録ゲームがありません (または DB 読み込みに失敗)。", C_MUTED)
+		return
+
+	# 復帰直後で 〇× 入力待ちなら、まず確認プロンプトを出す。
+	if _pt_await >= 0 and _pt_await < _pt_games.size():
+		var g = _pt_games[_pt_await]
+		_add_text("「%s」は正しく遊べましたか？" % g.title, C_ACCENT)
+		var ok_btn := _add_button("〇 遊べた", func(): _pt_record(_pt_await, "〇 遊べた"))
+		_set_button_font_color(ok_btn, C_OK)
+		var ng_btn := _add_button("× 問題あり", func(): _pt_record(_pt_await, "× 問題あり"))
+		_set_button_font_color(ng_btn, C_DANGER)
+		_add_button("あとで（記録しない）", func(): _pt_await = -1; _build_detail("games_test"); _refocus_detail())
+		_detail_content.add_child(HSeparator.new())
+
+	_add_text("行を選ぶとそのゲームを起動して試遊できます。遊び終わったらゲームを終了するか、HOMEボタンで戻れます。", C_MUTED)
+
+	var scroll := ScrollContainer.new()
+	scroll.follow_focus = true
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(0, 380)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_detail_content.add_child(scroll)
+	var list_box := VBoxContainer.new()
+	list_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list_box.add_theme_constant_override("separation", 0)
+	scroll.add_child(list_box)
+	var row_a := _lt_row_style(Color(0.07, 0.07, 0.07))
+	var row_b := _lt_row_style(Color(0.11, 0.11, 0.11))
+	_pt_status_labels.clear()
+	for i in range(_pt_games.size()):
+		var g = _pt_games[i]
+		var panel := PanelContainer.new()
+		panel.add_theme_stylebox_override("panel", row_a if i % 2 == 0 else row_b)
+		var row := HBoxContainer.new()
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		panel.add_child(row)
+		var btn := Button.new()
+		btn.text = "▶ " + g.title
+		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		btn.focus_mode = Control.FOCUS_ALL
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.add_theme_stylebox_override("normal", _lt_empty_sb())
+		btn.pressed.connect(_pt_start.bind(i))
+		_apply_focus_style_to(btn)
+		row.add_child(btn)
+		var st := Label.new()
+		st.custom_minimum_size = Vector2(160, 0)
+		var res: String = _pt_results.get(g.game_id, "未確認")
+		st.text = res
+		st.add_theme_color_override("font_color",
+			C_OK if res.begins_with("〇") else (C_DANGER if res.begins_with("×") else C_MUTED))
+		row.add_child(st)
+		list_box.add_child(panel)
+		_pt_status_labels.append(st)
+
+
+## 試遊開始: 選んだゲームを起動する。
+func _pt_start(index: int) -> void:
+	if _pt_running or index < 0 or index >= _pt_games.size():
+		return
+	var g = _pt_games[index]
+	var exe := GamePathResolver.find_executable(g)
+	if exe.is_empty():
+		_pt_results[g.game_id] = "× 問題あり"  # 起動すらできない
+		_set_pt_status(index, "× 起動できない", C_DANGER)
+		return
+	var pid := _lt_spawn(exe, g)
+	if pid == -1:
+		_pt_results[g.game_id] = "× 問題あり"
+		_set_pt_status(index, "× 起動失敗", C_DANGER)
+		return
+	_pt_cur = index
+	_pt_pid = pid
+	_pt_running = true
+	_set_pt_status(index, "試遊中…", C_TEXT)
+	if LauncherAgent.is_available():
+		LauncherAgent.watch(pid)
+	# HOME/Guide で戻れるようトリガを購読 (押されたらゲームを終了して復帰)。
+	if not _pt_trigger_connected and LauncherAgent.has_signal("trigger_received"):
+		LauncherAgent.trigger_received.connect(_pt_on_trigger)
+		_pt_trigger_connected = true
+
+
+## HOME/Guide が押された (試遊中) → ゲームを終了して復帰。
+func _pt_on_trigger(_source: String) -> void:
+	if not _pt_running:
+		return
+	if _pt_pid != -1 and OS.is_process_running(_pt_pid):
+		OS.create_process("taskkill", ["/PID", str(_pt_pid), "/T", "/F"])
+	# プロセス消失は _process の監視が拾って _pt_on_return を呼ぶ。
+
+
+## 試遊中の毎フレーム監視 (_process から)。ゲームが終了したら復帰処理へ。
+func _pt_tick() -> void:
+	if not _pt_running:
+		return
+	if not OS.is_process_running(_pt_pid):
+		_pt_on_return()
+
+
+## ゲームが終了 (手動 or HOME) → サービスモードに復帰し、〇× 入力待ちにする。
+func _pt_on_return() -> void:
+	var idx := _pt_cur
+	_pt_running = false
+	_pt_pid = -1
+	_pt_cur = -1
+	if LauncherAgent.is_available():
+		LauncherAgent.unwatch()
+	if _pt_trigger_connected and LauncherAgent.trigger_received.is_connected(_pt_on_trigger):
+		LauncherAgent.trigger_received.disconnect(_pt_on_trigger)
+	_pt_trigger_connected = false
+	# ランチャー窓を前面へ (ゲーム消失後に自然に前面化するが念のため)。
+	var w := get_window()
+	if w:
+		w.grab_focus()
+	_pt_await = idx
+	if _games_test_mode == "play":
+		_build_detail("games_test")
+		_refocus_detail()
+
+
+## 〇× を記録してプロンプトを閉じる。
+func _pt_record(index: int, result: String) -> void:
+	if index >= 0 and index < _pt_games.size():
+		_pt_results[_pt_games[index].game_id] = result
+	_pt_await = -1
+	_build_detail("games_test")
+	_refocus_detail()
+
+
+func _set_pt_status(index: int, text: String, color: Color) -> void:
+	if index >= 0 and index < _pt_status_labels.size() and is_instance_valid(_pt_status_labels[index]):
+		_pt_status_labels[index].text = text
+		_pt_status_labels[index].add_theme_color_override("font_color", color)
+
+
+## 試遊を中断する (画面を離れる / 閉じる時)。起動中ゲームは終了させる。
+func _pt_stop() -> void:
+	if _pt_pid != -1 and OS.is_process_running(_pt_pid):
+		OS.create_process("taskkill", ["/PID", str(_pt_pid), "/T", "/F"])
+	if _pt_running and LauncherAgent.is_available():
+		LauncherAgent.unwatch()
+	if _pt_trigger_connected and LauncherAgent.trigger_received.is_connected(_pt_on_trigger):
+		LauncherAgent.trigger_received.disconnect(_pt_on_trigger)
+	_pt_trigger_connected = false
+	_pt_running = false
+	_pt_pid = -1
+	_pt_cur = -1
 
 
 ## データベース整合性チェック: ファイル存在→接続→バージョン→テーブル存在/件数→読み取りテスト。
@@ -1436,6 +1611,7 @@ func _apply_focus_style() -> void:
 func _clear_content() -> void:
 	_sysinfo_list = null  # 詳細を作り直すのでシステム情報のリアルタイム更新対象も解除
 	_lt_stop()            # 起動テスト実行中なら止める (画面を離れるのでゲームを置き去りにしない)
+	_pt_stop()            # 試遊中なら止める (同上)
 	# remove_child を即時に行ってから queue_free する。queue_free だけだとフレーム末まで子が get_children に
 	# 残り、直後の _first_focusable が「解放予定の古いボタン」を掴んでフォーカスを当て、フレーム末に消えて
 	# フォーカス喪失で詰む (キーボード操作で「ランチャーを終了」→確認画面のフォーカスが出ない不具合)。
