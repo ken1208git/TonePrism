@@ -167,10 +167,34 @@ namespace TonePrism.LauncherAgent
                                     Logger.Milestone("[main] focus_hwnd " + hwndVal + " ok=" + ok);
                                 }
                                 break;
+                            case "clickthrough":
+                                // clickthrough <hwnd>。指定窓を OS レベルでクリック透過 (WS_EX_TRANSPARENT) にする。
+                                // デバッグHUDが外部ゲームの上にある時でもクリックを下へ通すため (Godot の
+                                // FLAG_MOUSE_PASSTHROUGH は同一プロセス内限定なので補完)。
+                                if (parts.Length >= 2 && long.TryParse(parts[1], out long cthwnd) && cthwnd != 0)
+                                {
+                                    bool ok = Win32Windows.SetClickThrough(new IntPtr(cthwnd));
+                                    Logger.Milestone("[main] clickthrough " + cthwnd + " ok=" + ok);
+                                }
+                                break;
                             case "speedtest":
-                                // speedtest <共有ファイルパス>。パスは空白を含みうるので "speedtest " 以降を全部使う。
-                                string spath = line.Length > 10 ? line.Substring(10).Trim() : "";
-                                StartSpeedTest(spath);
+                                // speedtest <run_id> <共有ファイルパス>。run_id は結果を Launcher 側の現在の run と
+                                // 照合するための識別子 (遅延した古い結果の取り違え防止)。パスは空白を含みうるので
+                                // run_id の次の空白以降を全部パスとして扱う。
+                                string rest = line.Length > 10 ? line.Substring(10).Trim() : "";
+                                int runId = 0;
+                                string spath = "";
+                                int sepIdx = rest.IndexOf(' ');
+                                if (sepIdx > 0)
+                                {
+                                    int.TryParse(rest.Substring(0, sepIdx), out runId);
+                                    spath = rest.Substring(sepIdx + 1).Trim();
+                                }
+                                else
+                                {
+                                    int.TryParse(rest, out runId); // パス省略時 (run_id のみ)
+                                }
+                                StartSpeedTest(runId, spath);
                                 break;
                             case "quit":
                                 Logger.Milestone("[main] quit コマンド受信、終了");
@@ -259,48 +283,48 @@ namespace TonePrism.LauncherAgent
         }
 
         // ---- 速度計測 ----
-        private static void StartSpeedTest(string sharePath)
+        private static void StartSpeedTest(int runId, string sharePath)
         {
             if (_speedRunning)
             {
-                // 前回の計測が in-flight。無言で捨てると Launcher 側が結果を一生受け取れず
-                // 「測定中…」で固まる (Launcher にタイムアウトは無い)。busy を ok:false で返して復帰させる。
-                SendSpeedtest("internet", false, "前回の計測中です。数秒待って再実行してください");
-                SendSpeedtest("server", false, "前回の計測中です。数秒待って再実行してください");
+                // 前回の計測が in-flight。無言で捨てると Launcher 側が結果を受け取れず固着する
+                // (Launcher 側は結果到着 or タイムアウトまでロック保持)。busy を ok:false で即返して復帰させる。
+                SendSpeedtest("internet", false, "前回の計測中です。数秒待って再実行してください", runId);
+                SendSpeedtest("server", false, "前回の計測中です。数秒待って再実行してください", runId);
                 return;
             }
             _speedRunning = true;
-            var t = new Thread(() => RunSpeedTest(sharePath)) { IsBackground = true };
+            var t = new Thread(() => RunSpeedTest(runId, sharePath)) { IsBackground = true };
             t.Start();
-            Logger.Milestone("[speed] 計測開始 share=" + sharePath);
+            Logger.Milestone("[speed] 計測開始 run=" + runId + " share=" + sharePath);
         }
 
-        private static void RunSpeedTest(string sharePath)
+        private static void RunSpeedTest(int runId, string sharePath)
         {
             try
             {
                 double mbps;
                 if (SpeedTest.Internet(5000, 6, SpeedUrl, out mbps))
-                    SendSpeedtest("internet", true, "約 " + Math.Round(mbps) + " Mbps");
+                    SendSpeedtest("internet", true, "約 " + Math.Round(mbps) + " Mbps", runId);
                 else
-                    SendSpeedtest("internet", false, "測定不可 (" + (string.IsNullOrEmpty(SpeedTest.LastError) ? "0B" : SpeedTest.LastError) + ")");
+                    SendSpeedtest("internet", false, "測定不可 (" + (string.IsNullOrEmpty(SpeedTest.LastError) ? "0B" : SpeedTest.LastError) + ")", runId);
 
                 double mbsec; long bytes;
                 // 受け取ったパスがディレクトリなら配下で最大のファイルを測る (exe は小さく本体は .pck/.mp4/.resS 側)。
                 string target = SpeedTest.ResolveReadTarget(sharePath, 5000);
-                if (!string.IsNullOrEmpty(target) && SpeedTest.ServerRead(target, 100L * 1024 * 1024, out mbsec, out bytes))
+                if (!string.IsNullOrEmpty(target) && SpeedTest.ServerRead(target, 100L * 1024 * 1024, SERVER_READ_CAP_MS, out mbsec, out bytes))
                 {
                     string sz = bytes >= 1048576 ? (bytes / 1048576) + "MB" : (Math.Max(1, bytes / 1024)) + "KB";
-                    SendSpeedtest("server", true, "約 " + Math.Round(mbsec, 1) + " MB/秒 (" + sz + " 読込)");
+                    SendSpeedtest("server", true, "約 " + Math.Round(mbsec, 1) + " MB/秒 (" + sz + " 読込)", runId);
                 }
                 else
-                    SendSpeedtest("server", false, string.IsNullOrEmpty(sharePath) ? "対象パス不明" : "測定不可");
+                    SendSpeedtest("server", false, string.IsNullOrEmpty(sharePath) ? "対象パス不明" : "測定不可", runId);
             }
             catch (Exception ex)
             {
                 Logger.Error("[speed] 計測中に例外", ex);
-                SendSpeedtest("internet", false, "測定不可");
-                SendSpeedtest("server", false, "測定不可");
+                SendSpeedtest("internet", false, "測定不可", runId);
+                SendSpeedtest("server", false, "測定不可", runId);
             }
             finally
             {
@@ -308,10 +332,14 @@ namespace TonePrism.LauncherAgent
             }
         }
 
-        private static void SendSpeedtest(string kind, bool ok, string text)
+        // server read の経過時間上限 (ms)。遅い共有でも有界時間で「読めた分」から速度を出し、
+        // Launcher 側の速度待ちタイムアウトに当たって「測定不可」化するのを防ぐ。
+        private const int SERVER_READ_CAP_MS = 10000;
+
+        private static void SendSpeedtest(string kind, bool ok, string text, int runId)
         {
             Send("{\"type\":\"speedtest\",\"kind\":\"" + kind + "\",\"ok\":" + (ok ? "true" : "false")
-                + ",\"text\":\"" + JsonEscape(text) + "\",\"at_unix_ms\":" + UnixMs() + "}");
+                + ",\"text\":\"" + JsonEscape(text) + "\",\"run\":" + runId + ",\"at_unix_ms\":" + UnixMs() + "}");
         }
 
         private static void SendLog(string level, string msg)
@@ -509,7 +537,9 @@ namespace TonePrism.LauncherAgent
         }
 
         // 共有サーバーの読み込み速度 (MB/秒)。FILE_FLAG_NO_BUFFERING でキャッシュを使わず実読み込みを測る。
-        public static bool ServerRead(string path, long cap, out double mbPerSec, out long bytes)
+        // capBytes (最大読込量) と capMs (経過時間上限) のどちらかに達したら打ち切り、読めた分から速度を出す。
+        // 時間上限により、遅い共有でも有界時間で完了し Launcher 側の速度待ちタイムアウトに当たらない。
+        public static bool ServerRead(string path, long capBytes, int capMs, out double mbPerSec, out long bytes)
         {
             mbPerSec = 0;
             bytes = 0;
@@ -523,7 +553,7 @@ namespace TonePrism.LauncherAgent
             long total = 0;
             try
             {
-                while (total < cap)
+                while (total < capBytes && sw.ElapsedMilliseconds < capMs)
                 {
                     uint read;
                     if (!ReadFile(h, buf, (uint)bufSize, out read, IntPtr.Zero)) break;

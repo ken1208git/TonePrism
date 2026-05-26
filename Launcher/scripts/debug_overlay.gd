@@ -49,8 +49,23 @@ func set_enabled(v: bool) -> void:
 		_refresh_slow()
 		_update_text()
 		_win.visible = true
+		_apply_clickthrough()
 	elif _win:
 		_win.visible = false
+
+
+## デバッグHUD窓を OS レベルでクリック透過にする。Godot の FLAG_MOUSE_PASSTHROUGH は同一アプリ内
+## (Godot の他窓) にしか効かず、外部ゲームプロセスの上ではクリックが吸われ得るため、WS_EX_TRANSPARENT を
+## Companion 経由で立ててクロスプロセスでも下のゲームへクリックを通す。表示の度に適用 (HWND は表示後に有効)。
+func _apply_clickthrough() -> void:
+	if _win == null:
+		return
+	var hwnd := DisplayServer.window_get_native_handle(DisplayServer.WINDOW_HANDLE, _win.get_window_id())
+	if hwnd == 0:
+		return
+	var agent := get_node_or_null("/root/LauncherAgent")
+	if agent and agent.has_method("set_clickthrough"):
+		agent.set_clickthrough(hwnd)
 
 
 func _process(delta: float) -> void:

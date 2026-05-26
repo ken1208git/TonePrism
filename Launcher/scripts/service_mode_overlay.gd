@@ -148,7 +148,8 @@ var _nw_running: bool = false
 var _nw_cancel: bool = false           # close / 画面離脱時に true。ワーカーが段階境界で見て早期終了する
 var _nw_speed_pending: int = 0         # 待っている速度結果の数 (internet + server で 2)。0 になったら run 解放
 var _nw_speed_timeout_left: float = 0.0  # 速度結果待ちの残り秒 (Companion 異常死等で結果が来ない保険)
-const NW_SPEED_TIMEOUT_SEC := 20.0     # 速度結果が揃わない場合に強制解放するまでの秒数
+var _nw_run_id: int = 0                # 速度計測の run 識別子。古い run の遅延結果を弾くため毎 run で増やす
+const NW_SPEED_TIMEOUT_SEC := 30.0     # 速度結果が揃わない場合に強制解放するまでの秒数 (内訳: ネット5s + 探索5s + 読込10s + 余裕)
 var _nw_run_btn: Button = null
 var _nw_rows: Dictionary = {}          # stage_id -> 結果 Label
 var _nw_db_host: String = ""           # 共有サーバーのホスト (DBパスから抽出、メインスレッドで取得)
@@ -959,7 +960,8 @@ func _nw_done() -> void:
 	if agent and agent.has_method("is_available") and agent.is_available():
 		_nw_set("inet_speed", "測定中…", C_TEXT)
 		_nw_set("server_speed", "測定中…", C_TEXT)
-		agent.request_speedtest(_nw_speed_file)
+		_nw_run_id += 1  # この run の識別子。これ以外の run_id の結果 (古い遅延結果) は無視する
+		agent.request_speedtest(_nw_speed_file, _nw_run_id)
 		_nw_speed_pending = 2  # internet + server の 2 結果を待つ
 		_nw_speed_timeout_left = NW_SPEED_TIMEOUT_SEC
 		if _nw_run_btn and is_instance_valid(_nw_run_btn):
@@ -981,7 +983,10 @@ func _nw_release_run() -> void:
 
 
 ## Companion からの速度計測結果。kind="internet"/"server" を対応する段に反映する。
-func _nw_on_speed(kind: String, ok: bool, text: String) -> void:
+func _nw_on_speed(kind: String, ok: bool, text: String, run_id: int) -> void:
+	# 現在の run の結果のみ受理する。古いプローブの遅延結果が新 run の行/pending を汚すのを防ぐ。
+	if run_id != _nw_run_id:
+		return
 	var sid := "inet_speed" if kind == "internet" else ("server_speed" if kind == "server" else "")
 	if sid == "":
 		return

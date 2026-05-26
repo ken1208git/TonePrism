@@ -230,6 +230,23 @@ namespace TonePrism.LauncherAgent
             }
         }
 
+        // 指定 HWND を OS レベルでクリック透過にする (WS_EX_LAYERED | WS_EX_TRANSPARENT)。
+        // Godot の FLAG_MOUSE_PASSTHROUGH は同一プロセス内の窓にしか効かないため、デバッグHUDが
+        // 外部ゲーム (別プロセス) の上にある時でもクリックを下のゲームへ通すために使う。
+        // WS_EX_TRANSPARENT はヒットテスト透過のみで描画には影響しない (透過描画用の WS_EX_LAYERED は
+        // Godot の per-pixel transparency 窓で既に立っている)。
+        public static bool SetClickThrough(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return false;
+            try
+            {
+                int ex = GetWindowLong(hwnd, GWL_EXSTYLE);
+                SetWindowLong(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED | WS_EX_TRANSPARENT);
+                return true;
+            }
+            catch { return false; }
+        }
+
         // ----- P/Invoke -----
         private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
 
@@ -247,9 +264,15 @@ namespace TonePrism.LauncherAgent
         [DllImport("user32.dll")] private static extern int GetWindowTextLength(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+        [DllImport("user32.dll", SetLastError = true)] private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+        [DllImport("user32.dll", SetLastError = true)] private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
 
         private const uint GW_OWNER = 4;
         private const int SW_SHOW = 5;
+        // クリック透過 (SetClickThrough) 用
+        private const int GWL_EXSTYLE = -20;
+        private const int WS_EX_LAYERED = 0x80000;
+        private const int WS_EX_TRANSPARENT = 0x20;
 
         // SetWindowPos フラグ (PlaceWindowCentered の移動用: サイズ/z-order/アクティブ化は変えない)
         private const uint SWP_NOSIZE = 0x0001;

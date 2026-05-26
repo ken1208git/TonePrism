@@ -15,7 +15,7 @@ extends Node
 ## Manager のログ閲覧「Launcher タブ」に出る (Manager 改修不要)。
 
 signal trigger_received(source: String)  ## "home" | "guide"
-signal speedtest_result(kind: String, ok: bool, text: String)  ## "internet" | "server" の速度計測結果
+signal speedtest_result(kind: String, ok: bool, text: String, run_id: int)  ## "internet" | "server" の速度計測結果 (run_id で要求と照合)
 
 enum WindowState { UNAVAILABLE, NOT_FOUND, NOT_VISIBLE, VISIBLE_BACKGROUND, VISIBLE_FOREGROUND }
 
@@ -135,7 +135,7 @@ func _handle_event(txt: String) -> void:
 		"log":
 			_forward_log(String(data.get("level", "info")), String(data.get("msg", "")))
 		"speedtest":
-			speedtest_result.emit(String(data.get("kind", "")), bool(data.get("ok", false)), String(data.get("text", "")))
+			speedtest_result.emit(String(data.get("kind", "")), bool(data.get("ok", false)), String(data.get("text", "")), int(data.get("run", -1)))
 
 
 func _forward_log(level: String, msg: String) -> void:
@@ -209,9 +209,16 @@ func focus_hwnd(hwnd: int) -> void:
 	_send("focus_hwnd %d" % hwnd)
 
 
+## 指定 HWND を OS レベルでクリック透過 (WS_EX_TRANSPARENT) にする。Godot の FLAG_MOUSE_PASSTHROUGH は
+## 同一アプリ内限定のため、デバッグHUDが外部ゲームの上にある時のクリック透過を補完する (#Codex)。
+func set_clickthrough(hwnd: int) -> void:
+	_send("clickthrough %d" % hwnd)
+
+
 ## 速度計測を要求する (結果は speedtest_result シグナルで返る)。share_path=共有上の計測対象ファイル。
-func request_speedtest(share_path: String) -> void:
-	_send("speedtest " + share_path)
+## run_id は結果を呼び出し側の現在の run と照合するための識別子 (遅延した古い結果の取り違え防止)。
+func request_speedtest(share_path: String, run_id: int) -> void:
+	_send("speedtest %d %s" % [run_id, share_path])
 
 
 func _send(cmd: String) -> void:
