@@ -100,6 +100,7 @@ func _build() -> void:
 
 	_label = Label.new()
 	_label.add_theme_color_override("font_color", Color(0.85, 1.0, 0.85))
+	_label.add_theme_font_override("font", preload("res://fonts/NotoSansJP-Regular.ttf"))  # 他画面と同じ日本語フォント
 	_label.add_theme_font_size_override("font_size", 14)
 	panel.add_child(_label)
 

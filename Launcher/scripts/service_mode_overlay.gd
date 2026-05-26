@@ -8,6 +8,11 @@ extends CanvasLayer
 ##
 ## 表示制御・トリガ・60 秒自動復帰は autoload ServiceMode。UI は項目数が多く動的なため code-built。
 
+# ランチャー他画面と同じ日本語フォント (Noto Sans JP)。指定しないと Godot 既定フォントになり
+# サービスモードだけ見た目が浮くため、UI 全体に既定フォントとして適用する。
+const FONT_REGULAR := preload("res://fonts/NotoSansJP-Regular.ttf")
+const FONT_BOLD := preload("res://fonts/NotoSansJP-Bold.ttf")
+
 const C_BG := Color(0.05, 0.05, 0.07, 1.0)  # 完全不透明 (裏のシーンは pause + 不可視で凍結)
 const C_PANEL := Color(0.10, 0.10, 0.13, 1.0)
 const C_TEXT := Color(0.90, 0.90, 0.90)
@@ -48,6 +53,7 @@ const SCREEN_SEQ := [
 ]
 
 var _root: Control = null
+var _theme: Theme = null             # Noto Sans JP を既定フォントにする UI 全体のテーマ
 var _focus_sb: StyleBoxFlat = null   # フォーカス枠 (ボタン内側に描く=ScrollContainer のクリップで見切れない)
 var _focus_off_sb: StyleBox = null   # マウス操作時の透明 focus (枠を出さない)
 var _btn_sb: StyleBoxFlat = null     # 詳細ペインのボタン通常スタイル (薄く色を付ける)
@@ -189,9 +195,14 @@ func _build_ui() -> void:
 	_btn_hover_sb.content_margin_top = 6
 	_btn_hover_sb.content_margin_bottom = 6
 
+	# UI 全体の既定フォントを Noto Sans JP に。_root に theme を付けると子の Label/Button 等へ伝播する。
+	_theme = Theme.new()
+	_theme.default_font = FONT_REGULAR
+
 	_root = Control.new()
 	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_root.mouse_filter = Control.MOUSE_FILTER_STOP
+	_root.theme = _theme
 	add_child(_root)
 
 	var bg := ColorRect.new()
@@ -215,6 +226,7 @@ func _build_ui() -> void:
 	var header := Label.new()
 	header.text = "サービスモード  —  Launcher %s" % Version.get_version_string()
 	header.add_theme_color_override("font_color", C_ACCENT)
+	header.add_theme_font_override("font", FONT_BOLD)
 	header.add_theme_font_size_override("font_size", 26)
 	col.add_child(header)
 
@@ -271,6 +283,7 @@ func _build_ui() -> void:
 
 	_detail_title = Label.new()
 	_detail_title.add_theme_color_override("font_color", C_ACCENT)
+	_detail_title.add_theme_font_override("font", FONT_BOLD)
 	_detail_title.add_theme_font_size_override("font_size", 22)
 	detail_box.add_child(_detail_title)
 	detail_box.add_child(HSeparator.new())
@@ -723,6 +736,7 @@ func _ensure_test_canvas() -> void:
 	_test_canvas = Control.new()
 	_test_canvas.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_test_canvas.mouse_filter = Control.MOUSE_FILTER_STOP
+	_test_canvas.theme = _theme  # draw_string のキャプションも Noto Sans JP で描く
 	_test_canvas.draw.connect(_draw_test)
 	add_child(_test_canvas)
 
