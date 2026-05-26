@@ -289,6 +289,7 @@ func _build_detail(id: String) -> void:
 	match id:
 		"system_info": _build_system_info()
 		"games_test": _build_games_test()
+		"db_check": _build_db_check()
 		"screen_test": _build_screen_test()
 		"fullscreen": _build_fullscreen()
 		"monitor": _build_monitor()
@@ -373,6 +374,66 @@ func _render_games_exists_check() -> void:
 		list.set_item_custom_fg_color(idx, C_OK if ok else C_DANGER)
 		list.set_item_selectable(idx, true)
 	_detail_content.add_child(list)
+
+
+## データベース整合性チェック: ファイル存在→接続→バージョン→テーブル存在/件数→読み取りテスト。
+## Launcher は read-only (SPEC §6.5) のため書き込みテストはしない。
+func _build_db_check() -> void:
+	var db_path := PathManager.get_database_path()
+	if not FileAccess.file_exists(db_path):
+		_add_text("✗ DB ファイルが見つかりません: %s" % db_path, C_DANGER)
+		_add_text("Manager での初期化が必要です。", C_MUTED)
+		return
+	_add_text("✓ DB ファイル: %s" % db_path, C_OK)
+
+	var dbm := DatabaseManager.new()
+	if not dbm.open():
+		_add_text("✗ DB に接続できませんでした。", C_DANGER)
+		return
+	_add_text("✓ DB 接続 OK（読み取りテスト成功）", C_OK)
+
+	# バージョン
+	dbm.db.query("PRAGMA user_version")
+	var vres := dbm.db.get_query_result()
+	var ver := 0
+	if vres and vres.size() > 0:
+		ver = int(vres[0].get("user_version", 0))
+	_add_text("DB バージョン (user_version): %d  /  Launcher 期待: %d" % [ver, DatabaseManager.CURRENT_DB_VERSION],
+		C_OK if ver == DatabaseManager.CURRENT_DB_VERSION else C_MUTED)
+	if ver > DatabaseManager.CURRENT_DB_VERSION:
+		_add_text("  → DB が Launcher より新しい (Manager が先行更新。通常は無害)", C_MUTED)
+	elif ver != 0 and ver < DatabaseManager.CURRENT_DB_VERSION:
+		_add_text("  → DB が古い。Manager で更新してください", C_DANGER)
+
+	# テーブル一覧
+	dbm.db.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+	var trows := dbm.db.get_query_result()
+	var names: Array[String] = []
+	if trows:
+		for r in trows:
+			names.append(str(r.get("name", "")))
+
+	# 主要テーブルの存在
+	for req in ["games", "developers", "store_sections"]:
+		_add_text(("✓ テーブル %s あり" % req) if req in names else ("✗ 必須テーブル %s が見つかりません" % req),
+			C_OK if req in names else C_DANGER)
+
+	_add_text("テーブル別レコード数:", C_TEXT)
+	var list := ItemList.new()
+	list.focus_mode = Control.FOCUS_ALL
+	list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	list.custom_minimum_size = Vector2(0, 280)
+	for n in names:
+		dbm.db.query('SELECT COUNT(*) AS c FROM "%s"' % n)
+		var cres := dbm.db.get_query_result()
+		var cnt := -1
+		if cres and cres.size() > 0:
+			cnt = int(cres[0].get("c", 0))
+		list.add_item("%s: %s" % [n, "%d 件" % cnt if cnt >= 0 else "読み取り失敗"])
+	_detail_content.add_child(list)
+	dbm.close()
+
+	_add_text("※ 書き込みテストは行いません (Launcher は read-only、書き込みは Manager 専用 / SPEC §6.5)。", C_MUTED)
 
 
 func _build_screen_test() -> void:
