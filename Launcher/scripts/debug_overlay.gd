@@ -20,10 +20,18 @@ var _db_ok: bool = false
 var _db_path: String = ""
 
 
+var _overlay_mgr: Node = null
+
+
 func _ready() -> void:
 	# サービスモード表示中 (tree.paused) でも更新し続ける。
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_build()
+	# 中断メニューも always_on_top の別ウィンドウなので、開くと HUD の上に被さることがある。
+	# 開いた直後に HUD を最前面へ上げ直して隠れないようにする。
+	_overlay_mgr = get_node_or_null("/root/OverlayManager")
+	if _overlay_mgr and _overlay_mgr.has_signal("opened"):
+		_overlay_mgr.opened.connect(_on_overlay_menu_opened)
 
 
 func is_enabled() -> bool:
@@ -54,6 +62,9 @@ func _process(delta: float) -> void:
 		_slow_accum = 0.0
 		_refresh_slow()
 		_place_window()  # ゲームが別モニタへ移った場合などに追従
+		# 中断メニュー表示中は被されやすいので、念のため毎秒最前面へ上げ直す (安全網)。
+		if _overlay_mgr and _overlay_mgr.has_method("is_open") and _overlay_mgr.is_open():
+			_reassert_top()
 	if _fast_accum >= REFRESH_FAST:
 		_fast_accum = 0.0
 		_update_text()
@@ -120,6 +131,26 @@ func _resolve_screen() -> int:
 		if center.x >= pos.x and center.x < pos.x + sz.x and center.y >= pos.y and center.y < pos.y + sz.y:
 			return i
 	return fallback
+
+
+## 中断メニューが開いた直後の処理。メニューが前面を取り切るのを待ってから、数回 HUD を上げ直して
+## メニューの裏に隠れるのを防ぐ (1 回だけだと取り合いに負けて「たまに隠れる」ため複数回リトライ)。
+func _on_overlay_menu_opened() -> void:
+	if not _enabled:
+		return
+	for i in range(4):
+		await get_tree().create_timer(0.12).timeout
+		if _enabled and _win and _win.visible:
+			_reassert_top()
+
+
+## HUD ウィンドウを最前面 (always_on_top band の先頭) へ上げ直す。always_on_top を一度 off→on すると
+## Windows では再び最前面に来るため、後から出た別の always_on_top 窓 (中断メニュー) の上へ戻せる。
+func _reassert_top() -> void:
+	if _win == null:
+		return
+	_win.always_on_top = false
+	_win.always_on_top = true
 
 
 ## 重めの項目 (DB ファイルの存在確認など) を間隔を空けて更新する。
