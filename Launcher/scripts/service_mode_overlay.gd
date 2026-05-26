@@ -697,16 +697,28 @@ func _describe_input(event: InputEvent) -> String:
 ## 無変換/変換/半角全角/かな 等の日本語配列キーは Godot に論理名が無く KEY_UNKNOWN になるため、
 ## 物理キー名や生コードを出して「検知はできている」ことが分かるようにする。
 func _key_label(event: InputEventKey) -> String:
-	var name := OS.get_keycode_string(event.keycode) if event.keycode != 0 else ""
+	var name := _kc_name(event.keycode)
 	if name == "":
-		var pname := OS.get_keycode_string(event.physical_keycode) if event.physical_keycode != 0 else ""
+		var pname := _kc_name(event.physical_keycode)
 		if pname != "":
 			name = pname + "（物理）"
+	if name == "":
+		var lname := _kc_name(event.key_label)
+		if lname != "":
+			name = lname + "（ラベル）"
 	if name == "" and event.unicode != 0:
 		name = "「%s」" % char(event.unicode)
 	if name == "":
-		name = "不明 (keycode=%d / 物理=%d)" % [event.keycode, event.physical_keycode]
+		name = "名称なしキー (物理コード %d)" % event.physical_keycode
 	return name
+
+
+## キーコードの表示名。0 / KEY_UNKNOWN / "Unknown" は名前なし扱いで "" を返す。
+func _kc_name(code: int) -> String:
+	if code == 0 or code == KEY_UNKNOWN:
+		return ""
+	var s := OS.get_keycode_string(code)
+	return "" if s == "Unknown" else s
 
 
 ## パッドのボタン番号を分かりやすい名前にする (Xbox 表記基準)。
