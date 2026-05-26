@@ -29,7 +29,7 @@ const ITEMS := [
 	{"id": "input",        "label": "1. 入力チェック"},
 	{"id": "audio",        "label": "2. 音声チェック"},
 	{"id": "screen_test",  "label": "3. 画面表示テスト"},
-	{"id": "games_test",   "label": "4. ゲーム動作確認"},
+	{"id": "games_test",   "label": "4. ゲーム動作テスト"},
 	{"id": "network",      "label": "5. ネットワーク接続テスト"},
 	{"id": "db_check",     "label": "6. データベース整合性チェック"},
 	{"id": "log_view",     "label": "7. 簡易ログ確認"},
@@ -91,7 +91,7 @@ var _test_mode: String = "solid"     # 現在のテスト描画モード ("solid
 var _test_color: Color = Color.BLACK # solid モードの表示色
 var _test_active: bool = false
 var _seq_index: int = 0              # 画面表示テストで今表示しているパターンの位置
-var _games_test_mode: String = ""    # 「ゲーム動作確認」の選択中モード ("" / exists / auto / play)
+var _games_test_mode: String = ""    # 「ゲーム動作テスト」の選択中モード ("" / exists / auto / play)
 var _games_test_desc: Label = null   # 確認方法の選択画面で、フォーカス/ホバー中の選択肢の詳細説明を出すラベル
 var _games_focus_idx: int = -1       # キーボード/パッドでフォーカス中の選択肢 (-1=なし)
 var _games_hover_idx: int = -1       # マウスでホバー中の選択肢 (-1=なし)
@@ -111,7 +111,7 @@ var _lt_cur: int = -1                # 現在テスト中のゲーム index
 var _lt_phase: String = ""           # "" / "wait" / "kill"
 var _lt_pid: int = -1                # 現在テスト中の cmd プロセス PID
 var _lt_phase_ms: int = 0            # 現フェーズ開始時刻
-# 試遊確認 (4③): チェックしたゲームを 1 本ずつ自動で起動→試遊→復帰し、戻るたびに 〇× を記録して次へ。
+# 試遊テスト (4③): チェックしたゲームを 1 本ずつ自動で起動→試遊→復帰し、戻るたびに 〇× を記録して次へ。
 var _pt_games: Array = []            # 登録ゲーム (GameInfo) 一覧
 var _pt_checks: Array[CheckBox] = [] # 各ゲームのチェックボックス
 var _pt_status: Array[Label] = []    # 各ゲームの結果ラベル
@@ -263,7 +263,7 @@ func _input(event: InputEvent) -> void:
 		if event.is_action_pressed("ui_cancel"):
 			get_viewport().set_input_as_handled()
 		return
-	# B / Esc: 詳細内にサブ画面 (ゲーム動作確認のモード表示等) があればまずそこから戻る。
+	# B / Esc: 詳細内にサブ画面 (ゲーム動作テストのモード表示等) があればまずそこから戻る。
 	# 無ければ、詳細ペインなら左リストへ戻る / 左リストならサービスモード終了。
 	if event.is_action_pressed("ui_cancel"):
 		get_viewport().set_input_as_handled()
@@ -536,7 +536,7 @@ func _select(index: int) -> void:
 	if not visible or index == _selected_index:
 		return
 	_selected_index = index
-	_games_test_mode = ""  # 項目を切り替えたらゲーム動作確認のモード選択もリセット
+	_games_test_mode = ""  # 項目を切り替えたらゲーム動作テストのモード選択もリセット
 	_detail_title.text = ITEMS[index]["label"]
 	_build_detail(ITEMS[index]["id"])
 
@@ -559,7 +559,7 @@ func _enter_detail() -> bool:
 
 
 ## 詳細ペイン内のサブ画面から一段戻れるなら戻る (詳細ペインからは出ない)。戻したら true。
-## 現状「ゲーム動作確認」のモード表示中のみ: 確認方法の選択へ戻る。
+## 現状「ゲーム動作テスト」のモード表示中のみ: 確認方法の選択へ戻る。
 func _try_detail_subback() -> bool:
 	if _selected_index >= 0 and _selected_index < ITEMS.size() \
 			and ITEMS[_selected_index]["id"] == "games_test" and _games_test_mode != "":
@@ -1154,7 +1154,7 @@ func _refresh_sysinfo() -> void:
 		list.set_item_text(_sys_idx_uptime, "稼働時間: " + _uptime_text())
 
 
-## ゲーム動作確認。まず確認方法を選ぶ画面を出し、選ぶと中身全体がそのモード画面に切り替わる。
+## ゲーム動作テスト。まず確認方法を選ぶ画面を出し、選ぶと中身全体がそのモード画面に切り替わる。
 ## モード画面で ← / B / Esc を押すと確認方法の選択へ戻る (詳細ペインからは出ない)。
 func _build_games_test() -> void:
 	if _games_test_mode == "":
@@ -1170,7 +1170,7 @@ func _build_games_test() -> void:
 			"play": _build_games_playtest()
 
 
-## ゲーム動作確認の確認方法 選択画面 (3 段階)。3 択の下に、今フォーカス (キーボード) または
+## ゲーム動作テストの確認方法 選択画面 (3 段階)。3 択の下に、今フォーカス (キーボード) または
 ## ホバー (マウス) している選択肢の詳細説明をライブ表示する。どれも選んでいない時は何も出さない。
 func _build_games_test_menu() -> void:
 	_add_text("ゲームの動作を 3 段階で確認できます。確認方法を選んでください。", C_TEXT)
@@ -1180,7 +1180,7 @@ func _build_games_test_menu() -> void:
 		func(): _games_test_mode = "exists"; _build_detail("games_test"); _refocus_detail())
 	var b2 := _add_button("② 起動テスト（自動で起動→終了し、起動可否だけ確認）",
 		func(): _games_test_mode = "auto"; _build_detail("games_test"); _refocus_detail())
-	var b3 := _add_button("③ 試遊確認（起動して実際に遊ぶ・終了は手動）",
+	var b3 := _add_button("③ 試遊テスト（起動して実際に遊ぶ・終了は手動）",
 		func(): _games_test_mode = "play"; _build_detail("games_test"); _refocus_detail())
 	_connect_games_method(b1, 0)
 	_connect_games_method(b2, 1)
@@ -1539,9 +1539,9 @@ func _lt_after_kill() -> void:
 	_lt_begin_next()
 
 
-# ---------------- 試遊確認 (4③) ----------------
+# ---------------- 試遊テスト (4③) ----------------
 
-## モード③: 試遊確認。チェックしたゲームを 1 本ずつ自動で起動→試遊→復帰し、戻るたびに 〇× を記録して次へ。
+## モード③: 試遊テスト。チェックしたゲームを 1 本ずつ自動で起動→試遊→復帰し、戻るたびに 〇× を記録して次へ。
 func _build_games_playtest() -> void:
 	_pt_reset_state()
 	var db := DatabaseManager.new()
@@ -2244,7 +2244,7 @@ func _set_using_mouse(v: bool) -> void:
 		return
 	_using_mouse = v
 	_apply_focus_style()
-	# 入力が切り替わったら、ゲーム動作確認の説明も「今表示されている方の指標」で出し直す
+	# 入力が切り替わったら、ゲーム動作テストの説明も「今表示されている方の指標」で出し直す
 	# (キーボード時=フォーカス / マウス時=ホバー)。
 	_update_games_test_desc()
 

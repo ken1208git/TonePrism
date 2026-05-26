@@ -26,7 +26,7 @@ const _REMEDY := {
 	ErrorCode.DATABASE_QUERY_FAILED: "DB 破損の可能性。Manager でバックアップから復元を検討してください。",
 	ErrorCode.DATABASE_DATA_INVALID: "Manager の「ゲーム」タブでデータを確認・修正してください。",
 	ErrorCode.DATABASE_NO_GAMES_REGISTERED: "Manager の「ゲーム」タブからゲームを追加してください。",
-	ErrorCode.GAME_EXECUTION_FAILED: "サービスモード(Ctrl+Alt+F12)の「ゲーム動作確認」で exe を一括チェックできます。",
+	ErrorCode.GAME_EXECUTION_FAILED: "サービスモード(Ctrl+Alt+F12)の「ゲーム動作テスト」で exe を一括チェックできます。",
 	ErrorCode.GAME_EXECUTABLE_NOT_FOUND: "Manager の「ゲーム」編集で実行ファイルのパスを確認してください。共有フォルダ接続も確認。",
 	ErrorCode.GAME_PATH_INVALID: "Manager の「ゲーム」編集で実行ファイルのパスを設定し直してください。",
 	ErrorCode.GAME_PERMISSION_DENIED: "ゲーム exe の実行権限/ブロック解除と、共有フォルダのアクセス権を確認してください。",
