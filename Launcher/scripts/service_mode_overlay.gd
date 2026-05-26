@@ -66,7 +66,7 @@ const NW_STAGES := [
 	["server_speed", "7. 共有サーバー読み込み速度"],
 	["monitor",      "8. Monitor接続"],
 ]
-const NW_SPEED_URL := "https://speed.cloudflare.com/__down?bytes=5000000"  # 約5MB
+const NW_SPEED_URL := "https://speed.cloudflare.com/__down?bytes=50000000"  # 約50MB (小さいとスロースタート/準備時間で過小評価されるため大きめ)
 const NW_READ_CAP := 52428800  # 共有読み込み速度測定で読む上限 (50MB)
 
 var _root: Control = null
@@ -166,7 +166,7 @@ func _ready() -> void:
 	Input.joy_connection_changed.connect(_on_joy_conn_changed)
 	# インターネット速度測定用 (非同期DL)。
 	_nw_http = HTTPRequest.new()
-	_nw_http.timeout = 8.0
+	_nw_http.timeout = 25.0  # 50MB DL を遅い回線でも測れるよう長めに
 	add_child(_nw_http)
 	_nw_http.request_completed.connect(_nw_on_http)
 
@@ -925,7 +925,7 @@ func _nw_on_http(result: int, code: int, _headers: PackedStringArray, body: Pack
 	if result == HTTPRequest.RESULT_SUCCESS and code == 200 and body.size() > 0:
 		var ms := maxi(1, Time.get_ticks_msec() - _nw_http_t0)
 		var mbps := (body.size() * 8.0 / 1000000.0) / (ms / 1000.0)
-		_nw_set("inet_speed", "%.1f Mbps (%.1fMB DL)" % [mbps, body.size() / 1048576.0], C_OK)
+		_nw_set("inet_speed", "約 %.0f Mbps (目安・%.0fMB DL)" % [mbps, body.size() / 1048576.0], C_OK)
 	else:
 		_nw_set("inet_speed", "測定不可", C_MUTED)
 	_nw_finish()
