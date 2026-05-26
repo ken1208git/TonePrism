@@ -301,6 +301,7 @@ func _build_detail(id: String) -> void:
 		"restart": _build_restart()
 		"exit": _build_exit()
 		_: _build_stub()
+	_constrain_detail_focus()
 
 
 func _build_system_info() -> void:
@@ -836,3 +837,18 @@ func _first_focusable(node: Node) -> Control:
 		if c is Control and (c as Control).focus_mode != Control.FOCUS_NONE:
 			return c
 	return null
+
+
+## 詳細ペイン内の上下フォーカス移動を詰める。先頭の操作項目で↑、末尾で↓を押しても
+## 左の項目一覧 (外側) へフォーカスが逃げないよう、上下の neighbor を自分自身に向ける
+## (Godot の自動 neighbor が幾何的に左リストを拾って選択が変わるのを防ぐ)。
+## 詳細から一覧へ戻るのは ← / B / Esc に一本化する。
+func _constrain_detail_focus() -> void:
+	var focusables: Array[Control] = []
+	for c in _detail_content.get_children():
+		if c is Control and (c as Control).focus_mode != Control.FOCUS_NONE:
+			focusables.append(c)
+	if focusables.is_empty():
+		return
+	focusables[0].focus_neighbor_top = focusables[0].get_path()
+	focusables[-1].focus_neighbor_bottom = focusables[-1].get_path()
