@@ -665,31 +665,48 @@ func _draw_test_caption(size: Vector2) -> void:
 		HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
 
 
-## グリッド: 黒地に 64px 間隔の格子線 + 中央十字 + 四隅対角線 + セーフエリア枠 (90% / 80%)。
-## 解像度・拡大率の確認 (線が均等か) と、UI の端の見切れ確認 (枠内に収まっているか) を兼ねる。
+## ジオメトリ/クロスハッチ: 放送のモニタ調整パターン風。クロスハッチ (細密+粗) + 四隅対角線 +
+## 中央&四隅の真円 (画素アスペクト/歪みの確認: 真円が楕円に見えたら縦横比がおかしい) + 中央十字 +
+## セーフエリア枠 (90% / 80%)。解像度・拡大率・歪み・端の見切れをまとめて確認する。
 func _draw_test_grid(size: Vector2) -> void:
-	_test_canvas.draw_rect(Rect2(Vector2.ZERO, size), Color.BLACK)
-	var minor := Color(0.30, 0.30, 0.30)
-	var step := 64.0
-	var x := step
-	while x < size.x:
-		_test_canvas.draw_line(Vector2(x, 0), Vector2(x, size.y), minor, 1.0)
-		x += step
-	var y := step
-	while y < size.y:
-		_test_canvas.draw_line(Vector2(0, y), Vector2(size.x, y), minor, 1.0)
-		y += step
-	# 四隅対角線 (中心ずれの確認)
-	var diag := Color(0.22, 0.22, 0.22)
-	_test_canvas.draw_line(Vector2.ZERO, size, diag, 1.0)
-	_test_canvas.draw_line(Vector2(size.x, 0), Vector2(0, size.y), diag, 1.0)
-	# 中央十字
+	var cv := _test_canvas
+	cv.draw_rect(Rect2(Vector2.ZERO, size), Color.BLACK)
 	var center := size * 0.5
-	_test_canvas.draw_line(Vector2(center.x, 0), Vector2(center.x, size.y), C_ACCENT, 2.0)
-	_test_canvas.draw_line(Vector2(0, center.y), Vector2(size.x, center.y), C_ACCENT, 2.0)
+	# クロスハッチ: 細密 (32px) を淡く、粗 (128px) を濃く 2 段で描く
+	_draw_grid_lines(size, 32.0, Color(0.16, 0.16, 0.16))
+	_draw_grid_lines(size, 128.0, Color(0.42, 0.42, 0.42))
+	# 四隅対角線 (中心ずれ・台形歪みの確認)
+	var diag := Color(0.25, 0.25, 0.25)
+	cv.draw_line(Vector2.ZERO, size, diag, 1.0)
+	cv.draw_line(Vector2(size.x, 0), Vector2(0, size.y), diag, 1.0)
+	# 真円群 (画素アスペクト・幾何歪みの確認)。半径は短辺基準で等倍 → 正しければ真円に見える
+	var unit := minf(size.x, size.y)
+	var circ := Color(0.55, 0.55, 0.55)
+	cv.draw_arc(center, unit * 0.46, 0, TAU, 128, circ, 1.5)
+	cv.draw_arc(center, unit * 0.30, 0, TAU, 96, circ, 1.5)
+	var r_corner := unit * 0.12
+	for cpt in [Vector2(r_corner, r_corner), Vector2(size.x - r_corner, r_corner),
+			Vector2(r_corner, size.y - r_corner), Vector2(size.x - r_corner, size.y - r_corner)]:
+		cv.draw_arc(cpt, r_corner, 0, TAU, 48, circ, 1.5)
+	# 中央十字 + 中央点
+	cv.draw_line(Vector2(center.x, 0), Vector2(center.x, size.y), C_ACCENT, 2.0)
+	cv.draw_line(Vector2(0, center.y), Vector2(size.x, center.y), C_ACCENT, 2.0)
+	cv.draw_circle(center, 4.0, C_ACCENT)
 	# セーフエリア枠
 	_draw_safe_frame(size, 0.90, Color(0.95, 0.85, 0.30), "90%")
 	_draw_safe_frame(size, 0.80, Color(0.95, 0.55, 0.25), "80%")
+
+
+## 指定間隔の縦横グリッド線を描く。
+func _draw_grid_lines(size: Vector2, step: float, color: Color) -> void:
+	var x := step
+	while x < size.x:
+		_test_canvas.draw_line(Vector2(x, 0), Vector2(x, size.y), color, 1.0)
+		x += step
+	var y := step
+	while y < size.y:
+		_test_canvas.draw_line(Vector2(0, y), Vector2(size.x, y), color, 1.0)
+		y += step
 
 
 func _draw_safe_frame(size: Vector2, ratio: float, color: Color, label: String) -> void:
@@ -701,9 +718,10 @@ func _draw_safe_frame(size: Vector2, ratio: float, color: Color, label: String) 
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 18, color)
 
 
-## カラーバー: 放送規格 (SMPTE RP 219 / ARIB) の HD カラーバー。色再現・色順・黒レベルの確認用。
-## 4 段構成: 上=75% カラーバー + 両端 40% グレー袖 (7/12) / リバース (1/12) / ランプ (1/12) /
-## PLUGE = 黒レベル調整 (3/12)。横幅 a=画面幅、中央帯 x=3/4a を 7 列 (各 c=x/7) に分ける。
+## カラーバー: 放送規格 (SMPTE RP 219 / ARIB) ベースの HD カラーバー。色再現・色順の確認用。
+## 3 段構成: 上=75% カラーバー + 両端 40% グレー袖 (10/12) / リバース (1/12) / 0-100% ランプ (1/12)。
+## 横幅 a=画面幅、中央帯 x=3/4a を 7 列 (各 c=x/7) に分ける。黒レベル (PLUGE) 段は普通のモニタでは
+## 判別できず実用性が無いため省いている。
 func _draw_test_colorbar(size: Vector2) -> void:
 	var cv := _test_canvas
 	var a := size.x
@@ -711,13 +729,11 @@ func _draw_test_colorbar(size: Vector2) -> void:
 	var side := a / 8.0          # 両端の袖幅 (a/8)
 	var x := a * 3.0 / 4.0       # 中央のカラー帯領域 (3/4 a)
 	var c := x / 7.0             # 1 列の幅 (x/7)
-	var r1 := y * 7.0 / 12.0     # 上段 (カラーバー) 高さ
 	var r2 := y / 12.0           # リバース段
 	var r3 := y / 12.0           # ランプ段
+	var r1 := y - r2 - r3        # 上段 (カラーバー) 高さ (10/12)
 	var y2 := r1
 	var y3 := r1 + r2
-	var y4 := r1 + r2 + r3
-	var r4 := y - y4             # PLUGE 段 (3/12)
 	var W75 := Color(0.75, 0.75, 0.75)
 	var W40 := Color(0.40, 0.40, 0.40)
 	cv.draw_rect(Rect2(0, 0, a, y), Color.BLACK)
@@ -744,19 +760,6 @@ func _draw_test_colorbar(size: Vector2) -> void:
 		var v := float(i) / (steps - 1)
 		cv.draw_rect(Rect2(side + sw * i, y3, sw + 1.0, r3), Color(v, v, v))
 	cv.draw_rect(Rect2(side + x, y3, side, r3), Color(1, 0, 0))
-
-	# PLUGE 段: 両袖 15%W。中央は Bk(1.5c) | 100%W(2c) | 黒地 + PLUGE(-2/0/+2/0/+4%) | Bk(1c)
-	cv.draw_rect(Rect2(0, y4, side, r4), Color(0.15, 0.15, 0.15))
-	cv.draw_rect(Rect2(side, y4, c * 1.5, r4), Color.BLACK)
-	cv.draw_rect(Rect2(side + c * 1.5, y4, c * 2.0, r4), Color.WHITE)
-	var p := c / 3.0             # PLUGE 各バー幅 (x/21)
-	var px := side + c * 3.5 + c * (5.0 / 6.0)  # 黒地のフィラーぶん右へ寄せる
-	var pluge := [Color.BLACK, Color.BLACK, Color(0.02, 0.02, 0.02),
-		Color.BLACK, Color(0.04, 0.04, 0.04)]
-	for pc in pluge:
-		cv.draw_rect(Rect2(px, y4, p, r4), pc)
-		px += p
-	cv.draw_rect(Rect2(side + x, y4, side, r4), Color(0.15, 0.15, 0.15))
 
 
 ## グラデーション: 黒→白の横方向グラデ。階調飛び (バンディング) や縞模様の確認用。
