@@ -86,6 +86,7 @@ var _lt_checks: Array[CheckBox] = [] # 各ゲームのチェックボックス
 var _lt_status: Array[Label] = []    # 各ゲームの結果ラベル
 var _lt_start_btn: Button = null     # 「テスト開始」ボタン
 var _lt_stop_btn: Button = null      # 「テストを中止」ボタン
+var _lt_scroll: ScrollContainer = null  # ゲーム一覧のスクロール枠 (テスト中の行を自動で見せる)
 var _lt_running: bool = false        # テスト実行中
 var _lt_queue: Array[int] = []       # 残りテスト対象の index キュー
 var _lt_cur: int = -1                # 現在テスト中のゲーム index
@@ -694,10 +695,17 @@ func _build_games_launch_test() -> void:
 	_lt_stop_btn = _add_button("テストを中止", _lt_abort)
 	_lt_stop_btn.disabled = true  # 実行中のみ有効
 
+	# システム情報と同様、高さ固定のスクロール枠の中に一覧を陳列する (枠内だけがスクロールする)。
+	_lt_scroll = ScrollContainer.new()
+	_lt_scroll.follow_focus = true
+	_lt_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_lt_scroll.custom_minimum_size = Vector2(0, 420)
+	_lt_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_detail_content.add_child(_lt_scroll)
 	var list_box := VBoxContainer.new()
 	list_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	list_box.add_theme_constant_override("separation", 2)
-	_detail_content.add_child(list_box)
+	_lt_scroll.add_child(list_box)
 	_lt_checks.clear()
 	_lt_status.clear()
 	for g in _lt_games:
@@ -757,6 +765,9 @@ func _lt_begin_next() -> void:
 		_lt_finish()
 		return
 	_lt_cur = _lt_queue.pop_front()
+	# テスト中のゲーム行が常に見えるよう自動スクロール。
+	if _lt_scroll and is_instance_valid(_lt_scroll) and _lt_cur < _lt_checks.size():
+		_lt_scroll.ensure_control_visible(_lt_checks[_lt_cur])
 	var g = _lt_games[_lt_cur]
 	var exe := GamePathResolver.find_executable(g)
 	if exe.is_empty():
@@ -834,6 +845,7 @@ func _lt_reset_state() -> void:
 	_lt_status = []
 	_lt_start_btn = null
 	_lt_stop_btn = null
+	_lt_scroll = null
 
 
 ## 進行中の起動テストを止める (画面を離れる / 閉じる時)。起動中のゲームは終了させ、watch も解除する。
