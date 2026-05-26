@@ -563,12 +563,12 @@ func _build_exit() -> void:
 	if _exit_armed:
 		_add_text("本当に終了しますか？", C_DANGER)
 		var yes := _add_button("終了する", func(): get_tree().quit())
-		yes.add_theme_color_override("font_color", C_DANGER)
+		_set_button_font_color(yes, C_DANGER)
 		_add_button("キャンセル", func(): _exit_armed = false; _build_detail("exit"); _refocus_detail())
 		return
 	_add_text("ランチャーを終了します。Alt+F4 / × ボタン封印時はここが唯一の終了手段です。")
 	var btn := _add_button("ランチャーを終了", func(): _exit_armed = true; _build_detail("exit"); _refocus_detail())
-	btn.add_theme_color_override("font_color", C_DANGER)
+	_set_button_font_color(btn, C_DANGER)
 
 
 func _build_stub() -> void:
@@ -818,6 +818,14 @@ func _add_button(text: String, on_pressed: Callable) -> Button:
 	_detail_content.add_child(b)
 	_apply_focus_style_to(b)  # ツリー追加後に呼ぶ (get_theme_stylebox がテーマを正しく解決するため)
 	return b
+
+
+## ボタンの文字色を全状態 (通常/フォーカス/ホバー/押下) に適用する。font_color だけ上書きすると
+## フォーカス時に既定の font_focus_color (白系) が使われて色が変わってしまうため、全状態を揃える。
+func _set_button_font_color(b: Button, color: Color) -> void:
+	for state in ["font_color", "font_focus_color", "font_hover_color",
+			"font_pressed_color", "font_hover_pressed_color"]:
+		b.add_theme_color_override(state, color)
 
 
 ## 詳細を作り直した後、詳細ペインに居るなら先頭の操作可能 control へフォーカスを戻す。
