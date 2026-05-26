@@ -91,7 +91,6 @@ var _test_mode: String = "solid"     # 現在のテスト描画モード ("solid
 var _test_color: Color = Color.BLACK # solid モードの表示色
 var _test_active: bool = false
 var _seq_index: int = 0              # 画面表示テストで今表示しているパターンの位置
-var _exit_armed: bool = false
 var _games_test_mode: String = ""    # 「ゲーム動作確認」の選択中モード ("" / exists / auto / play)
 var _games_test_desc: Label = null   # 確認方法の選択画面で、フォーカス/ホバー中の選択肢の詳細説明を出すラベル
 var _games_focus_idx: int = -1       # キーボード/パッドでフォーカス中の選択肢 (-1=なし)
@@ -175,7 +174,6 @@ func _notification(what: int) -> void:
 func open_overlay() -> void:
 	visible = true
 	_in_detail = false
-	_exit_armed = false
 	_pt_await = false
 	_modal_open = false
 	if _modal_layer:
@@ -532,7 +530,6 @@ func _select(index: int) -> void:
 	if not visible or index == _selected_index:
 		return
 	_selected_index = index
-	_exit_armed = false
 	_games_test_mode = ""  # 項目を切り替えたらゲーム動作確認のモード選択もリセット
 	_detail_title.text = ITEMS[index]["label"]
 	_build_detail(ITEMS[index]["id"])
@@ -1950,14 +1947,10 @@ func _build_exit() -> void:
 	if GameSession.is_running():
 		_add_text("⚠ ゲーム実行中のため終了できません (先にゲームを終了してください)。", C_DANGER)
 		return
-	if _exit_armed:
-		_add_text("本当に終了しますか？", C_DANGER)
-		var yes := _add_button("終了する", func(): get_tree().quit())
-		_set_button_font_color(yes, C_DANGER)
-		_add_button("キャンセル", func(): _exit_armed = false; _build_detail("exit"); _refocus_detail())
-		return
+	# サービスモード自体が隠し画面 (Ctrl+Alt+F12) で、ここまで辿り着く操作自体が十分に意図的なため、
+	# 押したら即終了する (二段階確認は廃止)。Alt+F4 / × 封印時はここが唯一の終了手段。
 	_add_text("ランチャーを終了します。Alt+F4 / × ボタン封印時はここが唯一の終了手段です。")
-	var btn := _add_button("ランチャーを終了", func(): _exit_armed = true; _build_detail("exit"); _refocus_detail())
+	var btn := _add_button("ランチャーを終了", func(): get_tree().quit())
 	_set_button_font_color(btn, C_DANGER)
 
 
@@ -2270,7 +2263,7 @@ func _clear_content() -> void:
 	_pt_stop()            # 試遊中なら止める (同上)
 	# remove_child を即時に行ってから queue_free する。queue_free だけだとフレーム末まで子が get_children に
 	# 残り、直後の _first_focusable が「解放予定の古いボタン」を掴んでフォーカスを当て、フレーム末に消えて
-	# フォーカス喪失で詰む (キーボード操作で「ランチャーを終了」→確認画面のフォーカスが出ない不具合)。
+	# フォーカス喪失で詰む (詳細を作り直す系の操作でキーボードフォーカスが出ない不具合)。
 	for c in _detail_content.get_children():
 		_detail_content.remove_child(c)
 		c.queue_free()
