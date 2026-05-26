@@ -798,7 +798,7 @@ func _joy_axis_name(axis: int, value: float) -> String:
 ## ネットワーク接続テスト: 手前から順に IP→ゲートウェイ→DNS→インターネット/共有サーバー を確認する。
 ## ping/TCP はブロッキングなので別スレッドで実行し、結果を call_deferred でラベルへ反映する (画面を固めない)。
 func _build_network() -> void:
-	_add_text("ネットワークの繋がりを手前から順に確認します。最初に × が出た所が原因です。", C_MUTED)
+	_add_text("ネットワークの繋がりを手前から順に確認します。最初に × が出た所が原因です。", C_TEXT)
 	_nw_run_btn = _add_button("接続テストを実行", _nw_start)
 	_detail_content.add_child(HSeparator.new())
 
@@ -1167,7 +1167,7 @@ func _build_games_test() -> void:
 ## ゲーム動作確認の確認方法 選択画面 (3 段階)。3 択の下に、今フォーカス (キーボード) または
 ## ホバー (マウス) している選択肢の詳細説明をライブ表示する。どれも選んでいない時は何も出さない。
 func _build_games_test_menu() -> void:
-	_add_text("ゲームの動作を 3 段階で確認できます。確認方法を選んでください。", C_MUTED)
+	_add_text("ゲームの動作を 3 段階で確認できます。確認方法を選んでください。", C_TEXT)
 	_games_focus_idx = -1
 	_games_hover_idx = -1
 	var b1 := _add_button("① ファイル存在チェック（起動しない・全件一括）",
@@ -1283,7 +1283,7 @@ func _build_games_launch_test() -> void:
 		_add_text("登録ゲームがありません (または DB 読み込みに失敗)。", C_MUTED)
 		return
 
-	_add_text("チェックを付けたゲームを 1 本ずつ実際に起動し、ウィンドウが出れば OK と判定して自動終了します。", C_MUTED)
+	_add_text("チェックを付けたゲームを 1 本ずつ実際に起動し、ウィンドウが出れば OK と判定して自動終了します。", C_TEXT)
 	_add_text("※ テスト中はゲーム画面が一瞬ずつ前面に出ます。", C_MUTED)
 	_add_button("すべてチェック", func(): _lt_set_all(true))
 	_add_button("すべて外す", func(): _lt_set_all(false))
@@ -1549,8 +1549,8 @@ func _build_games_playtest() -> void:
 		_add_text("登録ゲームがありません (または DB 読み込みに失敗)。", C_MUTED)
 		return
 
-	_add_text("チェックしたゲームを 1 本ずつ起動して試遊します。遊び終わったらゲームを終了するか、キーボードの HOMEキー / コントローラーの Guideボタンで戻り、", C_MUTED)
-	_add_text("「正しく遊べたか」を 〇× で記録すると自動で次のゲームに進みます。", C_MUTED)
+	_add_text("チェックしたゲームを 1 本ずつ起動して試遊します。遊び終わったらゲームを終了するか、キーボードの HOMEキー / コントローラーの Guideボタンで戻り、", C_TEXT)
+	_add_text("「正しく遊べたか」を 〇× で記録すると自動で次のゲームに進みます。", C_TEXT)
 	_add_button("すべてチェック", func(): _pt_set_all(true))
 	_add_button("すべて外す", func(): _pt_set_all(false))
 	_pt_start_btn = _add_button("チェックしたゲームを試遊", _pt_start)
@@ -1794,7 +1794,7 @@ func _build_log_view() -> void:
 	if lines.is_empty():
 		_add_text("ログがありません。", C_MUTED)
 		return
-	_add_text("現セッションの直近ログ %d 行 (古い順。最新は最下部)" % lines.size(), C_MUTED)
+	_add_text("現セッションの直近ログ %d 行 (古い順。最新は最下部)" % lines.size(), C_TEXT)
 	var list := ItemList.new()
 	list.focus_mode = Control.FOCUS_ALL
 	list.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1871,7 +1871,7 @@ func _build_db_check() -> void:
 ## 音声チェック: 正弦波のテスト音を生成して再生し、音声出力が機能しているかを確認する。
 ## (音声ファイルを持たないので毎回その場で作る。音量調整は今後ここに追加予定。)
 func _build_audio_check() -> void:
-	_add_text("テスト音を再生して音声出力を確認します。音が出ない問題の切り分け用。", C_MUTED)
+	_add_text("テスト音を再生して音声出力を確認します。音が出ない問題の切り分け用。", C_TEXT)
 	_add_button("テスト音を再生 (880Hz / 0.6秒)", _play_test_tone)
 	_add_text("音が聞こえない場合: スピーカー/ヘッドホン接続、OS のミュート/音量、出力デバイスを確認してください。", C_MUTED)
 	_add_text("（音量調整は今後ここにも追加予定）", C_MUTED)
