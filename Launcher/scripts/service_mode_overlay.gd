@@ -13,13 +13,14 @@ extends CanvasLayer
 const FONT_REGULAR := preload("res://fonts/NotoSansJP-Regular.ttf")
 const FONT_BOLD := preload("res://fonts/NotoSansJP-Bold.ttf")
 
-const C_BG := Color(0.05, 0.05, 0.07, 1.0)  # 完全不透明 (裏のシーンは pause + 不可視で凍結)
-const C_PANEL := Color(0.10, 0.10, 0.13, 1.0)
-const C_TEXT := Color(0.90, 0.90, 0.90)
-const C_MUTED := Color(0.55, 0.55, 0.60)
-const C_ACCENT := Color(0.40, 0.75, 1.0)
-const C_DANGER := Color(1.0, 0.45, 0.40)
-const C_OK := Color(0.45, 0.90, 0.55)
+# 業務用ターミナル調の白黒 (青みを抜いたニュートラル)。背景は真っ黒、階層は 背景<パネル<ボタン。
+const C_BG := Color(0.0, 0.0, 0.0, 1.0)       # 真っ黒 (完全不透明。裏のシーンは pause + 不可視で凍結)
+const C_PANEL := Color(0.10, 0.10, 0.10, 1.0) # 詳細パネル (黒からわずかに浮かせる)
+const C_TEXT := Color(0.85, 0.85, 0.85)       # 本文
+const C_MUTED := Color(0.55, 0.55, 0.55)      # 補足
+const C_ACCENT := Color(1.0, 1.0, 1.0)        # 見出し・フォーカス枠 (白)
+const C_DANGER := Color(1.0, 0.45, 0.40)      # 危険/NG (赤)
+const C_OK := Color(0.45, 0.90, 0.55)         # OK (緑)
 
 # サービスモードに並ぶ項目の一覧。準備中の項目は詳細欄に「実装予定」と表示される。
 const ITEMS := [
@@ -194,10 +195,10 @@ func _build_ui() -> void:
 	_focus_sb.set_corner_radius_all(4)
 	_focus_off_sb = StyleBoxEmpty.new()  # マウス時: 何も描かない focus 枠
 
-	# 詳細ペインのボタンに薄く色を付けて「押せる項目」だと分かりやすくする (アクセント寄りの暗い青系)。
+	# 詳細ペインのボタンは黒からグレーで浮かせて「押せる項目」だと分かるようにする (ニュートラルな灰)。
 	_btn_sb = StyleBoxFlat.new()
-	_btn_sb.bg_color = Color(0.16, 0.19, 0.26)
-	_btn_sb.border_color = Color(0.28, 0.33, 0.44)
+	_btn_sb.bg_color = Color(0.12, 0.12, 0.12)
+	_btn_sb.border_color = Color(0.30, 0.30, 0.30)
 	_btn_sb.set_border_width_all(1)
 	_btn_sb.set_corner_radius_all(6)
 	_btn_sb.content_margin_left = 14
@@ -205,8 +206,8 @@ func _build_ui() -> void:
 	_btn_sb.content_margin_top = 6
 	_btn_sb.content_margin_bottom = 6
 	_btn_hover_sb = StyleBoxFlat.new()
-	_btn_hover_sb.bg_color = Color(0.22, 0.27, 0.37)
-	_btn_hover_sb.border_color = Color(0.40, 0.55, 0.78)
+	_btn_hover_sb.bg_color = Color(0.22, 0.22, 0.22)
+	_btn_hover_sb.border_color = Color(0.55, 0.55, 0.55)
 	_btn_hover_sb.set_border_width_all(1)
 	_btn_hover_sb.set_corner_radius_all(6)
 	_btn_hover_sb.content_margin_left = 14
