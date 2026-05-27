@@ -1471,6 +1471,14 @@ namespace TonePrism.Manager
                 }
             }
 
+            // (#234 追加精査) 最小プレイ人数 ≤ 最大プレイ人数 を検証 (3 フォーム共通 helper)。
+            if (!GameFormHelper.ValidatePlayerCount((int)numMinPlayers.Value, (int)numMaxPlayers.Value, out string playerCountError))
+            {
+                MessageBox.Show(playerCountError, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                numMinPlayers.Focus();
+                return false;
+            }
+
             return true;
         }
 

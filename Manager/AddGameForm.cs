@@ -20,6 +20,15 @@ namespace TonePrism.Manager
         private DatabaseManager dbManager;
         private string sourceGameFolder;
         private string destinationGameFolder;
+        // (#234 追加精査 ②対称化) rollback 時に「この追加操作で新規作成した」親フォルダ games/{id}/ だけを
+        // 空なら片付けるための記録。SPEC §3.8.5 が提案する parentCreatedThisCall flag 方式。追加前から親が
+        // 存在していた #120「既存フォルダで続行」経路では baseGameFolderCreated=false となり親に一切触らない。
+        private string baseGameFolder;
+        private bool baseGameFolderCreated;
+        // (#234 追加精査) #120「既存フォルダあり」警告でユーザーが OK (= 中身ごと削除して作り直す) を選んだか。
+        // CopyGameFolder が親 games/{id}/ を丸ごと削除→再作成する gate。警告を出した時のみ true になる
+        // ため、警告未提示の通常追加 / race で後から出現したフォルダを無確認で wipe することはない。
+        private bool wipeExistingOnCopy;
         private List<DeveloperInfo> developers;
         private DeveloperListManager devListManager;
         private Label lblArgumentsPlaceholder;
@@ -225,9 +234,32 @@ namespace TonePrism.Manager
         {
             // ゲームベースフォルダを作成
             string gameBaseFolder = PathManager.GetGameFolder(gameId);
+            baseGameFolder = gameBaseFolder;
+
+            // (#234 追加精査) #120 で「中身ごと削除して作り直す」を承諾済みなら、バージョンに関わらず
+            // 親 games/{id}/ を丸ごと削除して fresh state にする。これにより既存バージョンフォルダとの
+            // 衝突 throw + rollback 巻き込み削除 footgun を構造的に排除し、警告文言（OK=全削除）とも一致。
+            // worker thread (ProcessingDialog) 内で実行されるため UI freeze しない。削除失敗 (Launcher 等が
+            // 使用中) は明示メッセージにして中断する (= 半削除フォルダにコピーを重ねない)。
+            if (wipeExistingOnCopy && Directory.Exists(gameBaseFolder))
+            {
+                try
+                {
+                    Directory.Delete(gameBaseFolder, true);
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception(
+                        $"既存のゲームフォルダの削除に失敗しました（Launcher 等が使用中の可能性があります）:\n  {gameBaseFolder}\n\n{ex.Message}", ex);
+                }
+            }
+
             if (!Directory.Exists(gameBaseFolder))
             {
                 Directory.CreateDirectory(gameBaseFolder);
+                // (#234 追加精査 ②対称化) この追加操作が親フォルダを新規作成したことを記録。
+                // 失敗時 rollback で空なら削除するのに使う (既存フォルダで続行した場合は false のまま)。
+                baseGameFolderCreated = true;
             }
             
             // バージョンフォルダにコピー
@@ -262,32 +294,34 @@ namespace TonePrism.Manager
 
             string gameId = txtGameId.Text.Trim();
 
-            // gameId が既存フォルダと衝突している場合の警告 (#120)
-            // 何らかの原因で games/{gameId}/ が残っていると、同 gameId 追加で:
-            //  - 同バージョン追加時にエラー
-            //  - 別バージョン追加時に古いファイルがゴミとして残る
-            //  - 最悪、Launcher が古い実行ファイルを起動する silent failure
-            // 自動削除はせず手動退避を促す方針 (失いたくないデータ保護のため)
+            // gameId が既存フォルダと衝突している場合の警告 (#120 / #234 追加精査で「wipe & recreate」化)
+            // 何らかの原因で games/{gameId}/ が残っている状態での同 gameId 追加。
+            // 旧方針は「親フォルダを retain したまま続行」だったが、(a) バージョン衝突時に rollback が
+            // 既存版フォルダを巻き込み削除する footgun があり、(b)「自動削除されません」という文言と実装が
+            // 矛盾していた。新方針は **OK = フォルダを中身ごと削除して新規作成** に一本化し、文言と実装を
+            // 一致させる。大事なデータがあれば警告時点でユーザーが退避する前提 (= ゲーム削除と同じ思想)。
+            // ⑪ で「追加失敗時に空フォルダが残らない」ようにしたため、本ケース自体めったに発生しない。
+            // 毎クリックで再評価 (= 前回 OK で失敗→フォーム継続→再 OK 時に stale true を持ち越さない)。
+            // wipe は下の警告で OK したときのみ true になり、かつ CopyGameFolder で Directory.Exists と AND される。
+            wipeExistingOnCopy = false;
             string existingFolder = PathManager.GetGameFolder(gameId);
             if (Directory.Exists(existingFolder))
             {
                 var dr = MessageBox.Show(this,
                     "古いゲームデータが残っています。\n\n" +
                     $"ゲームID '{gameId}' のフォルダが既に存在します:\n  {existingFolder}\n\n" +
-                    "このまま続行すると、以下の挙動になります:\n" +
-                    "  ・同じバージョンを追加しようとした場合 → エラーになります\n" +
-                    "  ・別のバージョンを追加した場合 → 古いファイルがフォルダに残ります\n" +
-                    "  ・最悪、Launcher が古い実行ファイルを起動する可能性があります\n\n" +
-                    "失いたくないデータがある場合は、いったん上記のフォルダの中身を別の場所に\n" +
-                    "退避してから「キャンセル」を押してフォルダを手動で削除し、\n" +
-                    "再度ゲーム追加を試みてください。\n\n" +
-                    "退避不要であれば「OK」を押してください。\n" +
-                    "※ 古いフォルダの中身は自動削除されません。",
+                    "「OK」を押すと、このフォルダを中身ごと削除してから新しく作り直します。\n" +
+                    "（フォルダ内の古いバージョン・ファイルはすべて削除されます）\n\n" +
+                    "失いたくないデータがある場合は「キャンセル」を押し、上記フォルダの中身を\n" +
+                    "別の場所に退避してから、もう一度ゲーム追加をやり直してください。",
                     "古いゲームデータの確認",
                     MessageBoxButtons.OKCancel,
                     MessageBoxIcon.Warning);
 
                 if (dr != DialogResult.OK) return;
+
+                // OK = 中身ごと削除して作り直す承諾。CopyGameFolder が wipe する gate を立てる。
+                wipeExistingOnCopy = true;
             }
 
             // (#234 ②) AddGame と AddGameVersion は別トランザクション。AddGameVersion が失敗すると
@@ -335,11 +369,8 @@ namespace TonePrism.Manager
                         MessageBox.Show("処理がキャンセルされました。", "キャンセル", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
                     
-                    // コピー失敗時のロールバック（フォルダ削除）
-                    if (!string.IsNullOrEmpty(destinationGameFolder) && Directory.Exists(destinationGameFolder))
-                    {
-                        try { Directory.Delete(destinationGameFolder, true); } catch { }
-                    }
+                    // コピー失敗時のロールバック（バージョンフォルダ + 新規作成した空の親フォルダを削除）
+                    CleanupCopiedFoldersOnRollback();
                     return;
                 }
 
@@ -456,18 +487,8 @@ namespace TonePrism.Manager
             }
             catch (System.Data.SQLite.SQLiteException ex)
             {
-                // エラーが発生した場合、コピーしたフォルダを削除（ロールバック）
-                if (!string.IsNullOrEmpty(destinationGameFolder) && Directory.Exists(destinationGameFolder))
-                {
-                    try
-                    {
-                        Directory.Delete(destinationGameFolder, true);
-                    }
-                    catch
-                    {
-                        // 削除に失敗しても続行
-                    }
-                }
+                // エラー時のロールバック（バージョンフォルダ + 新規作成した空の親フォルダ）
+                CleanupCopiedFoldersOnRollback();
 
                 // (#234 ②) games 行が commit 済なら版なし孤児を残さないよう削除 (CASCADE で developers 等も除去)。
                 RollbackGameRow(gameId, gameAdded);
@@ -481,18 +502,8 @@ namespace TonePrism.Manager
             }
             catch (Exception ex)
             {
-                // エラーが発生した場合、コピーしたフォルダを削除（ロールバック）
-                if (!string.IsNullOrEmpty(destinationGameFolder) && Directory.Exists(destinationGameFolder))
-                {
-                    try
-                    {
-                        Directory.Delete(destinationGameFolder, true);
-                    }
-                    catch
-                    {
-                        // 削除に失敗しても続行
-                    }
-                }
+                // エラー時のロールバック（バージョンフォルダ + 新規作成した空の親フォルダ）
+                CleanupCopiedFoldersOnRollback();
 
                 // (#234 ②) games 行が commit 済なら版なし孤児を残さないよう削除 (CASCADE で developers 等も除去)。
                 RollbackGameRow(gameId, gameAdded);
@@ -520,6 +531,35 @@ namespace TonePrism.Manager
             catch (Exception delEx)
             {
                 Logger.Warn("[AddGameForm] (#234 ②) games 行 rollback 削除失敗: " + gameId + ": " + delEx.Message);
+            }
+        }
+
+        /// <summary>
+        /// (#234 追加精査 ②対称化) rollback 時の disk 後始末。バージョンフォルダ (destinationGameFolder) を
+        /// 削除し、さらに「この追加操作で新規作成した」親フォルダ games/{id}/ が空になっていれば削除する。
+        /// SPEC §3.8.5 が「別 issue 候補」としていた parentCreatedThisCall flag 方式の実装。
+        ///   - baseGameFolderCreated=false (= 追加前から親が存在 = #120「既存フォルダで続行」経路) では親に
+        ///     一切触らない (他 version 共存ケースの保護)。
+        ///   - 削除前に必ず空チェックを挟むため、万一中身が残っていても消さない (誤削除防止の二重防御)。
+        /// 削除失敗は握り潰す (元の例外通知を優先)。
+        /// </summary>
+        private void CleanupCopiedFoldersOnRollback()
+        {
+            if (!string.IsNullOrEmpty(destinationGameFolder) && Directory.Exists(destinationGameFolder))
+            {
+                try { Directory.Delete(destinationGameFolder, true); } catch { }
+            }
+
+            if (baseGameFolderCreated && !string.IsNullOrEmpty(baseGameFolder) && Directory.Exists(baseGameFolder))
+            {
+                try
+                {
+                    if (!Directory.EnumerateFileSystemEntries(baseGameFolder).Any())
+                    {
+                        Directory.Delete(baseGameFolder, false);
+                    }
+                }
+                catch { }
             }
         }
 
@@ -638,6 +678,14 @@ namespace TonePrism.Manager
                     btnSelectBackground.Focus();
                     return false;
                 }
+            }
+
+            // (#234 追加精査) 最小プレイ人数 ≤ 最大プレイ人数 を検証 (3 フォーム共通 helper)。
+            if (!GameFormHelper.ValidatePlayerCount((int)numMinPlayers.Value, (int)numMaxPlayers.Value, out string playerCountError))
+            {
+                MessageBox.Show(playerCountError, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                numMinPlayers.Focus();
+                return false;
             }
 
             // ゲームIDの重複チェック

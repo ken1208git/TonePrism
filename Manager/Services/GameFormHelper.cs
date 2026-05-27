@@ -312,5 +312,26 @@ namespace TonePrism.Manager.Services
 
             return true;
         }
+
+        /// <summary>
+        /// 最小プレイ人数 ≤ 最大プレイ人数 を検証する。Add / Edit / VersionUp の 3 フォーム共通。
+        /// 旧実装はどのフォームも大小チェックを持たず、最小 &gt; 最大（例: 最小 4・最大 1）の
+        /// ナンセンスな値をそのまま保存できていた（起動は壊れないがランチャー表示が破綻する
+        /// データ品質欠陥）。3 フォームで drift しないよう helper に集約する。
+        /// </summary>
+        public static bool ValidatePlayerCount(int minPlayers, int maxPlayers, out string errorMessage)
+        {
+            errorMessage = null;
+            if (minPlayers > maxPlayers)
+            {
+                errorMessage =
+                    "最小プレイ人数が最大プレイ人数を上回っています。\n\n" +
+                    "  最小プレイ人数: " + minPlayers + "\n" +
+                    "  最大プレイ人数: " + maxPlayers + "\n\n" +
+                    "最小 ≤ 最大 になるよう修正してください。";
+                return false;
+            }
+            return true;
+        }
     }
 }

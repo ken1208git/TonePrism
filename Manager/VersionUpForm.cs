@@ -491,8 +491,22 @@ namespace TonePrism.Manager
             foreach (var existing in versionsToCheck)
             {
                 string existingNormalized;
-                if (SemverInputControl.TryNormalize(existing ?? "", out existingNormalized)
-                    && string.Equals(newNormalized, existingNormalized, StringComparison.OrdinalIgnoreCase))
+                bool isDup;
+                if (SemverInputControl.TryNormalize(existing ?? "", out existingNormalized))
+                {
+                    // 正規化同士で比較 (= 同義表記 "v1.0.0"/"1.0.0"/"V1.0.0" を同一視)。
+                    isDup = string.Equals(newNormalized, existingNormalized, StringComparison.OrdinalIgnoreCase);
+                }
+                else
+                {
+                    // (#234 追加精査) 正規化不能な既存版 (malformed、例: DB に "1.0" / "alpha" が残存) は
+                    // 旧実装では比較対象外で素通りしており、その malformed 文字列と raw 一致する新版を
+                    // 作れる穴が残っていた。EditGameForm の dup-check が GroupBy キーを raw fallback して
+                    // 同型を捕捉しているのと同様、ここでも生値 (前後空白・大小無視) で最終比較し完全同名
+                    // だけは弾く (= 正規化できない以上「同義」までは判定不能なので raw 一致に限定)。
+                    isDup = string.Equals((existing ?? "").Trim(), (semverNext.VersionString ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
+                }
+                if (isDup)
                 {
                     // (#158 H3) bump button は削除済なので NumericUpDown 直接操作のみ案内。
                     MessageBox.Show("指定されたバージョンは既に存在します:\n\n" +
@@ -577,6 +591,14 @@ namespace TonePrism.Manager
                     btnSelectBackground.Focus();
                     return false;
                 }
+            }
+
+            // (#234 追加精査) 最小プレイ人数 ≤ 最大プレイ人数 を検証 (3 フォーム共通 helper)。
+            if (!GameFormHelper.ValidatePlayerCount((int)numMinPlayers.Value, (int)numMaxPlayers.Value, out string playerCountError))
+            {
+                MessageBox.Show(playerCountError, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                numMinPlayers.Focus();
+                return false;
             }
 
             return true;
