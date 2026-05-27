@@ -124,7 +124,7 @@
 
 #### Fixed (累積コードレビュー指摘の対応)
 
-- **`Clear-OldGodot` の version ソートを文字列辞書順 → `[version]` 数値比較に修正**: 旧 `Sort-Object Name -Descending` は文字列順のため Godot が `4.10.x` 系に達すると `4.9.x` を「より新しい」と誤判定し、最新版を古い版として削除する時限バグだった (現状 4.6.x のみで未発火)。`Where-Object { $_.Name -as [version] }` で非 version dir を削除対象から除外しつつ (cast 例外で cleanup phase が落ちるのも防ぐ)、`Sort-Object { [version]$_.Name }` で数値比較に変更。
+- **`Clear-OldGodot` の version ソートを文字列辞書順 → `[version]` 数値比較に修正**: 旧 `Sort-Object Name -Descending` は文字列順のため Godot が `4.10.x` 系に達すると `4.9.x` を「より新しい」と誤判定し、最新版を古い版として削除する時限バグだった (現状 4.6.x のみで未発火)。`Where-Object { $_.Name -as [version] }` で非 version dir を削除対象から除外しつつ (cast 例外で cleanup phase が落ちるのも防ぐ)、`Sort-Object { [version]$_.Name }` で数値比較に変更。非 version 名 dir (pre-release suffix 付き等) が混ざっていた場合は無言で蓄積しないよう warn を 1 行出す。
 - **起動バナーの `(Phase 1)` 表記を削除**: Phase 2 / 3 完成済 (`.DESCRIPTION` と整合) なのにバナーだけ旧 Phase 表記が残り、実行者の誤読源になっていた。
 
 bump 判断: 配布スクリプトの bugfix のみ。patch (v0.1.21 → v0.1.22)。Bundle への反映は次回リリース実行時。
@@ -1273,7 +1273,7 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 #### Fixed (累積コードレビュー指摘の対応)
 
 - **DB オープン失敗の silent success を解消** (`database_manager.gd`): `db.open_db()` の戻り値を無視し、後続の `if db == null` が常に false の dead code だったため、パス不正 / 権限不足 / ロック等で DB を開けなくても `open()` が `true` を返していた。戻り値で判定し、失敗時は `db = null` をセットして `false` を返すよう修正。これにより「DB を開けないのにゲーム 0 件として正常起動」する経路が塞がれる。
-- **ゲーム起動失敗時のログを ERROR レベル化** (`game_session.gd`): 実行ファイル未検出 / プロセス起動失敗の経路が `print("❌ …")` だったのを、同ファイルの既存パターンに揃えて `push_error` に変更 (ログのレベルフィルタで追跡可能に)。
+- **ゲーム起動失敗時のログを ERROR レベル化** (`game_session.gd`): 実行ファイル未検出 / プロセス起動失敗の経路が `print("❌ …")` だったのを、同ファイルの既存パターンに揃えて `push_error` に変更 (ログのレベルフィルタで追跡可能に)。あわせて `database_manager.gd` `open()` の失敗経路 (DB ファイル不在 / オープン失敗) も同じ理由で `push_error` に昇格。
 - **画面遷移失敗時に復帰演出フラグを汚さないようガード** (`playing.gd`): `change_scene_to_file` の戻り値を確認し、失敗時は `AppState.returning_from_game` / `returning_from_quit` を設定せず early return。成功時のフラグ設定は deferred 遷移より前なので新シーンの `_ready` から正しく参照される。
 - `version.gd` の stale なマイルストーンコメントを削除し、ファイル責務の記述に置換。
 

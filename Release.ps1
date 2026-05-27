@@ -2030,7 +2030,12 @@ function Clear-OldGodot {
     if (Test-Path $ToolsGodot) {
         # version 番号は文字列辞書順だと 4.10 < 4.9 と誤判定するため [version] cast で数値比較する。
         # `-as [version]` が $null になる非 version dir は削除対象から除外 (cast 例外で cleanup が落ちるのも防ぐ)。
-        $dirs = @(Get-ChildItem $ToolsGodot -Directory |
+        $allGodotDirs = @(Get-ChildItem $ToolsGodot -Directory)
+        # 非 version 名 dir (例: pre-release suffix 付き) は cleanup 対象外。無言で蓄積しないよう warn を出す。
+        foreach ($nv in @($allGodotDirs | Where-Object { -not ($_.Name -as [version]) })) {
+            Write-Warn "tools/godot/$($nv.Name) は version 形式でないため cleanup 対象外 (蓄積に注意)"
+        }
+        $dirs = @($allGodotDirs |
             Where-Object { $_.Name -as [version] } |
             Sort-Object { [version]$_.Name } -Descending)
         if ($dirs.Count -gt 2) {

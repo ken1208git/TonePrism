@@ -25,7 +25,7 @@ func open() -> bool:
 
 	# データベースファイルが存在するか確認
 	if not FileAccess.file_exists(db_path):
-		print("[DatabaseManager] Error: データベースファイルが見つかりません: " + db_path)
+		push_error("[DatabaseManager] データベースファイルが見つかりません: " + db_path)
 		return false
 
 	# SQLiteインスタンスを作成
@@ -37,7 +37,7 @@ func open() -> bool:
 	# データベースを開く（godot-sqliteのAPI）。失敗時 (パス不正・権限不足・ロック等) は
 	# false が返る。db オブジェクト自体は非 null のままなので、戻り値で必ず判定する。
 	if not db.open_db():
-		print("[DatabaseManager] Error: データベースを開けませんでした: " + db_path)
+		push_error("[DatabaseManager] データベースを開けませんでした: " + db_path)
 		db = null
 		return false
 
