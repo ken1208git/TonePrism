@@ -1901,6 +1901,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 - **`games.arguments` の追加を `CreateTables()` 内アドホック ALTER から `MigrateV13ToV14` に移設** (`CurrentDbVersion` 13 → 14)。旧実装は (a) `user_version` に連動せず毎起動 `PRAGMA table_info` で存在チェックして足す野良 migration で、(b) 失敗を `catch` で握り潰していた (AGENTS.md「`CreateTables()` を編集したら必ず `MigrateVxToVy`、スキーマ drift の温床」に違反)。version chain に正規化し、失敗時は例外を伝播させて transaction を rollback するよう変更。
 - **最終スキーマは不変**: 新規 DB は `CREATE TABLE games` で従来どおり `arguments` を持ち、`MigrateV13ToV14` は `TableHasColumn` で idempotent (= 列がある DB では no-op)。`ExpectedSchema` / SPEC §7.3 とも差分なし。retrofit が必要なのは arguments 列を持たない旧 DB のみ。
+- **v0 (versioning 導入前) DB の retrofit を維持** (Codex P1): `user_version=0` の旧 DB は `CheckAndMigrateDatabase` の早期 stamp path で chain を skip するため、`MigrateV13ToV14` をその path 内でも明示実行。これで旧実装 (`CreateTables` 内 retrofit) と同じ v0 カバレッジを保ち、列欠落のまま `no such column: arguments` で落ちる回帰を防ぐ。
 - `MigrateGamesTable` (games の `supported_connection` / `version` 追加) は `games.arguments` を参照しないことを確認済みで、retrofit を chain (= `MigrateGamesTable` の後) に移しても初期化中の依存は発生しない。
 
 #### Bump 根拠 (v0.16.2 → v0.16.3)

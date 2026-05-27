@@ -683,6 +683,15 @@ namespace TonePrism.Manager
 
             if (currentVersion == 0)
             {
+                // 新規 DB は CreateTables が最新スキーマを作るので stamp して返すだけでよい。
+                // ただし versioning 導入前 (user_version=0 のまま) に games テーブルだけ存在する
+                // 旧 DB は games.arguments を欠く場合がある。この列は他の games 列
+                // (supported_connection / version、MigrateGamesTable で無条件 backfill) と違い
+                // version chain (MigrateV13ToV14) 管理に移したため、v0 で chain を skip すると
+                // 永久に追加されず GameRepository の SELECT/INSERT が "no such column: arguments"
+                // で失敗する (Codex P1)。idempotent な MigrateV13ToV14 を stamp 前に明示実行して
+                // 旧実装 (CreateTables 内 retrofit) と同じ v0 カバレッジを保つ。
+                MigrateV13ToV14(connection, transaction);
                 SetDbVersion(connection, CurrentDbVersion, transaction);
                 return;
             }
