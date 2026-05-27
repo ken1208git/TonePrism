@@ -348,10 +348,18 @@ namespace TonePrism.Manager
                 Logger.Info($"[AddGameForm] サムネイル絶対パス: {thumbnailAbsolutePath}");
                 Logger.Info($"[AddGameForm] 背景絶対パス: {backgroundAbsolutePath}");
 
-                // コピー後にコピー先フォルダ（games/{game_id}/）からの相対パスに変換
-                string executablePath = PathConversionHelper.ToRelativePathAfterCopy(executableAbsolutePath, destinationGameFolder);
-                string thumbnailPath = PathConversionHelper.ToRelativePathAfterCopy(thumbnailAbsolutePath, destinationGameFolder);
-                string backgroundPath = PathConversionHelper.ToRelativePathAfterCopy(backgroundAbsolutePath, destinationGameFolder);
+                // (#234) 相対化の基準は version フォルダではなく **ゲームルート (games/{game_id}/)**。
+                // Launcher は games / game_versions のパスをゲームルート基準でしか解決しない
+                // (GamePathResolver.find_executable / resolve_path、Manager の EditGameForm も
+                // ToAbsolutePath(gameFolder, ...) で解決) ため、ファイル実体が games/{id}/v{version}/
+                // 配下にある以上、保存値は v{version}/ プレフィックスを含む必要がある。version フォルダ
+                // 基準で相対化すると "main.exe" のようにプレフィックスが落ち、新規追加ゲームが起動不能
+                // + サムネ/背景が表示されない silent corruption になっていた (version-up の exe は #234 で
+                // GameSectionPanel が同方針で修正済、本修正で追加フローと thumb/bg を揃える)。
+                string gameRelativeBase = PathManager.GetGameFolder(gameId);
+                string executablePath = PathConversionHelper.ToRelativePathAfterCopy(executableAbsolutePath, gameRelativeBase);
+                string thumbnailPath = PathConversionHelper.ToRelativePathAfterCopy(thumbnailAbsolutePath, gameRelativeBase);
+                string backgroundPath = PathConversionHelper.ToRelativePathAfterCopy(backgroundAbsolutePath, gameRelativeBase);
 
                 // デバッグログ（開発時のみ）
                 Logger.Info($"[AddGameForm] 実行ファイル相対パス: {executablePath}");

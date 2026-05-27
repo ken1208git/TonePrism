@@ -254,6 +254,25 @@ namespace TonePrism.Manager.Controls
                         string relativePath = Path.Combine(versionFolderName, form.RelativeExecutablePath);
                         form.NewVersion.ExecutablePath = relativePath;
 
+                        // (#234) thumbnail / background も exe と同様に v{version}/ プレフィックスを付ける。
+                        // VersionUpForm は source フォルダ基準の相対パス (プレフィックス無し、例: "thumb.png")
+                        // で返すため、そのまま games / game_versions に保存すると Launcher がゲームルート基準
+                        // (games/{id}/thumb.png) で解決して見つけられず、バージョンアップ後に画像が消える。
+                        // exe (上の relativePath) と同じく version フォルダ名を前置してゲームルート基準に揃える。
+                        // 両テーブル (NewVersion=game_versions / UpdatedGameInfo=activation 時の games) に反映。
+                        if (!string.IsNullOrEmpty(form.NewVersion.ThumbnailPath))
+                        {
+                            string thumbRelative = Path.Combine(versionFolderName, form.NewVersion.ThumbnailPath);
+                            form.NewVersion.ThumbnailPath = thumbRelative;
+                            form.UpdatedGameInfo.ThumbnailPath = thumbRelative;
+                        }
+                        if (!string.IsNullOrEmpty(form.NewVersion.BackgroundPath))
+                        {
+                            string bgRelative = Path.Combine(versionFolderName, form.NewVersion.BackgroundPath);
+                            form.NewVersion.BackgroundPath = bgRelative;
+                            form.UpdatedGameInfo.BackgroundPath = bgRelative;
+                        }
+
                         // (#234 ③) version 行の INSERT と activation (games 更新) を分離した try で扱う。
                         // INSERT 失敗時はコピー済 versionDir を rollback 削除し「保存に失敗」と通知。
                         // activation 失敗時は「版は作成済・アクティブ化のみ失敗」と正確に伝える (旧実装は
