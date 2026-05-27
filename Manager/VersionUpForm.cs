@@ -360,8 +360,11 @@ namespace TonePrism.Manager
                     Version = semverNext.VersionString,  // (#158)
                     ExecutablePath = "", // コピー後に設定
                     Arguments = string.IsNullOrWhiteSpace(txtArguments.Text) ? null : txtArguments.Text.Trim(),
-                    Description = txtDescription.Text.Trim(), // 説明文
-                    UpdateNote = txtUpdateNote.Text.Trim(), // 更新内容
+                    // (#234) 空白は null 正規化。AddGameForm / EditGameForm と DB 表現を統一する
+                    // (#224 で「3 フォームで統一」と決めたが VersionUpForm の Description/UpdateNote が
+                    // 取り残されており、空欄入力時に "" が保存され他フォームの null と不一致だった)。
+                    Description = string.IsNullOrWhiteSpace(txtDescription.Text) ? null : txtDescription.Text.Trim(), // 説明文
+                    UpdateNote = string.IsNullOrWhiteSpace(txtUpdateNote.Text) ? null : txtUpdateNote.Text.Trim(), // 更新内容
                     
                     Title = txtTitle.Text.Trim(),
                     Genre = GameFormHelper.GetSelectedGenres(clbGenre),
@@ -392,7 +395,8 @@ namespace TonePrism.Manager
                 {
                     GameId = originalGameInfo.GameId,
                     Title = txtTitle.Text.Trim(),
-                    Description = txtDescription.Text.Trim(),
+                    // (#234) games 側も版と同じく空白を null 正規化 (上の NewVersion と揃える)。
+                    Description = string.IsNullOrWhiteSpace(txtDescription.Text) ? null : txtDescription.Text.Trim(),
                     // (#224) 旧実装は UpdatedGameInfo に Arguments を設定しておらず、バージョンUp 時に
                     // games.arguments が新版の値に更新されなかった (Launcher は games を読むため旧引数の
                     // まま起動)。NewVersion (329) と同じ値を games 側にも反映する。
@@ -534,6 +538,45 @@ namespace TonePrism.Manager
                 MessageBox.Show("選択された実行ファイルが見つかりません。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 btnSelectExecutable.Focus();
                 return false;
+            }
+
+            // (#234) サムネ/背景は AddGameForm と同様、OK 時点で「存在する」かつ「コピー元フォルダ内」で
+            // あることを最終検証する。これを怠ると、btnOK_Click が File.Exists(false) 時に絶対パスを
+            // そのまま NewVersion に残し、GameSectionPanel の Path.Combine(versionFolderName, 絶対パス) が
+            // 絶対パスを素通しして「コピーされない元フォルダを指す壊れた画像パス」を DB 保存する穴になる
+            // (④ と同種の silent corruption)。auto 検出値も含めてここで一律に弾く。
+            if (!string.IsNullOrWhiteSpace(txtThumbnailPath.Text))
+            {
+                if (!File.Exists(txtThumbnailPath.Text))
+                {
+                    MessageBox.Show("選択されたサムネイル画像が見つかりません。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    btnSelectThumbnail.Focus();
+                    return false;
+                }
+                if (!string.IsNullOrEmpty(selectedFolderPath)
+                    && !txtThumbnailPath.Text.StartsWith(selectedFolderPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    MessageBox.Show("サムネイル画像はゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    btnSelectThumbnail.Focus();
+                    return false;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(txtBackgroundPath.Text))
+            {
+                if (!File.Exists(txtBackgroundPath.Text))
+                {
+                    MessageBox.Show("選択された背景画像が見つかりません。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    btnSelectBackground.Focus();
+                    return false;
+                }
+                if (!string.IsNullOrEmpty(selectedFolderPath)
+                    && !txtBackgroundPath.Text.StartsWith(selectedFolderPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    MessageBox.Show("背景画像はゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    btnSelectBackground.Focus();
+                    return false;
+                }
             }
 
             return true;

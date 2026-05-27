@@ -34,6 +34,12 @@ namespace TonePrism.Manager
         // 旧実装は cmbVersionList_SelectedIndexChanged 直後に宣言されてフィールド集約規約を破っていた。
         private GameVersion currentDisplayingVersion = null;
 
+        // (#234) LoadVersions が初期選択した version (= 起動対象 = games.version に一致する版) の DB id。
+        // OK 押下時に「ドロップダウンを別の版に切り替えたまま保存しようとしている」= アクティブ版の
+        // 暗黙切替を検出して確認ダイアログを出すために使う。row 単位 (DB id) で比較するため、
+        // アクティブ版を rename しただけ (同 row・version 文字列のみ変更) では誤発火しない。
+        private int? _initialSelectedVersionId = null;
+
         // (#158 CX-1) folder rename を 2-phase 化するための plan 単位 (Phase 1 で構築 / Phase 2 で実行)。
         // (#158 round 4 codex P1) Old{Executable,Thumbnail,Background}Path: in-memory state rollback 用に
         // path 書き換え前の値を capture。disk Move を rollback しても in-memory が NEW のままだと、同
@@ -284,7 +290,10 @@ namespace TonePrism.Manager
                 {
                     cmbVersionList.SelectedIndex = 0;
                 }
-                
+
+                // (#234) 初期選択 = 起動対象の版。OK 時のアクティブ版切替検出の基準として記録。
+                _initialSelectedVersionId = (cmbVersionList.SelectedItem as GameVersion)?.Id;
+
                 // 表示用にフォーマット
                 cmbVersionList.DisplayMember = "Version"; // GameVersionクラスのToStringをオーバーライドするか、DisplayMemberを設定
             }
@@ -741,6 +750,33 @@ namespace TonePrism.Manager
                 return;
             }
 
+            // (#234) アクティブ版 (= Launcher で起動する版) の暗黙切替を確認する。
+            // OK 時は選択中の版が games 行にミラーされ games.version = 選択版になる (= 起動対象が変わる)
+            // 設計のため、ロード時の起動対象と別の版を選んだまま保存しようとした場合に明示確認する。
+            // 「いいえ」で編集画面に戻し、ドロップダウンで元の版を選び直せるようにする (= 誤操作で
+            // 起動バージョンが入れ替わる footgun を塞ぐ。VersionUpForm のアクティブ化確認と同方針)。
+            // row 単位 (DB id) 比較なので、アクティブ版を rename しただけでは発火しない。
+            if (cmbVersionList.SelectedItem is GameVersion selForActiveCheck
+                && _initialSelectedVersionId.HasValue
+                && selForActiveCheck.Id != _initialSelectedVersionId.Value)
+            {
+                var activeDr = MessageBox.Show(this,
+                    "現在表示しているバージョン「" + (selForActiveCheck.Version ?? "(未設定)") + "」を、" +
+                    "ランチャーで表示・起動するバージョンにしますか?\n\n" +
+                    "  これまでランチャーに表示: " + (originalGame.Version ?? "(未設定)") + "\n" +
+                    "  OK 後にランチャーに表示: " + (selForActiveCheck.Version ?? "(未設定)") + "\n\n" +
+                    "「はい」を押すと、いま表示しているこのバージョンがランチャーに表示・起動されるように" +
+                    "なります。\n" +
+                    "「いいえ」を押すと編集画面に戻ります（ランチャーの表示バージョンを変えたくない場合は、" +
+                    "バージョン管理のドロップダウンで元のバージョンを選び直してから OK してください）。",
+                    "ランチャーに表示するバージョンの確認",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                if (activeDr != DialogResult.Yes)
+                {
+                    return;
+                }
+            }
+
             // (#179 round 6 M-1 案 B) DB write 直前で他 PC session を再 check (race fence)。
             // SectionPanel 側 (`ShowDialog` 直前) で既に 1 回 check 済だが、user が編集画面を 5-10 分
             // 開きっぱなしにする間に他 PC が編集を始めると衝突しうるため二段 fence。Cancel 選択時は
@@ -907,8 +943,12 @@ namespace TonePrism.Manager
                 // ジャンルを処理
                 game.Genre = GameFormHelper.GetSelectedGenres(clbGenre);
 
-                // 製作者情報は既存のものを保持
-                game.Developers = originalGame.Developers ?? new List<DeveloperInfo>();
+                // (#234) games 行 (version_id IS NULL) の製作者は、編集中リスト (= 選択中の版 = OK 後の
+                // アクティブ版の製作者) をミラーする。旧実装は originalGame.Developers をそのまま温存して
+                // いたため、アクティブ版から製作者を全削除しても games 行の旧製作者が残り、Launcher の
+                // 「版に紐づく製作者が空なら version_id IS NULL にフォールバック」(game_repository.gd) で
+                // 削除したはずの製作者が表示され続けるバグがあった。games を選択版のミラーに揃えて解消する。
+                game.Developers = new List<DeveloperInfo>(developers);
 
                 // 選択中のバージョン
                 var selectedVersion = cmbVersionList.SelectedItem as GameVersion;
@@ -936,10 +976,11 @@ namespace TonePrism.Manager
                     // (#158 Q3) version 文字列が変わった version について、per-version folder を rename。
                     // _originalVersionByDbId に LoadVersions 時の DB-fetched version を保存済なので、
                     // 現 v.Version との差分で rename 必要かを判定。relative path にも v<version>/
-                    // prefix が含まれているため、rename 後同じく書き換える (= EditGameForm 経路で保存
-                    // された path のみ `<gameFolder>` 基準で v<version>/ prefix が乗る、AddGameForm
-                    // 経路は version folder 基準なので prefix なし。M2 で誤記訂正、ReplaceVersionPrefix
-                    // は前者の prefix のみ書き換える保守的処理)。
+                    // prefix が含まれているため、rename 後同じく書き換える。
+                    // (#234 ④ 以降) AddGameForm 経路もゲームルート基準で相対化するようになり exe/サムネ/
+                    // 背景すべてに v<version>/ prefix が乗る (旧コメントの「AddGameForm 経路は prefix なし」
+                    // は ④ 修正前の記述で現在は誤り)。EditGameForm 経路・AddGameForm 経路どちらの path も
+                    // ReplaceVersionPrefix で正しく書き換わる (前方一致の v<old>/ prefix のみ置換する保守的処理)。
                     //
                     // (#158 H1 fix): folder path は `gameFolder` (直前の gameIdChanged block で
                     // `gameFolder = newFolder` に上書き済) を base にする。`PathManager.GetVersionFolder(
@@ -1147,9 +1188,9 @@ namespace TonePrism.Manager
                                 }
                             }
 
-                            // version 文字列を含む相対パス (`v<old>/...` 形式) を新 prefix に置換
-                            // (EditGameForm 経路で保存された path のみ対象、AddGameForm 経路は prefix なしで
-                            // 影響を受けない、M2)
+                            // version 文字列を含む相対パス (`v<old>/...` 形式) を新 prefix に置換。
+                            // (#234 ④ 以降) AddGameForm 経路の path も v<version>/ prefix を持つため対象。
+                            // prefix を持たない path (= 旧データ等) は ReplaceVersionPrefix が前方一致 skip して無変更。
                             p.Version.ExecutablePath = ReplaceVersionPrefix(p.Version.ExecutablePath, p.OriginalVer, p.Version.Version);
                             p.Version.ThumbnailPath = ReplaceVersionPrefix(p.Version.ThumbnailPath, p.OriginalVer, p.Version.Version);
                             p.Version.BackgroundPath = ReplaceVersionPrefix(p.Version.BackgroundPath, p.OriginalVer, p.Version.Version);

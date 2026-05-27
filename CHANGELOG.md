@@ -1913,7 +1913,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ### [Manager v0.16.5] - 2026-05-27
 
-#### Fixed (#234 — バージョンアップ/追加のデータ整合性 5 件 + 周辺修正)
+#### Fixed (#234 — バージョンアップ/追加のデータ整合性 8 件 + 周辺修正 + 製作者バリデーション緩和)
 
 ゲーム追加・編集・バージョンアップ処理の精査で、編集パス（`EditGameForm`、#158/#224 で堅牢化済）と同等の防御が version-up / add パスに展開されておらず発生していた整合性欠陥を修正。
 
@@ -1923,7 +1923,14 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **④【高】保存パスに `v{version}/` プレフィックスが付かず Launcher で実体に届かない**: Launcher は `games` のパス（`executable_path` / `thumbnail_path` / `background_path`）を**ゲームルート `games/{id}/` 基準**でしか解決しない（`GamePathResolver` が `get_game_folder()` に保存文字列を `path_join` するだけで version フォルダを補完しない）。一方ファイル実体は `games/{id}/v{version}/` 配下にあるため、保存値は `v{version}/` を含む必要がある。ところが (a) `AddGameForm` は相対化の基準を version フォルダにしていたため `executable_path` 等が `main.exe`（プレフィックス無し）になり、**新規追加ゲームが起動不能 + サムネ/背景が非表示**（既存 20 本は旧スキームのルート直下重複ファイルで偶然解決できていたが、新規インストールでは実体がルートに無いため救済されない）。(b) version-up は①③と同じ #234 で exe は `v{version}/` 付きに修正済だったが、**サムネ/背景は付け忘れ**ており、バージョンアップしてアクティブ化すると画像だけ消える状態だった。**対策**: `AddGameForm` の相対化基準を version フォルダ → ゲームルート（`PathManager.GetGameFolder`）に変更し exe/サムネ/背景すべてに `v{version}/` を載せる。`GameSectionPanel.btnVersionUp_Click` で exe と同様にサムネ/背景にも version フォルダ名を前置（`games`=`UpdatedGameInfo` / `game_versions`=`NewVersion` 両テーブルに反映）。`game_versions` 側もプレフィックス付きに揃えたことで、version-up 済み既存データ（例: Toney_Fox）と一貫し、`EditGameForm` のバージョン名リネーム（`ReplaceVersionPrefix`）も正しく連動する。
 
 - **⑤【高】追加直後のゲームを編集すると Title/ジャンル/サムネ/背景/難易度/プレイ時間/コントローラ/通信/製作者 が消える**: `AddGameForm` が作る初期バージョン行は `ExecutablePath` / `Description` / `Arguments`（#224 で追加）しか持たず、それ以外のメタデータが未設定のまま `game_versions` に INSERT されていた。`EditGameForm.LoadGameDataForVersion` はアクティブ版（=初期版）の値で UI を上書きするため、追加直後のゲームを編集で開くと上記項目が空 / 既定値（難易度・プレイ時間は「ふつう」、通信は「なし」、コントローラは off）にリセットされ、OK 保存で `games` 行ごと巻き添えに破損していた（#224 が Description/Arguments で直したのと**同じデータ損失が残り項目に残存**していた）。**対策**: (a) `AddGameForm` の初期版を `games` の全フィールドのミラーにする（製作者はディープコピー）。(b) `EditGameForm.LoadGameDataForVersion` の「アクティブ版フォールバック」（#224 で Description/Arguments のみ実装）を Title / Genre / 難易度 / プレイ時間 / 最小最大人数 / サムネ / 背景 / 製作者 / コントローラ / 通信 に拡張し、既存のスカスカ初期版行を編集→保存で自己修復させる。コントローラ/通信は非 nullable で未設定 sentinel が無いため、アクティブ版に限り `games` 値（定義上の真値）を採用する。
-- **周辺修正 3 件**: (i) サムネ/背景の**自動検出時にプレビューが更新されない**（`AddGameForm` / `VersionUpForm` の `AutoDetectFiles` が手動選択と違い `UpdateThumbnailPreview` / `UpdateBackgroundPreview` を呼んでいなかった）のを修正。(ii) `VersionUpForm` のサムネ/背景選択に**コピー元フォルダ内チェック**を追加（`AddGameForm`・exe 選択と同挙動。フォルダ外選択で絶対パスがそのまま保存され、コピーされないファイルを指す穴を塞ぐ）。(iii) 最新版判定を `VersionRepository.GetByGameId` の `ORDER BY registered_at DESC` → `id DESC` に統一（秒精度タイで「最新版」が非決定的になる問題を解消し、`GameRepository.GetAll` の `display_version`（`id DESC LIMIT 1`）と整合）。
+- **周辺修正 3 件**: (i) サムネ/背景の**自動検出時にプレビューが更新されない**（`AddGameForm` / `VersionUpForm` の `AutoDetectFiles` が手動選択と違い `UpdateThumbnailPreview` / `UpdateBackgroundPreview` を呼んでいなかった）のを修正。(ii) `VersionUpForm` のサムネ/背景選択に**コピー元フォルダ内チェック**を追加（`AddGameForm`・exe 選択と同挙動。フォルダ外選択で絶対パスがそのまま保存され、コピーされないファイルを指す穴を塞ぐ）。(iii) 最新版判定を `VersionRepository.GetByGameId` の `ORDER BY registered_at DESC` → `id DESC` に統一（秒精度タイで「最新版」が非決定的になる問題を解消し、`GameRepository.GetAll` の `display_version`（`id DESC LIMIT 1`）と整合）。(iv) `VersionUpForm` の `Description` / `UpdateNote` を空白 → null 正規化（#224 で「3 フォームで DB 表現を統一」と決めたが VersionUpForm だけ素の `Trim()` で取り残され、空欄入力時に他フォームの null と異なる `""` が `games` / `game_versions` に保存されていた）。
+
+**追加精査で見つかった残存欠陥（2nd pass）**:
+
+- **⑥【中〜高 UX】編集画面でバージョンを選び直して OK するとアクティブ版が無言で切り替わる**: `EditGameForm.btnOK_Click` は `cmbVersionList.SelectedItem`（ドロップダウンの現在選択版）を `games` 行へミラーし `games.version` まで上書きする設計のため、古い版を眺めようとドロップダウンを切り替えてから他項目を直して OK すると、**Launcher で起動する版が無言でその版に切り替わって**いた（version-up は明示確認するのに編集画面は無確認という非対称）。**対策**: `LoadVersions` 時の初期選択版（=ランチャー表示版）の DB id を記録し、OK 時に別 row が選択されていれば「現在表示しているバージョンをランチャーで表示・起動するバージョンにしますか?」と確認、「いいえ」で編集画面に戻す。row（DB id）比較なので表示版を rename しただけでは発火しない。製作者フォーム（`DeveloperForm`）の「名」ラベルに付いていた必須マーク `*` も上記緩和に合わせて除去。
+- **⑦【中】アクティブ版から製作者を全削除しても Launcher に反映されない**: `EditGameForm` は製作者を版（`version_id` 付き）に保存するが `games` 行（`version_id IS NULL`）は `originalGame.Developers` のまま温存していた。Launcher は「版に紐づく製作者が空なら `version_id IS NULL` にフォールバック」（`game_repository.gd`）するため、アクティブ版の製作者を全削除しても `games` 行の旧製作者が残り表示され続けた。**対策**: `games` 行の製作者も編集中リスト（=選択版=OK 後のアクティブ版）でミラーし、全削除が両レイヤーに反映されるようにする。
+- **⑧【低〜中】`VersionUpForm` がサムネ/背景の存在・フォルダ内検証を最終段で行っていない**: `AddGameForm` は OK 時に存在＋フォルダ内を検証するが `VersionUpForm.ValidateInput` は exe しか検証せず、OK 時に絶対パスのままだと `GameSectionPanel` の `Path.Combine(versionFolderName, 絶対パス)` が絶対パスを素通しして「コピーされない元フォルダを指す壊れた画像パス」を保存しうる穴（④ と同種）が残っていた。**対策**: `VersionUpForm.ValidateInput` にサムネ/背景の `File.Exists` ＋コピー元フォルダ内チェックを追加し `AddGameForm` と揃える。
+- **製作者バリデーション緩和**: `DeveloperForm` は「名」必須だったが、姓のみ判明しているケース等に対応するため「姓・名のどちらか一方でも入っていれば可」に緩和。
 
 `game_versions` への `UNIQUE(game_id, version)` 制約追加は、本番 live data に既存 dup 行があると migration が失敗しうるため見送り、app-level guard で対応（編集パスと同方針）。
 

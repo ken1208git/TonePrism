@@ -127,11 +127,11 @@ namespace TonePrism.Manager
         /// </summary>
         private bool ValidateInput()
         {
-            // 姓は空欄でも可（姓が不明な場合に対応）
-            // 名
-            if (string.IsNullOrWhiteSpace(txtFirstName.Text))
+            // 姓・名のどちらか一方でも入っていれば可 (姓だけ / 名だけ / 両方 いずれも許可)。
+            // 旧実装は「名」必須だったが、姓のみ判明しているケース等に対応するため緩和。
+            if (string.IsNullOrWhiteSpace(txtLastName.Text) && string.IsNullOrWhiteSpace(txtFirstName.Text))
             {
-                MessageBox.Show("名を入力してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("姓または名のいずれかを入力してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtFirstName.Focus();
                 return false;
             }
