@@ -197,12 +197,11 @@ namespace TonePrism.Manager
                 }
             }
 
-            // 起動オプションの設定
-            if (!string.IsNullOrWhiteSpace(originalGame.Arguments))
-            {
-                txtArguments.Text = originalGame.Arguments;
-            }
-            
+            // (#224) 起動オプションの初期値設定はここでは行わない。LoadVersions →
+            // SelectedIndexChanged → LoadGameDataForVersion が form open 時に走り、選択版の
+            // arguments (空なら games フォールバック) を txtArguments に流すため、ここでの games
+            // 由来ロードは重複かつ per-version 表示を一瞬上書きするので削除。
+
             // 起動オプションのプレースホルダー設定
             lblArgumentsPlaceholder = GameFormHelper.SetupArgumentsPlaceholder(txtArguments, this);
 
@@ -381,6 +380,10 @@ namespace TonePrism.Manager
             version.Title = txtTitle.Text.Trim();
             // Descriptionは "Game Description"
             version.Description = string.IsNullOrWhiteSpace(txtDescription.Text) ? null : txtDescription.Text.Trim();
+            // (#224 バグ①) 起動オプションは他フィールド同様 version に保存する必要があるが、旧実装は
+            // ここで漏れており OK 保存時の mirror (game.Arguments = selectedVersion.Arguments) で
+            // games.arguments が null 上書きされていた。版にも保存して per-version で round-trip させる。
+            version.Arguments = string.IsNullOrWhiteSpace(txtArguments.Text) ? null : txtArguments.Text.Trim();
             // UpdateNote
             version.UpdateNote = string.IsNullOrWhiteSpace(txtVersionDescription.Text) ? null : txtVersionDescription.Text.Trim();
             
@@ -421,7 +424,21 @@ namespace TonePrism.Manager
             // game_versions.description (ゲーム説明文) / game_versions.update_note (更新内容) を保持。
             // 旧実装はこの 2 行を冒頭 + 末尾 (line 421 と line 467) で重複代入していたため、片方
             // (冒頭側) を残して末尾側を削除、関連コメントもここに集約。
-            txtDescription.Text = version.Description ?? "";
+            // (#224) description / arguments は per-version の値を読む。ただし「アクティブ版」
+            // (= games.version に一致する版。games は定義上この版の mirror) に限り、版の値が空で
+            // games 側に値がある場合のみ games にフォールバックする。これは「desync と証明できる行」
+            // 限定の修復 (Codex P2 / review #1 — 非アクティブ版の意図的な空は対象外なので per-version
+            // 独立性を壊さない)。実 DB には games.description が本物・対応版が null の旧データが存在する
+            // (旧 AddGameForm 由来) ため、これを編集→保存で空消去しないための保護。フォールバックした値は
+            // OK 保存でアクティブ版に書き戻され自己修復する。
+            bool isActiveVersion = !string.IsNullOrEmpty(originalGame.Version)
+                && string.Equals(ToVersionLeaf(version.Version ?? ""), ToVersionLeaf(originalGame.Version), StringComparison.OrdinalIgnoreCase);
+            txtDescription.Text = !string.IsNullOrWhiteSpace(version.Description)
+                ? version.Description
+                : (isActiveVersion ? (originalGame.Description ?? "") : "");
+            txtArguments.Text = !string.IsNullOrWhiteSpace(version.Arguments)
+                ? version.Arguments
+                : (isActiveVersion ? (originalGame.Arguments ?? "") : "");
             txtVersionDescription.Text = version.UpdateNote ?? "";
 
             // ジャンル
