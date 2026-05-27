@@ -424,13 +424,13 @@ namespace TonePrism.Manager
             // game_versions.description (ゲーム説明文) / game_versions.update_note (更新内容) を保持。
             // 旧実装はこの 2 行を冒頭 + 末尾 (line 421 と line 467) で重複代入していたため、片方
             // (冒頭側) を残して末尾側を削除、関連コメントもここに集約。
-            // (#224) description / arguments は版から読むが、版の値が空なら games 値にフォールバック。
-            // これで version.desc/args が空の既存 desync データを開いた時に本物 (games) が表示され、
-            // 保存で版にも書き戻されて自己修復する (per-version モデルは維持、空フォールバックのみ)。
-            txtDescription.Text = !string.IsNullOrWhiteSpace(version.Description)
-                ? version.Description : (originalGame.Description ?? "");
-            txtArguments.Text = !string.IsNullOrWhiteSpace(version.Arguments)
-                ? version.Arguments : (originalGame.Arguments ?? "");
+            // (#224) description / arguments は per-version の値をそのまま読む (games フォールバックなし)。
+            // 当初は version 値が空のとき games 値にフォールバックする自己修復を入れたが、「意図的に空の版」と
+            // 「desync」を区別できず、その版を選んだだけで active(games) 値が旧版へ silent 転写される footgun
+            // だった (Codex P2 / review #1)。新規ゲームは AddGameForm が初期版に games と同じ値を持たせるため
+            // desync は発生せず、純粋 per-version で安全。
+            txtDescription.Text = version.Description ?? "";
+            txtArguments.Text = version.Arguments ?? "";
             txtVersionDescription.Text = version.UpdateNote ?? "";
 
             // ジャンル
