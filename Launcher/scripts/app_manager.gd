@@ -20,6 +20,9 @@ func _handle_quit_request():
 	# ただしゲーム実行中はゲームを孤立させないため終了しない (項目14 の終了ガードと同じ)。
 	if ServiceMode.is_open():
 		if not GameSession.is_running():
+			# 起動/試遊テストで起動したゲームは GameSession 非経由のため is_running()=false だが、
+			# このまま quit すると孤児プロセスとして残る。quit 直前に停止 (taskkill) を通す。
+			ServiceMode.cleanup_for_quit()
 			get_tree().quit()
 		return
 

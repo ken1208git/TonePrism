@@ -46,6 +46,13 @@ func is_open() -> bool:
 	return _open
 
 
+## 終了前クリーンアップ。起動/試遊テストで起動したゲーム (GameSession 非経由) を終了させる。
+## quit 経路 (Alt+F4 等) で孤児プロセスを残さないため AppManager から quit 直前に呼ぶ。
+func cleanup_for_quit() -> void:
+	if _overlay and _overlay.has_method("cleanup_for_quit"):
+		_overlay.cleanup_for_quit()
+
+
 ## INFO ログ出力。Godot 4 の built-in Logger クラスと名前衝突するため autoload を /root/Logger 経由で参照する
 ## (直接 Logger.info() は呼べない、#85 まで Launcher 全体の移行は保留だが新規ファイルは本経路を使う)。
 func _log(message: String) -> void:

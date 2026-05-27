@@ -202,6 +202,14 @@ func close_overlay() -> void:
 	visible = false
 
 
+## ランチャー終了前のクリーンアップ。起動/試遊テストで起動したゲームを taskkill する。
+## これらのゲームは GameSession 非経由 (_spawn_game_process) で起動されるため、Alt+F4 等の quit 経路では
+## 別途終了させないと孤児プロセスとして残る。AppManager の quit 直前と項目14 終了から呼ぶ。
+func cleanup_for_quit() -> void:
+	_lt_stop()
+	_pt_stop()
+
+
 func _process(delta: float) -> void:
 	if not visible:
 		return
@@ -824,6 +832,11 @@ func _joy_axis_name(axis: int, value: float) -> String:
 func _build_network() -> void:
 	_add_text("ネットワークの繋がりを手前から順に確認します。最初に × が出た所が原因です。", C_TEXT)
 	_nw_run_btn = _add_button("接続テストを実行", _nw_start)
+	# 前回の確認が疎通フェーズ進行中 (画面を離れて戻ってきた) なら、新ボタンを押しても _nw_start が
+	# no-op になるので、無効化して進行中であることを示す (ワーカー完了時に _nw_done が再び有効化する)。
+	if _nw_running:
+		_nw_run_btn.disabled = true
+		_nw_run_btn.text = "確認中…"
 	_detail_content.add_child(HSeparator.new())
 
 	var box := VBoxContainer.new()
@@ -954,6 +967,11 @@ func _nw_done() -> void:
 	# (対象の行/ボタンは解放済みのことがある)。
 	if _nw_cancel:
 		_nw_running = false
+		# 離脱中に network 画面が作り直されている場合、その新ボタンを「実行可能」に戻す
+		# (「確認中…」で固着させない)。close 時は _nw_run_btn=null なので guard で skip。
+		if _nw_run_btn and is_instance_valid(_nw_run_btn):
+			_nw_run_btn.disabled = false
+			_nw_run_btn.text = "接続テストを実行"
 		return
 	# 速度計測は Companion 側で実施 (キャッシュ回避の正確な測定。結果は speedtest_result シグナル)。
 	var agent := get_node_or_null("/root/LauncherAgent")
@@ -2034,7 +2052,7 @@ func _build_exit() -> void:
 	# サービスモード自体が隠し画面 (Ctrl+Alt+F12) で、ここまで辿り着く操作自体が十分に意図的なため、
 	# 押したら即終了する (二段階確認は廃止)。通常は Alt+F4 / × を無効化しているのでここから終了する。
 	_add_text("ランチャーを終了します。Alt+F4 や × ボタンは無効にしてあるため、終了はこのボタンから行います。")
-	var btn := _add_button("ランチャーを終了", func(): get_tree().quit())
+	var btn := _add_button("ランチャーを終了", func(): cleanup_for_quit(); get_tree().quit())
 	_set_button_font_color(btn, C_DANGER)
 
 

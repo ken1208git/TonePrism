@@ -181,7 +181,7 @@ namespace TonePrism.LauncherAgent
                                 // speedtest <run_id> <共有ファイルパス>。run_id は結果を Launcher 側の現在の run と
                                 // 照合するための識別子 (遅延した古い結果の取り違え防止)。パスは空白を含みうるので
                                 // run_id の次の空白以降を全部パスとして扱う。
-                                string rest = line.Length > 10 ? line.Substring(10).Trim() : "";
+                                string rest = line.Substring(parts[0].Length).Trim(); // "speedtest" 以降 (コマンド名長から算出)
                                 int runId = 0;
                                 string spath = "";
                                 int sepIdx = rest.IndexOf(' ');
