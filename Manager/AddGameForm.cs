@@ -390,12 +390,18 @@ namespace TonePrism.Manager
                 dbManager.AddGame(game);
 
                 // 初期バージョン情報を追加
+                // (#224 バグ②) 旧実装は Description に "初期バージョン" を入れていたが、編集画面が
+                // version.Description を読むため、編集→保存で games の本物の説明が "初期バージョン" で
+                // 上書き消去されていた。初期版は games と同じ本物の説明 / 起動オプションを持たせ、
+                // "初期バージョン" は更新内容 (UpdateNote) に移す。
                 var initialVersion = new GameVersion
                 {
                     GameId = game.GameId,
                     Version = version, // (#158, round 3 L-2: 同上)
                     ExecutablePath = game.ExecutablePath,
-                    Description = "初期バージョン",
+                    Description = game.Description,
+                    Arguments = game.Arguments,
+                    UpdateNote = "初期バージョン",
                     RegisteredAt = DateTime.Now
                 };
                 dbManager.AddGameVersion(initialVersion);

@@ -1890,6 +1890,23 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.16.4] - 2026-05-27
+
+#### Fixed (#224 — ゲーム編集のデータ損失 2 件)
+
+実機で「Only_Up の説明文が消失」「起動オプションが保存されない」として発覚したデータ損失バグを修正。バージョン制（version ごとに説明/引数を持てる）は維持したまま、実装ミスを正す方針。
+
+- **バグ①: 起動オプション(arguments)が保存されない** — `EditGameForm.SaveGameDataToVersion` が `txtArguments` を version に書いておらず（他フィールドは全て書くのに arguments だけ漏れ）、OK 保存時の mirror `game.Arguments = selectedVersion.Arguments`（null）で `games.arguments` が消えていた。`SaveGameDataToVersion` に arguments の保存を追加。`LoadGameDataForVersion` でも arguments を版から読むようにし per-version で round-trip させる（form ロード時の games 由来ロードは削除して一本化）。
+- **バグ②: ゲーム説明文が空で上書き消去** — `AddGameForm` が初期 version の `description` に本物でなく `"初期バージョン"` を入れていたため、編集で開くと version 由来の説明欄に `"初期バージョン"` が出て、保存で `games.description`（本物）が上書きされていた。初期 version は `games` と同じ本物の description / arguments を持たせ、`"初期バージョン"` は更新内容(`update_note`)へ移動。
+- **desync 自己修復**: `LoadGameDataForVersion` は version の description/arguments が空の場合 `games` 値にフォールバック表示し、保存で版にも書き戻す（既存の version 値が空のゲームを開いて保存すると整合する）。空判定のみ（magic string なし）。
+- **VersionUpForm**: バージョンUp 時に `games.arguments` が新版の値に更新されていなかった（version 側には入るが games 側に漏れ、Launcher は games を読むため旧引数のまま起動）。`UpdatedGameInfo.Arguments` を設定して整合。
+
+Launcher は実行時に `games` テーブルのみ読むため、上記で games 側が正しくなれば表示・起動とも正しくなる。本番はまっさら新規インストールのため既存 desync データは無く、DB マイグレーション/backfill は不要。
+
+#### Bump 根拠 (v0.16.3 → v0.16.4)
+
+SemVer pre-1.0 patch bump: データ損失 bugfix のみ。スキーマ変更なし。
+
 ### [Manager v0.16.3] - 2026-05-27
 
 #### Fixed (累積コードレビュー指摘の対応)

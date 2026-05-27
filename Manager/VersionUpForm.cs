@@ -360,6 +360,10 @@ namespace TonePrism.Manager
                     GameId = originalGameInfo.GameId,
                     Title = txtTitle.Text.Trim(),
                     Description = txtDescription.Text.Trim(),
+                    // (#224) 旧実装は UpdatedGameInfo に Arguments を設定しておらず、バージョンUp 時に
+                    // games.arguments が新版の値に更新されなかった (Launcher は games を読むため旧引数の
+                    // まま起動)。NewVersion (329) と同じ値を games 側にも反映する。
+                    Arguments = txtArguments.Text.Trim(),
                     Genre = GameFormHelper.GetSelectedGenres(clbGenre),
                     
                     // フォームにない項目は既存の値を引き継ぐ
