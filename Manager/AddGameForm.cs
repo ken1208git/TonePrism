@@ -353,8 +353,8 @@ namespace TonePrism.Manager
                 Logger.Info($"[AddGameForm] サムネイル相対パス: {thumbnailPath}");
                 Logger.Info($"[AddGameForm] 背景相対パス: {backgroundPath}");
 
-                // 起動オプション
-                string arguments = txtArguments.Text;
+                // 起動オプション（空白は null 正規化 — 3 フォームで DB 表現を統一、#224 review #2）
+                string arguments = string.IsNullOrWhiteSpace(txtArguments.Text) ? null : txtArguments.Text.Trim();
 
                 // GameInfoオブジェクトを作成
                 var game = new GameInfo

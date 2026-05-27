@@ -1898,8 +1898,10 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 - **バグ①: 起動オプション(arguments)が保存されない** — `EditGameForm.SaveGameDataToVersion` が `txtArguments` を version に書いておらず（他フィールドは全て書くのに arguments だけ漏れ）、OK 保存時の mirror `game.Arguments = selectedVersion.Arguments`（null）で `games.arguments` が消えていた。`SaveGameDataToVersion` に arguments の保存を追加。`LoadGameDataForVersion` でも arguments を版から読むようにし per-version で round-trip させる（form ロード時の games 由来ロードは削除して一本化）。
 - **バグ②: ゲーム説明文が空で上書き消去** — `AddGameForm` が初期 version の `description` に本物でなく `"初期バージョン"` を入れていたため、編集で開くと version 由来の説明欄に `"初期バージョン"` が出て、保存で `games.description`（本物）が上書きされていた。初期 version は `games` と同じ本物の description / arguments を持たせ、`"初期バージョン"` は更新内容(`update_note`)へ移動。
-- **desync 自己修復**: `LoadGameDataForVersion` は version の description/arguments が空の場合 `games` 値にフォールバック表示し、保存で版にも書き戻す（既存の version 値が空のゲームを開いて保存すると整合する）。空判定のみ（magic string なし）。
+- **desync 自己修復（選択中 version のみ）**: `LoadGameDataForVersion` は version の description/arguments が空の場合 `games` 値にフォールバック表示し、OK 保存で **その選択中 version** に書き戻す（複数版が desync でも一括修復はしない＝mirror は選択版 1 件のみ）。空判定のみ（magic string なし）のため「版が値を持たない desync」と「意図的に空」を区別せず、games が非空・ある版が空の場合その版へ games 値が転写されうる（特に arguments は空が常態）。本番はまっさら新規で既存 desync が無く、新規ゲームは AddGameForm 修正で最初から整合するため実害は無い。
 - **VersionUpForm**: バージョンUp 時に `games.arguments` が新版の値に更新されていなかった（version 側には入るが games 側に漏れ、Launcher は games を読むため旧引数のまま起動）。`UpdatedGameInfo.Arguments` を設定して整合。
+
+- **arguments の空正規化を 3 フォームで統一** (review #2): 空入力時の `arguments` を `AddGameForm` / `EditGameForm` / `VersionUpForm` すべて「空白なら `null`」に揃えた（旧: 生文字列 / null / 空文字が混在）。`games` / `game_versions` の空表現が安定。Launcher 側は元々 `is_empty()` ガードがあり実行時影響なし。
 
 Launcher は実行時に `games` テーブルのみ読むため、上記で games 側が正しくなれば表示・起動とも正しくなる。本番はまっさら新規インストールのため既存 desync データは無く、DB マイグレーション/backfill は不要。
 

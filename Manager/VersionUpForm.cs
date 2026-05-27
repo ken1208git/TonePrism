@@ -326,7 +326,7 @@ namespace TonePrism.Manager
                     GameId = gameId,
                     Version = semverNext.VersionString,  // (#158)
                     ExecutablePath = "", // コピー後に設定
-                    Arguments = txtArguments.Text.Trim(),
+                    Arguments = string.IsNullOrWhiteSpace(txtArguments.Text) ? null : txtArguments.Text.Trim(),
                     Description = txtDescription.Text.Trim(), // 説明文
                     UpdateNote = txtUpdateNote.Text.Trim(), // 更新内容
                     
@@ -363,7 +363,7 @@ namespace TonePrism.Manager
                     // (#224) 旧実装は UpdatedGameInfo に Arguments を設定しておらず、バージョンUp 時に
                     // games.arguments が新版の値に更新されなかった (Launcher は games を読むため旧引数の
                     // まま起動)。NewVersion (329) と同じ値を games 側にも反映する。
-                    Arguments = txtArguments.Text.Trim(),
+                    Arguments = string.IsNullOrWhiteSpace(txtArguments.Text) ? null : txtArguments.Text.Trim(),
                     Genre = GameFormHelper.GetSelectedGenres(clbGenre),
                     
                     // フォームにない項目は既存の値を引き継ぐ
