@@ -75,7 +75,9 @@ namespace TonePrism.Manager
                     Thread.Sleep(delayMs);
                 }
             }
-            return default(T);
+            // ループは「成功時 return」「最終 retry で throw」のいずれかで必ず抜けるため到達しない。
+            // 万一 maxRetries<=0 等で到達した場合に default(T) を silent に返さず、明示的に失敗させる。
+            throw new InvalidOperationException("ExecuteWithRetry: unreachable (maxRetries 指定が不正の可能性)");
         }
 
         /// <summary>

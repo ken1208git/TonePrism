@@ -20,7 +20,9 @@ namespace TonePrism.Manager
         // v11: SPEC v1.5.1 (2026-03-28) で変更された surveys / play_records スキーマの drift 修正（v0.8.1）
         // v12: backup_log に relative_path 列追加 (#127、v0.8.2)
         // v13: manager_sessions テーブル新設 (#179、Manager LAN-wide 同時起動検出、v0.10.0)
-        private const int CurrentDbVersion = 13;
+        // v14: games.arguments を CreateTables 内アドホック ALTER から正規 MigrateV13ToV14 に移設
+        //      (累積レビュー / AGENTS.md スキーマ drift 規約準拠、v0.16.3)。最終スキーマは不変。
+        private const int CurrentDbVersion = 14;
 
         public SchemaManager(DatabaseConnection conn)
         {
@@ -280,37 +282,8 @@ namespace TonePrism.Manager
                 command.ExecuteNonQuery();
             }
 
-            // 既存のgamesテーブルにargumentsカラムがない場合は追加（マイグレーション）
-            try
-            {
-                using (var command = new SQLiteCommand("PRAGMA table_info(games)", connection, transaction))
-                {
-                    bool hasArgumentsColumn = false;
-                    using (var reader = command.ExecuteReader())
-                    {
-                        while (reader.Read())
-                        {
-                            if (reader["name"].ToString() == "arguments")
-                            {
-                                hasArgumentsColumn = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (!hasArgumentsColumn)
-                    {
-                        using (var alterCommand = new SQLiteCommand("ALTER TABLE games ADD COLUMN arguments TEXT", connection, transaction))
-                        {
-                            alterCommand.ExecuteNonQuery();
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"Migration failed (arguments)", ex);
-            }
+            // games.arguments の既存 DB への retrofit は MigrateV13ToV14 (version chain) で行う。
+            // 新規 DB は上の CREATE TABLE で arguments を持つため CreateTables 側での ALTER は不要。
 
             // game_versionsテーブル作成
             string createGameVersionsTable = @"
@@ -710,6 +683,15 @@ namespace TonePrism.Manager
 
             if (currentVersion == 0)
             {
+                // 新規 DB は CreateTables が最新スキーマを作るので stamp して返すだけでよい。
+                // ただし versioning 導入前 (user_version=0 のまま) に games テーブルだけ存在する
+                // 旧 DB は games.arguments を欠く場合がある。この列は他の games 列
+                // (supported_connection / version、MigrateGamesTable で無条件 backfill) と違い
+                // version chain (MigrateV13ToV14) 管理に移したため、v0 で chain を skip すると
+                // 永久に追加されず GameRepository の SELECT/INSERT が "no such column: arguments"
+                // で失敗する (Codex P1)。idempotent な MigrateV13ToV14 を stamp 前に明示実行して
+                // 旧実装 (CreateTables 内 retrofit) と同じ v0 カバレッジを保つ。
+                MigrateV13ToV14(connection, transaction);
                 SetDbVersion(connection, CurrentDbVersion, transaction);
                 return;
             }
@@ -835,6 +817,24 @@ namespace TonePrism.Manager
                         else
                         {
                             Logger.Warn("[DatabaseManager] 直前の migration が未完のため user_version は " + currentVersion + " のまま据え置き (v13 物理変更のみ先行適用)");
+                        }
+                    }
+
+                    if (currentVersion < 14)
+                    {
+                        // v13 → v14: games.arguments を正規 migration 化 (旧 CreateTables 内アドホック
+                        // ALTER から移設)。TableHasColumn で idempotent (= 既に列があれば no-op)。
+                        // games.arguments は他 migration と独立かつ最終スキーマ不変なので、v12/v13 と同じ
+                        // guard pattern で「直前 migration 未完なら user_version 据え置き」を踏襲。
+                        MigrateV13ToV14(connection, migTransaction);
+
+                        if (currentVersion >= 13)
+                        {
+                            currentVersion = 14;
+                        }
+                        else
+                        {
+                            Logger.Warn("[DatabaseManager] 直前の migration が未完のため user_version は " + currentVersion + " のまま据え置き (v14 物理変更のみ先行適用)");
                         }
                     }
 
@@ -1458,6 +1458,32 @@ namespace TonePrism.Manager
             // 誤読されない表記 (round 2 Info-2)。
             CreateManagerSessionsTable(connection, transaction);
             Logger.Info("[DatabaseManager] v12 → v13 migration 完了 (manager_sessions table 確保)");
+        }
+
+        /// <summary>
+        /// v13 → v14: games.arguments 列を追加。以前は CreateTables() 内のアドホック ALTER
+        /// (user_version 非連動・毎起動の存在チェック・失敗握り潰し) だったものを version chain に
+        /// 移設し、AGENTS.md「CreateTables() を編集したら必ず MigrateVxToVy」規約に整合させたもの。
+        /// 新規 DB は CreateTables の CREATE TABLE で既に arguments を持つため、本 migration は
+        /// arguments 列を持たない旧 DB の retrofit 専用。TableHasColumn で idempotent。
+        /// 失敗時は例外を伝播させ、呼び出し元 (CheckAndMigrateDatabase / InitializeDatabase) の
+        /// トランザクションが rollback される (旧実装の silent な握り潰しを廃止)。
+        /// </summary>
+        private void MigrateV13ToV14(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            if (!TableHasColumn(connection, transaction, "games", "arguments"))
+            {
+                Logger.Info("[DatabaseManager] v13 → v14: games.arguments 列を追加します");
+                using (var command = new SQLiteCommand("ALTER TABLE games ADD COLUMN arguments TEXT", connection, transaction))
+                {
+                    command.ExecuteNonQuery();
+                }
+                Logger.Info("[DatabaseManager] v13 → v14 migration 完了 (games.arguments 追加)");
+            }
+            else
+            {
+                Logger.Info("[DatabaseManager] v13 → v14: games.arguments は既に存在 (skip)");
+            }
         }
 
         /// <summary>

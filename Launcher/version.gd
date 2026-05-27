@@ -1,8 +1,7 @@
 extends RefCounted
 class_name Version
 
-## ランチャーのバージョン情報
-## マイルストーン5: StoreBrowse画面（UI改善・レスポンス向上）
+## ランチャーのバージョン情報 (Launcher 版数定数の SoT)
 ##
 ## DO NOT CHANGE FORMAT: Manager parses these 3 const lines (#108 Phase 4 #161 round 5 M-5)
 ## `Manager/Services/VersionInventory.cs` の MajorRegex / MinorRegex / PatchRegex が
@@ -12,7 +11,7 @@ class_name Version
 
 const MAJOR: int = 0
 const MINOR: int = 9
-const PATCH: int = 0
+const PATCH: int = 1
 
 static func get_version_string() -> String:
 	return "v%d.%d.%d" % [MAJOR, MINOR, PATCH]

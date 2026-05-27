@@ -120,6 +120,15 @@
 
 **注意 (#160 で section 責務分離)**: `Updater` 等の **runtime exe 群** (= SPEC §2.4 Companions 配置) の changelog は本 section ではなく **`## Companions`** (旧 `## Updater (Companions/Updater)`、本 PR で section 名を一般化) に記載する。本 section は build / 配布スクリプトのみ対象。Bundle v0.4.0 以前 (= 本 PR merge 前) の Updater 変更履歴は `## Release Tooling` の過去 entry (= round 1〜8 review 詳細等) に retain、retroactive consolidation は scope creep のため見送り (= PR #159 round 4 「SPEC 1 PR 1 bump 規約」導入時と同 pattern)。
 
+### [Release Tooling v0.1.22] - 2026-05-27
+
+#### Fixed (累積コードレビュー指摘の対応)
+
+- **`Clear-OldGodot` の version ソートを文字列辞書順 → `[version]` 数値比較に修正**: 旧 `Sort-Object Name -Descending` は文字列順のため Godot が `4.10.x` 系に達すると `4.9.x` を「より新しい」と誤判定し、最新版を古い版として削除する時限バグだった (現状 4.6.x のみで未発火)。`Where-Object { $_.Name -as [version] }` で非 version dir を削除対象から除外しつつ (cast 例外で cleanup phase が落ちるのも防ぐ)、`Sort-Object { [version]$_.Name }` で数値比較に変更。非 version 名 dir (pre-release suffix 付き等) が混ざっていた場合は無言で蓄積しないよう warn を 1 行出す。
+- **起動バナーの `(Phase 1)` 表記を削除**: Phase 2 / 3 完成済 (`.DESCRIPTION` と整合) なのにバナーだけ旧 Phase 表記が残り、実行者の誤読源になっていた。
+
+bump 判断: 配布スクリプトの bugfix のみ。patch (v0.1.21 → v0.1.22)。Bundle への反映は次回リリース実行時。
+
 ### [Release Tooling v0.1.21] - 2026-05-21
 
 #### Added (#101 / #216 — WindowProbe の build / 配布統合)
@@ -1259,6 +1268,23 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.9.1] - 2026-05-27
+
+#### Fixed (累積コードレビュー指摘の対応)
+
+- **DB オープン失敗の silent success を解消** (`database_manager.gd`): `db.open_db()` の戻り値を無視し、後続の `if db == null` が常に false の dead code だったため、パス不正 / 権限不足 / ロック等で DB を開けなくても `open()` が `true` を返していた。戻り値で判定し、失敗時は `db = null` をセットして `false` を返すよう修正。これにより「DB を開けないのにゲーム 0 件として正常起動」する経路が塞がれる。
+- **ゲーム起動失敗時のログを ERROR レベル化** (`game_session.gd`): 実行ファイル未検出 / プロセス起動失敗の経路が `print("❌ …")` だったのを、同ファイルの既存パターンに揃えて `push_error` に変更 (ログのレベルフィルタで追跡可能に)。あわせて `database_manager.gd` `open()` の失敗経路 (DB ファイル不在 / オープン失敗) も同じ理由で `push_error` に昇格。
+- **画面遷移失敗時に復帰演出フラグを汚さないようガード** (`playing.gd`): `change_scene_to_file` の戻り値を確認し、失敗時は `AppState.returning_from_game` / `returning_from_quit` を設定せず early return。成功時のフラグ設定は deferred 遷移より前なので新シーンの `_ready` から正しく参照される。
+- `version.gd` の stale なマイルストーンコメントを削除し、ファイル責務の記述に置換。
+
+#### Changed
+
+- **対応 DB スキーマを v13 → v14 に追従** (`database_manager.gd` `CURRENT_DB_VERSION`)。v14 は Manager 側で `games.arguments` を正規 migration 化しただけで最終スキーマは不変、Launcher は `arguments` を既に扱えるため定数追従のみ (マイグレーション不要、§8.2 #5 の共有定数規約)。これで本番 DB(v14) 起動時の「対応版より新しい」警告とサービスモードの DB バージョン非一致表示を防ぐ。
+
+#### Bump 根拠 (v0.9.0 → v0.9.1)
+
+bugfix + DB 対応版数の追従のため SemVer patch (`version.gd` PATCH 0→1)。挙動変更は失敗経路の早期検知 / ログ精度向上に限定、DB 追従は読み取り専用で破壊的変更なし。
+
 ### [Launcher v0.9.0] - 2026-05-27
 
 #### Added (#74 — サービスモード / 機能23)
@@ -1863,6 +1889,24 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.16.3] - 2026-05-27
+
+#### Fixed (累積コードレビュー指摘の対応)
+
+- **`GameRepository.ReadGameInfo` の `arguments` 読み取りで silent な握り潰しを解消**: `try { … } catch { }` で例外を完全に飲み込んでおり、コメント「GetAll uses display_version alias which doesn't include arguments」も誤り (GetAll / GetById 双方の SELECT に `arguments` を含む)。catch を削除して直接読み取りに変更。将来 SELECT から `arguments` が誤って外れても例外が表面化するようになり、`Arguments` の隠れた null 化経路を排除。
+- **`DatabaseConnection.ExecuteWithRetry<T>` の到達不能 `return default(T)` を例外に変更**: ループは「成功で return」「最終 retry で throw」のいずれかで必ず抜けるため到達しないが、万一 `maxRetries<=0` 等で到達した場合に `null` / `0` を silent に返さず `InvalidOperationException` を投げるよう変更 (将来の制御フロー変更時の silent failure 予防)。
+
+#### Changed (スキーマ drift 解消: games.arguments を正規 migration 化、DB v13 → v14)
+
+- **`games.arguments` の追加を `CreateTables()` 内アドホック ALTER から `MigrateV13ToV14` に移設** (`CurrentDbVersion` 13 → 14)。旧実装は (a) `user_version` に連動せず毎起動 `PRAGMA table_info` で存在チェックして足す野良 migration で、(b) 失敗を `catch` で握り潰していた (AGENTS.md「`CreateTables()` を編集したら必ず `MigrateVxToVy`、スキーマ drift の温床」に違反)。version chain に正規化し、失敗時は例外を伝播させて transaction を rollback するよう変更。
+- **最終スキーマは不変**: 新規 DB は `CREATE TABLE games` で従来どおり `arguments` を持ち、`MigrateV13ToV14` は `TableHasColumn` で idempotent (= 列がある DB では no-op)。`ExpectedSchema` / SPEC §7.3 とも差分なし。retrofit が必要なのは arguments 列を持たない旧 DB のみ。
+- **v0 (versioning 導入前) DB の retrofit を維持** (Codex P1): `user_version=0` の旧 DB は `CheckAndMigrateDatabase` の早期 stamp path で chain を skip するため、`MigrateV13ToV14` をその path 内でも明示実行。これで旧実装 (`CreateTables` 内 retrofit) と同じ v0 カバレッジを保ち、列欠落のまま `no such column: arguments` で落ちる回帰を防ぐ。
+- `MigrateGamesTable` (games の `supported_connection` / `version` 追加) は `games.arguments` を参照しないことを確認済みで、retrofit を chain (= `MigrateGamesTable` の後) に移しても初期化中の依存は発生しない。
+
+#### Bump 根拠 (v0.16.2 → v0.16.3)
+
+SemVer pre-1.0 patch bump: bugfix + 内部マイグレーション hygiene のみ。`games.arguments` 移設は最終スキーマ不変 (= ユーザー影響なし) で、隠れた失敗経路の顕在化に限定。DB v13 → v14 bump は migration を版数管理下に置くためで、新規 install / 既存 DB ともに挙動互換。
 
 ### [Manager v0.16.2] - 2026-05-21
 

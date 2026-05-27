@@ -158,6 +158,12 @@ func _on_game_exited() -> void:
 	# トランジション無しで瞬時に game_selection へ。game_selection 側が起動中画面と同じ
 	# running-view 静止状態 (プレイ中表示・背景 1.05) を再現し、起動モーションの逆再生
 	# (switch_to_normal_view: 背景ズームアウト + カルーセルフェードイン) でカルーセルへ戻る。
+	# change_scene_to_file は実遷移をフレーム末に deferred 実行するため、戻り値で即時失敗
+	# (シーンロード不可) を検知できる。失敗時は AppState フラグを汚さず復帰演出の誤再生を防ぐ。
+	# 成功時のフラグ設定は deferred 遷移より前なので、新シーンの _ready から正しく参照される。
+	var err := get_tree().change_scene_to_file("res://scenes/game_selection.tscn")
+	if err != OK:
+		push_error("[Playing] game_selection への遷移に失敗 (err=%d)" % err)
+		return
 	AppState.returning_from_game = true
 	AppState.returning_from_quit = _quit_shown  # 終了中を見せた場合は復帰再現も「終了中」で連続させる
-	get_tree().change_scene_to_file("res://scenes/game_selection.tscn")

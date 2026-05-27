@@ -11,8 +11,10 @@ var db_path: String = ""
 # Launcher が想定する DB スキーマバージョン
 # Manager 側 SchemaManager.cs の CurrentDbVersion と歩調を合わせること
 # (v9, v10, v12 は backup_log 関連 / v13 は manager_sessions で Launcher は触らない /
-#  v11 の surveys・play_records 新スキーマには Launcher のクエリが既に対応済 → 単に定数追従のみ)
-const CURRENT_DB_VERSION: int = 13
+#  v11 の surveys・play_records 新スキーマには Launcher のクエリが既に対応済 /
+#  v14 は games.arguments の正規 migration 化のみで最終スキーマ不変・Launcher は arguments 対応済
+#  → いずれも単に定数追従のみ)
+const CURRENT_DB_VERSION: int = 14
 
 ## データベースを開く
 func open() -> bool:
@@ -23,7 +25,7 @@ func open() -> bool:
 
 	# データベースファイルが存在するか確認
 	if not FileAccess.file_exists(db_path):
-		print("[DatabaseManager] Error: データベースファイルが見つかりません: " + db_path)
+		push_error("[DatabaseManager] データベースファイルが見つかりません: " + db_path)
 		return false
 
 	# SQLiteインスタンスを作成
@@ -32,12 +34,11 @@ func open() -> bool:
 	# データベースパスを設定
 	db.path = db_path
 
-	# データベースを開く（godot-sqliteのAPI）
-	db.open_db()
-
-	# データベースが開けたか確認（エラーが発生した場合はdbがnullになる可能性がある）
-	if db == null:
-		print("[DatabaseManager] Error: データベースを開けませんでした: " + db_path)
+	# データベースを開く（godot-sqliteのAPI）。失敗時 (パス不正・権限不足・ロック等) は
+	# false が返る。db オブジェクト自体は非 null のままなので、戻り値で必ず判定する。
+	if not db.open_db():
+		push_error("[DatabaseManager] データベースを開けませんでした: " + db_path)
+		db = null
 		return false
 
 	print("[DatabaseManager] データベースを開きました: ", db_path)
