@@ -2,11 +2,11 @@ extends Node
 
 # AppManager
 # アプリケーション全体のライフサイクル管理を行うAutoLoad
-# ・終了リクエスト(Alt+F4)のハンドリング
+# ・終了リクエスト(Alt+F4 / ×ボタン)の封印。ランチャーの終了はサービスモードからのみ行える
 # ・全画面共通の処理
 
 func _ready():
-	# Alt+F4などで即終了せず、確認ダイアログを出すようにする
+	# Alt+F4 / × で即終了せず、終了要求を自前でハンドリングする。
 	get_tree().set_auto_accept_quit(false)
 	print("[AppManager] Auto accept quit disabled. Quit request will be handled manually.")
 
@@ -15,34 +15,26 @@ func _notification(what):
 		_handle_quit_request()
 
 func _handle_quit_request():
-	# エラーダイアログ表示中は確認なしで即終了（スタッフ対応中）
-	if ErrorManager.is_error_showing():
-		_quit_application()
+	# サービスモードはスタッフしか開けない隠し画面なので、その中でだけ Alt+F4 での終了を許可する
+	# (項目14 まで辿らず素早く終了できる。生徒は開けないので誤終了の心配はない)。
+	# ただしゲーム実行中はゲームを孤立させないため終了しない (項目14 の終了ガードと同じ)。
+	if ServiceMode.is_open():
+		if not GameSession.is_running():
+			# 起動/試遊テストで起動したゲームは GameSession 非経由のため is_running()=false だが、
+			# このまま quit すると孤児プロセスとして残る。quit 直前に停止 (taskkill) を通す。
+			ServiceMode.cleanup_for_quit()
+			get_tree().quit()
 		return
 
-	# 終了リクエストが来た場合（Alt+F4やウィンドウの×ボタン）
-	var msg = "【警告】アプリケーションを終了します\n\nこの操作は管理者（スタッフ）用です。\n通常、この画面を閉じる必要はありません。\n\n本当に終了してもよろしいですか？"
+	# 通常画面では Alt+F4 / × ボタンによる終了を完全に封印する。終了はサービスモード
+	# (Ctrl+Alt+F12 →「ランチャー終了」) からのみ可能にし、生徒の誤操作や勝手な終了を防ぐ。
+	# 終了要求は「サービスモードから終了して」の案内に変える。サービスモードはエラー表示中でも
+	# 開けるので、どんな状況でも終了の入り口をサービスモードに一本化できる。
+	if ErrorManager.is_error_showing():
+		# 既にエラーダイアログ表示中。案内ダイアログを重ねず黙殺する (終了はサービスモードから)。
+		return
 
-	# 既存のダイアログがあれば閉じてから出す
+	var msg = "この画面からランチャーを終了することはできません。\n\n【スタッフの方へ】\n終了するにはサービスモードを開き (Ctrl + Alt + F12)、\n「ランチャー終了」から行ってください。"
+
 	DialogManager.close_current_dialog()
-	
-	# ボタンを "終了する", "キャンセル" の順にする
-	# Left: 終了する (Index 0), Right: キャンセル (Index 1)
-	# Default focus on Cancel (Index 1) is safer? Or Exit?
-	# Typically left is affirmative, right is cancel.
-	# User screenshot had: OK, Cancel, Exit.
-	# Let's do: [終了する, キャンセル]
-	
-	# キャンセルを左（デフォルトフォーカス）にする
-	DialogManager.show_message("終了確認", msg, ["キャンセル", "終了する"], func(idx):
-		if idx == 1:
-			# 終了する
-			_quit_application()
-		else:
-			# キャンセル
-			pass
-	)
-
-func _quit_application():
-	print("[AppManager] Quitting application...")
-	get_tree().quit()
+	DialogManager.show_message("終了について", msg, ["閉じる"], func(_idx): pass)

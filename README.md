@@ -102,7 +102,6 @@ git clone https://github.com/ken1208git/TonePrism.git
 - [部員向けマニュアル](https://ken1208git.github.io/TonePrism/): 運営スタッフ・部員向けの運用マニュアル（`docs/` を MkDocs で公開）
 - [SPECIFICATION.md](SPECIFICATION.md): 全体仕様、画面仕様、マイルストーン、バージョン方針
 - [CHANGELOG.md](CHANGELOG.md): 実装変更の履歴
-- [ERROR_CODES_MANUAL.txt](ERROR_CODES_MANUAL.txt): エラーコード運用メモ
 
 ## 補足
 

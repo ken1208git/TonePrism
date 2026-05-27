@@ -33,6 +33,8 @@ AppState="*res://scripts/app_state.gd"
 TransitionManager="*res://scripts/transition_manager.gd"
 OverlayManager="*res://scripts/overlay_manager.gd"
 GameSession="*res://scripts/game_session.gd"
+ServiceMode="*res://scripts/service_mode.gd"
+DebugOverlay="*res://scripts/debug_overlay.gd"
 
 [display]
 

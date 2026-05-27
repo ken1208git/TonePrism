@@ -1,6 +1,6 @@
 # 変更履歴
 
-このプロジェクト（Prismランチャーシステム）の重要な変更点を全て記録します。
+このプロジェクト（TonePrism）の重要な変更点を全て記録します。
 
 このファイルの形式は [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) に従い、
 このプロジェクトは [Semantic Versioning](https://semver.org/lang/ja/) に準拠しています。
@@ -1153,6 +1153,13 @@ Release.bat の編集は **UTF-8 (no BOM) + CRLF** 厳守 (SPEC §3.7.9.1 参照
 
 SPEC §2.4 で定義される「主要 (Launcher / Manager / Monitor) を補助する独立 exe 群」の **runtime exe** の変更履歴。`Companions/Updater/TonePrism_Updater.exe` (Manager 自身の dir 置換用) + `LauncherAgent` (#30/#101/#216、probe/sensor/focus を統合した Launcher 補助の常駐エージェント、旧 WindowProbe を吸収) の deployment 配置と整合。本 section は **#160 で `## Updater (Companions/Updater)` から rename + 一般化**、`## Release Tooling` (= build / 配布スクリプト) と責務分離 (= 後者は build 時のみ動く scripts、本 section は runtime exe)。SPEC §2.4 / §3.7.4 参照。
 
+### [LauncherAgent v0.2.0] - 2026-05-26
+
+- **速度計測コマンド `speedtest <run_id> <共有ファイルパス>` を追加** (サービスモードのネットワーク接続テスト用。`run_id` は古い遅延結果の取り違え防止用に Launcher が要求と結果を照合する識別子)。Godot 単体では正確に測れない 2 つを Companion で実施し `{"type":"speedtest","kind":"internet|server","ok":..,"text":".."}` イベントで返す:
+  - **インターネット速度**: `HttpWebRequest` を **6 本並列**で約 5 秒回し合計バイト/秒から Mbps を算出。各接続は **75MB を1回要求して締め切りまで流しっぱなし**にする (小さいサイズで細切れに再リクエストするとリクエスト準備の隙間＋スロースタート再開で大幅に過小評価される: 25MB だと 50〜60Mbps しか出なかった)。測定サイト同様の継続ストリーム並列方式で実速に近づける (例 232Mbps)。**Cloudflare `__down` は bytes が大きすぎると 403 を返す (75MB はOK / 100MB は403) ため 75MB が上限**。失敗時は理由を「測定不可 (HTTP 403)」等と結果に表示。短時間の連打は 429 (Too Many Requests) になり得るが現地での単発利用では問題なし。
+  - **共有サーバー読み込み速度**: `CreateFile` に **`FILE_FLAG_NO_BUFFERING`** を指定して **OS ファイルキャッシュを回避**し実 MB/秒を測る (Godot の `FileAccess` はキャッシュ回避不可で、頻繁に読まれる DB は RAM キャッシュから読まれて実態と乖離するため)。`VirtualAlloc` でセクタ境界の 1MB バッファを確保し `ReadFile` でシーケンシャル読み (最大 100MB)。**計測対象は Launcher から渡された `games` フォルダ配下で最も大きいファイル** (`ResolveReadTarget`: `DirectoryInfo.EnumerateFiles` の `FileInfo` は列挙時にサイズを保持するため SMB 上でも追加 stat 不要で速い、時間予算 5 秒で打ち切り)。**exe を測らない理由**: Godot ゲームの exe は数百KBと小さく (本体は別の `.pck`)、量が少なすぎて速度がブレるため。実際の games ツリーには 286MB のプレビュー動画 (.mp4) / 284MB の .pck / Unity の 94〜106MB の .resS 等があり、最大ファイルを選ぶことで意味のある量 (100MB) を読める。
+- 計測は専用バックグラウンドスレッドで実行し、メインループ (メッセージポンプ / 親プロセス監視) を止めない。
+
 ### [LauncherAgent v0.1.0] - 2026-05-23
 
 > **命名**: 当初 `LauncherCompanion` で実装したが、`Companions/` 配下の命名一貫性 (Updater と同じ機能/役割ベース、カテゴリ名 "Companion" のスタッター回避) のため **`LauncherAgent`** にリネーム (#214、folder/csproj/AssemblyName/namespace `TonePrism.LauncherAgent`/exe `TonePrism_LauncherAgent.exe`/Godot autoload/ログ prefix `[LauncherAgent]` を一括更新)。本 entry は初版 v0.1.0 を最終形で記載。
@@ -1251,6 +1258,37 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 ---
 
 ## Launcher（ランチャー本体）
+
+### [Launcher v0.9.0] - 2026-05-27
+
+#### Added (#74 — サービスモード / 機能23)
+
+`Ctrl+Alt+F12` で開くスタッフ専用の全画面診断メニュー (autoload `ServiceMode` + `scripts/service_mode_overlay.gd`、CanvasLayer layer 200 / `PROCESS_MODE_ALWAYS` / 裏シーンを pause + 完全不透明の黒背景で凍結 / 60 秒無操作で自動復帰)。左に項目リスト・右に詳細の master-detail で、キーボード (↑↓ / Enter / Esc) とコントローラー (D-Pad / A / B) の両対応。主リストの上下は端でラップ。SPEC §機能23 参照。実装した 14 項目:
+
+1. **入力チェック** — 接続中コントローラー一覧 (`get_joy_info` の `raw_name` で実機の製品名を表示、例: Xbox Series X Controller) + 「入力確認モード」で押したボタン/キー/スティックをライブ表示。日本語配列キーや軸も判別し、Esc / Guide を 3 回で抜ける。
+2. **音声チェック** — 880Hz のテスト音を生成再生して音声出力を確認。
+3. **画面表示テスト** — グリッド / カラーバー (SMPTE RP 219 / ARIB の HD カラーバー) / 解像度+グレースケール / 単色などのパターンを順次スライドショー表示 (任意キーで次へ・← / Backspace で戻る・Esc / B で中断)。全画面 `Control._draw()` 描画 (画像アセット不要・解像度追従)。
+4. **ゲーム動作テスト** — 確認方法を選ぶサブ階層の 3 段階: ①ファイル存在チェック (起動せず exe 有無を全件一括) / ②起動テスト (自動で起動→ウィンドウ生成確認→自動終了で起動可否を判定) / ③試遊テスト (1 本ずつ起動→手動 or HOME/Guide で復帰→〇× 記録→自動で次へ)。チェックリスト + ゼブラ背景。
+5. **ネットワーク接続テスト** — 8 段階 (IP→ゲートウェイ→DNS→インターネット→インターネット速度→共有サーバー接続→共有サーバー読込速度→Monitor) を手前から確認 (最初に × が出た所が原因)。疎通は別スレッドで `OS.execute` / TCP、ゲートウェイは ping 無応答ルーター対策で `arp -a` フォールバック + 3 回 ping。速度測定は Godot 単体では不正確なため LauncherAgent(Companion) に委譲 (詳細は `## Companions` の `### [LauncherAgent v0.2.0]`)。Monitor は未実装表示。
+6. **データベース整合性チェック** — DB ファイル存在 / 接続 / 読み取り / 必須テーブル / バージョン / テーブル別レコード数を確認。
+7. **簡易ログ確認** — 現セッションの直近ログをメモリバッファから一覧表示 (WARN/ERROR 色分け)。あわせて `logger.gd` にリングバッファを追加。
+8. **システム情報** — CPU / GPU / メモリ / 解像度 / リフレッシュレート / OS / ロケール / 版数 / パス等を 4 分類で表示し、変動項目 (FPS / メモリ / 日時 / 稼働時間) はリアルタイム更新。
+9. **デバッグオーバーレイ切替** — ON で FPS・メモリ・PC名・シーン状態・DB接続等を常時表示する透明・最前面の別 OS ウィンドウ (autoload `DebugOverlay`)。中断メニュー / ゲームの上にも表示継続、メモリのみ保持 (再起動で OFF)。
+10. **フルスクリーン切替** / 11. **ランチャー表示モニタ選択** / 12. **再読み込み** / 13. **再起動** / 14. **ランチャー終了** (二段階確認なしで即終了、ゲーム実行中は除外)。
+
+#### Added (#84 — 終了制御)
+
+Alt+F4 / × ボタンを封印し、サービスモードの「14. ランチャー終了」のみを正規の終了手段にした。例外としてサービスモード表示中 (ゲーム非実行時) のみ Alt+F4 を許可。
+
+#### Changed
+
+- **対応 DB スキーマを v12 → v13 に追従** (`database_manager.gd` `CURRENT_DB_VERSION`)。v13 で追加の `manager_sessions` (#179) は Manager 専用で Launcher (読み取り専用 §6.5) は非対象のため、定数追従のみ (マイグレーション不要)。これで本番 DB(v13) 起動時の「対応版より新しい」警告とサービスモードの DB バージョン非一致表示を解消。
+- **エラーダイアログにエラーコード別の対処法を併記** (`error_dialog.gd` `_REMEDY`、ゲーセン筐体のエラー表示と同様)。スタンドアロンの `ERROR_CODES_MANUAL.txt` を廃止。
+- フォントを Noto Sans JP に統一、配色を 見出し=白 (C_ACCENT) / 本文=薄灰 (C_TEXT) / 補足=濃灰 (C_MUTED) の 3 段で統一。
+
+#### Bump 根拠 (v0.8.1 → v0.9.0)
+
+大規模な新機能 (サービスモード 14 項目 + 終了制御) の追加のため SemVer minor (`version.gd` MINOR 8→9 / PATCH 1→0)。DB 対応版数の追従は読み取り専用で破壊的変更なし。
 
 ### [Launcher v0.8.1] - 2026-05-25
 

@@ -10,6 +10,12 @@ var _timeout_dialog: CommonDialog = null
 
 ## アイドルタイマーを更新する。trueを返したらスクリーンセーバーに遷移
 func update(delta: float, is_paused: bool) -> bool:
+	# サービスモード表示中 (スタッフが操作中) はアイドル計測しない。タイマーを 0 に保つことで、
+	# 閉じた直後は 0 から再計測 = 即スクリーンセーバーに飛ばず、放置すればちゃんとタイトルへ戻る。
+	# (store_browse / game_selection は PROCESS_MODE_ALWAYS なのでサービスモード中も update が呼ばれる。)
+	if ServiceMode.is_open():
+		_idle_timer = 0.0
+		return false
 	if not is_paused or _timeout_dialog != null:
 		_idle_timer += delta
 

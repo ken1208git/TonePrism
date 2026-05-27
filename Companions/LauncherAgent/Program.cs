@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -39,6 +40,13 @@ namespace TonePrism.LauncherAgent
         private static UdpClient _eventSender;
         private static IPEndPoint _eventEp;
         private static int _seq;
+
+        // 速度計測 (サービスモードのネットワークテスト用)。1 回約5秒の並列DL + 共有のキャッシュ無し読み。
+        // bytes は各接続が5秒間「流しっぱなし」になる十分な大きさにする (小さいと再リクエストの
+        // 隙間 + スロースタート再開で大幅に過小評価される)。締め切りで読み取りを打ち切る。
+        // 上限は 75MB: Cloudflare `__down` は bytes が大きすぎると 403 を返す (75MB はOK / 100MB は403)。
+        private const string SpeedUrl = "https://speed.cloudflare.com/__down?bytes=75000000";
+        private static volatile bool _speedRunning;
 
         private static int Main(string[] args)
         {
@@ -159,6 +167,35 @@ namespace TonePrism.LauncherAgent
                                     Logger.Milestone("[main] focus_hwnd " + hwndVal + " ok=" + ok);
                                 }
                                 break;
+                            case "clickthrough":
+                                // clickthrough <hwnd>。指定窓を OS レベルでクリック透過 (WS_EX_TRANSPARENT) にする。
+                                // デバッグHUDが外部ゲームの上にある時でもクリックを下へ通すため (Godot の
+                                // FLAG_MOUSE_PASSTHROUGH は同一プロセス内限定なので補完)。
+                                if (parts.Length >= 2 && long.TryParse(parts[1], out long cthwnd) && cthwnd != 0)
+                                {
+                                    bool ok = Win32Windows.SetClickThrough(new IntPtr(cthwnd));
+                                    Logger.Milestone("[main] clickthrough " + cthwnd + " ok=" + ok);
+                                }
+                                break;
+                            case "speedtest":
+                                // speedtest <run_id> <共有ファイルパス>。run_id は結果を Launcher 側の現在の run と
+                                // 照合するための識別子 (遅延した古い結果の取り違え防止)。パスは空白を含みうるので
+                                // run_id の次の空白以降を全部パスとして扱う。
+                                string rest = line.Substring(parts[0].Length).Trim(); // "speedtest" 以降 (コマンド名長から算出)
+                                int runId = 0;
+                                string spath = "";
+                                int sepIdx = rest.IndexOf(' ');
+                                if (sepIdx > 0)
+                                {
+                                    int.TryParse(rest.Substring(0, sepIdx), out runId);
+                                    spath = rest.Substring(sepIdx + 1).Trim();
+                                }
+                                else
+                                {
+                                    int.TryParse(rest, out runId); // パス省略時 (run_id のみ)
+                                }
+                                StartSpeedTest(runId, spath);
+                                break;
                             case "quit":
                                 Logger.Milestone("[main] quit コマンド受信、終了");
                                 sensor.Stop();
@@ -245,6 +282,66 @@ namespace TonePrism.LauncherAgent
             Logger.Milestone("[main] trigger seq=" + seq + " event=" + source);
         }
 
+        // ---- 速度計測 ----
+        private static void StartSpeedTest(int runId, string sharePath)
+        {
+            if (_speedRunning)
+            {
+                // 前回の計測が in-flight。無言で捨てると Launcher 側が結果を受け取れず固着する
+                // (Launcher 側は結果到着 or タイムアウトまでロック保持)。busy を ok:false で即返して復帰させる。
+                SendSpeedtest("internet", false, "前回の計測中です。数秒待って再実行してください", runId);
+                SendSpeedtest("server", false, "前回の計測中です。数秒待って再実行してください", runId);
+                return;
+            }
+            _speedRunning = true;
+            var t = new Thread(() => RunSpeedTest(runId, sharePath)) { IsBackground = true };
+            t.Start();
+            Logger.Milestone("[speed] 計測開始 run=" + runId + " share=" + sharePath);
+        }
+
+        private static void RunSpeedTest(int runId, string sharePath)
+        {
+            try
+            {
+                double mbps;
+                if (SpeedTest.Internet(5000, 6, SpeedUrl, out mbps))
+                    SendSpeedtest("internet", true, "約 " + Math.Round(mbps) + " Mbps", runId);
+                else
+                    SendSpeedtest("internet", false, "測定不可 (" + (string.IsNullOrEmpty(SpeedTest.LastError) ? "0B" : SpeedTest.LastError) + ")", runId);
+
+                double mbsec; long bytes;
+                // 受け取ったパスがディレクトリなら配下で最大のファイルを測る (exe は小さく本体は .pck/.mp4/.resS 側)。
+                string target = SpeedTest.ResolveReadTarget(sharePath, 5000);
+                if (!string.IsNullOrEmpty(target) && SpeedTest.ServerRead(target, 100L * 1024 * 1024, SERVER_READ_CAP_MS, out mbsec, out bytes))
+                {
+                    string sz = bytes >= 1048576 ? (bytes / 1048576) + "MB" : (Math.Max(1, bytes / 1024)) + "KB";
+                    SendSpeedtest("server", true, "約 " + Math.Round(mbsec, 1) + " MB/秒 (" + sz + " 読込)", runId);
+                }
+                else
+                    SendSpeedtest("server", false, string.IsNullOrEmpty(sharePath) ? "対象パス不明" : "測定不可", runId);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("[speed] 計測中に例外", ex);
+                SendSpeedtest("internet", false, "測定不可", runId);
+                SendSpeedtest("server", false, "測定不可", runId);
+            }
+            finally
+            {
+                _speedRunning = false;
+            }
+        }
+
+        // server read の経過時間上限 (ms)。遅い共有でも有界時間で「読めた分」から速度を出し、
+        // Launcher 側の速度待ちタイムアウトに当たって「測定不可」化するのを防ぐ。
+        private const int SERVER_READ_CAP_MS = 10000;
+
+        private static void SendSpeedtest(string kind, bool ok, string text, int runId)
+        {
+            Send("{\"type\":\"speedtest\",\"kind\":\"" + kind + "\",\"ok\":" + (ok ? "true" : "false")
+                + ",\"text\":\"" + JsonEscape(text) + "\",\"run\":" + runId + ",\"at_unix_ms\":" + UnixMs() + "}");
+        }
+
         private static void SendLog(string level, string msg)
         {
             // Logger.Forwarder 経由。ここでは Logger を呼ばない (再帰防止)。
@@ -324,5 +421,170 @@ namespace TonePrism.LauncherAgent
         [DllImport("user32.dll")] private static extern bool PeekMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax, uint wRemoveMsg);
         [DllImport("user32.dll")] private static extern bool TranslateMessage(ref MSG lpMsg);
         [DllImport("user32.dll")] private static extern IntPtr DispatchMessage(ref MSG lpMsg);
+    }
+
+    /// <summary>
+    /// 速度計測。インターネットは複数並列DLで実速に近づけ、共有サーバーは FILE_FLAG_NO_BUFFERING で
+    /// OS キャッシュを回避して実際の読み込み速度を測る (Godot の FileAccess では不可能なため Companion で実施)。
+    /// </summary>
+    internal static class SpeedTest
+    {
+        private static long _dlBytes;
+        // 失敗時の理由 (UI とログで原因切り分けに使う)。最後に観測したエラーを保持。
+        internal static string LastError = "";
+
+        private static void RecordError(Exception ex)
+        {
+            try
+            {
+                var we = ex as WebException;
+                if (we != null)
+                {
+                    var hr = we.Response as HttpWebResponse;
+                    LastError = hr != null ? ("HTTP " + (int)hr.StatusCode) : ("接続:" + we.Status);
+                }
+                else
+                {
+                    LastError = ex.GetType().Name;
+                }
+            }
+            catch { LastError = "err"; }
+        }
+
+        // インターネット速度 (Mbps)。durationMs の間、connections 本を並列でDLし続けて合計バイト/秒を測る。
+        public static bool Internet(int durationMs, int connections, string url, out double mbps)
+        {
+            mbps = 0;
+            try
+            {
+                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+                ServicePointManager.DefaultConnectionLimit = 64;
+            }
+            catch { }
+            Interlocked.Exchange(ref _dlBytes, 0);
+            LastError = "";
+            int deadline = unchecked(Environment.TickCount + durationMs);
+            var threads = new Thread[connections];
+            var sw = Stopwatch.StartNew();
+            for (int i = 0; i < connections; i++)
+            {
+                int idx = i;
+                threads[i] = new Thread(() => DownloadLoop(url, idx, deadline)) { IsBackground = true };
+                threads[i].Start();
+            }
+            for (int i = 0; i < connections; i++) threads[i].Join(durationMs + 10000);
+            sw.Stop();
+            long total = Interlocked.Read(ref _dlBytes);
+            double secs = sw.Elapsed.TotalSeconds;
+            if (total <= 0 || secs <= 0) return false;
+            // 403 等のエラーが起きつつ最初の数KBだけ受信したケースを「成功(緑)」と誤認しない。
+            // エラーが記録されていて受信量が極端に少ない (< 1MB) なら測定失敗扱いにする
+            // (エラー無しで <1MB は実際に遅い回線の正当な測定値なので通す)。
+            if (!string.IsNullOrEmpty(LastError) && total < 1048576) return false;
+            mbps = (total * 8.0) / secs / 1e6;
+            return true;
+        }
+
+        private static void DownloadLoop(string url, int idx, int deadline)
+        {
+            var buf = new byte[65536];
+            while (unchecked(Environment.TickCount - deadline) < 0)
+            {
+                try
+                {
+                    var req = (HttpWebRequest)WebRequest.Create(url + "&n=" + idx + "_" + Environment.TickCount);
+                    req.Timeout = 8000;
+                    req.ReadWriteTimeout = 8000;
+                    req.KeepAlive = true;
+                    req.AllowAutoRedirect = true;
+                    using (var resp = (HttpWebResponse)req.GetResponse())
+                    using (var s = resp.GetResponseStream())
+                    {
+                        int n;
+                        while (unchecked(Environment.TickCount - deadline) < 0 && (n = s.Read(buf, 0, buf.Length)) > 0)
+                            Interlocked.Add(ref _dlBytes, n);
+                    }
+                }
+                catch (Exception ex) { RecordError(ex); Thread.Sleep(150); }
+            }
+        }
+
+        // 読み込み速度の計測対象を決める。ファイルならそのまま、ディレクトリなら配下で最も大きいファイルを返す。
+        // ゲーム本体は exe でなく .pck / .mp4 (プレビュー動画) / Unity の .resS 等の巨大データ側にあるため、
+        // ツリーを走査して最大ファイルを選ぶことで意味のある量を読めるようにする。
+        // DirectoryInfo.EnumerateFiles の FileInfo は列挙時にサイズを保持する (WIN32_FIND_DATA 由来) ので
+        // SMB 上でもファイル毎の追加 stat が発生せず速い。巨大ツリー対策に budgetMs の時間予算を設ける。
+        public static string ResolveReadTarget(string pathOrDir, int budgetMs)
+        {
+            try
+            {
+                if (File.Exists(pathOrDir)) return pathOrDir;
+                if (!Directory.Exists(pathOrDir)) return pathOrDir; // 渡されたまま ServerRead 側で失敗扱いさせる
+                FileInfo best = null;
+                var sw = Stopwatch.StartNew();
+                try
+                {
+                    foreach (var f in new DirectoryInfo(pathOrDir).EnumerateFiles("*", SearchOption.AllDirectories))
+                    {
+                        if (best == null || f.Length > best.Length) best = f;
+                        if (sw.ElapsedMilliseconds > budgetMs) break; // 予算超過時はそれまでの最大で打ち切り
+                    }
+                }
+                catch { /* アクセス拒否等で列挙が中断しても best にそれまでの最大が残る */ }
+                return best != null ? best.FullName : pathOrDir;
+            }
+            catch { return pathOrDir; }
+        }
+
+        // 共有サーバーの読み込み速度 (MB/秒)。FILE_FLAG_NO_BUFFERING でキャッシュを使わず実読み込みを測る。
+        // capBytes (最大読込量) と capMs (経過時間上限) のどちらかに達したら打ち切り、読めた分から速度を出す。
+        // 時間上限により、遅い共有でも有界時間で完了し Launcher 側の速度待ちタイムアウトに当たらない。
+        public static bool ServerRead(string path, long capBytes, int capMs, out double mbPerSec, out long bytes)
+        {
+            mbPerSec = 0;
+            bytes = 0;
+            // GENERIC_READ / SHARE_READ|WRITE / OPEN_EXISTING / NO_BUFFERING|SEQUENTIAL_SCAN
+            IntPtr h = CreateFile(path, 0x80000000, 0x00000001 | 0x00000002, IntPtr.Zero, 3, 0x20000000 | 0x08000000, IntPtr.Zero);
+            if (h == new IntPtr(-1) || h == IntPtr.Zero) return false;
+            int bufSize = 1 << 20; // 1MB (セクタ4096の倍数)
+            IntPtr buf = VirtualAlloc(IntPtr.Zero, (UIntPtr)(uint)bufSize, 0x1000 | 0x2000, 0x04); // COMMIT|RESERVE / READWRITE (page境界=セクタ境界)
+            if (buf == IntPtr.Zero) { CloseHandle(h); return false; }
+            var sw = Stopwatch.StartNew();
+            long total = 0;
+            try
+            {
+                while (total < capBytes && sw.ElapsedMilliseconds < capMs)
+                {
+                    uint read;
+                    if (!ReadFile(h, buf, (uint)bufSize, out read, IntPtr.Zero)) break;
+                    if (read == 0) break;
+                    total += read;
+                    if (read < (uint)bufSize) break; // EOF
+                }
+            }
+            finally
+            {
+                VirtualFree(buf, UIntPtr.Zero, 0x8000); // MEM_RELEASE
+                CloseHandle(h);
+            }
+            sw.Stop();
+            double secs = sw.Elapsed.TotalSeconds;
+            if (total <= 0 || secs <= 0) return false;
+            mbPerSec = (total / 1048576.0) / secs;
+            bytes = total;
+            return true;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern IntPtr CreateFile(string lpFileName, uint dwDesiredAccess, uint dwShareMode,
+            IntPtr lpSecurityAttributes, uint dwCreationDisposition, uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool ReadFile(IntPtr hFile, IntPtr lpBuffer, uint nNumberOfBytesToRead, out uint lpNumberOfBytesRead, IntPtr lpOverlapped);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr hObject);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr VirtualAlloc(IntPtr lpAddress, UIntPtr dwSize, uint flAllocationType, uint flProtect);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool VirtualFree(IntPtr lpAddress, UIntPtr dwSize, uint dwFreeType);
     }
 }

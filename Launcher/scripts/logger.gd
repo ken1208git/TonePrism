@@ -38,6 +38,10 @@ var _mutex: Mutex = Mutex.new()
 var _initialized: bool = false
 var _init_failed: bool = false
 
+# サービスモード「簡易ログ確認」用に直近ログ行をメモリ保持するリングバッファ (現セッションのみ・ファイル非依存)。
+const RECENT_MAX: int = 400
+var _recent: Array[String] = []
+
 # Godot 標準ログ (user://logs/godot.log) テール用
 var _godot_log_path: String = ""
 var _godot_log_pos: int = 0
@@ -318,12 +322,25 @@ func error(message: String) -> void:
 func _write_safely(level: String, message: String) -> void:
 	if _init_failed:
 		return
+	var ts = Time.get_datetime_string_from_system(false, true)
+	var line := "[%s] [%s] %s" % [ts, level, message]
 	_mutex.lock()
 	if _file != null:
-		var ts = Time.get_datetime_string_from_system(false, true)
-		_file.store_line("[%s] [%s] %s" % [ts, level, message])
+		_file.store_line(line)
 		_file.flush()
+	# サービスモード「簡易ログ確認」用にメモリ保持 (上限超過は古い行から捨てる)。
+	_recent.append(line)
+	if _recent.size() > RECENT_MAX:
+		_recent = _recent.slice(_recent.size() - RECENT_MAX)
 	_mutex.unlock()
+
+
+## サービスモード「簡易ログ確認」用: 現セッションの直近ログ行 (古い順) のコピーを返す。
+func get_recent_logs() -> Array[String]:
+	_mutex.lock()
+	var copy: Array[String] = _recent.duplicate()
+	_mutex.unlock()
+	return copy
 
 
 # 起動時に 30 日より古いログファイルを削除
