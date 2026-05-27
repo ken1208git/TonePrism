@@ -21,6 +21,11 @@ namespace TonePrism.Manager
         private GameVersion baseVersion; // コピー元のバージョン情報
         private GameInfo originalGameInfo; // 元のゲーム情報
 
+        // (#234 ①) 既存全バージョンの version 文字列。ValidateInput で「最新版だけでなく全版」と
+        // 重複比較するために caller (GameSectionPanel) から受け取る。null の場合は currentVersion
+        // 単体との比較に fallback (旧挙動)。
+        private readonly List<string> existingVersionStrings;
+
         /// <summary>
         /// 作成された新しいバージョン情報
         /// </summary>
@@ -46,13 +51,14 @@ namespace TonePrism.Manager
         /// </summary>
         public List<DeveloperInfo> UpdatedDevelopers => developers;
 
-        public VersionUpForm(GameInfo gameInfo, string currentVersion, GameVersion baseVersion = null)
+        public VersionUpForm(GameInfo gameInfo, string currentVersion, GameVersion baseVersion = null, IEnumerable<string> existingVersions = null)
         {
             InitializeComponent();
             this.originalGameInfo = gameInfo;
             this.gameId = gameInfo.GameId;
             this.currentVersion = currentVersion;
             this.baseVersion = baseVersion;
+            this.existingVersionStrings = existingVersions?.ToList();
             developers = new List<DeveloperInfo>();
             
             lblCurrentVersion.Text = currentVersion;
@@ -434,27 +440,38 @@ namespace TonePrism.Manager
                 return false;
             }
 
-            // (#158 M-1) currentVersion は DB 由来で過去の "1.0.0" / "V1.0.0" 等のゆれを含みうる。
-            // semverNext.VersionString は常に "v<X>.<Y>.<Z>[-suffix]" の正規化形なので、生比較すると
-            // 同義値 ("v1.0.0" vs "1.0.0") をすり抜けて Launcher 側で 2 つの version が並ぶ silent
-            // danger になる。両辺を SemverInputControl.TryNormalize で正規化してから比較する。
-            // currentVersion 自体が malformed (= TryNormalize が false) のケースは ctor / Form_Load で
-            // 既に MessageBox 警告済 + v0.0.0 fallback 入力済なので、ここでは「正規化できなければ dup
-            // 判定対象外 = 続行」とする (= H-2 警告で user は修正済の前提)。
-            // (#158 round 8 senior Low #6) 両辺は TryNormalize 経由で lowercase v 強制 + 数値部正規化済
-            // なので Ordinal `==` でも機能等価だが、本 PR の他経路 (EditGameForm rename / dup-check 等)
-            // は OrdinalIgnoreCase 統一なので規約整合のため string.Equals(... OrdinalIgnoreCase) に揃える。
-            string currentNormalized;
-            if (SemverInputControl.TryNormalize(currentVersion, out currentNormalized)
-                && string.Equals(semverNext.VersionString, currentNormalized, StringComparison.OrdinalIgnoreCase))
+            // (#234 ①) 旧実装は currentVersion (=最新版) としか重複比較しておらず、数値欄を直接
+            // 編集して非最新版 (例: 過去の 1.5.0) と同じ番号を入力すると validation を通過していた。
+            // その後 GameSectionPanel が既存 version folder へ上書きマージコピー + game_versions へ
+            // 重複行 INSERT (UNIQUE 制約なし) し、Launcher 側で「どちらの版か」決定不能になる silent
+            // corruption が起きた。EditGameForm の #158 Q2 dup-check と同様、既存「全版」と比較する。
+            //
+            // 比較は SemverInputControl.TryNormalize で正規化後に行う (= 同義値 "v1.0.0"/"1.0.0"/"V1.0.0"
+            // を同一視、#158 M-1 の規則を踏襲)。malformed な既存 version は正規化不能なので比較対象外
+            // (= ctor/Form_Load で警告済の前提)。existingVersionStrings が null の旧 caller 経路では
+            // currentVersion 単体との比較に fallback する。
+            string newNormalized;
+            if (!SemverInputControl.TryNormalize(semverNext.VersionString, out newNormalized))
             {
-                // (#158 H3) bump button は round 3 で削除済 (#133 ガイドライン doc に移管予定)、
-                // その案内を撤去。NumericUpDown を直接操作する旨だけ案内。
-                MessageBox.Show("現在のバージョンと同じバージョンは指定できません。\n\n" +
-                    "Major / Minor / Patch のいずれかの数値を直接編集してください (= ▲ で +1、▼ で -1)。",
-                    "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                semverNext.Focus();
-                return false;
+                // IsValid 通過後なので通常ここには来ない。defensive に生値で比較継続。
+                newNormalized = semverNext.VersionString;
+            }
+            var versionsToCheck = existingVersionStrings ?? new List<string> { currentVersion };
+            foreach (var existing in versionsToCheck)
+            {
+                string existingNormalized;
+                if (SemverInputControl.TryNormalize(existing ?? "", out existingNormalized)
+                    && string.Equals(newNormalized, existingNormalized, StringComparison.OrdinalIgnoreCase))
+                {
+                    // (#158 H3) bump button は削除済なので NumericUpDown 直接操作のみ案内。
+                    MessageBox.Show("指定されたバージョンは既に存在します:\n\n" +
+                        "  " + existing + "\n\n" +
+                        "別のバージョン番号を指定してください。Major / Minor / Patch の数値を直接編集できます " +
+                        "(▲ で +1、▼ で -1)。",
+                        "バージョン重複エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    semverNext.Focus();
+                    return false;
+                }
             }
 
             if (string.IsNullOrWhiteSpace(txtGameFolder.Text))

@@ -1911,6 +1911,22 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.16.5] - 2026-05-27
+
+#### Fixed (#234 — バージョンアップ/追加のデータ整合性 3 件)
+
+ゲーム追加・編集・バージョンアップ処理の精査で、編集パス（`EditGameForm`、#158/#224 で堅牢化済）と同等の防御が version-up / add パスに展開されておらず発生していた整合性欠陥を修正。
+
+- **①【高】バージョンアップに「最新版以外との重複」防止がない**: `VersionUpForm.ValidateInput` は新バージョンを `currentVersion`（=最新版）としか比較しておらず、数値欄を直接編集して非最新版（例: 過去の 1.5.0）と同じ番号を入力すると validation を通過していた。その後 `GameSectionPanel.btnVersionUp_Click` が `Directory.CreateDirectory`（既存フォルダで no-op）→ 既存 version folder へ `File.Copy(..., overwrite:true)` で上書きマージ + `game_versions` へ重複行 INSERT（`UNIQUE(game_id, version)` 制約なし）し、Launcher 側で「どちらの版か」決定不能になる silent corruption が起きた。**対策**: `VersionUpForm` に既存全版リストを渡し、`EditGameForm` の #158 Q2 dup-check と同じく SemVer 正規化後（`SemverInputControl.TryNormalize`、v 大小・leading v 有無を同一視）で全版と重複比較。さらに `btnVersionUp_Click` で `Directory.Exists(versionDir)` を二重防御（`AddGameForm.CopyGameFolder` と同方針）。
+- **②【中】新規追加で `AddGameVersion` 失敗時に `games` 行が孤児化**: `AddGame` と `AddGameVersion` は別トランザクションのため、後者失敗時に commit 済 `games` 行だけが残り、版なし・フォルダなしの孤児ゲームが Launcher に出て起動不能になっていた（catch はフォルダのみ削除）。**対策**: `AddGameForm` の catch で `RollbackGameRow` を呼び、commit 済なら `DeleteGame`（FK CASCADE で developers 等も巻き取り）で `games` 行も rollback。
+- **③【低〜中】version-up の誤解を招くエラー + 孤児フォルダ**: `AddGameVersion` 成功後に activation（`UpdateGame`）が失敗すると「データベースへの保存に失敗しました」と出るが版は保存済で、同番号で再実行すると①へ突入していた。また `AddGameVersion` 自体の失敗時にコピー済 `versionDir` がディスクに残っていた。**対策**: version 行 INSERT と activation を別 try に分離。INSERT 失敗時は `versionDir` を rollback 削除し「保存に失敗・ファイルは削除」と通知、activation 失敗時は「版は作成済・アクティブ化のみ失敗」と正確に通知。ProcessingDialog cancel 時も `versionDir` を掃除。
+
+`game_versions` への `UNIQUE(game_id, version)` 制約追加は、本番 live data に既存 dup 行があると migration が失敗しうるため見送り、app-level guard で対応（編集パスと同方針）。
+
+#### Bump 根拠 (v0.16.4 → v0.16.5)
+
+SemVer pre-1.0 patch bump: データ整合性 bugfix のみ。スキーマ変更なし。
+
 ### [Manager v0.16.4] - 2026-05-27
 
 #### Fixed (#224 — ゲーム編集のデータ損失 2 件)

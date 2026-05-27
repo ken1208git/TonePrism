@@ -282,6 +282,11 @@ namespace TonePrism.Manager
                 if (dr != DialogResult.OK) return;
             }
 
+            // (#234 ②) AddGame と AddGameVersion は別トランザクション。AddGameVersion が失敗すると
+            // commit 済の games 行だけが残り、版なし・フォルダなしの孤児ゲームが Launcher に出て起動
+            // 不能になる。失敗時 catch で games 行も rollback するため、AddGame 成否を追跡する。
+            bool gameAdded = false;
+
             try
             {
                 // 初期バージョン番号 (#158: SemverInputControl で typo / フォーマットゆれを構造的に排除)
@@ -388,6 +393,7 @@ namespace TonePrism.Manager
 
                 // データベースに追加
                 dbManager.AddGame(game);
+                gameAdded = true;
 
                 // 初期バージョン情報を追加
                 // (#224 バグ②) 旧実装は Description に "初期バージョン" を入れていたが、編集画面が
@@ -425,6 +431,9 @@ namespace TonePrism.Manager
                     }
                 }
 
+                // (#234 ②) games 行が commit 済なら版なし孤児を残さないよう削除 (CASCADE で developers 等も除去)。
+                RollbackGameRow(gameId, gameAdded);
+
                 string errorMessage = DatabaseManager.GetUserFriendlyErrorMessage(ex);
                 MessageBox.Show(
                     $"ゲームの追加に失敗しました。\n\n{errorMessage}",
@@ -447,11 +456,32 @@ namespace TonePrism.Manager
                     }
                 }
 
+                // (#234 ②) games 行が commit 済なら版なし孤児を残さないよう削除 (CASCADE で developers 等も除去)。
+                RollbackGameRow(gameId, gameAdded);
+
                 MessageBox.Show(
                     $"ゲームの追加に失敗しました。\n\n{ex.Message}",
                     "エラー",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>
+        /// (#234 ②) AddGame は成功したが後続 (AddGameVersion 等) が失敗した場合に、commit 済の
+        /// games 行を削除して「版なし孤児ゲーム」を残さないための rollback。DeleteGame は FK CASCADE で
+        /// developers / game_versions 等も巻き取る。削除自体の失敗は握り潰す (元の例外通知を優先)。
+        /// </summary>
+        private void RollbackGameRow(string gameId, bool gameAdded)
+        {
+            if (!gameAdded) return;
+            try
+            {
+                dbManager.DeleteGame(gameId);
+            }
+            catch (Exception delEx)
+            {
+                Logger.Warn("[AddGameForm] (#234 ②) games 行 rollback 削除失敗: " + gameId + ": " + delEx.Message);
             }
         }
 

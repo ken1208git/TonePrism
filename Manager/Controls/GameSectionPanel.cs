@@ -203,18 +203,36 @@ namespace TonePrism.Manager.Controls
                 return;
             }
 
-            var latestVersion = _dbManager.GetLatestVersion(game.GameId);
+            // (#234 ①) 全バージョンを取得し、最新版判定と VersionUpForm の重複チェックの両方に使う。
+            // GetByGameId は registered_at DESC 順なので先頭が最新 (GetLatestVersion と等価)。
+            var allVersions = _dbManager.GetGameVersions(game.GameId);
+            var latestVersion = allVersions.FirstOrDefault();
             string currentVersion = latestVersion?.Version ?? "1.0.0";
+            var existingVersionStrings = allVersions.Select(v => v.Version).ToList();
 
-            using (var form = new VersionUpForm(game, currentVersion, latestVersion))
+            using (var form = new VersionUpForm(game, currentVersion, latestVersion, existingVersionStrings))
             {
                 if (form.ShowDialog() == DialogResult.OK && form.NewVersion != null)
                 {
+                    string versionDir = PathManager.GetVersionFolder(game.GameId, form.NewVersion.Version);
+
+                    // (#234 ① 二重防御) DB 上は重複しない version でも、過去の中断 (#234 ③) で version
+                    // folder だけが残っている場合がある。そのまま CopyDirectory すると既存フォルダへ
+                    // 上書きマージされるため、ここで明示的に衝突を弾く (AddGameForm.CopyGameFolder と同方針)。
+                    if (Directory.Exists(versionDir))
+                    {
+                        MessageBox.Show(
+                            "バージョンフォルダが既に存在します:\n  " + versionDir + "\n\n" +
+                            "前回のバージョンアップが中断された残骸の可能性があります。中身を確認し、" +
+                            "必要なファイルを退避してからフォルダを削除して再試行してください。",
+                            "フォルダ衝突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
                     var processingDialog = new ProcessingDialog((IProgress<ProgressInfo> progress, CancellationToken token) =>
                     {
                         try
                         {
-                            string versionDir = PathManager.GetVersionFolder(game.GameId, form.NewVersion.Version);
                             Directory.CreateDirectory(versionDir);
                             FileOperationService.CopyDirectoryWithProgress(
                                 form.SourceFolderPath, versionDir, progress, token,
@@ -232,41 +250,65 @@ namespace TonePrism.Manager.Controls
 
                     if (processingDialog.ShowDialog() == DialogResult.OK)
                     {
+                        string versionFolderName = form.NewVersion.Version.StartsWith("v") ? form.NewVersion.Version : "v" + form.NewVersion.Version;
+                        string relativePath = Path.Combine(versionFolderName, form.RelativeExecutablePath);
+                        form.NewVersion.ExecutablePath = relativePath;
+
+                        // (#234 ③) version 行の INSERT と activation (games 更新) を分離した try で扱う。
+                        // INSERT 失敗時はコピー済 versionDir を rollback 削除し「保存に失敗」と通知。
+                        // activation 失敗時は「版は作成済・アクティブ化のみ失敗」と正確に伝える (旧実装は
+                        // どちらも「データベースへの保存に失敗しました」で、版が保存済なのに再実行させて
+                        // ① の重複地獄に誘導していた)。
                         try
                         {
-                            string versionDir = PathManager.GetVersionFolder(game.GameId, form.NewVersion.Version);
-                            string versionFolderName = form.NewVersion.Version.StartsWith("v") ? form.NewVersion.Version : "v" + form.NewVersion.Version;
-                            string relativePath = Path.Combine(versionFolderName, form.RelativeExecutablePath);
-                            form.NewVersion.ExecutablePath = relativePath;
-
                             _dbManager.AddGameVersion(form.NewVersion);
+                        }
+                        catch (Exception ex)
+                        {
+                            try { if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true); }
+                            catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (#234 ③) versionDir rollback 削除失敗: " + versionDir + ": " + delEx.Message); }
+                            MessageBox.Show(
+                                $"バージョン情報のデータベース保存に失敗しました。\n\n{ex.Message}\n\nコピーしたファイルは削除しました。",
+                                "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            return;
+                        }
 
-                            var activationResult = MessageBox.Show(
-                                $"バージョン {form.NewVersion.Version} を現在のバージョン（アクティブ）として設定しますか？\n\n「いいえ」を選択した場合、バージョンは作成されますが、ランチャーで起動するバージョンは変更されません。",
-                                "アクティブバージョンの確認",
-                                MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                        var activationResult = MessageBox.Show(
+                            $"バージョン {form.NewVersion.Version} を現在のバージョン（アクティブ）として設定しますか？\n\n「いいえ」を選択した場合、バージョンは作成されますが、ランチャーで起動するバージョンは変更されません。",
+                            "アクティブバージョンの確認",
+                            MessageBoxButtons.YesNo, MessageBoxIcon.Question);
 
-                            if (activationResult == DialogResult.Yes)
+                        if (activationResult == DialogResult.Yes)
+                        {
+                            try
                             {
                                 form.UpdatedGameInfo.ExecutablePath = relativePath;
                                 _dbManager.UpdateGame(form.UpdatedGameInfo);
                             }
-
-                            MessageBox.Show(
-                                $"ゲーム「{game.Title}」のバージョン {form.NewVersion.Version} を追加しました。",
-                                "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
-
-                            LoadGames();
+                            catch (Exception ex)
+                            {
+                                // 版 (game_versions) は保存済。games のアクティブ化のみ失敗。disk / version 行は
+                                // 健全なので rollback せず、状態を正確に通知して return (再実行で ① に入らない)。
+                                MessageBox.Show(
+                                    $"バージョン {form.NewVersion.Version} は作成されましたが、アクティブ版への切り替えに失敗しました。\n\n{ex.Message}\n\n" +
+                                    "Launcher で起動する版は変更されていません。ゲーム編集画面でアクティブ版を切り替えられます。",
+                                    "アクティブ化失敗", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                LoadGames();
+                                return;
+                            }
                         }
-                        catch (Exception ex)
-                        {
-                            MessageBox.Show(
-                                $"データベースへの保存に失敗しました。\n\n{ex.Message}",
-                                "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        }
+
+                        MessageBox.Show(
+                            $"ゲーム「{game.Title}」のバージョン {form.NewVersion.Version} を追加しました。",
+                            "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                        LoadGames();
                     }
                     else if (processingDialog.DialogResult == DialogResult.Cancel)
                     {
+                        // (#234 ③) コピーが途中まで進んでいた可能性があるため versionDir を掃除する。
+                        try { if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true); }
+                        catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (#234 ③) cancel 時の versionDir 削除失敗: " + versionDir + ": " + delEx.Message); }
                         MessageBox.Show("処理がキャンセルされました。", "キャンセル",
                             MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
