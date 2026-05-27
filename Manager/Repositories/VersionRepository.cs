@@ -142,11 +142,15 @@ namespace TonePrism.Manager.Repositories
                 {
                     _conn.OpenConnectionWithJournalMode(connection);
 
+                    // (#234) 並びは registered_at DESC ではなく id DESC。registered_at は秒精度文字列の
+                    // ため同一秒内に追加された版でタイが起き「最新版」(FirstOrDefault) が非決定的になる。
+                    // id は AUTOINCREMENT で挿入順=作成順を単調に表すため最新判定が安定し、GameRepository.GetAll
+                    // の display_version (= 同じく id DESC LIMIT 1) とも整合する。
                     string query = @"
                         SELECT *
                         FROM game_versions
                         WHERE game_id = @gameId
-                        ORDER BY registered_at DESC";
+                        ORDER BY id DESC";
 
                     using (var command = new SQLiteCommand(query, connection))
                     {

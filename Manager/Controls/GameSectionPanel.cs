@@ -204,7 +204,7 @@ namespace TonePrism.Manager.Controls
             }
 
             // (#234 ①) 全バージョンを取得し、最新版判定と VersionUpForm の重複チェックの両方に使う。
-            // GetByGameId は registered_at DESC 順なので先頭が最新 (GetLatestVersion と等価)。
+            // GetByGameId は id DESC 順なので先頭が最新 (GetLatestVersion と等価)。
             var allVersions = _dbManager.GetGameVersions(game.GameId);
             var latestVersion = allVersions.FirstOrDefault();
             string currentVersion = latestVersion?.Version ?? "1.0.0";

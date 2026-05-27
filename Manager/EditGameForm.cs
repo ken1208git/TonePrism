@@ -419,20 +419,22 @@ namespace TonePrism.Manager
             // の入力値を保持したまま OK 押下されると別 version に化けるため)。
             // (#158 round 4 L-1) 戻り値 / out error は意図的に discard。`out _` で意図を明示。
             semverVersionName.TryParseAndSet(version.Version ?? "", out _);
-            txtTitle.Text = version.Title ?? "";
+
             // (#158 round 8.6 / #164) txtDescription / txtVersionDescription はそれぞれ
             // game_versions.description (ゲーム説明文) / game_versions.update_note (更新内容) を保持。
-            // 旧実装はこの 2 行を冒頭 + 末尾 (line 421 と line 467) で重複代入していたため、片方
-            // (冒頭側) を残して末尾側を削除、関連コメントもここに集約。
-            // (#224) description / arguments は per-version の値を読む。ただし「アクティブ版」
-            // (= games.version に一致する版。games は定義上この版の mirror) に限り、版の値が空で
-            // games 側に値がある場合のみ games にフォールバックする。これは「desync と証明できる行」
-            // 限定の修復 (Codex P2 / review #1 — 非アクティブ版の意図的な空は対象外なので per-version
-            // 独立性を壊さない)。実 DB には games.description が本物・対応版が null の旧データが存在する
-            // (旧 AddGameForm 由来) ため、これを編集→保存で空消去しないための保護。フォールバックした値は
-            // OK 保存でアクティブ版に書き戻され自己修復する。
+            // (#224 / #234) 各項目は per-version の値を読む。ただし「アクティブ版」(= games.version に
+            // 一致する版。games は定義上この版の mirror) に限り、版の値が空のとき games にフォールバック
+            // する。これは「desync と証明できる行」限定の修復 (Codex P2 / review #1 — 非アクティブ版の
+            // 意図的な空は対象外なので per-version 独立性を壊さない)。旧 AddGameForm 由来の初期版行は
+            // Description/Arguments だけでなく Title/Genre/難易度/プレイ時間/コントローラ/通信/サムネ/
+            // 背景/製作者 も未設定だった (#234) ため、それら全項目をアクティブ版フォールバックで健全化
+            // する。フォールバックした値は OK 保存でアクティブ版に書き戻され自己修復する。
             bool isActiveVersion = !string.IsNullOrEmpty(originalGame.Version)
                 && string.Equals(ToVersionLeaf(version.Version ?? ""), ToVersionLeaf(originalGame.Version), StringComparison.OrdinalIgnoreCase);
+
+            txtTitle.Text = !string.IsNullOrWhiteSpace(version.Title)
+                ? version.Title
+                : (isActiveVersion ? (originalGame.Title ?? "") : "");
             txtDescription.Text = !string.IsNullOrWhiteSpace(version.Description)
                 ? version.Description
                 : (isActiveVersion ? (originalGame.Description ?? "") : "");
@@ -441,43 +443,76 @@ namespace TonePrism.Manager
                 : (isActiveVersion ? (originalGame.Arguments ?? "") : "");
             txtVersionDescription.Text = version.UpdateNote ?? "";
 
-            // ジャンル
-            GameFormHelper.SetSelectedGenres(clbGenre, version.Genre);
+            // ジャンル (#234: 版が空ならアクティブ版に限り games へフォールバック)
+            var genreToShow = (version.Genre != null && version.Genre.Count > 0)
+                ? version.Genre
+                : (isActiveVersion ? originalGame.Genre : null);
+            GameFormHelper.SetSelectedGenres(clbGenre, genreToShow);
 
             // 数値系
             if (version.MinPlayers.HasValue) numMinPlayers.Value = version.MinPlayers.Value;
+            else if (isActiveVersion && originalGame.MinPlayers.HasValue) numMinPlayers.Value = originalGame.MinPlayers.Value;
             if (version.MaxPlayers.HasValue) numMaxPlayers.Value = version.MaxPlayers.Value;
-            
+            else if (isActiveVersion && originalGame.MaxPlayers.HasValue) numMaxPlayers.Value = originalGame.MaxPlayers.Value;
+
             // Difficulty (1-3)
             if (version.Difficulty.HasValue && version.Difficulty >= 1 && version.Difficulty <= 3)
                 cmbDifficulty.SelectedIndex = version.Difficulty.Value - 1;
+            else if (isActiveVersion && originalGame.Difficulty.HasValue && originalGame.Difficulty >= 1 && originalGame.Difficulty <= 3)
+                cmbDifficulty.SelectedIndex = originalGame.Difficulty.Value - 1;
             else cmbDifficulty.SelectedIndex = 1;
 
             // PlayTime (1-3)
             if (version.PlayTime.HasValue && version.PlayTime >= 1 && version.PlayTime <= 3)
                 cmbPlayTime.SelectedIndex = version.PlayTime.Value - 1;
+            else if (isActiveVersion && originalGame.PlayTime.HasValue && originalGame.PlayTime >= 1 && originalGame.PlayTime <= 3)
+                cmbPlayTime.SelectedIndex = originalGame.PlayTime.Value - 1;
             else cmbPlayTime.SelectedIndex = 1;
 
-            // Connection
-            if (version.SupportedConnection >= 0 && version.SupportedConnection <= 2)
-                cmbSupportedConnection.SelectedIndex = version.SupportedConnection;
+            // Connection / ControllerSupport は非 nullable で「未設定」を判別する sentinel が無い。
+            // アクティブ版は games が定義上の mirror (= 真値) なので、版値ではなく games 値を採用して
+            // 旧初期版行 (= 既定値 0 / false で保存されていた) を健全化する。非アクティブ版は版値のまま。
+            int connToShow = isActiveVersion ? originalGame.SupportedConnection : version.SupportedConnection;
+            if (connToShow >= 0 && connToShow <= 2)
+                cmbSupportedConnection.SelectedIndex = connToShow;
             else cmbSupportedConnection.SelectedIndex = 0;
 
-            chkControllerSupport.Checked = version.ControllerSupport;
-            
-            // Paths（相対パスを絶対パスに変換して表示）
+            chkControllerSupport.Checked = isActiveVersion ? originalGame.ControllerSupport : version.ControllerSupport;
+
+            // Paths（相対パスを絶対パスに変換して表示。#234: 版が空ならアクティブ版に限り games フォールバック）
+            string thumbToShow = !string.IsNullOrEmpty(version.ThumbnailPath)
+                ? version.ThumbnailPath
+                : (isActiveVersion ? originalGame.ThumbnailPath : null);
+            string bgToShow = !string.IsNullOrEmpty(version.BackgroundPath)
+                ? version.BackgroundPath
+                : (isActiveVersion ? originalGame.BackgroundPath : null);
             txtExecutablePath.Text = !string.IsNullOrEmpty(version.ExecutablePath)
                 ? PathConversionHelper.ToAbsolutePath(gameFolder, version.ExecutablePath) : "";
-            txtThumbnailPath.Text = !string.IsNullOrEmpty(version.ThumbnailPath)
-                ? PathConversionHelper.ToAbsolutePath(gameFolder, version.ThumbnailPath) : "";
-            txtBackgroundPath.Text = !string.IsNullOrEmpty(version.BackgroundPath)
-                ? PathConversionHelper.ToAbsolutePath(gameFolder, version.BackgroundPath) : "";
+            txtThumbnailPath.Text = !string.IsNullOrEmpty(thumbToShow)
+                ? PathConversionHelper.ToAbsolutePath(gameFolder, thumbToShow) : "";
+            txtBackgroundPath.Text = !string.IsNullOrEmpty(bgToShow)
+                ? PathConversionHelper.ToAbsolutePath(gameFolder, bgToShow) : "";
 
-            // Developers
+            // Developers (#234: 版が空ならアクティブ版に限り games の製作者へフォールバック)
             developers.Clear();
-            if (version.Developers != null)
+            if (version.Developers != null && version.Developers.Count > 0)
             {
-                foreach(var d in version.Developers) developers.Add(d);
+                foreach (var d in version.Developers) developers.Add(d);
+            }
+            else if (isActiveVersion && originalGame.Developers != null)
+            {
+                // games 由来の製作者をディープコピー (グリッド編集で originalGame.Developers を汚さない)。
+                // Id はコピーしない (= 保存時に version_id 付きの新規行として INSERT される)。
+                foreach (var d in originalGame.Developers)
+                {
+                    developers.Add(new DeveloperInfo
+                    {
+                        GameId = d.GameId,
+                        LastName = d.LastName,
+                        FirstName = d.FirstName,
+                        Grade = d.Grade
+                    });
+                }
             }
             RefreshDevelopersGrid();
 

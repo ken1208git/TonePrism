@@ -224,8 +224,16 @@ namespace TonePrism.Manager
                 txtExecutablePath.Text = exePath;
                 RelativeExecutablePath = PathConversionHelper.ToRelativePath(selectedFolderPath, exePath);
             }
-            if (thumbPath != null) txtThumbnailPath.Text = thumbPath;
-            if (bgPath != null) txtBackgroundPath.Text = bgPath;
+            if (thumbPath != null)
+            {
+                txtThumbnailPath.Text = thumbPath;
+                UpdateThumbnailPreview();
+            }
+            if (bgPath != null)
+            {
+                txtBackgroundPath.Text = bgPath;
+                UpdateBackgroundPreview();
+            }
         }
 
         private void btnSelectExecutable_Click(object sender, EventArgs e)
@@ -278,6 +286,17 @@ namespace TonePrism.Manager
 
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
+                    // (#234) 実行ファイル選択と同様、サムネはコピー元フォルダ内のものに限る。フォルダ外の
+                    // ファイルだと相対化できず絶対パスのまま保存され、コピーされないファイルを指す壊れた
+                    // パスになる (GameSectionPanel が v{version}/ を前置しても絶対パスは Path.Combine で
+                    // そのまま残る)。AddGameForm と挙動を揃える。
+                    if (!dialog.FileName.StartsWith(selectedFolderPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        MessageBox.Show(
+                            "サムネイル画像はゲームフォルダ内から選択してください。",
+                            "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
                     txtThumbnailPath.Text = dialog.FileName;
                     UpdateThumbnailPreview();
                 }
@@ -300,6 +319,14 @@ namespace TonePrism.Manager
 
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
+                    // (#234) 背景もコピー元フォルダ内に限る (サムネと同理由)。
+                    if (!dialog.FileName.StartsWith(selectedFolderPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        MessageBox.Show(
+                            "背景画像はゲームフォルダ内から選択してください。",
+                            "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
                     txtBackgroundPath.Text = dialog.FileName;
                     UpdateBackgroundPreview();
                 }

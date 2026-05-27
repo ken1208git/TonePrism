@@ -100,8 +100,16 @@ namespace TonePrism.Manager
         {
             var (exePath, thumbPath, bgPath) = GameFormHelper.AutoDetectFiles(sourceGameFolder);
             if (exePath != null) txtExecutablePath.Text = exePath;
-            if (thumbPath != null) txtThumbnailPath.Text = thumbPath;
-            if (bgPath != null) txtBackgroundPath.Text = bgPath;
+            if (thumbPath != null)
+            {
+                txtThumbnailPath.Text = thumbPath;
+                UpdateThumbnailPreview();
+            }
+            if (bgPath != null)
+            {
+                txtBackgroundPath.Text = bgPath;
+                UpdateBackgroundPreview();
+            }
         }
 
 
@@ -408,6 +416,10 @@ namespace TonePrism.Manager
                 // version.Description を読むため、編集→保存で games の本物の説明が "初期バージョン" で
                 // 上書き消去されていた。初期版は games と同じ本物の説明 / 起動オプションを持たせ、
                 // "初期バージョン" は更新内容 (UpdateNote) に移す。
+                // (#234 補完) #224 は Description / Arguments のみ初期版にミラーしていたが、Title / Genre /
+                // 難易度 / プレイ時間 / コントローラ対応 / 通信対応 / サムネ / 背景 / 製作者 が未設定のままで、
+                // 編集画面でアクティブ版 (=初期版) を読むと UI が空 / 既定値で上書きされ、保存で games 側も
+                // 巻き添えに消える #224 と同種のデータ損失が残っていた。初期版は games の完全ミラーにする。
                 var initialVersion = new GameVersion
                 {
                     GameId = game.GameId,
@@ -416,6 +428,24 @@ namespace TonePrism.Manager
                     Description = game.Description,
                     Arguments = game.Arguments,
                     UpdateNote = "初期バージョン",
+                    Title = game.Title,
+                    Genre = game.Genre,
+                    MinPlayers = game.MinPlayers,
+                    MaxPlayers = game.MaxPlayers,
+                    Difficulty = game.Difficulty,
+                    PlayTime = game.PlayTime,
+                    ControllerSupport = game.ControllerSupport,
+                    SupportedConnection = game.SupportedConnection,
+                    ThumbnailPath = game.ThumbnailPath,
+                    BackgroundPath = game.BackgroundPath,
+                    // 製作者は version_id 付き行として別 INSERT されるためディープコピー (Id はコピーしない)。
+                    Developers = developers.Select(d => new DeveloperInfo
+                    {
+                        GameId = d.GameId,
+                        LastName = d.LastName,
+                        FirstName = d.FirstName,
+                        Grade = d.Grade
+                    }).ToList(),
                     RegisteredAt = DateTime.Now
                 };
                 dbManager.AddGameVersion(initialVersion);
