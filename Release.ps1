@@ -2028,7 +2028,11 @@ function Clear-OldGodot {
 
     # サーバー側 tools/godot/<version>/ は最新 2 version まで残す
     if (Test-Path $ToolsGodot) {
-        $dirs = @(Get-ChildItem $ToolsGodot -Directory | Sort-Object Name -Descending)
+        # version 番号は文字列辞書順だと 4.10 < 4.9 と誤判定するため [version] cast で数値比較する。
+        # `-as [version]` が $null になる非 version dir は削除対象から除外 (cast 例外で cleanup が落ちるのも防ぐ)。
+        $dirs = @(Get-ChildItem $ToolsGodot -Directory |
+            Where-Object { $_.Name -as [version] } |
+            Sort-Object { [version]$_.Name } -Descending)
         if ($dirs.Count -gt 2) {
             $toDelete = @($dirs | Select-Object -Skip 2)
             foreach ($d in $toDelete) {
@@ -2075,7 +2079,7 @@ function Clear-OldGodot {
 # ============================================================================
 
 Write-Host ""
-Write-Host "TonePrism Release Script (Phase 1)" -ForegroundColor White
+Write-Host "TonePrism Release Script" -ForegroundColor White
 Write-Host "Bundle Version: $Version" -ForegroundColor White
 Write-Host "RepoRoot:       $RepoRoot" -ForegroundColor White
 if ($DryRun)     { Write-Host "Mode: DRY-RUN (zip と upload を skip)" -ForegroundColor Yellow }

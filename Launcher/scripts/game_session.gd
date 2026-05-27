@@ -84,7 +84,7 @@ func start_process() -> bool:
 
 	var exe_path := GamePathResolver.find_executable(game)
 	if exe_path.is_empty():
-		print("❌ Executable not found: ", game.executable_path)
+		push_error("[GameSession] Executable not found: " + str(game.executable_path))
 		ErrorManager.show_error(ErrorCode.GAME_EXECUTABLE_NOT_FOUND)
 		_is_launching = false
 		current_game = null
@@ -102,7 +102,7 @@ func start_process() -> bool:
 
 	var pid := OS.create_process("cmd.exe", ["/C", cmd_command])
 	if pid == -1:
-		print("❌ Failed to create process.")
+		push_error("[GameSession] Failed to create process: " + str(exe_path))
 		ErrorManager.show_error(ErrorCode.GAME_EXECUTION_FAILED)
 		_is_launching = false
 		current_game = null

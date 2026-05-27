@@ -341,12 +341,8 @@ namespace TonePrism.Manager.Repositories
                 game.Genre = new List<string>();
             }
 
-            // GetAll uses display_version alias which doesn't include arguments
-            try
-            {
-                game.Arguments = reader["arguments"] is DBNull ? null : reader["arguments"].ToString();
-            }
-            catch { }
+            // GetAll / GetById の SELECT は両方 arguments を含むため直接読む。
+            game.Arguments = reader["arguments"] is DBNull ? null : reader["arguments"].ToString();
 
             return game;
         }

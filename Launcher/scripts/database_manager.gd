@@ -32,12 +32,11 @@ func open() -> bool:
 	# データベースパスを設定
 	db.path = db_path
 
-	# データベースを開く（godot-sqliteのAPI）
-	db.open_db()
-
-	# データベースが開けたか確認（エラーが発生した場合はdbがnullになる可能性がある）
-	if db == null:
+	# データベースを開く（godot-sqliteのAPI）。失敗時 (パス不正・権限不足・ロック等) は
+	# false が返る。db オブジェクト自体は非 null のままなので、戻り値で必ず判定する。
+	if not db.open_db():
 		print("[DatabaseManager] Error: データベースを開けませんでした: " + db_path)
+		db = null
 		return false
 
 	print("[DatabaseManager] データベースを開きました: ", db_path)
