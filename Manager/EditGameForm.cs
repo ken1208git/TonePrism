@@ -1223,66 +1223,39 @@ namespace TonePrism.Manager
                         }
                     }
 
-                    // (#158 round 3 M-4 + round 5 codex P1) UpdateGameVersion ループ。
-                    // VersionRepository.Update は call ごとに独立 transaction で commit するため、N 件目で
-                    // 失敗しても 0..N-1 件目は既に DB commit 済 (per-call transaction)。
-                    // - dbSucceededCount == 0: DB 未 commit、disk rollback で OK 押下前状態に戻せる安全
-                    //   path → 従来の RollbackCompletedRenames を呼ぶ。
-                    // - dbSucceededCount  > 0: 一部 DB commit 済、disk rollback すると commit 済 row が
-                    //   指す新 folder 名を消失させて drift 拡大。disk は NEW のままにして user に partial
-                    //   commit 状態 + Manager 再起動 + 手動修復を促す。
-                    int dbSucceededCount = 0;
+                    // (#234 後続) バージョン情報を単一トランザクションで一括更新する。
+                    // 旧実装は VersionRepository.Update を 1 行ずつ呼んで per-call commit していたため、
+                    // (a) バージョン番号の入れ替え (v1↔v2) / 玉突き (A→B→C) / 循環では、行を 1 件ずつ
+                    //     確定する途中で「一瞬だけ同じ番号が 2 行」になり、最終状態が一意でも
+                    //     game_versions(game_id, version) UNIQUE INDEX (#234 ②) 違反で throw していた
+                    //     (= 画面上で番号を入れ替えてから保存すると正当な操作が失敗する回帰)、
+                    // (b) N 件目で失敗すると 0..N-1 件目は commit 済の部分コミット drift が残る、
+                    // の 2 問題があった。UpdateGameVersions は「全行を一意な一時値へ退避 → 本番値を確定」を
+                    // 単一 transaction で行うため (a) を構造的に回避し、(b) も「全成功 or 全 rollback」の
+                    // 原子性で解消する。原子的ゆえ DB の部分コミットは起きないので、失敗時は常に DB 無変更で
+                    // 返り、完了済 disk rename を安全に rollback できる (旧 dbSucceededCount 分岐は不要)。
                     try
                     {
-                        foreach (var item in cmbVersionList.Items)
-                        {
-                            if (item is GameVersion v)
-                            {
-                                dbManager.UpdateGameVersion(v);
-                                dbSucceededCount++;
-                            }
-                        }
+                        dbManager.UpdateGameVersions(cmbVersionList.Items.OfType<GameVersion>());
                     }
                     catch (Exception dbEx)
                     {
-                        if (dbSucceededCount == 0)
-                        {
-                            // DB 一切 commit なし: disk + in-memory rollback で OK 押下前に戻す。
-                            int rolledBack, rollbackFailures;
-                            RollbackCompletedRenames(completedRenames, out rolledBack, out rollbackFailures);
-                            MessageBox.Show(
-                                "バージョン情報の DB 更新に失敗しました:\n" +
-                                "  " + dbEx.Message + "\n\n" +
-                                "  完了済の rename " + rolledBack + " 件を元の名前に rollback しました" +
-                                (rollbackFailures > 0
-                                    ? " (rollback 失敗 " + rollbackFailures + " 件、Console ログ参照、手動で元に戻してください)"
-                                    : "") +
-                                "。\n  DB は更新前なので OK 押下前の状態に戻ります。",
-                                "DB 更新失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        }
-                        else
-                        {
-                            // (#158 round 5 codex P1) 部分 commit 状態: disk rollback 不可 (commit 済 row
-                            // が指す新 folder を消すと drift 拡大)。disk は NEW のまま、user に partial
-                            // commit を通知 + Manager 再起動を促す。in-memory は結局 OK Form 終了で破棄
-                            // されるので revert 不要。
-                            MessageBox.Show(
-                                "バージョン情報の DB 更新が途中で失敗しました:\n" +
-                                "  " + dbEx.Message + "\n\n" +
-                                "  ・ DB 更新成功: " + dbSucceededCount + " 件\n" +
-                                "  ・ disk フォルダは新しい名前のまま (rename を rollback しません = 既に commit\n" +
-                                "    済の DB row を壊さないため)\n" +
-                                "  ・ 残りの version は DB が古い名前のまま、disk は新しい名前で drift 状態\n\n" +
-                                "Manager を一度終了して再起動し、該当ゲームの version 一覧を確認してください。" +
-                                "DB と disk の不整合が残っている version は手動で再編集してください。",
-                                "DB 部分更新失敗 (要手動確認)", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        }
-                        // (#158 round 6 H-1) 旧実装は `throw;` で外側 catch (System.Data.SQLite.SQLiteException
-                        // / Exception) に再投していたため、本 catch で出した詳細 MessageBox の直後に
-                        // 「ゲームの更新に失敗しました\n\n{ex.Message}」の汎用 MessageBox が必ず 2 枚目
-                        // として出る UX bug があった (= partial commit / 安全 rollback 両 path で必発)。
-                        // ここで return すれば form は閉じず DialogResult は default の None のまま、user は
-                        // 状態を見て手動で Cancel するか修正リトライできる。
+                        // 原子的更新のため DB は OK 押下前のまま (部分コミットなし)。完了済 disk rename を
+                        // 逆順で元へ戻し、in-memory state も capture 前へ復元して「OK 押下前」に巻き戻す。
+                        int rolledBack, rollbackFailures;
+                        RollbackCompletedRenames(completedRenames, out rolledBack, out rollbackFailures);
+                        MessageBox.Show(
+                            "バージョン情報の DB 更新に失敗しました:\n" +
+                            "  " + dbEx.Message + "\n\n" +
+                            "  完了済の rename " + rolledBack + " 件を元の名前に rollback しました" +
+                            (rollbackFailures > 0
+                                ? " (rollback 失敗 " + rollbackFailures + " 件、ログファイル参照、手動で元に戻してください)"
+                                : "") +
+                            "。\n  DB は更新前なので OK 押下前の状態に戻ります。",
+                            "DB 更新失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        // (#158 round 6 H-1) throw で再投すると外側 catch の汎用 MessageBox が 2 枚目に
+                        // 出る UX bug があるため return で form を留める (DialogResult は None のまま、
+                        // user は状態を見て Cancel か修正リトライを選べる)。
                         return;
                     }
                     

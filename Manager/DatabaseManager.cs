@@ -76,6 +76,8 @@ namespace TonePrism.Manager
         // --- バージョン ---
         public void AddGameVersion(GameVersion version) => _versionRepo.Add(version);
         public void UpdateGameVersion(GameVersion version) => _versionRepo.Update(version);
+        // (#234 後続) 複数バージョンを単一トランザクションで一括更新 (番号入れ替え時の UNIQUE 一時衝突回避)。
+        public void UpdateGameVersions(IEnumerable<GameVersion> versions) => _versionRepo.UpdateMany(versions);
         public List<GameVersion> GetGameVersions(string gameId) => _versionRepo.GetByGameId(gameId);
         public GameVersion GetLatestVersion(string gameId) => _versionRepo.GetLatest(gameId);
 

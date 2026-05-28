@@ -1928,6 +1928,12 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **④【低】バージョンフォルダ leaf 名の正規化を `PathManager.GetVersionFolderLeaf` に集約**: `PathManager.GetVersionFolder`（disk のコピー先）と `GameSectionPanel`（DB 保存パスの prefix）が共に case-sensitive な `StartsWith("v")` で leaf 名を独立計算しており、生値が `"V1.0.0"`（大文字 V）の場合に前者は `"vV1.0.0"`・後者は別結果となって**実フォルダ名と DB 保存パスが食い違う**死角があった。`v`/`V` を剥がして小文字 `v` を被せ直す helper（`EditGameForm.ToVersionLeaf` と同規則）に両者を集約し、必ず一致させる。新規版は `VersionString` が常に小文字 `v` のため通常フローの挙動は不変。
 - **⑤【低】`PathConversionHelper.ToRelativePathAfterCopy` の境界判定が区切り文字非安全**: 生 `StartsWith` のため `dest="games\game1"` が `"games\game10\..."` のような兄弟フォルダにも前方一致しうる死角。現 caller では `destinationFolder` から構築したパスしか渡らず実害は無いが、`IsPathInside` / `ToRelativePath` と同じ「等値 OR 区切り付き StartsWith」に揃えて多層防御を統一。
 
+#### Fixed (② UNIQUE 制約追加による回帰 — バージョン番号の入れ替え保存が失敗)
+
+- **【中】`EditGameForm` でバージョン番号を「入れ替え／玉突き／循環」させて保存すると UNIQUE 制約違反で失敗する回帰**: 上記 ② の `game_versions(game_id, version)` UNIQUE INDEX は immediate 制約のため、編集画面で例えば 2 版の番号を交換（`v1.0.0`↔`v2.0.0`）してから保存すると、保存処理が版を 1 行ずつ確定する途中で「一瞬だけ同じ番号が 2 行」存在する中間状態が生じ、**最終状態は一意なのに制約違反で throw** していた。編集画面はドロップダウンで各版の番号を画面上で自由に書き換えてから OK でまとめて保存する作りのため、アプリ層 dup-check（最終状態を正規化比較）は素通りし、保存時のみ失敗する分かりにくい挙動になっていた。玉突き（A→B→C）や循環（A↔B）でも同様。
+  - 修正: `VersionRepository.UpdateMany`（`DatabaseManager.UpdateGameVersions` 経由）を新設し、**単一トランザクション内で「対象全行の `version` を一意な一時値（`__tmp_<id>_<GUID>`、SemVer と絶対に被らない）へ退避 → 本番の全列を確定」する 2 フェーズ方式**に変更。最終状態が一意である限り各 UPDATE 実行時点で衝突相手が存在しないため、途中の UNIQUE 一時衝突を構造的に回避する。
+  - 副次的改善: 旧実装は `VersionRepository.Update` を 1 行ずつ呼ぶ per-call commit ループだったため、N 件目で失敗すると 0..N-1 件目が commit 済の**部分コミット drift**（DB と disk フォルダ名の不整合 → 要手動修復）が残りえた。一括化により「全成功 or 全 rollback」の原子性になり、失敗時は DB 無変更で返るため完了済 disk rename を常に安全に rollback できる。`EditGameForm` 側の `dbSucceededCount` 分岐（部分コミット通知）は不要になり削除。
+
 #### Bump 根拠 (v0.16.5 → v0.16.6)
 
 DB スキーマ変更（v15、`game_versions` への UNIQUE INDEX 追加）+ データ整合性 hardening。Bundle 版数の Major 判定（AGENTS.md「DB schema 変更含む」）はリリース時に行う。

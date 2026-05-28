@@ -81,44 +81,68 @@ namespace TonePrism.Manager.Repositories
                     {
                         try
                         {
-                            string updateSql = @"
-                                UPDATE game_versions SET
-                                    version = @version,
-                                    executable_path = @executablePath,
-                                    arguments = @arguments,
-                                    description = @description,
-                                    update_note = @updateNote,
-                                    title = @title,
-                                    genre = @genre,
-                                    min_players = @minPlayers,
-                                    max_players = @maxPlayers,
-                                    difficulty = @difficulty,
-                                    play_time = @playTime,
-                                    controller_support = @controllerSupport,
-                                    supported_connection = @supportedConnection,
-                                    thumbnail_path = @thumbnailPath,
-                                    background_path = @backgroundPath,
-                                    registered_at = @registeredAt
-                                WHERE id = @id";
+                            UpdateVersionRow(connection, transaction, version);
+                            transaction.Commit();
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+                }
+            });
+        }
 
-                            using (var command = new SQLiteCommand(updateSql, connection, transaction))
+        /// <summary>
+        /// (#234 後続) 複数バージョンを単一トランザクションでまとめて更新する。
+        ///
+        /// 背景: game_versions(game_id, version) の UNIQUE INDEX (#234 ②) は immediate 制約のため、
+        /// バージョン番号の「入れ替え」(v1↔v2) / 「玉突き」(A→B→C) / 「循環」では、行を 1 件ずつ
+        /// 確定していくと「一瞬だけ同じ番号が 2 行存在する」中間状態が生じ、最終状態は一意でも
+        /// 制約違反で throw していた (= EditGameForm でユーザーが画面上で番号を入れ替えてから保存すると
+        /// 正当な操作が失敗する回帰)。
+        ///
+        /// 対策: (Phase 1) 対象全行の version を「絶対に実 version と被らない一意な一時値」へ退避してから、
+        /// (Phase 2) 本番の全列を確定する。最終状態が一意である限り、各 UPDATE 実行時点で衝突相手が
+        /// 存在しなくなるため制約違反が起きない。全体を 1 transaction で囲むので、途中失敗時は temp 値も
+        /// 含め完全に rollback され、部分コミット / 一時値残留は発生しない (旧 per-call commit ループの
+        /// 部分コミット問題も同時に解消)。
+        /// </summary>
+        public void UpdateMany(IEnumerable<GameVersion> versions)
+        {
+            var list = versions?.Where(v => v != null).ToList() ?? new List<GameVersion>();
+            if (list.Count == 0) return;
+
+            _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+
+                    using (var transaction = connection.BeginTransaction())
+                    {
+                        try
+                        {
+                            // Phase 1: 全行の version を一意な一時値へ退避 (途中の UNIQUE 一時衝突を回避)。
+                            // temp 値は "__tmp_" prefix + id + GUID で、SemVer 形式の実 version とは絶対に
+                            // 一致しない (= 既存・本番いずれの値とも衝突しない)。
+                            foreach (var v in list)
                             {
-                                SetVersionParameters(command, version);
-                                command.Parameters.AddWithValue("@registeredAt", version.RegisteredAt.ToString("yyyy-MM-dd HH:mm:ss"));
-                                command.Parameters.AddWithValue("@id", version.Id);
-
-                                command.ExecuteNonQuery();
+                                using (var cmd = new SQLiteCommand(
+                                    "UPDATE game_versions SET version = @version WHERE id = @id", connection, transaction))
+                                {
+                                    cmd.Parameters.AddWithValue("@version", "__tmp_" + v.Id + "_" + Guid.NewGuid().ToString("N"));
+                                    cmd.Parameters.AddWithValue("@id", v.Id);
+                                    cmd.ExecuteNonQuery();
+                                }
                             }
 
-                            // 製作者情報の更新（削除して再登録）
-                            string deleteDevs = "DELETE FROM developers WHERE version_id = @versionId";
-                            using (var cmd = new SQLiteCommand(deleteDevs, connection, transaction))
+                            // Phase 2: 本番の全列 (version 含む) + 製作者を確定。
+                            foreach (var v in list)
                             {
-                                cmd.Parameters.AddWithValue("@versionId", version.Id);
-                                cmd.ExecuteNonQuery();
+                                UpdateVersionRow(connection, transaction, v);
                             }
-
-                            InsertVersionDevelopers(connection, transaction, version);
 
                             transaction.Commit();
                         }
@@ -130,6 +154,52 @@ namespace TonePrism.Manager.Repositories
                     }
                 }
             });
+        }
+
+        /// <summary>
+        /// 1 バージョン行の全列 UPDATE + 製作者の削除→再登録を、呼び出し側が用意した connection /
+        /// transaction 上で実行する (commit はしない)。Update (単発) / UpdateMany (一括) で共通利用。
+        /// </summary>
+        private void UpdateVersionRow(SQLiteConnection connection, SQLiteTransaction transaction, GameVersion version)
+        {
+            string updateSql = @"
+                UPDATE game_versions SET
+                    version = @version,
+                    executable_path = @executablePath,
+                    arguments = @arguments,
+                    description = @description,
+                    update_note = @updateNote,
+                    title = @title,
+                    genre = @genre,
+                    min_players = @minPlayers,
+                    max_players = @maxPlayers,
+                    difficulty = @difficulty,
+                    play_time = @playTime,
+                    controller_support = @controllerSupport,
+                    supported_connection = @supportedConnection,
+                    thumbnail_path = @thumbnailPath,
+                    background_path = @backgroundPath,
+                    registered_at = @registeredAt
+                WHERE id = @id";
+
+            using (var command = new SQLiteCommand(updateSql, connection, transaction))
+            {
+                SetVersionParameters(command, version);
+                command.Parameters.AddWithValue("@registeredAt", version.RegisteredAt.ToString("yyyy-MM-dd HH:mm:ss"));
+                command.Parameters.AddWithValue("@id", version.Id);
+
+                command.ExecuteNonQuery();
+            }
+
+            // 製作者情報の更新（削除して再登録）
+            string deleteDevs = "DELETE FROM developers WHERE version_id = @versionId";
+            using (var cmd = new SQLiteCommand(deleteDevs, connection, transaction))
+            {
+                cmd.Parameters.AddWithValue("@versionId", version.Id);
+                cmd.ExecuteNonQuery();
+            }
+
+            InsertVersionDevelopers(connection, transaction, version);
         }
 
         public List<GameVersion> GetByGameId(string gameId)
