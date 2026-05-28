@@ -40,6 +40,16 @@ namespace TonePrism.Manager
         // アクティブ版を rename しただけ (同 row・version 文字列のみ変更) では誤発火しない。
         private int? _initialSelectedVersionId = null;
 
+        // 非アクティブ版で MinPlayers / MaxPlayers が DB 上 null だった場合の null 保護用 snapshot。
+        // NumericUpDown は null 値を持てないので Load 時に Minimum (=1) を表示するが、user が触っていない
+        // 限り Save で null を維持する (= 旧実装の "前 version の数値が silent に書き換わる" 経路を閉鎖)。
+        // active 版の null は games.version mirror 仕様で「games 値で healing → DB に書き戻す」が意図された
+        // 挙動なので、本 flag は active 版では false にして従来の自己修復 path を温存する。
+        private bool _versionMinPlayersWasNullOnLoad;
+        private bool _versionMaxPlayersWasNullOnLoad;
+        private decimal _versionMinPlayersDisplayedOnLoad;
+        private decimal _versionMaxPlayersDisplayedOnLoad;
+
         // (#158 CX-1) folder rename を 2-phase 化するための plan 単位 (Phase 1 で構築 / Phase 2 で実行)。
         // (#158 round 4 codex P1) Old{Executable,Thumbnail,Background}Path: in-memory state rollback 用に
         // path 書き換え前の値を capture。disk Move を rollback しても in-memory が NEW のままだと、同
@@ -402,8 +412,17 @@ namespace TonePrism.Manager
             
             version.Genre = GameFormHelper.GetSelectedGenres(clbGenre);
             
-            version.MinPlayers = (int)numMinPlayers.Value;
-            version.MaxPlayers = (int)numMaxPlayers.Value;
+            // 「load 時に null かつ非 active」 + 「user が UI を触っていない (= 表示値が load 直後の snapshot のまま)」
+            // のとき null を維持する。それ以外は UI 値を書く (= active 版の自己修復 / user 編集後)。
+            if (_versionMinPlayersWasNullOnLoad && numMinPlayers.Value == _versionMinPlayersDisplayedOnLoad)
+                version.MinPlayers = null;
+            else
+                version.MinPlayers = (int)numMinPlayers.Value;
+
+            if (_versionMaxPlayersWasNullOnLoad && numMaxPlayers.Value == _versionMaxPlayersDisplayedOnLoad)
+                version.MaxPlayers = null;
+            else
+                version.MaxPlayers = (int)numMaxPlayers.Value;
             version.Difficulty = cmbDifficulty.SelectedIndex >= 0 ? cmbDifficulty.SelectedIndex + 1 : (int?)null;
             version.PlayTime = cmbPlayTime.SelectedIndex >= 0 ? cmbPlayTime.SelectedIndex + 1 : (int?)null;
             version.ControllerSupport = chkControllerSupport.Checked;
@@ -458,11 +477,42 @@ namespace TonePrism.Manager
                 : (isActiveVersion ? originalGame.Genre : null);
             GameFormHelper.SetSelectedGenres(clbGenre, genreToShow);
 
-            // 数値系
-            if (version.MinPlayers.HasValue) numMinPlayers.Value = version.MinPlayers.Value;
-            else if (isActiveVersion && originalGame.MinPlayers.HasValue) numMinPlayers.Value = originalGame.MinPlayers.Value;
-            if (version.MaxPlayers.HasValue) numMaxPlayers.Value = version.MaxPlayers.Value;
-            else if (isActiveVersion && originalGame.MaxPlayers.HasValue) numMaxPlayers.Value = originalGame.MaxPlayers.Value;
+            // 数値系。else 欠落で「前 version の表示が残ったまま save で書き換わる」silent overwrite を
+            // 起こさないよう、null+非active のときは Minimum (=1) にリセットしつつ null 保護 flag を立てる。
+            // active 版の null フォールバック (games 値で healing) は従来通り (= save で games 値が書き戻される)。
+            if (version.MinPlayers.HasValue)
+            {
+                numMinPlayers.Value = version.MinPlayers.Value;
+                _versionMinPlayersWasNullOnLoad = false;
+            }
+            else if (isActiveVersion && originalGame.MinPlayers.HasValue)
+            {
+                numMinPlayers.Value = originalGame.MinPlayers.Value;
+                _versionMinPlayersWasNullOnLoad = false;
+            }
+            else
+            {
+                numMinPlayers.Value = numMinPlayers.Minimum;
+                _versionMinPlayersWasNullOnLoad = true;
+            }
+            _versionMinPlayersDisplayedOnLoad = numMinPlayers.Value;
+
+            if (version.MaxPlayers.HasValue)
+            {
+                numMaxPlayers.Value = version.MaxPlayers.Value;
+                _versionMaxPlayersWasNullOnLoad = false;
+            }
+            else if (isActiveVersion && originalGame.MaxPlayers.HasValue)
+            {
+                numMaxPlayers.Value = originalGame.MaxPlayers.Value;
+                _versionMaxPlayersWasNullOnLoad = false;
+            }
+            else
+            {
+                numMaxPlayers.Value = numMaxPlayers.Minimum;
+                _versionMaxPlayersWasNullOnLoad = true;
+            }
+            _versionMaxPlayersDisplayedOnLoad = numMaxPlayers.Value;
 
             // Difficulty (1-3)
             if (version.Difficulty.HasValue && version.Difficulty >= 1 && version.Difficulty <= 3)
@@ -924,6 +974,11 @@ namespace TonePrism.Manager
                 {
                     GameId = txtGameId.Text.Trim(),
                     Title = txtTitle.Text.Trim(),
+                    // 通常経路 (selectedVersion != null) では下で `game.Version = selectedVersion.Version` に
+                    // 上書きされるが、防御経路 (cmbVersionList.Items.Count == 0、本来ありえない) では上書きが
+                    // 走らず games.version に NULL が書かれてしまう。originalGame.Version を default に置いて
+                    // 防御経路でも version 文字列を保つ。
+                    Version = originalGame.Version,
                     Description = string.IsNullOrWhiteSpace(txtDescription.Text) ? null : txtDescription.Text.Trim(),
                     ReleaseYear = numReleaseYear.Value > 0 ? (int?)numReleaseYear.Value : null,
                     MinPlayers = numMinPlayers.Value > 0 ? (int?)numMinPlayers.Value : null,

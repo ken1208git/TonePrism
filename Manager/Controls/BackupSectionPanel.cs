@@ -218,7 +218,7 @@ namespace TonePrism.Manager.Controls
                 return;
             }
 
-            using (var confirm = new RestoreConfirmForm(entry))
+            using (var confirm = new RestoreConfirmForm(entry, _dbManager.DatabasePath))
             {
                 if (confirm.ShowDialog(this) != DialogResult.Yes)
                 {
@@ -275,6 +275,20 @@ namespace TonePrism.Manager.Controls
             }
 
             // dr == DialogResult.OK: 復元成功
+            // (重要) Analyze の前に必ずスキーマ migration を走らせる。古い schema (例: arguments 列なしの
+            // v13 以前) のバックアップを復元した直後は、現行クエリ (v15 前提) が "no such column" で
+            // 失敗するため Analyze が空振りする。InitializeDatabase は idempotent なので、後続の
+            // DatabaseChanged?.Invoke() 経由 (= OnDatabaseRestored の InitializeDatabase) と二重呼出に
+            // なっても害はない。
+            try
+            {
+                _dbManager.InitializeDatabase();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("[BackupSectionPanel] 復元後のスキーマ migration に失敗", ex);
+            }
+
             // (復元ドリフト検出) バックアップ/復元は toneprism.db のみが対象で games/ フォルダは復元
             // されないため、別時点の DB を復元すると DB と実フォルダがズレうる。復元直後に突き合わせて
             // 結果と復元手順を提示する。深刻な問題 (起動不能) があれば必ずレポートを出し、軽微なズレや

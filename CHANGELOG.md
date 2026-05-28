@@ -1911,6 +1911,33 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.17.1] - 2026-05-28
+
+#### Fixed (v0.17.0 復元後の整合性チェック regression — 古いスキーマで必ず空振り)
+
+- **【中】古い schema (例: `arguments` 列追加前 = v13 以前) のバックアップを復元すると、復元直後の整合性チェックが必ず「実行できませんでした」になっていた回帰を修正**: `BackupSectionPanel.btnRestore_Click` は ProcessingDialog で復元成功（= ファイル置換完了）後、`RestoreReconciliationService.Analyze()` を呼ぶが、**この時点ではまだスキーマ migration が走っていない**ため、現行クエリ（`GameRepository.GetAll` の SELECT に `arguments` 列を含む = v15 schema 前提）が `no such column: arguments` で例外。`Analyze` の catch 節で `AnalysisFailed=true` となり、`RestoreReportForm` が「整合性チェックを実行できませんでした、Manager を再起動してください」と表示。データ自体は無事（後続の `DatabaseChanged?.Invoke()` → `OnDatabaseRestored` で `InitializeDatabase` が走り chain migration 完走、次回起動時は正常）だが、v0.17.0 の目玉機能が古いバックアップ復元シナリオで必ず空振る regression だった。
+  - 修正: `Analyze()` 呼び出しの**直前**に `_dbManager.InitializeDatabase()`（idempotent）を明示的に呼んで schema migration を保証する。後続の `DatabaseChanged?.Invoke()` 経路（= `OnDatabaseRestored.InitializeDatabase`）と二重呼出になるが両方 idempotent で害なし。`OnDatabaseRestored` 側で `InitializeDatabase` を呼んでいるからといって、その先で走る `Analyze` が migration 前である事実を見落としていた順序欠陥。
+
+#### Fixed (#235 — 手動バックアップが自動 retention で silent に削除される)
+
+- **【中】手動取得したバックアップが自動世代管理で消えていた問題を修正**: `BackupService.ApplyRetention` は世代数（既定 30）を超える古いファイルを削除するが、**判定がファイル名パターン `toneprism_*.db` のみ**で `backup_log.trigger_type` を参照しておらず、`manual` / `auto` / `safety` を全部同等に扱っていた。手動も自動も同じ `toneprism_{yyyyMMdd_HHmmss}.db` 命名で**ファイル名から区別できない**ため、部員が「念のため」取った手動バックアップが、後で自動バックアップが規定数を超えた瞬間に容赦なく消えていた。文化祭直前の「これだけは残しておきたい」snapshot ほど消えやすい構造だった。
+  - 修正: `BackupLogRepository.GetAutoSuccessRetentionTargets(keepCount)` を新設（`trigger_type='auto' AND status='success'` の行を `started_at DESC` で並べて `keepCount` 件を skip した残りを返す DB 駆動 SoT）。`ApplyRetention` をこの結果に紐づくファイルだけ削除する形に書き換え、`manual` / `safety` / `failed` および**DB に未登録のファイル**は絶対に削除しないルールにした（= 自動 retention は「自分が取った自動バックアップだけ整理する」最小権限）。DB 行はそのまま残置（既存挙動互換、表示は `File.Exists` フィルタで自然に hide される）。
+
+#### Fixed (`RestoreConfirmForm` のフルパス表示が古い絶対パスのまま)
+
+- **【低】復元確認ダイアログの「フルパス:」表示が `BackupPathResolver` を通っておらず、プロジェクト移動後に旧絶対パスを表示していた問題を修正**: `_entry.FilePath` を生で表示していたため、`backup_log.relative_path` が記録されている行でもダイアログ上は移動前の絶対パスが見えていた。実際の復元処理（`btnRestore_Click`）は `BackupPathResolver.ResolveAbsolutePath` で正しく解決した値を使うため**動作は正しい**が、ユーザーには「違うファイルが復元されるのでは?」と疑念を与える UX 退行。
+  - 修正: `RestoreConfirmForm` の ctor に `dbPath` を追加し、`Load` で `BackupPathResolver.ResolveAbsolutePath` を通した値を表示。呼出元 `BackupSectionPanel.btnRestore_Click` も `_dbManager.DatabasePath` を渡すように更新（表示と実行で同一の解決パスを使う対称化）。
+
+#### Fixed (`EditGameForm` の MinPlayers/MaxPlayers が版切替で silent 上書きされる)
+
+- **【低〜中】非アクティブ版で `min_players` / `max_players` が NULL の版を表示すると、ドロップダウンを切り替えるか OK を押すだけで前の版の値で silent に書き換わる問題を修正**: `LoadGameDataForVersion` の数値系で「`version.MinPlayers.HasValue == false` かつ非アクティブ版」のとき UI を**触らない** else 欠落があり、NumericUpDown には**前 version の表示値が残ったまま**になっていた。一方 `SaveGameDataToVersion` 側は無条件で `version.MinPlayers = (int)numMinPlayers.Value` を実行するため、画面上は何も変えていないのに DB は `null → 前 version 値` に書き換わる経路があった（#224 / #234 で潰してきた silent overwrite と同型の最後のギャップ）。`MaxPlayers` も同パターン（`Difficulty` / `PlayTime` には else 分岐があり影響なし、`SupportedConnection` / `ControllerSupport` は非 nullable で影響なし）。
+  - 修正: load 側に else 分岐を追加して「非アクティブ + null」のとき UI を `Minimum` (=1) にリセットしつつ「load 時 null」flag と「表示値 snapshot」をフィールドに保存。save 側で **flag が立ち、UI 値が snapshot のまま**（= user が触っていない）なら null を維持、それ以外は UI 値を書き込む。アクティブ版の null フォールバック（games 値で healing → DB へ書き戻し）は従来の自己修復 path を意図的に温存。
+- **【低】`EditGameForm` の防御経路（`cmbVersionList.Items.Count == 0`）で `games.version` が NULL に上書きされる subtle path を併せて修正**: `GameInfo` 構築時に `Version` が未設定で、防御経路の `dbManager.UpdateGame(game)` が `UPDATE games SET ... version = NULL` を発行する経路があった。通常経路（`selectedVersion != null`）では下で `game.Version = selectedVersion.Version` に上書きされるが、防御経路では上書きが走らない。`Version = originalGame.Version` を default に置いて防御経路でも version 文字列を保つ形にした。
+
+#### Bump 根拠 (v0.17.0 → v0.17.1)
+
+bug fix のみのため patch bump。DB スキーマ変更なし、UI / 機能の追加も無し。
+
 ### [Manager v0.17.0] - 2026-05-28
 
 #### Added (復元後の DB↔games フォルダ整合性チェック)

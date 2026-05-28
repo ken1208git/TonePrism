@@ -213,7 +213,18 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>
-        /// 設定された世代数を超える古いバックアップファイルを削除
+        /// 設定された世代数を超える古い**自動**バックアップファイルを削除する (#235)。
+        ///
+        /// **trigger_type='auto' AND status='success'** の行に紐づくファイルのみが対象。手動取得 (manual) /
+        /// 復元前の自動退避 (safety) / 失敗履歴 (failed) は絶対に削除しない。旧実装はファイル名パターン
+        /// `toneprism_*.db` だけで判定していたため、ファイル名から区別できない手動取得分も silent に消えていた。
+        ///
+        /// 本実装は backup_log を SoT にする (= DB に登録されていないファイルは触らない、= 自動 retention は
+        /// 「自分が取った自動バックアップだけ整理する」最小権限で動く)。DB 行は削除しない (= 既存挙動互換、
+        /// BackupSectionPanel の表示は File.Exists フィルタで自然に hide される)。
+        ///
+        /// destinationDir 引数は将来「設定で保存先を変えた直後の旧フォルダ清掃」等の拡張のため受けるが、
+        /// 現状は backup_log の file_path / relative_path が SoT なので未使用。
         /// </summary>
         private void ApplyRetention(string destinationDir)
         {
@@ -222,24 +233,28 @@ namespace TonePrism.Manager.Services
 
             try
             {
-                var dir = new DirectoryInfo(destinationDir);
-                if (!dir.Exists) return;
+                var targets = _logRepo.GetAutoSuccessRetentionTargets(retentionCount);
+                if (targets.Count == 0) return;
 
-                var oldFiles = dir.GetFiles("toneprism_*.db")
-                    .OrderByDescending(f => f.CreationTimeUtc)
-                    .Skip(retentionCount)
-                    .ToList();
-
-                foreach (var f in oldFiles)
+                string dbPath = _conn.DbPath;
+                foreach (var entry in targets)
                 {
+                    string resolvedPath = BackupPathResolver.ResolveAbsolutePath(entry, dbPath);
+                    if (string.IsNullOrEmpty(resolvedPath)) continue;
+                    if (!File.Exists(resolvedPath))
+                    {
+                        // 既に消えている (= 手動で削除された等)。DB 行はそのまま残置 (表示は File.Exists で hide)。
+                        continue;
+                    }
+
                     try
                     {
-                        f.Delete();
-                        Logger.Info($"[BackupService] 古いバックアップを削除: {f.Name}");
+                        File.Delete(resolvedPath);
+                        Logger.Info($"[BackupService] 古い自動バックアップを削除 (#235 trigger_type=auto に限定): {resolvedPath}");
                     }
                     catch (Exception ex)
                     {
-                        Logger.Error($"[BackupService] 削除失敗 {f.Name}", ex);
+                        Logger.Error($"[BackupService] 削除失敗 {resolvedPath}", ex);
                     }
                 }
             }

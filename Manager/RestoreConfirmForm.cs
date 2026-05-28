@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Windows.Forms;
 using TonePrism.Manager.Models;
+using TonePrism.Manager.Services;
 
 namespace TonePrism.Manager
 {
@@ -13,11 +14,13 @@ namespace TonePrism.Manager
         private string _confirmationCode;
         private readonly Random _random = new Random();
         private readonly BackupLogEntry _entry;
+        private readonly string _dbPath;
 
-        public RestoreConfirmForm(BackupLogEntry entry)
+        public RestoreConfirmForm(BackupLogEntry entry, string dbPath)
         {
             InitializeComponent();
             _entry = entry;
+            _dbPath = dbPath;
         }
 
         private void RestoreConfirmForm_Load(object sender, EventArgs e)
@@ -27,12 +30,16 @@ namespace TonePrism.Manager
 
             if (_entry != null)
             {
+                // (復元と表示で同一の解決パスを使う) 実復元時は BackupPathResolver で
+                // relative_path から再計算した絶対パスを使うが、ここで _entry.FilePath を生表示
+                // するとプロジェクト移動後に「昔の絶対パス」が出てユーザーを混乱させる。
+                string resolvedPath = BackupPathResolver.ResolveAbsolutePath(_entry, _dbPath);
                 string sizeStr = _entry.FileSizeBytes.HasValue ? FormatBytes(_entry.FileSizeBytes.Value) : "-";
                 lblTargetFile.Text =
-                    $"対象: {Path.GetFileName(_entry.FilePath ?? "")}\n" +
+                    $"対象: {Path.GetFileName(resolvedPath)}\n" +
                     $"作成日時: {_entry.StartedAtLocal:yyyy/MM/dd HH:mm:ss}\n" +
                     $"サイズ: {sizeStr}\n" +
-                    $"フルパス: {_entry.FilePath}";
+                    $"フルパス: {resolvedPath}";
             }
         }
 

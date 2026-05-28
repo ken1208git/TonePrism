@@ -484,6 +484,47 @@ namespace TonePrism.Manager.Repositories
             });
         }
 
+        /// <summary>
+        /// 自動バックアップで成功した行のうち、新しい順に `keepCount` 件を除いた残り (= retention で削除対象に
+        /// すべき行) を返す (#235)。
+        ///
+        /// **trigger_type='auto' AND status='success'** のみが対象。`manual` (手動取得) / `safety` (復元前の自動退避) /
+        /// `failed` (失敗履歴) は絶対に retention 対象にしない。旧実装は backups フォルダ内の
+        /// `toneprism_*.db` ファイル名パターンだけで判定していたため、手動取得分も自動 retention で
+        /// silent に削除されていた。
+        ///
+        /// `keepCount &lt;= 0` の場合は空リストを返す (= retention 無効、削除しない)。
+        /// </summary>
+        public List<BackupLogEntry> GetAutoSuccessRetentionTargets(int keepCount)
+        {
+            if (keepCount <= 0) return new List<BackupLogEntry>();
+            return _conn.ExecuteWithRetry(() =>
+            {
+                var list = new List<BackupLogEntry>();
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    // 新しい順に並べて keepCount 件を skip した残りを返す。
+                    // started_at は UNIX秒。NULL は理論上ないが念のため最後尾にしておく。
+                    using (var cmd = new SQLiteCommand(
+                        "SELECT id, started_at, completed_at, pc_name, file_path, relative_path, file_size_bytes, " +
+                        "status, error_message, trigger_type FROM backup_log " +
+                        "WHERE trigger_type = 'auto' AND status = 'success' " +
+                        "ORDER BY started_at DESC " +
+                        "LIMIT -1 OFFSET @offset", connection))
+                    {
+                        cmd.Parameters.AddWithValue("@offset", keepCount);
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                                list.Add(ReadEntry(reader));
+                        }
+                    }
+                }
+                return list;
+            });
+        }
+
         public List<BackupLogEntry> GetRecent(int limit)
         {
             return _conn.ExecuteWithRetry(() =>
