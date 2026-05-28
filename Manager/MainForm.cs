@@ -185,6 +185,35 @@ namespace TonePrism.Manager
         /// </returns>
         public DialogResult CheckSessionConflictBeforeWrite(string operationDescription)
         {
+            // (H5) advisory restore-lock check。他 PC が現在復元処理中なら即時 Cancel 返却。
+            // 「他 PC で復元中の数十秒間に自 PC が write した内容が File.Replace で消える」race を
+            // user 確認層で塞ぐ coordination layer。stale (= 5 分以上 lock 古い) と self lock は無視。
+            if (dbManager != null)
+            {
+                try
+                {
+                    string lockOwner = dbManager.SettingsRepository.GetActiveRestoreLockOwnerOrNull(
+                        Environment.MachineName,
+                        DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        Services.SettingsKeys.RestoreLockStaleThresholdMs);
+                    if (!string.IsNullOrEmpty(lockOwner))
+                    {
+                        Logger.Warn($"[MainForm] (H5) 他 PC '{lockOwner}' が restore lock 保有中、{operationDescription} を中止");
+                        MessageBox.Show(this,
+                            $"他 PC ({lockOwner}) が現在データベースの復元処理中です。\n\n" +
+                            $"復元処理と書込操作が衝突するとデータ消失のおそれがあるため、{operationDescription} を中止します。\n" +
+                            "復元完了 (通常 1 分以内) を待ってから再試行してください。",
+                            "他 PC で復元処理中", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return DialogResult.Cancel;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // lock check の失敗で write 全 path を block しないよう fail-soft。
+                    Logger.Warn("[MainForm] (H5) restore lock check 失敗 (fail-soft 続行): " + ex.Message);
+                }
+            }
+
             // (#179 round 7 M-1) `_sessionService == null` (= MainForm_Load 完了前) と
             // `_sessionService.IsInitialized == false` (= Initialize 失敗で heartbeat 機構なし) の両方を
             // fail-soft で OK 返却。後者を guard しないと毎 click ごとに `DetectOtherActiveSessions` →

@@ -25,6 +25,11 @@ namespace TonePrism.Manager
         // 存在していた #120「既存フォルダで続行」経路では baseGameFolderCreated=false となり親に一切触らない。
         private string baseGameFolder;
         private bool baseGameFolderCreated;
+        // (M7) 「この追加操作で destinationGameFolder を新規作成した」flag。並行 Manager race で
+        // 「既に存在する」throw を踏んだ敗者の rollback が、勝者の直前 CreateDirectory した folder を
+        // 巻き込み削除する footgun を物理閉鎖。baseGameFolderCreated と同じパターン (自分が作った
+        // disk 状態のみ自分で消す)。
+        private bool versionFolderCreatedThisCall;
         // (#234 追加精査) #120「既存フォルダあり」警告でユーザーが OK (= 中身ごと削除して作り直す) を選んだか。
         // CopyGameFolder が親 games/{id}/ を丸ごと削除→再作成する gate。警告を出した時のみ true になる
         // ため、警告未提示の通常追加 / race で後から出現したフォルダを無確認で wipe することはない。
@@ -273,6 +278,9 @@ namespace TonePrism.Manager
 
             // バージョンフォルダを作成
             Directory.CreateDirectory(destinationGameFolder);
+            // (M7) 自分で作った直後に flag を立てる。CreateDirectory より後 (= throw が出る前に立てない) で、
+            // 「Directory.Exists 判定で throw した敗者」と「Created 直後の勝者」の状態を rollback で区別可能に。
+            versionFolderCreatedThisCall = true;
 
             // FileOperationServiceに委譲してコピー
             // (追加精査 ②) 個別 File.Copy 失敗を呼び出し側に伝播。1 件でも失敗があれば throw して
@@ -564,6 +572,22 @@ namespace TonePrism.Manager
             catch (Exception delEx)
             {
                 Logger.Warn("[AddGameForm] (#234 ②) games 行 rollback 削除失敗: " + gameId + ": " + delEx.Message);
+                // (M8) silent な整合性破綻 (= 物理ファイルは消えたが DB に games 行のみ残留 → 次回起動時に
+                // 版なし孤児ゲームとして UI 表示) を user に伝える。手動 SQL での修復が必要なケースを
+                // 明示通知。
+                try
+                {
+                    MessageBox.Show(this,
+                        $"ゲーム '{gameId}' の rollback 削除に失敗しました。\n\n" +
+                        $"{delEx.Message}\n\n" +
+                        "ファイルは削除されましたが、データベース上のゲーム情報は残っています。" +
+                        "次回 Manager 起動時に「版なしのゲーム」として表示される可能性があります。" +
+                        "管理者に連絡して手動でデータベース修復を依頼してください。",
+                        "rollback 失敗 (手動修復が必要)",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                }
+                catch { /* MessageBox 失敗は無視 */ }
             }
         }
 
@@ -578,7 +602,10 @@ namespace TonePrism.Manager
         /// </summary>
         private void CleanupCopiedFoldersOnRollback()
         {
-            if (!string.IsNullOrEmpty(destinationGameFolder) && Directory.Exists(destinationGameFolder))
+            // (M7) versionFolderCreatedThisCall=true (= 自分が CreateDirectory した version folder) のときだけ削除。
+            // 並行 Manager race で「既に存在する」throw を踏んだ敗者は flag=false のままで、勝者の folder には
+            // 触らない。baseGameFolderCreated と同じパターン。
+            if (versionFolderCreatedThisCall && !string.IsNullOrEmpty(destinationGameFolder) && Directory.Exists(destinationGameFolder))
             {
                 try { Directory.Delete(destinationGameFolder, true); } catch { }
             }

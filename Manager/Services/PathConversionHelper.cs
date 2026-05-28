@@ -81,22 +81,28 @@ namespace TonePrism.Manager.Services
                 return null;
             }
 
+            // (L) 戻り値が相対 path のままだと caller (File.Exists 等) で CWD 基準で評価されて
+            // false になる経路があるため、最後に Path.GetFullPath で必ず絶対化する。
+            string result;
             if (IsPathInside(destinationFolder, sourcePath))
             {
                 // 既にコピー先フォルダ内のパス
-                return sourcePath;
+                result = sourcePath;
             }
             else if (IsPathInside(sourceFolder, sourcePath))
             {
                 // コピー元フォルダ内のパス → コピー先の絶対パスに変換
                 string relativePath = ToRelativePath(sourceFolder, sourcePath);
-                return Path.Combine(destinationFolder, relativePath);
+                result = Path.Combine(destinationFolder, relativePath);
             }
             else
             {
                 // その他のパスはそのまま
-                return sourcePath;
+                result = sourcePath;
             }
+
+            try { return Path.GetFullPath(result); }
+            catch { return result; /* 不正 path 等 GetFullPath が throw する稀 case は元の値返却 */ }
         }
 
         /// <summary>

@@ -50,6 +50,13 @@ namespace TonePrism.Manager
         private decimal _versionMinPlayersDisplayedOnLoad;
         private decimal _versionMaxPlayersDisplayedOnLoad;
 
+        // (M1) games.release_year は GameInfo.ReleaseYear が int? 型で null 可能だが、UI 側 numReleaseYear は
+        // NumericUpDown のため null を表現できない。Load 時に null だった場合は DateTime.Now.Year を仮表示する
+        // が、本 flag が true + user が値を触っていない (= 表示値と保存時の値が同一) 場合は null を維持する。
+        // Min/MaxPlayers の null 保護パターンと同じ。
+        private bool _gameReleaseYearWasNullOnLoad;
+        private decimal _gameReleaseYearDisplayedOnLoad;
+
         // (#158 CX-1) folder rename を 2-phase 化するための plan 単位 (Phase 1 で構築 / Phase 2 で実行)。
         // (#158 round 4 codex P1) Old{Executable,Thumbnail,Background}Path: in-memory state rollback 用に
         // path 書き換え前の値を capture。disk Move を rollback しても in-memory が NEW のままだと、同
@@ -130,6 +137,31 @@ namespace TonePrism.Manager
         }
 
         /// <summary>
+        /// (M2) NumericUpDown に DB 由来の int 値を代入する。範囲外なら clamp + warn ログ + false 返却
+        /// (= caller 側 NullOnLoad flag を立てて save 時に意図せず clamp 値が書き戻らないようにする)。
+        /// 範囲内なら true 返却 + そのまま代入。SemverInputControl が clamp + healing する pattern と揃える。
+        /// </summary>
+        /// <returns>範囲内で生代入できれば true、clamp 発生 (= NullOnLoad 相当扱い) なら false。</returns>
+        private static bool SetClampedNumericValue(System.Windows.Forms.NumericUpDown nud, int value, string fieldName)
+        {
+            decimal d = value;
+            if (d < nud.Minimum)
+            {
+                Services.Logger.Warn($"[EditGameForm] (M2) {fieldName}={value} は許容下限 {nud.Minimum} を下回るため clamp");
+                nud.Value = nud.Minimum;
+                return false;
+            }
+            if (d > nud.Maximum)
+            {
+                Services.Logger.Warn($"[EditGameForm] (M2) {fieldName}={value} は許容上限 {nud.Maximum} を上回るため clamp");
+                nud.Value = nud.Maximum;
+                return false;
+            }
+            nud.Value = d;
+            return true;
+        }
+
+        /// <summary>
         /// フォームロード時の処理
         /// </summary>
         private void EditGameForm_Load(object sender, EventArgs e)
@@ -143,12 +175,17 @@ namespace TonePrism.Manager
             
             if (originalGame.ReleaseYear.HasValue)
             {
-                numReleaseYear.Value = originalGame.ReleaseYear.Value;
+                // (M2) DB に範囲外の年 (例: 0 / 9999) があると ArgumentOutOfRangeException で edit 画面が開けなくなる。
+                // clamp 経路に乗せて空欄相当 (= NullOnLoad 扱い) で扱う。
+                _gameReleaseYearWasNullOnLoad = !SetClampedNumericValue(numReleaseYear, originalGame.ReleaseYear.Value, "ReleaseYear");
             }
             else
             {
+                // (M1) DB 上 null を NumericUpDown で「現在年」と仮表示するが、user が触っていなければ null 維持。
                 numReleaseYear.Value = DateTime.Now.Year;
+                _gameReleaseYearWasNullOnLoad = true;
             }
+            _gameReleaseYearDisplayedOnLoad = numReleaseYear.Value;
 
             // ジャンルチェックボックスリストを初期化
             clbGenre.Items.Clear();
@@ -274,35 +311,43 @@ namespace TonePrism.Manager
                         MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
 
+                // (H2) _initialSelectedVersionId は cmbVersionList.SelectedItem 設定 (= SelectedIndexChanged
+                // 発火 → LoadGameDataForVersion 実行) より **前** に決定する。
+                // 旧実装は代入を SelectedItem 設定の後に行っていたため、初回 load 時の LoadGameDataForVersion
+                // 内で `_initialSelectedVersionId.HasValue == false` 確定となり、#234 の active fallback
+                // (= 初期版スカスカ healing) が form open 時のみ無効化される非対称があった。dropdown を一度
+                // 切替えて戻すと正常化、という silent UX 劣化を防ぐ。
+                //
+                // (#158 round 7 M-2) `==` (= Ordinal) ではなく OrdinalIgnoreCase 比較。CX-3 で大文字
+                // V を regex 受理にした副作用で、games.version="V1.0.0" / game_versions.version="v1.0.0"
+                // (どこかの normalize 経由で書き戻された) が共存しうる。生 == 比較だと false →
+                // fallback で先頭 (= 最新版) が選択され「user が active と思っていた version と違う
+                // ものが表示される」silent UX drift になる。dup-check / rename 比較と同じ規則に揃える。
+                GameVersion initialSelected = null;
                 if (originalGame.Version != null)
                 {
-                    // (#158 round 7 M-2) `==` (= Ordinal) ではなく OrdinalIgnoreCase 比較。CX-3 で大文字
-                    // V を regex 受理にした副作用で、games.version="V1.0.0" / game_versions.version="v1.0.0"
-                    // (どこかの normalize 経由で書き戻された) が共存しうる。生 == 比較だと false →
-                    // fallback で先頭 (= 最新版) が選択され「user が active と思っていた version と違う
-                    // ものが表示される」silent UX drift になる。dup-check / rename 比較と同じ規則に揃える。
                     foreach (var item in cmbVersionList.Items)
                     {
                         if (item is GameVersion v && string.Equals(v.Version, originalGame.Version, StringComparison.OrdinalIgnoreCase))
                         {
-                            cmbVersionList.SelectedItem = item;
+                            initialSelected = v;
                             break;
                         }
                     }
-                    
-                    // 見つからなかった場合（またはVersionが設定されていない場合）は先頭（最新）を選択
-                    if (cmbVersionList.SelectedIndex == -1 && cmbVersionList.Items.Count > 0)
-                    {
-                        cmbVersionList.SelectedIndex = 0;
-                    }
                 }
-                else if (cmbVersionList.Items.Count > 0)
+                // 見つからなかった場合（またはVersionが設定されていない場合）は先頭（最新）を選択
+                if (initialSelected == null && cmbVersionList.Items.Count > 0)
                 {
-                    cmbVersionList.SelectedIndex = 0;
+                    initialSelected = cmbVersionList.Items[0] as GameVersion;
                 }
 
                 // (#234) 初期選択 = 起動対象の版。OK 時のアクティブ版切替検出の基準として記録。
-                _initialSelectedVersionId = (cmbVersionList.SelectedItem as GameVersion)?.Id;
+                // SelectedItem 設定より前に代入することで LoadGameDataForVersion の active 判定が初回から有効。
+                _initialSelectedVersionId = initialSelected?.Id;
+                if (initialSelected != null)
+                {
+                    cmbVersionList.SelectedItem = initialSelected;
+                }
 
                 // 表示用にフォーマット
                 cmbVersionList.DisplayMember = "Version"; // GameVersionクラスのToStringをオーバーライドするか、DisplayMemberを設定
@@ -347,12 +392,14 @@ namespace TonePrism.Manager
         {
             if (version == null) return;
 
+            // (L) AddGameForm 経路 / UpdateGame 経路は空時に null 保存だが、本 path だけ "" を入れていた。
+            // Launcher 側が null と "" を別 path として扱うと silent 表示崩れの risk があるため null に統一。
             version.ExecutablePath = !string.IsNullOrEmpty(txtExecutablePath.Text)
-                ? PathConversionHelper.ToRelativePath(gameFolder, txtExecutablePath.Text) : "";
+                ? PathConversionHelper.ToRelativePath(gameFolder, txtExecutablePath.Text) : null;
             version.ThumbnailPath = !string.IsNullOrEmpty(txtThumbnailPath.Text)
-                ? PathConversionHelper.ToRelativePath(gameFolder, txtThumbnailPath.Text) : "";
+                ? PathConversionHelper.ToRelativePath(gameFolder, txtThumbnailPath.Text) : null;
             version.BackgroundPath = !string.IsNullOrEmpty(txtBackgroundPath.Text)
-                ? PathConversionHelper.ToRelativePath(gameFolder, txtBackgroundPath.Text) : "";
+                ? PathConversionHelper.ToRelativePath(gameFolder, txtBackgroundPath.Text) : null;
         }
 
         /// <summary>
@@ -486,15 +533,17 @@ namespace TonePrism.Manager
             // 数値系。else 欠落で「前 version の表示が残ったまま save で書き換わる」silent overwrite を
             // 起こさないよう、null+非active のときは Minimum (=1) にリセットしつつ null 保護 flag を立てる。
             // active 版の null フォールバック (games 値で healing) は従来通り (= save で games 値が書き戻される)。
+            // (M2) DB に NumericUpDown 範囲外の値 (例: 0 / 200) が入っている場合、生代入は
+            // ArgumentOutOfRangeException で編集画面が開けなくなる。SetClampedNumericValue で
+            // clamp + warn ログ + 注意 flag を立てる (= 保存時に意図せず clamp 値が書き戻らないよう
+            // 旧 null と同じ NullOnLoad 保護に乗せる) のが安全。
             if (version.MinPlayers.HasValue)
             {
-                numMinPlayers.Value = version.MinPlayers.Value;
-                _versionMinPlayersWasNullOnLoad = false;
+                _versionMinPlayersWasNullOnLoad = !SetClampedNumericValue(numMinPlayers, version.MinPlayers.Value, "MinPlayers (version)");
             }
             else if (isActiveVersion && originalGame.MinPlayers.HasValue)
             {
-                numMinPlayers.Value = originalGame.MinPlayers.Value;
-                _versionMinPlayersWasNullOnLoad = false;
+                _versionMinPlayersWasNullOnLoad = !SetClampedNumericValue(numMinPlayers, originalGame.MinPlayers.Value, "MinPlayers (game fallback)");
             }
             else
             {
@@ -505,13 +554,11 @@ namespace TonePrism.Manager
 
             if (version.MaxPlayers.HasValue)
             {
-                numMaxPlayers.Value = version.MaxPlayers.Value;
-                _versionMaxPlayersWasNullOnLoad = false;
+                _versionMaxPlayersWasNullOnLoad = !SetClampedNumericValue(numMaxPlayers, version.MaxPlayers.Value, "MaxPlayers (version)");
             }
             else if (isActiveVersion && originalGame.MaxPlayers.HasValue)
             {
-                numMaxPlayers.Value = originalGame.MaxPlayers.Value;
-                _versionMaxPlayersWasNullOnLoad = false;
+                _versionMaxPlayersWasNullOnLoad = !SetClampedNumericValue(numMaxPlayers, originalGame.MaxPlayers.Value, "MaxPlayers (game fallback)");
             }
             else
             {
@@ -545,14 +592,20 @@ namespace TonePrism.Manager
             chkControllerSupport.Checked = isActiveVersion ? originalGame.ControllerSupport : version.ControllerSupport;
 
             // Paths（相対パスを絶対パスに変換して表示。#234: 版が空ならアクティブ版に限り games フォールバック）
+            // (H1) ExecutablePath にも他と同じ active fallback を適用。旧 AddGameForm 経由で作られた
+            // game_versions 行は ExecutablePath が NULL のため、active 版選択中でも txt が空になり
+            // 「実行ファイルを選択してください」validation で永久 block される回帰を防ぐ。
+            string exeToShow = !string.IsNullOrEmpty(version.ExecutablePath)
+                ? version.ExecutablePath
+                : (isActiveVersion ? originalGame.ExecutablePath : null);
             string thumbToShow = !string.IsNullOrEmpty(version.ThumbnailPath)
                 ? version.ThumbnailPath
                 : (isActiveVersion ? originalGame.ThumbnailPath : null);
             string bgToShow = !string.IsNullOrEmpty(version.BackgroundPath)
                 ? version.BackgroundPath
                 : (isActiveVersion ? originalGame.BackgroundPath : null);
-            txtExecutablePath.Text = !string.IsNullOrEmpty(version.ExecutablePath)
-                ? PathConversionHelper.ToAbsolutePath(gameFolder, version.ExecutablePath) : "";
+            txtExecutablePath.Text = !string.IsNullOrEmpty(exeToShow)
+                ? PathConversionHelper.ToAbsolutePath(gameFolder, exeToShow) : "";
             txtThumbnailPath.Text = !string.IsNullOrEmpty(thumbToShow)
                 ? PathConversionHelper.ToAbsolutePath(gameFolder, thumbToShow) : "";
             txtBackgroundPath.Text = !string.IsNullOrEmpty(bgToShow)
@@ -986,7 +1039,11 @@ namespace TonePrism.Manager
                     // 防御経路でも version 文字列を保つ。
                     Version = originalGame.Version,
                     Description = string.IsNullOrWhiteSpace(txtDescription.Text) ? null : txtDescription.Text.Trim(),
-                    ReleaseYear = numReleaseYear.Value > 0 ? (int?)numReleaseYear.Value : null,
+                    // (M1) Load 時に DB 上 null だった + user が表示値を触っていなければ null 維持。
+                    // 旧実装は numReleaseYear.Minimum=1900 で常に > 0 となるため null が現在年で silent 上書きされていた。
+                    ReleaseYear = (_gameReleaseYearWasNullOnLoad && numReleaseYear.Value == _gameReleaseYearDisplayedOnLoad)
+                        ? (int?)null
+                        : (numReleaseYear.Value > 0 ? (int?)numReleaseYear.Value : null),
                     MinPlayers = numMinPlayers.Value > 0 ? (int?)numMinPlayers.Value : null,
                     MaxPlayers = numMaxPlayers.Value > 0 ? (int?)numMaxPlayers.Value : null,
                     Difficulty = cmbDifficulty.SelectedIndex >= 0 ? cmbDifficulty.SelectedIndex + 1 : (int?)null,

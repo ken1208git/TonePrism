@@ -25,7 +25,11 @@ namespace TonePrism.Manager
         // v15: game_versions(game_id, version) に UNIQUE INDEX を追加 (#234 ②)。同一ゲームに同一
         //      バージョン番号が 2 行入る silent corruption を DB レベルで防ぐ最後の砦。重複残存時は
         //      throw せず skip + 警告 (V10→V11 と同じ "data residual → retry" パターン)。
-        private const int CurrentDbVersion = 15;
+        // v16: backup_log.trigger_type CHECK に 'restore' を追加 (H4)。リストアイベントの監査ログを
+        //      backup_log に記録できるようにする。既存行は影響なし (CHECK 拡張のみ)。
+        // v17: game_versions UNIQUE INDEX を COLLATE NOCASE で作り直す (M3)。`v1.0.0` と `V1.0.0` の
+        //      case 違いを semantic dup として弾く。重複残存時は v14→v15 と同じ skip + retry パターン。
+        private const int CurrentDbVersion = 17;
 
         public SchemaManager(DatabaseConnection conn)
         {
@@ -505,7 +509,7 @@ namespace TonePrism.Manager
 
         /// <summary>
         /// backup_log テーブルを作成（IF NOT EXISTS で冪等）。
-        /// trigger_type は 'manual' / 'auto' / 'safety' の3種。
+        /// trigger_type は 'manual' / 'auto' / 'safety' / 'restore' の4種 (v16 で 'restore' を追加)。
         /// </summary>
         private void CreateBackupLogTable(SQLiteConnection connection, SQLiteTransaction transaction)
         {
@@ -520,7 +524,7 @@ namespace TonePrism.Manager
                     file_size_bytes INTEGER,
                     status TEXT NOT NULL CHECK (status IN ('in_progress','success','failed')),
                     error_message TEXT,
-                    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('manual','auto','safety'))
+                    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('manual','auto','safety','restore'))
                 )";
             using (var command = new SQLiteCommand(sql, connection, transaction))
             {
@@ -864,6 +868,42 @@ namespace TonePrism.Manager
                         else
                         {
                             Logger.Warn("[DatabaseManager] 直前の migration が未完のため user_version は " + currentVersion + " のまま据え置き (v15 物理変更のみ先行適用)");
+                        }
+                    }
+
+                    if (currentVersion < 16)
+                    {
+                        // v15 → v16: backup_log.trigger_type CHECK 拡張 ('restore' 追加、H4)。
+                        // 既存行は trigger_type が 'manual' / 'auto' / 'safety' のみなので新 CHECK に違反しない。
+                        // V9→V10 と同じ pattern (テーブル recreate)。
+                        MigrateV15ToV16(connection, migTransaction);
+                        if (currentVersion >= 15)
+                        {
+                            currentVersion = 16;
+                        }
+                        else
+                        {
+                            Logger.Warn("[DatabaseManager] 直前の migration が未完のため user_version は " + currentVersion + " のまま据え置き (v16 物理変更のみ先行適用)");
+                        }
+                    }
+
+                    if (currentVersion < 17)
+                    {
+                        // v16 → v17: game_versions UNIQUE INDEX を COLLATE NOCASE 化 (M3)。
+                        // v14→v15 と同じく重複残存時は skip + retry。case 違い重複も新たに弾くため
+                        // 旧 BINARY INDEX では通っていた `v1.0.0` + `V1.0.0` の共存があると失敗しうる。
+                        bool nocaseOk = MigrateV16ToV17(connection, migTransaction);
+                        if (currentVersion >= 16 && nocaseOk)
+                        {
+                            currentVersion = 17;
+                        }
+                        else if (!nocaseOk)
+                        {
+                            Logger.Warn("[DatabaseManager] v16→v17 が未完 (game_versions に case 違い重複残存) のため user_version は " + currentVersion + " のまま据え置き、次回起動時に再試行します");
+                        }
+                        else
+                        {
+                            Logger.Warn("[DatabaseManager] 直前の migration が未完のため user_version は " + currentVersion + " のまま据え置き (v17 物理変更のみ先行適用)");
                         }
                     }
 
@@ -1529,6 +1569,111 @@ namespace TonePrism.Manager
         {
             Logger.Info("[DatabaseManager] Executing migration V14 -> V15 (game_versions に (game_id, version) UNIQUE INDEX を追加, #234 ②)");
             return EnsureGameVersionsVersionUniqueIndex(connection, transaction);
+        }
+
+        /// <summary>
+        /// v15 → v16: backup_log.trigger_type CHECK を 'restore' 受け入れに拡張 (H4)。
+        /// V9 → V10 と同じ pattern: SQLite の CHECK は ALTER で変更不能のため、新スキーマで table を recreate
+        /// + 全行 INSERT コピー + DROP/RENAME。既存行は 'manual' / 'auto' / 'safety' のみで新 CHECK に違反しない。
+        /// v11 で追加された relative_path 列も保持する (V9 → V10 の列セットからの drift に注意)。
+        /// </summary>
+        private void MigrateV15ToV16(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            Logger.Info("[DatabaseManager] Executing migration V15 -> V16 (backup_log.trigger_type CHECK 拡張: 'restore' 追加, H4)");
+
+            string createNew = @"
+                CREATE TABLE backup_log_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    started_at INTEGER NOT NULL,
+                    completed_at INTEGER,
+                    pc_name TEXT NOT NULL,
+                    file_path TEXT,
+                    relative_path TEXT,
+                    file_size_bytes INTEGER,
+                    status TEXT NOT NULL CHECK (status IN ('in_progress','success','failed')),
+                    error_message TEXT,
+                    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('manual','auto','safety','restore'))
+                )";
+            using (var cmd = new SQLiteCommand(createNew, connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            using (var cmd = new SQLiteCommand(
+                "INSERT INTO backup_log_new (id, started_at, completed_at, pc_name, file_path, relative_path, " +
+                "file_size_bytes, status, error_message, trigger_type) " +
+                "SELECT id, started_at, completed_at, pc_name, file_path, relative_path, " +
+                "file_size_bytes, status, error_message, trigger_type FROM backup_log",
+                connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            using (var cmd = new SQLiteCommand("DROP TABLE backup_log", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            using (var cmd = new SQLiteCommand(
+                "ALTER TABLE backup_log_new RENAME TO backup_log", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            Logger.Info("[DatabaseManager] Migration V15 -> V16 completed.");
+        }
+
+        /// <summary>
+        /// v16 → v17: game_versions UNIQUE INDEX を COLLATE NOCASE 化 (M3)。
+        /// 旧 BINARY collation index は `v1.0.0` と `V1.0.0` を別行として許容していた。SemverInputControl が
+        /// 大文字 V を受理する一方、UI 層 dup-check は OrdinalIgnoreCase のため外部ツール直 INSERT や
+        /// レガシー復元データで case 違い重複が DB に入る経路があった。NOCASE INDEX で DB レベルでも弾く。
+        /// 重複残存時は MigrateV14ToV15 と同じ skip + retry パターン。
+        /// </summary>
+        /// <returns>NOCASE INDEX 作成成功なら true、case 違い重複残存で skip なら false</returns>
+        private bool MigrateV16ToV17(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            Logger.Info("[DatabaseManager] Executing migration V16 -> V17 (game_versions UNIQUE INDEX を COLLATE NOCASE 化, M3)");
+
+            // NOCASE 重複検出 (LOWER で GROUP BY)
+            var dups = new List<string>();
+            using (var cmd = new SQLiteCommand(
+                "SELECT game_id, LOWER(version) AS v_lower, COUNT(*) AS cnt FROM game_versions " +
+                "GROUP BY game_id, LOWER(version) HAVING cnt > 1 ORDER BY game_id, v_lower",
+                connection, transaction))
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    dups.Add("  - game_id='" + reader["game_id"] + "', version (NOCASE)='" + reader["v_lower"] + "' (" + reader["cnt"] + " 行)");
+                }
+            }
+
+            if (dups.Count > 0)
+            {
+                Logger.Warn(
+                    "[DatabaseManager] WARNING: game_versions に case 違い重複を検出。NOCASE UNIQUE INDEX 作成を skip します " +
+                    "(user_version 据え置き、次回起動時に再試行)。tools/sqlite3/sqlite3.exe で重複行を確認し、不要な行を削除してから " +
+                    "Manager を再起動してください:\n" + string.Join("\n", dups));
+                // 既存の BINARY INDEX は維持 (drop しない、= 部分的 fence は継続)。
+                return false;
+            }
+
+            // 旧 BINARY INDEX を drop して NOCASE で作り直す。drop は idempotent (IF EXISTS)。
+            using (var cmd = new SQLiteCommand(
+                "DROP INDEX IF EXISTS " + GameVersionsVersionUniqueIndexName, connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+            using (var cmd = new SQLiteCommand(
+                "CREATE UNIQUE INDEX IF NOT EXISTS " + GameVersionsVersionUniqueIndexName +
+                " ON game_versions(game_id, version COLLATE NOCASE)",
+                connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+            Logger.Info("[DatabaseManager] game_versions(game_id, version COLLATE NOCASE) UNIQUE INDEX を作成しました (M3)");
+            return true;
         }
 
         /// <summary>(#234 ②) game_versions(game_id, version) UNIQUE INDEX 名。CreateTables / Migrate 共通。</summary>

@@ -36,7 +36,9 @@ namespace TonePrism.Manager
             _settingsRepo = new SettingsRepository(_conn);
             _backupLogRepo = new BackupLogRepository(_conn);
             _backupService = new BackupService(_conn, _backupLogRepo, _settingsRepo);
-            _restoreService = new RestoreService(_conn);
+            // (H4) リストア audit row を backup_log に残すため BackupLogRepository を注入。
+            // (H5) advisory restore-lock 取得/解放のため SettingsRepository も注入。
+            _restoreService = new RestoreService(_conn, _backupLogRepo, _settingsRepo);
             _sessionRepo = new ManagerSessionRepository(_conn);
         }
 
@@ -80,6 +82,38 @@ namespace TonePrism.Manager
         public void UpdateGameVersions(IEnumerable<GameVersion> versions) => _versionRepo.UpdateMany(versions);
         public List<GameVersion> GetGameVersions(string gameId) => _versionRepo.GetByGameId(gameId);
         public GameVersion GetLatestVersion(string gameId) => _versionRepo.GetLatest(gameId);
+
+        /// <summary>
+        /// (M5) 新版の追加 (game_versions INSERT) と activation (games UPDATE) を 1 transaction で atomic に
+        /// 実行する。両者を別 transaction で順次実行する旧経路では、commit 完了直後に電源断 / SMB disconnect が
+        /// 起きると game_versions のみ INSERT され games.version は旧版のまま残る partial-commit 窓があった
+        /// (= Launcher で新版が起動できないが UI 上「アクティブ化失敗」MessageBox も出ない silent corruption)。
+        /// 本 method は両 INSERT/UPDATE を共有 connection + transaction でラップして窓を物理閉鎖する。
+        /// </summary>
+        public void AddVersionAndActivate(GameVersion version, GameInfo game)
+        {
+            _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var transaction = connection.BeginTransaction())
+                    {
+                        try
+                        {
+                            _versionRepo.AddVersionRowInTransaction(connection, transaction, version);
+                            _gameRepo.UpdateGameRowInTransaction(connection, transaction, game);
+                            transaction.Commit();
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+                }
+            });
+        }
 
         // --- ストアセクション ---
         public List<StoreSectionInfo> GetAllSections() => _sectionRepo.GetAll();

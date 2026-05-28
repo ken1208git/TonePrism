@@ -1911,6 +1911,52 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.18.0] - 2026-05-28
+
+#### Fixed (累積監査ラウンド 2: ゲーム追加/編集/バージョンアップ/バックアップ周りに残っていた 17 件)
+
+v0.17.0〜v0.17.2 (#234/#235/v0.17.x の 14 件+ 連続修正) の後に独立 4 並列監査を実行、code 上の根拠付きで残存していた欠陥 17 件のうち High 5 / Medium 8 / Low 7 を修正 (一部 Low 4 件は follow-up issue 候補として deferred、CHANGELOG 末尾参照)。スキーマ変更 (v15 → v17) と DB write 経路に LAN advisory lock を導入したため minor bump。
+
+**【High】**
+
+- **H1: ゲーム編集の実行ファイル path にアクティブ版 fallback を追加**: `EditGameForm.LoadGameDataForVersion` で `version.ExecutablePath` が空のときに `originalGame.ExecutablePath` を出す active-fallback が他 (Thumbnail/Background/Title/Description/Arguments/Genre/Min/Max/Difficulty/PlayTime/Connection/Controller/Developers) には全部入っていたのに ExecutablePath だけ漏れていた。旧 AddGameForm 経路で作られた初期版行 (= `executable_path` NULL) を編集しようとすると、active 版選択中でも txt が空 → 「実行ファイルを選択してください」 validation で永久 block される #234 修正の取りこぼし。
+- **H2: ゲーム編集の初回 load で active 判定が不発になる非対称を修正**: `LoadVersions` で `cmbVersionList.SelectedItem = item` が SelectedIndexChanged を発火 → `LoadGameDataForVersion` が走るが、その内部で参照する `_initialSelectedVersionId` への代入は SelectedItem 設定**後**の行で行われていた。初回 load 時 `_initialSelectedVersionId.HasValue == false` 確定 → 全項目で active fallback が機能せず、初期版スカスカが UI 上空のまま見える。dropdown 切替えて戻ると正常化、という silent UX 劣化 (#234 healing が form open 時のみ無効化)。代入順を SelectedItem 設定の**前**に出して構造閉鎖。
+- **H3: バージョンアップの Abort 経路で versionDir が掃除されず永久 block する問題を修正**: `ProcessingDialog` の worker が例外を throw すると `DialogResult.Abort` がセットされるが、`GameSectionPanel.btnVersionUp_Click` は `Cancel` しか handle していなかった。コピー途中で disk full / ファイルロック等で落ちると、partial copy された `games/{id}/v.../` が残留、次回同一バージョンで再試行すると「フォルダ衝突」 guard で永久 block (#234 ③ の rollback 対称化が Cancel のみ対象で Abort を漏らした)。`Cancel` と `Abort` を共通 cleanup branch に統合 + Abort 時は ProcessingDialog 側で既に MessageBox 表示済のため二重表示を回避。
+- **H4: リストアイベントの監査ログを `backup_log` に記録 (v15 → v16 スキーマ拡張)**: v0.17.0 release notes は「監査ログ完備」を謳うが、`RestoreService.Restore` は `Logger.Info` の file log のみで、ローテーション / 別 PC コピー / 手動 truncate で消失する path だった。`backup_log.trigger_type` CHECK に `'restore'` を追加 (`MigrateV15ToV16`)、`BackupLogRepository.LogRestoreCompleted` を新設して `BackupSectionPanel.btnRestore_Click` の成功 path で `InitializeDatabase` (= migration 完了) **後**に新 DB に audit 行を INSERT。RestoreService 開始時の `InsertInProgress` 行は OLD DB (= safety バックアップに保存される版) に残り、forensic snapshot として保全される。
+- **H5: リストア中の LAN advisory lock を導入 (v17 で確定、`settings.restore_lock_owner`)**: SessionConflictHelper の dialog 確認は user 確認層のみで、チェック通過後〜`File.Replace` の数十秒間に別 PC の Manager が write を開けば uncommitted トランザクションごと旧 DB が消える race を緩和。`RestoreService.Restore` 開始時に `SettingsRepository.TryAcquireRestoreLock` で advisory lock (`<pcName>|<unixMs>`) を取得、終了 (success/failure/cancel) で finally release。`MainForm.CheckSessionConflictBeforeWrite` が write 操作前に lock check して他 PC 保有なら即 Cancel + MessageBox。stale (5 分超過) と self lock は無視。lock 取得失敗時 (= 他 PC が active lock 保有) は復元自体を開始前に中止。
+
+**【Medium】**
+
+- **M1: ゲーム編集の ReleaseYear null tracking flag を追加**: `numReleaseYear.Value = DateTime.Now.Year` を null 仮表示時に立てるが flag が無く、保存時に `2026` が DB に書き戻されていた。`_gameReleaseYearWasNullOnLoad` flag を追加し、Load 時 null + 表示値未変更なら save で null 維持。Min/MaxPlayers の `_versionXxxWasNullOnLoad` パターンと対称化。
+- **M2: ゲーム編集の NumericUpDown 範囲外値を clamp (旧実装は throw で edit 画面が開けなくなる)**: DB に MinPlayers=0/200 / ReleaseYear=9999 等の異常値があると生代入で `ArgumentOutOfRangeException` → 編集画面が永久 block。`SetClampedNumericValue` ヘルパで clamp + Logger.Warn + NullOnLoad flag (= 保存時に clamp 値が書き戻らない)。SemverInputControl の clamp+healing パターンと統一。
+- **M3: `game_versions(game_id, version)` UNIQUE INDEX を COLLATE NOCASE 化 (v16 → v17)**: 旧 BINARY collation INDEX は `v1.0.0` と `V1.0.0` を別行として許容。SemverInputControl の `V` 受理仕様と UI dup-check の OrdinalIgnoreCase の間で「外部ツール直 INSERT / レガシー復元データで case 違い重複が DB に入る」経路があった。`MigrateV16ToV17` で NOCASE INDEX に rebuild、case 違い重複残存時は v14→v15 と同じ skip + retry pattern。
+- **M4: VersionUpForm の画像 path TOCTOU で絶対 path が DB に流入する問題を修正**: 旧実装は `NewVersion.ThumbnailPath = txtThumbnailPath.Text` (絶対 path) を先にセット、`File.Exists` 経由でのみ相対化していた。validate と OK click の間にユーザが画像を削除すると `File.Exists=false` → 絶対 path が `Path.Combine(versionFolderName, absolutePath)` の「絶対は第一引数を破棄」仕様で DB に流入し Launcher の path 解決が壊れる。初期値を null にし、`File.Exists` 内でのみ relative セット。GameSectionPanel 側にも `Path.IsPathRooted` assert を二段目 fence として追加。
+- **M5: バージョンアップで AddGameVersion + UpdateGame を 1 transaction で atomic 化 (partial commit 窓を物理閉鎖)**: 両 commit の間で電源断 / SMB disconnect が起きると `game_versions` に新版行は入るが `games.version` は旧版のまま残り、Launcher で新版が起動できないが UI 上「アクティブ化失敗」MessageBox も出ない silent corruption。`DatabaseManager.AddVersionAndActivate` を新設 (VersionRepository + GameRepository の `*InTransaction` internal helper 経由) し、activation 確認 dialog を DB write より前倒しすることで両 INSERT/UPDATE を共有 connection + transaction で実行。
+- **M6: ApplyRetention で物理削除した backup_log 行を DB からも削除 + `GetLastSuccess` が File.Exists を見るように修正**: 旧実装は file のみ削除して DB 行を残置、UI で「最終バックアップ: ファイル無し」表示や `RestoreConfirmForm` の選択候補に残る不整合があった。`ApplyRetention` で `DeleteById(entry.Id)` を併発、`GetLastSuccess` に `File.Exists` filter を追加 (最大 100 行までで打ち切り)。
+- **M7: AddGameForm の並行 Manager race で勝者のバージョンフォルダを敗者が rollback で巻き込み削除する問題を修正**: 2 Manager が同 DB を並行操作した場合、敗者 (`Directory.Exists` 判定で「既に存在」throw を踏む) の `CleanupCopiedFoldersOnRollback` が `Directory.Delete(destinationGameFolder, true)` で勝者の直前 `CreateDirectory` した folder を巻き込み削除する footgun。`versionFolderCreatedThisCall` flag を `baseGameFolderCreated` と同パターンで導入し、自分が作った disk 状態のみ自分で消す原則を強制。
+- **M8: AddGameForm の RollbackGameRow 失敗を MessageBox で user 通知**: `DeleteGame` 失敗時に `Logger.Warn` のみで silent 継続していたため、「DB に games 行のみ残留 + ファイル消失」の整合性破綻が user 不通知で残り、次回起動時に game_versions の無い行が UI に出る。失敗時に「手動 DB 修復が必要」MessageBox で明示通知。
+
+**【Low】(7 件まとめて)**
+
+- **L1: `FileOperationService.NormalizePath` の null/空文字 NRE 防止**: `path.StartsWith` を null guard なしで呼ぶ defensive さ欠如を冒頭 `IsNullOrEmpty` ガードで閉鎖。
+- **L2: `PathConversionHelper.ConvertSourceToDestination` 戻り値の絶対化**: 相対 path 経路で `File.Exists` が CWD 基準で評価される footgun を `Path.GetFullPath` 強制で閉鎖。
+- **L3: `GameRepository.UpdateGameId` で `PRAGMA foreign_keys = ON` を try-finally で必ず restore**: throw 経路で PRAGMA 復元 skip → connection pool 経由で FK 制約なしで動く silent drift の risk を physical 閉鎖。
+- **L4: `EditGameForm.ApplyRelativePaths` の空 path 保存を `""` → `null` に統一**: AddGameForm / UpdateGame と非対称だった「Launcher が null と "" を別 path として扱う silent 表示崩れ」risk を解消。
+- **L5: `SemverInputControl.Suffix` setter の長さ制限 enforce**: UI 入力は `MaxLength=32` で物理 block するが setter は素通り → caller drift で 32 文字超 suffix が DB → version folder leaf 名が MAX_PATH を超え `PathTooLongException` で copy 失敗する経路を defensive substring で閉鎖。
+- **L6: バックアップファイル名衝突回避の suffix に PC 名を mix**: 2 PC が SMB 共有経由で同 1 秒 backup を発火すると双方 `File.Exists=false` で同 path に書込み出力ファイル破損する LAN race を緩和。collision 検出時 suffix を `_2/_3` → `_<pcName>` 形式に変更 (同 PC 連射は従来通り数値 suffix)。legacy recovery regex は file_path 記録済の新形式を対象外とするため互換維持。
+- **L7: `CleanupFailedEntries` で safety / restore の failed 行を audit 保護**: 旧実装は `trigger_type='safety'` の failed 行 (復元途中で死んだ証跡) も `DeleteById` で消していた audit trail 欠損を、`safety` / `restore` の failed 行を明示 skip する。
+
+**【deferred Low (follow-up issue 候補)】**
+
+- developers の DELETE+INSERT pattern を diff/upsert 化 (id drift) — リファクタ規模、別 PR。
+- developers.version_id への FK CASCADE 制約追加 — 現状版削除 UI 未存在のため緊急度低。
+- VersionRepository.UpdateMany の `__tmp_` suffix が Launcher 直 SQLite read に漏れる経路 — 現状 Launcher は SQLite 直 read しないため将来回帰時に対応。
+- `RestoreReconciliationService.Analyze` の worker thread 化 + 手動配置 DB の auto-register — 個別 feature work、別 issue で扱う。
+
+#### Bump 根拠 (v0.17.2 → v0.18.0)
+
+DB schema 変更 (v15 → v17、`backup_log.trigger_type` CHECK 拡張 + `game_versions` UNIQUE INDEX を NOCASE 化) + LAN advisory lock の機能追加を含むため minor bump。schema 変更は v9→v10 と同じ非破壊 migration (CHECK 拡張 + INDEX rebuild) で auto-applied、user 手動操作不要。Bundle への反映は次回リリース実行時。
+
 ### [Manager v0.17.2] - 2026-05-28
 
 #### Fixed (追加精査ラウンド: バックアップ / ゲーム周りに残っていた 8 件)

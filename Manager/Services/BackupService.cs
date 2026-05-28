@@ -129,10 +129,17 @@ namespace TonePrism.Manager.Services
             string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
             string fileName = $"toneprism_{timestamp}.db";
             string destinationPath = Path.Combine(destinationDir, fileName);
+            // (L) 2 PC が SMB 共有経由で同 1 秒に backup を発火した場合、双方 File.Exists=false で同 path に書き込み
+            // 出力ファイル破損する LAN race を緩和。collision 検出時の suffix に PC 名を mix することで、
+            // 「同 PC 内連射 = `_2` `_3` ...」と「別 PC 由来 = `_<pcName>`」を分離。pcName が空文字の defensive
+            // case は従来の数値 suffix に fall through。
             int collisionSuffix = 2;
             while (File.Exists(destinationPath))
             {
-                fileName = $"toneprism_{timestamp}_{collisionSuffix}.db";
+                string suffix = string.IsNullOrEmpty(pcName)
+                    ? collisionSuffix.ToString()
+                    : (collisionSuffix == 2 ? pcName : pcName + "_" + (collisionSuffix - 1));
+                fileName = $"toneprism_{timestamp}_{suffix}.db";
                 destinationPath = Path.Combine(destinationDir, fileName);
                 collisionSuffix++;
                 if (collisionSuffix > 99)
@@ -270,6 +277,10 @@ namespace TonePrism.Manager.Services
                     {
                         File.Delete(resolvedPath);
                         Logger.Info($"[BackupService] 古い自動バックアップを削除 (#235 trigger_type=auto に限定): {resolvedPath}");
+                        // (M6) DB 行も同時削除。旧実装は file のみ削除して DB 行を残置、UI で「最終バックアップ:
+                        // ファイル無し」表示や RestoreConfirmForm の選択候補に残る不整合があった。
+                        try { _logRepo.DeleteById(entry.Id); }
+                        catch (Exception delEx) { Logger.Warn($"[BackupService] (M6) backup_log 行削除失敗 id={entry.Id}: " + delEx.Message); }
                     }
                     catch (Exception ex)
                     {

@@ -297,6 +297,20 @@ namespace TonePrism.Manager.Controls
                         // 同じ正規化規則で leaf 名を作る。両者を別実装で計算すると "V1.0.0" のような生値で
                         // 食い違い、DB 保存パスが実フォルダを指さなくなるため GetVersionFolderLeaf に揃える。
                         string versionFolderName = PathManager.GetVersionFolderLeaf(form.NewVersion.Version);
+
+                        // (M4 二段目) Path.Combine の「第二引数が絶対 path なら第一引数を破棄」仕様で
+                        // versionFolderName が無視され絶対 path がそのまま DB 保存される silent corruption を
+                        // 物理閉鎖。VersionUpForm は M4 修正で relative 化済の path のみ返す契約だが、
+                        // 将来の caller drift / fallback 経路への defense として ここでも assert。
+                        if (!string.IsNullOrEmpty(form.RelativeExecutablePath) && Path.IsPathRooted(form.RelativeExecutablePath))
+                        {
+                            try { if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true); } catch { /* swallow */ }
+                            MessageBox.Show(
+                                "実行ファイルの相対パス計算に失敗しました。バージョンアップを中止しました。\n\n" +
+                                "コピー元フォルダを指定し直してください。",
+                                "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            return;
+                        }
                         string relativePath = Path.Combine(versionFolderName, form.RelativeExecutablePath);
                         form.NewVersion.ExecutablePath = relativePath;
 
@@ -306,61 +320,62 @@ namespace TonePrism.Manager.Controls
                         // (games/{id}/thumb.png) で解決して見つけられず、バージョンアップ後に画像が消える。
                         // exe (上の relativePath) と同じく version フォルダ名を前置してゲームルート基準に揃える。
                         // 両テーブル (NewVersion=game_versions / UpdatedGameInfo=activation 時の games) に反映。
-                        if (!string.IsNullOrEmpty(form.NewVersion.ThumbnailPath))
+                        // (M4 二段目) thumbnail / background も絶対 path assert。
+                        if (!string.IsNullOrEmpty(form.NewVersion.ThumbnailPath) && !Path.IsPathRooted(form.NewVersion.ThumbnailPath))
                         {
                             string thumbRelative = Path.Combine(versionFolderName, form.NewVersion.ThumbnailPath);
                             form.NewVersion.ThumbnailPath = thumbRelative;
                             form.UpdatedGameInfo.ThumbnailPath = thumbRelative;
                         }
-                        if (!string.IsNullOrEmpty(form.NewVersion.BackgroundPath))
+                        else if (!string.IsNullOrEmpty(form.NewVersion.ThumbnailPath))
+                        {
+                            Logger.Warn("[GameSectionPanel] (M4) ThumbnailPath が絶対 path、保存 skip: " + form.NewVersion.ThumbnailPath);
+                            form.NewVersion.ThumbnailPath = null;
+                            form.UpdatedGameInfo.ThumbnailPath = null;
+                        }
+                        if (!string.IsNullOrEmpty(form.NewVersion.BackgroundPath) && !Path.IsPathRooted(form.NewVersion.BackgroundPath))
                         {
                             string bgRelative = Path.Combine(versionFolderName, form.NewVersion.BackgroundPath);
                             form.NewVersion.BackgroundPath = bgRelative;
                             form.UpdatedGameInfo.BackgroundPath = bgRelative;
                         }
-
-                        // (#234 ③) version 行の INSERT と activation (games 更新) を分離した try で扱う。
-                        // INSERT 失敗時はコピー済 versionDir を rollback 削除し「保存に失敗」と通知。
-                        // activation 失敗時は「版は作成済・アクティブ化のみ失敗」と正確に伝える (旧実装は
-                        // どちらも「データベースへの保存に失敗しました」で、版が保存済なのに再実行させて
-                        // ① の重複地獄に誘導していた)。
-                        try
+                        else if (!string.IsNullOrEmpty(form.NewVersion.BackgroundPath))
                         {
-                            _dbManager.AddGameVersion(form.NewVersion);
-                        }
-                        catch (Exception ex)
-                        {
-                            try { if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true); }
-                            catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (#234 ③) versionDir rollback 削除失敗: " + versionDir + ": " + delEx.Message); }
-                            MessageBox.Show(
-                                $"バージョン情報のデータベース保存に失敗しました。\n\n{ex.Message}\n\nコピーしたファイルは削除しました。",
-                                "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                            return;
+                            Logger.Warn("[GameSectionPanel] (M4) BackgroundPath が絶対 path、保存 skip: " + form.NewVersion.BackgroundPath);
+                            form.NewVersion.BackgroundPath = null;
+                            form.UpdatedGameInfo.BackgroundPath = null;
                         }
 
+                        // (M5) activation 確認を DB write より前倒し。Yes 確定の場合 AddVersionAndActivate で
+                        // version 行 INSERT と games 行 UPDATE を 1 transaction で atomic 実行 (partial commit
+                        // 窓を物理閉鎖)。No なら従来通り AddGameVersion のみ。旧実装は AddGameVersion 後に
+                        // 確認 dialog を出していたが、両 DB write を Yes 確定時に統合できる UI 順序へ整理。
                         var activationResult = MessageBox.Show(
                             $"バージョン {form.NewVersion.Version} を現在のバージョン（アクティブ）として設定しますか？\n\n「いいえ」を選択した場合、バージョンは作成されますが、ランチャーで起動するバージョンは変更されません。",
                             "アクティブバージョンの確認",
                             MessageBoxButtons.YesNo, MessageBoxIcon.Question);
 
-                        if (activationResult == DialogResult.Yes)
+                        try
                         {
-                            try
+                            if (activationResult == DialogResult.Yes)
                             {
+                                // atomic: version INSERT + games UPDATE in single transaction
                                 form.UpdatedGameInfo.ExecutablePath = relativePath;
-                                _dbManager.UpdateGame(form.UpdatedGameInfo);
+                                _dbManager.AddVersionAndActivate(form.NewVersion, form.UpdatedGameInfo);
                             }
-                            catch (Exception ex)
+                            else
                             {
-                                // 版 (game_versions) は保存済。games のアクティブ化のみ失敗。disk / version 行は
-                                // 健全なので rollback せず、状態を正確に通知して return (再実行で ① に入らない)。
-                                MessageBox.Show(
-                                    $"バージョン {form.NewVersion.Version} は作成されましたが、アクティブ版への切り替えに失敗しました。\n\n{ex.Message}\n\n" +
-                                    "Launcher で起動する版は変更されていません。ゲーム編集画面でアクティブ版を切り替えられます。",
-                                    "アクティブ化失敗", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                                LoadGames();
-                                return;
+                                _dbManager.AddGameVersion(form.NewVersion);
                             }
+                        }
+                        catch (Exception ex)
+                        {
+                            try { if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true); }
+                            catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (M5) versionDir rollback 削除失敗: " + versionDir + ": " + delEx.Message); }
+                            MessageBox.Show(
+                                $"バージョン情報のデータベース保存に失敗しました。\n\n{ex.Message}\n\nコピーしたファイルは削除しました。",
+                                "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            return;
                         }
 
                         MessageBox.Show(
@@ -369,13 +384,23 @@ namespace TonePrism.Manager.Controls
 
                         LoadGames();
                     }
-                    else if (processingDialog.DialogResult == DialogResult.Cancel)
+                    else
                     {
-                        // (#234 ③) コピーが途中まで進んでいた可能性があるため versionDir を掃除する。
+                        // (H3) 非 OK 経路 (Cancel / Abort=例外) は版データ未 commit + コピー済 versionDir が
+                        // 残留する状態。次回同 version 再試行時に L222 の「フォルダ衝突」guard で永久
+                        // block されるため、必ず掃除する。旧実装は Cancel のみ handle、Abort 経路
+                        // (= worker thread 内例外 → ProcessingDialog.Shown が DialogResult.Abort をセット) を
+                        // 漏らしており disk full / ファイルロック等で partial copy が disk に残っていた。
                         try { if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true); }
-                        catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (#234 ③) cancel 時の versionDir 削除失敗: " + versionDir + ": " + delEx.Message); }
-                        MessageBox.Show("処理がキャンセルされました。", "キャンセル",
-                            MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (H3) 中断時の versionDir 削除失敗: " + versionDir + ": " + delEx.Message); }
+
+                        if (processingDialog.DialogResult == DialogResult.Cancel)
+                        {
+                            MessageBox.Show("処理がキャンセルされました。", "キャンセル",
+                                MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                        // Abort 経路は ProcessingDialog 内で既に「エラーが発生しました: ...」MessageBox を
+                        // 出しているため二重に出さない (cleanup のみ実施)。
                     }
                 }
             }

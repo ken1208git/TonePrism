@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Linq;
 using TonePrism.Manager.Models;
+using TonePrism.Manager.Services;
 
 namespace TonePrism.Manager.Repositories
 {
@@ -167,46 +168,7 @@ namespace TonePrism.Manager.Repositories
                     {
                         try
                         {
-                            string updateGame = @"
-                                UPDATE games SET
-                                    title = @title,
-                                    description = @description,
-                                    release_year = @releaseYear,
-                                    genre = @genre,
-                                    min_players = @minPlayers,
-                                    max_players = @maxPlayers,
-                                    difficulty = @difficulty,
-                                    play_time = @playTime,
-                                    controller_support = @controllerSupport,
-                                    supported_connection = @supportedConnection,
-                                    thumbnail_path = @thumbnailPath,
-                                    background_path = @backgroundPath,
-                                    executable_path = @executablePath,
-                                    display_order = @displayOrder,
-                                    is_visible = @isVisible,
-                                    controls = @controls,
-                                    key_mapping = @keyMapping,
-                                    arguments = @arguments,
-                                    version = @version
-                                WHERE game_id = @gameId";
-
-                            using (var command = new SQLiteCommand(updateGame, connection, transaction))
-                            {
-                                SetGameParameters(command, game);
-                                command.ExecuteNonQuery();
-                            }
-
-                            if (game.Developers != null)
-                            {
-                                using (var command = new SQLiteCommand("DELETE FROM developers WHERE game_id = @gameId AND version_id IS NULL", connection, transaction))
-                                {
-                                    command.Parameters.AddWithValue("@gameId", game.GameId);
-                                    command.ExecuteNonQuery();
-                                }
-
-                                InsertDevelopers(connection, transaction, game.GameId, game.Developers);
-                            }
-
+                            UpdateGameRowInTransaction(connection, transaction, game);
                             transaction.Commit();
                         }
                         catch (Exception)
@@ -217,6 +179,54 @@ namespace TonePrism.Manager.Repositories
                     }
                 }
             });
+        }
+
+        /// <summary>
+        /// (M5) Update (= games UPDATE + games 配下 developers の delete+reinsert) を既存 transaction の
+        /// 中で実行する内部 helper。`DatabaseManager.AddVersionAndActivate` で同一 transaction 内に
+        /// AddGameVersion + UpdateGame を atomically まとめるために抽出。
+        /// </summary>
+        internal void UpdateGameRowInTransaction(SQLiteConnection connection, SQLiteTransaction transaction, GameInfo game)
+        {
+            string updateGame = @"
+                UPDATE games SET
+                    title = @title,
+                    description = @description,
+                    release_year = @releaseYear,
+                    genre = @genre,
+                    min_players = @minPlayers,
+                    max_players = @maxPlayers,
+                    difficulty = @difficulty,
+                    play_time = @playTime,
+                    controller_support = @controllerSupport,
+                    supported_connection = @supportedConnection,
+                    thumbnail_path = @thumbnailPath,
+                    background_path = @backgroundPath,
+                    executable_path = @executablePath,
+                    display_order = @displayOrder,
+                    is_visible = @isVisible,
+                    controls = @controls,
+                    key_mapping = @keyMapping,
+                    arguments = @arguments,
+                    version = @version
+                WHERE game_id = @gameId";
+
+            using (var command = new SQLiteCommand(updateGame, connection, transaction))
+            {
+                SetGameParameters(command, game);
+                command.ExecuteNonQuery();
+            }
+
+            if (game.Developers != null)
+            {
+                using (var command = new SQLiteCommand("DELETE FROM developers WHERE game_id = @gameId AND version_id IS NULL", connection, transaction))
+                {
+                    command.Parameters.AddWithValue("@gameId", game.GameId);
+                    command.ExecuteNonQuery();
+                }
+
+                InsertDevelopers(connection, transaction, game.GameId, game.Developers);
+            }
         }
 
         public void Delete(string gameId)
@@ -259,50 +269,67 @@ namespace TonePrism.Manager.Repositories
                     using (var cmd = new SQLiteCommand("PRAGMA foreign_keys = OFF", connection))
                         cmd.ExecuteNonQuery();
 
-                    using (var transaction = connection.BeginTransaction())
+                    // (L) PRAGMA foreign_keys = ON は connection-local の状態だが、
+                    // System.Data.SQLite の connection pool に返却される際に PRAGMA 状態が
+                    // 連れて行かれる可能性がある。transaction が throw した場合に ON 復元が
+                    // skip されると、pool から同 connection を取り出した後続 path が FK 制約なしで
+                    // 動く silent drift の risk。try-finally で必ず ON に戻す。
+                    try
                     {
-                        try
+                        using (var transaction = connection.BeginTransaction())
                         {
-                            // 子テーブルのgame_idを更新
-                            string[] childTables = { "game_versions", "developers", "game_genres", "play_records", "surveys", "store_section_games" };
-                            foreach (var table in childTables)
+                            try
                             {
-                                using (var cmd = new SQLiteCommand($"UPDATE {table} SET game_id = @newId WHERE game_id = @oldId", connection, transaction))
+                                // 子テーブルのgame_idを更新
+                                string[] childTables = { "game_versions", "developers", "game_genres", "play_records", "surveys", "store_section_games" };
+                                foreach (var table in childTables)
+                                {
+                                    using (var cmd = new SQLiteCommand($"UPDATE {table} SET game_id = @newId WHERE game_id = @oldId", connection, transaction))
+                                    {
+                                        cmd.Parameters.AddWithValue("@newId", newId);
+                                        cmd.Parameters.AddWithValue("@oldId", oldId);
+                                        cmd.ExecuteNonQuery();
+                                    }
+                                }
+
+                                // launcher_surveys の favorite_game_id を更新
+                                using (var cmd = new SQLiteCommand("UPDATE launcher_surveys SET favorite_game_id = @newId WHERE favorite_game_id = @oldId", connection, transaction))
                                 {
                                     cmd.Parameters.AddWithValue("@newId", newId);
                                     cmd.Parameters.AddWithValue("@oldId", oldId);
                                     cmd.ExecuteNonQuery();
                                 }
-                            }
 
-                            // launcher_surveys の favorite_game_id を更新
-                            using (var cmd = new SQLiteCommand("UPDATE launcher_surveys SET favorite_game_id = @newId WHERE favorite_game_id = @oldId", connection, transaction))
+                                // メインテーブルの主キーを更新
+                                using (var cmd = new SQLiteCommand("UPDATE games SET game_id = @newId WHERE game_id = @oldId", connection, transaction))
+                                {
+                                    cmd.Parameters.AddWithValue("@newId", newId);
+                                    cmd.Parameters.AddWithValue("@oldId", oldId);
+                                    cmd.ExecuteNonQuery();
+                                }
+
+                                transaction.Commit();
+                            }
+                            catch (Exception)
                             {
-                                cmd.Parameters.AddWithValue("@newId", newId);
-                                cmd.Parameters.AddWithValue("@oldId", oldId);
-                                cmd.ExecuteNonQuery();
+                                transaction.Rollback();
+                                throw;
                             }
-
-                            // メインテーブルの主キーを更新
-                            using (var cmd = new SQLiteCommand("UPDATE games SET game_id = @newId WHERE game_id = @oldId", connection, transaction))
-                            {
-                                cmd.Parameters.AddWithValue("@newId", newId);
-                                cmd.Parameters.AddWithValue("@oldId", oldId);
-                                cmd.ExecuteNonQuery();
-                            }
-
-                            transaction.Commit();
-                        }
-                        catch (Exception)
-                        {
-                            transaction.Rollback();
-                            throw;
                         }
                     }
-
-                    // 外部キー制約を再有効化
-                    using (var cmd = new SQLiteCommand("PRAGMA foreign_keys = ON", connection))
-                        cmd.ExecuteNonQuery();
+                    finally
+                    {
+                        // 例外伝播 path でも必ず FK 制約を再有効化 (connection pool 汚染防止)
+                        try
+                        {
+                            using (var cmd = new SQLiteCommand("PRAGMA foreign_keys = ON", connection))
+                                cmd.ExecuteNonQuery();
+                        }
+                        catch (Exception pragmaEx)
+                        {
+                            Logger.Warn("[GameRepository] (L) PRAGMA foreign_keys = ON 復元失敗: " + pragmaEx.Message);
+                        }
+                    }
                 }
             });
         }

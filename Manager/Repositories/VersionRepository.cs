@@ -28,35 +28,11 @@ namespace TonePrism.Manager.Repositories
                 {
                     _conn.OpenConnectionWithJournalMode(connection);
 
-                    string query = @"
-                        INSERT INTO game_versions (
-                            game_id, version, executable_path, arguments, description, update_note,
-                            title, genre, min_players, max_players, difficulty, play_time,
-                            controller_support, supported_connection, thumbnail_path, background_path,
-                            registered_at
-                        ) VALUES (
-                            @gameId, @version, @executablePath, @arguments, @description, @updateNote,
-                            @title, @genre, @minPlayers, @maxPlayers, @difficulty, @playTime,
-                            @controllerSupport, @supportedConnection, @thumbnailPath, @backgroundPath,
-                            @registeredAt
-                        );
-                        SELECT last_insert_rowid();";
-
                     using (var transaction = connection.BeginTransaction())
                     {
                         try
                         {
-                            using (var command = new SQLiteCommand(query, connection, transaction))
-                            {
-                                SetVersionParameters(command, version);
-                                command.Parameters.AddWithValue("@registeredAt", version.RegisteredAt.ToString("yyyy-MM-dd HH:mm:ss"));
-
-                                long versionId = (long)command.ExecuteScalar();
-                                version.Id = (int)versionId;
-                            }
-
-                            InsertVersionDevelopers(connection, transaction, version);
-
+                            AddVersionRowInTransaction(connection, transaction, version);
                             transaction.Commit();
                         }
                         catch
@@ -67,6 +43,39 @@ namespace TonePrism.Manager.Repositories
                     }
                 }
             });
+        }
+
+        /// <summary>
+        /// (M5) AddGameVersion (= game_versions INSERT + version 別 developers INSERT) を既存 transaction の
+        /// 中で実行する内部 helper。`AddVersionAndActivate` で同一 transaction 内に Add + UpdateGame を
+        /// atomically まとめるために抽出した。version.Id は INSERT 後に更新される。
+        /// </summary>
+        internal void AddVersionRowInTransaction(SQLiteConnection connection, SQLiteTransaction transaction, GameVersion version)
+        {
+            string query = @"
+                INSERT INTO game_versions (
+                    game_id, version, executable_path, arguments, description, update_note,
+                    title, genre, min_players, max_players, difficulty, play_time,
+                    controller_support, supported_connection, thumbnail_path, background_path,
+                    registered_at
+                ) VALUES (
+                    @gameId, @version, @executablePath, @arguments, @description, @updateNote,
+                    @title, @genre, @minPlayers, @maxPlayers, @difficulty, @playTime,
+                    @controllerSupport, @supportedConnection, @thumbnailPath, @backgroundPath,
+                    @registeredAt
+                );
+                SELECT last_insert_rowid();";
+
+            using (var command = new SQLiteCommand(query, connection, transaction))
+            {
+                SetVersionParameters(command, version);
+                command.Parameters.AddWithValue("@registeredAt", version.RegisteredAt.ToString("yyyy-MM-dd HH:mm:ss"));
+
+                long versionId = (long)command.ExecuteScalar();
+                version.Id = (int)versionId;
+            }
+
+            InsertVersionDevelopers(connection, transaction, version);
         }
 
         public void Update(GameVersion version)

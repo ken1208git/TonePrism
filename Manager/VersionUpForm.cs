@@ -377,16 +377,13 @@ namespace TonePrism.Manager
                     ControllerSupport = chkControllerSupport.Checked,
                     SupportedConnection = cmbSupportedConnection.SelectedIndex,
                     
-                    // サムネイルと背景はコピー後に相対パスになる可能性があるが、
-                    // ここではとりあえずフォームの値をセットし、MainFormで処理するか、
-                    // 相対パス計算ロジックをここに入れるか。
-                    // 既存ロジック(UpdatedGameInfo)ではMainFormではなくForm内で計算していた(lines 394+)
-                    // NewVersionにも同じロジックを適用する必要がある。
-                    // ここでは空文字または絶対パスを入れておき、後続の処理で書き換える。
-                    // (#234 追加精査) 空欄は null 正規化 (Add/Edit と DB 表現を統一、#224 review #2)。
-                    // 非空時は下の File.Exists ブロックで相対パスに上書きされる。
-                    ThumbnailPath = string.IsNullOrWhiteSpace(txtThumbnailPath.Text) ? null : txtThumbnailPath.Text,
-                    BackgroundPath = string.IsNullOrWhiteSpace(txtBackgroundPath.Text) ? null : txtBackgroundPath.Text,
+                    // サムネイルと背景は L431 の File.Exists ブロックで相対パスを設定する。
+                    // (M4) 初期値を null にすることで、validate と OK click の間に画像が削除された TOCTOU
+                    // race (File.Exists false → 絶対パスが残留 → GameSectionPanel が Path.Combine の
+                    // 「絶対 path は第一引数を破棄」仕様で絶対パスのまま DB に書込まれる) を物理閉鎖。
+                    // 旧実装は txtThumbnailPath.Text の生値 (= 絶対 path) を一旦セットしていた。
+                    ThumbnailPath = null,
+                    BackgroundPath = null,
                     
                     Developers = new List<DeveloperInfo>(developers), // リストをコピー
                     

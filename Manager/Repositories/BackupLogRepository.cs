@@ -90,6 +90,40 @@ namespace TonePrism.Manager.Repositories
             });
         }
 
+        /// <summary>
+        /// (H4) 復元完了の audit 行を直接 INSERT する。InsertInProgress + MarkSuccess の組合せが復元では
+        /// 機能しない (= 開始時の行は OLD DB、UPDATE 時は NEW DB で row id が一致しない) ため、NEW DB に
+        /// 確定済の `success` (または `failed`) 行を 1 発で記録する用途。trigger_type='restore' は v16 で
+        /// CHECK 拡張済のため、本 method は呼び出し側で InitializeDatabase (= migration 完了) 後に呼ぶ。
+        /// </summary>
+        public void LogRestoreCompleted(string pcName, long startedAtUnixSec, long completedAtUnixSec,
+            string sourceBackupPath, long fileSizeBytes, string status, string errorMessage)
+        {
+            _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var cmd = new SQLiteCommand(
+                        "INSERT INTO backup_log (started_at, completed_at, pc_name, file_path, " +
+                        "file_size_bytes, status, error_message, trigger_type) " +
+                        "VALUES (@started, @completed, @pc, @path, @size, @status, @err, 'restore')",
+                        connection))
+                    {
+                        cmd.Parameters.AddWithValue("@started", startedAtUnixSec);
+                        cmd.Parameters.AddWithValue("@completed", completedAtUnixSec);
+                        cmd.Parameters.AddWithValue("@pc", pcName ?? "");
+                        cmd.Parameters.AddWithValue("@path", sourceBackupPath ?? "");
+                        cmd.Parameters.AddWithValue("@size", fileSizeBytes);
+                        cmd.Parameters.AddWithValue("@status", status ?? "success");
+                        cmd.Parameters.AddWithValue("@err",
+                            string.IsNullOrEmpty(errorMessage) ? (object)DBNull.Value : errorMessage);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+            });
+        }
+
         public void MarkFailed(long id, string errorMessage, long completedAtUnixSec)
         {
             _conn.ExecuteWithRetry(() =>
@@ -251,14 +285,22 @@ namespace TonePrism.Manager.Repositories
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
                     _conn.OpenConnectionWithJournalMode(connection);
+                    // (M6) File.Exists で実体存在を check しながら新しい順に走査。retention で物理削除済の DB 行が
+                    // 残置されたケースで「最終バックアップ: ファイル無し」表示を防ぐ。最大 100 行までで打ち切り
+                    // (= 通常は新しい順 1 件目で hit、disk 全滅の異常 case でも応答時間を bound する)。
                     using (var cmd = new SQLiteCommand(
                         "SELECT id, started_at, completed_at, pc_name, file_path, relative_path, file_size_bytes, " +
                         "status, error_message, trigger_type FROM backup_log " +
-                        "WHERE status = 'success' ORDER BY started_at DESC LIMIT 1", connection))
+                        "WHERE status = 'success' ORDER BY started_at DESC LIMIT 100", connection))
                     using (var reader = cmd.ExecuteReader())
                     {
-                        if (reader.Read())
-                            return ReadEntry(reader);
+                        while (reader.Read())
+                        {
+                            var entry = ReadEntry(reader);
+                            string resolved = ResolvePathForExistsCheck(entry.FilePath, entry.RelativePath);
+                            if (!string.IsNullOrEmpty(resolved) && System.IO.File.Exists(resolved))
+                                return entry;
+                        }
                         return null;
                     }
                 }

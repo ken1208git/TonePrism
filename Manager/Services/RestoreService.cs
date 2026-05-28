@@ -3,6 +3,7 @@ using System.Data.SQLite;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using TonePrism.Manager.Repositories;
 
 namespace TonePrism.Manager.Services
 {
@@ -15,10 +16,20 @@ namespace TonePrism.Manager.Services
         public const int DefaultSafetyRetentionCount = 10;
 
         private readonly DatabaseConnection _conn;
+        private readonly BackupLogRepository _logRepo;
+        private readonly SettingsRepository _settingsRepo;
 
-        public RestoreService(DatabaseConnection conn)
+        /// <summary>
+        /// (H4) 直近の Restore 呼出しの開始 Unix 秒。caller (BackupSectionPanel) が成功時の audit 行を
+        /// NEW DB (= InitializeDatabase 完了後の v17 schema) に INSERT する際の started_at として使う。
+        /// </summary>
+        public long LastRestoreStartedAt { get; private set; }
+
+        public RestoreService(DatabaseConnection conn, BackupLogRepository logRepo, SettingsRepository settingsRepo)
         {
             _conn = conn;
+            _logRepo = logRepo;
+            _settingsRepo = settingsRepo;
         }
 
         /// <summary>
@@ -49,6 +60,44 @@ namespace TonePrism.Manager.Services
             // 「詳細はログを確認」と促すのに該当ログが空 という不整合があった。throw 経路には Logger.Error を
             // 必ず挟んで例外詳細を残す (caller の ProcessingDialog catch では例外型情報を握って破棄するため)。
             Logger.Info($"[RestoreService] 復元開始: source='{backupFilePath}', target='{dbPath}'");
+
+            // (H4) backup_log に復元イベントの audit 行を残す。Logger.Info の file log だけだと
+            // ローテーション / 別 PC コピー / 手動 truncate で消失するため、DB 行として永続化する。
+            // trigger_type='restore' は v16 migration で CHECK 拡張済。file_path は復元元のバックアップを記録
+            // (safety ファイルではなく source、= 「どのバックアップから復元したか」が監査の主目的)。
+            string pcName = Environment.MachineName;
+            long startedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            long startedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            long logId = 0;
+
+            // (H5) LAN advisory lock を取得。他 PC が active な restore lock を保有していたら
+            // user 操作意図に関わらず取得失敗 → throw して開始前に中止 (caller は BackupSectionPanel
+            // の Abort 経路に流れる)。`File.Replace` の OS-level atomic 性は別物だが、coordination layer
+            // として他 Manager の write 操作を SessionConflictHelper 経由で block する fence になる。
+            if (_settingsRepo != null)
+            {
+                bool acquired = _settingsRepo.TryAcquireRestoreLock(
+                    pcName, startedAtMs, Services.SettingsKeys.RestoreLockStaleThresholdMs,
+                    out string activeOwner);
+                if (!acquired)
+                {
+                    string msg = $"他 PC ({activeOwner}) が現在データベース復元中のため、復元を開始できません。完了後に再試行してください。";
+                    Logger.Error("[RestoreService] " + msg);
+                    throw new InvalidOperationException(msg);
+                }
+                Logger.Info("[RestoreService] restore advisory lock 取得: pcName=" + pcName);
+            }
+
+            try
+            {
+                logId = _logRepo.InsertInProgress(pcName, "restore", startedAt, backupFilePath);
+            }
+            catch (Exception logEx)
+            {
+                // audit 行の挿入失敗で復元自体を止めない (= audit 不能でも user の復元意図を尊重)。
+                // Logger に warn を残して継続。
+                Logger.Warn("[RestoreService] backup_log に restore audit 行を挿入できませんでした (復元処理は継続): " + logEx.Message);
+            }
 
             try
             {
@@ -159,17 +208,59 @@ namespace TonePrism.Manager.Services
 
                 progress?.Report(new ProgressInfo(100, "復元完了", dbPath));
                 Logger.Info($"[RestoreService] 復元完了: source='{backupFilePath}', safety='{safetyPath}'");
+
+                // (H4) 注意: 起動時に挿入した in_progress 行は OLD DB (= safety バックアップに保存される版)
+                // にしかない。File.Replace 後の NEW DB には該当行が存在しないため、ここで MarkSuccess UPDATE
+                // を打っても 0 行更新で silent no-op になる。NEW DB に成功の audit 行を残す責務は呼び出し側
+                // (BackupSectionPanel) が InitializeDatabase 完了後 (= v17 schema 確定後) に
+                // BackupLogRepository.LogRestoreSucceeded で別行を INSERT する形で担う。
+                // ここでは safetyPath を返すのみ。
+                LastRestoreStartedAt = startedAt;
                 return safetyPath;
             }
             catch (OperationCanceledException)
             {
                 Logger.Info($"[RestoreService] 復元キャンセル: source='{backupFilePath}'");
+                MarkAuditFailed(logId, "ユーザーによりキャンセルされました");
                 throw;
             }
             catch (Exception ex)
             {
                 Logger.Error($"[RestoreService] 復元失敗: source='{backupFilePath}'", ex);
+                MarkAuditFailed(logId, ex.Message);
                 throw;
+            }
+            finally
+            {
+                // (H5) advisory restore-lock を解放。lock 取得済の場合のみ delete (= 他 PC 保有 lock は触らない)。
+                // ReleaseRestoreLock は SQL の LIKE 句で「自 PC 保有行のみ削除」を保証している。
+                if (_settingsRepo != null)
+                {
+                    try
+                    {
+                        _settingsRepo.ReleaseRestoreLock(pcName);
+                        Logger.Info("[RestoreService] restore advisory lock 解放: pcName=" + pcName);
+                    }
+                    catch (Exception releaseEx)
+                    {
+                        Logger.Warn("[RestoreService] restore advisory lock 解放失敗 (stale lock 5 分後に自動失効): " + releaseEx.Message);
+                    }
+                }
+            }
+        }
+
+        /// <summary>(H4) 失敗 / cancel 経路から audit 行を failed に確定する内部ヘルパ。</summary>
+        private void MarkAuditFailed(long logId, string reason)
+        {
+            if (logId <= 0) return;
+            try
+            {
+                long completedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                _logRepo.MarkFailed(logId, reason ?? "", completedAt);
+            }
+            catch (Exception markEx)
+            {
+                Logger.Warn("[RestoreService] backup_log restore failed 記録に失敗: " + markEx.Message);
             }
         }
 

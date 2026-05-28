@@ -280,6 +280,8 @@ namespace TonePrism.Manager.Controls
             // 失敗するため Analyze が空振りする。InitializeDatabase は idempotent なので、後続の
             // DatabaseChanged?.Invoke() 経由 (= OnDatabaseRestored の InitializeDatabase) と二重呼出に
             // なっても害はない。
+            // (H4) 同じ理由で audit 行の INSERT も migration 後に行う必要がある (= 古い backup には 'restore'
+            // CHECK が無いため、migration 前に INSERT すると CHECK 制約違反になる)。
             try
             {
                 _dbManager.InitializeDatabase();
@@ -287,6 +289,28 @@ namespace TonePrism.Manager.Controls
             catch (Exception ex)
             {
                 Logger.Error("[BackupSectionPanel] 復元後のスキーマ migration に失敗", ex);
+            }
+
+            // (H4) NEW DB に success 行を別途 INSERT。RestoreService.Restore が start 時に
+            // InsertInProgress した行は OLD DB (= safety backup に snapshot 保存) にしかないため、
+            // NEW DB に audit を残す責務はここに集約。startedAt は LastRestoreStartedAt から拾う。
+            try
+            {
+                long completedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                long fileSize = 0;
+                try { fileSize = new System.IO.FileInfo(_dbManager.DatabasePath).Length; } catch { /* swallow */ }
+                _dbManager.BackupLogRepository.LogRestoreCompleted(
+                    Environment.MachineName,
+                    _dbManager.RestoreService.LastRestoreStartedAt,
+                    completedAt,
+                    resolvedPath,
+                    fileSize,
+                    "success",
+                    null);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[BackupSectionPanel] 復元成功の audit 行 INSERT に失敗 (復元自体は成功): " + ex.Message);
             }
 
             // (復元ドリフト検出) バックアップ/復元は toneprism.db のみが対象で games/ フォルダは復元
@@ -359,6 +383,14 @@ namespace TonePrism.Manager.Controls
             var failedEntries = _dbManager.BackupLogRepository.GetByStatus("failed");
             foreach (var entry in failedEntries)
             {
+                // (L) trigger_type='safety' の failed 行は audit trail として明示的に残す
+                // (= 復元が途中で死んだ証跡)。'restore' (H4) も同じ理由で保護。掃除対象は
+                // 'manual' / 'auto' の failed 行のみ。
+                if (entry.TriggerType == "safety" || entry.TriggerType == "restore")
+                {
+                    continue;
+                }
+
                 string path = BackupPathResolver.ResolveAbsolutePath(entry, dbPath);
 
                 // セーフティ: failed なのに実ファイルが残っている場合は触らない

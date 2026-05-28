@@ -195,10 +195,12 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>
-        /// パスを正規化（\\?\ プレフィックスの除去と絶対パス化）
+        /// パスを正規化（\\?\ プレフィックスの除去と絶対パス化）。
+        /// (L) null / 空文字は素通し (NRE 防止)、将来 caller drift で null path を渡されても落ちないように。
         /// </summary>
         public static string NormalizePath(string path)
         {
+            if (string.IsNullOrEmpty(path)) return path;
             if (path.StartsWith(@"\\?\")) path = path.Substring(4);
             return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         }
