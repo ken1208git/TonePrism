@@ -273,9 +273,19 @@ namespace TonePrism.Manager
 
             // バージョンフォルダを作成
             Directory.CreateDirectory(destinationGameFolder);
-            
+
             // FileOperationServiceに委譲してコピー
-            FileOperationService.CopyDirectoryWithProgress(sourceGameFolder, destinationGameFolder, progress, token);
+            // (追加精査 ②) 個別 File.Copy 失敗を呼び出し側に伝播。1 件でも失敗があれば throw して
+            // ProcessingDialog の catch → CleanupCopiedFoldersOnRollback に流す (= DB 未 commit のうちに
+            // 物理 rollback)。これで「DB は登録されたが実体が無い」起動不能ゲームの silent 生成を防ぐ。
+            // exe / サムネ / 背景の実体存在 check は ProcessingDialog 完了後 (= 上位 btnOK_Click 内) で
+            // executableAbsolutePath を計算したあとに行う (= 相対 path 解決ロジックは上位に集約済)。
+            var copyFailures = FileOperationService.CopyDirectoryWithProgress(sourceGameFolder, destinationGameFolder, progress, token);
+            if (copyFailures.Count > 0)
+            {
+                string msg = FileOperationService.FormatCopyFailureMessage(copyFailures, sourceGameFolder);
+                throw new Exception(msg + "\n\nファイルが他のアプリケーションに開かれていないか、コピー元・コピー先の権限・ディスク容量を確認してください。");
+            }
         }
 
 
@@ -386,6 +396,29 @@ namespace TonePrism.Manager
                 Logger.Info($"[AddGameForm] 実行ファイル絶対パス: {executableAbsolutePath}");
                 Logger.Info($"[AddGameForm] サムネイル絶対パス: {thumbnailAbsolutePath}");
                 Logger.Info($"[AddGameForm] 背景絶対パス: {backgroundAbsolutePath}");
+
+                // (追加精査 ②) DB commit 直前に exe / サムネ / 背景の実体存在を最終 check。
+                // CopyDirectoryWithProgress は failed list で個別 copy 失敗を伝播済だが、
+                // (a) ファイル名の case 違いや (b) コピー後に別プロセスが消した、等の path で
+                // DB と実体が乖離するケースを最後の砦として弾く。失敗時は CleanupCopiedFoldersOnRollback
+                // と同じ rollback path に流す。
+                var missingAssets = new List<string>();
+                if (!string.IsNullOrEmpty(executableAbsolutePath) && !File.Exists(executableAbsolutePath))
+                    missingAssets.Add("実行ファイル: " + executableAbsolutePath);
+                if (!string.IsNullOrEmpty(thumbnailAbsolutePath) && !File.Exists(thumbnailAbsolutePath))
+                    missingAssets.Add("サムネイル: " + thumbnailAbsolutePath);
+                if (!string.IsNullOrEmpty(backgroundAbsolutePath) && !File.Exists(backgroundAbsolutePath))
+                    missingAssets.Add("背景画像: " + backgroundAbsolutePath);
+                if (missingAssets.Count > 0)
+                {
+                    CleanupCopiedFoldersOnRollback();
+                    MessageBox.Show(
+                        "コピー後のファイルが見つかりません。ゲーム追加を中止しました:\n\n  " +
+                        string.Join("\n  ", missingAssets) +
+                        "\n\nコピー元のパス指定 / 権限 / ディスク容量を確認のうえ再試行してください。",
+                        "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
 
                 // (#234) 相対化の基準は version フォルダではなく **ゲームルート (games/{game_id}/)**。
                 // Launcher は games / game_versions のパスをゲームルート基準でしか解決しない

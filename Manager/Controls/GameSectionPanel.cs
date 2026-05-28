@@ -239,8 +239,15 @@ namespace TonePrism.Manager.Controls
                             // CopyDirectoryRecursive 冒頭の再帰ガードが既に空コピーで防ぐため除外は無力、
                             // (b) 正当な v* 名フォルダを無言で取りこぼす下しか無い保険だった。除外を撤去し、
                             // ルート選択自体は VersionUpForm.ValidateInput の games/ 配下ソース拒否で明示的に弾く。
-                            FileOperationService.CopyDirectoryWithProgress(
+                            // (追加精査 ②) 個別 File.Copy 失敗を呼び出し側に伝播。1 件でも失敗があれば
+                            // throw して ProcessingDialog の catch → 上位 cleanup 経路に流す。
+                            var copyFailures = FileOperationService.CopyDirectoryWithProgress(
                                 form.SourceFolderPath, versionDir, progress, token);
+                            if (copyFailures.Count > 0)
+                            {
+                                string msg = FileOperationService.FormatCopyFailureMessage(copyFailures, form.SourceFolderPath);
+                                throw new Exception(msg + "\n\nファイルが他のアプリケーションに開かれていないか、コピー元・コピー先の権限・ディスク容量を確認してください。");
+                            }
                         }
                         catch (OperationCanceledException)
                         {
@@ -254,6 +261,38 @@ namespace TonePrism.Manager.Controls
 
                     if (processingDialog.ShowDialog() == DialogResult.OK)
                     {
+                        // (追加精査 ②) DB commit 直前に exe / サムネ / 背景の実体存在を最終 check。
+                        // CopyDirectoryWithProgress は failed list で個別 copy 失敗を伝播済だが、
+                        // case 違いやコピー後の race による乖離を最後の砦として弾く。失敗時は versionDir
+                        // を削除して入力やり直しを促す (DB 行は未 commit のため rollback 不要)。
+                        var missingVersionAssets = new System.Collections.Generic.List<string>();
+                        string exeCheckPath = string.IsNullOrEmpty(form.RelativeExecutablePath)
+                            ? null
+                            : Path.Combine(versionDir, form.RelativeExecutablePath);
+                        string thumbCheckPath = string.IsNullOrEmpty(form.NewVersion.ThumbnailPath)
+                            ? null
+                            : Path.Combine(versionDir, form.NewVersion.ThumbnailPath);
+                        string bgCheckPath = string.IsNullOrEmpty(form.NewVersion.BackgroundPath)
+                            ? null
+                            : Path.Combine(versionDir, form.NewVersion.BackgroundPath);
+                        if (!string.IsNullOrEmpty(exeCheckPath) && !File.Exists(exeCheckPath))
+                            missingVersionAssets.Add("実行ファイル: " + exeCheckPath);
+                        if (!string.IsNullOrEmpty(thumbCheckPath) && !File.Exists(thumbCheckPath))
+                            missingVersionAssets.Add("サムネイル: " + thumbCheckPath);
+                        if (!string.IsNullOrEmpty(bgCheckPath) && !File.Exists(bgCheckPath))
+                            missingVersionAssets.Add("背景画像: " + bgCheckPath);
+                        if (missingVersionAssets.Count > 0)
+                        {
+                            try { if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true); }
+                            catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (追加精査 ②) versionDir 削除失敗: " + versionDir + ": " + delEx.Message); }
+                            MessageBox.Show(
+                                "コピー後のファイルが見つかりません。バージョンアップを中止しました:\n\n  " +
+                                string.Join("\n  ", missingVersionAssets) +
+                                "\n\nコピー元のパス指定 / 権限 / ディスク容量を確認のうえ再試行してください。",
+                                "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            return;
+                        }
+
                         // (#234) disk のコピー先フォルダ (PathManager.GetVersionFolder = versionDir) と
                         // 同じ正規化規則で leaf 名を作る。両者を別実装で計算すると "V1.0.0" のような生値で
                         // 食い違い、DB 保存パスが実フォルダを指さなくなるため GetVersionFolderLeaf に揃える。

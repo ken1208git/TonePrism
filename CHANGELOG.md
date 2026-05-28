@@ -1911,6 +1911,33 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.17.2] - 2026-05-28
+
+#### Fixed (追加精査ラウンド: バックアップ / ゲーム周りに残っていた 8 件)
+
+#234 + #235 + v0.17.0 / v0.17.1 を当てたあと、独立目線でゲーム追加・編集・バージョンアップ・バックアップ / 復元のコード経路を再精査し、コード上の根拠を持つ残存欠陥 8 件を修正。本ラウンドは新規修正で、レビュー対応コミットではないため `v0.17.1 → v0.17.2` patch bump（既知 21 件以外の独立した bug fix 群）。
+
+- **【中】retention のソートが各 PC の wall clock 順だったため、時計ズレ PC が混ざると最新バックアップが先に削除されうる問題を修正**: `BackupLogRepository.GetAutoSuccessRetentionTargets` の `ORDER BY started_at DESC` を `ORDER BY id DESC`（AUTOINCREMENT = INSERT 順）に変更。`started_at` は `DateTimeOffset.UtcNow.ToUnixTimeSeconds()` 由来で各 PC の wall clock に依存するため、LAN 共有上で時計が大きくズレた PC（NTP 同期前 / RTC 電池切れ等）が auto バックアップを取ると、後から作られた行が古い扱いで先に削除対象になる逆転が起きていた。`id` は SQLite が INSERT 時に振る単調増加値で、同一 DB に対する write は serialise されるため真の作成順序を時計に依存せず復元できる。WHERE 句で `trigger_type='auto' AND status='success'` に絞っているため、ORDER 変更は手動 / safety / failed の保護（= 削除対象外、#235 で導入）には影響しない。
+- **【中】`FileOperationService.CopyDirectoryRecursive` の個別ファイル copy 失敗が呼び出し側に伝わらず、DB は登録されたが実体が無い起動不能ゲームを silent に生む経路があったのを修正**: 旧実装は `File.Copy` 失敗を `Logger.Warn` / `Error` するだけで catch して continue、`copiedFiles` カウントだけ進めずループは完走し、呼び出し側は `ProcessingDialog.DialogResult == OK` を「コピー成功」と判定して `AddGame` / `AddGameVersion` / `UpdateGame` を commit していた。`main.exe` が他プロセス（Explorer プレビュー / 起動中の同 exe / ウイルス対策スキャン）に開かれている等で発火しうる。
+  - 修正: `CopyDirectoryRecursive` に `List<string> failedFiles` 引数を追加して失敗 path を集約、`CopyDirectoryWithProgress` の戻り値を `void` → `List<string>`（= 失敗 list）に変更。呼び出し側（`AddGameForm.CopyGameFolder` / `GameSectionPanel.btnVersionUp_Click`）は list が空でなければ `FileOperationService.FormatCopyFailureMessage` で整形した例外を throw し、既存の rollback 経路（`CleanupCopiedFoldersOnRollback` / versionDir 削除）に流す。
+  - さらに DB commit 直前に **exe / サムネイル / 背景** の `File.Exists` post-check を追加（case 違いやコピー直後の race による乖離を最後の砦として弾く）。post-check で欠落が見つかれば物理 rollback して入力やり直しを案内。
+- **【低〜中】古い DB を復元したとき v14→v15 マイグレーションが「重複行残存」で partial skip しても、`RestoreReportForm` が「✓ 問題なし」と表示する経路を修正**: `SchemaManager.MigrateV14ToV15` は `UNIQUE INDEX` 作成失敗時に `user_version` を 14 のまま据え置いて `Logger.Warn` のみで起動継続する設計（V10→V11 と同じ pattern）だが、`RestoreReconciliationService.Analyze` は (1) 起動不能ゲーム (2) ディスクに無い版 (3) 孤児フォルダしか見ず、スキーマ未完を検出する経路が無かった。結果として「UNIQUE 制約が未適用の DB」で動いているのに復元レポートは安心メッセージ、その後のゲーム編集で重複行がさらに増殖し得る状態。
+  - 修正: `Analyze` 冒頭で `GetActualDatabaseVersion() < GetTargetDatabaseVersion()` を check し、`RestoreReconciliationResult.SchemaIncomplete` / `ActualSchemaVersion` / `ExpectedSchemaVersion` に記録。`HasCriticalFindings` / `HasAnyFindings` も SchemaIncomplete を含む。`RestoreReportForm` に「DB スキーマが未完です（対処が必要）」セクションを追加して具体的なバージョン番号と再起動誘導を出す。本番 DB に重複は確認されていないが、将来の安全策として表面化経路を担保。
+- **【低】`EditGameForm` のアクティブ版判定（読込側）が version 文字列比較だったため、版を rename したあと dropdown 切替で戻ると active-fallback が透過的に止まる非対称を修正**: 旧実装の `LoadGameDataForVersion` 内 `isActiveVersion = string.Equals(ToVersionLeaf(version.Version), ToVersionLeaf(originalGame.Version), ...)` は in-memory で rename した版を「別物」と誤判定し、sparse な初期版（旧 AddGameForm 由来で Title/Genre/数値項目が空）の active healing 経路が止まっていた。保存側は既に `_initialSelectedVersionId` との id 比較 (`L810`) に切り替わっているため、**load 側だけ取り残された非対称**。即データ消失ではない（数値項目は `_versionMinPlayersWasNullOnLoad` flag で保護されている）が、healing 機構が透過的に止まる UX 退行。
+  - 修正: `isActiveVersion` を `_initialSelectedVersionId.HasValue && version.Id == _initialSelectedVersionId.Value` に変更し、read / write の判定基準を行 identity (= DB id) に揃えた。1 行 fix。
+- **【低】`BackupService` / `RestoreService` のファイル名 (`yyyyMMdd_HHmmss`) が同 1 秒衝突したとき前のバックアップが silent に上書きされる問題を修正**: 1 秒粒度のタイムスタンプで衝突 check が無く、`SQLiteConnection("Data Source=<衝突 path>;...")` で開いて `BackupDatabase` を流すと destination の tables 全置換で前の中身が消える経路があった。発火確率は単一 PC では低い（`TryAcquireBackupLease` で auto 連発は防がれる）が、複数 PC が同 1 秒に lease をすり抜けるケースは構造的に起こりうる。
+  - 修正: ファイル名生成後に `while (File.Exists(destinationPath))` ループで `_2` / `_3` ... の suffix を付与（衝突 100 件で safety throw）。`safety_*.db` も同 pattern。既存ファイル名形式との互換性のため衝突時のみ suffix を追加する形式とし、`BackupLogRepository.RecoverLegacyFailedEntriesByFolderScan` / `RegisterUnknownSafetyFiles` の regex も `(_\d+)?` optional を追加して新形式を受容。
+- **【低】最新の自動バックアップを UI 手動削除すると、`last_backup_at` が rollback されず次回の自動バックアップが「間隔未到達」で skip される UX 不具合を修正**: `BackupSectionPanel.btnDelete_Click` は backup ファイル + `backup_log` 行を消すが `settings.last_backup_at` を更新しないため、削除後 `intervalHours` 経過するまで `BackupService.IsAutoBackupDue` が常に false。手動で取り直しは可能なので回避は効くが「最新が壊れてた / 不要だから消して取り直したい」操作と整合しない。
+  - 修正: 削除対象が `trigger_type='auto' AND status='success'` のとき、`BackupLogRepository.GetLastAutoSuccess()`（新設、`ORDER BY id DESC LIMIT 1`）で残存最新を取り直し、`SettingsRepository.SetInt64("last_backup_at", completedAt ?? startedAt)` で rewind。残りが無ければ 0（= 初回扱い、次回 due 判定で auto 取得）。手動 / safety / failed の削除は `last_backup_at` 無関係なので無影響。
+- **【低】`RegisterUnknownSafetyFiles` の重複判定が `file_path` 文字列の完全一致のみだったため、LAN 共有運用で UNC / ドライブ文字の表記揺れにより同一物理ファイルが 2 行で登録される問題を修正**: PC-A が `C:\TonePrism\backups\safety\X.db`、PC-B が `\\srv\TonePrism\backups\safety\X.db` で同じ物理ファイルを登録すると別 entry 扱い、履歴 UI に「同じファイルが 2 行出る」混乱を起こしていた（実害は表示のみ、復元・削除は file_path 個別に動くので機能は壊れない）。
+  - 修正: `existingPaths` に DB 由来 path の `Path.GetFullPath` 正規化版も併用登録、enumerate 由来 path も同様に正規化して両方で重複判定。`GetFullPath` 不能な不正 path は元の文字列で判定にフォールバック（既存挙動互換）。
+- **【低】`RestoreService.File.Replace` が SMB DFS / Junction Point / Symbolic Link 構成で `IOException` で fail したときの fallback が無く、復元失敗 + tempPath + WAL/SHM 削除済みの中途半端な状態が残る問題を修正**: `ReplaceFile` Win32 API は両 path が同一ボリュームでないと失敗するため、SMB 共有運用（#103 で明示サポート）の特定構成で破綻余地があった。safety は既に取れているのでデータ消失は無いが手動復旧が要る UX 退行。
+  - 修正: `File.Replace` を `try`、`catch (IOException)` / `catch (UnauthorizedAccessException)` で `File.Delete(dbPath) + File.Move(tempPath, dbPath)` 経路に fallback（atomicity は落ちるが safety で担保済み、Logger.Warn で fallback 経路に流れた事実を記録）。
+
+#### Bump 根拠 (v0.17.1 → v0.17.2)
+
+bug fix のみのため patch bump。DB スキーマ変更なし、UI / 機能の追加も無し（`RestoreReportForm` の SchemaIncomplete セクションは既存ダイアログへの section 追加で新規画面ではない）。AGENTS.md「1 PR 1 bump」原則は、本 PR (#236) では v0.16.x → v0.17.x の連続 bump を「想定範囲を超える追加修正が混入した」例外条項で許容している既存運用に沿う（#234 / #235 の連続 bump と同パターン）。Bundle への反映は次回リリース実行時。
+
 ### [Manager v0.17.1] - 2026-05-28
 
 #### Fixed (v0.17.0 復元後の整合性チェック regression — 古いスキーマで必ず空振り)

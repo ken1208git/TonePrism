@@ -266,6 +266,34 @@ namespace TonePrism.Manager.Repositories
         }
 
         /// <summary>
+        /// (追加精査 ⑦) trigger_type='auto' AND status='success' の中で最新の行を返す。
+        /// BackupSectionPanel の削除処理で last_backup_at の rewind 対象を決めるために使う。
+        /// 並び順は `id DESC` (= INSERT 順、AUTOINCREMENT) で wall clock 不依存。
+        /// 該当行が無ければ null を返す (= settings.last_backup_at を 0 に rewind すべきケース)。
+        /// </summary>
+        public BackupLogEntry GetLastAutoSuccess()
+        {
+            return _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var cmd = new SQLiteCommand(
+                        "SELECT id, started_at, completed_at, pc_name, file_path, relative_path, file_size_bytes, " +
+                        "status, error_message, trigger_type FROM backup_log " +
+                        "WHERE trigger_type = 'auto' AND status = 'success' " +
+                        "ORDER BY id DESC LIMIT 1", connection))
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                            return ReadEntry(reader);
+                        return null;
+                    }
+                }
+            });
+        }
+
+        /// <summary>
         /// `file_path` が空のまま残っている `failed` 行について、バックアップフォルダ内の
         /// `toneprism_yyyyMMdd_HHmmss.db` 形式のファイル名と `started_at` を照合し、
         /// 一致するファイルが見つかれば `success` として復元する。
@@ -280,8 +308,11 @@ namespace TonePrism.Manager.Repositories
                 return 0;
 
             // ファイル一覧を timestamp → path のマップに
+            // (追加精査 ⑥) 同 1 秒衝突回避の `_2` / `_3` suffix も受け入れる。fileMap の key は timestamp
+            // 単位なので、同 1 秒に複数ファイルが存在する場合は後勝ち (この path は旧版救済専用で、新規
+            // バックアップは InsertInProgress で file_path を記録するため通常はゼロ件)。
             var fileMap = new Dictionary<string, string>();
-            var regex = new Regex(@"^toneprism_(\d{8})_(\d{6})\.db$");
+            var regex = new Regex(@"^toneprism_(\d{8})_(\d{6})(_\d+)?\.db$");
             try
             {
                 foreach (var file in System.IO.Directory.EnumerateFiles(backupFolder, "toneprism_*.db"))
@@ -371,6 +402,12 @@ namespace TonePrism.Manager.Repositories
                     _conn.OpenConnectionWithJournalMode(connection);
 
                     // 既に登録済みの safety 行の file_path をセットに集める
+                    // (追加精査 ⑧) DB に入っている file_path は登録時の表記そのまま (例: PC-A は
+                    // `C:\TonePrism\backups\safety\X.db`、PC-B は `\\srv\TonePrism\backups\safety\X.db`)。
+                    // LAN 共有運用で UNC とドライブ文字が混在すると、同一物理ファイルが別 entry として
+                    // 2 重登録される。`Path.GetFullPath` (= 絶対化 + `\\?\` プレフィックス除去 + 末尾区切り
+                    // 整理) で正規化した path も併用して重複判定の精度を上げる。GetFullPath 不能な
+                    // 不正 path は元の文字列のままセットに入れる (失敗側で hit させない方向)。
                     var existingPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     using (var cmd = new SQLiteCommand(
                         "SELECT file_path FROM backup_log " +
@@ -380,12 +417,16 @@ namespace TonePrism.Manager.Repositories
                     {
                         while (reader.Read())
                         {
-                            existingPaths.Add(reader["file_path"].ToString());
+                            string p = reader["file_path"].ToString();
+                            existingPaths.Add(p);
+                            try { existingPaths.Add(System.IO.Path.GetFullPath(p)); }
+                            catch { /* 不正 path は元の文字列だけ登録 */ }
                         }
                     }
 
-                    var newRegex = new Regex(@"^safety_(\d{8})_(\d{6})\.db$");
-                    var legacyRegex = new Regex(@"^safety_before_restore_(\d{8})_(\d{6})\.db$");
+                    // (追加精査 ⑥) 同 1 秒衝突回避の `_2` / `_3` suffix も受け入れる (optional)。
+                    var newRegex = new Regex(@"^safety_(\d{8})_(\d{6})(_\d+)?\.db$");
+                    var legacyRegex = new Regex(@"^safety_before_restore_(\d{8})_(\d{6})(_\d+)?\.db$");
 
                     foreach (var file in System.IO.Directory.EnumerateFiles(safetyDir, "*.db"))
                     {
@@ -393,7 +434,12 @@ namespace TonePrism.Manager.Repositories
                         Match match = newRegex.Match(name);
                         if (!match.Success) match = legacyRegex.Match(name);
                         if (!match.Success) continue;
+                        // (追加精査 ⑧) enumerate 由来の生 path と正規化 path の両方で重複判定。
                         if (existingPaths.Contains(file)) continue;
+                        string normalizedFile = file;
+                        try { normalizedFile = System.IO.Path.GetFullPath(file); }
+                        catch { /* GetFullPath 失敗時は生 path のまま判定 */ }
+                        if (!ReferenceEquals(file, normalizedFile) && existingPaths.Contains(normalizedFile)) continue;
 
                         string dateStr = match.Groups[1].Value;
                         string timeStr = match.Groups[2].Value;
@@ -505,12 +551,19 @@ namespace TonePrism.Manager.Repositories
                 {
                     _conn.OpenConnectionWithJournalMode(connection);
                     // 新しい順に並べて keepCount 件を skip した残りを返す。
-                    // started_at は UNIX秒。NULL は理論上ないが念のため最後尾にしておく。
+                    // ORDER BY は `id DESC` (= AUTOINCREMENT INSERT 順) を SoT にする。`started_at` は
+                    // 各 PC の wall clock 由来 (DateTimeOffset.UtcNow.ToUnixTimeSeconds) なので、LAN 上で
+                    // 時計がズレた PC が混ざる (NTP 同期前 / RTC 電池切れ等) と「後から取られたバックアップ」
+                    // が古い扱いで先に削除される逆転が起きる。id は SQLite が INSERT した瞬間に振る単調
+                    // 増加値なので、書き込んだ瞬間の真の時系列順序 (= 同一 DB に対する write は排他なので
+                    // serialise される) を時計に依存せず復元できる。
+                    // WHERE 句で trigger_type='auto' AND status='success' に絞っているため、ORDER 変更は
+                    // 手動 / safety / failed の保護 (= 削除対象外) には影響しない。
                     using (var cmd = new SQLiteCommand(
                         "SELECT id, started_at, completed_at, pc_name, file_path, relative_path, file_size_bytes, " +
                         "status, error_message, trigger_type FROM backup_log " +
                         "WHERE trigger_type = 'auto' AND status = 'success' " +
-                        "ORDER BY started_at DESC " +
+                        "ORDER BY id DESC " +
                         "LIMIT -1 OFFSET @offset", connection))
                     {
                         cmd.Parameters.AddWithValue("@offset", keepCount);

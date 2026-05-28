@@ -118,9 +118,28 @@ namespace TonePrism.Manager.Services
 
             // ファイルパスを先に確定させ、in_progress 行に最初から記録する。
             // こうすることで、後で「ファイル存在の有無」で行をリコンサイルできる。
+            //
+            // (追加精査 ⑥) yyyyMMdd_HHmmss は 1 秒粒度なので、同 1 秒に複数 PC が auto/manual を発火すると
+            // ファイル名衝突が起きる。SQLiteConnection に既存パスを渡すと BackupDatabase が destination の
+            // tables 全置換で silent 上書きとなり、前のバックアップが破壊される。File.Exists で衝突 check し、
+            // 衝突時は _2 / _3 ... の suffix を付与。100 件衝突はあり得ないので safety limit を入れて throw。
+            // 既存ファイル名 (yyyyMMdd_HHmmss.db) との互換性のため、衝突時のみ suffix を追加する形式とする
+            // (BackupLogRepository.RecoverLegacyFailedEntriesByFolderScan 等の旧版救済 regex に影響しない)。
             string destinationDir = GetEffectiveDestinationDirectory();
-            string fileName = $"toneprism_{DateTime.Now:yyyyMMdd_HHmmss}.db";
+            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string fileName = $"toneprism_{timestamp}.db";
             string destinationPath = Path.Combine(destinationDir, fileName);
+            int collisionSuffix = 2;
+            while (File.Exists(destinationPath))
+            {
+                fileName = $"toneprism_{timestamp}_{collisionSuffix}.db";
+                destinationPath = Path.Combine(destinationDir, fileName);
+                collisionSuffix++;
+                if (collisionSuffix > 99)
+                {
+                    throw new Exception($"バックアップファイル名の衝突回避に失敗しました (同 1 秒に 100 件以上の衝突): {destinationDir}");
+                }
+            }
 
             // プロジェクト移動耐性のため、toneprism.db のあるディレクトリからの相対パスも記録 (#126)
             // dbDir 配下に無い destinationDir (ユーザー指定の絶対パス等) では null になり、

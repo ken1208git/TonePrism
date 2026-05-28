@@ -62,7 +62,21 @@ namespace TonePrism.Manager.Services
                 }
 
                 // 1. 現DBを安全バックアップ（Online Backup API でライブコピー）
-                string safetyPath = Path.Combine(safetyDir, $"safety_{DateTime.Now:yyyyMMdd_HHmmss}.db");
+                // (追加精査 ⑥) BackupService と同様、yyyyMMdd_HHmmss の同 1 秒衝突を suffix で回避する。
+                // 復元連打は UI 上 ProcessingDialog で block されるため発生確率は低いが、防御ラインとして
+                // BackupService と同じ pattern に揃える。
+                string safetyTimestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                string safetyPath = Path.Combine(safetyDir, $"safety_{safetyTimestamp}.db");
+                int safetyCollisionSuffix = 2;
+                while (File.Exists(safetyPath))
+                {
+                    safetyPath = Path.Combine(safetyDir, $"safety_{safetyTimestamp}_{safetyCollisionSuffix}.db");
+                    safetyCollisionSuffix++;
+                    if (safetyCollisionSuffix > 99)
+                    {
+                        throw new Exception($"退避ファイル名の衝突回避に失敗しました (同 1 秒に 100 件以上の衝突): {safetyDir}");
+                    }
+                }
                 progress?.Report(new ProgressInfo(10, "現在のデータベースを退避中...", safetyPath));
 
                 if (File.Exists(dbPath))
@@ -109,7 +123,28 @@ namespace TonePrism.Manager.Services
                 {
                     // File.Replace は NTFS 上で atomic（ReplaceFile Win32 API）
                     // backupFileName=null で旧 toneprism.db のバックアップは作らない（safety で既に確保済み）
-                    File.Replace(tempPath, dbPath, null);
+                    //
+                    // (追加精査 ⑨) ReplaceFile は両 path が同一ボリュームでないと失敗する。SMB DFS /
+                    // Junction Point / Symbolic Link が介在する構成では IOException で fail し得る。
+                    // safety は既に取れているのでデータ消失は無いが、tempPath + WAL/SHM 削除済みの
+                    // 中途半端な状態が残り手動復旧が要る。catch で Delete + Move 経路に fallback して
+                    // 復元自体は通す (atomicity は落ちるが safety で担保済み)。
+                    try
+                    {
+                        File.Replace(tempPath, dbPath, null);
+                    }
+                    catch (IOException replaceEx)
+                    {
+                        Logger.Warn("[RestoreService] File.Replace 失敗 (SMB/Junction 等の可能性)、Delete + Move 経路に fallback: " + replaceEx.Message);
+                        File.Delete(dbPath);
+                        File.Move(tempPath, dbPath);
+                    }
+                    catch (UnauthorizedAccessException replaceEx)
+                    {
+                        Logger.Warn("[RestoreService] File.Replace 権限エラー、Delete + Move 経路に fallback: " + replaceEx.Message);
+                        File.Delete(dbPath);
+                        File.Move(tempPath, dbPath);
+                    }
                 }
                 else
                 {

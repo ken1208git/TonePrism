@@ -457,8 +457,14 @@ namespace TonePrism.Manager
             // Description/Arguments だけでなく Title/Genre/難易度/プレイ時間/コントローラ/通信/サムネ/
             // 背景/製作者 も未設定だった (#234) ため、それら全項目をアクティブ版フォールバックで健全化
             // する。フォールバックした値は OK 保存でアクティブ版に書き戻され自己修復する。
-            bool isActiveVersion = !string.IsNullOrEmpty(originalGame.Version)
-                && string.Equals(ToVersionLeaf(version.Version ?? ""), ToVersionLeaf(originalGame.Version), StringComparison.OrdinalIgnoreCase);
+            //
+            // (追加精査) 旧判定は version 文字列比較だったため、dropdown 上で active 版を rename したあと
+            // 別 version へ切替 → 戻る、で本来 active のはずの行が isActiveVersion=false 扱いになり
+            // healing が透過的に止まる非対称があった。保存側 (L810 付近) は既に _initialSelectedVersionId
+            // との id 比較に切り替わっているため、読込側も同じ row identity (= DB id) で揃える。
+            // _initialSelectedVersionId は LoadVersions 時に「games.version と一致する行の Id」を記録した値。
+            bool isActiveVersion = _initialSelectedVersionId.HasValue
+                && version.Id == _initialSelectedVersionId.Value;
 
             txtTitle.Text = !string.IsNullOrWhiteSpace(version.Title)
                 ? version.Title

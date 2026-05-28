@@ -445,6 +445,24 @@ namespace TonePrism.Manager.Controls
             // DB レコード削除
             _dbManager.BackupLogRepository.DeleteById(entry.Id);
 
+            // (追加精査 ⑦) auto+success を削除した場合、last_backup_at を「残った中で最新の auto success
+            // の completed_at」に rewind する。さもないと「最新の自動バックアップを消して取り直したい」
+            // 操作で IsAutoBackupDue が間隔未到達と誤判定し、次の自動バックアップが skip される。
+            // 残りが無ければ 0 (= 初回扱い、次回判定で auto バックアップが取得される)。
+            // 削除対象が手動 / safety / failed の場合は last_backup_at に無関係なので何もしない。
+            if (entry.TriggerType == "auto" && entry.Status == "success")
+            {
+                var newLatest = _dbManager.BackupLogRepository.GetLastAutoSuccess();
+                // status='success' の行なので CompletedAt は通常非 null。古い行で NULL のケースに備えて
+                // StartedAt にフォールバック。残行が無ければ 0 (= 初回扱い)。
+                long newLastBackupAt = 0;
+                if (newLatest != null)
+                {
+                    newLastBackupAt = newLatest.CompletedAt ?? newLatest.StartedAt;
+                }
+                _dbManager.SettingsRepository.SetInt64("last_backup_at", newLastBackupAt);
+            }
+
             RefreshDisplay();
         }
 

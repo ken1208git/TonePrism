@@ -33,6 +33,31 @@ namespace TonePrism.Manager.Services
         {
             var result = new RestoreReconciliationResult();
 
+            // (追加精査 ③) schema version の不一致を critical findings として検出する。
+            // v14→v15 のような migration が「重複行残存」で partial skip した場合、SchemaManager は
+            // Logger.Warn のみで user_version を据え置いて起動継続する (起動可能性優先の設計、
+            // SchemaManager L849-868 参照)。その状態だと UNIQUE INDEX 等の最終スキーマが未適用なのに
+            // RestoreReportForm が「✓ 復元完了：問題なし」と誤った安心メッセージを出す経路が残る。
+            // ここで明示的に actual vs target を比較してレポートに乗せる。実害は復元時に限らないが
+            // 復元直後はユーザーが必ずレポート画面を見るため、この経路で表面化させる。
+            try
+            {
+                int actual = _dbManager.GetActualDatabaseVersion();
+                int target = _dbManager.GetTargetDatabaseVersion();
+                result.ActualSchemaVersion = actual;
+                result.ExpectedSchemaVersion = target;
+                if (actual < target)
+                {
+                    result.SchemaIncomplete = true;
+                    Logger.Warn("[RestoreReconciliation] DB スキーマが未完です: actual=v" + actual + ", target=v" + target);
+                }
+            }
+            catch (Exception ex)
+            {
+                // schema version 取得失敗は致命でない (= 既存の整合性チェックは続行)。Warn のみ。
+                Logger.Warn("[RestoreReconciliation] DB スキーマ version の取得に失敗: " + ex.Message);
+            }
+
             List<GameInfo> games;
             try
             {
@@ -173,12 +198,30 @@ namespace TonePrism.Manager.Services
         public List<MissingVersionFolder> MissingVersionFolders { get; } = new List<MissingVersionFolder>();
         public List<OrphanFolder> OrphanFolders { get; } = new List<OrphanFolder>();
 
-        /// <summary>起動に直結する深刻な問題 (= 復元時点のフォルダ補完が必要)。</summary>
-        public bool HasCriticalFindings => BrokenGames.Count > 0;
+        /// <summary>
+        /// (追加精査 ③) DB スキーマが未完 (= migration が partial skip された) ことを示す。
+        /// 例: v14→v15 で `(game_id, version)` 重複残存により UNIQUE INDEX 作成を skip した場合、
+        /// user_version は 14 のまま据え置かれ、UNIQUE 制約は未適用のまま起動継続する。SchemaManager 側は
+        /// Logger.Warn しか出さないため、UI 経路として復元レポートで表面化させる。
+        /// </summary>
+        public bool SchemaIncomplete { get; set; }
+
+        /// <summary>実際の DB の user_version (PRAGMA user_version)。SchemaIncomplete 時の表示用。</summary>
+        public int ActualSchemaVersion { get; set; }
+
+        /// <summary>このバージョンの Manager が想定する target schema version (= SchemaManager.CurrentDbVersion)。</summary>
+        public int ExpectedSchemaVersion { get; set; }
+
+        /// <summary>
+        /// 起動に直結する深刻な問題 (= 復元時点のフォルダ補完が必要)、または
+        /// schema 未完 (= 後続の DB 操作で重複行増殖等のリスク残存)。
+        /// </summary>
+        public bool HasCriticalFindings => BrokenGames.Count > 0 || SchemaIncomplete;
 
         /// <summary>何らかのズレが見つかったか (深刻 / 軽微いずれか)。</summary>
         public bool HasAnyFindings =>
-            BrokenGames.Count > 0 || MissingVersionFolders.Count > 0 || OrphanFolders.Count > 0;
+            BrokenGames.Count > 0 || MissingVersionFolders.Count > 0 || OrphanFolders.Count > 0
+            || SchemaIncomplete;
     }
 
     public class BrokenGame

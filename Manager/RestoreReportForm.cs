@@ -159,6 +159,24 @@ namespace TonePrism.Manager
                 return sb.ToString();
             }
 
+            // (0) スキーマ未完 (追加精査 ③)。v14→v15 のような migration が「重複行残存」等で partial skip
+            //     した状態で復元したケース。user_version は据え置きで起動継続するが UNIQUE 制約等が未適用。
+            if (_result.SchemaIncomplete)
+            {
+                sb.AppendLine("■ DB スキーマが未完です（対処が必要）");
+                sb.AppendLine("  復元した DB のスキーマバージョンが、この Manager が想定する最新版より");
+                sb.AppendLine("  古い状態です。一部の整合性制約が未適用のまま起動しているため、");
+                sb.AppendLine("  この状態でゲーム編集を続けるとデータ重複等の問題が発生する可能性があります。");
+                sb.AppendLine();
+                sb.AppendLine("    現在の DB バージョン: v" + _result.ActualSchemaVersion);
+                sb.AppendLine("    想定 DB バージョン:   v" + _result.ExpectedSchemaVersion);
+                sb.AppendLine();
+                sb.AppendLine("  原因として多いのは『古い DB に残った重複データ』です。Manager を再起動すると");
+                sb.AppendLine("  再度マイグレーションを試行します。それでも未完のままなら、ログ");
+                sb.AppendLine("  （Manager.log）の WARN 行で具体的なテーブル名 / 制約が確認できます。");
+                sb.AppendLine();
+            }
+
             // (1) 起動できないゲーム
             if (_result.BrokenGames.Count > 0)
             {
