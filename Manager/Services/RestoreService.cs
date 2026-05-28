@@ -222,12 +222,17 @@ namespace TonePrism.Manager.Services
             {
                 Logger.Info($"[RestoreService] 復元キャンセル: source='{backupFilePath}'");
                 MarkAuditFailed(logId, "ユーザーによりキャンセルされました");
+                // (累積監査 round 3) 一時ファイルが残置されると次回復元時 L154 の File.Delete で消えるが、
+                // 復元失敗が連続する展示 PC (SSD 小容量) では disk 逼迫 → File.Copy 失敗の連鎖を誘発する。
+                // catch 経路で必ず後始末する (両 catch で対称化、failure 自体は swallow して例外伝播を優先)。
+                TryDeleteTempFile(tempPath);
                 throw;
             }
             catch (Exception ex)
             {
                 Logger.Error($"[RestoreService] 復元失敗: source='{backupFilePath}'", ex);
                 MarkAuditFailed(logId, ex.Message);
+                TryDeleteTempFile(tempPath);
                 throw;
             }
             finally
@@ -295,6 +300,26 @@ namespace TonePrism.Manager.Services
             catch (Exception ex)
             {
                 Logger.Error($"[RestoreService] 退避リテンション処理失敗", ex);
+            }
+        }
+
+        /// <summary>
+        /// (累積監査 round 3) 復元失敗 / cancel 時に tempPath を best-effort で削除する。失敗は握り潰す
+        /// (Logger.Warn のみ)、上位 catch の throw を優先する。tempPath が存在しないケースも no-op で安全。
+        /// </summary>
+        private static void TryDeleteTempFile(string tempPath)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(tempPath) && File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                    Logger.Info($"[RestoreService] 一時ファイルを削除しました: '{tempPath}'");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[RestoreService] 一時ファイル削除失敗 (next attempt の L154 cleanup で再試行されます): '{tempPath}': {ex.Message}");
             }
         }
 

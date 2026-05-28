@@ -138,9 +138,15 @@ namespace TonePrism.Manager.Repositories
                     using (var tx = connection.BeginTransaction(IsolationLevel.Serializable))
                     {
                         string existing = null;
+                        // (累積監査 round 3 / #7) 同 file 内の INSERT (L173) / ReleaseRestoreLock (L197) は
+                        // parameterized なのに、本 SELECT だけ literal embed の非対称があった。現値は
+                        // alphanumeric のみで injection 経路は無いが、convention drift で `'` 含む値に
+                        // rename された瞬間に SQL break しうる ハザード。@k パラメータ化で物理閉鎖し
+                        // 3 経路を対称化する。
                         using (var cmd = new SQLiteCommand(
-                            "SELECT value FROM settings WHERE key = '" + Services.SettingsKeys.RestoreLockOwner + "'", connection, tx))
+                            "SELECT value FROM settings WHERE key = @k", connection, tx))
                         {
+                            cmd.Parameters.AddWithValue("@k", Services.SettingsKeys.RestoreLockOwner);
                             var v = cmd.ExecuteScalar();
                             if (v != null && v != DBNull.Value) existing = v.ToString();
                         }
@@ -185,20 +191,61 @@ namespace TonePrism.Manager.Repositories
 
         /// <summary>
         /// (H5) リストア advisory lock を解除する。自 PC 保有の lock のみ解除、他 PC 保有 lock には触らない。
+        /// (累積監査 round 3 / #6) 旧実装は `value LIKE '<pcName>|%'` で削除していたが、LIKE の `_` /
+        /// `%` は wildcard 扱いされるため、PC 名にこれらの文字が含まれると他 PC の lock も巻き込み削除
+        /// しうる経路があった (例: PC 名 `PC_A` を解除すると `PC1A|...` の lock も `_` に一致して削除される)。
+        /// 現実装は (1) SELECT で現在の lock 値を取得、(2) `<owner>|<ms>` を parse、(3) owner が pcName と
+        /// 完全一致 (OrdinalIgnoreCase) するときのみ exact `value = @v` で DELETE する Serializable tx 方式に
+        /// 変更。SQL の LIKE 経路を一切使わないため wildcard 巻き込みを構造的に排除する。
         /// </summary>
         public void ReleaseRestoreLock(string pcName)
         {
+            if (string.IsNullOrEmpty(pcName)) return;
             _conn.ExecuteWithRetry(() =>
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
                     _conn.OpenConnectionWithJournalMode(connection);
-                    using (var cmd = new SQLiteCommand(
-                        "DELETE FROM settings WHERE key = @k AND value LIKE @prefix", connection))
+                    using (var tx = connection.BeginTransaction(IsolationLevel.Serializable))
                     {
-                        cmd.Parameters.AddWithValue("@k", Services.SettingsKeys.RestoreLockOwner);
-                        cmd.Parameters.AddWithValue("@prefix", (pcName ?? "") + "|%");
-                        cmd.ExecuteNonQuery();
+                        string existing = null;
+                        using (var cmd = new SQLiteCommand(
+                            "SELECT value FROM settings WHERE key = @k", connection, tx))
+                        {
+                            cmd.Parameters.AddWithValue("@k", Services.SettingsKeys.RestoreLockOwner);
+                            var v = cmd.ExecuteScalar();
+                            if (v != null && v != DBNull.Value) existing = v.ToString();
+                        }
+
+                        // lock 行なし / parse 不能 / 他 PC 所有 → 何もせず commit
+                        if (string.IsNullOrEmpty(existing))
+                        {
+                            tx.Commit();
+                            return;
+                        }
+                        int sep = existing.IndexOf('|');
+                        if (sep <= 0)
+                        {
+                            tx.Commit();
+                            return;
+                        }
+                        string ownerPc = existing.Substring(0, sep);
+                        if (!string.Equals(ownerPc, pcName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            tx.Commit();
+                            return;
+                        }
+
+                        // 自 PC 所有 → exact 値で DELETE (SELECT で取得した行が race で別 PC に書き換えられた
+                        // 場合は 0 行更新で no-op、その他 PC の lock を巻き込まない)。
+                        using (var cmd = new SQLiteCommand(
+                            "DELETE FROM settings WHERE key = @k AND value = @v", connection, tx))
+                        {
+                            cmd.Parameters.AddWithValue("@k", Services.SettingsKeys.RestoreLockOwner);
+                            cmd.Parameters.AddWithValue("@v", existing);
+                            cmd.ExecuteNonQuery();
+                        }
+                        tx.Commit();
                     }
                 }
             });

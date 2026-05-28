@@ -394,12 +394,35 @@ namespace TonePrism.Manager
 
             // (L) AddGameForm 経路 / UpdateGame 経路は空時に null 保存だが、本 path だけ "" を入れていた。
             // Launcher 側が null と "" を別 path として扱うと silent 表示崩れの risk があるため null に統一。
-            version.ExecutablePath = !string.IsNullOrEmpty(txtExecutablePath.Text)
-                ? PathConversionHelper.ToRelativePath(gameFolder, txtExecutablePath.Text) : null;
-            version.ThumbnailPath = !string.IsNullOrEmpty(txtThumbnailPath.Text)
-                ? PathConversionHelper.ToRelativePath(gameFolder, txtThumbnailPath.Text) : null;
-            version.BackgroundPath = !string.IsNullOrEmpty(txtBackgroundPath.Text)
-                ? PathConversionHelper.ToRelativePath(gameFolder, txtBackgroundPath.Text) : null;
+            version.ExecutablePath = NormalizeRelative(txtExecutablePath.Text, "executable_path");
+            version.ThumbnailPath = NormalizeRelative(txtThumbnailPath.Text, "thumbnail_path");
+            version.BackgroundPath = NormalizeRelative(txtBackgroundPath.Text, "background_path");
+        }
+
+        /// <summary>
+        /// (累積監査 round 3 / #9) gameFolder 基準で相対化し、絶対 path が残った場合 (= base 外) は
+        /// Logger.Warn で記録した上で null に格下げる二段目 fence。`PathConversionHelper.ToRelativePath` は
+        /// base 外の path を「絶対のまま」返す設計のため、UpdatePathTextBox の prefix 置換が部分一致しない
+        /// 経路 (例: gameId rename + 古い絶対 path) や画像 UX copy 漏れで絶対 path が DB に流入する経路を
+        /// silent 通過させてしまう risk があった。本 fence で DB 保存値が「相対 path / null」のいずれかに
+        /// 確実に collapse する契約を強制し、Launcher の path 解決が絶対と相対の混在で崩れる経路を構造閉鎖。
+        /// 絶対 path が検出された場合は画面の表示は残しつつ DB は null 保存にして user が次回 OK 時に再入力できる
+        /// 余地を残す (= silent corruption 化しない、警告 log で trail を残す)。
+        /// </summary>
+        private string NormalizeRelative(string raw, string fieldName)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+            string relative = PathConversionHelper.ToRelativePath(gameFolder, raw.Trim());
+            if (string.IsNullOrWhiteSpace(relative)) return null;
+            if (Path.IsPathRooted(relative))
+            {
+                Logger.Warn("[EditGameForm] gameFolder (" + gameFolder + ") 外の絶対パスを " + fieldName +
+                    " に保存しようとしました (raw='" + raw + "'、relative='" + relative + "')。null に格下げて保存します。" +
+                    " 画像経路は CopyExternalImagesToVersionFolder で自動コピー、それ以外は ApplyRelativePaths " +
+                    "二段目 fence で構造閉鎖。");
+                return null;
+            }
+            return relative;
         }
 
         /// <summary>
@@ -684,7 +707,9 @@ namespace TonePrism.Manager
             {
                 dialog.InitialDirectory = gameFolder;
                 dialog.Filter = "画像ファイル (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp|すべてのファイル (*.*)|*.*";
-                dialog.Title = "サムネイル画像を選択（ゲームフォルダ内から選択）";
+                // (累積監査 round 3) ゲームフォルダ外の画像も選択可。OK 押下時に編集中バージョンの
+                // v{version}/ 配下へ自動コピーする (同名衝突は ImageNameConflictDialog で rename 案内)。
+                dialog.Title = "サムネイル画像を選択（ゲームフォルダ外も可。OK 時に自動コピー）";
 
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
@@ -695,7 +720,7 @@ namespace TonePrism.Manager
         }
 
         /// <summary>
-        /// 背景画像選択ボタンクリック（既存のgames/{game_id}/フォルダ内から選択）
+        /// 背景画像選択ボタンクリック（ゲームフォルダ外も可、OK 時に自動コピー）
         /// </summary>
         private void btnSelectBackground_Click(object sender, EventArgs e)
         {
@@ -703,7 +728,8 @@ namespace TonePrism.Manager
             {
                 dialog.InitialDirectory = gameFolder;
                 dialog.Filter = "画像ファイル (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp|すべてのファイル (*.*)|*.*";
-                dialog.Title = "背景画像を選択（ゲームフォルダ内から選択）";
+                // (累積監査 round 3) ゲームフォルダ外も選択可。OK 押下時に v{version}/ 配下へコピー。
+                dialog.Title = "背景画像を選択（ゲームフォルダ外も可。OK 時に自動コピー）";
 
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
@@ -1018,10 +1044,32 @@ namespace TonePrism.Manager
                     }
                 }
 
+                // (累積監査 round 3) ゲームフォルダ外の画像が選ばれていれば、編集中バージョンの v{version}/ 配下へ
+                // コピーする。AddGameForm のようなコピー元フォルダ概念は EditGameForm にはなく、user が任意の場所
+                // から画像を取り込めるよう UI を緩和した分の補助。古い画像は古いバージョンが参照している可能性が
+                // あるため削除しない方針 (user 合意済)。同名衝突は ImageNameConflictDialog で user に rename を促す。
+                {
+                    var currentVersionForCopy = cmbVersionList.SelectedItem as GameVersion;
+                    if (currentVersionForCopy != null)
+                    {
+                        if (!CopyExternalImagesToVersionFolder(currentVersionForCopy))
+                        {
+                            // user が衝突 dialog で Cancel、または copy 失敗 → 編集画面に戻る (DB / 他 disk 操作は未実行)。
+                            // gameIdChanged の disk 名は既に新 ID に変更済だが、これは UpdateGameId 成功 = DB も新 ID
+                            // に同期済の状態。txtGameId.Text も新 ID で、user が再度 OK を押せばこの block は no-op で
+                            // 通過するため drift は残らない。
+                            return;
+                        }
+                    }
+                }
+
                 // パスを相対パスに変換（可能な場合）
-                string executablePath = PathConversionHelper.ToRelativePath(gameFolder, txtExecutablePath.Text.Trim());
-                string thumbnailPath = string.IsNullOrWhiteSpace(txtThumbnailPath.Text) ? null : PathConversionHelper.ToRelativePath(gameFolder, txtThumbnailPath.Text.Trim());
-                string backgroundPath = string.IsNullOrWhiteSpace(txtBackgroundPath.Text) ? null : PathConversionHelper.ToRelativePath(gameFolder, txtBackgroundPath.Text.Trim());
+                // (累積監査 round 3 / #9) `NormalizeRelative` 経由で絶対 path 流入を null 格下げ fence。
+                // 防御経路 (selectedVersion==null) でも ApplyRelativePaths と同じ契約 (= 相対 / null のみ) で
+                // DB に書く形に揃える。
+                string executablePath = NormalizeRelative(txtExecutablePath.Text, "executable_path");
+                string thumbnailPath = NormalizeRelative(txtThumbnailPath.Text, "thumbnail_path");
+                string backgroundPath = NormalizeRelative(txtBackgroundPath.Text, "background_path");
 
                 // 起動オプション (#234 追加精査: 空白は null 正規化、Add/VersionUp と DB 表現を統一。
                 // 通常経路では下の selectedVersion 反映で版の正規化値に上書きされるが、selectedVersion==null
@@ -1531,6 +1579,10 @@ namespace TonePrism.Manager
             }
 
             // サムネイル画像パスのチェック（指定されている場合）
+            // (累積監査 round 3) ゲームフォルダ外も許可。外なら OK 時に CopyExternalImagesToVersionFolder で
+            // 自動コピーする (同名衝突は ImageNameConflictDialog 経由)。古い画像ファイルは古いバージョンが
+            // 参照している可能性があるため削除しない方針。File.Exists check は維持 (= 選んだ瞬間にファイルが
+            // 削除された TOCTOU や 名前タイプミスを弾く目的)。
             if (!string.IsNullOrWhiteSpace(txtThumbnailPath.Text))
             {
                 if (!File.Exists(txtThumbnailPath.Text))
@@ -1539,26 +1591,14 @@ namespace TonePrism.Manager
                     btnSelectThumbnail.Focus();
                     return false;
                 }
-                if (!PathConversionHelper.IsPathInside(gameFolder, txtThumbnailPath.Text))
-                {
-                    MessageBox.Show("サムネイル画像はゲームフォルダ内のファイルを選択してください。\n\n外部のファイルを使用する場合は、バージョンアップ機能をご利用ください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    btnSelectThumbnail.Focus();
-                    return false;
-                }
             }
 
-            // 背景画像パスのチェック（指定されている場合）
+            // 背景画像パスのチェック（指定されている場合、ゲームフォルダ外も可）
             if (!string.IsNullOrWhiteSpace(txtBackgroundPath.Text))
             {
                 if (!File.Exists(txtBackgroundPath.Text))
                 {
                     MessageBox.Show("選択された背景画像が見つかりません。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    btnSelectBackground.Focus();
-                    return false;
-                }
-                if (!PathConversionHelper.IsPathInside(gameFolder, txtBackgroundPath.Text))
-                {
-                    MessageBox.Show("背景画像はゲームフォルダ内のファイルを選択してください。\n\n外部のファイルを使用する場合は、バージョンアップ機能をご利用ください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     btnSelectBackground.Focus();
                     return false;
                 }
@@ -1584,6 +1624,164 @@ namespace TonePrism.Manager
 
         private void btnTestRun_Click(object sender, EventArgs e) =>
             GameFormHelper.TestRunGame(txtExecutablePath.Text.Trim(), txtArguments.Text, gameFolder);
+
+        /// <summary>
+        /// (累積監査 round 3) ゲームフォルダ外の画像を編集中バージョンの v{version}/ 配下にコピーする。
+        /// サムネイル / 背景の textbox が gameFolder 外を指している場合のみ実行する (内部なら何もしない)。
+        /// 同名衝突時は <see cref="ImageNameConflictDialog"/> を表示して user に rename を促す。
+        /// 古い画像は古いバージョンが参照している可能性があるため削除しない方針 (user 合意済)。
+        ///
+        /// 戻り値: 全件成功 (= 後続の DB write 処理に進んでよい) なら true、
+        ///         user が衝突 dialog で Cancel した / copy 中に例外で失敗した場合は false (caller は return)。
+        /// 失敗時の partial copy は本関数内で rollback される (= 中途半端な disk 状態を残さない)。
+        /// </summary>
+        private bool CopyExternalImagesToVersionFolder(GameVersion currentVersion)
+        {
+            if (currentVersion == null) return true;
+
+            string versionString = currentVersion.Version;
+            if (string.IsNullOrEmpty(versionString))
+            {
+                // 防御経路: version 文字列が無いとコピー先 v{version}/ が決まらない。silent skip して
+                // 後続の relative path 化 (= 絶対 path のまま DB に流入する経路) に進ませず、明示エラーで弾く。
+                MessageBox.Show(this,
+                    "編集中のバージョン文字列が未設定のため、外部画像のコピー先を決められません。\n" +
+                    "バージョン名を確認してから再度 OK してください。",
+                    "画像コピー エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            string versionFolder = PathManager.GetVersionFolder(txtGameId.Text.Trim(), versionString);
+
+            var plan = new List<ImageCopyPlan>();
+
+            // Thumbnail
+            if (!string.IsNullOrWhiteSpace(txtThumbnailPath.Text)
+                && !PathConversionHelper.IsPathInside(gameFolder, txtThumbnailPath.Text))
+            {
+                var item = ResolveCopyPlan(txtThumbnailPath.Text, versionFolder, "サムネイル画像");
+                if (item == null) return false;
+                item.AssignBackTextBox = txtThumbnailPath;
+                plan.Add(item);
+            }
+
+            // Background
+            if (!string.IsNullOrWhiteSpace(txtBackgroundPath.Text)
+                && !PathConversionHelper.IsPathInside(gameFolder, txtBackgroundPath.Text))
+            {
+                var item = ResolveCopyPlan(txtBackgroundPath.Text, versionFolder, "背景画像");
+                if (item == null) return false;
+                item.AssignBackTextBox = txtBackgroundPath;
+                plan.Add(item);
+            }
+
+            if (plan.Count == 0) return true;
+
+            // ProcessingDialog で copy 実行 (= SMB 越しで時間がかかるケースに備える)。
+            // 失敗 / cancel 時は本関数内で partial copy を片付ける。
+            Exception copyError = null;
+            using (var dialog = new ProcessingDialog((IProgress<ProgressInfo> progress, System.Threading.CancellationToken token) =>
+            {
+                try
+                {
+                    Directory.CreateDirectory(versionFolder);
+                    for (int i = 0; i < plan.Count; i++)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        var p = plan[i];
+                        int percent = (int)((double)i / plan.Count * 100);
+                        progress?.Report(new ProgressInfo(percent, p.Description + "をコピー中...",
+                            Path.GetFileName(p.SourcePath) + " → " + Path.GetFileName(p.DestinationPath)));
+                        File.Copy(p.SourcePath, p.DestinationPath, false);
+                    }
+                    progress?.Report(new ProgressInfo(100, "コピー完了", ""));
+                }
+                catch (Exception ex)
+                {
+                    copyError = ex;
+                    throw;
+                }
+            })
+            {
+                Text = "画像をコピー中",
+                MarqueeMode = false
+            })
+            {
+                var dr = dialog.ShowDialog(this);
+                if (dr != DialogResult.OK)
+                {
+                    // partial copy のロールバック (= 自分が作った disk 状態のみ削除、versionFolder 自体は
+                    // 既存版なら touch しない、Add 経路の versionFolderCreatedThisCall と同型方針)
+                    foreach (var p in plan)
+                    {
+                        if (File.Exists(p.DestinationPath))
+                        {
+                            try { File.Delete(p.DestinationPath); }
+                            catch (Exception delEx) { Logger.Warn("[EditGameForm] copy rollback でファイル削除失敗 '" + p.DestinationPath + "': " + delEx.Message); }
+                        }
+                    }
+
+                    if (copyError != null)
+                    {
+                        // 既に ProcessingDialog 内で MessageBox 表示済 (Abort 経路)。ここでは何もしない。
+                        Logger.Error("[EditGameForm] 外部画像コピーに失敗、入力に戻ります", copyError);
+                    }
+                    return false;
+                }
+            }
+
+            // 成功 → textbox を copy 先に書き換え (= 後続の ToRelativePath が gameFolder 内として認識して
+            // v{version}/<filename> の相対 path を生成する)
+            foreach (var p in plan)
+            {
+                p.AssignBackTextBox.Text = p.DestinationPath;
+            }
+            UpdateThumbnailPreview();
+            UpdateBackgroundPreview();
+            Logger.Info("[EditGameForm] 外部画像 " + plan.Count + " 件を v{version} 配下にコピーしました (versionFolder=" + versionFolder + ")");
+            return true;
+        }
+
+        /// <summary>
+        /// (累積監査 round 3) 1 画像のコピー計画を決める。コピー先で同名衝突なら ImageNameConflictDialog で
+        /// user に rename を促し、確定した destination path を返す。Cancel なら null を返す (caller は abort)。
+        /// </summary>
+        private ImageCopyPlan ResolveCopyPlan(string sourcePath, string versionFolder, string description)
+        {
+            string originalFileName = Path.GetFileName(sourcePath);
+            string destPath = Path.Combine(versionFolder, originalFileName);
+
+            if (File.Exists(destPath))
+            {
+                // 衝突: dialog で user に rename を促す
+                string suggested = ImageNameConflictDialog.SuggestNonConflictingFileName(versionFolder, originalFileName);
+                using (var dlg = new ImageNameConflictDialog(sourcePath, versionFolder, suggested))
+                {
+                    dlg.Text = "同名ファイルがあります (" + description + ")";
+                    var dr = dlg.ShowDialog(this);
+                    if (dr != DialogResult.OK || string.IsNullOrEmpty(dlg.ResolvedFileName))
+                    {
+                        return null;
+                    }
+                    destPath = Path.Combine(versionFolder, dlg.ResolvedFileName);
+                }
+            }
+
+            return new ImageCopyPlan
+            {
+                SourcePath = sourcePath,
+                DestinationPath = destPath,
+                Description = description
+            };
+        }
+
+        private class ImageCopyPlan
+        {
+            public string SourcePath;
+            public string DestinationPath;
+            public string Description;
+            public TextBox AssignBackTextBox;
+        }
 
     }
 }

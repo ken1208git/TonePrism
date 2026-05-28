@@ -280,7 +280,30 @@ namespace TonePrism.Manager.Services
                         // (M6) DB 行も同時削除。旧実装は file のみ削除して DB 行を残置、UI で「最終バックアップ:
                         // ファイル無し」表示や RestoreConfirmForm の選択候補に残る不整合があった。
                         try { _logRepo.DeleteById(entry.Id); }
-                        catch (Exception delEx) { Logger.Warn($"[BackupService] (M6) backup_log 行削除失敗 id={entry.Id}: " + delEx.Message); }
+                        catch (Exception delEx)
+                        {
+                            Logger.Warn($"[BackupService] (M6) backup_log 行削除失敗 id={entry.Id}: " + delEx.Message);
+                            // (累積監査 round 3 / #10) 物理 file は削除成功・DB 行 delete だけ失敗するケース、
+                            // 旧実装は Logger.Warn で swallow するだけだったため次回の GetAutoSuccessRetentionTargets
+                            // が当該行を「auto+success の 1 件」として count に含めてしまい、retention 件数が
+                            // 1 件ずつ目減りする silent drift を起こしていた。failed に格下げて (status='failed')
+                            // 以降の count から外し、retention が想定 keep 件数で運用される状態を維持する。
+                            // status='failed' 化は audit trail としても残る (= 「実体削除済、DB delete fail で
+                            // failed 化」の trail)。本格下げ自体が更に失敗した場合は Logger.Error のみで継続 (=
+                            // 起動 / 後続バックアップは止めない、ApplyRetention は best-effort セマンティクス)。
+                            try
+                            {
+                                long completedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                                _logRepo.MarkFailed(entry.Id,
+                                    "retention 削除中に DB 行削除失敗 (実体は削除済): " + delEx.Message,
+                                    completedAt);
+                                Logger.Info($"[BackupService] (#10) DB delete 失敗行を failed に格下げ: id={entry.Id}");
+                            }
+                            catch (Exception markEx)
+                            {
+                                Logger.Error($"[BackupService] (#10) failed への格下げにも失敗: id={entry.Id}", markEx);
+                            }
+                        }
                     }
                     catch (Exception ex)
                     {

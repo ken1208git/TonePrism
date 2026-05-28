@@ -164,9 +164,22 @@ namespace TonePrism.Manager
                 // 実際にはユーザーが「フォルダ選択」を行うことが前提のフローになっているため、
                 // パスだけ入れてもコピー元フォルダが決まらないと意味がないかもしれない。
                 // しかし「あらゆる要素」をコピペという要望なので入れておく。
-                txtExecutablePath.Text = baseVersion.ExecutablePath;
-                txtThumbnailPath.Text = baseVersion.ThumbnailPath;
-                txtBackgroundPath.Text = baseVersion.BackgroundPath;
+                //
+                // (累積監査 round 3 / #8) baseVersion.* には DB 上の **相対 path** (例: `v1.0.0/cover.png`) が
+                // 入っていることがある。それを生のまま textbox に入れると後段の `File.Exists(txt.Text)` が
+                // CWD 基準で評価され「画像が見つかりません」エラーで OK が押せない永久 block UX 退行が
+                // 起きていた (ValidateInput L583-598 経由)。`PathConversionHelper.ToAbsolutePath` で gameFolder
+                // (= `games/<id>/`) 基準に絶対化してから textbox に入れることで、絶対 path として File.Exists
+                // が成立するように揃える。元から絶対 path だった場合は ToAbsolutePath 内 `Path.IsPathRooted`
+                // 分岐でそのまま返るので互換。
+                string baseGameFolder = !string.IsNullOrEmpty(gameId) ? PathManager.GetGameFolder(gameId) : "";
+                txtExecutablePath.Text = PathConversionHelper.ToAbsolutePath(baseGameFolder, baseVersion.ExecutablePath) ?? "";
+                txtThumbnailPath.Text = PathConversionHelper.ToAbsolutePath(baseGameFolder, baseVersion.ThumbnailPath) ?? "";
+                txtBackgroundPath.Text = PathConversionHelper.ToAbsolutePath(baseGameFolder, baseVersion.BackgroundPath) ?? "";
+                // (累積監査 round 3 / #8 follow-up) textbox 更新後にプレビュー反映。AddGameForm の AutoDetectFiles
+                // で同型の漏れがあり #234 ⑤(i) で修正された経緯と同じ pattern、baseVersion-load 経路も同様に呼ぶ。
+                UpdateThumbnailPreview();
+                UpdateBackgroundPreview();
             }
             else
             {

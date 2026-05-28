@@ -198,6 +198,9 @@
     <Compile Include="RestoreReportForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="ImageNameConflictDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="DatabaseConnection.cs" />
     <Compile Include="DatabaseManager.cs" />
     <Compile Include="SchemaManager.cs" />

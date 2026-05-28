@@ -1721,13 +1721,18 @@ namespace TonePrism.Manager
                 return false;
             }
 
+            // (累積監査 round 3 追加 fix) COLLATE NOCASE で作る。CreateTables 経路 (新規 DB) は
+            // currentVersion=0 → SetDbVersion(17) へ直接 jump するため MigrateV16ToV17 (NOCASE rebuild) が
+            // 永久に走らない経路があった。本番 2026-05-27 まっさら install の DB は BINARY index のまま
+            // 動いており、M3 で導入した case 違い重複 fence (`v1.0.0` と `V1.0.0` の同一視) が無効化されて
+            // いた回帰を、本関数を NOCASE で揃えることで構造的に閉じる。
             using (var cmd = new SQLiteCommand(
-                "CREATE UNIQUE INDEX IF NOT EXISTS " + GameVersionsVersionUniqueIndexName + " ON game_versions(game_id, version)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS " + GameVersionsVersionUniqueIndexName + " ON game_versions(game_id, version COLLATE NOCASE)",
                 connection, transaction))
             {
                 cmd.ExecuteNonQuery();
             }
-            Logger.Info("[DatabaseManager] game_versions(game_id, version) に UNIQUE INDEX を作成しました (#234 ②)");
+            Logger.Info("[DatabaseManager] game_versions(game_id, version COLLATE NOCASE) に UNIQUE INDEX を作成しました (#234 ②, M3)");
             return true;
         }
 
