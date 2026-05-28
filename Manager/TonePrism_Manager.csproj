@@ -195,6 +195,9 @@
     <Compile Include="RestoreConfirmForm.Designer.cs">
       <DependentUpon>RestoreConfirmForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="RestoreReportForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="DatabaseConnection.cs" />
     <Compile Include="DatabaseManager.cs" />
     <Compile Include="SchemaManager.cs" />
@@ -254,6 +257,7 @@
     <Compile Include="Services\MarkdownRenderer.cs" />
     <Compile Include="Services\ProcessTerminator.cs" />
     <Compile Include="Services\RestoreService.cs" />
+    <Compile Include="Services\RestoreReconciliationService.cs" />
     <Compile Include="Services\SettingsKeys.cs" />
     <Compile Include="Services\UpdateChecker.cs" />
     <Compile Include="Services\UpdateDownloader.cs" />

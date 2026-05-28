@@ -220,11 +220,24 @@ namespace TonePrism.Manager.Controls
 
             using (var confirm = new RestoreConfirmForm(entry))
             {
-                if (confirm.ShowDialog(this) != DialogResult.Yes) return;
+                if (confirm.ShowDialog(this) != DialogResult.Yes)
+                {
+                    Logger.Info($"[BackupSectionPanel] 復元キャンセル (確認ダイアログ): entry_id={entry.Id}, source='{resolvedPath}'");
+                    return;
+                }
             }
 
+            // (監査ログ) 確認コード入力を通過した時点で復元意思が確定。以降の経路 (session conflict / cancel /
+            // abort / success) を Logger に残して事後追跡できるようにする。旧実装は MessageBox エラー文言が
+            // 「詳細はログを確認」と促していたのにログ自体が空、という不整合があった。
+            Logger.Info($"[BackupSectionPanel] 復元実行: entry_id={entry.Id}, source='{resolvedPath}'");
+
             // (round 2 High-2) user 確認後、DB write (Restore = safety backup + DB 置換) 直前で session conflict check
-            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ復元") == DialogResult.Cancel) return;
+            if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ復元") == DialogResult.Cancel)
+            {
+                Logger.Info("[BackupSectionPanel] 復元中止 (session conflict check で user がキャンセル)");
+                return;
+            }
 
             string safetyPath = null;
             DialogResult dr;
@@ -244,6 +257,7 @@ namespace TonePrism.Manager.Controls
             // （Codex P1 指摘 "Handle restore cancellation before reporting success" 対応）
             if (dr == DialogResult.Cancel)
             {
+                Logger.Info("[BackupSectionPanel] 復元キャンセル (ProcessingDialog で user がキャンセル)");
                 MessageBox.Show(
                     "復元はキャンセルされました。\n\nデータベースは変更されていません。",
                     "キャンセル", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -252,6 +266,8 @@ namespace TonePrism.Manager.Controls
 
             if (dr == DialogResult.Abort)
             {
+                // 例外詳細は RestoreService 側で Logger.Error 済 (= MessageBox の「詳細はログを確認」が機能する)。
+                Logger.Error("[BackupSectionPanel] 復元失敗 (ProcessingDialog から Abort、詳細は直前の RestoreService ログ参照)");
                 MessageBox.Show(
                     "復元中にエラーが発生しました（詳細はログを確認）",
                     "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -259,9 +275,54 @@ namespace TonePrism.Manager.Controls
             }
 
             // dr == DialogResult.OK: 復元成功
-            MessageBox.Show(
-                $"復元が完了しました。\n\n復元前のDBは退避されました:\n{safetyPath}\n\nManager のデータを再読み込みします。",
-                "復元成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            // (復元ドリフト検出) バックアップ/復元は toneprism.db のみが対象で games/ フォルダは復元
+            // されないため、別時点の DB を復元すると DB と実フォルダがズレうる。復元直後に突き合わせて
+            // 結果と復元手順を提示する。深刻な問題 (起動不能) があれば必ずレポートを出し、軽微なズレや
+            // 問題なしのときは簡潔な成功通知に留める。
+            RestoreReconciliationResult reconcile = null;
+            try
+            {
+                reconcile = new Services.RestoreReconciliationService(_dbManager).Analyze();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[BackupSectionPanel] 復元後の整合性チェックに失敗: " + ex.Message);
+            }
+
+            // (監査ログ) 復元成功 + 整合性チェック結果の要約を残す。findings の内訳が後から追跡できるよう
+            // broken / missing / orphan のカウントを 1 行にまとめる。reconcile が null (=チェック自体が
+            // 失敗) のときも明示。
+            if (reconcile == null)
+            {
+                Logger.Info($"[BackupSectionPanel] 復元成功: source='{resolvedPath}', safety='{safetyPath}', reconcile=skipped");
+            }
+            else if (reconcile.AnalysisFailed)
+            {
+                Logger.Info($"[BackupSectionPanel] 復元成功: source='{resolvedPath}', safety='{safetyPath}', reconcile=analysis_failed: {reconcile.AnalysisError}");
+            }
+            else
+            {
+                Logger.Info(
+                    $"[BackupSectionPanel] 復元成功: source='{resolvedPath}', safety='{safetyPath}', " +
+                    $"reconcile broken={reconcile.BrokenGames.Count}, " +
+                    $"missing_versions={reconcile.MissingVersionFolders.Count}, " +
+                    $"orphans={reconcile.OrphanFolders.Count}");
+            }
+
+            if (reconcile != null && (reconcile.HasAnyFindings || reconcile.AnalysisFailed))
+            {
+                using (var report = new RestoreReportForm(reconcile, safetyPath))
+                {
+                    report.ShowDialog(this.FindForm());
+                }
+            }
+            else
+            {
+                MessageBox.Show(
+                    $"復元が完了しました。\n\n復元前のDBは退避されました:\n{safetyPath}\n\n" +
+                    "DB とゲームフォルダの整合性に問題はありませんでした。\nManager のデータを再読み込みします。",
+                    "復元成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
 
             DatabaseChanged?.Invoke();
             RefreshDisplay();

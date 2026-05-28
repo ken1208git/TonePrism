@@ -44,72 +44,98 @@ namespace TonePrism.Manager.Services
             string safetyDir = Path.Combine(dbDir, "backups", "safety");
             string tempPath = dbPath + ".restore-tmp";
 
-            progress?.Report(new ProgressInfo(0, "復元の準備...", ""));
-            token.ThrowIfCancellationRequested();
+            // (監査ログ) 復元イベントの開始 / 各フェーズ / 完了を Logger.Info に残す。旧実装は本 service /
+            // BackupSectionPanel ともに復元の audit trail を一切残しておらず、エラー時に MessageBox が
+            // 「詳細はログを確認」と促すのに該当ログが空 という不整合があった。throw 経路には Logger.Error を
+            // 必ず挟んで例外詳細を残す (caller の ProcessingDialog catch では例外型情報を握って破棄するため)。
+            Logger.Info($"[RestoreService] 復元開始: source='{backupFilePath}', target='{dbPath}'");
 
-            // 退避フォルダを必ず作成
-            if (!Directory.Exists(safetyDir))
+            try
             {
-                Directory.CreateDirectory(safetyDir);
-            }
+                progress?.Report(new ProgressInfo(0, "復元の準備...", ""));
+                token.ThrowIfCancellationRequested();
 
-            // 1. 現DBを安全バックアップ（Online Backup API でライブコピー）
-            string safetyPath = Path.Combine(safetyDir, $"safety_{DateTime.Now:yyyyMMdd_HHmmss}.db");
-            progress?.Report(new ProgressInfo(10, "現在のデータベースを退避中...", safetyPath));
-
-            if (File.Exists(dbPath))
-            {
-                using (var sourceConn = new SQLiteConnection(_conn.ConnectionString))
+                // 退避フォルダを必ず作成
+                if (!Directory.Exists(safetyDir))
                 {
-                    sourceConn.Open();
-                    using (var destConn = new SQLiteConnection($"Data Source={safetyPath};Version=3;"))
-                    {
-                        destConn.Open();
-                        sourceConn.BackupDatabase(destConn, "main", "main", -1, null, 0);
-                    }
+                    Directory.CreateDirectory(safetyDir);
                 }
+
+                // 1. 現DBを安全バックアップ（Online Backup API でライブコピー）
+                string safetyPath = Path.Combine(safetyDir, $"safety_{DateTime.Now:yyyyMMdd_HHmmss}.db");
+                progress?.Report(new ProgressInfo(10, "現在のデータベースを退避中...", safetyPath));
+
+                if (File.Exists(dbPath))
+                {
+                    using (var sourceConn = new SQLiteConnection(_conn.ConnectionString))
+                    {
+                        sourceConn.Open();
+                        using (var destConn = new SQLiteConnection($"Data Source={safetyPath};Version=3;"))
+                        {
+                            destConn.Open();
+                            sourceConn.BackupDatabase(destConn, "main", "main", -1, null, 0);
+                        }
+                    }
+                    Logger.Info($"[RestoreService] 現DB を退避しました: '{safetyPath}'");
+                }
+                else
+                {
+                    Logger.Warn($"[RestoreService] 現DB ('{dbPath}') が存在しないため退避を skip しました (新規 DB 復元 path)");
+                }
+
+                token.ThrowIfCancellationRequested();
+
+                // 2. バックアップを一時ファイルへ先にコピー（toneprism.db はまだ無傷）。
+                //    コピー中・コピー後にキャンセル/失敗が起きても toneprism.db は壊れない。
+                progress?.Report(new ProgressInfo(40, "バックアップを準備中...", backupFilePath));
+                if (File.Exists(tempPath)) File.Delete(tempPath); // 前回失敗時の残骸があれば消す
+                File.Copy(backupFilePath, tempPath, false);
+
+                token.ThrowIfCancellationRequested();
+
+                // 3. 全 SQLite 接続プールをクリアし、ハンドルを解放
+                progress?.Report(new ProgressInfo(60, "データベース接続を閉じています...", ""));
+                SQLiteConnection.ClearAllPools();
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+
+                // ─── ここから先はキャンセル不可。中断すると toneprism.db が一時的に欠落する ───
+                // 4. WAL/SHM を削除し、tmp で toneprism.db を置換
+                progress?.Report(new ProgressInfo(80, "既存ファイルを置き換え中...", ""));
+                DeleteWithRetry(dbPath + "-wal");
+                DeleteWithRetry(dbPath + "-shm");
+
+                if (File.Exists(dbPath))
+                {
+                    // File.Replace は NTFS 上で atomic（ReplaceFile Win32 API）
+                    // backupFileName=null で旧 toneprism.db のバックアップは作らない（safety で既に確保済み）
+                    File.Replace(tempPath, dbPath, null);
+                }
+                else
+                {
+                    // 新規 DB の場合（通常想定外だが安全対策）
+                    File.Move(tempPath, dbPath);
+                }
+                Logger.Info($"[RestoreService] toneprism.db を置換しました ('{backupFilePath}' → '{dbPath}')");
+
+                // 5. 退避フォルダのリテンション適用（最新を残して古いのから削除）
+                progress?.Report(new ProgressInfo(95, "退避ファイルの世代管理...", ""));
+                ApplySafetyRetention(safetyDir, DefaultSafetyRetentionCount);
+
+                progress?.Report(new ProgressInfo(100, "復元完了", dbPath));
+                Logger.Info($"[RestoreService] 復元完了: source='{backupFilePath}', safety='{safetyPath}'");
+                return safetyPath;
             }
-
-            token.ThrowIfCancellationRequested();
-
-            // 2. バックアップを一時ファイルへ先にコピー（toneprism.db はまだ無傷）。
-            //    コピー中・コピー後にキャンセル/失敗が起きても toneprism.db は壊れない。
-            progress?.Report(new ProgressInfo(40, "バックアップを準備中...", backupFilePath));
-            if (File.Exists(tempPath)) File.Delete(tempPath); // 前回失敗時の残骸があれば消す
-            File.Copy(backupFilePath, tempPath, false);
-
-            token.ThrowIfCancellationRequested();
-
-            // 3. 全 SQLite 接続プールをクリアし、ハンドルを解放
-            progress?.Report(new ProgressInfo(60, "データベース接続を閉じています...", ""));
-            SQLiteConnection.ClearAllPools();
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-
-            // ─── ここから先はキャンセル不可。中断すると toneprism.db が一時的に欠落する ───
-            // 4. WAL/SHM を削除し、tmp で toneprism.db を置換
-            progress?.Report(new ProgressInfo(80, "既存ファイルを置き換え中...", ""));
-            DeleteWithRetry(dbPath + "-wal");
-            DeleteWithRetry(dbPath + "-shm");
-
-            if (File.Exists(dbPath))
+            catch (OperationCanceledException)
             {
-                // File.Replace は NTFS 上で atomic（ReplaceFile Win32 API）
-                // backupFileName=null で旧 toneprism.db のバックアップは作らない（safety で既に確保済み）
-                File.Replace(tempPath, dbPath, null);
+                Logger.Info($"[RestoreService] 復元キャンセル: source='{backupFilePath}'");
+                throw;
             }
-            else
+            catch (Exception ex)
             {
-                // 新規 DB の場合（通常想定外だが安全対策）
-                File.Move(tempPath, dbPath);
+                Logger.Error($"[RestoreService] 復元失敗: source='{backupFilePath}'", ex);
+                throw;
             }
-
-            // 5. 退避フォルダのリテンション適用（最新を残して古いのから削除）
-            progress?.Report(new ProgressInfo(95, "退避ファイルの世代管理...", ""));
-            ApplySafetyRetention(safetyDir, DefaultSafetyRetentionCount);
-
-            progress?.Report(new ProgressInfo(100, "復元完了", dbPath));
-            return safetyPath;
         }
 
         /// <summary>

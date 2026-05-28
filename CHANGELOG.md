@@ -1911,6 +1911,36 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.17.0] - 2026-05-28
+
+#### Added (復元後の DB↔games フォルダ整合性チェック)
+
+- **DB 復元の直後に「復元した toneprism.db」と「現在の games/ フォルダ」を突き合わせ、ズレを検出して復元手順を案内するようにした**: バックアップ/復元は `toneprism.db` 単体のみを対象とし `games/` フォルダには触れない（`BackupService` / `RestoreService`）。一方リセット（`SchemaManager.ResetDatabase`）は DB と `games/` を両方まっさらにするためズレないが、**別時点の DB を復元すると「DB は在るがディスクに無い版」「ディスクに在るが DB に無い孤児フォルダ」といったドリフトが起こりうる**のに、復元確認ダイアログにはその注意が無く、ズレを検知する仕組みも無かった。
+  - 新サービス `Services/RestoreReconciliationService` が復元後に DB を読み直し、(1) **起動できないゲーム**（アクティブ版の実行ファイルが Launcher と同じ解決順＝絶対パス→ゲームルート基準→install 基準のいずれでも見つからない）、(2) **ディスクに無いバージョン**（`game_versions` 行はあるが `games/{id}/v{version}/` フォルダが無い）、(3) **DB に無い余分なフォルダ**（`games/` 直下の未登録ゲームフォルダ／既知ゲーム配下の未登録 `v*` フォルダ）に分類する。孤児版フォルダは `^v\d` 形状に限定して素材フォルダの誤検出を避け、`.pending-delete-*` 退避フォルダは除外する。
+  - 新ダイアログ `RestoreReportForm`（Designer 不使用・コード生成）が結果を上記 3 分類で表示し、**整合した状態に戻すための番号付き手順**（全 PC の Launcher を閉じる → 想定パスのフォルダを同時点の games から補完 → 再起動で再チェック → 揃わなければ退避ファイル `safety_*.db` から DB を戻す）を併記する。深刻な問題（起動不能）があれば必ずレポートを表示、軽微なズレ／問題なしのときは簡潔な成功通知に留める。
+  - 統合点は `BackupSectionPanel.btnRestore_Click` の復元成功後。チェック自体の失敗は握り潰して従来通り復元成功として扱う（復元結果そのものには影響させない）。
+
+#### Fixed (`RestoreConfirmForm` の対象ファイル情報が縦に見切れる)
+
+- **復元確認ダイアログの「対象 / 作成日時 / サイズ / フルパス」4 行のうち、下 2 行（サイズ・フルパス）が見切れていたのを修正**: `lblTargetFile` の高さが 40px しかなく、9pt 4 行分の縦サイズ（約 60–70px）に足りていなかった。Size を 88px に拡張し、下方のコントロール（警告文 3 行 / 確認コード / 入力欄 / 説明 / ボタン）を +50px 一律でずらし、`ClientSize.Height` を 340 → 390 に拡張。横方向はもともと 620px 確保され `AutoEllipsis=true` で長いパスは末尾省略されるため変更不要。
+
+#### Added (復元イベントの監査ログ)
+
+- **`RestoreService.Restore` と `BackupSectionPanel.btnRestore_Click` に Logger.Info / Error を追加**: 旧実装は復元処理が `Logger` を一切呼んでおらず（`ApplySafetyRetention` 内の retention ログのみ）、`logs/manager/*.log` を grep しても「復元実行」「復元成功」「復元失敗」の痕跡が一切残らない状態だった。失敗時 MessageBox 文言が「**詳細はログを確認**」と促すのに該当ログが空、という不整合があり、今回の本番運用直前の安全窓のうちに塞ぐ。
+  - `RestoreService.Restore`: メソッド全体を `try/catch` で包み、開始 / 現DB 退避完了 / DB ファイル置換完了 / 復元完了 を `Logger.Info`、`OperationCanceledException` を Info、その他例外を `Logger.Error(..., ex)`（例外オブジェクトを渡してスタックも残す）で記録してから throw する。caller の `ProcessingDialog` catch では例外型が `Abort` に潰されてしまうため、詳細はここで残すのが唯一の audit point。
+  - `BackupSectionPanel.btnRestore_Click`: 確認ダイアログでのキャンセル / 復元意思確定 (確認コード通過) / session conflict キャンセル / ProcessingDialog キャンセル / Abort / 復元成功 + 整合性チェック結果要約 (`broken=N missing_versions=M orphans=K`) をそれぞれ `Logger.Info` / `Logger.Error` で記録。これにより、ログ 1 本を時系列に見るだけで「誰がいつ何を復元してどんなドリフトが残ったか」が追跡できるようになる。
+  - 復元の対称機能であるバックアップ作成側 (`BackupService.RunManualBackup` / `RunAutoBackupIfDue`) は既に `backup_log` テーブルに DB レベルで全件記録される設計のため、本変更の対象外。
+
+#### Fixed (`StoreSectionPanel.ConfigureDataGridView` で WinForms 内部 NRE)
+
+- **復元後の `DatabaseChanged` 再読み込み経路でストアセクション panel が WinForms 内部 `NullReferenceException` を起こしていたのを防御化**: `dgvSections.DataSource = null; = _sections; ConfigureDataGridView();` の直後タイミングで auto-generated column の internal state が transient な間に、列の `Visible` / `HeaderText` / `Width` setter が WinForms 内部で null 参照に達する経路が観測された (本リリースで追加した復元後の全 panel reload で表面化、System.Windows.Forms.dll 内で throw)。本 NRE は元々 `LoadSections` 内の `catch (Exception ex)` で握れているため Manager は復元成功後も継続動作するが、ストアセクション一覧が一瞬空になる UX 退行 + デバッグ実行時の例外 break の元になっていた。
+  - 対策: (1) `dgvSections.SuspendLayout()` / `ResumeLayout(true)` で内部レイアウト更新を一括化、(2) 全列を一旦非表示にする foreach を `Cast<DataGridViewColumn>().ToList()` でスナップショット経由に変えて enumerator + 列参照の二重防御、(3) 名前指定 column アクセスを `ConfigureColumn(name, header, width)` helper に集約し `Contains` + 二重 null チェックを追加。`GameSectionPanel.ConfigureDataGridView` の defensive pattern と趣旨を揃える。
+  - 範囲確認: `BackupSectionPanel` / `LogSectionPanel` は `AutoGenerateColumns=false` + 明示 column 定義で同種 race の影響を受けない。`GameSectionPanel` は既に文字列配列ベースの定義 + 明示 null チェックで対策済。本修正対象は `StoreSectionPanel` のみ。
+
+#### Bump 根拠 (v0.16.6 → v0.17.0)
+
+復元後の整合性チェックという新機能の追加のため minor bump。DB スキーマ変更なし、既存の復元処理（`RestoreService`）の挙動も不変で、成功後に読み取り専用の突き合わせと案内ダイアログを足すのみ。
+
 ### [Manager v0.16.6] - 2026-05-28
 
 #### Added (#234 ② フォローアップ — `game_versions` への UNIQUE 制約)
