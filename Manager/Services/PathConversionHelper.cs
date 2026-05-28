@@ -81,12 +81,12 @@ namespace TonePrism.Manager.Services
                 return null;
             }
 
-            if (sourcePath.StartsWith(destinationFolder, StringComparison.OrdinalIgnoreCase))
+            if (IsPathInside(destinationFolder, sourcePath))
             {
                 // 既にコピー先フォルダ内のパス
                 return sourcePath;
             }
-            else if (sourcePath.StartsWith(sourceFolder, StringComparison.OrdinalIgnoreCase))
+            else if (IsPathInside(sourceFolder, sourcePath))
             {
                 // コピー元フォルダ内のパス → コピー先の絶対パスに変換
                 string relativePath = ToRelativePath(sourceFolder, sourcePath);
@@ -134,6 +134,31 @@ namespace TonePrism.Manager.Services
             Logger.Warn($"[警告] パスがコピー先フォルダ内にありません。絶対パスのまま保存します: {absolutePath}");
             Logger.Warn($"[警告] コピー先フォルダ: {destinationFolder}");
             return absolutePath;
+        }
+
+        /// <summary>
+        /// (#234 追加精査 ③) targetPath が baseFolder 自身、またはその配下にあるかを区切り文字安全に判定する。
+        /// 生の StartsWith は basePath が "C:\games\foo" のとき "C:\games\foobar\x.exe" のような兄弟
+        /// フォルダにも前方一致してしまうため、正規化 + 区切り文字境界 (basePath + セパレータ) で比較する。
+        /// 空 / 正規化不能の場合は false（= 呼び出し側は「内側ではない」扱い）。
+        /// </summary>
+        public static bool IsPathInside(string baseFolder, string targetPath)
+        {
+            if (string.IsNullOrEmpty(baseFolder) || string.IsNullOrEmpty(targetPath)) return false;
+
+            string b, t;
+            try
+            {
+                b = Path.GetFullPath(baseFolder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                t = Path.GetFullPath(targetPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (string.Equals(b, t, StringComparison.OrdinalIgnoreCase)) return true;
+            return t.StartsWith(b + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

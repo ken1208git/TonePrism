@@ -234,9 +234,13 @@ namespace TonePrism.Manager.Controls
                         try
                         {
                             Directory.CreateDirectory(versionDir);
+                            // (#234 追加精査) 旧実装は IsVersionFolder で v* フォルダを除外していたが、
+                            // (a) コピー先が games/{id}/v.../ でソース内側になる「ルート選択」誤操作は
+                            // CopyDirectoryRecursive 冒頭の再帰ガードが既に空コピーで防ぐため除外は無力、
+                            // (b) 正当な v* 名フォルダを無言で取りこぼす下しか無い保険だった。除外を撤去し、
+                            // ルート選択自体は VersionUpForm.ValidateInput の games/ 配下ソース拒否で明示的に弾く。
                             FileOperationService.CopyDirectoryWithProgress(
-                                form.SourceFolderPath, versionDir, progress, token,
-                                excludeFolderPredicate: FileOperationService.IsVersionFolder);
+                                form.SourceFolderPath, versionDir, progress, token);
                         }
                         catch (OperationCanceledException)
                         {

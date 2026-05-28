@@ -253,8 +253,8 @@ namespace TonePrism.Manager
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
                     string selectedPath = dialog.FileName;
-                    
-                    if (!selectedPath.StartsWith(selectedFolderPath, StringComparison.OrdinalIgnoreCase))
+
+                    if (!PathConversionHelper.IsPathInside(selectedFolderPath, selectedPath))
                     {
                         MessageBox.Show(
                             "実行ファイルはゲームフォルダ内から選択してください。",
@@ -263,9 +263,11 @@ namespace TonePrism.Manager
                             MessageBoxIcon.Warning);
                         return;
                     }
-                    
+
                     txtExecutablePath.Text = selectedPath;
-                    RelativeExecutablePath = selectedPath.Substring(selectedFolderPath.Length).TrimStart(Path.DirectorySeparatorChar);
+                    // (#234 追加精査 ③) 区切り安全な ToRelativePath で相対化 (AutoDetectFiles と同経路)。
+                    // 旧実装の Substring(folder.Length) は兄弟フォルダ前方一致時に誤った相対パスを生む懸念があった。
+                    RelativeExecutablePath = PathConversionHelper.ToRelativePath(selectedFolderPath, selectedPath);
                 }
             }
         }
@@ -290,7 +292,7 @@ namespace TonePrism.Manager
                     // ファイルだと相対化できず絶対パスのまま保存され、コピーされないファイルを指す壊れた
                     // パスになる (GameSectionPanel が v{version}/ を前置しても絶対パスは Path.Combine で
                     // そのまま残る)。AddGameForm と挙動を揃える。
-                    if (!dialog.FileName.StartsWith(selectedFolderPath, StringComparison.OrdinalIgnoreCase))
+                    if (!PathConversionHelper.IsPathInside(selectedFolderPath, dialog.FileName))
                     {
                         MessageBox.Show(
                             "サムネイル画像はゲームフォルダ内から選択してください。",
@@ -320,7 +322,7 @@ namespace TonePrism.Manager
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
                     // (#234) 背景もコピー元フォルダ内に限る (サムネと同理由)。
-                    if (!dialog.FileName.StartsWith(selectedFolderPath, StringComparison.OrdinalIgnoreCase))
+                    if (!PathConversionHelper.IsPathInside(selectedFolderPath, dialog.FileName))
                     {
                         MessageBox.Show(
                             "背景画像はゲームフォルダ内から選択してください。",
@@ -381,8 +383,10 @@ namespace TonePrism.Manager
                     // 既存ロジック(UpdatedGameInfo)ではMainFormではなくForm内で計算していた(lines 394+)
                     // NewVersionにも同じロジックを適用する必要がある。
                     // ここでは空文字または絶対パスを入れておき、後続の処理で書き換える。
-                    ThumbnailPath = txtThumbnailPath.Text,
-                    BackgroundPath = txtBackgroundPath.Text,
+                    // (#234 追加精査) 空欄は null 正規化 (Add/Edit と DB 表現を統一、#224 review #2)。
+                    // 非空時は下の File.Exists ブロックで相対パスに上書きされる。
+                    ThumbnailPath = string.IsNullOrWhiteSpace(txtThumbnailPath.Text) ? null : txtThumbnailPath.Text,
+                    BackgroundPath = string.IsNullOrWhiteSpace(txtBackgroundPath.Text) ? null : txtBackgroundPath.Text,
                     
                     Developers = new List<DeveloperInfo>(developers), // リストをコピー
                     
@@ -533,6 +537,14 @@ namespace TonePrism.Manager
                 return false;
             }
 
+            // (#234 追加精査) コピー元に games/ 配下を選ぶ誤操作を境界で弾く (Add と共通)。
+            if (!GameFormHelper.ValidateSourceNotInGamesFolder(txtGameFolder.Text, out string srcInGamesError))
+            {
+                MessageBox.Show(srcInGamesError, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                btnSelectGameFolder.Focus();
+                return false;
+            }
+
             if (string.IsNullOrWhiteSpace(txtTitle.Text))
             {
                 MessageBox.Show("タイトルを入力してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -568,7 +580,7 @@ namespace TonePrism.Manager
                     return false;
                 }
                 if (!string.IsNullOrEmpty(selectedFolderPath)
-                    && !txtThumbnailPath.Text.StartsWith(selectedFolderPath, StringComparison.OrdinalIgnoreCase))
+                    && !PathConversionHelper.IsPathInside(selectedFolderPath, txtThumbnailPath.Text))
                 {
                     MessageBox.Show("サムネイル画像はゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     btnSelectThumbnail.Focus();
@@ -585,7 +597,7 @@ namespace TonePrism.Manager
                     return false;
                 }
                 if (!string.IsNullOrEmpty(selectedFolderPath)
-                    && !txtBackgroundPath.Text.StartsWith(selectedFolderPath, StringComparison.OrdinalIgnoreCase))
+                    && !PathConversionHelper.IsPathInside(selectedFolderPath, txtBackgroundPath.Text))
                 {
                     MessageBox.Show("背景画像はゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     btnSelectBackground.Focus();

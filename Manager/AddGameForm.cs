@@ -617,6 +617,15 @@ namespace TonePrism.Manager
                 return false;
             }
 
+            // (#234 追加精査) コピー元に games/ 配下 (= Manager 管理下のゲーム本体・版フォルダ) を選ぶ
+            // 誤操作を境界で弾く (VersionUpForm と共通)。新ビルドは必ず games/ の外から取り込む。
+            if (!GameFormHelper.ValidateSourceNotInGamesFolder(gameFolderPath, out string srcInGamesError))
+            {
+                MessageBox.Show(srcInGamesError, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                btnSelectGameFolder.Focus();
+                return false;
+            }
+
             // sourceGameFolderを更新
             sourceGameFolder = gameFolderPath;
 
@@ -629,8 +638,8 @@ namespace TonePrism.Manager
             }
 
             // 実行ファイルが選択されたフォルダ内にあるか確認（ゲームフォルダが選択されている場合のみ）
-            if (!string.IsNullOrEmpty(sourceGameFolder) && 
-                !txtExecutablePath.Text.StartsWith(sourceGameFolder, StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrEmpty(sourceGameFolder) &&
+                !PathConversionHelper.IsPathInside(sourceGameFolder, txtExecutablePath.Text))
             {
                 MessageBox.Show("実行ファイルは選択されたゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 btnSelectExecutable.Focus();
@@ -653,8 +662,8 @@ namespace TonePrism.Manager
                     btnSelectThumbnail.Focus();
                     return false;
                 }
-                if (!string.IsNullOrEmpty(sourceGameFolder) && 
-                    !txtThumbnailPath.Text.StartsWith(sourceGameFolder, StringComparison.OrdinalIgnoreCase))
+                if (!string.IsNullOrEmpty(sourceGameFolder) &&
+                    !PathConversionHelper.IsPathInside(sourceGameFolder, txtThumbnailPath.Text))
                 {
                     MessageBox.Show("サムネイル画像は選択されたゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     btnSelectThumbnail.Focus();
@@ -671,8 +680,8 @@ namespace TonePrism.Manager
                     btnSelectBackground.Focus();
                     return false;
                 }
-                if (!string.IsNullOrEmpty(sourceGameFolder) && 
-                    !txtBackgroundPath.Text.StartsWith(sourceGameFolder, StringComparison.OrdinalIgnoreCase))
+                if (!string.IsNullOrEmpty(sourceGameFolder) &&
+                    !PathConversionHelper.IsPathInside(sourceGameFolder, txtBackgroundPath.Text))
                 {
                     MessageBox.Show("背景画像は選択されたゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     btnSelectBackground.Focus();

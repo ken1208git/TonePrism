@@ -181,16 +181,5 @@ namespace TonePrism.Manager.Services
             }
             return fileName;
         }
-
-        /// <summary>
-        /// バージョンフォルダかどうかを判定（v + 数字 で始まるか）
-        /// </summary>
-        public static bool IsVersionFolder(string folderName)
-        {
-            if (string.IsNullOrEmpty(folderName)) return false;
-            if (!folderName.StartsWith("v", StringComparison.OrdinalIgnoreCase)) return false;
-            if (folderName.Length < 2) return false;
-            return char.IsDigit(folderName[1]);
-        }
     }
 }

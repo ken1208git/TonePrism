@@ -1430,7 +1430,7 @@ namespace TonePrism.Manager
             }
 
             // 実行ファイルがゲームフォルダ内にあるか確認
-            if (!txtExecutablePath.Text.StartsWith(gameFolder, StringComparison.OrdinalIgnoreCase))
+            if (!PathConversionHelper.IsPathInside(gameFolder, txtExecutablePath.Text))
             {
                 MessageBox.Show("実行ファイルはゲームフォルダ内のファイルを選択してください。\n\n外部のファイルを使用する場合は、バージョンアップ機能をご利用ください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 btnSelectExecutable.Focus();
@@ -1446,7 +1446,7 @@ namespace TonePrism.Manager
                     btnSelectThumbnail.Focus();
                     return false;
                 }
-                if (!txtThumbnailPath.Text.StartsWith(gameFolder, StringComparison.OrdinalIgnoreCase))
+                if (!PathConversionHelper.IsPathInside(gameFolder, txtThumbnailPath.Text))
                 {
                     MessageBox.Show("サムネイル画像はゲームフォルダ内のファイルを選択してください。\n\n外部のファイルを使用する場合は、バージョンアップ機能をご利用ください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     btnSelectThumbnail.Focus();
@@ -1463,7 +1463,7 @@ namespace TonePrism.Manager
                     btnSelectBackground.Focus();
                     return false;
                 }
-                if (!txtBackgroundPath.Text.StartsWith(gameFolder, StringComparison.OrdinalIgnoreCase))
+                if (!PathConversionHelper.IsPathInside(gameFolder, txtBackgroundPath.Text))
                 {
                     MessageBox.Show("背景画像はゲームフォルダ内のファイルを選択してください。\n\n外部のファイルを使用する場合は、バージョンアップ機能をご利用ください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     btnSelectBackground.Focus();

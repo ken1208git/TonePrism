@@ -333,5 +333,48 @@ namespace TonePrism.Manager.Services
             }
             return true;
         }
+
+        /// <summary>
+        /// コピー元フォルダが games/ 配下（= Manager 管理下のゲーム本体・各版フォルダ）を指していないか
+        /// 検証する。ゲーム追加 / バージョンアップ共通。
+        ///
+        /// games/ 配下をソースに選ぶと、コピー先が games/{id}/v.../ となりソースの内側に入るため、
+        /// CopyDirectoryRecursive 冒頭の再帰ガードで「1 ファイルもコピーされない空コピー」になり破綻する。
+        /// 旧実装は IsVersionFolder 名前ベース除外でこの誤操作を糊塗していたが、守りたいケース（ルート選択）
+        /// は守れず、正当な v* 名フォルダを無言で誤除外する下しか無い保険だった。新ビルドは必ず games/ の外
+        /// から取り込む規約を境界で強制し、誤操作はここで明示的に弾く。
+        /// </summary>
+        public static bool ValidateSourceNotInGamesFolder(string sourceFolder, out string errorMessage)
+        {
+            errorMessage = null;
+            if (string.IsNullOrWhiteSpace(sourceFolder)) return true; // 空欄は別 validation が扱う
+
+            string gamesRoot;
+            string src;
+            try
+            {
+                gamesRoot = FileOperationService.NormalizePath(TonePrism.Manager.PathManager.GamesFolder);
+                src = FileOperationService.NormalizePath(sourceFolder);
+            }
+            catch
+            {
+                // 正規化不能（= パス不正）なら Directory.Exists 等の他 validation に委ねる
+                return true;
+            }
+
+            bool insideGames =
+                string.Equals(src, gamesRoot, StringComparison.OrdinalIgnoreCase)
+                || src.StartsWith(gamesRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            if (insideGames)
+            {
+                errorMessage =
+                    "コピー元として games フォルダ内のフォルダが選択されています:\n" +
+                    "  " + sourceFolder + "\n\n" +
+                    "games フォルダは Manager が管理するゲーム本体の置き場所です。\n" +
+                    "取り込むのは、games フォルダの外にある新しいビルド（配布用フォルダ）を選んでください。";
+                return false;
+            }
+            return true;
+        }
     }
 }
