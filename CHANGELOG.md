@@ -1911,6 +1911,25 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.16.6] - 2026-05-28
+
+#### Added (#234 ② フォローアップ — `game_versions` への UNIQUE 制約)
+
+- **`game_versions(game_id, version)` に UNIQUE INDEX を追加（DB v15）**: v0.16.5 では「本番 live data に既存 dup 行があると migration が失敗しうる」ため app-level guard のみで対応し、DB 制約は意図的に見送っていた（当時の記述は下記 v0.16.5 末尾参照）。本番が本格運用に入る前の安全な窓のうちに、同一ゲームに同一バージョン番号が 2 行入る silent corruption を防ぐ**最後の砦**を DB レベルで追加する。アプリ層 dup-check（`VersionUpForm` / `EditGameForm` / `GameSectionPanel`）は「check → write」が 2 ステップに分かれるため、複数 PC が同一ゲームを同時にバージョンアップする race ではすり抜けうるが、UNIQUE INDEX があれば 2 件目の INSERT を DB が確実に弾く。
+  - 実装: `SchemaManager` の `CurrentDbVersion` を 14 → 15 に上げ、新規 DB は `CreateTables`、既存 DB は `MigrateV14ToV15` で同一の `EnsureGameVersionsVersionUniqueIndex` ヘルパーを呼ぶ。
+  - **重複残存時の安全装置**: 既存 DB に重複 `(game_id, version)` が残っている場合、index 作成は制約違反で失敗する。これを事前検出し、**throw せず警告ログ + skip** して `user_version` を 14 のまま据え置き、次回起動時に再試行する（`MigrateV10ToV11` の "data residual → skip + warn + retry" パターン踏襲＝起動を壊さない）。`CreateTables` 側は戻り値を無視し警告のみで起動継続。
+  - version は raw 文字列比較（BINARY collation）。意味的正規化（`v1.0.0`/`1.0.0` の同一視）は引き続きアプリ層の責務。
+  - 検証: live DB（user_version=14・24 版）/ 2026-05-27 本番バックアップ ともに重複なしを確認済みのため、次回起動時にクリーンに index が作成される。
+
+#### Fixed (追加精査 5th pass — 3 フォーム整合の残存ギャップ)
+
+- **①【低】`VersionUpForm.ValidateInput` だけ実行ファイルの「コピー元フォルダ内」チェックが欠落**: サムネ/背景には `IsPathInside` チェックがあるのに exe だけ無い非対称（`AddGameForm` / `EditGameForm` には exe の inside チェックあり）。textbox は ReadOnly でフォルダ外には現状成り得ないため実害は無いが、多層防御として 3 フォームを揃える。
+- **③【低】`EditGameForm` の `arguments` が `selectedVersion==null` 防御経路で null 正規化されない**: 通常経路では選択版の正規化値で上書きされるが、防御経路で `games.arguments` に空文字 `""` を残しうる非対称。Add/VersionUp と同じ null 正規化に揃える。
+
+#### Bump 根拠 (v0.16.5 → v0.16.6)
+
+DB スキーマ変更（v15、`game_versions` への UNIQUE INDEX 追加）+ データ整合性 hardening。Bundle 版数の Major 判定（AGENTS.md「DB schema 変更含む」）はリリース時に行う。
+
 ### [Manager v0.16.5] - 2026-05-27
 
 #### Fixed (#234 — バージョンアップ/追加のデータ整合性 8 件 + 周辺修正 + 製作者バリデーション緩和)

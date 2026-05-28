@@ -22,7 +22,10 @@ namespace TonePrism.Manager
         // v13: manager_sessions テーブル新設 (#179、Manager LAN-wide 同時起動検出、v0.10.0)
         // v14: games.arguments を CreateTables 内アドホック ALTER から正規 MigrateV13ToV14 に移設
         //      (累積レビュー / AGENTS.md スキーマ drift 規約準拠、v0.16.3)。最終スキーマは不変。
-        private const int CurrentDbVersion = 14;
+        // v15: game_versions(game_id, version) に UNIQUE INDEX を追加 (#234 ②)。同一ゲームに同一
+        //      バージョン番号が 2 行入る silent corruption を DB レベルで防ぐ最後の砦。重複残存時は
+        //      throw せず skip + 警告 (V10→V11 と同じ "data residual → retry" パターン)。
+        private const int CurrentDbVersion = 15;
 
         public SchemaManager(DatabaseConnection conn)
         {
@@ -313,6 +316,11 @@ namespace TonePrism.Manager
             {
                 command.ExecuteNonQuery();
             }
+
+            // (#234 ②) 同一ゲームに同一バージョン番号が 2 行入る silent corruption を DB レベルで防ぐ
+            // UNIQUE INDEX。新規 DB はここで作成 (空テーブルなので重複なし)。既存 DB は MigrateV14ToV15 が
+            // dedup-skip 安全付きで追加する。重複残存時も throw しない (= 起動継続、戻り値は無視)。
+            EnsureGameVersionsVersionUniqueIndex(connection, transaction);
 
             // developersテーブル作成
             string createDevelopersTable = @"
@@ -835,6 +843,27 @@ namespace TonePrism.Manager
                         else
                         {
                             Logger.Warn("[DatabaseManager] 直前の migration が未完のため user_version は " + currentVersion + " のまま据え置き (v14 物理変更のみ先行適用)");
+                        }
+                    }
+
+                    if (currentVersion < 15)
+                    {
+                        // v14 → v15: game_versions(game_id, version) に UNIQUE INDEX を追加 (#234 ②)。
+                        // 重複行が残存する場合は index を作らず false を返す。その場合 user_version を
+                        // 14 のまま据え置いて次回起動時に再試行する (V10→V11 と同じ "data residual →
+                        // skip + warn + retry" パターン、起動は継続)。index 作成自体は他 migration と独立。
+                        bool indexOk = MigrateV14ToV15(connection, migTransaction);
+                        if (currentVersion >= 14 && indexOk)
+                        {
+                            currentVersion = 15;
+                        }
+                        else if (!indexOk)
+                        {
+                            Logger.Warn("[DatabaseManager] v14→v15 が未完 (game_versions に重複残存) のため user_version は " + currentVersion + " のまま据え置き、次回起動時に再試行します");
+                        }
+                        else
+                        {
+                            Logger.Warn("[DatabaseManager] 直前の migration が未完のため user_version は " + currentVersion + " のまま据え置き (v15 物理変更のみ先行適用)");
                         }
                     }
 
@@ -1484,6 +1513,77 @@ namespace TonePrism.Manager
             {
                 Logger.Info("[DatabaseManager] v13 → v14: games.arguments は既に存在 (skip)");
             }
+        }
+
+        /// <summary>
+        /// v14 → v15: game_versions(game_id, version) に UNIQUE INDEX を追加 (#234 ②)。
+        /// 同一ゲームに同一バージョン番号が 2 行 INSERT される silent corruption をアプリ層 dup-check
+        /// (VersionUpForm / EditGameForm / GameSectionPanel) の最後の砦として DB レベルで封じる。
+        /// 複数 PC 同時操作時の「check → write」間 race のように app-level guard で塞ぎきれない経路を
+        /// DB 制約で確実に弾く。重複行が残存する場合は throw せず false を返し、user_version 据え置きで
+        /// 次回起動時に再試行する (V10→V11 と同じパターン、起動は継続)。EnsureGameVersionsVersionUniqueIndex
+        /// が CreateTables (新規 DB) と共通の実体。
+        /// </summary>
+        /// <returns>index 作成成功 / 既存なら true、重複残存で skip なら false</returns>
+        private bool MigrateV14ToV15(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            Logger.Info("[DatabaseManager] Executing migration V14 -> V15 (game_versions に (game_id, version) UNIQUE INDEX を追加, #234 ②)");
+            return EnsureGameVersionsVersionUniqueIndex(connection, transaction);
+        }
+
+        /// <summary>(#234 ②) game_versions(game_id, version) UNIQUE INDEX 名。CreateTables / Migrate 共通。</summary>
+        private const string GameVersionsVersionUniqueIndexName = "idx_game_versions_game_id_version";
+
+        /// <summary>
+        /// game_versions(game_id, version) の UNIQUE INDEX を作成する (#234 ②)。CreateTables (新規 DB)
+        /// と MigrateV14ToV15 (既存 DB) の共通処理。version 文字列は raw 比較 (BINARY collation = index と
+        /// 同じ) で重複判定する (= 意味的正規化 "v1.0.0"/"1.0.0" の同一視はアプリ層の責務、DB は raw 一致
+        /// のみ保証)。重複 (game_id, version) が残存する場合は index 作成が制約違反で失敗するため、事前に
+        /// 検出して throw せず警告ログ + false 返却で skip する (= 起動を壊さない、V10→V11 踏襲)。CreateTables
+        /// 側は戻り値を無視 (警告のみで起動継続)、migration 側は false を user_version 据え置きへ伝播する。
+        /// </summary>
+        /// <returns>index 作成成功 / 既存なら true、重複残存で skip なら false</returns>
+        private bool EnsureGameVersionsVersionUniqueIndex(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            // 既に index があれば no-op (idempotent)。
+            using (var cmd = new SQLiteCommand(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=@name", connection, transaction))
+            {
+                cmd.Parameters.AddWithValue("@name", GameVersionsVersionUniqueIndexName);
+                if (Convert.ToInt64(cmd.ExecuteScalar()) > 0) return true;
+            }
+
+            // 重複 (game_id, version) を検出。あれば UNIQUE INDEX 作成は制約違反で失敗するので、
+            // 事前検出して throw せず skip + 警告 (起動継続)。
+            var dups = new List<string>();
+            using (var cmd = new SQLiteCommand(
+                "SELECT game_id, version, COUNT(*) AS cnt FROM game_versions GROUP BY game_id, version HAVING cnt > 1 ORDER BY game_id, version",
+                connection, transaction))
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    dups.Add("  - game_id='" + reader["game_id"] + "', version='" + reader["version"] + "' (" + reader["cnt"] + " 行)");
+                }
+            }
+
+            if (dups.Count > 0)
+            {
+                Logger.Warn(
+                    "[DatabaseManager] WARNING: game_versions に (game_id, version) の重複行を検出。UNIQUE INDEX 作成を skip します " +
+                    "(user_version 据え置き、次回起動時に再試行)。tools/sqlite3/sqlite3.exe で重複行を確認し、不要な行を削除してから " +
+                    "Manager を再起動してください:\n" + string.Join("\n", dups));
+                return false;
+            }
+
+            using (var cmd = new SQLiteCommand(
+                "CREATE UNIQUE INDEX IF NOT EXISTS " + GameVersionsVersionUniqueIndexName + " ON game_versions(game_id, version)",
+                connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+            Logger.Info("[DatabaseManager] game_versions(game_id, version) に UNIQUE INDEX を作成しました (#234 ②)");
+            return true;
         }
 
         /// <summary>

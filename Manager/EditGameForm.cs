@@ -914,8 +914,10 @@ namespace TonePrism.Manager
                 string thumbnailPath = string.IsNullOrWhiteSpace(txtThumbnailPath.Text) ? null : PathConversionHelper.ToRelativePath(gameFolder, txtThumbnailPath.Text.Trim());
                 string backgroundPath = string.IsNullOrWhiteSpace(txtBackgroundPath.Text) ? null : PathConversionHelper.ToRelativePath(gameFolder, txtBackgroundPath.Text.Trim());
 
-                // 起動オプション
-                string arguments = txtArguments.Text;
+                // 起動オプション (#234 追加精査: 空白は null 正規化、Add/VersionUp と DB 表現を統一。
+                // 通常経路では下の selectedVersion 反映で版の正規化値に上書きされるが、selectedVersion==null
+                // の防御経路でも games.arguments に "" を残さないよう正規化を揃える)。
+                string arguments = string.IsNullOrWhiteSpace(txtArguments.Text) ? null : txtArguments.Text.Trim();
 
                 // GameInfoオブジェクトを作成（既存の値をベースに）
                 var game = new GameInfo

@@ -566,6 +566,18 @@ namespace TonePrism.Manager
                 return false;
             }
 
+            // (#234 追加精査) 実行ファイルもサムネ/背景と同様にコピー元フォルダ内であることを最終検証する
+            // (Add / Edit と 3 フォーム揃え)。RelativeExecutablePath は folder 選択 / autodetect / 選択
+            // ダイアログ経由でしか設定されず textbox も ReadOnly のため現状フォルダ外には成り得ないが、
+            // 多層防御として境界でも弾く (サムネ/背景には inside チェックがあり exe だけ欠けていた非対称解消)。
+            if (!string.IsNullOrEmpty(selectedFolderPath)
+                && !PathConversionHelper.IsPathInside(selectedFolderPath, txtExecutablePath.Text))
+            {
+                MessageBox.Show("実行ファイルはゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                btnSelectExecutable.Focus();
+                return false;
+            }
+
             // (#234) サムネ/背景は AddGameForm と同様、OK 時点で「存在する」かつ「コピー元フォルダ内」で
             // あることを最終検証する。これを怠ると、btnOK_Click が File.Exists(false) 時に絶対パスを
             // そのまま NewVersion に残し、GameSectionPanel の Path.Combine(versionFolderName, 絶対パス) が
