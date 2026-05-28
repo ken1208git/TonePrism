@@ -1925,6 +1925,8 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 - **①【低】`VersionUpForm.ValidateInput` だけ実行ファイルの「コピー元フォルダ内」チェックが欠落**: サムネ/背景には `IsPathInside` チェックがあるのに exe だけ無い非対称（`AddGameForm` / `EditGameForm` には exe の inside チェックあり）。textbox は ReadOnly でフォルダ外には現状成り得ないため実害は無いが、多層防御として 3 フォームを揃える。
 - **③【低】`EditGameForm` の `arguments` が `selectedVersion==null` 防御経路で null 正規化されない**: 通常経路では選択版の正規化値で上書きされるが、防御経路で `games.arguments` に空文字 `""` を残しうる非対称。Add/VersionUp と同じ null 正規化に揃える。
+- **④【低】バージョンフォルダ leaf 名の正規化を `PathManager.GetVersionFolderLeaf` に集約**: `PathManager.GetVersionFolder`（disk のコピー先）と `GameSectionPanel`（DB 保存パスの prefix）が共に case-sensitive な `StartsWith("v")` で leaf 名を独立計算しており、生値が `"V1.0.0"`（大文字 V）の場合に前者は `"vV1.0.0"`・後者は別結果となって**実フォルダ名と DB 保存パスが食い違う**死角があった。`v`/`V` を剥がして小文字 `v` を被せ直す helper（`EditGameForm.ToVersionLeaf` と同規則）に両者を集約し、必ず一致させる。新規版は `VersionString` が常に小文字 `v` のため通常フローの挙動は不変。
+- **⑤【低】`PathConversionHelper.ToRelativePathAfterCopy` の境界判定が区切り文字非安全**: 生 `StartsWith` のため `dest="games\game1"` が `"games\game10\..."` のような兄弟フォルダにも前方一致しうる死角。現 caller では `destinationFolder` から構築したパスしか渡らず実害は無いが、`IsPathInside` / `ToRelativePath` と同じ「等値 OR 区切り付き StartsWith」に揃えて多層防御を統一。
 
 #### Bump 根拠 (v0.16.5 → v0.16.6)
 

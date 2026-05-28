@@ -119,12 +119,20 @@ namespace TonePrism.Manager.Services
                 return absolutePath;
             }
 
-            // パスを正規化
-            string normalizedAbsolutePath = Path.GetFullPath(absolutePath);
-            string normalizedDestinationFolder = Path.GetFullPath(destinationFolder);
+            // パスを正規化（末尾区切りを除去して境界比較を区切り文字安全にする。生 StartsWith だと
+            // dest="games\game1" が "games\game10\..." のような兄弟フォルダにも前方一致する死角があり、
+            // IsPathInside / ToRelativePath と同じ「等値 OR 区切り付き StartsWith」に揃える）
+            string normalizedAbsolutePath = Path.GetFullPath(absolutePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string normalizedDestinationFolder = Path.GetFullPath(destinationFolder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-            // コピー先フォルダ内のパスか確認
-            if (normalizedAbsolutePath.StartsWith(normalizedDestinationFolder, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(normalizedAbsolutePath, normalizedDestinationFolder, StringComparison.OrdinalIgnoreCase))
+            {
+                // コピー先フォルダ自身を指す場合はファイル名のみ返す
+                return Path.GetFileName(normalizedAbsolutePath);
+            }
+
+            // コピー先フォルダ内のパスか確認（区切り文字境界で判定）
+            if (normalizedAbsolutePath.StartsWith(normalizedDestinationFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             {
                 string relativePath = normalizedAbsolutePath.Substring(normalizedDestinationFolder.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
                 return string.IsNullOrEmpty(relativePath) ? Path.GetFileName(normalizedAbsolutePath) : relativePath;

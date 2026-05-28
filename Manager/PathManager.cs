@@ -243,12 +243,23 @@ namespace TonePrism.Manager
         }
         
         /// <summary>
+        /// version 文字列からバージョンフォルダの leaf 名 (`v<X>.<Y>.<Z>[-suffix]`、必ず小文字 v) を作る。
+        /// 先頭の `v`/`V` を一度剥がしてから小文字 v を被せ直すため、生値が "1.0.0" / "v1.0.0" / "V1.0.0"
+        /// のいずれでも同一 leaf に正規化される。case-sensitive な `StartsWith("v")` 実装だと "V1.0.0" が
+        /// "vV1.0.0" と二重 prefix になり、disk フォルダ名と DB 保存パス (GameSectionPanel が独立計算する
+        /// prefix) が食い違う死角があったため helper に集約して両者を必ず一致させる (EditGameForm.ToVersionLeaf と同規則)。
+        /// </summary>
+        public static string GetVersionFolderLeaf(string version)
+        {
+            return "v" + (version ?? "").TrimStart('v', 'V');
+        }
+
+        /// <summary>
         /// 指定したゲームのバージョンフォルダパス
         /// </summary>
         public static string GetVersionFolder(string gameId, string version)
         {
-            string versionFolder = version.StartsWith("v") ? version : "v" + version;
-            return Path.Combine(GetGameFolder(gameId), versionFolder);
+            return Path.Combine(GetGameFolder(gameId), GetVersionFolderLeaf(version));
         }
         
         /// <summary>

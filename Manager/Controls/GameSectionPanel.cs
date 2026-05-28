@@ -254,7 +254,10 @@ namespace TonePrism.Manager.Controls
 
                     if (processingDialog.ShowDialog() == DialogResult.OK)
                     {
-                        string versionFolderName = form.NewVersion.Version.StartsWith("v") ? form.NewVersion.Version : "v" + form.NewVersion.Version;
+                        // (#234) disk のコピー先フォルダ (PathManager.GetVersionFolder = versionDir) と
+                        // 同じ正規化規則で leaf 名を作る。両者を別実装で計算すると "V1.0.0" のような生値で
+                        // 食い違い、DB 保存パスが実フォルダを指さなくなるため GetVersionFolderLeaf に揃える。
+                        string versionFolderName = PathManager.GetVersionFolderLeaf(form.NewVersion.Version);
                         string relativePath = Path.Combine(versionFolderName, form.RelativeExecutablePath);
                         form.NewVersion.ExecutablePath = relativePath;
 
