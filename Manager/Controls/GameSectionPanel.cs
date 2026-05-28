@@ -216,6 +216,15 @@ namespace TonePrism.Manager.Controls
                 {
                     string versionDir = PathManager.GetVersionFolder(game.GameId, form.NewVersion.Version);
 
+                    // (累積監査 round 4 Critical-1) 並行 Manager race で勝者の versionDir を loser の rollback が
+                    // 物理削除する経路を構造的に閉鎖する目的で、コピーは「自分専用の tempDir に書く → 全工程
+                    // 成功後に Directory.Move で atomic に versionDir へ昇格」の 2 段に分離した。Directory.Move は
+                    // 移動先が既存だと失敗するため、敗者は失敗を確定して自分の tempDir のみ delete (= 勝者の
+                    // 物理ファイルには触れない)。`versionDirOwnedByThisCall` flag は move 成功後にだけ true にして、
+                    // 後段の missing-asset / DB save 失敗時の cleanup でも勝者の versionDir を絶対に削除しない。
+                    string tempDir = versionDir + ".pending-create-" + Guid.NewGuid().ToString("N");
+                    bool versionDirOwnedByThisCall = false;
+
                     // (#234 ① 二重防御) DB 上は重複しない version でも、過去の中断 (#234 ③) で version
                     // folder だけが残っている場合がある。そのまま CopyDirectory すると既存フォルダへ
                     // 上書きマージされるため、ここで明示的に衝突を弾く (AddGameForm.CopyGameFolder と同方針)。
@@ -233,7 +242,8 @@ namespace TonePrism.Manager.Controls
                     {
                         try
                         {
-                            Directory.CreateDirectory(versionDir);
+                            // (Critical-1) tempDir にコピーする。後段で Directory.Move で atomic に versionDir へ昇格。
+                            Directory.CreateDirectory(tempDir);
                             // (#234 追加精査) 旧実装は IsVersionFolder で v* フォルダを除外していたが、
                             // (a) コピー先が games/{id}/v.../ でソース内側になる「ルート選択」誤操作は
                             // CopyDirectoryRecursive 冒頭の再帰ガードが既に空コピーで防ぐため除外は無力、
@@ -242,7 +252,7 @@ namespace TonePrism.Manager.Controls
                             // (追加精査 ②) 個別 File.Copy 失敗を呼び出し側に伝播。1 件でも失敗があれば
                             // throw して ProcessingDialog の catch → 上位 cleanup 経路に流す。
                             var copyFailures = FileOperationService.CopyDirectoryWithProgress(
-                                form.SourceFolderPath, versionDir, progress, token);
+                                form.SourceFolderPath, tempDir, progress, token);
                             if (copyFailures.Count > 0)
                             {
                                 string msg = FileOperationService.FormatCopyFailureMessage(copyFailures, form.SourceFolderPath);
@@ -261,10 +271,34 @@ namespace TonePrism.Manager.Controls
 
                     if (processingDialog.ShowDialog() == DialogResult.OK)
                     {
+                        // (Critical-1) tempDir の中身が全件揃ったので、Directory.Move で atomic に versionDir へ昇格。
+                        // Move は移動先が既存だと失敗するため、並行 Manager の勝者が既に versionDir を作っていれば
+                        // ここで弾かれる (= 我々は敗者)。敗者は自分の tempDir のみ delete して abort。勝者の
+                        // 物理ファイルには絶対に触れないので Critical-1 / Medium-15 / Medium-16 を一括閉鎖。
+                        try
+                        {
+                            Directory.Move(tempDir, versionDir);
+                            versionDirOwnedByThisCall = true;
+                        }
+                        catch (IOException moveEx)
+                        {
+                            try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); }
+                            catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (Critical-1) tempDir 削除失敗: " + tempDir + ": " + delEx.Message); }
+                            MessageBox.Show(
+                                "バージョンフォルダの作成に失敗しました:\n  " + versionDir + "\n\n" +
+                                "他の Manager が同じバージョン番号で既にフォルダを作成した可能性があります。\n" +
+                                "別のバージョン番号を指定するか、少し待ってから再試行してください。\n\n" +
+                                "詳細: " + moveEx.Message,
+                                "フォルダ作成失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            return;
+                        }
+
                         // (追加精査 ②) DB commit 直前に exe / サムネ / 背景の実体存在を最終 check。
                         // CopyDirectoryWithProgress は failed list で個別 copy 失敗を伝播済だが、
                         // case 違いやコピー後の race による乖離を最後の砦として弾く。失敗時は versionDir
                         // を削除して入力やり直しを促す (DB 行は未 commit のため rollback 不要)。
+                        // (Critical-1) Move 成功後の versionDir は我々の所有物なので無条件 delete でも勝者破壊
+                        // にはならない (= versionDirOwnedByThisCall=true)。
                         var missingVersionAssets = new System.Collections.Generic.List<string>();
                         string exeCheckPath = string.IsNullOrEmpty(form.RelativeExecutablePath)
                             ? null
@@ -283,8 +317,11 @@ namespace TonePrism.Manager.Controls
                             missingVersionAssets.Add("背景画像: " + bgCheckPath);
                         if (missingVersionAssets.Count > 0)
                         {
-                            try { if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true); }
-                            catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (追加精査 ②) versionDir 削除失敗: " + versionDir + ": " + delEx.Message); }
+                            if (versionDirOwnedByThisCall)
+                            {
+                                try { if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true); }
+                                catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (追加精査 ②) versionDir 削除失敗: " + versionDir + ": " + delEx.Message); }
+                            }
                             MessageBox.Show(
                                 "コピー後のファイルが見つかりません。バージョンアップを中止しました:\n\n  " +
                                 string.Join("\n  ", missingVersionAssets) +
@@ -304,7 +341,10 @@ namespace TonePrism.Manager.Controls
                         // 将来の caller drift / fallback 経路への defense として ここでも assert。
                         if (!string.IsNullOrEmpty(form.RelativeExecutablePath) && Path.IsPathRooted(form.RelativeExecutablePath))
                         {
-                            try { if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true); } catch { /* swallow */ }
+                            if (versionDirOwnedByThisCall)
+                            {
+                                try { if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true); } catch { /* swallow */ }
+                            }
                             MessageBox.Show(
                                 "実行ファイルの相対パス計算に失敗しました。バージョンアップを中止しました。\n\n" +
                                 "コピー元フォルダを指定し直してください。",
@@ -370,10 +410,22 @@ namespace TonePrism.Manager.Controls
                         }
                         catch (Exception ex)
                         {
-                            try { if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true); }
-                            catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (M5) versionDir rollback 削除失敗: " + versionDir + ": " + delEx.Message); }
+                            // (Critical-1) Move 成功後 (versionDirOwnedByThisCall=true) のみ versionDir を削除。
+                            // ここに来る時点で UNIQUE 違反等の DB エラーが起きているが、Move 自体は成功して
+                            // 我々が versionDir 所有者なので、delete しても勝者破壊にはならない。
+                            string cleanupNote;
+                            if (versionDirOwnedByThisCall)
+                            {
+                                try { if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true); }
+                                catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (M5) versionDir rollback 削除失敗: " + versionDir + ": " + delEx.Message); }
+                                cleanupNote = "\n\nコピーしたファイルは削除しました。";
+                            }
+                            else
+                            {
+                                cleanupNote = "";
+                            }
                             MessageBox.Show(
-                                $"バージョン情報のデータベース保存に失敗しました。\n\n{ex.Message}\n\nコピーしたファイルは削除しました。",
+                                $"バージョン情報のデータベース保存に失敗しました。\n\n{ex.Message}{cleanupNote}",
                                 "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
                             return;
                         }
@@ -386,13 +438,13 @@ namespace TonePrism.Manager.Controls
                     }
                     else
                     {
-                        // (H3) 非 OK 経路 (Cancel / Abort=例外) は版データ未 commit + コピー済 versionDir が
-                        // 残留する状態。次回同 version 再試行時に L222 の「フォルダ衝突」guard で永久
-                        // block されるため、必ず掃除する。旧実装は Cancel のみ handle、Abort 経路
-                        // (= worker thread 内例外 → ProcessingDialog.Shown が DialogResult.Abort をセット) を
-                        // 漏らしており disk full / ファイルロック等で partial copy が disk に残っていた。
-                        try { if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true); }
-                        catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (H3) 中断時の versionDir 削除失敗: " + versionDir + ": " + delEx.Message); }
+                        // (H3) 非 OK 経路 (Cancel / Abort=例外) は版データ未 commit + コピー済 tempDir が
+                        // 残留する状態。tempDir は guid 付きで永続的に block する経路は無いが、disk full
+                        // 防止のため掃除する。
+                        // (Critical-1) この経路は ProcessingDialog 内 = Move 前なので、片付け対象は tempDir のみ。
+                        // versionDir は触らない (= 我々はまだ owner ではない、勝者が既に作っていれば破壊しない)。
+                        try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); }
+                        catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (H3) 中断時の tempDir 削除失敗: " + tempDir + ": " + delEx.Message); }
 
                         if (processingDialog.DialogResult == DialogResult.Cancel)
                         {

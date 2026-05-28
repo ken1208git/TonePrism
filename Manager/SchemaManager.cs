@@ -29,7 +29,7 @@ namespace TonePrism.Manager
         //      backup_log に記録できるようにする。既存行は影響なし (CHECK 拡張のみ)。
         // v17: game_versions UNIQUE INDEX を COLLATE NOCASE で作り直す (M3)。`v1.0.0` と `V1.0.0` の
         //      case 違いを semantic dup として弾く。重複残存時は v14→v15 と同じ skip + retry パターン。
-        private const int CurrentDbVersion = 17;
+        private const int CurrentDbVersion = 18;
 
         public SchemaManager(DatabaseConnection conn)
         {
@@ -327,6 +327,9 @@ namespace TonePrism.Manager
             EnsureGameVersionsVersionUniqueIndex(connection, transaction);
 
             // developersテーブル作成
+            // (累積監査 round 4 Medium-22) v18 で version_id に FK + ON DELETE CASCADE を追加した。
+            // 旧 schema は version_id INTEGER (FK なし) で、将来「単一版削除」機能 (#101 / #30 関連) が
+            // 入った時にその版に紐付く developers 行が silent orphan になる経路があった。本 FK で構造的に閉鎖。
             string createDevelopersTable = @"
                 CREATE TABLE IF NOT EXISTS developers (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -335,7 +338,8 @@ namespace TonePrism.Manager
                     first_name TEXT,
                     grade TEXT,
                     version_id INTEGER,
-                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE
+                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE,
+                    FOREIGN KEY(version_id) REFERENCES game_versions(id) ON DELETE CASCADE
                 )";
 
             using (var command = new SQLiteCommand(createDevelopersTable, connection, transaction))
@@ -343,19 +347,8 @@ namespace TonePrism.Manager
                 command.ExecuteNonQuery();
             }
 
-            // game_genresテーブル作成
-            string createGameGenresTable = @"
-                CREATE TABLE IF NOT EXISTS game_genres (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    game_id TEXT,
-                    genre TEXT,
-                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE
-                )";
-
-            using (var command = new SQLiteCommand(createGameGenresTable, connection, transaction))
-            {
-                command.ExecuteNonQuery();
-            }
+            // (累積監査 round 4 Low-28/29) game_genres は dead table のため v18 で DROP 済 (MigrateV17ToV18 参照)。
+            // 新規 install では作成しない。SoT は `games.genre` のカンマ区切り文字列 (GameRepository が直接 read/write)。
 
             // play_recordsテーブル作成（MigrateV10ToV11 でも再利用するため helper メソッド化）
             CreatePlayRecordsTable(connection, transaction);
@@ -876,14 +869,19 @@ namespace TonePrism.Manager
                         // v15 → v16: backup_log.trigger_type CHECK 拡張 ('restore' 追加、H4)。
                         // 既存行は trigger_type が 'manual' / 'auto' / 'safety' のみなので新 CHECK に違反しない。
                         // V9→V10 と同じ pattern (テーブル recreate)。
-                        MigrateV15ToV16(connection, migTransaction);
+                        //
+                        // (累積監査 round 4 Medium-21) 旧実装は v14→v15 が skip された場合でも v15→v16 を
+                        // 無条件実行していたため、backup_log を毎起動で DROP+RECREATE+INSERT-SELECT する
+                        // 高コスト処理が走り続けていた (= SMB 上 + 数千行で起動遅延)。前提 step が完了
+                        // (currentVersion >= 15) のときだけ走らせて idempotency を確保する。
                         if (currentVersion >= 15)
                         {
+                            MigrateV15ToV16(connection, migTransaction);
                             currentVersion = 16;
                         }
                         else
                         {
-                            Logger.Warn("[DatabaseManager] 直前の migration が未完のため user_version は " + currentVersion + " のまま据え置き (v16 物理変更のみ先行適用)");
+                            Logger.Warn("[DatabaseManager] (Medium-21) v14→v15 が未完のため v15→v16 も skip、user_version は " + currentVersion + " のまま据え置き");
                         }
                     }
 
@@ -904,6 +902,22 @@ namespace TonePrism.Manager
                         else
                         {
                             Logger.Warn("[DatabaseManager] 直前の migration が未完のため user_version は " + currentVersion + " のまま据え置き (v17 物理変更のみ先行適用)");
+                        }
+                    }
+
+                    if (currentVersion < 18)
+                    {
+                        // v17 → v18: developers.version_id に FK + ON DELETE CASCADE を追加 (Medium-22)。
+                        // SQLite は ALTER で FK 追加不能のため table recreate。orphan 行 (version_id が
+                        // game_versions に存在しない) は INSERT-SELECT で除外して silent に掃除する。
+                        if (currentVersion >= 17)
+                        {
+                            MigrateV17ToV18(connection, migTransaction);
+                            currentVersion = 18;
+                        }
+                        else
+                        {
+                            Logger.Warn("[DatabaseManager] (Medium-22) 直前の migration が未完のため v17→v18 も skip、user_version は " + currentVersion + " のまま据え置き");
                         }
                     }
 
@@ -1577,6 +1591,83 @@ namespace TonePrism.Manager
         /// + 全行 INSERT コピー + DROP/RENAME。既存行は 'manual' / 'auto' / 'safety' のみで新 CHECK に違反しない。
         /// v11 で追加された relative_path 列も保持する (V9 → V10 の列セットからの drift に注意)。
         /// </summary>
+        /// <summary>
+        /// (累積監査 round 4 Medium-22) v17 → v18: developers.version_id に FK + ON DELETE CASCADE を追加。
+        /// SQLite は ALTER で FK 追加不能のため、テーブル recreate + INSERT-SELECT で対応する。
+        /// orphan 行 (version_id が non-null だが game_versions に該当 id が無い) は INSERT-SELECT で除外することで
+        /// silent に掃除する (現状 single-version 削除コードが無いので通常 orphan は発生していないはずだが、
+        /// 過去 migration の残党 / 外部ツール直 DML での garbage を念のため除去する defensive sweep)。
+        /// </summary>
+        private void MigrateV17ToV18(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            Logger.Info("[DatabaseManager] Executing migration V17 -> V18 (developers.version_id に FK + ON DELETE CASCADE 追加 / game_genres dead table 除去, Medium-22 / Low-28/29)");
+
+            // (累積監査 round 4 Low-28/29) game_genres は v2 で追加されたが GameRepository.Add/Update は
+            // 一切書き込まず `games.genre` のカンマ区切り文字列が SoT として動いている dead table。
+            // UpdateGameId だけが child table list に含めて更新しているため過去 v2 migration 経由の DB では
+            // 「rename 時だけ古い行が追従」する半端な状態が残っていた。本 migration で DROP して
+            // SoT を 1 本化する (CreateTables / ExpectedSchema からも同時に除去済)。
+            using (var cmd = new SQLiteCommand("DROP TABLE IF EXISTS game_genres", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            string createNew = @"
+                CREATE TABLE developers_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_id TEXT,
+                    last_name TEXT,
+                    first_name TEXT,
+                    grade TEXT,
+                    version_id INTEGER,
+                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE,
+                    FOREIGN KEY(version_id) REFERENCES game_versions(id) ON DELETE CASCADE
+                )";
+            using (var cmd = new SQLiteCommand(createNew, connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            // orphan 行 (version_id 非 NULL だが game_versions に該当無し) は除外して INSERT。
+            // version_id IS NULL の行 (= games 行と紐づく developers) は全件保持。
+            using (var cmd = new SQLiteCommand(
+                "INSERT INTO developers_new (id, game_id, last_name, first_name, grade, version_id) " +
+                "SELECT d.id, d.game_id, d.last_name, d.first_name, d.grade, d.version_id " +
+                "FROM developers d " +
+                "WHERE d.version_id IS NULL " +
+                "   OR EXISTS (SELECT 1 FROM game_versions gv WHERE gv.id = d.version_id)",
+                connection, transaction))
+            {
+                int copied = cmd.ExecuteNonQuery();
+                Logger.Info("[DatabaseManager] (Medium-22) developers 行を新テーブルへコピー: " + copied + " 件");
+            }
+
+            // orphan 件数を別途 log に残す (= silent sweep の trail)。
+            using (var cmd = new SQLiteCommand(
+                "SELECT COUNT(*) FROM developers WHERE version_id IS NOT NULL " +
+                "AND NOT EXISTS (SELECT 1 FROM game_versions gv WHERE gv.id = developers.version_id)",
+                connection, transaction))
+            {
+                var r = cmd.ExecuteScalar();
+                long orphans = r is DBNull ? 0 : Convert.ToInt64(r);
+                if (orphans > 0)
+                {
+                    Logger.Warn("[DatabaseManager] (Medium-22) developers.version_id 孤児行を migration で除去: " + orphans + " 件");
+                }
+            }
+
+            using (var cmd = new SQLiteCommand("DROP TABLE developers", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+            using (var cmd = new SQLiteCommand("ALTER TABLE developers_new RENAME TO developers", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            Logger.Info("[DatabaseManager] Migration V17 -> V18 completed.");
+        }
+
         private void MigrateV15ToV16(SQLiteConnection connection, SQLiteTransaction transaction)
         {
             Logger.Info("[DatabaseManager] Executing migration V15 -> V16 (backup_log.trigger_type CHECK 拡張: 'restore' 追加, H4)");
@@ -1851,7 +1942,7 @@ namespace TonePrism.Manager
             { "games", new[] { "game_id", "title", "description", "release_year", "genre", "min_players", "max_players", "difficulty", "play_time", "controller_support", "supported_connection", "thumbnail_path", "background_path", "executable_path", "display_order", "is_visible", "controls", "key_mapping", "arguments", "version" } },
             { "game_versions", new[] { "id", "game_id", "version", "executable_path", "arguments", "description", "title", "genre", "min_players", "max_players", "difficulty", "play_time", "controller_support", "supported_connection", "thumbnail_path", "background_path", "update_note", "registered_at" } },
             { "developers", new[] { "id", "game_id", "last_name", "first_name", "grade", "version_id" } },
-            { "game_genres", new[] { "id", "game_id", "genre" } },
+            // (累積監査 round 4 Low-28/29) game_genres は v18 で DROP した dead table のため除去 (MigrateV17ToV18 参照)。
             { "play_records", new[] { "id", "game_id", "start_time", "end_time", "play_duration", "player_count" } },
             { "surveys", new[] { "id", "game_id", "rating", "comment", "created_at" } },
             { "launcher_surveys", new[] { "id", "rating", "favorite_game_id", "comment", "created_at" } },

@@ -246,6 +246,30 @@ namespace TonePrism.Manager
             // 衝突 throw + rollback 巻き込み削除 footgun を構造的に排除し、警告文言（OK=全削除）とも一致。
             // worker thread (ProcessingDialog) 内で実行されるため UI freeze しない。削除失敗 (Launcher 等が
             // 使用中) は明示メッセージにして中断する (= 半削除フォルダにコピーを重ねない)。
+            //
+            // (累積監査 round 4 Medium-11) UI 側 warning の OK 押下から worker thread でこの wipe が走るまでの間に、
+            // 他 Manager が同 gameId でゲーム追加 → 完了したケースの保護。DB を再 check して existing game が
+            // できていれば wipe を skip + throw して abort。並行 race の確率は低いが本番 LAN 運用想定では non-zero
+            // のため fence を入れる。
+            if (wipeExistingOnCopy)
+            {
+                try
+                {
+                    var existingDbGame = dbManager.GetGameById(gameId);
+                    if (existingDbGame != null)
+                    {
+                        throw new Exception(
+                            $"他の Manager が同じゲーム ID '{gameId}' で先にゲームを追加した可能性があります。\n" +
+                            "ゲーム追加を中止します。ゲーム ID を変えるか、最新の状態を再読み込みしてから再試行してください。");
+                    }
+                }
+                catch (Exception ex) when (!(ex.Message.StartsWith("他の Manager")))
+                {
+                    // DB read 自体の失敗は wipe 安全側 (skip) に倒さず、明示 throw でユーザーに判断委ねる。
+                    throw new Exception(
+                        $"既存ゲームの存在確認に失敗したため wipe を中止しました:\n  {ex.Message}", ex);
+                }
+            }
             if (wipeExistingOnCopy && Directory.Exists(gameBaseFolder))
             {
                 try
@@ -466,7 +490,7 @@ namespace TonePrism.Manager
                     BackgroundPath = backgroundPath,
                     ExecutablePath = executablePath,
                     Arguments = arguments,
-                    DisplayOrder = dbManager.GetMinDisplayOrder() - 1, // 既存の最小値より1小さい値（一番上に配置）
+                    DisplayOrder = null, // (累積監査 round 4 Medium-10) AddGameAtTop が atomic に MIN-1 を採番
                     IsVisible = true, // 新規追加のゲームは常にランチャーに表示
                     Controls = null, // 後で実装
                     KeyMapping = null, // 後で実装
@@ -479,8 +503,8 @@ namespace TonePrism.Manager
                 // 製作者情報を設定
                 game.Developers = developers;
 
-                // データベースに追加
-                dbManager.AddGame(game);
+                // データベースに追加 (累積監査 round 4 Medium-10) display_order の MIN-1 採番を atomic に行う AddGameAtTop 経由。
+                dbManager.AddGameAtTop(game);
                 gameAdded = true;
 
                 // 初期バージョン情報を追加
@@ -571,19 +595,28 @@ namespace TonePrism.Manager
             }
             catch (Exception delEx)
             {
-                Logger.Warn("[AddGameForm] (#234 ②) games 行 rollback 削除失敗: " + gameId + ": " + delEx.Message);
-                // (M8) silent な整合性破綻 (= 物理ファイルは消えたが DB に games 行のみ残留 → 次回起動時に
-                // 版なし孤児ゲームとして UI 表示) を user に伝える。手動 SQL での修復が必要なケースを
-                // 明示通知。
+                // (累積監査 round 4 Medium-12) zombie 状態 (= 物理ファイルは消えたが DB に games 行のみ残留 →
+                // 次回起動時に「版なし孤児ゲーム」として表示 + 同 gameId 再追加が重複 check で永久 block) を user に
+                // 伝える。手動 SQL での修復が必要なケースを明示通知し、復旧 SQL 文も Logger に残す。
+                string repairSql =
+                    "DELETE FROM developers WHERE game_id='" + gameId + "';\n" +
+                    "DELETE FROM game_versions WHERE game_id='" + gameId + "';\n" +
+                    "DELETE FROM games WHERE game_id='" + gameId + "';";
+                Logger.Warn("[AddGameForm] (#234 ②/Medium-12) games 行 rollback 削除失敗: " + gameId + ": " + delEx.Message);
+                Logger.Warn("[AddGameForm] (Medium-12) zombie 復旧 SQL (sqlite3 toneprism.db で実行): \n" + repairSql);
                 try
                 {
                     MessageBox.Show(this,
                         $"ゲーム '{gameId}' の rollback 削除に失敗しました。\n\n" +
                         $"{delEx.Message}\n\n" +
-                        "ファイルは削除されましたが、データベース上のゲーム情報は残っています。" +
-                        "次回 Manager 起動時に「版なしのゲーム」として表示される可能性があります。" +
-                        "管理者に連絡して手動でデータベース修復を依頼してください。",
-                        "rollback 失敗 (手動修復が必要)",
+                        "ファイルは削除されましたが、データベース上のゲーム情報は残っています。\n" +
+                        "次回 Manager 起動時に「版なしのゲーム」として表示される可能性があり、\n" +
+                        "同じゲーム ID では再追加できなくなります。\n\n" +
+                        "対処方法:\n" +
+                        "  ① 別のゲーム ID を使って再追加する (推奨、データ損失なし)\n" +
+                        "  ② Manager の「ゲーム削除」で zombie ゲームを削除してから再追加する\n" +
+                        "  ③ 上記が両方失敗する場合のみ手動で DB を修復 (修復 SQL は Manager.log 参照)",
+                        "rollback 失敗 (zombie ゲーム残留)",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning);
                 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Linq;
 using TonePrism.Manager.Models;
 using TonePrism.Manager.Repositories;
 using TonePrism.Manager.Services;
@@ -102,6 +103,83 @@ namespace TonePrism.Manager
                         try
                         {
                             _versionRepo.AddVersionRowInTransaction(connection, transaction, version);
+                            _gameRepo.UpdateGameRowInTransaction(connection, transaction, game);
+                            transaction.Commit();
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+                }
+            });
+        }
+
+        /// <summary>
+        /// (累積監査 round 4 High-2) 複数バージョンの一括更新 (UpdateGameVersions) + ゲーム本体の更新
+        /// (UpdateGame) を 1 transaction で atomic に実行する。EditGameForm のアクティブ版切替で両者を
+        /// 別 transaction で順次実行する旧経路には、game_versions だけ commit 完了直後に電源断 / SMB
+        /// disconnect が起きると games 行が旧版を指したまま残る partial-commit 窓があった (= Launcher で
+        /// 古い executable_path / thumbnail を解決して silent corruption)。AddVersionAndActivate と同じ
+        /// 設計で窓を物理閉鎖する。
+        /// </summary>
+        /// <summary>
+        /// (累積監査 round 4 Medium-10) ゲーム追加時に DisplayOrder を「現在の MIN(display_order) - 1」へ自動採番
+        /// する path を、SELECT MIN + INSERT を 1 transaction で atomic に実行する。旧経路は
+        /// `GetMinDisplayOrder()` + `AddGame()` を別 transaction で順次実行しており、並行 Manager race で
+        /// 両者が同じ MIN を取得して同 DisplayOrder で INSERT する → Launcher 並び順 invariant 「最新が一番上」が
+        /// 壊れる経路があった。`IsolationLevel.Serializable` (= BEGIN IMMEDIATE) で RESERVED lock を最初に取り、
+        /// 同時実行は SQLite 側で serialize される。
+        /// </summary>
+        public void AddGameAtTop(GameInfo game)
+        {
+            _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var transaction = connection.BeginTransaction(System.Data.IsolationLevel.Serializable))
+                    {
+                        try
+                        {
+                            // SELECT MIN は RESERVED lock 内で実行されるため、他 Manager の concurrent
+                            // AddGameAtTop は BEGIN IMMEDIATE で待たされ、commit 後に next snapshot を見る。
+                            int minOrder;
+                            using (var cmd = new SQLiteCommand("SELECT COALESCE(MIN(display_order), 0) FROM games", connection, transaction))
+                            {
+                                var r = cmd.ExecuteScalar();
+                                minOrder = r is DBNull ? 0 : Convert.ToInt32(r);
+                            }
+                            game.DisplayOrder = minOrder - 1;
+
+                            _gameRepo.AddGameRowInTransaction(connection, transaction, game);
+                            transaction.Commit();
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+                }
+            });
+        }
+
+        public void UpdateVersionsAndGame(IEnumerable<GameVersion> versions, GameInfo game)
+        {
+            var list = versions?.Where(v => v != null).ToList() ?? new List<GameVersion>();
+
+            _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var transaction = connection.BeginTransaction())
+                    {
+                        try
+                        {
+                            _versionRepo.UpdateManyInTransaction(connection, transaction, list);
                             _gameRepo.UpdateGameRowInTransaction(connection, transaction, game);
                             transaction.Commit();
                         }

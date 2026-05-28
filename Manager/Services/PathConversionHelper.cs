@@ -64,6 +64,17 @@ namespace TonePrism.Manager.Services
                 return relativePath; // 既に絶対パスの場合
             }
 
+            // (累積監査 round 4 High-8) basePath が空文字 / null の防御経路は relative のまま返さない。
+            // 旧実装は `Path.Combine("", "v1.0.0/thumb.png")` → "v1.0.0/thumb.png" を返し、後段の
+            // File.Exists() が CWD (= Manager.exe 作業 dir) 基準で評価される silent corruption 経路だった。
+            // ToRelativePath / IsPathInside と同様に「base が空なら相対変換は不可能」と扱い、Logger.Warn
+            // で contract 違反を伝播 + null を返して caller に必須再 reject させる契約に統一。
+            if (string.IsNullOrEmpty(basePath))
+            {
+                Logger.Warn("[PathConversionHelper] (H8) ToAbsolutePath: basePath が空。relativePath を CWD 基準解決させないよう null を返却: " + relativePath);
+                return null;
+            }
+
             return Path.Combine(basePath, relativePath);
         }
 

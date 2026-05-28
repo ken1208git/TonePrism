@@ -123,8 +123,15 @@ namespace TonePrism.Manager.Services
                     string fullSubPath = NormalizePath(subDir);
 
                     // コピー先自身やその親への再帰を防止
+                    // (累積監査 round 4 High-4) 区切り文字を含めて比較し、Foo と Foobar のような兄弟前方一致で
+                    // 正当な subdir が silent skip されるのを防ぐ (line 81-82 の sourceDirWithSep と同じ pattern)。
+                    // 旧実装は `fullDestDir.StartsWith(fullSubPath, ...)` のみで判定しており、`fullSubPath="C:\src\Foo"`
+                    // と `fullDestDir="C:\src\Foobar"` で前方一致 true → continue 経路に流れ、`Foo/` 配下が
+                    // 1 ファイルもコピーされない (取り込み後の存在 check で最終 rollback されるが、毎回必ず失敗する
+                    // 取り込み不能ゲームの源だった)。
+                    string subPathWithSep = fullSubPath.EndsWith("\\") ? fullSubPath : fullSubPath + "\\";
                     if (fullSubPath.Equals(fullDestDir, StringComparison.OrdinalIgnoreCase) ||
-                        fullDestDir.StartsWith(fullSubPath, StringComparison.OrdinalIgnoreCase))
+                        fullDestDir.StartsWith(subPathWithSep, StringComparison.OrdinalIgnoreCase))
                         continue;
 
                     if (ExcludedFolders.Contains(folderName, StringComparer.OrdinalIgnoreCase))

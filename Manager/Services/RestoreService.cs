@@ -130,9 +130,11 @@ namespace TonePrism.Manager.Services
 
                 if (File.Exists(dbPath))
                 {
+                    // (累積監査 round 4 Medium-18) BackupService と同じく `OpenConnectionWithJournalMode` 経由で
+                    // PRAGMA 統一。busy_timeout=10000 で別 Manager 書込中の SQLITE_BUSY 即 throw を抑制する。
                     using (var sourceConn = new SQLiteConnection(_conn.ConnectionString))
                     {
-                        sourceConn.Open();
+                        _conn.OpenConnectionWithJournalMode(sourceConn);
                         using (var destConn = new SQLiteConnection($"Data Source={safetyPath};Version=3;"))
                         {
                             destConn.Open();
@@ -202,11 +204,26 @@ namespace TonePrism.Manager.Services
                 }
                 Logger.Info($"[RestoreService] toneprism.db を置換しました ('{backupFilePath}' → '{dbPath}')");
 
-                // 5. 退避フォルダのリテンション適用（最新を残して古いのから削除）
-                progress?.Report(new ProgressInfo(95, "退避ファイルの世代管理...", ""));
-                ApplySafetyRetention(safetyDir, DefaultSafetyRetentionCount);
+                // (累積監査 round 4 High-6) ─── point of no return: ここから先 (post-step) の例外は復元失敗扱い
+                // しない ─── 旧実装は post-step (= ApplySafetyRetention の外側で起きた予期せぬ例外、
+                // progress?.Report 中の throw 等) を外側 catch (Exception) で拾い、(a) MarkAuditFailed の UPDATE が
+                // NEW DB の logId に届かず silent no-op、(b) caller の ProcessingDialog に throw して
+                // 「復元失敗」MessageBox → ユーザーが二重復元する事故、の 2 つの誤動作があった。post-step を内側
+                // try で囲み swallow + Logger.Warn にすることで外側 catch を pre-replace 失敗専用に絞り、
+                // dbReplaceCompleted flag を持たずに同じ point-of-no-return 性質を達成する。
+                try
+                {
+                    // 5. 退避フォルダのリテンション適用（最新を残して古いのから削除）
+                    progress?.Report(new ProgressInfo(95, "退避ファイルの世代管理...", ""));
+                    ApplySafetyRetention(safetyDir, DefaultSafetyRetentionCount);
 
-                progress?.Report(new ProgressInfo(100, "復元完了", dbPath));
+                    progress?.Report(new ProgressInfo(100, "復元完了", dbPath));
+                }
+                catch (Exception postEx)
+                {
+                    Logger.Warn($"[RestoreService] (High-6) DB 置換後の post-step 例外を swallow (復元自体は成功): {postEx.Message}");
+                }
+
                 Logger.Info($"[RestoreService] 復元完了: source='{backupFilePath}', safety='{safetyPath}'");
 
                 // (H4) 注意: 起動時に挿入した in_progress 行は OLD DB (= safety バックアップに保存される版)
@@ -230,6 +247,8 @@ namespace TonePrism.Manager.Services
             }
             catch (Exception ex)
             {
+                // (High-6) post-step 例外は内側 try で swallow 済のため、ここに到達する例外は必ず pre-replace 失敗。
+                // = 「DB は無傷 + safety は取れたかもしれない / tempPath 残存」状態なので、MarkAuditFailed + tempPath 削除 + throw が正しい。
                 Logger.Error($"[RestoreService] 復元失敗: source='{backupFilePath}'", ex);
                 MarkAuditFailed(logId, ex.Message);
                 TryDeleteTempFile(tempPath);

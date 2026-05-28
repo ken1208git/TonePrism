@@ -67,14 +67,48 @@ namespace TonePrism.Manager.Services
 
         /// <summary>
         /// 設定された保存先パスを返す。空ならデフォルト（DBフォルダ/backups/）を返す。
+        /// (累積監査 round 4 Medium-17) 危険 path (`C:\Windows` 配下 等) を fence する軽い guard を入れて、user の
+        /// path 誤入力でバックアップが OS 重要領域に散布される運用事故を防ぐ。実害は OS 権限で大半 block されるが
+        /// 警告 path も書込可能領域 (`%APPDATA%` 等) には届くため、Logger.Warn + デフォルトへの fall-back で
+        /// silent な誤誘導を避ける。判定は最小: drive root 直下 + `%WinDir%` 配下 + 解決失敗のみ。
         /// </summary>
         public string GetEffectiveDestinationDirectory()
         {
             string configured = _settingsRepo.GetString("backup_destination_path", "");
-            if (!string.IsNullOrWhiteSpace(configured))
-                return configured;
             string dbDir = Path.GetDirectoryName(_conn.DbPath);
-            return Path.Combine(dbDir, "backups");
+            string defaultDir = Path.Combine(dbDir, "backups");
+            if (string.IsNullOrWhiteSpace(configured)) return defaultDir;
+
+            string resolved;
+            try { resolved = Path.GetFullPath(configured); }
+            catch (Exception ex)
+            {
+                Logger.Warn("[BackupService] (M17) backup_destination_path の正規化に失敗、デフォルトに fall-back: " + configured + " err=" + ex.Message);
+                return defaultDir;
+            }
+
+            // drive root 直下 (= "C:\backups" の正規形が "C:\" になるケース) は除外。
+            string rootPath = Path.GetPathRoot(resolved);
+            if (!string.IsNullOrEmpty(rootPath) && string.Equals(resolved.TrimEnd(Path.DirectorySeparatorChar), rootPath.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+            {
+                Logger.Warn("[BackupService] (M17) backup_destination_path が drive root 直下のため危険、デフォルトに fall-back: " + resolved);
+                return defaultDir;
+            }
+
+            // %WinDir% (= C:\Windows 等) 配下は除外。OS 重要領域へのバックアップ散布を防ぐ。
+            string winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            if (!string.IsNullOrEmpty(winDir))
+            {
+                string winDirSep = winDir.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                if (resolved.StartsWith(winDirSep, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(resolved.TrimEnd(Path.DirectorySeparatorChar), winDir.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+                {
+                    Logger.Warn("[BackupService] (M17) backup_destination_path が %WinDir% 配下のため除外、デフォルトに fall-back: " + resolved);
+                    return defaultDir;
+                }
+            }
+
+            return configured;
         }
 
         /// <summary>
@@ -168,9 +202,14 @@ namespace TonePrism.Manager.Services
                 token.ThrowIfCancellationRequested();
 
                 // SQLite Online Backup API でコピー
+                // (累積監査 round 4 Medium-18) source 接続は `OpenConnectionWithJournalMode` で
+                // `journal_mode=DELETE` / `busy_timeout=10000` / `foreign_keys=ON` / `synchronous=NORMAL` を確実に
+                // 適用する。Online Backup API は journal mode 非依存だが、別 Manager / Launcher が書込中の場合に
+                // sourceConn.Open() が `SQLITE_BUSY` で即 throw する確率を下げる (busy_timeout=10000 で 10s 待機) +
+                // 将来「Backup 取得直前にチェック SQL」等の拡張で FK off の silent drift を防ぐ convention 統一。
                 using (var sourceConn = new SQLiteConnection(_conn.ConnectionString))
                 {
-                    sourceConn.Open();
+                    _conn.OpenConnectionWithJournalMode(sourceConn);
                     using (var destConn = new SQLiteConnection($"Data Source={destinationPath};Version=3;"))
                     {
                         destConn.Open();
@@ -357,14 +396,29 @@ namespace TonePrism.Manager.Services
                 try
                 {
                     string destPath = Path.Combine(safetyDir, file.Name);
+                    // (累積監査 round 4 Medium-20) 衝突時 skip すると旧 path のファイルがプロジェクトルート直下に
+                    // 永久残置し、起動毎に warn が連発 + user が「これは何？」と削除して safety を失う事故になる。
+                    // 衝突時は suffix (`_dup_N`) を付けて必ず移動完了させる契約に変える。
                     if (File.Exists(destPath))
                     {
-                        Logger.Warn($"[BackupService] スキップ（既存）: {file.Name}");
-                        continue;
+                        string baseName = Path.GetFileNameWithoutExtension(file.Name);
+                        string ext = Path.GetExtension(file.Name);
+                        int dupSuffix = 1;
+                        while (File.Exists(destPath) && dupSuffix < 100)
+                        {
+                            destPath = Path.Combine(safetyDir, $"{baseName}_dup_{dupSuffix}{ext}");
+                            dupSuffix++;
+                        }
+                        if (File.Exists(destPath))
+                        {
+                            Logger.Warn($"[BackupService] (M20) 退避ファイル移動 skip (100 件以上の dup_N 衝突): {file.Name}");
+                            continue;
+                        }
+                        Logger.Warn($"[BackupService] (M20) 退避ファイル名衝突を suffix で回避: {file.Name} → {Path.GetFileName(destPath)}");
                     }
                     file.MoveTo(destPath);
                     moved++;
-                    Logger.Info($"[BackupService] 退避ファイル移動: {file.Name} → backups/safety/");
+                    Logger.Info($"[BackupService] 退避ファイル移動: {file.Name} → backups/safety/{Path.GetFileName(destPath)}");
                 }
                 catch (Exception ex)
                 {

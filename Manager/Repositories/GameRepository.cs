@@ -123,27 +123,7 @@ namespace TonePrism.Manager.Repositories
                     {
                         try
                         {
-                            string insertGame = @"
-                                INSERT INTO games (
-                                    game_id, title, description, release_year, genre,
-                                    min_players, max_players, difficulty, play_time, controller_support, supported_connection,
-                                    thumbnail_path, background_path, executable_path,
-                                    display_order, is_visible, controls, key_mapping, arguments, version
-                                ) VALUES (
-                                    @gameId, @title, @description, @releaseYear, @genre,
-                                    @minPlayers, @maxPlayers, @difficulty, @playTime, @controllerSupport, @supportedConnection,
-                                    @thumbnailPath, @backgroundPath, @executablePath,
-                                    @displayOrder, @isVisible, @controls, @keyMapping, @arguments, @version
-                                )";
-
-                            using (var command = new SQLiteCommand(insertGame, connection, transaction))
-                            {
-                                SetGameParameters(command, game);
-                                command.ExecuteNonQuery();
-                            }
-
-                            InsertDevelopers(connection, transaction, game.GameId, game.Developers);
-
+                            AddGameRowInTransaction(connection, transaction, game);
                             transaction.Commit();
                         }
                         catch (Exception)
@@ -154,6 +134,36 @@ namespace TonePrism.Manager.Repositories
                     }
                 }
             });
+        }
+
+        /// <summary>
+        /// (累積監査 round 4 Medium-10) Add の core logic を既存 transaction の中で実行する内部 helper。
+        /// `DatabaseManager.AddGameAtTop` で「MIN(display_order) を SERIALIZABLE 内で読んで -1 した値を採用」+
+        /// games INSERT を 1 transaction にまとめる目的で抽出。並行 Manager race で DisplayOrder が衝突する経路を
+        /// 構造的に閉鎖する。
+        /// </summary>
+        internal void AddGameRowInTransaction(SQLiteConnection connection, SQLiteTransaction transaction, GameInfo game)
+        {
+            string insertGame = @"
+                INSERT INTO games (
+                    game_id, title, description, release_year, genre,
+                    min_players, max_players, difficulty, play_time, controller_support, supported_connection,
+                    thumbnail_path, background_path, executable_path,
+                    display_order, is_visible, controls, key_mapping, arguments, version
+                ) VALUES (
+                    @gameId, @title, @description, @releaseYear, @genre,
+                    @minPlayers, @maxPlayers, @difficulty, @playTime, @controllerSupport, @supportedConnection,
+                    @thumbnailPath, @backgroundPath, @executablePath,
+                    @displayOrder, @isVisible, @controls, @keyMapping, @arguments, @version
+                )";
+
+            using (var command = new SQLiteCommand(insertGame, connection, transaction))
+            {
+                SetGameParameters(command, game);
+                command.ExecuteNonQuery();
+            }
+
+            InsertDevelopers(connection, transaction, game.GameId, game.Developers);
         }
 
         public void Update(GameInfo game)
@@ -280,8 +290,8 @@ namespace TonePrism.Manager.Repositories
                         {
                             try
                             {
-                                // 子テーブルのgame_idを更新
-                                string[] childTables = { "game_versions", "developers", "game_genres", "play_records", "surveys", "store_section_games" };
+                                // 子テーブルのgame_idを更新 (累積監査 round 4 Low-28/29: game_genres は v18 で DROP した dead table のため除去)
+                                string[] childTables = { "game_versions", "developers", "play_records", "surveys", "store_section_games" };
                                 foreach (var table in childTables)
                                 {
                                     using (var cmd = new SQLiteCommand($"UPDATE {table} SET game_id = @newId WHERE game_id = @oldId", connection, transaction))

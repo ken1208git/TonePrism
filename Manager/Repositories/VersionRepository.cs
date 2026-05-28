@@ -133,26 +133,7 @@ namespace TonePrism.Manager.Repositories
                     {
                         try
                         {
-                            // Phase 1: 全行の version を一意な一時値へ退避 (途中の UNIQUE 一時衝突を回避)。
-                            // temp 値は "__tmp_" prefix + id + GUID で、SemVer 形式の実 version とは絶対に
-                            // 一致しない (= 既存・本番いずれの値とも衝突しない)。
-                            foreach (var v in list)
-                            {
-                                using (var cmd = new SQLiteCommand(
-                                    "UPDATE game_versions SET version = @version WHERE id = @id", connection, transaction))
-                                {
-                                    cmd.Parameters.AddWithValue("@version", "__tmp_" + v.Id + "_" + Guid.NewGuid().ToString("N"));
-                                    cmd.Parameters.AddWithValue("@id", v.Id);
-                                    cmd.ExecuteNonQuery();
-                                }
-                            }
-
-                            // Phase 2: 本番の全列 (version 含む) + 製作者を確定。
-                            foreach (var v in list)
-                            {
-                                UpdateVersionRow(connection, transaction, v);
-                            }
-
+                            UpdateManyInTransaction(connection, transaction, list);
                             transaction.Commit();
                         }
                         catch
@@ -163,6 +144,36 @@ namespace TonePrism.Manager.Repositories
                     }
                 }
             });
+        }
+
+        /// <summary>
+        /// (累積監査 round 4 High-2) UpdateMany の core logic を既存 transaction の中で実行する内部 helper。
+        /// `DatabaseManager.UpdateVersionsAndGame` で同一 transaction 内に UpdateGameVersions + UpdateGame を
+        /// atomically まとめるために抽出。Phase 1 (temp 退避) + Phase 2 (本番確定) の二段 sweep は UpdateMany と同一。
+        /// </summary>
+        internal void UpdateManyInTransaction(SQLiteConnection connection, SQLiteTransaction transaction, List<GameVersion> list)
+        {
+            if (list == null || list.Count == 0) return;
+
+            // Phase 1: 全行の version を一意な一時値へ退避 (途中の UNIQUE 一時衝突を回避)。
+            // temp 値は "__tmp_" prefix + id + GUID で、SemVer 形式の実 version とは絶対に
+            // 一致しない (= 既存・本番いずれの値とも衝突しない)。
+            foreach (var v in list)
+            {
+                using (var cmd = new SQLiteCommand(
+                    "UPDATE game_versions SET version = @version WHERE id = @id", connection, transaction))
+                {
+                    cmd.Parameters.AddWithValue("@version", "__tmp_" + v.Id + "_" + Guid.NewGuid().ToString("N"));
+                    cmd.Parameters.AddWithValue("@id", v.Id);
+                    cmd.ExecuteNonQuery();
+                }
+            }
+
+            // Phase 2: 本番の全列 (version 含む) + 製作者を確定。
+            foreach (var v in list)
+            {
+                UpdateVersionRow(connection, transaction, v);
+            }
         }
 
         /// <summary>

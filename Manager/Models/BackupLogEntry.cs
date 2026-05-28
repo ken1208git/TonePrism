@@ -21,7 +21,7 @@ namespace TonePrism.Manager.Models
         public long? FileSizeBytes { get; set; }
         public string Status { get; set; }        // "in_progress" | "success" | "failed"
         public string ErrorMessage { get; set; }
-        public string TriggerType { get; set; }   // "manual" | "auto"
+        public string TriggerType { get; set; }   // "manual" | "auto" | "safety" | "restore"  (v10 で 'safety' / v16 で 'restore' 追加)
 
         /// <summary>
         /// StartedAt をローカルタイムの DateTime に変換

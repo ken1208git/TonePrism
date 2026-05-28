@@ -97,23 +97,30 @@ namespace TonePrism.Manager.Repositories
         /// CHECK 拡張済のため、本 method は呼び出し側で InitializeDatabase (= migration 完了) 後に呼ぶ。
         /// </summary>
         public void LogRestoreCompleted(string pcName, long startedAtUnixSec, long completedAtUnixSec,
-            string sourceBackupPath, long fileSizeBytes, string status, string errorMessage)
+            string sourceBackupPath, long fileSizeBytes, string status, string errorMessage,
+            string relativePath = null)
         {
+            // (累積監査 round 4 Medium-19) relativePath 引数を追加。通常のバックアップ INSERT (InsertInProgress) は
+            // 相対 path も記録するが、復元 audit は絶対 path のみだったため、プロジェクトを別ドライブに移動すると
+            // 履歴行のリンクが切れる非対称があった。caller (BackupSectionPanel) は復元元バックアップの dbDir 基準
+            // 相対 path を `BackupPathResolver.ToRelativeFromDbDir` で計算して渡す。null なら従来通り絶対のみ記録。
             _conn.ExecuteWithRetry(() =>
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
                     _conn.OpenConnectionWithJournalMode(connection);
                     using (var cmd = new SQLiteCommand(
-                        "INSERT INTO backup_log (started_at, completed_at, pc_name, file_path, " +
+                        "INSERT INTO backup_log (started_at, completed_at, pc_name, file_path, relative_path, " +
                         "file_size_bytes, status, error_message, trigger_type) " +
-                        "VALUES (@started, @completed, @pc, @path, @size, @status, @err, 'restore')",
+                        "VALUES (@started, @completed, @pc, @path, @relpath, @size, @status, @err, 'restore')",
                         connection))
                     {
                         cmd.Parameters.AddWithValue("@started", startedAtUnixSec);
                         cmd.Parameters.AddWithValue("@completed", completedAtUnixSec);
                         cmd.Parameters.AddWithValue("@pc", pcName ?? "");
                         cmd.Parameters.AddWithValue("@path", sourceBackupPath ?? "");
+                        cmd.Parameters.AddWithValue("@relpath",
+                            string.IsNullOrEmpty(relativePath) ? (object)DBNull.Value : relativePath);
                         cmd.Parameters.AddWithValue("@size", fileSizeBytes);
                         cmd.Parameters.AddWithValue("@status", status ?? "success");
                         cmd.Parameters.AddWithValue("@err",

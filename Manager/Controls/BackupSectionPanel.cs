@@ -299,6 +299,10 @@ namespace TonePrism.Manager.Controls
                 long completedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 long fileSize = 0;
                 try { fileSize = new System.IO.FileInfo(_dbManager.DatabasePath).Length; } catch { /* swallow */ }
+                // (累積監査 round 4 Medium-19) 復元元バックアップの dbDir 基準相対 path も渡してプロジェクト移動耐性を持たせる。
+                // BackupPathResolver.ToRelativeFromDbDir は dbDir 配下に無い path には null を返す (絶対 path のみ記録になる)。
+                string dbDirForRestore = System.IO.Path.GetDirectoryName(_dbManager.DatabasePath);
+                string restoreRelativePath = Services.BackupPathResolver.ToRelativeFromDbDir(resolvedPath, dbDirForRestore);
                 _dbManager.BackupLogRepository.LogRestoreCompleted(
                     Environment.MachineName,
                     _dbManager.RestoreService.LastRestoreStartedAt,
@@ -306,7 +310,8 @@ namespace TonePrism.Manager.Controls
                     resolvedPath,
                     fileSize,
                     "success",
-                    null);
+                    null,
+                    restoreRelativePath);
             }
             catch (Exception ex)
             {

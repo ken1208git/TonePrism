@@ -98,6 +98,31 @@ namespace TonePrism.Manager.Services
                     });
                 }
 
+                // (累積監査 round 4 High-7) アクティブ版の thumbnail / background が物理欠落していれば warning として
+                // 報告する (Launcher の MainForm サムネ表示 / 背景描画が silent に欠落するのを表面化)。
+                if (!string.IsNullOrWhiteSpace(game.ThumbnailPath) && !ResolvesAsset(game.ThumbnailPath, gameFolder, baseDir))
+                {
+                    result.BrokenAssets.Add(new BrokenAsset
+                    {
+                        GameId = game.GameId,
+                        Title = string.IsNullOrWhiteSpace(game.Title) ? game.GameId : game.Title,
+                        Version = game.Version,
+                        AssetKind = "サムネイル",
+                        ExpectedPath = Path.IsPathRooted(game.ThumbnailPath) ? game.ThumbnailPath : Path.Combine(gameFolder, game.ThumbnailPath)
+                    });
+                }
+                if (!string.IsNullOrWhiteSpace(game.BackgroundPath) && !ResolvesAsset(game.BackgroundPath, gameFolder, baseDir))
+                {
+                    result.BrokenAssets.Add(new BrokenAsset
+                    {
+                        GameId = game.GameId,
+                        Title = string.IsNullOrWhiteSpace(game.Title) ? game.GameId : game.Title,
+                        Version = game.Version,
+                        AssetKind = "背景画像",
+                        ExpectedPath = Path.IsPathRooted(game.BackgroundPath) ? game.BackgroundPath : Path.Combine(gameFolder, game.BackgroundPath)
+                    });
+                }
+
                 // (2) DB に在るがディスクに無い版フォルダ。
                 List<GameVersion> versions;
                 try
@@ -124,6 +149,49 @@ namespace TonePrism.Manager.Services
                             Title = string.IsNullOrWhiteSpace(game.Title) ? game.GameId : game.Title,
                             Version = v.Version,
                             ExpectedFolder = versionDir
+                        });
+                        continue; // フォルダごと欠落なら exe / 画像 check は冗長。
+                    }
+
+                    // (累積監査 round 4 High-7) 非アクティブ版の exe / thumbnail / background も検証する。
+                    // 旧実装はアクティブ版のみ check で、非アクティブ版に切替えた瞬間に起動不能になる状態でも
+                    // 「✓ 復元完了」と誤通知していた。フォルダは存在するが個別ファイルが欠落するケースを拾う。
+                    // アクティブ版 (= 上の BrokenGames 経路) と重複しないよう、`v.Version == game.Version` の場合は skip。
+                    bool isActiveVersion = !string.IsNullOrEmpty(game.Version) &&
+                        string.Equals(v.Version, game.Version, StringComparison.OrdinalIgnoreCase);
+                    if (!isActiveVersion)
+                    {
+                        if (!string.IsNullOrWhiteSpace(v.ExecutablePath) && !ResolvesExecutable(v.ExecutablePath, gameFolder, baseDir))
+                        {
+                            result.BrokenVersions.Add(new BrokenVersion
+                            {
+                                GameId = game.GameId,
+                                Title = string.IsNullOrWhiteSpace(game.Title) ? game.GameId : game.Title,
+                                Version = v.Version,
+                                ExpectedExecutable = Path.IsPathRooted(v.ExecutablePath) ? v.ExecutablePath : Path.Combine(gameFolder, v.ExecutablePath)
+                            });
+                        }
+                    }
+                    if (!string.IsNullOrWhiteSpace(v.ThumbnailPath) && !ResolvesAsset(v.ThumbnailPath, gameFolder, baseDir))
+                    {
+                        result.BrokenAssets.Add(new BrokenAsset
+                        {
+                            GameId = game.GameId,
+                            Title = string.IsNullOrWhiteSpace(game.Title) ? game.GameId : game.Title,
+                            Version = v.Version,
+                            AssetKind = "サムネイル",
+                            ExpectedPath = Path.IsPathRooted(v.ThumbnailPath) ? v.ThumbnailPath : Path.Combine(gameFolder, v.ThumbnailPath)
+                        });
+                    }
+                    if (!string.IsNullOrWhiteSpace(v.BackgroundPath) && !ResolvesAsset(v.BackgroundPath, gameFolder, baseDir))
+                    {
+                        result.BrokenAssets.Add(new BrokenAsset
+                        {
+                            GameId = game.GameId,
+                            Title = string.IsNullOrWhiteSpace(game.Title) ? game.GameId : game.Title,
+                            Version = v.Version,
+                            AssetKind = "背景画像",
+                            ExpectedPath = Path.IsPathRooted(v.BackgroundPath) ? v.BackgroundPath : Path.Combine(gameFolder, v.BackgroundPath)
                         });
                     }
                 }
@@ -182,6 +250,15 @@ namespace TonePrism.Manager.Services
             return false;
         }
 
+        /// <summary>
+        /// (累積監査 round 4 High-7) thumbnail / background など非実行ファイル系の解決 helper。
+        /// 実装は ResolvesExecutable と同じ三段 (絶対 / gameFolder 基準 / install 基準) だが、意味的区別のため別名にする。
+        /// </summary>
+        private static bool ResolvesAsset(string assetPath, string gameFolder, string baseDir)
+        {
+            return ResolvesExecutable(assetPath, gameFolder, baseDir);
+        }
+
         private static IEnumerable<string> SafeGetDirectories(string path)
         {
             try { return Directory.GetDirectories(path); }
@@ -197,6 +274,11 @@ namespace TonePrism.Manager.Services
         public List<BrokenGame> BrokenGames { get; } = new List<BrokenGame>();
         public List<MissingVersionFolder> MissingVersionFolders { get; } = new List<MissingVersionFolder>();
         public List<OrphanFolder> OrphanFolders { get; } = new List<OrphanFolder>();
+        // (累積監査 round 4 High-7) 非アクティブ版で exe が解決不能なケース。フォルダはあるが個別 file が欠落。
+        // この版に切替えた瞬間に起動不能になるため、復元直後にユーザーに表面化する。
+        public List<BrokenVersion> BrokenVersions { get; } = new List<BrokenVersion>();
+        // (累積監査 round 4 High-7) thumbnail / background の物理欠落。画像なので起動はできるが UI が劣化する warning。
+        public List<BrokenAsset> BrokenAssets { get; } = new List<BrokenAsset>();
 
         /// <summary>
         /// (追加精査 ③) DB スキーマが未完 (= migration が partial skip された) ことを示す。
@@ -215,12 +297,14 @@ namespace TonePrism.Manager.Services
         /// <summary>
         /// 起動に直結する深刻な問題 (= 復元時点のフォルダ補完が必要)、または
         /// schema 未完 (= 後続の DB 操作で重複行増殖等のリスク残存)。
+        /// (High-7) BrokenVersions も「版切替時点で起動不能」になるため critical に含める。
         /// </summary>
-        public bool HasCriticalFindings => BrokenGames.Count > 0 || SchemaIncomplete;
+        public bool HasCriticalFindings => BrokenGames.Count > 0 || BrokenVersions.Count > 0 || SchemaIncomplete;
 
         /// <summary>何らかのズレが見つかったか (深刻 / 軽微いずれか)。</summary>
         public bool HasAnyFindings =>
             BrokenGames.Count > 0 || MissingVersionFolders.Count > 0 || OrphanFolders.Count > 0
+            || BrokenVersions.Count > 0 || BrokenAssets.Count > 0
             || SchemaIncomplete;
     }
 
@@ -247,5 +331,28 @@ namespace TonePrism.Manager.Services
     {
         public string Path { get; set; }
         public OrphanKind Kind { get; set; }
+    }
+
+    /// <summary>
+    /// (累積監査 round 4 High-7) 非アクティブ版の exe 欠落。
+    /// </summary>
+    public class BrokenVersion
+    {
+        public string GameId { get; set; }
+        public string Title { get; set; }
+        public string Version { get; set; }
+        public string ExpectedExecutable { get; set; }
+    }
+
+    /// <summary>
+    /// (累積監査 round 4 High-7) 画像 asset (thumbnail / background) の欠落。
+    /// </summary>
+    public class BrokenAsset
+    {
+        public string GameId { get; set; }
+        public string Title { get; set; }
+        public string Version { get; set; }
+        public string AssetKind { get; set; } // "サムネイル" or "背景画像"
+        public string ExpectedPath { get; set; }
     }
 }

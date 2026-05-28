@@ -57,6 +57,16 @@ namespace TonePrism.Manager
         private bool _gameReleaseYearWasNullOnLoad;
         private decimal _gameReleaseYearDisplayedOnLoad;
 
+        // (累積監査 round 4 Low-5) games.min_players / max_players 用の null 保護 snapshot。通常経路は
+        // selectedVersion != null で UpdateVersionsAndGame の game ← selectedVersion mirror で正しい値が入るが、
+        // 防御経路 (cmbVersionList が空 = 異常 DB) で games.MinPlayers/MaxPlayers が NULL だったゲームの
+        // 編集を保存すると、numMinPlayers.Minimum=1 で常に > 0 となり Launcher の表示が「不明」→「1人」に
+        // silent 化ける drift があった。ReleaseYear と同じ pattern で防御経路でも NULL を維持する。
+        private bool _gameMinPlayersWasNullOnLoad;
+        private bool _gameMaxPlayersWasNullOnLoad;
+        private decimal _gameMinPlayersDisplayedOnLoad;
+        private decimal _gameMaxPlayersDisplayedOnLoad;
+
         // (#158 CX-1) folder rename を 2-phase 化するための plan 単位 (Phase 1 で構築 / Phase 2 で実行)。
         // (#158 round 4 codex P1) Old{Executable,Thumbnail,Background}Path: in-memory state rollback 用に
         // path 書き換え前の値を capture。disk Move を rollback しても in-memory が NEW のままだと、同
@@ -195,23 +205,30 @@ namespace TonePrism.Manager
             }
             GameFormHelper.SetSelectedGenres(clbGenre, originalGame.Genre);
 
+            // (累積監査 round 4 Low-5) games.min_players / max_players が DB 上 NULL のときの保護 snapshot を記録。
+            // 通常経路 (selectedVersion != null) では selectedVersion 値で上書きされ救われるが、防御経路で
+            // numMinPlayers.Minimum=1 で常に > 0 となり NULL→1 の silent 上書きが起きる drift を防ぐ。
             if (originalGame.MinPlayers.HasValue)
             {
-                numMinPlayers.Value = originalGame.MinPlayers.Value;
+                _gameMinPlayersWasNullOnLoad = !SetClampedNumericValue(numMinPlayers, originalGame.MinPlayers.Value, "MinPlayers (game)");
             }
             else
             {
                 numMinPlayers.Value = 1;
+                _gameMinPlayersWasNullOnLoad = true;
             }
+            _gameMinPlayersDisplayedOnLoad = numMinPlayers.Value;
 
             if (originalGame.MaxPlayers.HasValue)
             {
-                numMaxPlayers.Value = originalGame.MaxPlayers.Value;
+                _gameMaxPlayersWasNullOnLoad = !SetClampedNumericValue(numMaxPlayers, originalGame.MaxPlayers.Value, "MaxPlayers (game)");
             }
             else
             {
                 numMaxPlayers.Value = 1;
+                _gameMaxPlayersWasNullOnLoad = true;
             }
+            _gameMaxPlayersDisplayedOnLoad = numMaxPlayers.Value;
 
             // コンボボックスを初期化
             GameFormHelper.InitializeDifficultyCombo(cmbDifficulty, originalGame.Difficulty);
@@ -339,6 +356,17 @@ namespace TonePrism.Manager
                 if (initialSelected == null && cmbVersionList.Items.Count > 0)
                 {
                     initialSelected = cmbVersionList.Items[0] as GameVersion;
+                    // (累積監査 round 4 Medium-14) `originalGame.Version IS NULL` の異常 DB (= 過去 migration 中断 /
+                    // 旧 Manager で games.version 未設定のまま残ったゲーム) を編集時、active fallback healing が
+                    // 無効化されて編集画面が空項目で表示される drift があった。ここで先頭版を仮 active として扱い、
+                    // OK 保存時 (line 1442 で games.version が必ず非 NULL に書き出される) に healing が自動完了する。
+                    // ユーザーへは UI 注意喚起 (warning Label 等) は出さず、Logger に trail を残すだけに留める
+                    // (= 編集動作自体は正常完遂するため、過度な驚かせ警告は避ける)。
+                    if (originalGame.Version == null && initialSelected != null)
+                    {
+                        Logger.Info("[EditGameForm] (Medium-14) games.version=NULL の異常 DB を編集中。先頭版 '" +
+                            initialSelected.Version + "' を仮 active とし、OK 保存で healing する: gameId=" + originalGame.GameId);
+                    }
                 }
 
                 // (#234) 初期選択 = 起動対象の版。OK 時のアクティブ版切替検出の基準として記録。
@@ -1092,8 +1120,13 @@ namespace TonePrism.Manager
                     ReleaseYear = (_gameReleaseYearWasNullOnLoad && numReleaseYear.Value == _gameReleaseYearDisplayedOnLoad)
                         ? (int?)null
                         : (numReleaseYear.Value > 0 ? (int?)numReleaseYear.Value : null),
-                    MinPlayers = numMinPlayers.Value > 0 ? (int?)numMinPlayers.Value : null,
-                    MaxPlayers = numMaxPlayers.Value > 0 ? (int?)numMaxPlayers.Value : null,
+                    // (累積監査 round 4 Low-5) Load 時に NULL だった + user が触っていなければ NULL 維持。
+                    MinPlayers = (_gameMinPlayersWasNullOnLoad && numMinPlayers.Value == _gameMinPlayersDisplayedOnLoad)
+                        ? (int?)null
+                        : (numMinPlayers.Value > 0 ? (int?)numMinPlayers.Value : null),
+                    MaxPlayers = (_gameMaxPlayersWasNullOnLoad && numMaxPlayers.Value == _gameMaxPlayersDisplayedOnLoad)
+                        ? (int?)null
+                        : (numMaxPlayers.Value > 0 ? (int?)numMaxPlayers.Value : null),
                     Difficulty = cmbDifficulty.SelectedIndex >= 0 ? cmbDifficulty.SelectedIndex + 1 : (int?)null,
                     PlayTime = cmbPlayTime.SelectedIndex >= 0 ? cmbPlayTime.SelectedIndex + 1 : (int?)null,
                     SupportedConnection = cmbSupportedConnection.SelectedIndex >= 0 ? cmbSupportedConnection.SelectedIndex : 0,
@@ -1389,43 +1422,20 @@ namespace TonePrism.Manager
                         }
                     }
 
-                    // (#234 後続) バージョン情報を単一トランザクションで一括更新する。
-                    // 旧実装は VersionRepository.Update を 1 行ずつ呼んで per-call commit していたため、
-                    // (a) バージョン番号の入れ替え (v1↔v2) / 玉突き (A→B→C) / 循環では、行を 1 件ずつ
-                    //     確定する途中で「一瞬だけ同じ番号が 2 行」になり、最終状態が一意でも
-                    //     game_versions(game_id, version) UNIQUE INDEX (#234 ②) 違反で throw していた
-                    //     (= 画面上で番号を入れ替えてから保存すると正当な操作が失敗する回帰)、
-                    // (b) N 件目で失敗すると 0..N-1 件目は commit 済の部分コミット drift が残る、
-                    // の 2 問題があった。UpdateGameVersions は「全行を一意な一時値へ退避 → 本番値を確定」を
-                    // 単一 transaction で行うため (a) を構造的に回避し、(b) も「全成功 or 全 rollback」の
-                    // 原子性で解消する。原子的ゆえ DB の部分コミットは起きないので、失敗時は常に DB 無変更で
-                    // 返り、完了済 disk rename を安全に rollback できる (旧 dbSucceededCount 分岐は不要)。
-                    try
-                    {
-                        dbManager.UpdateGameVersions(cmbVersionList.Items.OfType<GameVersion>());
-                    }
-                    catch (Exception dbEx)
-                    {
-                        // 原子的更新のため DB は OK 押下前のまま (部分コミットなし)。完了済 disk rename を
-                        // 逆順で元へ戻し、in-memory state も capture 前へ復元して「OK 押下前」に巻き戻す。
-                        int rolledBack, rollbackFailures;
-                        RollbackCompletedRenames(completedRenames, out rolledBack, out rollbackFailures);
-                        MessageBox.Show(
-                            "バージョン情報の DB 更新に失敗しました:\n" +
-                            "  " + dbEx.Message + "\n\n" +
-                            "  完了済の rename " + rolledBack + " 件を元の名前に rollback しました" +
-                            (rollbackFailures > 0
-                                ? " (rollback 失敗 " + rollbackFailures + " 件、ログファイル参照、手動で元に戻してください)"
-                                : "") +
-                            "。\n  DB は更新前なので OK 押下前の状態に戻ります。",
-                            "DB 更新失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        // (#158 round 6 H-1) throw で再投すると外側 catch の汎用 MessageBox が 2 枚目に
-                        // 出る UX bug があるため return で form を留める (DialogResult は None のまま、
-                        // user は状態を見て Cancel か修正リトライを選べる)。
-                        return;
-                    }
-                    
+                    // (累積監査 round 4 High-2) 旧実装は (a) UpdateGameVersions + (b) UpdateGame を別 transaction で
+                    // 順次実行しており、(a) 完了直後の電源断 / SMB disconnect で「version 群は新値 / games 行は
+                    // 旧版を指したまま / disk folder は新名」という partial-commit drift が残る窓があった。
+                    // UpdateVersionsAndGame で両者を 1 transaction に統合し窓を物理閉鎖 (AddVersionAndActivate と
+                    // 同じ設計)。旧コメント (#234 後続 / #158 round 7 H-2) はこの drift を user に通知する
+                    // 通常運用前提の fallback だったが、atomic 化で「全成功 or 全 rollback」の二択に整理され、
+                    // 失敗時は「DB 無変更 + 完了済 disk rename を逆順 rollback」で OK 押下前に戻せる。
+                    //
                     // 3. メインのゲーム情報を更新（選択中バージョンの全フィールドを反映）
+                    // (累積監査 round 4 High-3 防御) selectedVersion.Thumbnail/Background が null だと
+                    // games.thumbnail_path / background_path も null 化される。これは「アクティブ版を切替たので
+                    // その版のメタデータが games に流入する」正しいセマンティクスだが、新版に画像未登録のまま
+                    // active 化すると Launcher の画像が消える silent UX 退行になる。ここでは仕様通り上書きし、
+                    // 画像消去の警告は version-up 時の入力時に出す責務 (別 Low fix)。
                     game.Title = selectedVersion.Title ?? game.Title;
                     game.Description = selectedVersion.Description;
                     game.Genre = selectedVersion.Genre ?? game.Genre;
@@ -1441,35 +1451,28 @@ namespace TonePrism.Manager
                     game.Arguments = selectedVersion.Arguments;
                     game.Version = selectedVersion.Version;
 
-                    // (#158 round 7 H-2) UpdateGame は UpdateGameVersion 群が全件成功した後に呼ばれる
-                    // が、ここで一時的 SQLite 失敗等で例外が出ると「version 群 (= per-call commit 済) は
-                    // 新値 / games 行は旧値 / disk folder は新名」という drift で残る。round 5 codex P1
-                    // の partial commit pattern と同型なので同 wording で user に通知 + return (= round 6
-                    // H-1 の二重 MessageBox 防止のため throw せず form 留める)。disk rollback は行わない
-                    // (= UpdateGameVersion が既に commit 済の row が disk 新名を指しているため)。
                     try
                     {
-                        dbManager.UpdateGame(game);
+                        dbManager.UpdateVersionsAndGame(cmbVersionList.Items.OfType<GameVersion>(), game);
                     }
-                    catch (Exception gameEx)
+                    catch (Exception dbEx)
                     {
-                        // (#158 round 8 senior Low #1) gameIdChanged=true 経路では既に UpdateGameId で
-                        // games.gameId は新値、それ以外 (title/genre/people 等) は旧値の混合状態になる。
-                        // 「games 行のみ古い値」と言い切ると user が「全 fields old」と誤読する余地が
-                        // あるため、gameIdChanged 有無で文言分岐。
-                        string driftDetail = gameIdChanged
-                            ? "  ・ games 行は部分更新状態 (gameId は新値で更新済み、title / ジャンル / 人数等" +
-                              " のフィールドは旧値の可能性あり)\n"
-                            : "  ・ games 行のみ古い値で残っており drift 状態\n";
+                        // 原子的更新のため DB は OK 押下前のまま (部分コミットなし)。完了済 disk rename を
+                        // 逆順で元へ戻し、in-memory state も capture 前へ復元して「OK 押下前」に巻き戻す。
+                        int rolledBack, rollbackFailures;
+                        RollbackCompletedRenames(completedRenames, out rolledBack, out rollbackFailures);
                         MessageBox.Show(
-                            "ゲーム本体情報 (games table) の DB 更新に失敗しました:\n" +
-                            "  " + gameEx.Message + "\n\n" +
-                            "  ・ バージョン情報 (game_versions table) の更新は既に完了しています\n" +
-                            "  ・ disk フォルダは新しい名前のまま\n" +
-                            driftDetail +
-                            "\nManager を一度終了して再起動し、該当ゲームを開いて UpdateGame の項目 (タイトル / " +
-                            "ジャンル / 人数等) が想定通りか確認、必要なら手動で再編集してください。",
-                            "DB 部分更新失敗 (要手動確認)", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            "バージョン情報 + ゲーム本体情報の DB 更新に失敗しました:\n" +
+                            "  " + dbEx.Message + "\n\n" +
+                            "  完了済の rename " + rolledBack + " 件を元の名前に rollback しました" +
+                            (rollbackFailures > 0
+                                ? " (rollback 失敗 " + rollbackFailures + " 件、ログファイル参照、手動で元に戻してください)"
+                                : "") +
+                            "。\n  DB は更新前なので OK 押下前の状態に戻ります。",
+                            "DB 更新失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        // (#158 round 6 H-1) throw で再投すると外側 catch の汎用 MessageBox が 2 枚目に
+                        // 出る UX bug があるため return で form を留める (DialogResult は None のまま、
+                        // user は状態を見て Cancel か修正リトライを選べる)。
                         return;
                     }
                 }
@@ -1520,9 +1523,20 @@ namespace TonePrism.Manager
         {
             string path = textBox.Text.Trim();
             if (string.IsNullOrEmpty(path)) return;
+            if (string.IsNullOrEmpty(oldFolder)) return;
 
             // 絶対パスで旧フォルダ配下の場合、新フォルダに置換
-            if (Path.IsPathRooted(path) && path.StartsWith(oldFolder, StringComparison.OrdinalIgnoreCase))
+            // (累積監査 round 4 Medium-13) 区切り文字境界を持たない StartsWith は `oldFolder="<base>\games\foo"`
+            // で textbox 値が偶然 `<base>\games\foobar\...` を含むと別ゲームの path を `<base>\games\<newId>bar\...`
+            // に書き換える兄弟前方一致 risk があった。`IsPathInside` / `ToRelativePathAfterCopy` と同じ
+            // 「等値 OR 区切り付き StartsWith」契約に揃え、defense-in-depth で兄弟誤置換を物理閉鎖する。
+            if (!Path.IsPathRooted(path)) return;
+            string oldFolderWithSep = oldFolder.EndsWith(Path.DirectorySeparatorChar.ToString()) ? oldFolder : oldFolder + Path.DirectorySeparatorChar;
+            if (string.Equals(path, oldFolder, StringComparison.OrdinalIgnoreCase))
+            {
+                textBox.Text = newFolder;
+            }
+            else if (path.StartsWith(oldFolderWithSep, StringComparison.OrdinalIgnoreCase))
             {
                 textBox.Text = newFolder + path.Substring(oldFolder.Length);
             }

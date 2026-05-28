@@ -211,6 +211,37 @@ namespace TonePrism.Manager
                 sb.AppendLine();
             }
 
+            // (2b) 非アクティブ版で実行ファイルが解決できない (累積監査 round 4 High-7)
+            if (_result.BrokenVersions.Count > 0)
+            {
+                sb.AppendLine("■ 起動できない非アクティブ版（" + _result.BrokenVersions.Count + " 件）— 対処が必要");
+                sb.AppendLine("  フォルダはディスクに在りますが、実行ファイルが見つからない版があります。");
+                sb.AppendLine("  この版に切替えると起動できなくなります（アクティブ版でなければ当面の");
+                sb.AppendLine("  起動には影響しません）。");
+                sb.AppendLine();
+                foreach (var bv in _result.BrokenVersions)
+                {
+                    sb.AppendLine("  ・" + bv.Title + "  [ID: " + bv.GameId + "]  版: " + bv.Version);
+                    sb.AppendLine("      想定パス: " + bv.ExpectedExecutable);
+                }
+                sb.AppendLine();
+            }
+
+            // (2c) thumbnail / background asset の欠落 (累積監査 round 4 High-7)
+            if (_result.BrokenAssets.Count > 0)
+            {
+                sb.AppendLine("■ サムネイル／背景画像の欠落（" + _result.BrokenAssets.Count + " 件）— 起動への影響なし");
+                sb.AppendLine("  DB が指す画像ファイルがディスクに見つかりません。Launcher の見た目が");
+                sb.AppendLine("  劣化しますが、ゲーム自体は起動できます。");
+                sb.AppendLine();
+                foreach (var ba in _result.BrokenAssets)
+                {
+                    sb.AppendLine("  ・" + ba.Title + "  [ID: " + ba.GameId + "]  版: " + (ba.Version ?? "(不明)") + "  種別: " + ba.AssetKind);
+                    sb.AppendLine("      想定パス: " + ba.ExpectedPath);
+                }
+                sb.AppendLine();
+            }
+
             // (3) 孤児フォルダ
             var orphanGames = _result.OrphanFolders.Where(o => o.Kind == OrphanKind.Game).ToList();
             var orphanVersions = _result.OrphanFolders.Where(o => o.Kind == OrphanKind.Version).ToList();

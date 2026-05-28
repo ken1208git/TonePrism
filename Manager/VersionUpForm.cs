@@ -450,7 +450,32 @@ namespace TonePrism.Manager
                     UpdatedGameInfo.BackgroundPath = relativePath;
                     NewVersion.BackgroundPath = relativePath;
                 }
-                
+
+                // (累積監査 round 4 Low-27) baseVersion に画像があったのに新版で未設定のまま OK 押下すると、
+                // activation Yes 時に games.thumbnail_path / background_path が null で上書きされ、Launcher の
+                // 表示が消える silent UX 退行が起きる。新版を active 化する前提の操作なので、画像欠落を
+                // 明示的に確認して user に「了承して進む / 戻って指定する」の選択肢を出す。
+                bool baseHadThumb = baseVersion != null && !string.IsNullOrEmpty(baseVersion.ThumbnailPath);
+                bool baseHadBg = baseVersion != null && !string.IsNullOrEmpty(baseVersion.BackgroundPath);
+                bool newHasNoThumb = string.IsNullOrEmpty(NewVersion.ThumbnailPath);
+                bool newHasNoBg = string.IsNullOrEmpty(NewVersion.BackgroundPath);
+                if ((baseHadThumb && newHasNoThumb) || (baseHadBg && newHasNoBg))
+                {
+                    var missing = new List<string>();
+                    if (baseHadThumb && newHasNoThumb) missing.Add("サムネイル");
+                    if (baseHadBg && newHasNoBg) missing.Add("背景画像");
+                    var dr = MessageBox.Show(
+                        "新しいバージョンに " + string.Join(" / ", missing) + " が指定されていません。\n\n" +
+                        "このバージョンをアクティブ (= ランチャーで起動する版) にすると、" +
+                        "ランチャーでのこれらの表示が消えます (= 旧版の画像は引き継がれません)。\n\n" +
+                        "「OK」を押すとそのまま進みます。「キャンセル」を押すと、戻ってコピー元フォルダ内の" +
+                        "画像ファイルを指定し直せます。",
+                        "画像未設定の確認",
+                        MessageBoxButtons.OKCancel,
+                        MessageBoxIcon.Warning);
+                    if (dr != DialogResult.OK) return;
+                }
+
                 DialogResult = DialogResult.OK;
                 Close();
             }
@@ -516,9 +541,18 @@ namespace TonePrism.Manager
                     // (#234 追加精査) 正規化不能な既存版 (malformed、例: DB に "1.0" / "alpha" が残存) は
                     // 旧実装では比較対象外で素通りしており、その malformed 文字列と raw 一致する新版を
                     // 作れる穴が残っていた。EditGameForm の dup-check が GroupBy キーを raw fallback して
-                    // 同型を捕捉しているのと同様、ここでも生値 (前後空白・大小無視) で最終比較し完全同名
-                    // だけは弾く (= 正規化できない以上「同義」までは判定不能なので raw 一致に限定)。
-                    isDup = string.Equals((existing ?? "").Trim(), (semverNext.VersionString ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
+                    // 同型を捕捉しているのと同様、ここでも生値 (前後空白・大小無視) で最終比較する。
+                    bool rawDup = string.Equals((existing ?? "").Trim(), (semverNext.VersionString ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
+
+                    // (累積監査 round 4 Medium-14) raw 比較に加え、数字トークン列での semantic 比較も追加。
+                    // 例: DB に "1.0" (2 parts) が残っていて新 input が "v1.0.0" のとき、raw は不一致だが
+                    // semantic には同じ → DB UNIQUE INDEX も raw 不一致で通過 + disk leaf が `v1.0` と `v1.0.0` で
+                    // 別フォルダ → 「semantic 上 同 version だが DB 行は別」が並び、Launcher の起動対象が
+                    // user 意図と無関係に切替わる drift があった。数字トークン抽出 + 末尾 0 padding で
+                    // "1.0" と "v1.0.0" を同一視して弾く。
+                    bool tokenDup = TokenSequenceEqualPadded(existing, semverNext.VersionString);
+
+                    isDup = rawDup || tokenDup;
                 }
                 if (isDup)
                 {
@@ -636,6 +670,39 @@ namespace TonePrism.Manager
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// (累積監査 round 4 Medium-14) 2 つの version 文字列を「数字トークン列」として比較し、末尾 0 padding で
+        /// 同一視する。例: "1.0" ↔ "v1.0.0" は両方 [1, 0, 0, ...] とみなして dup 判定する。
+        /// TryNormalize で正規化不能な malformed (parts 不足) との semantic 衝突を捕捉する目的。
+        /// 完全に数字を含まない文字列 ("alpha" 等) は []token、片方が空なら一致しない。
+        /// </summary>
+        private static bool TokenSequenceEqualPadded(string a, string b)
+        {
+            var tokensA = ExtractIntegerTokens(a);
+            var tokensB = ExtractIntegerTokens(b);
+            if (tokensA.Count == 0 || tokensB.Count == 0) return false;
+            int maxLen = Math.Max(tokensA.Count, tokensB.Count);
+            for (int i = 0; i < maxLen; i++)
+            {
+                int ai = i < tokensA.Count ? tokensA[i] : 0;
+                int bi = i < tokensB.Count ? tokensB[i] : 0;
+                if (ai != bi) return false;
+            }
+            return true;
+        }
+
+        private static List<int> ExtractIntegerTokens(string s)
+        {
+            var result = new List<int>();
+            if (string.IsNullOrEmpty(s)) return result;
+            var matches = System.Text.RegularExpressions.Regex.Matches(s, @"\d+");
+            foreach (System.Text.RegularExpressions.Match m in matches)
+            {
+                if (int.TryParse(m.Value, out int n)) result.Add(n);
+            }
+            return result;
         }
 
         private void UpdateThumbnailPreview() => ImagePreviewHelper.UpdatePreview(picThumbnailPreview, txtThumbnailPath.Text);
