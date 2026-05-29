@@ -33,14 +33,18 @@ namespace TonePrism.Manager.Controls
         {
             gridHistory.AutoGenerateColumns = false;
             gridHistory.Columns.Clear();
+            // (Manager v0.21.0) AutoSize=Fill で列幅を grid 幅にちょうど収め、横スクロールを出さない。
+            // ファイルパスは余り幅を埋める可変列 (溢れた分は DataGridView 既定の "…" 省略表示)。固定情報列は
+            // MinimumWidth で可読性を確保し、window を狭めても潰れないようにする。
+            gridHistory.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             // (Manager v0.21.0) ファイル由来の履歴では開始 / 完了の区別が無いため日時は「作成日時」1 列に統合。
-            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "created", HeaderText = "作成日時", Width = 150 });
-            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "pc", HeaderText = "実行PC", Width = 110 });
-            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "trigger", HeaderText = "トリガ", Width = 60 });
+            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "created", HeaderText = "作成日時", FillWeight = 150, MinimumWidth = 150 });
+            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "pc", HeaderText = "実行PC", FillWeight = 100, MinimumWidth = 90 });
+            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "trigger", HeaderText = "トリガ", FillWeight = 55, MinimumWidth = 50 });
             // (#200) 「状態」列は持たない。backup_log 廃止 (v19) 後は失敗はファイルを残さず履歴に出ない
             // (走査結果は実質すべて成功ファイル) ため状態列は情報量ゼロ。失敗通知は status bar / Logger で覆える。
-            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "size", HeaderText = "サイズ", Width = 90 });
-            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "file", HeaderText = "ファイルパス", Width = 380 });
+            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "size", HeaderText = "サイズ", FillWeight = 75, MinimumWidth = 70 });
+            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "file", HeaderText = "ファイルパス", FillWeight = 320, MinimumWidth = 120 });
         }
 
         public void RefreshDisplay()
