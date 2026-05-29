@@ -292,6 +292,21 @@ namespace TonePrism.Manager.Services
                 TryDeleteIfExists(destinationPath + "-shm");
                 TryDeleteIfExists(destinationPath + "-journal");
 
+                // (Finding #5) success 記録の前に出力 DB を検証する。BackupDatabase が例外を投げずに戻っても、
+                // 出力が空 / 不完全なら success として記録すると「最終バックアップ」表示や復元候補に中身のない
+                // バックアップが正常として残り、後日それを復元すると空 DB を掴む最悪事故になる。(a) ファイルが
+                // 存在しサイズ > 0、(b) PRAGMA quick_check が "ok"、の両方を満たさなければ例外を投げ、下の
+                // catch で failed 記録 + ファイル削除 + lease 巻き戻しに流す。
+                if (!File.Exists(destinationPath) || new FileInfo(destinationPath).Length == 0)
+                {
+                    throw new Exception("バックアップファイルが作成されていない、または空です: " + destinationPath);
+                }
+                VerifyBackupIntegrity(destinationPath);
+                // VerifyBackupIntegrity が開いた read 接続が稀に sibling を残す版があるため再掃除。
+                TryDeleteIfExists(destinationPath + "-wal");
+                TryDeleteIfExists(destinationPath + "-shm");
+                TryDeleteIfExists(destinationPath + "-journal");
+
                 token.ThrowIfCancellationRequested();
 
                 long fileSize = 0;
@@ -343,6 +358,33 @@ namespace TonePrism.Manager.Services
         /// MainForm.StartAutoBackupIfDue で「起動時 1 回」のため、巻き戻しても連射 (= 警告 modal の連発) には
         /// ならない。巻き戻し自体の失敗は握り潰す (最悪でも従来挙動 = 次 interval 待ちに戻るだけ)。
         /// </summary>
+        /// <summary>
+        /// (Finding #5) 作成したバックアップ DB を `PRAGMA quick_check` で検証する。"ok" 以外なら例外を投げ、
+        /// caller の catch で failed 記録 + ファイル削除 + lease 巻き戻しに流す (= 壊れた / 不完全なバックアップを
+        /// success として残さない)。検証は read のみ。書き込まないが、念のため caller 側で検証後に
+        /// -wal/-shm/-journal sibling を再掃除する。quick_check は integrity_check より軽量で、
+        /// ページ単位の連結・B-tree 構造の妥当性を確認する (索引の中身までは見ないが、空 / 切り詰め /
+        /// 途中切れの検出には十分)。
+        /// </summary>
+        private void VerifyBackupIntegrity(string path)
+        {
+            string result = null;
+            using (var conn = new SQLiteConnection($"Data Source={path};Version=3;"))
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = "PRAGMA quick_check;";
+                    var scalar = cmd.ExecuteScalar();
+                    result = scalar?.ToString();
+                }
+            }
+            if (!string.Equals(result, "ok", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new Exception("バックアップ DB の整合性チェック (quick_check) に失敗しました: " + (result ?? "(結果なし)"));
+            }
+        }
+
         private void RollbackLeaseOnFailure(bool leaseAlreadyAcquired, long leasePreviousValue)
         {
             if (!leaseAlreadyAcquired) return;

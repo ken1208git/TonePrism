@@ -363,6 +363,21 @@ namespace TonePrism.Manager
             // 毎クリックで再評価 (= 前回 OK で失敗→フォーム継続→再 OK 時に stale true を持ち越さない)。
             // wipe は下の警告で OK したときのみ true になり、かつ CopyGameFolder で Directory.Exists と AND される。
             wipeExistingOnCopy = false;
+
+            // (Finding #3) M7 の「自分が作った disk 状態だけ自分で消す」flag 群も毎クリックでリセットする。
+            // 旧実装は wipeExistingOnCopy しかリセットしておらず、1 回目 OK が CopyGameFolder で
+            // baseGameFolderCreated / versionFolderCreatedThisCall / destinationGameFolder を立てた後に失敗
+            // → cleanup で folder は消すが flag は stale true のまま残存。2 回目 OK で wipe-check の DB 再 check が
+            // 早期 throw (= destinationGameFolder の再代入より前) すると、CleanupCopiedFoldersOnRollback が stale な
+            // destinationGameFolder を「自分が作った」と誤認して削除し、並行 Manager の勝者が作成済の version
+            // フォルダを巻き込む footgun があった (M7 ガードが stale flag で無効化)。上記コメントの意図
+            // (= 持ち越さない) を flag 群全体に適用して構造的に閉じる。CopyGameFolder で必ず再代入されるため
+            // 通常経路には影響しない。
+            baseGameFolderCreated = false;
+            versionFolderCreatedThisCall = false;
+            destinationGameFolder = null;
+            baseGameFolder = null;
+
             string existingFolder = PathManager.GetGameFolder(gameId);
             if (Directory.Exists(existingFolder))
             {

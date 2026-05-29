@@ -174,7 +174,12 @@ namespace TonePrism.Manager.Services
                     // (累積監査 round 4 High-7) 非アクティブ版の exe / thumbnail / background も検証する。
                     // 旧実装はアクティブ版のみ check で、非アクティブ版に切替えた瞬間に起動不能になる状態でも
                     // 「✓ 復元完了」と誤通知していた。フォルダは存在するが個別ファイルが欠落するケースを拾う。
-                    // アクティブ版 (= 上の BrokenGames 経路) と重複しないよう、`v.Version == game.Version` の場合は skip。
+                    // アクティブ版 (= 上の BrokenGames 経路で game.* を検証済) と重複しないよう、
+                    // `v.Version == game.Version` の場合は exe / 画像とも skip。
+                    // (Finding #7) 旧実装は exe だけを isActiveVersion ガードで包み、thumbnail / background は
+                    // ガード外で全版 (アクティブ含む) を検査していたため、アクティブ版の画像欠落が games 側 (上の
+                    // 103-124) と版側で二重カウントされ、レポートの「欠落 N 件」が実数より多く表示されていた。
+                    // 画像 check も exe と同じくガード内へ移し、アクティブ版は games 経由の 1 回だけ数える。
                     bool isActiveVersion = !string.IsNullOrEmpty(game.Version) &&
                         string.Equals(v.Version, game.Version, StringComparison.OrdinalIgnoreCase);
                     if (!isActiveVersion)
@@ -189,28 +194,28 @@ namespace TonePrism.Manager.Services
                                 ExpectedExecutable = Path.IsPathRooted(v.ExecutablePath) ? v.ExecutablePath : Path.Combine(gameFolder, v.ExecutablePath)
                             });
                         }
-                    }
-                    if (!string.IsNullOrWhiteSpace(v.ThumbnailPath) && !ResolvesAsset(v.ThumbnailPath, gameFolder, baseDir))
-                    {
-                        result.BrokenAssets.Add(new BrokenAsset
+                        if (!string.IsNullOrWhiteSpace(v.ThumbnailPath) && !ResolvesAsset(v.ThumbnailPath, gameFolder, baseDir))
                         {
-                            GameId = game.GameId,
-                            Title = string.IsNullOrWhiteSpace(game.Title) ? game.GameId : game.Title,
-                            Version = v.Version,
-                            AssetKind = "サムネイル",
-                            ExpectedPath = Path.IsPathRooted(v.ThumbnailPath) ? v.ThumbnailPath : Path.Combine(gameFolder, v.ThumbnailPath)
-                        });
-                    }
-                    if (!string.IsNullOrWhiteSpace(v.BackgroundPath) && !ResolvesAsset(v.BackgroundPath, gameFolder, baseDir))
-                    {
-                        result.BrokenAssets.Add(new BrokenAsset
+                            result.BrokenAssets.Add(new BrokenAsset
+                            {
+                                GameId = game.GameId,
+                                Title = string.IsNullOrWhiteSpace(game.Title) ? game.GameId : game.Title,
+                                Version = v.Version,
+                                AssetKind = "サムネイル",
+                                ExpectedPath = Path.IsPathRooted(v.ThumbnailPath) ? v.ThumbnailPath : Path.Combine(gameFolder, v.ThumbnailPath)
+                            });
+                        }
+                        if (!string.IsNullOrWhiteSpace(v.BackgroundPath) && !ResolvesAsset(v.BackgroundPath, gameFolder, baseDir))
                         {
-                            GameId = game.GameId,
-                            Title = string.IsNullOrWhiteSpace(game.Title) ? game.GameId : game.Title,
-                            Version = v.Version,
-                            AssetKind = "背景画像",
-                            ExpectedPath = Path.IsPathRooted(v.BackgroundPath) ? v.BackgroundPath : Path.Combine(gameFolder, v.BackgroundPath)
-                        });
+                            result.BrokenAssets.Add(new BrokenAsset
+                            {
+                                GameId = game.GameId,
+                                Title = string.IsNullOrWhiteSpace(game.Title) ? game.GameId : game.Title,
+                                Version = v.Version,
+                                AssetKind = "背景画像",
+                                ExpectedPath = Path.IsPathRooted(v.BackgroundPath) ? v.BackgroundPath : Path.Combine(gameFolder, v.BackgroundPath)
+                            });
+                        }
                     }
                 }
 

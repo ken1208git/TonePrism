@@ -1019,6 +1019,33 @@ namespace TonePrism.Manager
                 return;
             }
 
+            // (Finding #4) 全版の「最小プレイ人数 > 最大プレイ人数」を検出する。OK 時の ValidateInput →
+            // ValidatePlayerCount (下の ~1800) は表示中の NumericUpDown 値しか見ないため、非表示の版で
+            // min>max にしたまま別の版を表示して OK すると素通りしていた (SemVer 重複は上で全件 scan するのに
+            // 対し非対称)。版切替時の SaveGameDataToVersion で各版に commit 済の値を全件比較し、違反版を
+            // 列挙して block する (両方とも非 null のときのみ比較。Add/VersionUp は常に ≥1 を書くため
+            // 実運用で null になる経路は限定的だが、表示中版は ValidateInput が先に弾くので本 scan は非表示版を補完)。
+            var playerCountViolations = new List<string>();
+            foreach (var item in cmbVersionList.Items)
+            {
+                if (!(item is GameVersion vPc)) continue;
+                if (vPc.MinPlayers.HasValue && vPc.MaxPlayers.HasValue && vPc.MinPlayers.Value > vPc.MaxPlayers.Value)
+                {
+                    playerCountViolations.Add("  - " + (vPc.Version ?? "(id=" + vPc.Id + ")")
+                        + ": 最小 " + vPc.MinPlayers.Value + " > 最大 " + vPc.MaxPlayers.Value);
+                }
+            }
+            if (playerCountViolations.Count > 0)
+            {
+                MessageBox.Show(this,
+                    "以下のバージョンで「最小プレイ人数 > 最大プレイ人数」になっています。\n" +
+                    "バージョン管理ドロップダウンで該当の版を選び、人数を修正してから再度 OK してください:\n\n" +
+                    string.Join("\n", playerCountViolations),
+                    "プレイ人数の入力エラー (" + playerCountViolations.Count + " 件)",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             // (#234) アクティブ版 (= Launcher で起動する版) の暗黙切替を確認する。
             // OK 時は選択中の版が games 行にミラーされ games.version = 選択版になる (= 起動対象が変わる)
             // 設計のため、ロード時の起動対象と別の版を選んだまま保存しようとした場合に明示確認する。
