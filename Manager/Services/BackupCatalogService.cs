@@ -19,7 +19,9 @@ namespace TonePrism.Manager.Services
     /// プロジェクト移動耐性も (常に現在の保存先を走査するので) 自動的に得られる。
     ///
     /// 種類はフォルダ位置で確定: `&lt;保存先&gt;/auto/`→auto、`&lt;保存先&gt;/manual/`→manual、
-    /// `&lt;dbDir&gt;/backups/safety/`→safety、保存先直下の旧 `toneprism_*.db`→manual (種類不明は安全側)。
+    /// `&lt;dbDir&gt;/backups/safety/`→safety、保存先直下の旧フラット形式 (`toneprism_*.db` / `prism_*.db`)→unknown
+    /// (v0.20.0 以前は auto/manual を区別する情報がファイル名に無く backup_log だけが保持していたため、廃止後は
+    ///  種類復元不能 = 「不明」。retention は auto/ フォルダ限定なので、不明扱いでも自動削除はされない)。
     ///
     /// フォルダパスは <see cref="BackupService"/> から取得して二重実装 (特に M17 危険パス guard) を避ける。
     /// 整合性チェック (PRAGMA quick_check) は走査時には行わない — バックアップ成功確定前に
@@ -57,9 +59,11 @@ namespace TonePrism.Manager.Services
             var list = new List<BackupCatalogEntry>();
             string root = _backupService.GetEffectiveDestinationDirectory();
 
-            // 保存先直下の旧レイアウト (種類不明 → 安全側で manual)。#168 前の `prism_` 接頭辞も拾う。
-            ScanFolder(list, root, "toneprism_*.db", "manual", LegacyRegex);
-            ScanFolder(list, root, "prism_*.db", "manual", PrismLegacyRegex);
+            // 保存先直下の旧フラット形式 (v0.20.0 以前)。auto/manual の区別がファイル名に無く復元不能なため
+            // "unknown" (= 不明) とする。retention は auto/ フォルダ限定なので不明扱いでも自動削除されない。
+            // #168 前の `prism_` 接頭辞も拾う。
+            ScanFolder(list, root, "toneprism_*.db", "unknown", LegacyRegex);
+            ScanFolder(list, root, "prism_*.db", "unknown", PrismLegacyRegex);
             // 新レイアウト (フォルダ位置で種類確定)
             ScanFolder(list, Path.Combine(root, "auto"), "auto_*.db", "auto", AutoRegex);
             ScanFolder(list, Path.Combine(root, "manual"), "manual_*.db", "manual", ManualRegex);

@@ -18,8 +18,9 @@ namespace TonePrism.Manager.Models
         public string FilePath { get; set; }
 
         /// <summary>
-        /// "manual" | "auto" | "safety"。**フォルダ位置で確定**する
-        /// (`auto/`→auto、`manual/`→manual、`safety/`→safety、保存先直下の旧 `toneprism_*.db`→manual)。
+        /// "auto" | "manual" | "safety" | "unknown"。**フォルダ位置で確定**する
+        /// (`auto/`→auto、`manual/`→manual、`safety/`→safety、保存先直下の旧フラット形式
+        /// `toneprism_*.db` / `prism_*.db`→unknown = v0.20.0 以前で種類がファイル名に無く復元不能)。
         /// </summary>
         public string TriggerType { get; set; }
 

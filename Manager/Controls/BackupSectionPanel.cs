@@ -82,6 +82,7 @@ namespace TonePrism.Manager.Controls
                         case "manual": trigger = "手動"; break;
                         case "auto": trigger = "自動"; break;
                         case "safety": trigger = "退避"; break;
+                        case "unknown": trigger = "不明"; break;  // v0.20.0 以前の旧フラット形式 (種類復元不能)
                         default: trigger = entry.TriggerType ?? ""; break;
                     }
                     // ファイル由来の作成日時 (開始 / 完了の区別が無いため 1 列)。
