@@ -1935,9 +1935,18 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 複数 PC の自動バックアップ排他 (`settings.last_backup_at` lease) と復元 advisory lock (`settings.restore_lock_owner`) は `backup_log` ではなく `settings` テーブルにあり、本変更の影響を受けない (SMB 上のファイルロックは不安定で DB トランザクションが正しい primitive のため意図的に DB のまま維持)。
 
+#### Fixed (バックアップ/ゲーム管理まわりの追加監査: スキーマ migration drift 2 件)
+
+ユーザー依頼の「ゲーム追加・編集・バージョンアップ / DB バックアップまわりの欠陥精査」で発見した残存事項。中核ロジック (トランザクション境界・atomic ファイル置換・復元の safety 退避・並行 race・lease/lock) に Critical/High 級の欠陥は無かったが、スキーマ migration の非対称を 2 件修正した。
+
+- **v0 fast-path が `MigrateV10ToV11` を飛ばす drift (潜在)**: `SchemaManager.CheckAndMigrateDatabase` の `user_version==0` 分岐は `MigrateV13ToV14` (games.arguments) / 条件付き `MigrateV17ToV18` (developers FK) / `EnsureSettingsTableIsKvsSchema` (settings KVS) は明示 retrofit するのに、`MigrateV10ToV11` (surveys/play_records の旧スキーマ→新スキーマ drift 修正) だけ呼んでいなかった。versioning 導入前から旧 surveys/play_records を持つ v0 DB は、`CreateTables` の `CREATE TABLE IF NOT EXISTS` が旧スキーマを温存するため drift が残ったまま v19 を刻み、以後 migration 経路に乗らず永久固定されていた。冪等な `MigrateV10ToV11` を `SetDbVersion(19)` の前に明示実行する (新規 DB では新スキーマ検出で no-op、旧スキーマ空テーブルは再作成、データ残存時のみ skip+警告)。現状の実害はほぼゼロ (surveys/play_records は Manager 未参照 + 2026-05-27 以降の本番はまっさら新規で `CreateTables` が新スキーマ作成) だが、issue #35 (アンケート実装) 着手時に旧 v0 DB が残っていると壊れる時限要素を解消。
+- **`games.play_time` の CHECK 制約欠落を DB レベルで復元 (SPEC drift, #247, DB v19 → v20)**: `CreateTables` の `games` は `difficulty INTEGER CHECK(difficulty BETWEEN 1 AND 3)` は持つのに `play_time INTEGER` は CHECK なし。SPEC §7.3 と初代スキーマは両方 `CHECK(1-3)` で、新規DB/旧DB/SPEC の三者 drift だった (`VerifySchema` は列名のみ比較で CHECK 差を検知しない)。`difficulty` との非対称解消 + SPEC 整合のため `MigrateV19ToV20` で `games` テーブルを recreate し CHECK を追加 (CreateTables 側も CHECK 付きに更新、新規DBは native に持つ)。
+  - **親テーブル recreate の FK 安全策**: `games` は game_versions / developers / play_records / surveys / store_section_games が ON DELETE CASCADE、launcher_surveys が ON DELETE SET NULL で参照する**親テーブル**。foreign_keys=ON のまま `DROP TABLE games` すると暗黙 DELETE が CASCADE 発火で子行を全消去する。`defer_foreign_keys` は検査遅延のみで CASCADE action を止めない (同梱 sqlite3 で実測確認)。よって `InitializeDatabase` を「**migration 検出時のみ** transaction 開始前に `PRAGMA foreign_keys=OFF` → commit 前に `foreign_key_check` で整合検証 → 後に ON へ復帰」する形に変更 (SQLite 公式のスキーマ変更手順)。通常起動 (version == CurrentDbVersion) は FK=ON のまま既存挙動を維持し blast radius を migration 時に限定。
+  - **検証**: 移行 SQL を実スキーマ相当 (games + 全 CASCADE/SET NULL 子テーブルにデータ) で round-trip テストし、全子テーブル行の保全・`foreign_key_check` 整合・CHECK の 1-3 強制 (NULL は許容)・recreate 後も CASCADE 健在を確認。`MigrateV19ToV20` は冪等 (既に CHECK を持つ games では skip)。範囲外 play_time の既存行があれば (UI は 1-3 しか書かないため通常発生しないが外部 DML 等の保険) **hard-fail で起動を止めず skip + 警告 + retry** に倒す (user_version 19 据え置き、sqlite3 で是正後に次回起動で適用。V14→V15 / V16→V17 の重複時 skip+retry と同パターン)。silent な値書き換えはしない。
+
 #### Bump 根拠 (v0.20.0 → v0.21.0)
 
-DB スキーマ破壊的変更 (v18 → v19、`backup_log` DROP) を含むため minor bump。元ブランチ (`fix/version-up-dup-guard`) の想定を超える再設計のため v0.20.0 entry には folding せず新 entry を立てた (AGENTS.md「想定範囲を超える機能追加が混入した場合は例外として新規 version エントリ可」)。既存運用 DB は起動時に自動 migration、物理バックアップファイルは保持され履歴に復活するため後方互換あり。Bundle への反映は次回リリース実行時。
+DB スキーマ破壊的変更 (v18 → v19 `backup_log` DROP、および同 PR 追補の v19 → v20 `games` recreate で `play_time` CHECK 追加, #247) を含むため minor bump。元ブランチ (`fix/version-up-dup-guard`) の想定を超える再設計のため v0.20.0 entry には folding せず新 entry を立てた (AGENTS.md「想定範囲を超える機能追加が混入した場合は例外として新規 version エントリ可」)。既存運用 DB は起動時に自動 migration (v19 → v20 は foreign_keys=OFF + foreign_key_check で子テーブルを保全しつつ recreate)、物理バックアップファイルは保持され履歴に復活するため後方互換あり。Bundle への反映は次回リリース実行時。
 
 ### [Manager v0.20.0] - 2026-05-29
 
