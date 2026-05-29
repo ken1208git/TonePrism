@@ -403,6 +403,13 @@ namespace TonePrism.Manager
                     return;
                 }
 
+                // (Finding #2) コピー時に除外されるフォルダ (Library / node_modules 等) があれば、
+                // 一覧を出して続行可否を確認する。除外を silent にしないための fence。Cancel なら中止。
+                if (!GameFormHelper.ConfirmExcludedFoldersBeforeCopy(this, sourceGameFolder))
+                {
+                    return;
+                }
+
                 // ProcessingDialog を使用して非同期コピー
                 // (累積監査) 他箇所と同様 using で囲み、ハンドル / 内部 CTS のリークを防ぐ
                 // (ShowDialog は Dispose しないため明示破棄が必要)。

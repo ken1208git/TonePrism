@@ -83,6 +83,16 @@ namespace TonePrism.Manager
         // round 4 R4-M10 の versionDir 所有 flag と同方針 (= 自分が作った disk 状態は自分で片付ける)。
         private readonly List<string> _copiedExternalImagePaths = new List<string>();
 
+        // (Finding #1) 版切替で失われる「gameFolder 外の画像」絶対パスを版ごとに記憶する。key = version.Id。
+        // ApplyRelativePaths は絶対 (= フォルダ外) path を null に格下げる契約のため、外部画像を選んだまま
+        // 別の版へ切り替えると textbox の選択も版オブジェクトの path も消え、OK 時のコピー (CopyExternal
+        // ImagesToVersionFolder は「表示中の版」しか対象にしない) からも漏れて silent に選択が失われていた。
+        // 切替前 (SaveGameDataToVersion) に控え、切替で戻ったとき (LoadGameDataForVersion) textbox に復元、
+        // OK 時に表示中以外の版についても各版フォルダへコピーする。コピーは OK まで遅延 (= disk を触らない)
+        // 既存方針を維持しつつ、選択の「記憶」だけ in-memory で持ち越す。
+        private readonly Dictionary<int, string> _pendingExternalThumbnailByVersionId = new Dictionary<int, string>();
+        private readonly Dictionary<int, string> _pendingExternalBackgroundByVersionId = new Dictionary<int, string>();
+
         // (#158 CX-1) folder rename を 2-phase 化するための plan 単位 (Phase 1 で構築 / Phase 2 で実行)。
         // (#158 round 4 codex P1) Old{Executable,Thumbnail,Background}Path: in-memory state rollback 用に
         // path 書き換え前の値を capture。disk Move を rollback しても in-memory が NEW のままだと、同
@@ -572,6 +582,29 @@ namespace TonePrism.Manager
 
             // Paths: ApplyRelativePaths handles reading from text boxes and converting to relative if possible
             ApplyRelativePaths(version);
+
+            // (Finding #1) ApplyRelativePaths で null 格下げされる「gameFolder 外の画像」選択を版ごとに記憶
+            // (= 切替で戻ったとき復元 / OK 時にコピー)。内部 path / 空に変わっていれば記憶を消す (= 自己訂正)。
+            RememberPendingExternalImage(version.Id, txtThumbnailPath.Text, _pendingExternalThumbnailByVersionId);
+            RememberPendingExternalImage(version.Id, txtBackgroundPath.Text, _pendingExternalBackgroundByVersionId);
+        }
+
+        /// <summary>
+        /// (Finding #1) textbox の画像 path が gameFolder 外 (= 未コピーの外部選択) なら版 id に紐づけて記憶し、
+        /// 内部 path / 空ならその版の記憶を消す。<paramref name="versionId"/> 単位で per-version に持つことで、
+        /// 複数版を行き来しても各版の外部画像選択を取り違えずに保持・復元できる。
+        /// </summary>
+        private void RememberPendingExternalImage(int versionId, string text, Dictionary<int, string> map)
+        {
+            if (!string.IsNullOrWhiteSpace(text)
+                && !PathConversionHelper.IsPathInside(gameFolder, text))
+            {
+                map[versionId] = text.Trim();
+            }
+            else
+            {
+                map.Remove(versionId);
+            }
         }
 
         private void LoadGameDataForVersion(GameVersion version)
@@ -725,6 +758,15 @@ namespace TonePrism.Manager
                 ? PathConversionHelper.ToAbsolutePath(gameFolder, thumbToShow) : "";
             txtBackgroundPath.Text = !string.IsNullOrEmpty(bgToShow)
                 ? PathConversionHelper.ToAbsolutePath(gameFolder, bgToShow) : "";
+
+            // (Finding #1) この版に「未コピーの外部画像」記憶があれば textbox に復元する。版オブジェクトの
+            // path は ApplyRelativePaths で null 化されていても、ユーザーの選択 (= 絶対パス) を失わない。
+            if (_pendingExternalThumbnailByVersionId.TryGetValue(version.Id, out string pendingThumb)
+                && !string.IsNullOrWhiteSpace(pendingThumb))
+                txtThumbnailPath.Text = pendingThumb;
+            if (_pendingExternalBackgroundByVersionId.TryGetValue(version.Id, out string pendingBg)
+                && !string.IsNullOrWhiteSpace(pendingBg))
+                txtBackgroundPath.Text = pendingBg;
 
             // Developers (#234: 版が空ならアクティブ版に限り games の製作者へフォールバック)
             developers.Clear();
@@ -1150,6 +1192,21 @@ namespace TonePrism.Manager
                             // gameIdChanged の disk 名は既に新 ID に変更済だが、これは UpdateGameId 成功 = DB も新 ID
                             // に同期済の状態。txtGameId.Text も新 ID で、user が再度 OK を押せばこの block は no-op で
                             // 通過するため drift は残らない。
+                            return;
+                        }
+                    }
+
+                    // (Finding #1) 表示中以外の版に「版切替で記憶した未コピーの外部画像」があれば各版へコピーする。
+                    // 表示中版 (currentVersionForCopy) は直上で処理済のため除外。rename plan 構築より前に実行する
+                    // ことで、ここで設定した版オブジェクトの (旧 leaf prefix の) 相対 path を rename ループが
+                    // 正しく新 leaf へ追従させ、rollback 用 snapshot にも正しい値が capture される。
+                    foreach (var item in cmbVersionList.Items)
+                    {
+                        if (!(item is GameVersion hiddenVersion)) continue;
+                        if (ReferenceEquals(hiddenVersion, currentVersionForCopy)) continue;
+                        if (!CopyPendingExternalImagesForHiddenVersion(hiddenVersion))
+                        {
+                            // 衝突 dialog で Cancel / copy 失敗 → 編集画面に戻る (DB write 未実行)。
                             return;
                         }
                     }
@@ -1831,6 +1888,33 @@ namespace TonePrism.Manager
 
             if (plan.Count == 0) return true;
 
+            // (Finding #1) ProcessingDialog でのコピー実行は ExecuteImageCopyPlan に共通化
+            // (非表示版コピー CopyPendingExternalImagesForHiddenVersion と同経路)。
+            if (!ExecuteImageCopyPlan(plan, versionFolder)) return false;
+
+            // 成功 → textbox を copy 先に書き換え (= 後続の ToRelativePath が gameFolder 内として認識して
+            // v{version}/<filename> の相対 path を生成する)
+            foreach (var p in plan)
+            {
+                p.AssignBackTextBox.Text = p.DestinationPath;
+            }
+            UpdateThumbnailPreview();
+            UpdateBackgroundPreview();
+            Logger.Info("[EditGameForm] 外部画像 " + plan.Count + " 件を v{version} 配下にコピーしました (versionFolder=" + versionFolder + ")");
+            return true;
+        }
+
+        /// <summary>
+        /// (Finding #1) <see cref="ImageCopyPlan"/> 群を ProcessingDialog で実コピーする共通処理。成功で true、
+        /// ユーザー Cancel / 例外失敗で false (partial copy は本処理内で rollback)。成功した destination は
+        /// <see cref="_copiedExternalImagePaths"/> に集約し、Cancel/Close 時の OnFormClosing オーファン削除対象に
+        /// 載せる。コピー先 path の textbox / 版オブジェクトへの反映は呼び出し側が行う (表示中版は textbox、
+        /// 非表示版は版オブジェクトに書く、で経路が異なるため本処理は disk コピーと追跡のみに専念する)。
+        /// </summary>
+        private bool ExecuteImageCopyPlan(List<ImageCopyPlan> plan, string versionFolder)
+        {
+            if (plan == null || plan.Count == 0) return true;
+
             // ProcessingDialog で copy 実行 (= SMB 越しで時間がかかるケースに備える)。
             // 失敗 / cancel 時は本関数内で partial copy を片付ける。
             Exception copyError = null;
@@ -1884,18 +1968,73 @@ namespace TonePrism.Manager
                 }
             }
 
-            // 成功 → textbox を copy 先に書き換え (= 後続の ToRelativePath が gameFolder 内として認識して
-            // v{version}/<filename> の相対 path を生成する)
+            // (round 5 M3) copy 済 path を集約。後で OK 確定すれば commit としてクリア、
+            // Cancel/Close で抜けた場合は OnFormClosing で disk から削除してオーファン化を防ぐ。
             foreach (var p in plan)
             {
-                p.AssignBackTextBox.Text = p.DestinationPath;
-                // (round 5 M3) copy 済 path を集約。後で OK 確定すれば commit としてクリア、
-                // Cancel/Close で抜けた場合は OnFormClosing で disk から削除してオーファン化を防ぐ。
                 _copiedExternalImagePaths.Add(p.DestinationPath);
             }
-            UpdateThumbnailPreview();
-            UpdateBackgroundPreview();
-            Logger.Info("[EditGameForm] 外部画像 " + plan.Count + " 件を v{version} 配下にコピーしました (versionFolder=" + versionFolder + ")");
+            return true;
+        }
+
+        /// <summary>
+        /// (Finding #1) 表示中以外の版に記憶された「未コピーの外部画像」を、その版の (rename 前 disk leaf の)
+        /// フォルダへコピーし、版オブジェクトの ThumbnailPath / BackgroundPath を相対 path に設定する。
+        /// 表示中の版は <see cref="CopyExternalImagesToVersionFolder"/> (textbox 起点) が担当するため呼び出し側で
+        /// 除外する。rename される版は path に旧 leaf prefix が乗るが、後続の rename ループ (ReplaceVersionPrefix)
+        /// が全版の path prefix を新 leaf に更新するため整合する。成功 true / Cancel・失敗 false。
+        /// </summary>
+        private bool CopyPendingExternalImagesForHiddenVersion(GameVersion version)
+        {
+            if (version == null) return true;
+
+            bool hasThumb = _pendingExternalThumbnailByVersionId.TryGetValue(version.Id, out string thumbSrc)
+                && !string.IsNullOrWhiteSpace(thumbSrc);
+            bool hasBg = _pendingExternalBackgroundByVersionId.TryGetValue(version.Id, out string bgSrc)
+                && !string.IsNullOrWhiteSpace(bgSrc);
+            if (!hasThumb && !hasBg) return true;
+
+            // コピー先は「現在 disk 上にある version フォルダ (= rename 前の leaf)」。表示中版コピーと同じく
+            // _originalVersionByDbId snapshot から旧 leaf を引く (snapshot 不在の防御経路は現 version へ fall back)。
+            string onDiskVersion =
+                (_originalVersionByDbId.TryGetValue(version.Id, out string snapshotVer) && !string.IsNullOrWhiteSpace(snapshotVer))
+                ? snapshotVer
+                : version.Version;
+            if (string.IsNullOrWhiteSpace(onDiskVersion)) return true; // version 文字列なし = コピー先決定不可、skip
+            string versionFolder = PathManager.GetVersionFolder(txtGameId.Text.Trim(), onDiskVersion);
+
+            var reservedDestinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var plan = new List<ImageCopyPlan>();
+            ImageCopyPlan thumbPlan = null, bgPlan = null;
+            if (hasThumb)
+            {
+                thumbPlan = ResolveCopyPlan(thumbSrc, versionFolder, "サムネイル画像 (" + onDiskVersion + ")", reservedDestinations);
+                if (thumbPlan == null) return false;
+                plan.Add(thumbPlan);
+            }
+            if (hasBg)
+            {
+                bgPlan = ResolveCopyPlan(bgSrc, versionFolder, "背景画像 (" + onDiskVersion + ")", reservedDestinations);
+                if (bgPlan == null) return false;
+                plan.Add(bgPlan);
+            }
+
+            if (!ExecuteImageCopyPlan(plan, versionFolder)) return false;
+
+            // 成功 → 版オブジェクトの path を相対化して設定 (非表示版なので textbox には触れない)。
+            // 旧 leaf prefix の相対 path は rename ループ (ReplaceVersionPrefix) が新 leaf に直す。
+            if (thumbPlan != null)
+            {
+                version.ThumbnailPath = PathConversionHelper.ToRelativePath(gameFolder, thumbPlan.DestinationPath);
+                _pendingExternalThumbnailByVersionId.Remove(version.Id);
+            }
+            if (bgPlan != null)
+            {
+                version.BackgroundPath = PathConversionHelper.ToRelativePath(gameFolder, bgPlan.DestinationPath);
+                _pendingExternalBackgroundByVersionId.Remove(version.Id);
+            }
+            Logger.Info("[EditGameForm] (Finding #1) 非表示版 id=" + version.Id + " (" + onDiskVersion + ") の外部画像 "
+                + plan.Count + " 件を " + versionFolder + " へコピーしました");
             return true;
         }
 

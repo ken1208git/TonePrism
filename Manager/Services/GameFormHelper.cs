@@ -222,7 +222,7 @@ namespace TonePrism.Manager.Services
 
             // 実行ファイルを自動検出
             var exeFiles = Directory.GetFiles(folderPath, "*.exe", SearchOption.AllDirectories)
-                .Where(f => IsPathInsideSourceFolder(folderPath, f))
+                .Where(f => IsPathInsideSourceFolder(folderPath, f) && !IsInsideExcludedFolder(folderPath, f))
                 .ToList();
             if (exeFiles.Count > 0)
             {
@@ -245,7 +245,7 @@ namespace TonePrism.Manager.Services
             foreach (var pattern in thumbnailPatterns)
             {
                 var files = Directory.GetFiles(folderPath, pattern, SearchOption.AllDirectories)
-                    .Where(f => IsPathInsideSourceFolder(folderPath, f))
+                    .Where(f => IsPathInsideSourceFolder(folderPath, f) && !IsInsideExcludedFolder(folderPath, f))
                     .ToList();
                 if (files.Count > 0)
                 {
@@ -259,7 +259,7 @@ namespace TonePrism.Manager.Services
             foreach (var pattern in backgroundPatterns)
             {
                 var files = Directory.GetFiles(folderPath, pattern, SearchOption.AllDirectories)
-                    .Where(f => IsPathInsideSourceFolder(folderPath, f))
+                    .Where(f => IsPathInsideSourceFolder(folderPath, f) && !IsInsideExcludedFolder(folderPath, f))
                     .ToList();
                 if (files.Count > 0)
                 {
@@ -292,7 +292,64 @@ namespace TonePrism.Manager.Services
             }
         }
 
+        /// <summary>
+        /// (Finding #2) <paramref name="candidatePath"/> が sourceFolder 配下の除外対象フォルダ
+        /// (<see cref="FileOperationService.ExcludedFolders"/>) の内側にあるかを判定する。自動検出が
+        /// 「コピー時に除外されて結局存在しなくなる exe / 画像」を候補に出して post-copy で不可解な
+        /// 「コピー後にファイルが見つかりません」abort を招く非対称を解消する目的。candidate の親を
+        /// sourceFolder まで遡り、途中のフォルダ名が 1 つでも除外対象なら true。例外時は false 倒し
+        /// (= 除外内とみなさず候補に残す、IsPathInsideSourceFolder と同じ保守的方針)。
+        /// </summary>
+        private static bool IsInsideExcludedFolder(string sourceFolder, string candidatePath)
+        {
+            try
+            {
+                string sourceFull = Path.GetFullPath(sourceFolder).TrimEnd(Path.DirectorySeparatorChar);
+                string dir = Path.GetDirectoryName(Path.GetFullPath(candidatePath));
+                while (!string.IsNullOrEmpty(dir)
+                       && !string.Equals(dir, sourceFull, StringComparison.OrdinalIgnoreCase))
+                {
+                    string name = Path.GetFileName(dir);
+                    if (FileOperationService.ExcludedFolders.Contains(name, StringComparer.OrdinalIgnoreCase))
+                        return true;
+                    dir = Path.GetDirectoryName(dir);
+                }
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         #endregion
+
+        /// <summary>
+        /// (Finding #2) コピー元フォルダに「コピー時に除外されるフォルダ」があれば、その一覧を提示して
+        /// 続行可否をユーザーに確認する。OK で続行 (true)、キャンセルで中止 (false)。除外対象フォルダが
+        /// 1 つも無ければダイアログを出さず即 true。AddGameForm / GameSectionPanel (バージョンアップ) の
+        /// コピー直前で共通に呼び、除外を silent にしない (= Build/Saved 等を絞り込んだ後も残る曖昧な
+        /// 除外名 Library / node_modules 等をユーザーが認知できるようにする) ための fence。
+        /// </summary>
+        public static bool ConfirmExcludedFoldersBeforeCopy(IWin32Window owner, string sourceDir)
+        {
+            if (string.IsNullOrWhiteSpace(sourceDir) || !Directory.Exists(sourceDir))
+                return true;
+
+            var names = FileOperationService.FindExcludedFolderNames(sourceDir);
+            if (names.Count == 0) return true;
+
+            var dr = MessageBox.Show(owner,
+                "コピー元フォルダ内の次のフォルダは、開発時の中間ファイル / キャッシュとみなして" +
+                "コピーされません:\n\n" +
+                "  " + string.Join("\n  ", names) + "\n\n" +
+                "通常はそのまま続行して問題ありません。\n" +
+                "もしゲームの動作に必要なフォルダが含まれている場合は「キャンセル」を押し、" +
+                "不要な開発用フォルダを取り除いてから取り込み直してください。",
+                "コピーされないフォルダの確認",
+                MessageBoxButtons.OKCancel, MessageBoxIcon.Information);
+            return dr == DialogResult.OK;
+        }
 
         /// <summary>
         /// ゲームIDが有効な文字列かチェック（半角英数字、ハイフン、アンダースコアのみ、最大64文字）

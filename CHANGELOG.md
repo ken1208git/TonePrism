@@ -1953,9 +1953,16 @@ round 7 (本 entry) 後、ゲーム追加 / 編集 / バージョンアップ + 
 - **(EditGameForm, Low): 非アクティブ版の難易度 / プレイ時間を「表示しただけ」で NULL → 既定値に化ける非対称**: Min/MaxPlayers には NULL 保護 snapshot があるのに difficulty / play_time には無く、NULL の非アクティブ版を選択 → 別版へ切替で既定値 (普通 / 5-15分) が書き込まれていた。人数と同じ `WasNullOnLoad` + `DisplayedOnLoad` snapshot を difficulty / play_time にも追加 (NULL かつ user 未操作なら NULL 維持)。実運用で NULL が入る経路は限定的 (Add/VersionUp は常に ≥1 を書く) だが非対称を解消。
 - **(GameSectionPanel / AddGameForm, Low): `ProcessingDialog` の Dispose 漏れ**: バージョンアップ / ゲーム追加経路のみ `ProcessingDialog` を `using` で囲まず、ネイティブハンドル + 内部 `CancellationTokenSource` を GC 任せにしていた (他の全箇所は using)。両経路を using に統一。
 
+#### Fixed (累積監査ラウンド 9: ゲーム編集の外部画像消失 / コピー除外フォルダの silent 欠落 2 件)
+
+round 8 (本 entry) 後、ユーザー依頼でゲーム追加 / 編集 / バージョンアップ + DB バックアップ / 復元を再精査。実コード verify で真と確認した欠陥 2 件を修正。いずれも「正常に保存できたように見えて、実は選んだ / 必要なファイルが silent に欠落する」経路の取りこぼし (正常系・トランザクション境界・削除孤児・復元ロールバックは round 1〜8 で塞ぎ済)。
+
+- **(EditGameForm, Med): バージョンを切り替えると「フォルダ外から選んだ画像」が無警告で消える**: 外部 (gameFolder 外) のサムネ / 背景を選んだあと OK 前に別の版へ切り替えると、`SaveGameDataToVersion` → `ApplyRelativePaths` → `NormalizeRelative` が絶対 path を null へ格下げ (Logger.Warn のみ・UI 無通知) し、版オブジェクト・textbox の双方から選択が消失。OK 時のコピー (`CopyExternalImagesToVersionFolder`) は「表示中の版」しか対象にしないため、切替を挟むと選択が永久に失われていた (フォルダ内画像は round-trip するため影響なし、外部選択に限定)。版 id 単位の `_pendingExternalThumbnail/BackgroundByVersionId` map に外部 path を控え、(a) 切替で戻ったとき `LoadGameDataForVersion` で textbox へ復元、(b) OK 時に表示中以外の版も `CopyPendingExternalImagesForHiddenVersion` で各版フォルダ (rename 前 leaf) へコピーし版オブジェクトの相対 path を確定 (rename ループの `ReplaceVersionPrefix` が新 leaf へ追従、rollback snapshot も正しく capture)。コピーを OK まで遅延する既存方針 (disk を触らない / Cancel で orphan 削除) は維持し、選択の「記憶」だけ in-memory で持ち越す。ProcessingDialog のコピー実行部は `ExecuteImageCopyPlan` に共通化。
+- **(FileOperationService / GameFormHelper, Med): コピー除外フォルダに実体があるゲームが silent に不完全コピーで登録される**: コピー除外リストに `Build` / `Builds` / `Saved` / `Logs` / `Temp` という「ゲーム本体の中身にもなりうる総称名」が含まれ、exe / 画像がフォルダ直下にある限り 3 点の post-copy 存在チェックを全通過 → 必要フォルダが欠落したまま「追加成功」していた (Unreal の `Saved`、配布物の `Build` / `Builds` 等で踏みやすい)。さらに自動検出 (`AutoDetectFiles`) は除外フォルダ内の exe も候補にするのにコピーは除外する非対称で、exe が `Build/` 内のゲームは「自動検出されたのにコピー後に見つからず rollback」という不可解な行き止まりになっていた。(a) 除外対象を「再生成可能でほぼ確実に出荷物でない」engine cache (`Library` / `Intermediate` / `DerivedDataCache` / `.import`) + VCS / IDE / 言語キャッシュ (dotfiles 系) に限定し、総称名 `Build` / `Builds` / `Saved` / `Logs` / `Temp` を除外リストから撤去、(b) コピー直前に残る除外フォルダ (`Library` / `node_modules` 等) を `FileOperationService.FindExcludedFolderNames` で列挙し `GameFormHelper.ConfirmExcludedFoldersBeforeCopy` で明示確認 (silent に落とさず続行可否をユーザーに委ねる)、(c) 自動検出も `IsInsideExcludedFolder` で除外フォルダ内を候補から外し非対称を解消。Add / バージョンアップ両経路で共通適用。
+
 #### Bump 根拠 (v0.19.1 → v0.20.0)
 
-バックアップ保存レイアウトの変更 (= 観測可能な挙動 / 配置変更) を含むため minor bump。schema 変更なし・後方互換あり (旧 `toneprism_*.db` も引き続き読める)。round 7 の bugfix/perf 3 件 + round 8 の異常系 bugfix 7 件も同 entry に統合 (PR 内 1 bump 原則: 新規 version エントリを作らず本 entry に加筆)。Bundle への反映は次回リリース実行時。
+バックアップ保存レイアウトの変更 (= 観測可能な挙動 / 配置変更) を含むため minor bump。schema 変更なし・後方互換あり (旧 `toneprism_*.db` も引き続き読める)。round 7 の bugfix/perf 3 件 + round 8 の異常系 bugfix 7 件 + round 9 のゲーム編集外部画像 / コピー除外フォルダ 2 件も同 entry に統合 (PR 内 1 bump 原則: 新規 version エントリを作らず本 entry に加筆)。Bundle への反映は次回リリース実行時。
 
 ### [Manager v0.19.1] - 2026-05-29
 

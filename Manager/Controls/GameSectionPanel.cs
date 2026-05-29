@@ -238,6 +238,13 @@ namespace TonePrism.Manager.Controls
                         return;
                     }
 
+                    // (Finding #2) コピー時に除外されるフォルダ (Library / node_modules 等) があれば、
+                    // 一覧を出して続行可否を確認する。除外を silent にしないための fence (Add 経路と共通)。
+                    if (!GameFormHelper.ConfirmExcludedFoldersBeforeCopy(this, form.SourceFolderPath))
+                    {
+                        return;
+                    }
+
                     // (累積監査) ProcessingDialog は他箇所と同様 using で囲み、ハンドル / 内部 CTS の
                     // リークを防ぐ (ShowDialog は Dispose しないため明示破棄が必要)。
                     using (var processingDialog = new ProcessingDialog((IProgress<ProgressInfo> progress, CancellationToken token) =>

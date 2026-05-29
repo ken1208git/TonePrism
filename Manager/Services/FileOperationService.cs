@@ -12,18 +12,58 @@ namespace TonePrism.Manager.Services
     public static class FileOperationService
     {
         /// <summary>
-        /// ゲームエンジン/開発環境の不要フォルダ一覧
+        /// ゲームエンジン/開発環境の不要フォルダ一覧 (コピー時に除外する)。
+        ///
+        /// (Finding #2) 旧実装は "Build" / "Builds" / "Saved" / "Logs" / "Temp" も除外していたが、
+        /// これらは「ゲーム本体の中身」でもありうる総称名 (Unreal の Saved、配布物の Build/Builds、
+        /// 自作ゲームの Logs/Temp 等) で、exe / 画像がフォルダ直下にあると除外に気づかぬまま不完全
+        /// コピーで起動不能ゲームが silent 登録される穴があった。除外対象は「再生成可能で出荷物に
+        /// 含めない」ことがほぼ確実な engine cache (Library / Intermediate / DerivedDataCache / .import)
+        /// と VCS / IDE / 言語キャッシュ (dotfiles 系) に限定する。残る曖昧な名前 (Library / node_modules
+        /// 等、ごく稀に本体になりうる) は <see cref="FindExcludedFolderNames"/> + コピー前確認ダイアログで
+        /// ユーザーに明示するため、silent には落とさない。
         /// </summary>
         public static readonly string[] ExcludedFolders = new[]
         {
-            "Library", "Temp", "Logs", "Build", "Builds",
-            "Intermediate", "Saved", "DerivedDataCache",
+            "Library",
+            "Intermediate", "DerivedDataCache",
             ".import",
             ".vs", ".idea", ".vscode",
             ".git", ".svn", ".hg",
             "node_modules",
             "__pycache__", ".pytest_cache", ".mypy_cache"
         };
+
+        /// <summary>
+        /// (Finding #2) <paramref name="sourceDir"/> 配下に存在する除外対象フォルダ名 (distinct) を列挙する。
+        /// コピー前に「これらは取り込まれません」とユーザーへ確認するための事前 scan。ディレクトリのみ走査
+        /// (ファイルは見ない) のため軽量。アクセス不能フォルダは握り潰してスキップ。除外フォルダの内側は
+        /// これ以上辿らない (= コピー側 <see cref="CopyDirectoryRecursive"/> の skip 挙動と一致させ、報告内容を
+        /// 「実際にコピーされないフォルダ」と厳密に揃える)。
+        /// </summary>
+        public static List<string> FindExcludedFolderNames(string sourceDir)
+        {
+            var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            CollectExcludedFolderNames(sourceDir, found);
+            return found.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        private static void CollectExcludedFolderNames(string dir, HashSet<string> found)
+        {
+            string[] subDirs;
+            try { subDirs = Directory.GetDirectories(dir); }
+            catch { return; }
+            foreach (string subDir in subDirs)
+            {
+                string name = Path.GetFileName(subDir);
+                if (ExcludedFolders.Contains(name, StringComparer.OrdinalIgnoreCase))
+                {
+                    found.Add(name);
+                    continue; // 除外フォルダ内は走査不要 (コピーされないため)
+                }
+                CollectExcludedFolderNames(subDir, found);
+            }
+        }
 
         /// <summary>
         /// 指定ディレクトリ配下のファイル数を再帰的にカウント
