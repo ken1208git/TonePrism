@@ -33,13 +33,12 @@ namespace TonePrism.Manager.Controls
         {
             gridHistory.AutoGenerateColumns = false;
             gridHistory.Columns.Clear();
-            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "started", HeaderText = "開始日時", Width = 150 });
-            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "completed", HeaderText = "完了日時", Width = 150 });
+            // (Manager v0.21.0) ファイル由来の履歴では開始 / 完了の区別が無いため日時は「作成日時」1 列に統合。
+            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "created", HeaderText = "作成日時", Width = 150 });
             gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "pc", HeaderText = "実行PC", Width = 110 });
             gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "trigger", HeaderText = "トリガ", Width = 60 });
-            // (#200) 「状態」列は削除。failed は AutoCleanupFailedEntries で DB + 物理削除され、in_progress は
-            // 数秒〜数十秒のみのため、grid を開いた時点で実質ほぼ全行「成功」になり情報量ゼロだった。
-            // 失敗通知は status bar (PR #196 G 系) で覆える。DB schema / status reconcile logic は不変。
+            // (#200) 「状態」列は持たない。backup_log 廃止 (v19) 後は失敗はファイルを残さず履歴に出ない
+            // (走査結果は実質すべて成功ファイル) ため状態列は情報量ゼロ。失敗通知は status bar / Logger で覆える。
             gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "size", HeaderText = "サイズ", Width = 90 });
             gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "file", HeaderText = "ファイルパス", Width = 380 });
         }
@@ -81,11 +80,10 @@ namespace TonePrism.Manager.Controls
                         case "safety": trigger = "退避"; break;
                         default: trigger = entry.TriggerType ?? ""; break;
                     }
-                    // ファイル由来のため開始 / 完了は同一タイムスタンプ。
-                    string started = entry.StartedAtLocal.ToString("yyyy/MM/dd HH:mm:ss");
+                    // ファイル由来の作成日時 (開始 / 完了の区別が無いため 1 列)。
+                    string created = entry.StartedAtLocal.ToString("yyyy/MM/dd HH:mm:ss");
                     int rowIndex = gridHistory.Rows.Add(
-                        started,
-                        started,
+                        created,
                         entry.PcName,
                         trigger,
                         FormatBytes(entry.FileSizeBytes),
