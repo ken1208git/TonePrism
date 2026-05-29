@@ -101,6 +101,15 @@ namespace TonePrism.Manager.Repositories
                                 long.TryParse(v.ToString(), out lastBackupAt);
                         }
 
+                        // (累積監査 round 6 M5) 時計が大きく未来にズレた PC (NTP 未同期 / RTC 電池切れで
+                        // 2099 年等) が last_backup_at を未来 unix 秒で書き込むと、以降すべての PC で
+                        // `lastBackupAt + interval > now` が恒真になり自動バックアップが永久 skip される。
+                        // 1 日以上未来の値は明らかな時計異常として 0 扱いにし、lease を取得可能にする。
+                        if (lastBackupAt > nowUnixSeconds + 86400)
+                        {
+                            lastBackupAt = 0;
+                        }
+
                         if (lastBackupAt + intervalSeconds > nowUnixSeconds)
                         {
                             tx.Rollback();

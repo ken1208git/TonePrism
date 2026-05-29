@@ -520,11 +520,7 @@ namespace TonePrism.Manager
                 // 製作者情報を設定
                 game.Developers = developers;
 
-                // データベースに追加 (累積監査 round 4 Medium-10) display_order の MIN-1 採番を atomic に行う AddGameAtTop 経由。
-                dbManager.AddGameAtTop(game);
-                gameAdded = true;
-
-                // 初期バージョン情報を追加
+                // 初期バージョン情報を作成
                 // (#224 バグ②) 旧実装は Description に "初期バージョン" を入れていたが、編集画面が
                 // version.Description を読むため、編集→保存で games の本物の説明が "初期バージョン" で
                 // 上書き消去されていた。初期版は games と同じ本物の説明 / 起動オプションを持たせ、
@@ -561,7 +557,13 @@ namespace TonePrism.Manager
                     }).ToList(),
                     RegisteredAt = DateTime.Now
                 };
-                dbManager.AddGameVersion(initialVersion);
+
+                // データベースに追加 (累積監査 round 6 High-1) games 行 (display_order の MIN-1 採番込み) と
+                // 初期版 INSERT を 1 transaction で atomic に実行する。旧実装は AddGameAtTop と AddGameVersion を
+                // 別 transaction で順次実行しており、前者 commit 直後の電源断 / SMB disconnect で「games 行はあるが
+                // 版なし」の起動不能孤児ゲームが残る partial-commit 窓があった。両 INSERT を統合して窓を物理閉鎖。
+                dbManager.AddGameAtTopWithInitialVersion(game, initialVersion);
+                gameAdded = true;
 
                 AddedGame = game;
                 DialogResult = DialogResult.OK;

@@ -76,10 +76,17 @@ namespace TonePrism.Manager.Controls
                     int safetyAdded = _dbManager.BackupLogRepository.RegisterUnknownSafetyFiles(
                         _dbManager.BackupService.GetSafetyDirectory(),
                         Environment.MachineName);
+                    // (累積監査 round 6 #7) 復元で backup_log が古い snapshot に置き換わった等で、本体バックアップ
+                    // フォルダに log 行を失った orphan ファイルが残ると「履歴に出ず・retention 対象外で永久残置」
+                    // という見えない蓄積になる。trigger_type='manual' (= 自動削除対象外 + 履歴表示 + 復元可能) で
+                    // 再登録して可視化し、不要なら運営が手動で整理できるようにする (削除は一切しない安全方針)。
+                    int orphanBackups = _dbManager.BackupLogRepository.RegisterUnknownBackupFiles(
+                        _dbManager.BackupService.GetEffectiveDestinationDirectory(),
+                        Environment.MachineName);
                     int failedCleaned = CleanupFailedEntries();
-                    if (recoveredSuccess > 0 || markedFailed > 0 || legacyRecovered > 0 || safetyAdded > 0 || failedCleaned > 0)
+                    if (recoveredSuccess > 0 || markedFailed > 0 || legacyRecovered > 0 || safetyAdded > 0 || orphanBackups > 0 || failedCleaned > 0)
                     {
-                        Logger.Info($"[BackupSectionPanel] 更新時リコンサイル: 成功化 {recoveredSuccess} / 失敗化 {markedFailed} / 旧版救済 {legacyRecovered} / 退避新規 {safetyAdded} / 失敗自動掃除 {failedCleaned}");
+                        Logger.Info($"[BackupSectionPanel] 更新時リコンサイル: 成功化 {recoveredSuccess} / 失敗化 {markedFailed} / 旧版救済 {legacyRecovered} / 退避新規 {safetyAdded} / 本体orphan登録 {orphanBackups} / 失敗自動掃除 {failedCleaned}");
                     }
                 }
                 catch (Exception reconcileEx)
@@ -502,7 +509,16 @@ namespace TonePrism.Manager.Controls
                 {
                     newLastBackupAt = newLatest.CompletedAt ?? newLatest.StartedAt;
                 }
-                _dbManager.SettingsRepository.SetInt64("last_backup_at", newLastBackupAt);
+                // (累積監査 round 6 M8) この削除操作は「最新の自動バックアップを消して取り直したい」ための
+                // last_backup_at rewind。しかし削除中に別 PC が新しい自動バックアップを取得して last_backup_at を
+                // 前進させていた場合、ここで古い値に上書きすると別 PC の最新取得を打ち消して二重バックアップを
+                // 誘発する (last-write-wins 競合)。rewind になる (= 現在値より小さくなる) ときだけ更新し、
+                // 別 PC がより新しい値を書いていれば尊重する。完全な atomic ではないが TOCTOU 窓を縮める。
+                long currentLastBackupAt = _dbManager.SettingsRepository.GetInt64("last_backup_at", 0);
+                if (newLastBackupAt < currentLastBackupAt)
+                {
+                    _dbManager.SettingsRepository.SetInt64("last_backup_at", newLastBackupAt);
+                }
             }
 
             RefreshDisplay();

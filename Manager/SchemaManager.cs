@@ -697,6 +697,20 @@ namespace TonePrism.Manager
                 // で失敗する (Codex P1)。idempotent な MigrateV13ToV14 を stamp 前に明示実行して
                 // 旧実装 (CreateTables 内 retrofit) と同じ v0 カバレッジを保つ。
                 MigrateV13ToV14(connection, transaction);
+
+                // (累積監査 round 6 #13) versioning 導入前 (user_version=0 のまま) から developers テーブルが
+                // 存在する旧 DB は、CreateTables の CREATE TABLE IF NOT EXISTS が既存 developers を温存するため、
+                // v18 で追加した version_id / game_id の FK + ON DELETE CASCADE が付かないまま user_version
+                // だけ 18 に刻印される schema drift があった (VerifySchema は列名のみ検証で FK 欠落を見逃す)。
+                // 新規 DB は CreateTables が FK 付きで作るので問題ない。developers に期待 FK が無い場合のみ
+                // MigrateV17ToV18 で retrofit する (新規 DB では FK 検出で skip されるため、毎回の table
+                // recreate コストを common path に乗せない)。
+                if (!DevelopersHasVersionIdForeignKey(connection, transaction))
+                {
+                    Logger.Warn("[DatabaseManager] (#13) v0 DB の developers に version_id FK が無いため MigrateV17ToV18 で retrofit します");
+                    MigrateV17ToV18(connection, transaction);
+                }
+
                 SetDbVersion(connection, CurrentDbVersion, transaction);
                 return;
             }
@@ -1598,6 +1612,36 @@ namespace TonePrism.Manager
         /// silent に掃除する (現状 single-version 削除コードが無いので通常 orphan は発生していないはずだが、
         /// 過去 migration の残党 / 外部ツール直 DML での garbage を念のため除去する defensive sweep)。
         /// </summary>
+        /// <summary>
+        /// (累積監査 round 6 #13) developers テーブルが version_id への FOREIGN KEY を持つか判定する。
+        /// v0 DB の retrofit 要否判定に使う。`PRAGMA foreign_key_list(developers)` の各行の `from` 列が
+        /// "version_id" のものがあれば true。検出に失敗した場合は安全側 (= retrofit を走らせない) に倒して
+        /// true を返す (= 余計な table recreate を避ける。新規 DB では CreateTables が FK 付きで作るため、
+        /// 検出失敗で skip しても実害なし)。
+        /// </summary>
+        private bool DevelopersHasVersionIdForeignKey(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            try
+            {
+                using (var cmd = new SQLiteCommand("PRAGMA foreign_key_list(developers)", connection, transaction))
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        string from = reader["from"] is DBNull ? null : reader["from"].ToString();
+                        if (string.Equals(from, "version_id", StringComparison.OrdinalIgnoreCase))
+                            return true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[DatabaseManager] (#13) developers FK 検出に失敗、retrofit を skip (安全側): " + ex.Message);
+                return true;
+            }
+            return false;
+        }
+
         private void MigrateV17ToV18(SQLiteConnection connection, SQLiteTransaction transaction)
         {
             Logger.Info("[DatabaseManager] Executing migration V17 -> V18 (developers.version_id に FK + ON DELETE CASCADE 追加 / game_genres dead table 除去, Medium-22 / Low-28/29)");

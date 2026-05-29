@@ -104,6 +104,34 @@ namespace TonePrism.Manager.Services
                 progress?.Report(new ProgressInfo(0, "復元の準備...", ""));
                 token.ThrowIfCancellationRequested();
 
+                // (累積監査 round 6 M12) 復元は (1) safety 退避 + (2) backup を tempPath にコピー + (3) File.Replace で
+                // ディスクを最大 2 ファイル分消費する。展示 PC は小容量 SSD が多く、途中で容量が尽きると safety だけ
+                // 書けて tempPath コピーが IOException で落ちる (DB は無傷だが中途半端な残骸 + 不親切なエラー)。
+                // 事前に「復元元サイズ × 2 + 余裕」の空きを確認し、不足なら明確なメッセージで先に止める。
+                try
+                {
+                    long needed = new FileInfo(backupFilePath).Length * 2L + 16L * 1024 * 1024; // ×2 (safety+temp) + 16MB 余裕
+                    string root = Path.GetPathRoot(Path.GetFullPath(dbPath));
+                    if (!string.IsNullOrEmpty(root))
+                    {
+                        var drive = new DriveInfo(root);
+                        if (drive.IsReady && drive.AvailableFreeSpace < needed)
+                        {
+                            string msg = "ディスクの空き容量が不足しているため復元を中止しました。\n" +
+                                "  必要: 約 " + (needed / (1024 * 1024)) + " MB / 空き: 約 " + (drive.AvailableFreeSpace / (1024 * 1024)) + " MB\n" +
+                                "  不要なファイルを削除して空き容量を確保してから再試行してください。";
+                            Logger.Error("[RestoreService] " + msg);
+                            throw new IOException(msg);
+                        }
+                    }
+                }
+                catch (IOException) { throw; }
+                catch (Exception spaceEx)
+                {
+                    // 空き容量チェック自体の失敗 (ネットワークドライブ等で DriveInfo 不能) は復元を止めない。
+                    Logger.Warn("[RestoreService] 空き容量チェックに失敗 (チェックを skip して続行): " + spaceEx.Message);
+                }
+
                 // 退避フォルダを必ず作成
                 if (!Directory.Exists(safetyDir))
                 {
@@ -229,8 +257,10 @@ namespace TonePrism.Manager.Services
                     }
 
                     // 5. 退避フォルダのリテンション適用（最新を残して古いのから削除）
+                    // (累積監査 round 6 High-10) 今回作成した safetyPath を除外対象として渡し、CreationTime の
+                    // タイ順序揺れで「今まさにレポートで案内する safety」が間引かれる事故を防ぐ。
                     progress?.Report(new ProgressInfo(95, "退避ファイルの世代管理...", ""));
-                    ApplySafetyRetention(safetyDir, DefaultSafetyRetentionCount);
+                    ApplySafetyRetention(safetyDir, DefaultSafetyRetentionCount, safetyPath);
 
                     progress?.Report(new ProgressInfo(100, "復元完了", dbPath));
                 }
@@ -306,14 +336,32 @@ namespace TonePrism.Manager.Services
         /// <summary>
         /// safety_*.db を新しい順に count 個まで残し、それより古いものを削除
         /// </summary>
-        private static void ApplySafetyRetention(string safetyDir, int count)
+        private static void ApplySafetyRetention(string safetyDir, int count, string currentSafetyPath = null)
         {
             try
             {
                 var dir = new DirectoryInfo(safetyDir);
                 if (!dir.Exists) return;
 
+                // (累積監査 round 6 High-10) 今回作成した safety は復元レポートで「元に戻すならここ」と案内する
+                // 対象。NTFS の CreationTime 解像度 (約 2 秒) で同一秒に複数 safety が並ぶと OrderByDescending の
+                // タイ順序が不定になり、本来最新の今回 safety が Skip 境界に落ちて削除されうる。削除候補から
+                // 明示的に除外して、案内した path がレポート表示時点で消えている事故を防ぐ。
+                string normalizedCurrent = null;
+                if (!string.IsNullOrEmpty(currentSafetyPath))
+                {
+                    try { normalizedCurrent = Path.GetFullPath(currentSafetyPath); }
+                    catch { normalizedCurrent = currentSafetyPath; }
+                }
+
                 var oldFiles = dir.GetFiles("safety_*.db")
+                    .Where(f =>
+                    {
+                        if (normalizedCurrent == null) return true;
+                        string fp;
+                        try { fp = Path.GetFullPath(f.FullName); } catch { fp = f.FullName; }
+                        return !string.Equals(fp, normalizedCurrent, StringComparison.OrdinalIgnoreCase);
+                    })
                     .OrderByDescending(f => f.CreationTimeUtc)
                     .Skip(count)
                     .ToList();

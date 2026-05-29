@@ -167,7 +167,11 @@ namespace TonePrism.Manager
                         developers.Add(new DeveloperInfo
                         {
                             // IDはコピーしない（新規作成のため）
-                            GameId = dev.GameId,
+                            // (累積監査 round 6 M4) GameId は baseVersion の値を盲目コピーせず、編集中の
+                            // ゲーム ID (this.gameId) を採用する。baseVersion 由来の dev.GameId が
+                            // 移行バグ等で空 / 別 id を持っていた場合、新版の developers 行に誤った
+                            // game_id が入り FK 不整合 (親 game 削除で消えない孤児) の温床になるため。
+                            GameId = this.gameId,
                             LastName = dev.LastName,
                             FirstName = dev.FirstName,
                             Grade = dev.Grade
@@ -543,7 +547,14 @@ namespace TonePrism.Manager
                 // IsValid 通過後なので通常ここには来ない。defensive に生値で比較継続。
                 newNormalized = semverNext.VersionString;
             }
-            var versionsToCheck = existingVersionStrings ?? new List<string> { currentVersion };
+            // (累積監査 round 6 High-6) fallback は null だけでなく「空リスト」も拾う。game_versions が
+            // ゼロ件 (= 過去の中断で games 行だけ残った等) のとき caller は空 list を渡し、旧 `?? ` は
+            // null チェックのみで空 list を素通り → dup check 全 skip → games.version と同じ番号を再入力
+            // できる穴があった (UNIQUE INDEX も空集合には発火しない)。空のときは currentVersion 単体と
+            // 比較する旧 fallback 挙動に倒す。
+            var versionsToCheck = (existingVersionStrings != null && existingVersionStrings.Count > 0)
+                ? existingVersionStrings
+                : new List<string> { currentVersion };
             foreach (var existing in versionsToCheck)
             {
                 string existingNormalized;
@@ -637,6 +648,19 @@ namespace TonePrism.Manager
                 MessageBox.Show("実行ファイルはゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 btnSelectExecutable.Focus();
                 return false;
+            }
+
+            // (累積監査 round 6 High-1/headline) RelativeExecutablePath を textbox の最終値から必ず再計算する。
+            // round 5 Phase D で txtExecutablePath を編集可能 (ReadOnly=false) にしたが、TextChanged は
+            // `/` → `\` 正規化しかせず RelativeExecutablePath を更新しなかった。そのため「autodetect された
+            // path が違うので手で別 exe に書き換えて OK」すると、ValidateInput は編集後の textbox 値で
+            // File.Exists + IsPathInside を通すのに、DB 保存に使われる RelativeExecutablePath は autodetect 時の
+            // 古い値のまま → GameSectionPanel が古い exe を指す path を保存 → コピーした新 exe が起動できない
+            // silent corruption だった (フォルダ丸ごとコピーで両 exe が versionDir に存在するため missing-asset
+            // check も素通り)。textbox を SoT として、検証通過したこの時点で相対 path を確定させる。
+            if (!string.IsNullOrEmpty(selectedFolderPath))
+            {
+                RelativeExecutablePath = PathConversionHelper.ToRelativePath(selectedFolderPath, txtExecutablePath.Text);
             }
 
             // (#234) サムネ/背景は AddGameForm と同様、OK 時点で「存在する」かつ「コピー元フォルダ内」で

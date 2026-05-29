@@ -62,6 +62,13 @@ namespace TonePrism.Manager.Services
             int intervalHours = _settingsRepo.GetInt32("backup_auto_interval_hours", 24);
             long lastBackupAt = _settingsRepo.GetInt64("last_backup_at", 0);
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            // (累積監査 round 6 M5) 時計異常 (未来日時) で last_backup_at が未来値になっていると
+            // due 判定が恒偽になり自動バックアップが永久 skip される。TryAcquireBackupLease 側と
+            // 同じ sanity を入れ、1 日以上未来の値は 0 扱いで「due」と判定して取得を促す。
+            if (lastBackupAt > now + 86400)
+            {
+                lastBackupAt = 0;
+            }
             return lastBackupAt + (long)intervalHours * 3600 <= now;
         }
 
@@ -270,6 +277,15 @@ namespace TonePrism.Manager.Services
                             100);
                     }
                 }
+
+                // (累積監査 round 6 M9) Online Backup API の dest 接続が close 時に -wal / -shm / -journal の
+                // sibling を残すケースが System.Data.SQLite の版によって報告されている。本体 .db は単独で完結
+                // すべきで、sibling が残ると user がバックアップファイルを別フォルダへ手動 move した際に
+                // 置き去りになり、復元時に古い journal が誤適用されて内容が巻き戻る稀な事故につながる。
+                // backup 完了直後 (両接続 close 後) に sibling を best-effort で掃除する。
+                TryDeleteIfExists(destinationPath + "-wal");
+                TryDeleteIfExists(destinationPath + "-shm");
+                TryDeleteIfExists(destinationPath + "-journal");
 
                 token.ThrowIfCancellationRequested();
 

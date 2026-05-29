@@ -1911,6 +1911,44 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.19.1] - 2026-05-29
+
+#### Fixed (累積監査ラウンド 6: ゲーム追加/編集/バージョンアップ/バックアップ/復元/スキーマの残存欠陥 17 件)
+
+round 5 (v0.19.0) リリース後、6 領域 (追加 / 編集 / バージョンアップ / バックアップ作成・保持 / 復元・整合性 / スキーマ・DB 接続層) を独立並列で再精査。Agent 報告 25 件超のうち、**実コード verify で真と確認した High 9 / Medium 8 = 計 17 件**を修正。残り 5 件は「設計通り / 到達不能」、3 件は「本番 (新規インストール) では非到達 or 効果に対し実装が過大」として実コード根拠付きで見送り (本 entry 末尾「除外」参照)。schema の最終形 (v18) は不変のため patch bump。
+
+**【High】**
+
+- **H1 (AddGameForm + DatabaseManager): ゲーム追加が games INSERT と初期版 INSERT の別 transaction で partial-commit 窓**: 旧実装は `AddGameAtTop` (games 行 commit) → `AddGameVersion` (初期版 commit) を順次実行しており、前者 commit 直後の電源断 / SMB disconnect で「games 行はあるが game_versions ゼロ件」の起動不能孤児ゲーム (Launcher 一覧に出るが版が無く起動不可) が残る経路があった。`DatabaseManager.AddGameAtTopWithInitialVersion` を新設し、display_order の MIN-1 採番 + games INSERT + 初期版 INSERT を 1 つの Serializable transaction に統合 (`AddVersionAndActivate` / `UpdateVersionsAndGame` と同設計)。初期版の `GameId` も追加対象 game の id に強制して caller 取り違えの二段保険を入れる。
+- **H2 (VersionRepository.InsertVersionDevelopers): 製作者の null フィールドが games 側と非対称に DB 流入**: `GameRepository.InsertDevelopers` は `?? ""` で null を空文字に正規化していたのに、version 別 INSERT 側は素通しで、同じ user 入力が games 側 developers では `""` / version 側 developers では `NULL` に乖離していた。後段の集計 / 表示 (null と空文字を区別する経路) で NRE / 不整合を招くため `LastName` / `FirstName` / `Grade` を `?? ""` で揃える。
+- **H3 (EditGameForm.SaveGameDataToVersion): version.Developers の浅いコピーで版間 aliasing**: `new List<DeveloperInfo>(developers)` は List だけ新規で中身の `DeveloperInfo` インスタンスを版間で共有し、ある版の製作者を編集すると別の版にも波及しうる温床だった。AddGameForm / VersionUpForm と同じくフィールド単位のディープコピーに変更し、版ごとに独立実体を持たせる。
+- **H4 (VersionUpForm.ValidateInput): path textbox 直接編集が `RelativeExecutablePath` に反映されず保存される silent corruption**: v0.19.0 Phase D で `txtExecutablePath` を編集可能化したが、TextChanged は `/`→`\` 正規化のみで `RelativeExecutablePath` を更新しなかった。「autodetect された path が違うので手で別 exe に書き換えて OK」すると、ValidateInput は編集後 textbox 値で File.Exists + IsPathInside を通すのに、DB 保存に使う `RelativeExecutablePath` は autodetect 時の古い値のまま → 古い exe を指す path を保存 → コピーした新 exe が起動できない (フォルダ丸ごとコピーで両 exe が版フォルダに存在するため欠落 check も素通り)。検証通過時点で textbox を SoT として相対 path を再計算する。
+- **H5 (VersionUpForm.ValidateInput): dup guard の fallback が空リストを素通り**: 重複チェックの fallback が `existingVersionStrings ?? new List{currentVersion}` で null のみ拾い、game_versions ゼロ件 (過去の中断で games 行だけ残った等) で caller が渡す空 list を素通りさせ、dup check 全 skip → games.version と同じ番号を再入力できる穴があった (UNIQUE INDEX も空集合には発火しない)。`!= null && Count > 0` に変更して空時は currentVersion 単体と比較する。
+- **H6 (BackupSectionPanel + BackupLogRepository): backup_log を失った orphan バックアップファイルが「見えず・消えず」永久蓄積**: 復元で backup_log がスナップショット時点の古い状態に置換されると、スナップショット後〜復元前に取られた自動バックアップの log 行だけが消えてファイル実体が残る orphan が生じる。旧実装ではこの orphan は (a) 履歴グリッドに出ず運営から見えない、(b) retention は backup_log 駆動なので永久に削除対象外、という二重の死角だった。`RegisterUnknownBackupFiles` を新設し、保存先フォルダ内で backup_log 未登録の `toneprism_*.db` を `trigger_type='manual'` (= 自動削除対象外 + 履歴/削除 UI に表示 + 復元可能) で可視化 (削除は一切しない安全方針)。**(本 PR 検証で追補)**: 当初の重複判定が `file_path` のみで、SMB 共有運用 (本番) で他 PC が取った auto バックアップを表記揺れ (UNC `\\srv\...` ↔ ドライブ文字 `Z:\...`、GetFullPath でも解決不能) で取りこぼし → manual で重複登録 → その行が retention 対象外になり「auto を manual 化して世代管理から外す」副作用が生じる穴があったため、PC 非依存の `relative_path` (dbDir 基準) も dedup キーに併用して塞いだ。
+- **H7 (MainForm): 自動バックアップ失敗が 7 秒のステータス表示のみで運営が気づけない**: 保存先 path の綴り間違い等で毎回静かに失敗していても、失敗履歴は次回 `CleanupFailedEntries` で掃除されるため画面に痕跡が残らず、「いざ復元しようとしたら過去ぶんが 1 件も無い」最悪ケースに直結していた。自動バックアップ失敗時に modal で明示通知 (保存先 / 空き容量 / 書込権限の確認を促す) して見落としを防ぐ。
+- **H8 (RestoreService.ApplySafetyRetention): 復元レポートが案内する safety ファイルが間引かれて消える**: 退避 safety を 10 個まで残す retention で、NTFS の CreationTime 解像度 (約 2 秒) により同一秒に複数 safety が並ぶと `OrderByDescending` のタイ順序が不定になり、本来最新の今回 safety が Skip 境界に落ちて削除されうる。RestoreReportForm が「元に戻すならここ」と案内する path が表示時点で消える事故になるため、今回作成した safetyPath を削除候補から明示除外する。
+- **H9 (SchemaManager): user_version=0 の旧 DB をアップグレードすると developers の FK が欠落したまま v18 を名乗る**: versioning 導入前から developers テーブルが存在する旧 DB は、CreateTables の `CREATE TABLE IF NOT EXISTS` が既存テーブルを温存するため、v18 で追加した version_id / game_id の FK + ON DELETE CASCADE が付かないまま user_version だけ 18 に刻印される drift があった (VerifySchema は列名のみ検証で FK 欠落を見逃す)。`DevelopersHasVersionIdForeignKey` (`PRAGMA foreign_key_list`) で FK 欠落を検出した場合のみ v0 path で `MigrateV17ToV18` を retrofit する (新規 DB は FK 付きで作られるため検出で skip、common path に table recreate コストを乗せない)。
+
+**【Medium】**
+
+- **M1 (SPECIFICATION.md): §7.3 ドリフト — 廃止済 `game_genres` がテーブル / リレーション / ER 図に残存**: v18 (`MigrateV17ToV18`) で DROP 済 + `ExpectedSchema` からも除去済なのに、SPEC §7.3 テーブル7・§7.4 リレーション・ER 図・機能「ゲーム削除」CASCADE 一覧に `game_genres` が現役テーブルとして残っていた。AGENTS.md「SPEC ↔ ExpectedSchema 同期」則に従い「DB v18 で廃止」へ更新 (テーブル番号は後続参照を壊さないよう欠番で残置)。
+- **M2 (VersionUpForm): 新版の製作者 GameId を baseVersion から盲目コピー**: `dev.GameId` を baseVersion 由来の値そのまま transcribe しており、移行バグ等で空 / 別 id を持っていた場合、新版 developers 行に誤った game_id が入り FK 不整合 (親 game 削除で消えない孤児) の温床になる。`GameId = this.gameId` (編集中ゲームの id) に上書き。
+- **M3 (BackupService + SettingsRepository): 時計が未来にズレた PC で自動バックアップが永久 skip**: NTP 未同期 / RTC 電池切れで wall clock が未来 (2099 年等) になった PC が `last_backup_at` を未来 unix 秒で書き込むと、以降全 PC で `lastBackupAt + interval > now` が恒真になり自動バックアップが永久 skip される。`IsAutoBackupDue` / `TryAcquireBackupLease` の両方に「1 日以上未来の値は明らかな時計異常として 0 扱い」の sanity を入れて lease 取得を促す。
+- **M4 (BackupLogRepository.GetLastSuccess): 「最終バックアップ」表示が時計依存**: retention 側 (`GetAutoSuccessRetentionTargets`) は時計非依存の `id DESC` なのに、UI の最終バックアップ表示 SoT である `GetLastSuccess` は `started_at DESC` で wall clock 依存だった。時計が大きくズレた PC のバックアップが常に「最新」扱いで上に居座り、時計正常な PC の直近バックアップが UI で見えなくなる。`ORDER BY id DESC` (AUTOINCREMENT INSERT 順) に揃えて時計非依存化。
+- **M5 (RestoreService): 復元前にディスク空き容量を確認せず途中で容量切れ**: 復元は safety 退避 + tempPath コピー + File.Replace でディスクを最大 2 ファイル分消費する。展示 PC は小容量 SSD が多く、safety だけ書けて tempPath コピーが IOException で落ちると中途半端な残骸 + 不親切なエラーになる。「復元元サイズ × 2 + 16MB 余裕」を事前確認し、不足なら明確なメッセージで先に止める (DriveInfo 取得不能なネットワークドライブ等では check を skip して続行)。
+- **M6 (BackupSectionPanel.btnDelete_Click): last_backup_at rewind の last-write-wins 競合**: 自動バックアップ削除時の last_backup_at rewind で、削除中に別 PC が新しい自動バックアップを取得して last_backup_at を前進させていた場合、古い値で上書きすると別 PC の最新取得を打ち消して二重バックアップを誘発していた。現在値より小さくなる (= 真に rewind になる) ときだけ更新する guard を追加 (完全 atomic ではないが TOCTOU 窓を縮小)。
+- **M7 (BackupService): Online Backup API が残す `-wal` / `-shm` / `-journal` sibling の掃除**: System.Data.SQLite の版によっては dest 接続の close 時に journal sibling が残り、user がバックアップファイルを別フォルダへ手動 move した際に置き去りになって、復元時に古い journal が誤適用され内容が巻き戻る稀な事故につながる。本体 .db は単独で完結すべきなので backup 完了直後に sibling を best-effort で掃除する。
+- **M8 (EditGameForm.UpdatePathTextBox): path 正規化失敗が完全 silent で追跡不能**: `Path.GetFullPath` 例外時の catch が完全 silent で、rename 後に path が旧 gameId のまま残り後段で null 化 → 喪失する経路の追跡が効かなかった。`Logger.Warn` を残して後段 validation に委ねる (挙動は据え置き、可観測性のみ改善)。
+
+**【除外: 実コード根拠付き】**
+
+- **設計通り / 到達不能 (修正不要、5 件)**: (a) EditGameForm の `game.Title = selectedVersion.Title ?? game.Title` は Title が必須入力 (空版を作れない) のため `?? game.Title` は NOT NULL 安全弁で実害なし。(b) BackupService.ApplyRetention の File.Delete 失敗は foreach が continue で後続処理 + 次回バックアップ時に再試行されるため「渋滞」は起きない。(c) 復元 Abort 時の audit は pre-replace 失敗 (DB は OLD のまま) なので OLD DB に `MarkAuditFailed` で残る。(d) `ForceClearRestoreLock` の順序は round 5 M2 で意図的に設計した post-step 処理 (File.Replace 完了後) でデータ破損経路なし。(e) SemverInputControl の範囲外入力は `TryParseAndSet` が `ok=false` を返し (silent でない) + LoadVersions で全件警告済み。
+- **本番非到達 / 効果過大で見送り (3 件)**: (a) legacy safety ファイルの移行 retry loop は対象が「v0.8.0 リリース直前まで」の旧ファイルで、2026-05-27 開始の新規インストールには存在せず即 0 返却で到達しない。(b) 復元後整合性チェックの case 違い version 重複検出は、v17 の NOCASE UNIQUE INDEX でアプリ経由の重複が入らず、pre-v17 backup 復元時も migration の index rebuild 失敗 → `SchemaIncomplete=true` で既に検出済みのため、残るは v18 DB への外部ツール直 DML のみで本番非現実的。(c) safety/backup 再登録の UNC↔ドライブ文字 dedup は完全解決に共有マッピングが必要で本質的に困難、害は履歴の重複表示のみ (`RegisterUnknownBackupFiles` は GetFullPath 正規化で部分対応済み)。これら 3 件は GitHub issue 化を検討。
+
+#### Bump 根拠 (v0.19.0 → v0.19.1)
+
+全 17 件が bugfix (新機能なし、path 編集解放は v0.19.0 で追加済でその回帰 fix が H4)。schema の最終形は v18 のまま不変 (H9 は v0 DB の retrofit hardening で新 user_version は引き続き 18) のため patch bump。AGENTS.md「1 PR 1 bump」原則に従い round 6 の修正群を単一 v0.19.1 entry に統合。Bundle への反映は次回リリース実行時。
+
 ### [Manager v0.19.0] - 2026-05-29
 
 #### Fixed (累積監査ラウンド 5: 並行 Manager race / GDI lifecycle / 規約 drift の 12 件)

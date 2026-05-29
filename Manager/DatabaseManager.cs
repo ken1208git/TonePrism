@@ -166,6 +166,52 @@ namespace TonePrism.Manager
             });
         }
 
+        /// <summary>
+        /// (累積監査 round 6 High-1) ゲーム追加時の games INSERT (display_order の MIN-1 採番込み) と
+        /// 初期バージョンの game_versions INSERT を 1 transaction で atomic に実行する。
+        ///
+        /// 旧 AddGameForm は `AddGameAtTop` (games INSERT) と `AddGameVersion` (初期版 INSERT) を別 transaction で
+        /// 順次実行しており、前者 commit 完了直後の電源断 / SMB disconnect で「games 行はあるが game_versions は
+        /// ゼロ件」の起動不能孤児ゲーム (= Launcher 一覧には出るが版が無く起動できない) が残る partial-commit 窓が
+        /// あった。失敗時は補償削除 (RollbackGameRow) で救おうとするが、それ自体が失敗すると zombie が残る。
+        /// 本 method は両 INSERT を共有 connection + Serializable transaction でラップして窓を物理閉鎖する
+        /// (AddVersionAndActivate / UpdateVersionsAndGame と同じ設計)。
+        /// </summary>
+        public void AddGameAtTopWithInitialVersion(GameInfo game, GameVersion initialVersion)
+        {
+            _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var transaction = connection.BeginTransaction(System.Data.IsolationLevel.Serializable))
+                    {
+                        try
+                        {
+                            int minOrder;
+                            using (var cmd = new SQLiteCommand("SELECT COALESCE(MIN(display_order), 0) FROM games", connection, transaction))
+                            {
+                                var r = cmd.ExecuteScalar();
+                                minOrder = r is DBNull ? 0 : Convert.ToInt32(r);
+                            }
+                            game.DisplayOrder = minOrder - 1;
+
+                            _gameRepo.AddGameRowInTransaction(connection, transaction, game);
+                            // 初期版は必ず追加対象 game の id を指す (caller の取り違え防止の二段保険)。
+                            initialVersion.GameId = game.GameId;
+                            _versionRepo.AddVersionRowInTransaction(connection, transaction, initialVersion);
+                            transaction.Commit();
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+                }
+            });
+        }
+
         public void UpdateVersionsAndGame(IEnumerable<GameVersion> versions, GameInfo game)
         {
             var list = versions?.Where(v => v != null).ToList() ?? new List<GameVersion>();

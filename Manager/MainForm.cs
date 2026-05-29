@@ -778,6 +778,24 @@ namespace TonePrism.Manager
                 {
                     UpdateBackupStatus($"✗ 自動バックアップ失敗: {result.Message}",
                         System.Drawing.Color.DarkRed, autoRevert: true);
+                    // (累積監査 round 6 #9) 自動バックアップ失敗は 7 秒で消えるステータス表示だけだと、
+                    // 保存先 path の綴り間違い等で毎回静かに失敗していても運営が気づけない (履歴グリッドも
+                    // 「ファイル無し」判定で非表示になる)。バックアップは実データ保護の生命線で、失敗放置は
+                    // 「いざ復元しようとしたら過去ぶんが 1 件も無い」最悪ケースに直結するため、失敗時は
+                    // modal で明示通知して見落としを防ぐ。
+                    try
+                    {
+                        MessageBox.Show(this,
+                            "自動バックアップに失敗しました。\n\n" +
+                            result.Message + "\n\n" +
+                            "保存先フォルダの指定 (設定タブ)・ディスクの空き容量・書き込み権限を確認してください。\n" +
+                            "この状態が続くとバックアップが取得されないため、早めの対処をおすすめします。",
+                            "自動バックアップ失敗", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                    catch (Exception msgEx)
+                    {
+                        Logger.Warn("[MainForm] 自動バックアップ失敗通知の表示に失敗: " + msgEx.Message);
+                    }
                 }
                 else if (result.IsSkipped)
                 {

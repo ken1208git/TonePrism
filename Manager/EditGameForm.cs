@@ -534,7 +534,22 @@ namespace TonePrism.Manager
             version.SupportedConnection = cmbSupportedConnection.SelectedIndex >= 0 ? cmbSupportedConnection.SelectedIndex : 0;
             
             // Developers
-            version.Developers = new List<DeveloperInfo>(developers);
+            // (累積監査 round 6 High-2) 浅いコピー (new List(developers)) は List だけ新規で中身の
+            // DeveloperInfo インスタンスを版間で共有してしまい、ある版の製作者を編集すると別の版にも
+            // 波及しうる aliasing の温床だった。AddGameForm / VersionUpForm と同じくディープコピーにして
+            // 版ごとに独立した実体を持たせる (Id はコピーしない = DELETE+INSERT 再登録のため不要)。
+            var copiedDevelopers = new List<DeveloperInfo>();
+            foreach (var d in developers)
+            {
+                copiedDevelopers.Add(new DeveloperInfo
+                {
+                    GameId = d.GameId,
+                    LastName = d.LastName,
+                    FirstName = d.FirstName,
+                    Grade = d.Grade
+                });
+            }
+            version.Developers = copiedDevelopers;
 
             // Paths: ApplyRelativePaths handles reading from text boxes and converting to relative if possible
             ApplyRelativePaths(version);
@@ -1578,9 +1593,12 @@ namespace TonePrism.Manager
             {
                 path = Path.GetFullPath(path);
             }
-            catch
+            catch (Exception ex)
             {
-                // 不正 path (= 制御文字混入等) は normalize 不能、後段 validation に委ねる
+                // 不正 path (= 制御文字混入等) は normalize 不能、後段 validation に委ねる。
+                // (累積監査 round 6 M3) 旧実装は完全 silent だったため、rename 後に path が
+                // 旧 gameId のまま残り後段で null 化 → 喪失する経路の追跡が効かなかった。Warn を残す。
+                Logger.Warn("[EditGameForm] (round 6 M3) パス正規化に失敗、後段 validation に委ねます: " + path + ": " + ex.Message);
                 return;
             }
             string oldFolderNormalized;

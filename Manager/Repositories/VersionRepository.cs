@@ -331,10 +331,14 @@ namespace TonePrism.Manager.Repositories
             {
                 using (var devCmd = new SQLiteCommand(insertDeveloper, connection, transaction))
                 {
+                    // (累積監査 round 6 High-2) GameRepository.InsertDevelopers は `?? ""` で null を空文字に
+                    // 正規化しているのに、本 version 別 INSERT 側は素通しで非対称だった。同じ user 入力が
+                    // games 側 developers では "" / version 側 developers では NULL に乖離し、後段の集計 /
+                    // 表示 (null と空文字を区別する経路) で不整合や NRE を招く。両者を `?? ""` で揃える。
                     devCmd.Parameters.AddWithValue("@gameId", version.GameId);
-                    devCmd.Parameters.AddWithValue("@lastName", developer.LastName);
-                    devCmd.Parameters.AddWithValue("@firstName", developer.FirstName);
-                    devCmd.Parameters.AddWithValue("@grade", developer.Grade);
+                    devCmd.Parameters.AddWithValue("@lastName", developer.LastName ?? "");
+                    devCmd.Parameters.AddWithValue("@firstName", developer.FirstName ?? "");
+                    devCmd.Parameters.AddWithValue("@grade", developer.Grade ?? "");
                     devCmd.Parameters.AddWithValue("@versionId", version.Id);
                     devCmd.ExecuteNonQuery();
                 }
