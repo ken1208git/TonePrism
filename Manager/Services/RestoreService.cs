@@ -99,6 +99,11 @@ namespace TonePrism.Manager.Services
                 Logger.Warn("[RestoreService] backup_log に restore audit 行を挿入できませんでした (復元処理は継続): " + logEx.Message);
             }
 
+            // (累積監査) File.Replace fallback で現 DB を削除した後に File.Move が失敗すると、現 DB も
+            // tempPath (= 唯一の復元データ) も失われる致命的 path があった。その状態を外側 catch に伝え、
+            // tempPath を削除させないための flag。
+            bool tempPathIsLastResort = false;
+
             try
             {
                 progress?.Report(new ProgressInfo(0, "復元の準備...", ""));
@@ -215,14 +220,12 @@ namespace TonePrism.Manager.Services
                     catch (IOException replaceEx)
                     {
                         Logger.Warn("[RestoreService] File.Replace 失敗 (SMB/Junction 等の可能性)、Delete + Move 経路に fallback: " + replaceEx.Message);
-                        File.Delete(dbPath);
-                        File.Move(tempPath, dbPath);
+                        FallbackDeleteAndMove(tempPath, dbPath, ref tempPathIsLastResort);
                     }
                     catch (UnauthorizedAccessException replaceEx)
                     {
                         Logger.Warn("[RestoreService] File.Replace 権限エラー、Delete + Move 経路に fallback: " + replaceEx.Message);
-                        File.Delete(dbPath);
-                        File.Move(tempPath, dbPath);
+                        FallbackDeleteAndMove(tempPath, dbPath, ref tempPathIsLastResort);
                     }
                 }
                 else
@@ -292,11 +295,22 @@ namespace TonePrism.Manager.Services
             }
             catch (Exception ex)
             {
-                // (High-6) post-step 例外は内側 try で swallow 済のため、ここに到達する例外は必ず pre-replace 失敗。
-                // = 「DB は無傷 + safety は取れたかもしれない / tempPath 残存」状態なので、MarkAuditFailed + tempPath 削除 + throw が正しい。
+                // (High-6) post-step 例外は内側 try で swallow 済のため、ここに到達する例外は通常 pre-replace 失敗
+                // (= DB 無傷 + tempPath 残存) なので、MarkAuditFailed + tempPath 削除 + throw が正しい。
                 Logger.Error($"[RestoreService] 復元失敗: source='{backupFilePath}'", ex);
                 MarkAuditFailed(logId, ex.Message);
-                TryDeleteTempFile(tempPath);
+                // (累積監査) ただし fallback の Move 失敗で現 DB を削除済の場合 (tempPathIsLastResort=true) は、
+                // tempPath が唯一の復元データなので絶対に消さない。手動復旧 (.restore-tmp を toneprism.db に
+                // リネーム) または退避フォルダの safety バックアップからの復元を案内する。
+                if (tempPathIsLastResort)
+                {
+                    Logger.Error("[RestoreService] 現 DB の置換に失敗し DB ファイルが不在の可能性があります。復元データを残します: '"
+                        + tempPath + "' → これを '" + dbPath + "' にリネームするか、退避フォルダの safety バックアップから復元してください。");
+                }
+                else
+                {
+                    TryDeleteTempFile(tempPath);
+                }
                 throw;
             }
             finally
@@ -402,6 +416,29 @@ namespace TonePrism.Manager.Services
             catch (Exception ex)
             {
                 Logger.Warn($"[RestoreService] 一時ファイル削除失敗 (next attempt の L154 cleanup で再試行されます): '{tempPath}': {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// (累積監査) File.Replace 失敗時の fallback。現 DB を削除してから tempPath を本来の位置へ Move する。
+        /// File.Delete(dbPath) 成功後に File.Move が失敗すると、現 DB も tempPath も失われ DB ファイルが
+        /// 不在になる致命的 path があった (= 旧実装は Move 失敗例外が外側 catch に伝播し、そこで唯一残っていた
+        /// tempPath まで削除していた)。Delete 後の Move 失敗時は tempPathIsLastResort を true にして呼び出し側に
+        /// 伝え、tempPath を保全 (= .restore-tmp → toneprism.db のリネームで手動復旧可能) させる。
+        /// </summary>
+        private static void FallbackDeleteAndMove(string tempPath, string dbPath, ref bool tempPathIsLastResort)
+        {
+            File.Delete(dbPath);
+            try
+            {
+                File.Move(tempPath, dbPath);
+            }
+            catch
+            {
+                // dbPath は既に削除済 = point of no return を越えた。tempPath が唯一の復元データなので
+                // 外側 catch で削除させない。
+                tempPathIsLastResort = true;
+                throw;
             }
         }
 

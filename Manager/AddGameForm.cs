@@ -404,7 +404,9 @@ namespace TonePrism.Manager
                 }
 
                 // ProcessingDialog を使用して非同期コピー
-                var processingDialog = new ProcessingDialog((IProgress<ProgressInfo> progress, CancellationToken token) =>
+                // (累積監査) 他箇所と同様 using で囲み、ハンドル / 内部 CTS のリークを防ぐ
+                // (ShowDialog は Dispose しないため明示破棄が必要)。
+                using (var processingDialog = new ProcessingDialog((IProgress<ProgressInfo> progress, CancellationToken token) =>
                 {
                     try
                     {
@@ -418,7 +420,8 @@ namespace TonePrism.Manager
                     {
                         throw new Exception($"ファイルコピー中にエラーが発生しました: {ex.Message}", ex);
                     }
-                });
+                }))
+                {
 
                 if (processingDialog.ShowDialog() != DialogResult.OK)
                 {
@@ -432,6 +435,7 @@ namespace TonePrism.Manager
                     CleanupCopiedFoldersOnRollback();
                     return;
                 }
+                } // using (processingDialog)
 
                 destinationGameFolder = PathManager.GetVersionFolder(gameId, version);
 

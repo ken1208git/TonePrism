@@ -158,11 +158,11 @@ namespace TonePrism.Manager.Services
             long intervalSeconds = (long)intervalHours * 3600;
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-            if (!_settingsRepo.TryAcquireBackupLease(intervalSeconds, now))
+            if (!_settingsRepo.TryAcquireBackupLease(intervalSeconds, now, out long previousLastBackupAt))
             {
                 return BackupResult.Skipped("自動バックアップは既に他のManagerで実行されました（または間隔未到達）");
             }
-            return RunBackupCore(TriggerAuto, progress, token, leaseAlreadyAcquired: true);
+            return RunBackupCore(TriggerAuto, progress, token, leaseAlreadyAcquired: true, leasePreviousValue: previousLastBackupAt);
         }
 
         /// <summary>
@@ -187,7 +187,7 @@ namespace TonePrism.Manager.Services
             return RunBackupCore(TriggerManual, progress, token, leaseAlreadyAcquired: false);
         }
 
-        private BackupResult RunBackupCore(string triggerType, IProgress<ProgressInfo> progress, CancellationToken token, bool leaseAlreadyAcquired)
+        private BackupResult RunBackupCore(string triggerType, IProgress<ProgressInfo> progress, CancellationToken token, bool leaseAlreadyAcquired, long leasePreviousValue = 0)
         {
             string pcName = Environment.MachineName;
             long startedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -322,6 +322,7 @@ namespace TonePrism.Manager.Services
                 _logRepo.MarkFailed(logId, "ユーザーによりキャンセルされました", completedAt);
                 // 中途半端なファイルを削除
                 TryDeleteIfExists(destinationPath);
+                RollbackLeaseOnFailure(leaseAlreadyAcquired, leasePreviousValue);
                 throw;
             }
             catch (Exception ex)
@@ -329,7 +330,30 @@ namespace TonePrism.Manager.Services
                 long completedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 _logRepo.MarkFailed(logId, ex.Message, completedAt);
                 TryDeleteIfExists(destinationPath);
+                RollbackLeaseOnFailure(leaseAlreadyAcquired, leasePreviousValue);
                 return BackupResult.Failed(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// (累積監査) auto バックアップが失敗 / キャンセルした場合、lease で前進させた last_backup_at を
+        /// 取得前の値へ巻き戻す。これにより次回 (起動時) の due 判定で再試行される (旧実装は失敗しても
+        /// last_backup_at が now に前進したままで、次の interval まで再試行されなかった)。手動経路
+        /// (leaseAlreadyAcquired=false) は lease を取らないため no-op。自動バックアップの起動は
+        /// MainForm.StartAutoBackupIfDue で「起動時 1 回」のため、巻き戻しても連射 (= 警告 modal の連発) には
+        /// ならない。巻き戻し自体の失敗は握り潰す (最悪でも従来挙動 = 次 interval 待ちに戻るだけ)。
+        /// </summary>
+        private void RollbackLeaseOnFailure(bool leaseAlreadyAcquired, long leasePreviousValue)
+        {
+            if (!leaseAlreadyAcquired) return;
+            try
+            {
+                _settingsRepo.SetInt64("last_backup_at", leasePreviousValue);
+                Logger.Info("[BackupService] auto バックアップ失敗/キャンセルのため last_backup_at を巻き戻し (次回起動で再試行): " + leasePreviousValue);
+            }
+            catch (Exception rbEx)
+            {
+                Logger.Warn("[BackupService] last_backup_at の巻き戻しに失敗 (次回は通常 interval 待ち): " + rbEx.Message);
             }
         }
 

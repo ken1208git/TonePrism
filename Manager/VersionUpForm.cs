@@ -149,8 +149,11 @@ namespace TonePrism.Manager
                 if (baseVersion.PlayTime.HasValue && baseVersion.PlayTime.Value >= 1 && baseVersion.PlayTime.Value <= 3)
                     cmbPlayTime.SelectedIndex = baseVersion.PlayTime.Value - 1;
 
-                numMinPlayers.Value = baseVersion.MinPlayers ?? 1;
-                numMaxPlayers.Value = baseVersion.MaxPlayers ?? 1;
+                // (累積監査) baseVersion の人数が NumericUpDown 範囲外 (0 / 100+) の場合、生代入は
+                // ArgumentOutOfRangeException を投げて Form_Load が落ち、バージョンアップ画面が開けなくなる。
+                // EditGameForm と同じく SetClampedNumericValue で clamp + warn ログにして落ちないようにする。
+                GameFormHelper.SetClampedNumericValue(numMinPlayers, baseVersion.MinPlayers ?? 1, "MinPlayers", "VersionUpForm");
+                GameFormHelper.SetClampedNumericValue(numMaxPlayers, baseVersion.MaxPlayers ?? 1, "MaxPlayers", "VersionUpForm");
                 chkControllerSupport.Checked = baseVersion.ControllerSupport;
 
                 if (baseVersion.SupportedConnection >= 0 && baseVersion.SupportedConnection < cmbSupportedConnection.Items.Count)

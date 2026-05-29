@@ -242,7 +242,8 @@ namespace TonePrism.Manager
         /// 衝突しない最初の候補名を生成する static helper。caller が dialog を出す前に呼ぶ。
         /// `cover.png` → `cover_2.png` → `cover_3.png` ... と increment、見つかったら return。
         /// </summary>
-        public static string SuggestNonConflictingFileName(string destinationFolder, string originalFileName)
+        public static string SuggestNonConflictingFileName(string destinationFolder, string originalFileName,
+            System.Collections.Generic.HashSet<string> reservedFullPaths = null)
         {
             if (string.IsNullOrEmpty(destinationFolder) || string.IsNullOrEmpty(originalFileName))
             {
@@ -253,7 +254,10 @@ namespace TonePrism.Manager
             for (int i = 2; i < 1000; i++)
             {
                 string candidate = baseName + "_" + i + ext;
-                if (!File.Exists(Path.Combine(destinationFolder, candidate)))
+                // (累積監査) disk 上の File.Exists だけでなく、同一保存処理内で予約済みの destination
+                // (= 同時にコピーする別画像の行き先) も避ける。両方避けた候補のみ採用する。
+                string full = Path.Combine(destinationFolder, candidate);
+                if (!File.Exists(full) && (reservedFullPaths == null || !reservedFullPaths.Contains(full)))
                 {
                     return candidate;
                 }

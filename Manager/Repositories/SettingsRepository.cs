@@ -82,9 +82,14 @@ namespace TonePrism.Manager.Repositories
         /// last_backup_at + intervalSeconds &lt;= now の場合のみ last_backup_at を now に更新して true を返す。
         /// 競合した場合は片方のみ true を返す（BEGIN IMMEDIATE による排他制御）。
         /// </summary>
-        public bool TryAcquireBackupLease(long intervalSeconds, long nowUnixSeconds)
+        public bool TryAcquireBackupLease(long intervalSeconds, long nowUnixSeconds, out long previousLastBackupAt)
         {
-            return _conn.ExecuteWithRetry(() =>
+            // (累積監査) lease 取得時に上書きする直前の last_backup_at を out で返す。auto バックアップ本体が
+            // 失敗 / キャンセルした場合に呼び出し側がこの値へ巻き戻し、次回 (起動時) に再試行できるようにする。
+            // 旧実装は失敗しても last_backup_at が now に前進したままで、次の interval (既定 24h) まで再試行
+            // されず、保存先設定ミス等で失敗が続くとバックアップが 1 件も取れない状態が放置されていた。
+            long capturedPrevious = 0;
+            bool acquired = _conn.ExecuteWithRetry(() =>
             {
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
@@ -100,6 +105,8 @@ namespace TonePrism.Manager.Repositories
                             if (v != null && v != DBNull.Value)
                                 long.TryParse(v.ToString(), out lastBackupAt);
                         }
+                        // 上書き前の生の値を記録 (future-clock clamp より前)。失敗時の巻き戻し用。
+                        capturedPrevious = lastBackupAt;
 
                         // (累積監査 round 6 M5) 時計が大きく未来にズレた PC (NTP 未同期 / RTC 電池切れで
                         // 2099 年等) が last_backup_at を未来 unix 秒で書き込むと、以降すべての PC で
@@ -128,6 +135,8 @@ namespace TonePrism.Manager.Repositories
                     }
                 }
             });
+            previousLastBackupAt = capturedPrevious;
+            return acquired;
         }
 
         /// <summary>

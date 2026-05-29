@@ -138,7 +138,25 @@ namespace TonePrism.Manager.Services
                 var knownLeaves = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var v in versions)
                 {
-                    string leaf = PathManager.GetVersionFolderLeaf(v.Version);
+                    // (累積監査) version が空文字 / 空白のみの game_versions 行が 1 つでもあると
+                    // GetVersionFolderLeaf が ArgumentException を投げ、ループごと中断 → Analyze() 全体が落ち、
+                    // 呼び出し側 (BackupSectionPanel) が握り潰して「整合性に問題なし」と誤通知してしまう。
+                    // 不正な版はその版だけ skip + 警告して、他ゲーム / 他版の検査は継続する。
+                    if (string.IsNullOrWhiteSpace(v.Version))
+                    {
+                        Logger.Warn("[RestoreReconciliation] version が空の game_versions 行を検出 (game_id=" + game.GameId + ")、当該版を skip");
+                        continue;
+                    }
+                    string leaf;
+                    try
+                    {
+                        leaf = PathManager.GetVersionFolderLeaf(v.Version);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn("[RestoreReconciliation] version '" + v.Version + "' の leaf 名生成に失敗 (game_id=" + game.GameId + "): " + ex.Message + "、当該版を skip");
+                        continue;
+                    }
                     knownLeaves.Add(leaf);
                     string versionDir = Path.Combine(gameFolder, leaf);
                     if (!Directory.Exists(versionDir))

@@ -238,7 +238,9 @@ namespace TonePrism.Manager.Controls
                         return;
                     }
 
-                    var processingDialog = new ProcessingDialog((IProgress<ProgressInfo> progress, CancellationToken token) =>
+                    // (累積監査) ProcessingDialog は他箇所と同様 using で囲み、ハンドル / 内部 CTS の
+                    // リークを防ぐ (ShowDialog は Dispose しないため明示破棄が必要)。
+                    using (var processingDialog = new ProcessingDialog((IProgress<ProgressInfo> progress, CancellationToken token) =>
                     {
                         try
                         {
@@ -267,7 +269,8 @@ namespace TonePrism.Manager.Controls
                         {
                             throw new Exception($"ファイルコピー中にエラーが発生しました: {ex.Message}", ex);
                         }
-                    });
+                    }))
+                    {
 
                     if (processingDialog.ShowDialog() == DialogResult.OK)
                     {
@@ -457,6 +460,7 @@ namespace TonePrism.Manager.Controls
                         // Abort 経路は ProcessingDialog 内で既に「エラーが発生しました: ...」MessageBox を
                         // 出しているため二重に出さない (cleanup のみ実施)。
                     }
+                    } // using (processingDialog)
                 }
             }
         }

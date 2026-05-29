@@ -50,6 +50,16 @@ namespace TonePrism.Manager
         private decimal _versionMinPlayersDisplayedOnLoad;
         private decimal _versionMaxPlayersDisplayedOnLoad;
 
+        // (累積監査) difficulty / play_time は GameVersion で int? (NULL 可能) だが、UI の ComboBox は
+        // NULL を表現できず Load 時に既定 index を表示する。Min/MaxPlayers と同じ null 保護パターンで、
+        // 「Load 時 NULL + 非アクティブ + user が index を触っていない」ときは Save で NULL を維持する。
+        // 旧実装は difficulty/play_time に保護が無く、NULL の非アクティブ版を表示しただけで既定値
+        // (普通 / 5-15分) に書き換わる非対称があった。
+        private bool _versionDifficultyWasNullOnLoad;
+        private bool _versionPlayTimeWasNullOnLoad;
+        private int _versionDifficultyDisplayedOnLoad;
+        private int _versionPlayTimeDisplayedOnLoad;
+
         // (M1) games.release_year は GameInfo.ReleaseYear が int? 型で null 可能だが、UI 側 numReleaseYear は
         // NumericUpDown のため null を表現できない。Load 時に null だった場合は DateTime.Now.Year を仮表示する
         // が、本 flag が true + user が値を触っていない (= 表示値と保存時の値が同一) 場合は null を維持する。
@@ -528,8 +538,17 @@ namespace TonePrism.Manager
                 version.MaxPlayers = null;
             else
                 version.MaxPlayers = (int)numMaxPlayers.Value;
-            version.Difficulty = cmbDifficulty.SelectedIndex >= 0 ? cmbDifficulty.SelectedIndex + 1 : (int?)null;
-            version.PlayTime = cmbPlayTime.SelectedIndex >= 0 ? cmbPlayTime.SelectedIndex + 1 : (int?)null;
+            // (累積監査) Load 時 NULL かつ user が index を触っていない場合は NULL を維持する
+            // (Min/MaxPlayers と同パターン)。それ以外は UI 値を書く (= active 版の healing / user 編集後)。
+            if (_versionDifficultyWasNullOnLoad && cmbDifficulty.SelectedIndex == _versionDifficultyDisplayedOnLoad)
+                version.Difficulty = null;
+            else
+                version.Difficulty = cmbDifficulty.SelectedIndex >= 0 ? cmbDifficulty.SelectedIndex + 1 : (int?)null;
+
+            if (_versionPlayTimeWasNullOnLoad && cmbPlayTime.SelectedIndex == _versionPlayTimeDisplayedOnLoad)
+                version.PlayTime = null;
+            else
+                version.PlayTime = cmbPlayTime.SelectedIndex >= 0 ? cmbPlayTime.SelectedIndex + 1 : (int?)null;
             version.ControllerSupport = chkControllerSupport.Checked;
             version.SupportedConnection = cmbSupportedConnection.SelectedIndex >= 0 ? cmbSupportedConnection.SelectedIndex : 0;
             
@@ -640,19 +659,42 @@ namespace TonePrism.Manager
             }
             _versionMaxPlayersDisplayedOnLoad = numMaxPlayers.Value;
 
-            // Difficulty (1-3)
+            // Difficulty (1-3)。null 非アクティブ版は既定 index を表示しつつ NULL 保護 flag を立てる
+            // (= user が触らなければ Save で NULL 維持。Min/MaxPlayers と同パターン)。
             if (version.Difficulty.HasValue && version.Difficulty >= 1 && version.Difficulty <= 3)
+            {
                 cmbDifficulty.SelectedIndex = version.Difficulty.Value - 1;
+                _versionDifficultyWasNullOnLoad = false;
+            }
             else if (isActiveVersion && originalGame.Difficulty.HasValue && originalGame.Difficulty >= 1 && originalGame.Difficulty <= 3)
+            {
                 cmbDifficulty.SelectedIndex = originalGame.Difficulty.Value - 1;
-            else cmbDifficulty.SelectedIndex = 1;
+                _versionDifficultyWasNullOnLoad = false;
+            }
+            else
+            {
+                cmbDifficulty.SelectedIndex = 1;
+                _versionDifficultyWasNullOnLoad = true;
+            }
+            _versionDifficultyDisplayedOnLoad = cmbDifficulty.SelectedIndex;
 
-            // PlayTime (1-3)
+            // PlayTime (1-3)。難易度と同じ NULL 保護パターン。
             if (version.PlayTime.HasValue && version.PlayTime >= 1 && version.PlayTime <= 3)
+            {
                 cmbPlayTime.SelectedIndex = version.PlayTime.Value - 1;
+                _versionPlayTimeWasNullOnLoad = false;
+            }
             else if (isActiveVersion && originalGame.PlayTime.HasValue && originalGame.PlayTime >= 1 && originalGame.PlayTime <= 3)
+            {
                 cmbPlayTime.SelectedIndex = originalGame.PlayTime.Value - 1;
-            else cmbPlayTime.SelectedIndex = 1;
+                _versionPlayTimeWasNullOnLoad = false;
+            }
+            else
+            {
+                cmbPlayTime.SelectedIndex = 1;
+                _versionPlayTimeWasNullOnLoad = true;
+            }
+            _versionPlayTimeDisplayedOnLoad = cmbPlayTime.SelectedIndex;
 
             // Connection / ControllerSupport は非 nullable で「未設定」を判別する sentinel が無い。
             // アクティブ版は games が定義上の mirror (= 真値) なので、版値ではなく games 値を採用して
@@ -1761,11 +1803,17 @@ namespace TonePrism.Manager
 
             var plan = new List<ImageCopyPlan>();
 
+            // (累積監査) サムネと背景が「別フォルダにある同名ファイル」(例: 両方 image.png) のとき、
+            // ResolveCopyPlan が disk の File.Exists だけで衝突判定すると、実コピー前は両方 false で
+            // 同じ destination を予約 → 後段の File.Copy(overwrite:false) で 2 枚目が IOException になり
+            // 保存が失敗していた。計画内で既に予約済みの destination も衝突として扱うため共有セットを渡す。
+            var reservedDestinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             // Thumbnail
             if (!string.IsNullOrWhiteSpace(txtThumbnailPath.Text)
                 && !PathConversionHelper.IsPathInside(gameFolder, txtThumbnailPath.Text))
             {
-                var item = ResolveCopyPlan(txtThumbnailPath.Text, versionFolder, "サムネイル画像");
+                var item = ResolveCopyPlan(txtThumbnailPath.Text, versionFolder, "サムネイル画像", reservedDestinations);
                 if (item == null) return false;
                 item.AssignBackTextBox = txtThumbnailPath;
                 plan.Add(item);
@@ -1775,7 +1823,7 @@ namespace TonePrism.Manager
             if (!string.IsNullOrWhiteSpace(txtBackgroundPath.Text)
                 && !PathConversionHelper.IsPathInside(gameFolder, txtBackgroundPath.Text))
             {
-                var item = ResolveCopyPlan(txtBackgroundPath.Text, versionFolder, "背景画像");
+                var item = ResolveCopyPlan(txtBackgroundPath.Text, versionFolder, "背景画像", reservedDestinations);
                 if (item == null) return false;
                 item.AssignBackTextBox = txtBackgroundPath;
                 plan.Add(item);
@@ -1855,15 +1903,18 @@ namespace TonePrism.Manager
         /// (累積監査 round 3) 1 画像のコピー計画を決める。コピー先で同名衝突なら ImageNameConflictDialog で
         /// user に rename を促し、確定した destination path を返す。Cancel なら null を返す (caller は abort)。
         /// </summary>
-        private ImageCopyPlan ResolveCopyPlan(string sourcePath, string versionFolder, string description)
+        private ImageCopyPlan ResolveCopyPlan(string sourcePath, string versionFolder, string description,
+            HashSet<string> reservedDestinations)
         {
             string originalFileName = Path.GetFileName(sourcePath);
             string destPath = Path.Combine(versionFolder, originalFileName);
 
-            if (File.Exists(destPath))
+            // disk 上の既存ファイルに加え、同一保存処理内で予約済みの destination (= 同時コピーする別画像の
+            // 行き先) も衝突として扱う。
+            if (File.Exists(destPath) || reservedDestinations.Contains(destPath))
             {
-                // 衝突: dialog で user に rename を促す
-                string suggested = ImageNameConflictDialog.SuggestNonConflictingFileName(versionFolder, originalFileName);
+                // 衝突: dialog で user に rename を促す (提案名も予約済みを避ける)
+                string suggested = ImageNameConflictDialog.SuggestNonConflictingFileName(versionFolder, originalFileName, reservedDestinations);
                 using (var dlg = new ImageNameConflictDialog(sourcePath, versionFolder, suggested))
                 {
                     dlg.Text = "同名ファイルがあります (" + description + ")";
@@ -1874,7 +1925,21 @@ namespace TonePrism.Manager
                     }
                     destPath = Path.Combine(versionFolder, dlg.ResolvedFileName);
                 }
+
+                // ImageNameConflictDialog の OK 時再衝突 check は disk の File.Exists のみで、予約済み destination
+                // を見ないため、user が予約済みと同名を手入力した場合はここで弾く。
+                if (File.Exists(destPath) || reservedDestinations.Contains(destPath))
+                {
+                    MessageBox.Show(this,
+                        "指定されたファイル名は、同時に保存する別の画像と重複しています。\n別の名前を指定してください: " +
+                        Path.GetFileName(destPath),
+                        "ファイル名の重複", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return null;
+                }
             }
+
+            // この destination を予約 (= 次の画像が同じ行き先を選ばないようにする)。
+            reservedDestinations.Add(destPath);
 
             return new ImageCopyPlan
             {
