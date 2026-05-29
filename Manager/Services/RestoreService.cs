@@ -16,19 +16,11 @@ namespace TonePrism.Manager.Services
         public const int DefaultSafetyRetentionCount = 10;
 
         private readonly DatabaseConnection _conn;
-        private readonly BackupLogRepository _logRepo;
         private readonly SettingsRepository _settingsRepo;
 
-        /// <summary>
-        /// (H4) 直近の Restore 呼出しの開始 Unix 秒。caller (BackupSectionPanel) が成功時の audit 行を
-        /// NEW DB (= InitializeDatabase 完了後の v17 schema) に INSERT する際の started_at として使う。
-        /// </summary>
-        public long LastRestoreStartedAt { get; private set; }
-
-        public RestoreService(DatabaseConnection conn, BackupLogRepository logRepo, SettingsRepository settingsRepo)
+        public RestoreService(DatabaseConnection conn, SettingsRepository settingsRepo)
         {
             _conn = conn;
-            _logRepo = logRepo;
             _settingsRepo = settingsRepo;
         }
 
@@ -61,14 +53,11 @@ namespace TonePrism.Manager.Services
             // 必ず挟んで例外詳細を残す (caller の ProcessingDialog catch では例外型情報を握って破棄するため)。
             Logger.Info($"[RestoreService] 復元開始: source='{backupFilePath}', target='{dbPath}'");
 
-            // (H4) backup_log に復元イベントの audit 行を残す。Logger.Info の file log だけだと
-            // ローテーション / 別 PC コピー / 手動 truncate で消失するため、DB 行として永続化する。
-            // trigger_type='restore' は v16 migration で CHECK 拡張済。file_path は復元元のバックアップを記録
-            // (safety ファイルではなく source、= 「どのバックアップから復元したか」が監査の主目的)。
+            // 復元の監査は backup_log 廃止 (DB v19) に伴い専用行を持たない。復元のたびに作られる
+            // safety_*.db (復元直前 DB スナップショット) が「いつ復元したか」の証跡を兼ねる。throw 経路には
+            // Logger.Error を必ず挟んで例外詳細を残す (caller の ProcessingDialog catch は例外型情報を握って破棄するため)。
             string pcName = Environment.MachineName;
-            long startedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             long startedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            long logId = 0;
 
             // (H5) LAN advisory lock を取得。他 PC が active な restore lock を保有していたら
             // user 操作意図に関わらず取得失敗 → throw して開始前に中止 (caller は BackupSectionPanel
@@ -86,17 +75,6 @@ namespace TonePrism.Manager.Services
                     throw new InvalidOperationException(msg);
                 }
                 Logger.Info("[RestoreService] restore advisory lock 取得: pcName=" + pcName);
-            }
-
-            try
-            {
-                logId = _logRepo.InsertInProgress(pcName, "restore", startedAt, backupFilePath);
-            }
-            catch (Exception logEx)
-            {
-                // audit 行の挿入失敗で復元自体を止めない (= audit 不能でも user の復元意図を尊重)。
-                // Logger に warn を残して継続。
-                Logger.Warn("[RestoreService] backup_log に restore audit 行を挿入できませんでした (復元処理は継続): " + logEx.Message);
             }
 
             // (累積監査) File.Replace fallback で現 DB を削除した後に File.Move が失敗すると、現 DB も
@@ -274,19 +252,13 @@ namespace TonePrism.Manager.Services
 
                 Logger.Info($"[RestoreService] 復元完了: source='{backupFilePath}', safety='{safetyPath}'");
 
-                // (H4) 注意: 起動時に挿入した in_progress 行は OLD DB (= safety バックアップに保存される版)
-                // にしかない。File.Replace 後の NEW DB には該当行が存在しないため、ここで MarkSuccess UPDATE
-                // を打っても 0 行更新で silent no-op になる。NEW DB に成功の audit 行を残す責務は呼び出し側
-                // (BackupSectionPanel) が InitializeDatabase 完了後 (= v17 schema 確定後) に
-                // BackupLogRepository.LogRestoreSucceeded で別行を INSERT する形で担う。
-                // ここでは safetyPath を返すのみ。
-                LastRestoreStartedAt = startedAt;
+                // 復元成功。safetyPath (復元直前に退避した DB スナップショット) を返す。
+                // これ自体が復元の証跡を兼ねるため、別途の audit 行 INSERT は行わない (backup_log 廃止)。
                 return safetyPath;
             }
             catch (OperationCanceledException)
             {
                 Logger.Info($"[RestoreService] 復元キャンセル: source='{backupFilePath}'");
-                MarkAuditFailed(logId, "ユーザーによりキャンセルされました");
                 // (累積監査 round 3) 一時ファイルが残置されると次回復元時 L154 の File.Delete で消えるが、
                 // 復元失敗が連続する展示 PC (SSD 小容量) では disk 逼迫 → File.Copy 失敗の連鎖を誘発する。
                 // catch 経路で必ず後始末する (両 catch で対称化、failure 自体は swallow して例外伝播を優先)。
@@ -296,9 +268,8 @@ namespace TonePrism.Manager.Services
             catch (Exception ex)
             {
                 // (High-6) post-step 例外は内側 try で swallow 済のため、ここに到達する例外は通常 pre-replace 失敗
-                // (= DB 無傷 + tempPath 残存) なので、MarkAuditFailed + tempPath 削除 + throw が正しい。
+                // (= DB 無傷 + tempPath 残存) なので、tempPath 削除 + throw が正しい。
                 Logger.Error($"[RestoreService] 復元失敗: source='{backupFilePath}'", ex);
-                MarkAuditFailed(logId, ex.Message);
                 // (累積監査) ただし fallback の Move 失敗で現 DB を削除済の場合 (tempPathIsLastResort=true) は、
                 // tempPath が唯一の復元データなので絶対に消さない。手動復旧 (.restore-tmp を toneprism.db に
                 // リネーム) または退避フォルダの safety バックアップからの復元を案内する。
@@ -329,21 +300,6 @@ namespace TonePrism.Manager.Services
                         Logger.Warn("[RestoreService] restore advisory lock 解放失敗 (stale lock 5 分後に自動失効): " + releaseEx.Message);
                     }
                 }
-            }
-        }
-
-        /// <summary>(H4) 失敗 / cancel 経路から audit 行を failed に確定する内部ヘルパ。</summary>
-        private void MarkAuditFailed(long logId, string reason)
-        {
-            if (logId <= 0) return;
-            try
-            {
-                long completedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                _logRepo.MarkFailed(logId, reason ?? "", completedAt);
-            }
-            catch (Exception markEx)
-            {
-                Logger.Warn("[RestoreService] backup_log restore failed 記録に失敗: " + markEx.Message);
             }
         }
 

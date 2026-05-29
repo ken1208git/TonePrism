@@ -1911,6 +1911,33 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.21.0] - 2026-05-29
+
+#### Changed (バックアップ履歴を `backup_log` テーブルから廃し、`backups/` フォルダ走査由来に再設計 — DB v19)
+
+累積監査で見つかった「失敗した復元が次回のバックアップ画面更新で『成功』に化ける」欠陥の**根本原因**は、バックアップ履歴メタデータを「バックアップ対象である `toneprism.db` の中 (`backup_log` テーブル)」に持っていたこと。復元で DB が丸ごと置き換わるたびに履歴とディスク実ファイルが恒常的にズレ、それを埋める `Reconcile*` / `Register*` 系の後付けコード (`BackupLogRepository.cs` 800 行超の過半) がバグの温床になっていた。履歴を**ファイルシステムから導出** (種類別フォルダ + ファイル名) する設計に変更し、ズレの概念ごと根絶した。
+
+- **`backup_log` テーブルを DROP (DB v18 → v19)**: `MigrateV18ToV19` が `DROP TABLE IF EXISTS backup_log` を実行。既存行は破棄されるが**物理バックアップファイルは残り、初回走査で履歴に復活**する (失われるのは失敗履歴と復元監査行のみ = いずれも要件上不要)。新規 DB は `CurrentDbVersion=19` で直接 stamp され `backup_log` を作らない (`CreateBackupLogTable` 本体は古い DB の v9 段階移行が呼ぶため残置)。`ExpectedSchema` からも除去。
+- **新 `BackupCatalogService` + `BackupCatalogEntry`**: `backups/` 配下 (`auto/` / `manual/` / `safety/` + 旧 `toneprism_*.db`) を走査し、**フォルダ位置で種類・ファイル名で日時と実行 PC・`FileInfo` でサイズ**を導出する。`ScanAll` / `ScanAuto` / `GetLastSuccess` / `GetLastAuto` を提供。並び順はファイル名タイムスタンプ降順 (固定幅ゼロ埋めなので文字列ソート = 時系列)。
+- **実行 PC をファイル名に埋め込み**: バックアップファイル名を `<種類>_<日時>_<host>.db` に統一 (`SanitizeHostForFileName` で禁止文字除去 + 区切り `_`→`-`)。これにより「実行 PC」列を DB なしで維持しつつ、旧来アドホックだった同秒 LAN 衝突回避も一本化 (別 PC は host で自然分離、同ホスト同秒のみ `_2`/`_3`)。旧形式 (host なし) ファイルは PC 欄空表示。
+- **復元の監査は `safety_*.db` で代替**: 復元のたびに作られる退避スナップショットが「いつ復元したか」の証跡を兼ねる (専用 audit 行 `LogRestoreCompleted` を廃止)。失敗履歴は Logger (ファイルログ) のみに残す (状態列は #200 で撤去済・failed 行は元々自動掃除のため UI 上の損失なし)。
+- **retention をファイル走査に**: `ApplyRetention` は `auto/` のファイルをファイル名降順で keep 件残し残りを削除 (DB 駆動の `GetAutoSuccessRetentionTargets` / DB 行削除失敗時の failed 格下げを全廃)。auto 限定はフォルダ分離で構造保証、並行 retention の `File.Delete` 競合は握って冪等。
+- **削除コード**: `Repositories/BackupLogRepository.cs` / `Models/BackupLogEntry.cs` / `Services/BackupPathResolver.cs` を撤去。`MainForm` 起動時・復元後の `ReconcileInProgressEntries` / `RegisterUnknownSafetyFiles` 呼び出しと付随ヘルパ、`BackupSectionPanel.CleanupFailedEntries` も削除。
+
+#### Fixed (上記再設計で根治した欠陥)
+
+- **失敗した復元が「成功」に化ける (Medium)**: `ReconcileInProgressEntries(recoverFailedWithExistingFile)` の救済 SELECT が `trigger_type` を絞らず、復元失敗で残った `failed`/`restore` 行を「復元元ファイルが実在する」だけの理由で `success` に蘇生していた (復元元は失敗時に消えないため必ず実在 → 必ず誤蘇生)。`CleanupFailedEntries` の「restore/safety failed は監査証跡として保護」と正面衝突していた。`backup_log` 廃止で `failed`/`restore` 行自体が存在しなくなり原理的に消滅。
+- 同根の「復元後の自己参照スナップショットゴースト」「retention の DB↔ファイル drift (#10)」も同時に消滅。
+- **プロジェクト移動耐性が無償化**: 常に現在の保存先を走査するため `relative_path` 追従機構が不要に。
+
+##### 協調機構は不変
+
+複数 PC の自動バックアップ排他 (`settings.last_backup_at` lease) と復元 advisory lock (`settings.restore_lock_owner`) は `backup_log` ではなく `settings` テーブルにあり、本変更の影響を受けない (SMB 上のファイルロックは不安定で DB トランザクションが正しい primitive のため意図的に DB のまま維持)。
+
+#### Bump 根拠 (v0.20.0 → v0.21.0)
+
+DB スキーマ破壊的変更 (v18 → v19、`backup_log` DROP) を含むため minor bump。元ブランチ (`fix/version-up-dup-guard`) の想定を超える再設計のため v0.20.0 entry には folding せず新 entry を立てた (AGENTS.md「想定範囲を超える機能追加が混入した場合は例外として新規 version エントリ可」)。既存運用 DB は起動時に自動 migration、物理バックアップファイルは保持され履歴に復活するため後方互換あり。Bundle への反映は次回リリース実行時。
+
 ### [Manager v0.20.0] - 2026-05-29
 
 #### Changed (バックアップ保存レイアウトを種類別サブフォルダ + 種類接頭辞に統一)

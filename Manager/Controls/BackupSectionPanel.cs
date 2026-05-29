@@ -1,6 +1,6 @@
 using System;
-using System.Data.SQLite;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
 using TonePrism.Manager.Models;
@@ -50,56 +50,16 @@ namespace TonePrism.Manager.Controls
 
             try
             {
-                // 接続プールに古いスナップショットが残ると新しい書き込みが見えないことがあるので
-                // プールを掃除して常に最新コミット状態を読みに行くようにする
-                SQLiteConnection.ClearAllPools();
+                // 履歴は backups/ フォルダのファイル走査由来 (BackupCatalogService)。DB の backup_log は v19 で
+                // 廃止したため、reconcile / register / cleanup の後付け machinery は不要になった
+                // (ファイル = 真実、欠落 = 不在、で恒常的にズレない)。
+                var catalog = _dbManager.BackupCatalogService;
 
-                // 表示更新前にリコンサイル：
-                //   - in_progress 行 → 開始から 300 秒以上経過したものだけファイル実在で success/failed 判定
-                //     (#127 Codex P1: 閾値なしだと別PC/別タスクで進行中の正常バックアップを
-                //      誤って failed 化 → CleanupFailedEntries が DB レコード削除 → 後続の
-                //      MarkSuccess が 0 件更新で成功履歴が消失するため、現実的なバックアップ
-                //      所要時間より長い 300 秒を閾値にして進行中行を保護する)
-                //   - failed 行のうちファイルが見つかるもの → success に救済
-                //   - file_path が空の failed 行 → バックアップフォルダをスキャンして
-                //     started_at と一致するファイルがあれば success に復元（旧版ゴースト救済）
-                //   - backups/safety/ の未登録ファイルを backup_log に登録
-                //   - 残った failed 行 → 物理ファイル + DB から自動掃除 (#126)
-                try
-                {
-                    var (recoveredSuccess, markedFailed) = _dbManager.BackupLogRepository.ReconcileInProgressEntries(
-                        "バックアップファイルが見つかりませんでした",
-                        thresholdSeconds: 300,
-                        recoverFailedWithExistingFile: true);
-                    int legacyRecovered = _dbManager.BackupLogRepository.RecoverLegacyFailedEntriesByFolderScan(
-                        _dbManager.BackupService.GetEffectiveDestinationDirectory());
-                    int safetyAdded = _dbManager.BackupLogRepository.RegisterUnknownSafetyFiles(
-                        _dbManager.BackupService.GetSafetyDirectory(),
-                        Environment.MachineName);
-                    // (累積監査 round 6 #7) 復元で backup_log が古い snapshot に置き換わった等で、本体バックアップ
-                    // フォルダに log 行を失った orphan ファイルが残ると「履歴に出ず・retention 対象外で永久残置」
-                    // という見えない蓄積になる。trigger_type='manual' (= 自動削除対象外 + 履歴表示 + 復元可能) で
-                    // 再登録して可視化し、不要なら運営が手動で整理できるようにする (削除は一切しない安全方針)。
-                    int orphanBackups = _dbManager.BackupLogRepository.RegisterUnknownBackupFiles(
-                        _dbManager.BackupService.GetEffectiveDestinationDirectory(),
-                        Environment.MachineName);
-                    int failedCleaned = CleanupFailedEntries();
-                    if (recoveredSuccess > 0 || markedFailed > 0 || legacyRecovered > 0 || safetyAdded > 0 || orphanBackups > 0 || failedCleaned > 0)
-                    {
-                        Logger.Info($"[BackupSectionPanel] 更新時リコンサイル: 成功化 {recoveredSuccess} / 失敗化 {markedFailed} / 旧版救済 {legacyRecovered} / 退避新規 {safetyAdded} / 本体orphan登録 {orphanBackups} / 失敗自動掃除 {failedCleaned}");
-                    }
-                }
-                catch (Exception reconcileEx)
-                {
-                    Logger.Error("[BackupSectionPanel] リコンサイル中にエラー", reconcileEx);
-                }
-
-                // 最終バックアップ表示
-                var last = _dbManager.BackupLogRepository.GetLastSuccess();
+                // 最終バックアップ表示 (auto / manual / safety のうち最新 1 件)
+                var last = catalog.GetLastSuccess();
                 if (last != null)
                 {
-                    string sizeStr = last.FileSizeBytes.HasValue ? FormatBytes(last.FileSizeBytes.Value) : "-";
-                    lblLastBackup.Text = $"最終バックアップ: {last.StartedAtLocal:yyyy/MM/dd HH:mm:ss} ({sizeStr})";
+                    lblLastBackup.Text = $"最終バックアップ: {last.StartedAtLocal:yyyy/MM/dd HH:mm:ss} ({FormatBytes(last.FileSizeBytes)})";
                 }
                 else
                 {
@@ -108,48 +68,29 @@ namespace TonePrism.Manager.Controls
 
                 lblDestPath.Text = $"保存先: {_dbManager.BackupService.GetEffectiveDestinationDirectory()}";
 
-                // 履歴 (#126: パス解決 + 実在チェックして不在は非表示)
-                var entries = _dbManager.BackupLogRepository.GetRecent(100);
-                string dbPath = _dbManager.DatabasePath;
+                // 履歴: 走査結果は実在ファイルのみなので File.Exists 追加フィルタ不要。新しい順 100 件。
+                var entries = catalog.ScanAll().Take(100).ToList();
                 gridHistory.Rows.Clear();
                 foreach (var entry in entries)
                 {
-                    // パス解決 (relative_path 優先、無ければ file_path)
-                    string resolvedPath = BackupPathResolver.ResolveAbsolutePath(entry, dbPath);
-
-                    // 実在チェック: 不在なら表示しない (in_progress は実行直後で File.Exists 前のことがあるため例外)
-                    if (entry.Status != "in_progress" &&
-                        (string.IsNullOrEmpty(resolvedPath) || !File.Exists(resolvedPath)))
-                    {
-                        continue;
-                    }
-
                     string trigger;
                     switch (entry.TriggerType)
                     {
                         case "manual": trigger = "手動"; break;
                         case "auto": trigger = "自動"; break;
                         case "safety": trigger = "退避"; break;
-                        // (round 5 L1) round 4 R4-M9 で restore audit 行を NEW DB に INSERT する経路を追加したが、
-                        // 本 switch は manual/auto/safety のみで restore が default 落ち → 生 string "restore" が
-                        // 「復元」と並んで英字混在表示されていた。BackupLogEntry.TriggerType の XML doc (R4-L3)
-                        // と対称化する形で「復元」case を追加。
-                        case "restore": trigger = "復元"; break;
                         default: trigger = entry.TriggerType ?? ""; break;
                     }
-                    string size = entry.FileSizeBytes.HasValue ? FormatBytes(entry.FileSizeBytes.Value) : "-";
-                    string completed = entry.CompletedAtLocal.HasValue
-                        ? entry.CompletedAtLocal.Value.ToString("yyyy/MM/dd HH:mm:ss")
-                        : "-";
-                    // (#200) 「状態」列削除に伴い status / color / tooltip の cell 設定も撤去。
+                    // ファイル由来のため開始 / 完了は同一タイムスタンプ。
+                    string started = entry.StartedAtLocal.ToString("yyyy/MM/dd HH:mm:ss");
                     int rowIndex = gridHistory.Rows.Add(
-                        entry.StartedAtLocal.ToString("yyyy/MM/dd HH:mm:ss"),
-                        completed,
+                        started,
+                        started,
                         entry.PcName,
                         trigger,
-                        size,
-                        resolvedPath);
-                    // 行のTagに元データを保存（Restore で取り出す）
+                        FormatBytes(entry.FileSizeBytes),
+                        entry.FilePath);
+                    // 行の Tag に元データを保存（Restore / Delete で取り出す）
                     gridHistory.Rows[rowIndex].Tag = entry;
                 }
             }
@@ -214,9 +155,9 @@ namespace TonePrism.Manager.Controls
             }
 
             var row = gridHistory.SelectedRows[0];
-            var entry = row.Tag as BackupLogEntry;
-            // パス解決 (#126: relative_path 優先、無ければ file_path)
-            string resolvedPath = BackupPathResolver.ResolveAbsolutePath(entry, _dbManager.DatabasePath);
+            var entry = row.Tag as BackupCatalogEntry;
+            // カタログ entry の FilePath は走査で得た絶対パスそのもの (パス解決不要)。
+            string resolvedPath = entry?.FilePath;
             if (entry == null || string.IsNullOrEmpty(resolvedPath))
             {
                 MessageBox.Show("選択したエントリにはファイルパス情報がありません。", "情報なし",
@@ -230,11 +171,11 @@ namespace TonePrism.Manager.Controls
                 return;
             }
 
-            using (var confirm = new RestoreConfirmForm(entry, _dbManager.DatabasePath))
+            using (var confirm = new RestoreConfirmForm(entry))
             {
                 if (confirm.ShowDialog(this) != DialogResult.Yes)
                 {
-                    Logger.Info($"[BackupSectionPanel] 復元キャンセル (確認ダイアログ): entry_id={entry.Id}, source='{resolvedPath}'");
+                    Logger.Info($"[BackupSectionPanel] 復元キャンセル (確認ダイアログ): source='{resolvedPath}'");
                     return;
                 }
             }
@@ -242,7 +183,7 @@ namespace TonePrism.Manager.Controls
             // (監査ログ) 確認コード入力を通過した時点で復元意思が確定。以降の経路 (session conflict / cancel /
             // abort / success) を Logger に残して事後追跡できるようにする。旧実装は MessageBox エラー文言が
             // 「詳細はログを確認」と促していたのにログ自体が空、という不整合があった。
-            Logger.Info($"[BackupSectionPanel] 復元実行: entry_id={entry.Id}, source='{resolvedPath}'");
+            Logger.Info($"[BackupSectionPanel] 復元実行: source='{resolvedPath}'");
 
             // (round 2 High-2) user 確認後、DB write (Restore = safety backup + DB 置換) 直前で session conflict check
             if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ復元") == DialogResult.Cancel)
@@ -303,32 +244,8 @@ namespace TonePrism.Manager.Controls
                 Logger.Error("[BackupSectionPanel] 復元後のスキーマ migration に失敗", ex);
             }
 
-            // (H4) NEW DB に success 行を別途 INSERT。RestoreService.Restore が start 時に
-            // InsertInProgress した行は OLD DB (= safety backup に snapshot 保存) にしかないため、
-            // NEW DB に audit を残す責務はここに集約。startedAt は LastRestoreStartedAt から拾う。
-            try
-            {
-                long completedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                long fileSize = 0;
-                try { fileSize = new System.IO.FileInfo(_dbManager.DatabasePath).Length; } catch { /* swallow */ }
-                // (累積監査 round 4 Medium-19) 復元元バックアップの dbDir 基準相対 path も渡してプロジェクト移動耐性を持たせる。
-                // BackupPathResolver.ToRelativeFromDbDir は dbDir 配下に無い path には null を返す (絶対 path のみ記録になる)。
-                string dbDirForRestore = System.IO.Path.GetDirectoryName(_dbManager.DatabasePath);
-                string restoreRelativePath = Services.BackupPathResolver.ToRelativeFromDbDir(resolvedPath, dbDirForRestore);
-                _dbManager.BackupLogRepository.LogRestoreCompleted(
-                    Environment.MachineName,
-                    _dbManager.RestoreService.LastRestoreStartedAt,
-                    completedAt,
-                    resolvedPath,
-                    fileSize,
-                    "success",
-                    null,
-                    restoreRelativePath);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn("[BackupSectionPanel] 復元成功の audit 行 INSERT に失敗 (復元自体は成功): " + ex.Message);
-            }
+            // (backup_log 廃止) 復元の監査行 INSERT は不要。復元で作られた safety_*.db が証跡を兼ね、
+            // 履歴グリッドにも「退避」として走査表示される。
 
             // (復元ドリフト検出) バックアップ/復元は toneprism.db のみが対象で games/ フォルダは復元
             // されないため、別時点の DB を復元すると DB と実フォルダがズレうる。復元直後に突き合わせて
@@ -384,55 +301,14 @@ namespace TonePrism.Manager.Controls
         }
 
         /// <summary>
-        /// failed 状態のレコードを物理ファイル + DB から自動削除する (#126)。
-        /// 失敗したバックアップの履歴は残してもユーザーには情報価値が無く、
-        /// 古いプロジェクトパスのゴミがそのまま残り続ける主因にもなるため。
-        ///
-        /// 二重防御 (#127 Codex P1): Reconcile が誤って failed 化した行で実ファイルが
-        /// 残っているケースを掃除で物理削除しないよう、BackupPathResolver で解決した
-        /// パスにファイルが実在する場合は DB レコードもファイルも触らない（安全側）。
-        /// </summary>
-        /// <returns>削除した件数</returns>
-        private int CleanupFailedEntries()
-        {
-            int cleaned = 0;
-            string dbPath = _dbManager.DatabasePath;
-            var failedEntries = _dbManager.BackupLogRepository.GetByStatus("failed");
-            foreach (var entry in failedEntries)
-            {
-                // (L) trigger_type='safety' の failed 行は audit trail として明示的に残す
-                // (= 復元が途中で死んだ証跡)。'restore' (H4) も同じ理由で保護。掃除対象は
-                // 'manual' / 'auto' の failed 行のみ。
-                if (entry.TriggerType == "safety" || entry.TriggerType == "restore")
-                {
-                    continue;
-                }
-
-                string path = BackupPathResolver.ResolveAbsolutePath(entry, dbPath);
-
-                // セーフティ: failed なのに実ファイルが残っている場合は触らない
-                // （Reconcile の取りこぼしで誤分類された可能性があり、ユーザーの貴重な
-                // バックアップを誤って削除しないため）
-                if (!string.IsNullOrEmpty(path) && File.Exists(path))
-                {
-                    Logger.Warn($"[BackupSectionPanel] failed だがファイル実在のため掃除スキップ (id={entry.Id}, path={path})");
-                    continue;
-                }
-
-                _dbManager.BackupLogRepository.DeleteById(entry.Id);
-                cleaned++;
-            }
-            return cleaned;
-        }
-
-        /// <summary>
-        /// 「削除」ボタン: 選択行のバックアップを物理ファイル + DB レコード両方削除 (#126)
+        /// 「削除」ボタン: 選択行のバックアップファイルを物理削除する (backup_log 廃止後は DB 行なし)。
         /// </summary>
         private void btnDelete_Click(object sender, EventArgs e)
         {
             if (_dbManager == null) return;
-            // (round 2 High-2) selection / in_progress / 削除確認の各 validation を session conflict
-            // check より前に倒す。check は DB write 直前 (削除確認 OK 後) で実行。
+            // (round 2 High-2) selection / 削除確認の各 validation を session conflict check より前に倒す。
+            // check はファイル削除直前 (削除確認 OK 後) で実行。backup_log 廃止後は in_progress 状態が無いため
+            // 旧「実行中は削除不可」ガードは撤去 (走査に出るのは実在ファイルのみ)。
             if (gridHistory.SelectedRows.Count == 0)
             {
                 MessageBox.Show("削除したいバックアップを履歴一覧から選択してください。", "未選択",
@@ -441,29 +317,16 @@ namespace TonePrism.Manager.Controls
             }
 
             var row = gridHistory.SelectedRows[0];
-            var entry = row.Tag as BackupLogEntry;
-            if (entry == null)
+            var entry = row.Tag as BackupCatalogEntry;
+            if (entry == null || string.IsNullOrEmpty(entry.FilePath))
             {
                 MessageBox.Show("選択したエントリの情報が取得できませんでした。", "エラー",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            // 進行中の行は削除不可 (Codex P2 #127):
-            // 別 PC や他タスクで現在進行中のバックアップ行を消すと、後で MarkSuccess が
-            // 対象を見失って成功履歴が消える + 書き込み中のファイルが削除される
-            if (entry.Status == "in_progress")
-            {
-                MessageBox.Show(this,
-                    "このバックアップは現在実行中（または別 PC からの進行中）の可能性があるため削除できません。\n\n" +
-                    "更新ボタンで状態を再確認してから、成功または失敗が確定したものを削除してください。",
-                    "実行中のため削除不可",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            string resolvedPath = BackupPathResolver.ResolveAbsolutePath(entry, _dbManager.DatabasePath);
-            string fileName = !string.IsNullOrEmpty(resolvedPath) ? Path.GetFileName(resolvedPath) : $"id={entry.Id}";
+            string resolvedPath = entry.FilePath;
+            string fileName = Path.GetFileName(resolvedPath);
 
             var dr = MessageBox.Show(this,
                 $"バックアップ「{fileName}」を削除します。\n\n" +
@@ -473,11 +336,11 @@ namespace TonePrism.Manager.Controls
 
             if (dr != DialogResult.OK) return;
 
-            // (round 2 High-2) 削除確認 OK 後、DB write (file + log delete) 直前で session conflict check
+            // (round 2 High-2) 削除確認 OK 後、ファイル削除直前で session conflict check
             if (Services.SessionConflictHelper.CheckBeforeWrite(this, "バックアップ削除") == DialogResult.Cancel) return;
 
-            // 物理ファイル削除 (失敗しても DB レコードは消す)
-            if (!string.IsNullOrEmpty(resolvedPath) && File.Exists(resolvedPath))
+            // 物理ファイル削除。削除できなければカタログに残り続けるので、通知して再表示するだけ。
+            if (File.Exists(resolvedPath))
             {
                 try
                 {
@@ -486,34 +349,24 @@ namespace TonePrism.Manager.Controls
                 catch (Exception ex)
                 {
                     MessageBox.Show(this,
-                        $"バックアップファイルの削除に失敗しましたが、履歴レコードは削除します。\n\n{ex.Message}",
+                        $"バックアップファイルの削除に失敗しました。\n\n{ex.Message}",
                         "ファイル削除失敗", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    RefreshDisplay();
+                    return;
                 }
             }
 
-            // DB レコード削除
-            _dbManager.BackupLogRepository.DeleteById(entry.Id);
-
-            // (追加精査 ⑦) auto+success を削除した場合、last_backup_at を「残った中で最新の auto success
-            // の completed_at」に rewind する。さもないと「最新の自動バックアップを消して取り直したい」
-            // 操作で IsAutoBackupDue が間隔未到達と誤判定し、次の自動バックアップが skip される。
-            // 残りが無ければ 0 (= 初回扱い、次回判定で auto バックアップが取得される)。
-            // 削除対象が手動 / safety / failed の場合は last_backup_at に無関係なので何もしない。
-            if (entry.TriggerType == "auto" && entry.Status == "success")
+            // (追加精査 ⑦) auto を削除した場合、last_backup_at を「残った中で最新の auto の開始時刻」に rewind する。
+            // さもないと「最新の自動バックアップを消して取り直したい」操作で IsAutoBackupDue が間隔未到達と
+            // 誤判定し、次の自動バックアップが skip される。残りが無ければ 0 (= 初回扱い、次回判定で取得される)。
+            // 手動 / 退避 (safety) は last_backup_at に無関係なので何もしない。
+            if (entry.TriggerType == "auto")
             {
-                var newLatest = _dbManager.BackupLogRepository.GetLastAutoSuccess();
-                // status='success' の行なので CompletedAt は通常非 null。古い行で NULL のケースに備えて
-                // StartedAt にフォールバック。残行が無ければ 0 (= 初回扱い)。
-                long newLastBackupAt = 0;
-                if (newLatest != null)
-                {
-                    newLastBackupAt = newLatest.CompletedAt ?? newLatest.StartedAt;
-                }
-                // (累積監査 round 6 M8) この削除操作は「最新の自動バックアップを消して取り直したい」ための
-                // last_backup_at rewind。しかし削除中に別 PC が新しい自動バックアップを取得して last_backup_at を
-                // 前進させていた場合、ここで古い値に上書きすると別 PC の最新取得を打ち消して二重バックアップを
-                // 誘発する (last-write-wins 競合)。rewind になる (= 現在値より小さくなる) ときだけ更新し、
-                // 別 PC がより新しい値を書いていれば尊重する。完全な atomic ではないが TOCTOU 窓を縮める。
+                // File.Delete 後に再走査するので、いま消した分は除外される。
+                var newLatest = _dbManager.BackupCatalogService.GetLastAuto();
+                long newLastBackupAt = newLatest != null ? newLatest.StartedAt : 0;
+                // (累積監査 round 6 M8) 削除中に別 PC が新しい auto を取得して last_backup_at を前進させていた場合に
+                // 古い値で上書きして二重バックアップを誘発しないよう、rewind になる (= 現在値より小さくなる) ときだけ更新。
                 long currentLastBackupAt = _dbManager.SettingsRepository.GetInt64("last_backup_at", 0);
                 if (newLastBackupAt < currentLastBackupAt)
                 {

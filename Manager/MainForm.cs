@@ -383,9 +383,9 @@ namespace TonePrism.Manager
             //   - 検出時: `BeginInvoke` で dialog 表示を defer (= MainForm の Show 完了後に dialog が
             //     owner-modal child で開く → taskbar entry あり、他 window click で裏に行ける、natural
             //     WinForms 挙動)
-            //   - **panel.Initialize / LoadGames / RegisterUnknownSafetyFiles / CleanupStaleBackupEntries /
-            //     StartAutoBackupIfDue / CleanupZombieStagings / StartBackgroundUpdateCheckIfDue は全部
-            //     `ContinueLoadAfterSessionCheck` に切出し**、conflict 検出時は MainForm_Load 自体は
+            //   - **panel.Initialize / LoadGames / StartAutoBackupIfDue / CleanupZombieStagings /
+            //     StartBackgroundUpdateCheckIfDue は全部 `ContinueLoadAfterSessionCheck` に切出し**、
+            //     conflict 検出時は MainForm_Load 自体は
             //     return して残り init は実行しない (= gate)。
             //   - OK 押下時のみ `ContinueLoadAfterSessionCheck` を chain で起動 → 旧実装の gate 意味論
             //     を完全に維持。Cancel 時は panel init / backup / update check すべて skip して Close。
@@ -522,12 +522,8 @@ namespace TonePrism.Manager
                 Logger.Error("[MainForm] 旧 safety ファイル移動失敗", ex);
             }
 
-            // 退避ファイルの未登録分を backup_log に登録（起動時に1回）
-            RegisterUnknownSafetyFiles();
-
-            // 起動時に古い in_progress 行を掃除（クラッシュ残骸 / 自己参照スナップショット由来）
-            CleanupStaleBackupEntries();
-
+            // (backup_log 廃止 / DB v19) バックアップ履歴は backups/ フォルダ走査由来 (BackupCatalogService)
+            // になったため、起動時の register / reconcile は不要 (ファイル = 真実でズレない)。
             _backupSectionPanel.Initialize(dbManager);
             _logSectionPanel.Initialize(PathManager.LogsRootDirectory);
             _updateSectionPanel.Initialize(dbManager);
@@ -708,43 +704,6 @@ namespace TonePrism.Manager
             return true; // (round 4 codex P2 NEW) dialog 表示完了 = success
         }
 
-        private void RegisterUnknownSafetyFiles()
-        {
-            try
-            {
-                int added = dbManager.BackupLogRepository.RegisterUnknownSafetyFiles(
-                    dbManager.BackupService.GetSafetyDirectory(),
-                    Environment.MachineName);
-                if (added > 0)
-                {
-                    Logger.Info($"[MainForm] 退避ファイル {added} 件を backup_log に新規登録しました");
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("[MainForm] 退避ファイル登録に失敗", ex);
-            }
-        }
-
-        private void CleanupStaleBackupEntries()
-        {
-            try
-            {
-                // 起動時は10分以上経過した in_progress のみリコンサイル対象（実行中のバックアップに干渉しないため）
-                var (success, failed) = dbManager.BackupLogRepository.ReconcileInProgressEntries(
-                    "進行中状態のまま放置されたため自動的にfailed扱いにしました（Managerクラッシュ等でバックアップが完了しなかった可能性）",
-                    thresholdSeconds: 600);
-                if (success > 0 || failed > 0)
-                {
-                    Logger.Info($"[MainForm] 起動時リコンサイル: 成功化 {success} 件 / 失敗化 {failed} 件");
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("[MainForm] バックアップ履歴の掃除に失敗しました", ex);
-            }
-        }
-
         /// <summary>
         /// 自動バックアップが期限到来していればバックグラウンドで実行する。
         /// UIをブロックせず、ステータスバーで進捗を伝える。
@@ -851,26 +810,8 @@ namespace TonePrism.Manager
                 // 復元によりスキーマやデータが変わっているので、必要なら再初期化
                 dbManager.InitializeDatabase();
 
-                // 復元時に作成された新しい safety ファイルを backup_log に登録（復元先には未登録）
-                RegisterUnknownSafetyFiles();
-
-                // 復元先のスナップショットには「バックアップ撮影時点で進行中だった自分自身の行」が
-                // 含まれている自己参照ゴーストになる。各 in_progress 行について実ファイルが
-                // 存在するか確認し、存在すれば success、存在しなければ failed としてリコンサイルする。
-                try
-                {
-                    var (success, failed) = dbManager.BackupLogRepository.ReconcileInProgressEntries(
-                        "バックアップファイルが見つかりませんでした（バックアップから復元時の自己参照スナップショット由来で、実ファイルも残っていない）");
-                    if (success > 0 || failed > 0)
-                    {
-                        Logger.Info($"[MainForm] 復元後リコンサイル: 成功化 {success} 件 / 失敗化 {failed} 件");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Error("[MainForm] 復元後の履歴リコンサイルに失敗しました", ex);
-                }
-
+                // (backup_log 廃止 / DB v19) 復元後の register / reconcile は不要。履歴は backups/ フォルダ
+                // 走査由来 (BackupCatalogService) で、復元で作られた safety_*.db も自動的に履歴へ現れる。
                 _gameSectionPanel.LoadGames();
                 _storeSectionPanel.LoadSections();
                 _settingsSectionPanel.UpdateVersionInfo();

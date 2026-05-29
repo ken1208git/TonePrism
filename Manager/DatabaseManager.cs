@@ -21,8 +21,8 @@ namespace TonePrism.Manager
         private readonly DeveloperRepository _devRepo;
         private readonly StoreSectionRepository _sectionRepo;
         private readonly SettingsRepository _settingsRepo;
-        private readonly BackupLogRepository _backupLogRepo;
         private readonly BackupService _backupService;
+        private readonly BackupCatalogService _backupCatalogService;
         private readonly RestoreService _restoreService;
         private readonly ManagerSessionRepository _sessionRepo;
 
@@ -35,25 +35,26 @@ namespace TonePrism.Manager
             _versionRepo = new VersionRepository(_conn, _devRepo);
             _sectionRepo = new StoreSectionRepository(_conn);
             _settingsRepo = new SettingsRepository(_conn);
-            _backupLogRepo = new BackupLogRepository(_conn);
-            _backupService = new BackupService(_conn, _backupLogRepo, _settingsRepo);
-            // (H4) リストア audit row を backup_log に残すため BackupLogRepository を注入。
-            // (H5) advisory restore-lock 取得/解放のため SettingsRepository も注入。
-            _restoreService = new RestoreService(_conn, _backupLogRepo, _settingsRepo);
+            _backupService = new BackupService(_conn, _settingsRepo);
+            // (backup_log 廃止 / DB v19) 履歴は backups/ フォルダ走査由来。BackupService からフォルダパスを取得する。
+            _backupCatalogService = new BackupCatalogService(_backupService);
+            // (H5) advisory restore-lock 取得/解放のため SettingsRepository を注入。
+            _restoreService = new RestoreService(_conn, _settingsRepo);
             _sessionRepo = new ManagerSessionRepository(_conn);
         }
 
         // --- バックアップ機能アクセサ ---
         public BackupService BackupService { get { return _backupService; } }
+        /// <summary>(DB v19) バックアップ履歴を backups/ フォルダ走査から導出するカタログサービス。</summary>
+        public BackupCatalogService BackupCatalogService { get { return _backupCatalogService; } }
         public RestoreService RestoreService { get { return _restoreService; } }
-        public BackupLogRepository BackupLogRepository { get { return _backupLogRepo; } }
         public SettingsRepository SettingsRepository { get { return _settingsRepo; } }
         /// <summary>(#179) Manager session tracking 用 repository。</summary>
         public ManagerSessionRepository ManagerSessionRepository { get { return _sessionRepo; } }
 
         // --- 接続・スキーマ ---
         /// <summary>
-        /// 現在の toneprism.db のフルパス (BackupPathResolver 等から参照)
+        /// 現在の toneprism.db のフルパス (バックアップ保存先の既定算出等から参照)
         /// </summary>
         public string DatabasePath => _conn.DbPath;
         public bool DatabaseExists() => _conn.DatabaseExists();

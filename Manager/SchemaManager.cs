@@ -29,7 +29,11 @@ namespace TonePrism.Manager
         //      backup_log に記録できるようにする。既存行は影響なし (CHECK 拡張のみ)。
         // v17: game_versions UNIQUE INDEX を COLLATE NOCASE で作り直す (M3)。`v1.0.0` と `V1.0.0` の
         //      case 違いを semantic dup として弾く。重複残存時は v14→v15 と同じ skip + retry パターン。
-        private const int CurrentDbVersion = 18;
+        // v18: developers.version_id に FK + ON DELETE CASCADE を追加 + dead table game_genres を DROP (Medium-22)。
+        // v19: backup_log テーブルを DROP。バックアップ履歴を DB から外し backups/ フォルダ走査
+        //      (BackupCatalogService) 由来に変更。reconcile / register / drift 対策コードを全廃し、失敗復元が
+        //      success 化する欠陥を根治。既存行は破棄されるが物理ファイルは残り初回走査で履歴に復活する。
+        private const int CurrentDbVersion = 19;
 
         public SchemaManager(DatabaseConnection conn)
         {
@@ -424,8 +428,8 @@ namespace TonePrism.Manager
                 command.ExecuteNonQuery();
             }
 
-            // backup_logテーブル作成（v9 で追加）
-            CreateBackupLogTable(connection, transaction);
+            // backup_log は v19 で DROP (履歴を backups/ フォルダ走査 = BackupCatalogService に移行)。新規 DB では
+            // 作成しない。CreateBackupLogTable 本体は古い DB の v9 段階移行 (MigrateV8ToV9) が呼ぶため残置する。
 
             // (#179) manager_sessions テーブル作成 (v13 で追加、MigrateV12ToV13 でも再利用する helper)
             CreateManagerSessionsTable(connection, transaction);
@@ -932,6 +936,21 @@ namespace TonePrism.Manager
                         else
                         {
                             Logger.Warn("[DatabaseManager] (Medium-22) 直前の migration が未完のため v17→v18 も skip、user_version は " + currentVersion + " のまま据え置き");
+                        }
+                    }
+
+                    if (currentVersion < 19)
+                    {
+                        // v18 → v19: backup_log テーブルを DROP (履歴を backups/ フォルダ走査に移行)。
+                        // game_genres v18 DROP と同じく、前段 migration が完了している場合のみ実行する。
+                        if (currentVersion >= 18)
+                        {
+                            MigrateV18ToV19(connection, migTransaction);
+                            currentVersion = 19;
+                        }
+                        else
+                        {
+                            Logger.Warn("[DatabaseManager] 直前の migration が未完のため v18→v19 も skip、user_version は " + currentVersion + " のまま据え置き");
                         }
                     }
 
@@ -1741,6 +1760,28 @@ namespace TonePrism.Manager
             Logger.Info("[DatabaseManager] Migration V17 -> V18 completed.");
         }
 
+        /// <summary>
+        /// v18 → v19: backup_log テーブルを DROP する。
+        ///
+        /// バックアップ履歴のメタデータを「バックアップ対象である toneprism.db の中」に持つ設計が、復元で DB が
+        /// 丸ごと置き換わるたびに履歴とディスク実ファイルのズレを生み、それを埋める reconcile / register 系の
+        /// 後付けコードがバグの温床になっていた (失敗復元が success 化する等)。履歴を backups/ フォルダ走査
+        /// (BackupCatalogService) 由来に切り替えたことで本テーブルは不要になった。
+        ///
+        /// 既存行は破棄されるが、物理バックアップファイルは残り、初回走査で履歴に復活する (失われるのは
+        /// 失敗履歴と復元監査行のみ = いずれも要件上不要)。LAN 協調 (last_backup_at lease / restore_lock_owner)
+        /// は settings テーブルにあり本 migration の影響を受けない。game_genres v18 DROP と同じパターン。
+        /// </summary>
+        private void MigrateV18ToV19(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            Logger.Info("[DatabaseManager] Executing migration V18 -> V19 (backup_log テーブルを DROP, 履歴を file-scan 化)");
+            using (var cmd = new SQLiteCommand("DROP TABLE IF EXISTS backup_log", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+            Logger.Info("[DatabaseManager] Migration V18 -> V19 completed.");
+        }
+
         private void MigrateV15ToV16(SQLiteConnection connection, SQLiteTransaction transaction)
         {
             Logger.Info("[DatabaseManager] Executing migration V15 -> V16 (backup_log.trigger_type CHECK 拡張: 'restore' 追加, H4)");
@@ -2022,7 +2063,8 @@ namespace TonePrism.Manager
             { "settings", new[] { "key", "value" } },
             { "store_sections", new[] { "section_id", "title", "section_type", "section_source", "display_order", "max_display_count", "is_visible" } },
             { "store_section_games", new[] { "id", "section_id", "game_id", "display_order", "display_text" } },
-            { "backup_log", new[] { "id", "started_at", "completed_at", "pc_name", "file_path", "relative_path", "file_size_bytes", "status", "error_message", "trigger_type" } },
+            // backup_log は v19 で DROP した (MigrateV18ToV19 参照、履歴を BackupCatalogService の file-scan に移行)。
+            // VerifySchema の検証対象外 = drop 済 DB / 新規 DB の両方で PASS する。
             { "manager_sessions", new[] { "pc_name", "started_at_unix_ms", "last_heartbeat_at_unix_ms", "pid", "manager_version" } },
         };
 

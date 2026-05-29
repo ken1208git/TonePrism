@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Windows.Forms;
 using TonePrism.Manager.Models;
-using TonePrism.Manager.Services;
 
 namespace TonePrism.Manager
 {
@@ -17,14 +16,12 @@ namespace TonePrism.Manager
         // 同 1ms 内に複数回呼ばれると同一 seed = 同一コード再出 → 「なぜ同じ？」混乱の UX bug があった。
         // 宣言済の `_random` field を実際に再利用するよう GenerateConfirmationCode を instance method 化。
         private readonly Random _random = new Random();
-        private readonly BackupLogEntry _entry;
-        private readonly string _dbPath;
+        private readonly BackupCatalogEntry _entry;
 
-        public RestoreConfirmForm(BackupLogEntry entry, string dbPath)
+        public RestoreConfirmForm(BackupCatalogEntry entry)
         {
             InitializeComponent();
             _entry = entry;
-            _dbPath = dbPath;
         }
 
         private void RestoreConfirmForm_Load(object sender, EventArgs e)
@@ -34,15 +31,13 @@ namespace TonePrism.Manager
 
             if (_entry != null)
             {
-                // (復元と表示で同一の解決パスを使う) 実復元時は BackupPathResolver で
-                // relative_path から再計算した絶対パスを使うが、ここで _entry.FilePath を生表示
-                // するとプロジェクト移動後に「昔の絶対パス」が出てユーザーを混乱させる。
-                string resolvedPath = BackupPathResolver.ResolveAbsolutePath(_entry, _dbPath);
-                string sizeStr = _entry.FileSizeBytes.HasValue ? FormatBytes(_entry.FileSizeBytes.Value) : "-";
+                // カタログ entry の FilePath は走査で得た現在の絶対パスそのもの (プロジェクト移動後も
+                // 常に現在の保存先を走査するため、昔の絶対パスが出る問題は構造的に発生しない)。
+                string resolvedPath = _entry.FilePath;
                 lblTargetFile.Text =
                     $"対象: {Path.GetFileName(resolvedPath)}\n" +
                     $"作成日時: {_entry.StartedAtLocal:yyyy/MM/dd HH:mm:ss}\n" +
-                    $"サイズ: {sizeStr}\n" +
+                    $"サイズ: {FormatBytes(_entry.FileSizeBytes)}\n" +
                     $"フルパス: {resolvedPath}";
             }
         }

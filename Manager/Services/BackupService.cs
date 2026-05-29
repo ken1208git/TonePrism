@@ -21,13 +21,11 @@ namespace TonePrism.Manager.Services
         public const string TriggerAuto = "auto";
 
         private readonly DatabaseConnection _conn;
-        private readonly BackupLogRepository _logRepo;
         private readonly SettingsRepository _settingsRepo;
 
-        public BackupService(DatabaseConnection conn, BackupLogRepository logRepo, SettingsRepository settingsRepo)
+        public BackupService(DatabaseConnection conn, SettingsRepository settingsRepo)
         {
             _conn = conn;
-            _logRepo = logRepo;
             _settingsRepo = settingsRepo;
         }
 
@@ -189,53 +187,33 @@ namespace TonePrism.Manager.Services
 
         private BackupResult RunBackupCore(string triggerType, IProgress<ProgressInfo> progress, CancellationToken token, bool leaseAlreadyAcquired, long leasePreviousValue = 0)
         {
-            string pcName = Environment.MachineName;
-            long startedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            string host = SanitizeHostForFileName(Environment.MachineName);
 
-            // ファイルパスを先に確定させ、in_progress 行に最初から記録する。
-            // こうすることで、後で「ファイル存在の有無」で行をリコンサイルできる。
-            //
-            // (追加精査 ⑥) yyyyMMdd_HHmmss は 1 秒粒度なので、同 1 秒に複数 PC が auto/manual を発火すると
-            // ファイル名衝突が起きる。SQLiteConnection に既存パスを渡すと BackupDatabase が destination の
-            // tables 全置換で silent 上書きとなり、前のバックアップが破壊される。File.Exists で衝突 check し、
-            // 衝突時は _2 / _3 ... の suffix を付与。100 件衝突はあり得ないので safety limit を入れて throw。
-            // 既存ファイル名 (yyyyMMdd_HHmmss.db) との互換性のため、衝突時のみ suffix を追加する形式とする
-            // (BackupLogRepository.RecoverLegacyFailedEntriesByFolderScan 等の旧版救済 regex に影響しない)。
-            // (種類別サブフォルダ + 種類接頭辞) auto / manual を種類ごとのサブフォルダに分け、ファイル名も
-            // `<種類>_<日時>.db` に統一する (退避 safety_*.db と同じ流儀)。backup_log を失った孤児ファイルでも
-            // 「どのサブフォルダにあるか」で auto / manual を復元でき、auto の世代管理 (retention) が正しく
-            // 効く (Finding 4 の根治)。triggerType は RunAutoBackupIfDue / RunManualBackup から "auto" /
-            // "manual" のみが渡るため、そのままサブフォルダ名 + ファイル名接頭辞として使える。
+            // auto / manual を種類ごとのサブフォルダに分け、ファイル名も `<種類>_<日時>_<host>.db` に統一する
+            // (退避 safety_*.db と同じ流儀)。フォルダ位置で種類が、ファイル名 host で実行 PC が確定するため、
+            // backup_log を持たずとも BackupCatalogService が履歴を完全に復元でき、auto の世代管理 (retention)
+            // も正しく効く。triggerType は RunAutoBackupIfDue / RunManualBackup から "auto" / "manual" のみが
+            // 渡るため、そのままサブフォルダ名 + ファイル名接頭辞として使える。
             string destinationDir = Path.Combine(GetEffectiveDestinationDirectory(), triggerType);
             string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            string fileName = $"{triggerType}_{timestamp}.db";
-            string destinationPath = Path.Combine(destinationDir, fileName);
-            // (L) 2 PC が SMB 共有経由で同 1 秒に backup を発火した場合、双方 File.Exists=false で同 path に書き込み
-            // 出力ファイル破損する LAN race を緩和。collision 検出時の suffix に PC 名を mix することで、
-            // 「同 PC 内連射 = `_2` `_3` ...」と「別 PC 由来 = `_<pcName>`」を分離。pcName が空文字の defensive
-            // case は従来の数値 suffix に fall through。
+            string baseName = string.IsNullOrEmpty(host)
+                ? $"{triggerType}_{timestamp}"
+                : $"{triggerType}_{timestamp}_{host}";
+            string destinationPath = Path.Combine(destinationDir, baseName + ".db");
+            // 同一 PC が同 1 秒に複数回発火した場合のみ `_2` / `_3` ... を付ける。別 PC は host が違うので
+            // baseName 自体が分離して衝突しない (旧実装の pcName-mix 衝突回避を host 常時埋め込みで一本化)。
+            // SQLiteConnection に既存パスを渡すと BackupDatabase が destination の tables を全置換して前の
+            // バックアップを silent 破壊するため File.Exists で衝突を避ける。100 件衝突は safety limit で throw。
             int collisionSuffix = 2;
             while (File.Exists(destinationPath))
             {
-                string suffix = string.IsNullOrEmpty(pcName)
-                    ? collisionSuffix.ToString()
-                    : (collisionSuffix == 2 ? pcName : pcName + "_" + (collisionSuffix - 1));
-                fileName = $"{triggerType}_{timestamp}_{suffix}.db";
-                destinationPath = Path.Combine(destinationDir, fileName);
+                destinationPath = Path.Combine(destinationDir, $"{baseName}_{collisionSuffix}.db");
                 collisionSuffix++;
                 if (collisionSuffix > 99)
                 {
                     throw new Exception($"バックアップファイル名の衝突回避に失敗しました (同 1 秒に 100 件以上の衝突): {destinationDir}");
                 }
             }
-
-            // プロジェクト移動耐性のため、toneprism.db のあるディレクトリからの相対パスも記録 (#126)
-            // dbDir 配下に無い destinationDir (ユーザー指定の絶対パス等) では null になり、
-            // 表示時は file_path にフォールバックされる。
-            string dbDir = Path.GetDirectoryName(_conn.DbPath);
-            string relativePath = BackupPathResolver.ToRelativeFromDbDir(destinationPath, dbDir);
-
-            long logId = _logRepo.InsertInProgress(pcName, triggerType, startedAt, destinationPath, relativePath);
 
             try
             {
@@ -315,26 +293,21 @@ namespace TonePrism.Manager.Services
                     fileSize = new FileInfo(destinationPath).Length;
                 }
 
-                long completedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                _logRepo.MarkSuccess(logId, destinationPath, fileSize, completedAt, relativePath);
-
-                // 手動の場合も last_backup_at を更新（自動バックアップが続けて走らないように）
+                // 手動の場合も last_backup_at を更新（自動バックアップが続けて走らないように）。
                 if (!leaseAlreadyAcquired)
                 {
-                    _settingsRepo.SetInt64("last_backup_at", completedAt);
+                    _settingsRepo.SetInt64("last_backup_at", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                 }
 
                 // リテンションは成功時のみ適用
                 progress?.Report(new ProgressInfo(95, "古いバックアップを整理中...", ""));
-                ApplyRetention(destinationDir);
+                ApplyRetention();
 
                 progress?.Report(new ProgressInfo(100, "バックアップ完了", destinationPath));
                 return BackupResult.Success(destinationPath, fileSize);
             }
             catch (OperationCanceledException)
             {
-                long completedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                _logRepo.MarkFailed(logId, "ユーザーによりキャンセルされました", completedAt);
                 // 中途半端なファイルを削除
                 TryDeleteIfExists(destinationPath);
                 RollbackLeaseOnFailure(leaseAlreadyAcquired, leasePreviousValue);
@@ -342,8 +315,8 @@ namespace TonePrism.Manager.Services
             }
             catch (Exception ex)
             {
-                long completedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                _logRepo.MarkFailed(logId, ex.Message, completedAt);
+                // (失敗履歴は backup_log 廃止に伴い Logger のみに残す)
+                Logger.Error("[BackupService] バックアップに失敗しました: " + destinationPath, ex);
                 TryDeleteIfExists(destinationPath);
                 RollbackLeaseOnFailure(leaseAlreadyAcquired, leasePreviousValue);
                 return BackupResult.Failed(ex.Message);
@@ -402,73 +375,41 @@ namespace TonePrism.Manager.Services
         /// <summary>
         /// 設定された世代数を超える古い**自動**バックアップファイルを削除する (#235)。
         ///
-        /// **trigger_type='auto' AND status='success'** の行に紐づくファイルのみが対象。手動取得 (manual) /
-        /// 復元前の自動退避 (safety) / 失敗履歴 (failed) は絶対に削除しない。旧実装はファイル名パターン
-        /// `toneprism_*.db` だけで判定していたため、ファイル名から区別できない手動取得分も silent に消えていた。
+        /// auto は `&lt;保存先&gt;/auto/auto_&lt;yyyyMMdd&gt;_&lt;HHmmss&gt;[_host].db` に保存され、固定幅ゼロ埋めの
+        /// タイムスタンプが接頭辞の直後に来るため、**ファイル名の降順 = 取得時刻の新しい順** になる
+        /// (wall-clock のパース不要 = 時計依存の順序逆転を避けつつ自己完結)。新しい順に keep 件を残し、残りを
+        /// 物理削除する。手動 (manual) / 復元前退避 (safety) は別フォルダなので構造的に削除対象外。
         ///
-        /// 本実装は backup_log を SoT にする (= DB に登録されていないファイルは触らない、= 自動 retention は
-        /// 「自分が取った自動バックアップだけ整理する」最小権限で動く)。DB 行は削除しない (= 既存挙動互換、
-        /// BackupSectionPanel の表示は File.Exists フィルタで自然に hide される)。
-        ///
-        /// destinationDir 引数は将来「設定で保存先を変えた直後の旧フォルダ清掃」等の拡張のため受けるが、
-        /// 現状は backup_log の file_path / relative_path が SoT なので未使用。
+        /// backup_log 廃止 (DB v19) に伴い、旧実装の「DB 行を SoT に retention」「DB 行削除失敗時の failed 格下げ」
+        /// は不要になった。並行 Manager が同時 retention で同一ファイルを先に消しても、File.Delete の失敗は
+        /// 握って continue する (次回も同じ対象なので冪等)。
         /// </summary>
-        private void ApplyRetention(string destinationDir)
+        private void ApplyRetention()
         {
             int retentionCount = _settingsRepo.GetInt32("backup_retention_count", 30);
             if (retentionCount <= 0) return;
 
             try
             {
-                var targets = _logRepo.GetAutoSuccessRetentionTargets(retentionCount);
-                if (targets.Count == 0) return;
+                string autoDir = Path.Combine(GetEffectiveDestinationDirectory(), "auto");
+                if (!Directory.Exists(autoDir)) return;
 
-                string dbPath = _conn.DbPath;
-                foreach (var entry in targets)
+                var targets = new DirectoryInfo(autoDir)
+                    .GetFiles("auto_*.db")
+                    .OrderByDescending(f => f.Name, StringComparer.OrdinalIgnoreCase)
+                    .Skip(retentionCount)
+                    .ToList();
+
+                foreach (var f in targets)
                 {
-                    string resolvedPath = BackupPathResolver.ResolveAbsolutePath(entry, dbPath);
-                    if (string.IsNullOrEmpty(resolvedPath)) continue;
-                    if (!File.Exists(resolvedPath))
-                    {
-                        // 既に消えている (= 手動で削除された等)。DB 行はそのまま残置 (表示は File.Exists で hide)。
-                        continue;
-                    }
-
                     try
                     {
-                        File.Delete(resolvedPath);
-                        Logger.Info($"[BackupService] 古い自動バックアップを削除 (#235 trigger_type=auto に限定): {resolvedPath}");
-                        // (M6) DB 行も同時削除。旧実装は file のみ削除して DB 行を残置、UI で「最終バックアップ:
-                        // ファイル無し」表示や RestoreConfirmForm の選択候補に残る不整合があった。
-                        try { _logRepo.DeleteById(entry.Id); }
-                        catch (Exception delEx)
-                        {
-                            Logger.Warn($"[BackupService] (M6) backup_log 行削除失敗 id={entry.Id}: " + delEx.Message);
-                            // (累積監査 round 3 / #10) 物理 file は削除成功・DB 行 delete だけ失敗するケース、
-                            // 旧実装は Logger.Warn で swallow するだけだったため次回の GetAutoSuccessRetentionTargets
-                            // が当該行を「auto+success の 1 件」として count に含めてしまい、retention 件数が
-                            // 1 件ずつ目減りする silent drift を起こしていた。failed に格下げて (status='failed')
-                            // 以降の count から外し、retention が想定 keep 件数で運用される状態を維持する。
-                            // status='failed' 化は audit trail としても残る (= 「実体削除済、DB delete fail で
-                            // failed 化」の trail)。本格下げ自体が更に失敗した場合は Logger.Error のみで継続 (=
-                            // 起動 / 後続バックアップは止めない、ApplyRetention は best-effort セマンティクス)。
-                            try
-                            {
-                                long completedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                                _logRepo.MarkFailed(entry.Id,
-                                    "retention 削除中に DB 行削除失敗 (実体は削除済): " + delEx.Message,
-                                    completedAt);
-                                Logger.Info($"[BackupService] (#10) DB delete 失敗行を failed に格下げ: id={entry.Id}");
-                            }
-                            catch (Exception markEx)
-                            {
-                                Logger.Error($"[BackupService] (#10) failed への格下げにも失敗: id={entry.Id}", markEx);
-                            }
-                        }
+                        f.Delete();
+                        Logger.Info($"[BackupService] 古い自動バックアップを削除 (#235 retention): {f.FullName}");
                     }
                     catch (Exception ex)
                     {
-                        Logger.Error($"[BackupService] 削除失敗 {resolvedPath}", ex);
+                        Logger.Error($"[BackupService] 自動バックアップ削除失敗 {f.FullName}", ex);
                     }
                 }
             }
@@ -476,6 +417,26 @@ namespace TonePrism.Manager.Services
             {
                 Logger.Error($"[BackupService] リテンション処理失敗", ex);
             }
+        }
+
+        /// <summary>
+        /// ホスト名をバックアップファイル名へ埋め込めるよう正規化する。ファイル名禁止文字を除去し、
+        /// フィールド区切りに使う `_` は `-` に置換する (host 内 `_` を潰すことで、BackupCatalogService の
+        /// 「末尾 `_&lt;数値&gt;` = 衝突連番」解釈との曖昧性をゼロにする)。全除去で空になった場合は host なしに
+        /// fall back する (ファイル名は `&lt;種類&gt;_&lt;日時&gt;.db` 形式)。
+        /// </summary>
+        private static string SanitizeHostForFileName(string host)
+        {
+            if (string.IsNullOrEmpty(host)) return "";
+            var sb = new System.Text.StringBuilder(host.Length);
+            char[] invalid = Path.GetInvalidFileNameChars();
+            foreach (char c in host)
+            {
+                if (c == '_') { sb.Append('-'); continue; }
+                if (Array.IndexOf(invalid, c) >= 0) continue; // 禁止文字は除去
+                sb.Append(c);
+            }
+            return sb.ToString();
         }
 
         private static void TryDeleteIfExists(string path)
@@ -560,22 +521,6 @@ namespace TonePrism.Manager.Services
             return Path.Combine(dbDir, "backups", "safety");
         }
 
-        /// <summary>
-        /// バックアップディレクトリ内のファイル一覧（履歴UIから「ディスク上の実体」を見る用）
-        /// </summary>
-        public List<FileInfo> ListBackupFiles()
-        {
-            // 旧レイアウト (保存先直下 toneprism_*.db) + 新レイアウト (auto / manual サブフォルダ) を統合して返す。
-            string root = GetEffectiveDestinationDirectory();
-            var files = new List<FileInfo>();
-            var rootDir = new DirectoryInfo(root);
-            if (rootDir.Exists) files.AddRange(rootDir.GetFiles("toneprism_*.db"));
-            var autoDir = new DirectoryInfo(Path.Combine(root, "auto"));
-            if (autoDir.Exists) files.AddRange(autoDir.GetFiles("auto_*.db"));
-            var manualDir = new DirectoryInfo(Path.Combine(root, "manual"));
-            if (manualDir.Exists) files.AddRange(manualDir.GetFiles("manual_*.db"));
-            return files.OrderByDescending(f => f.CreationTimeUtc).ToList();
-        }
     }
 
     /// <summary>
