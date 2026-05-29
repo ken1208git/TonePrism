@@ -201,9 +201,14 @@ namespace TonePrism.Manager.Services
             // 衝突時は _2 / _3 ... の suffix を付与。100 件衝突はあり得ないので safety limit を入れて throw。
             // 既存ファイル名 (yyyyMMdd_HHmmss.db) との互換性のため、衝突時のみ suffix を追加する形式とする
             // (BackupLogRepository.RecoverLegacyFailedEntriesByFolderScan 等の旧版救済 regex に影響しない)。
-            string destinationDir = GetEffectiveDestinationDirectory();
+            // (種類別サブフォルダ + 種類接頭辞) auto / manual を種類ごとのサブフォルダに分け、ファイル名も
+            // `<種類>_<日時>.db` に統一する (退避 safety_*.db と同じ流儀)。backup_log を失った孤児ファイルでも
+            // 「どのサブフォルダにあるか」で auto / manual を復元でき、auto の世代管理 (retention) が正しく
+            // 効く (Finding 4 の根治)。triggerType は RunAutoBackupIfDue / RunManualBackup から "auto" /
+            // "manual" のみが渡るため、そのままサブフォルダ名 + ファイル名接頭辞として使える。
+            string destinationDir = Path.Combine(GetEffectiveDestinationDirectory(), triggerType);
             string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            string fileName = $"toneprism_{timestamp}.db";
+            string fileName = $"{triggerType}_{timestamp}.db";
             string destinationPath = Path.Combine(destinationDir, fileName);
             // (L) 2 PC が SMB 共有経由で同 1 秒に backup を発火した場合、双方 File.Exists=false で同 path に書き込み
             // 出力ファイル破損する LAN race を緩和。collision 検出時の suffix に PC 名を mix することで、
@@ -215,7 +220,7 @@ namespace TonePrism.Manager.Services
                 string suffix = string.IsNullOrEmpty(pcName)
                     ? collisionSuffix.ToString()
                     : (collisionSuffix == 2 ? pcName : pcName + "_" + (collisionSuffix - 1));
-                fileName = $"toneprism_{timestamp}_{suffix}.db";
+                fileName = $"{triggerType}_{timestamp}_{suffix}.db";
                 destinationPath = Path.Combine(destinationDir, fileName);
                 collisionSuffix++;
                 if (collisionSuffix > 99)
@@ -494,11 +499,16 @@ namespace TonePrism.Manager.Services
         /// </summary>
         public List<FileInfo> ListBackupFiles()
         {
-            var dir = new DirectoryInfo(GetEffectiveDestinationDirectory());
-            if (!dir.Exists) return new List<FileInfo>();
-            return dir.GetFiles("toneprism_*.db")
-                .OrderByDescending(f => f.CreationTimeUtc)
-                .ToList();
+            // 旧レイアウト (保存先直下 toneprism_*.db) + 新レイアウト (auto / manual サブフォルダ) を統合して返す。
+            string root = GetEffectiveDestinationDirectory();
+            var files = new List<FileInfo>();
+            var rootDir = new DirectoryInfo(root);
+            if (rootDir.Exists) files.AddRange(rootDir.GetFiles("toneprism_*.db"));
+            var autoDir = new DirectoryInfo(Path.Combine(root, "auto"));
+            if (autoDir.Exists) files.AddRange(autoDir.GetFiles("auto_*.db"));
+            var manualDir = new DirectoryInfo(Path.Combine(root, "manual"));
+            if (manualDir.Exists) files.AddRange(manualDir.GetFiles("manual_*.db"));
+            return files.OrderByDescending(f => f.CreationTimeUtc).ToList();
         }
     }
 

@@ -247,6 +247,20 @@ namespace TonePrism.Manager.Repositories
                         command.Parameters.AddWithValue("@gameId", gameId);
                         using (var reader = command.ExecuteReader())
                         {
+                            // (perf) update_note 列の有無は結果セット全体で一定。旧実装は行ごとに
+                            // reader.GetSchemaTable() (= DataTable を毎行アロケート) を呼んでおり、
+                            // 版が多いゲーム × 全件走査 (復元整合性チェック等) で無駄が嵩んでいた。
+                            // ループ前に 1 回だけ列存在を判定する。未 migrate DB を読む防御として
+                            // presence check 自体は維持 (migration 後は常に存在)。
+                            bool hasUpdateNote = false;
+                            for (int ci = 0; ci < reader.FieldCount; ci++)
+                            {
+                                if (string.Equals(reader.GetName(ci), "update_note", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    hasUpdateNote = true;
+                                    break;
+                                }
+                            }
                             while (reader.Read())
                             {
                                 var version = new GameVersion
@@ -257,7 +271,7 @@ namespace TonePrism.Manager.Repositories
                                     ExecutablePath = reader["executable_path"].ToString(),
                                     Arguments = reader["arguments"] is DBNull ? null : reader["arguments"].ToString(),
                                     Description = reader["description"] is DBNull ? null : reader["description"].ToString(),
-                                    UpdateNote = reader.GetSchemaTable().Select("ColumnName = 'update_note'").Length > 0 && !(reader["update_note"] is DBNull) ? reader["update_note"].ToString() : null,
+                                    UpdateNote = hasUpdateNote && !(reader["update_note"] is DBNull) ? reader["update_note"].ToString() : null,
 
                                     Title = reader["title"] is DBNull ? null : reader["title"].ToString(),
                                     MinPlayers = reader["min_players"] is DBNull ? (int?)null : Convert.ToInt32(reader["min_players"]),

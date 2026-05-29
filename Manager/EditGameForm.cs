@@ -1744,7 +1744,20 @@ namespace TonePrism.Manager
                 return false;
             }
 
-            string versionFolder = PathManager.GetVersionFolder(txtGameId.Text.Trim(), versionString);
+            // (Finding 1 fix) 外部画像のコピー先は「現在ディスク上にあるバージョンフォルダ (= rename 前の leaf)」に
+            // する。currentVersion.Version は OK 処理冒頭の SaveGameDataToVersion で **rename 後の新しい値** に
+            // 更新済のことがあり、それを使うと後続のバージョンフォルダ rename の移動先 (newDir) を本コピーが
+            // 先に CreateDirectory してしまい、Phase 1 衝突 check が「移動先フォルダが既に存在します」で abort →
+            // 「バージョン番号変更 + フォルダ外画像指定」を同一保存で行うと保存不能 + 孤児フォルダ残留になる。
+            // exe パスと同じく「画像は旧 leaf のフォルダに置く → rename で一緒に移動 → ReplaceVersionPrefix で
+            // 保存パスを新 leaf に書き換える」流れに揃えることで衝突を構造的に排除する。snapshot が無い防御経路
+            // (現状ありえない) は従来通り currentVersion.Version に fall back。
+            string onDiskVersion =
+                (_originalVersionByDbId.TryGetValue(currentVersion.Id, out string snapshotVer)
+                 && !string.IsNullOrWhiteSpace(snapshotVer))
+                ? snapshotVer
+                : versionString;
+            string versionFolder = PathManager.GetVersionFolder(txtGameId.Text.Trim(), onDiskVersion);
 
             var plan = new List<ImageCopyPlan>();
 

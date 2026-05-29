@@ -1911,6 +1911,40 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.20.0] - 2026-05-29
+
+#### Changed (バックアップ保存レイアウトを種類別サブフォルダ + 種類接頭辞に統一)
+
+バックアップ保存先を **種類ごとのサブフォルダ + `<種類>_<日時>.db` 命名** に変更した。退避 (safety) が既に `backups/safety/safety_*.db` とフォルダ + 名前の両方で種類を持っていたのに、自動 (auto) / 手動 (manual) は `backups/toneprism_*.db` に混在して**ファイル単体からは種類を区別できない**非対称があり、これが「復元で `backup_log` がスナップショット時点に巻き戻り、孤児ファイルの種類を復元できず一律 manual 扱い → auto が世代管理 (retention) から永久に外れて溜まり続ける」(v0.19.1 で「除外: 受容仕様」とした項目) の根本原因だった。
+
+```
+backups/
+  ├ auto/    auto_20260529_143000.db      ← 自動 (retention 対象)
+  ├ manual/  manual_20260529_150000.db    ← 手動 (retention 対象外)
+  └ safety/  safety_20260529_152000.db    ← 復元前の退避 (既存のまま不変)
+```
+
+- **保存 (`BackupService.RunBackupCore`)**: `GetEffectiveDestinationDirectory()/<種類>/` 配下に `<種類>_<日時>.db` で書き込む (`triggerType` = `auto` / `manual` をそのままフォルダ名 + 接頭辞に流用)。衝突 suffix (`_2` / `_<PC名>`) は従来通り。
+- **孤児再登録 (`BackupLogRepository.RegisterUnknownBackupFiles`)**: 走査を 3 系統に拡張し、`auto/` 配下は `auto`、`manual/` 配下は `manual` として「**フォルダ位置で種類を確定**」して再登録する。これにより `backup_log` を失った auto 孤児が正しく `auto` で復活し、retention が再び効く (Finding 4 根治)。1 フォルダ分の登録処理は `RegisterUnknownInFolder` helper に抽出。
+- **safety は完全に現状維持** (`backups/safety/safety_*.db`、移行ロジック・retention とも不変)。
+- **本体 DB `toneprism.db` のリネームは見送り** (本番稼働中で Launcher/Manager 両参照 + プロジェクトルート検出キー + 既存実データの移行が必要なため、別 issue で慎重に扱う)。
+
+##### 後方互換
+
+移行前に `backups/` 直下へ直接保存された旧 `toneprism_*.db` はその場所のまま残し、(a) 既存の `backup_log` 行がある間は従来通りの種類で表示、(b) 孤児化した場合は種類不明のため安全側の `manual` で再登録 (= 誤って世代管理対象にして手動バックアップを消さない)。物理ファイルの移動・改名は一切行わない (実データを触らない安全方針)。新規バックアップから新レイアウトで書き、retention で旧 auto が消えるにつれ自然に新レイアウトへ収束する。
+
+#### Fixed (累積監査ラウンド 7: ゲーム編集の画像コピー順序 / 自動検出漏れ / 走査性能の 3 件)
+
+round 6 (v0.19.1) リリース後、ゲーム追加 / 編集 / バージョンアップ / バックアップ / 復元の各経路を再精査。実コード verify で真と確認した bugfix 2 件 + perf 1 件を修正。バックアップ / 復元の致命経路 (partial-commit 窓 / advisory lock / atomic File.Replace / reconcile) は round 1〜6 で塞ぎ済で、本ラウンドの新規発見は編集フォームの局所欠陥に限られた。
+
+- **(EditGameForm): バージョン番号変更とフォルダ外画像指定を同一保存で行うと保存不能 + 孤児フォルダ残留**: `CopyExternalImagesToVersionFolder` が **rename 後の新しい版名** (`SaveGameDataToVersion` で更新済の `currentVersion.Version`) でコピー先 `v{newVersion}/` を計算し `Directory.CreateDirectory` で**先に作成**していた。その後のバージョンフォルダ rename が「移動先 `v{newVersion}/` が既に存在」で Phase 1 衝突 check に弾かれ、(a) 正当な操作 (番号修正 + 画像差し替え) が「フォルダ衝突」エラーで保存不能、(b) 画像だけ入った `v{newVersion}/` が孤児として残留 (Cancel 時に `OnFormClosing` が画像は消すがフォルダは残す)、(c) リトライで番号を戻すと実在しない版フォルダを指すパスが DB に入る軽度ドリフト、が起きていた。exe パスと同じく「画像は**旧 leaf のフォルダ**に置く → rename で一緒に移動 → `ReplaceVersionPrefix` で保存パスを新 leaf に書き換え」へ揃え、`_originalVersionByDbId` の snapshot から on-disk 版名を引いてコピー先を決めることで衝突を構造的に排除 (番号未変更 / 画像のみの通常経路は挙動不変)。
+- **(GameFormHelper.AutoDetectFiles, #207): 画像自動検出から `thumbnail.jpg` が漏れ**: 検出パターンが `thumbnail.png` のみで `thumbnail.jpg` が無く、jpg のサムネイルが自動検出されず手動指定を強いられていた。`thumbnail.png` の直後に `thumbnail.jpg` を追加 (png 優先 → 無ければ jpg の順)。
+- **(VersionRepository.GetByGameId, perf): 版の走査で `reader.GetSchemaTable()` を行ごとに呼ぶ無駄**: `update_note` 列の有無判定で行ごとに `GetSchemaTable()` (= DataTable を毎行アロケート) を呼んでおり、版が多いゲーム × 全件走査 (復元整合性チェック等) で性能を浪費していた。列存在は結果セット全体で一定のためループ前に 1 回だけ判定する形に変更 (未 migrate DB を読む防御としての presence check 自体は維持)。
+
+#### Bump 根拠 (v0.19.1 → v0.20.0)
+
+バックアップ保存レイアウトの変更 (= 観測可能な挙動 / 配置変更) を含むため minor bump。schema 変更なし・後方互換あり (旧 `toneprism_*.db` も引き続き読める)。round 7 の bugfix/perf 3 件も同 entry に統合。Bundle への反映は次回リリース実行時。
+
 ### [Manager v0.19.1] - 2026-05-29
 
 #### Fixed (累積監査ラウンド 6: ゲーム追加/編集/バージョンアップ/バックアップ/復元/スキーマの残存欠陥 17 件)

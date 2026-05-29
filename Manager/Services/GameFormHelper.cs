@@ -239,7 +239,9 @@ namespace TonePrism.Manager.Services
             }
 
             // サムネイル画像を自動検出
-            var thumbnailPatterns = new[] { "thumbnail.png", "thumb.png", "thumb.jpg", "icon.png", "icon.jpg" };
+            // (#207) thumbnail.jpg が抜けており、jpg のサムネが自動検出されず手動指定を強いられていた。
+            // thumbnail.png の直後に追加 (= png 優先、無ければ jpg の検出順)。
+            var thumbnailPatterns = new[] { "thumbnail.png", "thumbnail.jpg", "thumb.png", "thumb.jpg", "icon.png", "icon.jpg" };
             foreach (var pattern in thumbnailPatterns)
             {
                 var files = Directory.GetFiles(folderPath, pattern, SearchOption.AllDirectories)

@@ -594,63 +594,97 @@ namespace TonePrism.Manager.Repositories
                         }
                     }
 
-                    // 本体バックアップ命名: toneprism_yyyyMMdd_HHmmss[_<suffix>].db (suffix は _2 / _<pcname> 等)。
-                    var regex = new Regex(@"^toneprism_(\d{8})_(\d{6})(_.+)?\.db$");
+                    // 旧レイアウト (移行前 = backupDir 直下の toneprism_*.db) と新レイアウト
+                    // (<backupDir>/auto/auto_*.db, <backupDir>/manual/manual_*.db) の両方を走査する。
+                    // 新レイアウトは「どのサブフォルダにあるか」で auto / manual を確定できるため、backup_log を
+                    // 失った孤児でも種類を正しく復元でき、auto は世代管理 (retention) に戻る (Finding 4 根治)。
+                    // 旧レイアウトの toneprism_*.db は種類不明 (auto/manual がファイル名から区別不能) なので、
+                    // 従来通り安全側の manual で登録する (= 誤って世代管理対象にして手動バックアップを消さない)。
+                    var legacyRegex = new Regex(@"^toneprism_(\d{8})_(\d{6})(_.+)?\.db$");
+                    var autoRegex = new Regex(@"^auto_(\d{8})_(\d{6})(_.+)?\.db$");
+                    var manualRegex = new Regex(@"^manual_(\d{8})_(\d{6})(_.+)?\.db$");
                     string dbDir = System.IO.Path.GetDirectoryName(_conn.DbPath);
 
-                    foreach (var file in System.IO.Directory.EnumerateFiles(backupDir, "toneprism_*.db"))
-                    {
-                        string name = System.IO.Path.GetFileName(file);
-                        Match match = regex.Match(name);
-                        if (!match.Success) continue;
-
-                        if (existingPaths.Contains(file)) continue;
-                        string normalizedFile = file;
-                        try { normalizedFile = System.IO.Path.GetFullPath(file); }
-                        catch { /* GetFullPath 失敗時は生 path のまま判定 */ }
-                        if (!ReferenceEquals(file, normalizedFile) && existingPaths.Contains(normalizedFile)) continue;
-
-                        // プロジェクト移動耐性のため相対 path を計算 (InsertInProgress と同方針) + PC 非依存の
-                        // dedup キーとしても使う。relative_path が既存行と一致すれば (file_path 表記揺れで上の
-                        // file_path 判定をすり抜けていても) 重複として skip する。
-                        string relativePath = BackupPathResolver.ToRelativeFromDbDir(file, dbDir);
-                        if (!string.IsNullOrEmpty(relativePath) && existingRelPaths.Contains(relativePath)) continue;
-
-                        string dateStr = match.Groups[1].Value;
-                        string timeStr = match.Groups[2].Value;
-                        if (!DateTime.TryParseExact($"{dateStr}_{timeStr}", "yyyyMMdd_HHmmss",
-                            System.Globalization.CultureInfo.InvariantCulture,
-                            System.Globalization.DateTimeStyles.AssumeLocal,
-                            out DateTime localTime))
-                        {
-                            continue;
-                        }
-                        long startedAt = new DateTimeOffset(localTime, TimeZoneInfo.Local.GetUtcOffset(localTime)).ToUnixTimeSeconds();
-
-                        long fileSize;
-                        try { fileSize = new System.IO.FileInfo(file).Length; }
-                        catch { continue; }
-
-                        using (var insertCmd = new SQLiteCommand(
-                            "INSERT INTO backup_log (started_at, completed_at, pc_name, file_path, relative_path, " +
-                            "file_size_bytes, status, trigger_type) " +
-                            "VALUES (@started, @completed, @pc, @path, @relpath, @size, 'success', 'manual')",
-                            connection))
-                        {
-                            insertCmd.Parameters.AddWithValue("@started", startedAt);
-                            insertCmd.Parameters.AddWithValue("@completed", startedAt);
-                            insertCmd.Parameters.AddWithValue("@pc", pcName ?? "");
-                            insertCmd.Parameters.AddWithValue("@path", file);
-                            insertCmd.Parameters.AddWithValue("@relpath",
-                                string.IsNullOrEmpty(relativePath) ? (object)DBNull.Value : relativePath);
-                            insertCmd.Parameters.AddWithValue("@size", fileSize);
-                            insertCmd.ExecuteNonQuery();
-                        }
-                        added++;
-                    }
+                    added += RegisterUnknownInFolder(connection, backupDir, "toneprism_*.db", legacyRegex, "manual", pcName, dbDir, existingPaths, existingRelPaths);
+                    added += RegisterUnknownInFolder(connection, System.IO.Path.Combine(backupDir, "auto"), "auto_*.db", autoRegex, "auto", pcName, dbDir, existingPaths, existingRelPaths);
+                    added += RegisterUnknownInFolder(connection, System.IO.Path.Combine(backupDir, "manual"), "manual_*.db", manualRegex, "manual", pcName, dbDir, existingPaths, existingRelPaths);
                 }
                 return added;
             });
+        }
+
+        /// <summary>
+        /// 1 つのフォルダを走査し、backup_log 未登録の `<searchPattern>` ファイルを `triggerType` + `status='success'`
+        /// で登録する (`RegisterUnknownBackupFiles` の 1 フォルダ分の本体)。フォルダ位置で種類 (auto / manual) が
+        /// 確定するため、種類を引数で受け取って INSERT する。重複判定は file_path (生 + GetFullPath 正規化) と
+        /// PC 非依存の relative_path (dbDir 基準) の併用。登録した path は同一 run 内の二重登録防止のため
+        /// existing セットにも追加する。フォルダ不在なら 0。
+        /// </summary>
+        private int RegisterUnknownInFolder(
+            SQLiteConnection connection, string folder, string searchPattern, Regex regex,
+            string triggerType, string pcName, string dbDir,
+            HashSet<string> existingPaths, HashSet<string> existingRelPaths)
+        {
+            if (string.IsNullOrEmpty(folder) || !System.IO.Directory.Exists(folder)) return 0;
+
+            int added = 0;
+            foreach (var file in System.IO.Directory.EnumerateFiles(folder, searchPattern))
+            {
+                string name = System.IO.Path.GetFileName(file);
+                Match match = regex.Match(name);
+                if (!match.Success) continue;
+
+                if (existingPaths.Contains(file)) continue;
+                string normalizedFile = file;
+                try { normalizedFile = System.IO.Path.GetFullPath(file); }
+                catch { /* GetFullPath 失敗時は生 path のまま判定 */ }
+                if (!ReferenceEquals(file, normalizedFile) && existingPaths.Contains(normalizedFile)) continue;
+
+                // プロジェクト移動耐性のため相対 path を計算 (InsertInProgress と同方針) + PC 非依存の
+                // dedup キーとしても使う。relative_path が既存行と一致すれば (file_path 表記揺れで上の
+                // file_path 判定をすり抜けていても) 重複として skip する。
+                string relativePath = BackupPathResolver.ToRelativeFromDbDir(file, dbDir);
+                if (!string.IsNullOrEmpty(relativePath) && existingRelPaths.Contains(relativePath)) continue;
+
+                string dateStr = match.Groups[1].Value;
+                string timeStr = match.Groups[2].Value;
+                if (!DateTime.TryParseExact($"{dateStr}_{timeStr}", "yyyyMMdd_HHmmss",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeLocal,
+                    out DateTime localTime))
+                {
+                    continue;
+                }
+                long startedAt = new DateTimeOffset(localTime, TimeZoneInfo.Local.GetUtcOffset(localTime)).ToUnixTimeSeconds();
+
+                long fileSize;
+                try { fileSize = new System.IO.FileInfo(file).Length; }
+                catch { continue; }
+
+                using (var insertCmd = new SQLiteCommand(
+                    "INSERT INTO backup_log (started_at, completed_at, pc_name, file_path, relative_path, " +
+                    "file_size_bytes, status, trigger_type) " +
+                    "VALUES (@started, @completed, @pc, @path, @relpath, @size, 'success', @trigger)",
+                    connection))
+                {
+                    insertCmd.Parameters.AddWithValue("@started", startedAt);
+                    insertCmd.Parameters.AddWithValue("@completed", startedAt);
+                    insertCmd.Parameters.AddWithValue("@pc", pcName ?? "");
+                    insertCmd.Parameters.AddWithValue("@path", file);
+                    insertCmd.Parameters.AddWithValue("@relpath",
+                        string.IsNullOrEmpty(relativePath) ? (object)DBNull.Value : relativePath);
+                    insertCmd.Parameters.AddWithValue("@size", fileSize);
+                    insertCmd.Parameters.AddWithValue("@trigger", triggerType);
+                    insertCmd.ExecuteNonQuery();
+                }
+
+                // 同一 run 内 (= 後続フォルダ走査) での二重登録防止のため existing セットにも反映。
+                existingPaths.Add(file);
+                if (!ReferenceEquals(file, normalizedFile)) existingPaths.Add(normalizedFile);
+                if (!string.IsNullOrEmpty(relativePath)) existingRelPaths.Add(relativePath);
+                added++;
+            }
+            return added;
         }
 
         /// <summary>
