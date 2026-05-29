@@ -1911,6 +1911,61 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.19.0] - 2026-05-29
+
+#### Fixed (累積監査ラウンド 5: 並行 Manager race / GDI lifecycle / 規約 drift の 12 件)
+
+round 4 (v0.18.0) リリース後、独立 2 並列監査でゲーム追加 / 編集 / バージョンアップ / バックアップ / 復元周りに残っていた defect を再精査。Agent 報告 17 件のうち実コード verify で真と確認された High 3 / Medium 6 / Low 3 = **計 12 件** を修正。さらに **path textbox の ReadOnly 解放 + バリデーション強化** (UX 改善) を同 PR に同梱。schema 変更なし、UI 機能追加 (path 編集可能化) を含むため minor bump。
+
+**【High】**
+
+- **H1 (GameSectionPanel.btnVersionUp): `Directory.Move` の `UnauthorizedAccessException` 取りこぼし**: round 4 R4-C1 で導入した tempDir → versionDir atomic Move は `catch (IOException moveEx)` のみで、MSDN 公式仕様の UAE (ACL 拒否 / read-only attr / 親フォルダロック中等) を取りこぼし、WinForms 既定の ThreadException ダイアログ (英文 stack trace) が user に出る経路 + tempDir (`.pending-create-{guid}`) の永続残置による disk 容量蓄積があった。`catch (UnauthorizedAccessException)` を IOException catch の隣に追加 + 共通 `HandleVersionDirMoveFailure` ヘルパに集約。round 4 R4-M10 の legacy safety MoveTo UAE 規約と非対称解消。
+
+- **H2 (BackupService.RunAutoBackupIfDue): 自動バックアップ path に restore advisory lock check が欠落**: round 2 H5 で導入した「他 PC が復元中なら write をブロック」する advisory lock は `MainForm.CheckSessionConflictBeforeWrite` (user 操作経路) のみ check しており、起動時の auto-backup は素通しだった。PC-A が File.Replace 中に PC-B の Manager 起動 → 自動バックアップが Online Backup API で File.Replace 中の DB を読みに行く → 出力 backup が partial / corrupt → 後日その backup を復元すると最新データ消失する致命 race があった。`RunAutoBackupIfDue` 冒頭で `GetActiveRestoreLockOwnerOrNull` check + Skipped で return。`RunManualBackup` も defense-in-depth で同 check を追加 (UI 経路は SessionConflictHelper で既に check 済だが direct 呼出 path への保険)。
+
+- **H3 (ImagePreviewHelper.UpdatePreview): PictureBox の旧 Image を Dispose せず GDI handle leak**: `pictureBox.Image = Image.FromStream(...)` と `pictureBox.Image = null` のいずれも旧 Image を Dispose せず GC 任せの非決定 dispose になっていた。Image は GDI+ unmanaged handle を持つため、9 時間連続展示で編集画面の画像切替を繰り返すと GDI handle 上限 (10,000) に達して WinForms 全体が描画不能になる経路があった。`SetImageWithDispose` private helper に集約し、代入前に必ず `oldImage?.Dispose()` を実行。さらに `Image.FromStream` の戻り値は MS docs 仕様で「stream must remain open for the lifetime of the Image」 — 本実装は MemoryStream を using で即解放しているため、`new Bitmap(raw)` でクローン化してから PictureBox に渡し、stream lifetime と切り離した (将来 PictureBox 表示中に stream が GC されて描画崩壊する path を構造閉鎖)。
+
+**【Medium】**
+
+- **M1 (SchemaManager.MigrateV17ToV18): `PRAGMA defer_foreign_keys` 未指定で developers 再作成中に game_id orphan で migration 即死**: round 4 R4-M12 で導入した v17→v18 migration は INSERT-SELECT 中の FK check が即時 throw され、game_id orphan が 1 件でも残っている過去 DB (= 外部ツール直 DML / round 4 以前の UpdateGameId 中断履歴) で migration 全体が即死する経路があった。SQLite 公式の「FK ありテーブル recreate」推奨手順に従い、transaction 開始直後に `PRAGMA defer_foreign_keys = ON` を発行 (3.7.5+、transaction 内で `foreign_keys` 自体は変更不能なため deferred check に切替) して COMMIT 直前にまとめて check させる。さらに INSERT-SELECT の WHERE に game_id orphan filter (`EXISTS (SELECT 1 FROM games g WHERE g.game_id = d.game_id)`) を追加して version_id orphan filter と対称化、sweep 件数の Logger.Warn も version_id / game_id 別カウントで残す。
+
+- **M2 (RestoreService): snapshot 由来の `restore_lock_owner` 行が NEW DB に持ち込まれ復元後 5 分間 write 全 block**: round 2 H5 + round 3 M11 で設計した「自 PC owner exact match での lock 削除」が裏目に出る経路。snapshot 取得タイミングで他 PC が active な restore lock を保有していた場合、復元すると NEW DB に他 PC 由来の lock 行が蘇り、自 PC の `ReleaseRestoreLock` は owner mismatch で no-op → 5 分 stale 失効まで `CheckSessionConflictBeforeWrite` で全 write 操作が dialog で Cancel 強制される UX 退行があった。`SettingsRepository.ForceClearRestoreLock` を新設 (所有者 check なしの DELETE) + `RestoreService` の post-step 内側 try で File.Replace 直後に呼出す。自 PC lock は finally の `ReleaseRestoreLock` と二重削除になるが no-op で害なし。
+
+- **M3 (EditGameForm): 外部画像 auto-copy 後の Cancel 経路で disk にオーファン画像が残る**: round 2 M10 で導入した `CopyExternalImagesToVersionFolder` は disk にコピー → textbox を destination path に書き換える設計のため、retry 経路では IsPathInside=true で再コピー skip が効くが、user が **Cancel / X ボタンで form を閉じた場合**、新規にコピーされた画像ファイルが `games/<id>/v<version>/<filename>` に永続残置されていた。`_copiedExternalImagePaths` field に copy 済 path を集約、OK 成功で commit としてクリア、`OnFormClosing` で DialogResult != OK 経路でのみ実体削除する best-effort cleanup を追加。
+
+- **M4 (EditGameForm.UpdatePathTextBox): `AltDirectorySeparatorChar` (`/`) の path で旧 folder prefix 置換漏れ**: round 4 R4-M13 で `Path.DirectorySeparatorChar` (`\`) 境界を追加した修正の取りこぼし。textbox 値が `/` 区切り (手入力 / 外部由来 path) の場合、`StartsWith(oldFolder + '\\')` が false → 置換漏れ → 後段 `NormalizeRelative` で base 外として null 格下げ → DB に null 保存で path 喪失する drift があった。比較前に path / oldFolder の両方を `Path.GetFullPath` で正規化 (`/` → `\` 揃え + 相対 path 解決) してから判定する。Phase D の ReadOnly 解除と組合せて初めて表面化する経路だが、DB 由来 path 経由でも発火しうるため round 5 で fence。
+
+- **M5 (PathManager.GetGameFolder / GetVersionFolderLeaf): 空文字 gameId / version で危険 path 返却の defense-in-depth fence**: `Path.Combine(GamesFolder, "")` は `GamesFolder` をそのまま返す .NET 仕様。それに `Directory.Delete(folder, true)` を当てると games/ 配下全削除の核兵器ボタン化する path だった。削除経路 (GameSectionPanel L477) は caller 側で IsNullOrWhiteSpace 防御済 (OK) だが、画像コピー / 編集の path 解決経路で別の caller が ValidateInput 前提でガード無し直呼びしている path が存在。`GetGameFolder` / `GetVersionFolderLeaf` 入口で `IsNullOrWhiteSpace` check → `ArgumentException` throw に変更 (caller 全部に防御を頼らない PathManager 自身の入口 fence)。`GetVersionFolderLeaf` も `version=""` で leaf 名が `"v"` 単独になる経路を同パターンで閉鎖。
+
+- **M6 (DeveloperForm + GameFormHelper): clamp helper 共通化漏れで grade 大きすぎ値で編集 dialog 永久 block**: round 2 M2 で EditGameForm に導入した `SetClampedNumericValue` (DB 由来 int 範囲外を clamp + Logger.Warn + NullOnLoad flag) を `GameFormHelper.SetClampedNumericValue` に昇格、DeveloperForm からも使えるよう公開。DB の `developers.grade` は TEXT 列で長さ制限なし、手書き SQL / 旧 schema 復元で `grade="9999999"` (8 桁) が入った developer 行を「編集」しようとすると `numGrade.Value = 7桁超int` で `ArgumentOutOfRangeException` → ダイアログ自体が表示できず、その製作者を編集する経路が永久 block されていた。EditGameForm の `SetClampedNumericValue` も新 helper への forwarder 1 行に短縮、SoT を 1 本化。
+
+**【Low】**
+
+- **L1 (BackupSectionPanel): 履歴 grid の trigger 列 switch に `"restore"` case が無く生 string 表示**: round 4 R4-M9 で復元 audit 行を NEW DB に `trigger_type='restore'` で INSERT する経路を追加したが、grid 表示の switch は manual/auto/safety のみで restore が default 落ち → 「復元」と並んで生 string `"restore"` が英字混在表示されていた。`case "restore": trigger = "復元"; break;` を 1 行追加。`BackupLogEntry.TriggerType` の XML doc (R4-L3) との対称化。
+
+- **L2 (RestoreConfirmForm.lblWarningDetail2): 存在しない legacy filename pattern を案内する文言**: 「現在のデータベースは安全のため自動的に退避されます (**safety_before_restore_\*.db**)」と書かれていたが、新規生成は `safety_yyyyMMdd_HHmmss.db`、`before_restore_` prefix は `MigrateLegacySafetyFilesToSafetyFolder` の対象 (BackupService.cs:380 regex) のみで新規生成では使われない。user が手動で safety ファイルを探す際に「該当パターンが見つからない」混乱を生む経路を解消。`"(safety_*.db)"` に書き換え。R4-L3 の XML doc 同期と同類の drift 修正。
+
+- **L4 (GameFormHelper.AutoDetectFiles): junction / symbolic link 越しの path 検出で sourceFolder 外を絶対 path のまま返す**: `Directory.GetFiles(... SearchOption.AllDirectories)` が junction 先のファイルを返した場合、戻り値 path が `Path.GetFullPath` 後に sourceFolder 外を指して「絶対 path として `RelativeExecutablePath` に流入 → 後段 assert で『絶対 path 検出、コピー元を指定し直して』MessageBox → 何度やっても抜けられない永久 block UX」する経路があった。新規 private helper `IsPathInsideSourceFolder` で各 path について sourceFolder 内 (等値 OR 区切り境界付き StartsWith) チェックを通し、外れていたら自動検出から除外する。AddGameForm + VersionUpForm の両 caller に同時に効果。
+
+**【Low (除外: 設計通り)】**
+
+- **MainForm.OnDatabaseRestored の `ReconcileInProgressEntries` threshold 無し**: agent は「他 PC active backup を巻き込み failed 化」と指摘したが、CHANGELOG L3335 で「復元直後はスナップショットの状態なので File.Exists で正しく success / failed が判定される」と設計意図明記。`File.Exists` filter があるので巻き込みは起きない。**設計通り、修正不要**。
+
+**【Low (撤回: scope creep)】**
+
+- L3 (AddGameForm の ReleaseYear / MinPlayers / MaxPlayers null 入力 UI): user 判断で round 5 のスコープから除外。新機能として独立 PR で扱う方が妥当。
+
+#### Added (path textbox を編集可能に解放 + バリデーション強化)
+
+- **AddGameForm / EditGameForm / VersionUpForm の 9 textbox を `ReadOnly = false` に解放** (`txtThumbnailPath` / `txtBackgroundPath` / `txtExecutablePath` × 3 form): 旧 ReadOnly 設計は「部員が手入力で typo って path 破壊するのを物理防止」する思想だったが、開発者寄りの user (= ゲーム作者本人 / 顧問の先生) が `v1.0.0/main.exe` → `v1.0.0/sub/launcher.exe` のような微調整を Browse ダイアログ往復なしで行う UX 改善を優先。Designer.cs 9 か所から `ReadOnly = true` を削除 (= class default false に倒す)。
+- **TextChanged hook で `/` → `\` 正規化 + ImagePreview 連動**: 各 form の Load で 3 textbox に TextChanged ハンドラを登録。`GameFormHelper.NormalizeSlashInPathTextBox` 共通ヘルパで `/` 区切り混入を `\` に正規化 (cursor 位置保持、再帰 fence で 2 回目は no-op)。サムネイル / 背景 textbox は同 hook で `UpdateThumbnailPreview` / `UpdateBackgroundPreview` も連動、user が手入力した瞬間にプレビューが追従する UX。
+- **`GameFormHelper.ValidateFilePath` 共通バリデーション helper を新設**: (a) 空欄 + required flag、(b) 拡張子 (allowedExtensions)、(c) 存在 check (相対なら baseFolder で絶対化) の 3 段検証を統一。AddGameForm.ValidateInput を共通 helper 経由に書き換えて、実行ファイルは `.exe` 必須、サムネイル / 背景は `.png` / `.jpg` / `.jpeg` / `.bmp` のいずれか必須に強制。EditGameForm / VersionUpForm は既存の File.Exists + IsPathInside fence で十分なので Phase D の主要 win (= `/` 正規化 + プレビュー追従) のみ適用。
+- **`GameFormHelper.ImageFileExtensions` / `ExecutableFileExtensions` を public static field として公開**: 拡張子集合の SoT 化。将来 `.gif` / `.webp` を許容する等の変更が 1 か所で済む。
+
+#### Bump 根拠 (v0.18.0 → v0.19.0)
+
+bugfix 12 件 + path textbox 編集可能化という UI 機能追加を含むため minor bump。schema 変更なし (v17→v18 migration は M1 で hardening するが新 user_version は引き続き 18)。AGENTS.md「1 PR 1 bump」原則に従い、bugfix 群と UX 機能追加を同 v0.19.0 entry に統合。Bundle への反映は次回リリース実行時。
+
 ### [Manager v0.18.0] - 2026-05-28
 
 #### Fixed (累積監査ラウンド 2: ゲーム追加/編集/バージョンアップ/バックアップ周りに残っていた 17 件 + 追加ラウンド 3 件 + 画像 UX 改修)

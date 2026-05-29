@@ -402,7 +402,8 @@ namespace TonePrism.Manager
             this.txtThumbnailPath.Location = new System.Drawing.Point(595, 10);
             this.txtThumbnailPath.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtThumbnailPath.Name = "txtThumbnailPath";
-            this.txtThumbnailPath.ReadOnly = true;
+            // (round 5 Phase D) ReadOnly 解除: user が直接 path を編集できるように。
+            // 入力時の正規化 + validation は AddGameForm.cs の TextChanged ハンドラ + ValidateInput で対応。
             this.txtThumbnailPath.Size = new System.Drawing.Size(265, 19);
             this.txtThumbnailPath.TabIndex = 28;
             //
@@ -454,7 +455,7 @@ namespace TonePrism.Manager
             this.txtBackgroundPath.Location = new System.Drawing.Point(595, 128);
             this.txtBackgroundPath.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtBackgroundPath.Name = "txtBackgroundPath";
-            this.txtBackgroundPath.ReadOnly = true;
+            // (round 5 Phase D) ReadOnly 解除
             this.txtBackgroundPath.Size = new System.Drawing.Size(265, 19);
             this.txtBackgroundPath.TabIndex = 33;
             //
@@ -506,7 +507,7 @@ namespace TonePrism.Manager
             this.txtExecutablePath.Location = new System.Drawing.Point(595, 246);
             this.txtExecutablePath.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtExecutablePath.Name = "txtExecutablePath";
-            this.txtExecutablePath.ReadOnly = true;
+            // (round 5 Phase D) ReadOnly 解除
             this.txtExecutablePath.Size = new System.Drawing.Size(265, 19);
             this.txtExecutablePath.TabIndex = 38;
             //

@@ -282,14 +282,17 @@ namespace TonePrism.Manager.Controls
                         }
                         catch (IOException moveEx)
                         {
-                            try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); }
-                            catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (Critical-1) tempDir 削除失敗: " + tempDir + ": " + delEx.Message); }
-                            MessageBox.Show(
-                                "バージョンフォルダの作成に失敗しました:\n  " + versionDir + "\n\n" +
-                                "他の Manager が同じバージョン番号で既にフォルダを作成した可能性があります。\n" +
-                                "別のバージョン番号を指定するか、少し待ってから再試行してください。\n\n" +
-                                "詳細: " + moveEx.Message,
-                                "フォルダ作成失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            HandleVersionDirMoveFailure(tempDir, versionDir, moveEx);
+                            return;
+                        }
+                        // (round 5 H1) MSDN 公式仕様: Directory.Move は権限拒否 (ACL / read-only attr /
+                        // 親フォルダロック中等) で UnauthorizedAccessException を投げる。これは IOException を
+                        // 継承していないため上記 catch をすり抜け、上位の WinForms 既定の ThreadException ダイアログ
+                        // (英文 stack trace) が出て tempDir (`.pending-create-{guid}`) が永続残置 → disk 容量蓄積。
+                        // round 4 R4-M10 で legacy safety MoveTo に既に UAE 別 catch を入れた規約と非対称解消。
+                        catch (UnauthorizedAccessException moveEx)
+                        {
+                            HandleVersionDirMoveFailure(tempDir, versionDir, moveEx);
                             return;
                         }
 
@@ -456,6 +459,27 @@ namespace TonePrism.Manager.Controls
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// (round 5 H1) Directory.Move 失敗時の共通 cleanup + 通知。IOException / UnauthorizedAccessException
+        /// の両 catch から呼ばれ、tempDir 削除 + user 通知 MessageBox を一元化する。
+        /// </summary>
+        private static void HandleVersionDirMoveFailure(string tempDir, string versionDir, Exception moveEx)
+        {
+            try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); }
+            catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (round 5 H1) tempDir 削除失敗: " + tempDir + ": " + delEx.Message); }
+
+            string detail = moveEx is UnauthorizedAccessException
+                ? "別の Manager が同じバージョン番号で既にフォルダを作成した、または対象フォルダの権限が制限されている可能性があります。"
+                : "別の Manager が同じバージョン番号で既にフォルダを作成した可能性があります。";
+
+            MessageBox.Show(
+                "バージョンフォルダの作成に失敗しました:\n  " + versionDir + "\n\n" +
+                detail + "\n" +
+                "別のバージョン番号を指定するか、少し待ってから再試行してください。\n\n" +
+                "詳細: " + moveEx.Message,
+                "フォルダ作成失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
 
         private void btnDeleteGame_Click(object sender, EventArgs e)

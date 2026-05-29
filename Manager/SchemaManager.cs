@@ -1602,6 +1602,17 @@ namespace TonePrism.Manager
         {
             Logger.Info("[DatabaseManager] Executing migration V17 -> V18 (developers.version_id に FK + ON DELETE CASCADE 追加 / game_genres dead table 除去, Medium-22 / Low-28/29)");
 
+            // (round 5 M1) SQLite 公式の「FK ありテーブル recreate」推奨手順に従い、transaction 内では
+            // foreign_keys check を deferred モードに切替する。`PRAGMA foreign_keys` は transaction 内で
+            // 変更できないため `defer_foreign_keys` を使う (3.7.5+)。これで INSERT-SELECT 中に新テーブルの
+            // FK 違反が即時 throw されず、COMMIT 直前にまとめて check される。これにより game_id orphan が
+            // 1 件でも残っている過去 DB (= 外部ツール直 DML 経験あり / round 4 以前の UpdateGameId 中断履歴)
+            // で migration 全体が即死する path を回避する。
+            using (var cmd = new SQLiteCommand("PRAGMA defer_foreign_keys = ON", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
             // (累積監査 round 4 Low-28/29) game_genres は v2 で追加されたが GameRepository.Add/Update は
             // 一切書き込まず `games.genre` のカンマ区切り文字列が SoT として動いている dead table。
             // UpdateGameId だけが child table list に含めて更新しているため過去 v2 migration 経由の DB では
@@ -1628,21 +1639,27 @@ namespace TonePrism.Manager
                 cmd.ExecuteNonQuery();
             }
 
-            // orphan 行 (version_id 非 NULL だが game_versions に該当無し) は除外して INSERT。
-            // version_id IS NULL の行 (= games 行と紐づく developers) は全件保持。
+            // (round 5 M1) orphan filter を拡張: 旧実装は version_id orphan のみ除外で、game_id orphan
+            // (= games に存在しない game_id を持つ developers 行) は除外していなかった。新テーブルの
+            // game_id 側にも FK が付くため orphan 残存で COMMIT 時 FK check 失敗 → migration 全体即死の
+            // 経路があった。version_id と同パターンで game_id 側にも EXISTS filter を追加し、
+            // 「game_id IS NULL (= 製作者が特定ゲーム未紐付け) または対応 games 行が存在」かつ
+            // 「version_id IS NULL または対応 game_versions 行が存在」の両条件を満たす行のみ移行する。
             using (var cmd = new SQLiteCommand(
                 "INSERT INTO developers_new (id, game_id, last_name, first_name, grade, version_id) " +
                 "SELECT d.id, d.game_id, d.last_name, d.first_name, d.grade, d.version_id " +
                 "FROM developers d " +
-                "WHERE d.version_id IS NULL " +
-                "   OR EXISTS (SELECT 1 FROM game_versions gv WHERE gv.id = d.version_id)",
+                "WHERE (d.game_id IS NULL " +
+                "       OR EXISTS (SELECT 1 FROM games g WHERE g.game_id = d.game_id)) " +
+                "  AND (d.version_id IS NULL " +
+                "       OR EXISTS (SELECT 1 FROM game_versions gv WHERE gv.id = d.version_id))",
                 connection, transaction))
             {
                 int copied = cmd.ExecuteNonQuery();
-                Logger.Info("[DatabaseManager] (Medium-22) developers 行を新テーブルへコピー: " + copied + " 件");
+                Logger.Info("[DatabaseManager] (round 5 M1 / Medium-22) developers 行を新テーブルへコピー: " + copied + " 件");
             }
 
-            // orphan 件数を別途 log に残す (= silent sweep の trail)。
+            // orphan 件数を別途 log に残す (= silent sweep の trail)。version_id / game_id を別カウントで記録。
             using (var cmd = new SQLiteCommand(
                 "SELECT COUNT(*) FROM developers WHERE version_id IS NOT NULL " +
                 "AND NOT EXISTS (SELECT 1 FROM game_versions gv WHERE gv.id = developers.version_id)",
@@ -1653,6 +1670,18 @@ namespace TonePrism.Manager
                 if (orphans > 0)
                 {
                     Logger.Warn("[DatabaseManager] (Medium-22) developers.version_id 孤児行を migration で除去: " + orphans + " 件");
+                }
+            }
+            using (var cmd = new SQLiteCommand(
+                "SELECT COUNT(*) FROM developers WHERE game_id IS NOT NULL " +
+                "AND NOT EXISTS (SELECT 1 FROM games g WHERE g.game_id = developers.game_id)",
+                connection, transaction))
+            {
+                var r = cmd.ExecuteScalar();
+                long orphans = r is DBNull ? 0 : Convert.ToInt64(r);
+                if (orphans > 0)
+                {
+                    Logger.Warn("[DatabaseManager] (round 5 M1) developers.game_id 孤児行を migration で除去: " + orphans + " 件");
                 }
             }
 

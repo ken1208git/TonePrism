@@ -94,6 +94,23 @@ namespace TonePrism.Manager
             // SoT は AddGameForm.Designer 側であり、SemverInputControl.Designer の Major=1 / Minor/Patch
             // class default のいずれにも依存しない設計を維持すること。
 
+            // (round 5 Phase D) path textbox を編集可能 (ReadOnly=false) に解放した分、入力時の正規化 +
+            // プレビュー連動を hook する。`/` → `\` への正規化は GameFormHelper の共通実装。
+            txtThumbnailPath.TextChanged += (s, ev) =>
+            {
+                GameFormHelper.NormalizeSlashInPathTextBox(txtThumbnailPath);
+                UpdateThumbnailPreview();
+            };
+            txtBackgroundPath.TextChanged += (s, ev) =>
+            {
+                GameFormHelper.NormalizeSlashInPathTextBox(txtBackgroundPath);
+                UpdateBackgroundPreview();
+            };
+            txtExecutablePath.TextChanged += (s, ev) =>
+            {
+                GameFormHelper.NormalizeSlashInPathTextBox(txtExecutablePath);
+            };
+
             // 製作者情報のDataGridViewを初期化
             InitializeDevelopersGrid();
         }
@@ -722,11 +739,13 @@ namespace TonePrism.Manager
             // sourceGameFolderを更新
             sourceGameFolder = gameFolderPath;
 
-            // 実行ファイルパス
-            if (string.IsNullOrWhiteSpace(txtExecutablePath.Text))
+            // (round 5 Phase D) ReadOnly 解除に伴う validation 強化: 拡張子 + 存在 check を共通 helper 経由に統一。
+            // 実行ファイル (必須、.exe)
+            if (!GameFormHelper.ValidateFilePath(txtExecutablePath.Text, sourceGameFolder,
+                GameFormHelper.ExecutableFileExtensions, true, "実行ファイル", out string exeErr))
             {
-                MessageBox.Show("実行ファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                btnSelectExecutable.Focus();
+                MessageBox.Show(exeErr, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtExecutablePath.Focus();
                 return false;
             }
 
@@ -735,51 +754,42 @@ namespace TonePrism.Manager
                 !PathConversionHelper.IsPathInside(sourceGameFolder, txtExecutablePath.Text))
             {
                 MessageBox.Show("実行ファイルは選択されたゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                btnSelectExecutable.Focus();
+                txtExecutablePath.Focus();
                 return false;
             }
 
-            if (!File.Exists(txtExecutablePath.Text))
+            // サムネイル画像 (任意、画像拡張子)
+            if (!GameFormHelper.ValidateFilePath(txtThumbnailPath.Text, sourceGameFolder,
+                GameFormHelper.ImageFileExtensions, false, "サムネイル画像", out string thumbErr))
             {
-                MessageBox.Show("選択された実行ファイルが見つかりません。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                btnSelectExecutable.Focus();
+                MessageBox.Show(thumbErr, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtThumbnailPath.Focus();
+                return false;
+            }
+            if (!string.IsNullOrWhiteSpace(txtThumbnailPath.Text) &&
+                !string.IsNullOrEmpty(sourceGameFolder) &&
+                !PathConversionHelper.IsPathInside(sourceGameFolder, txtThumbnailPath.Text))
+            {
+                MessageBox.Show("サムネイル画像は選択されたゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtThumbnailPath.Focus();
                 return false;
             }
 
-            // サムネイル画像パスのチェック（指定されている場合）
-            if (!string.IsNullOrWhiteSpace(txtThumbnailPath.Text))
+            // 背景画像 (任意、画像拡張子)
+            if (!GameFormHelper.ValidateFilePath(txtBackgroundPath.Text, sourceGameFolder,
+                GameFormHelper.ImageFileExtensions, false, "背景画像", out string bgErr))
             {
-                if (!File.Exists(txtThumbnailPath.Text))
-                {
-                    MessageBox.Show("選択されたサムネイル画像が見つかりません。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    btnSelectThumbnail.Focus();
-                    return false;
-                }
-                if (!string.IsNullOrEmpty(sourceGameFolder) &&
-                    !PathConversionHelper.IsPathInside(sourceGameFolder, txtThumbnailPath.Text))
-                {
-                    MessageBox.Show("サムネイル画像は選択されたゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    btnSelectThumbnail.Focus();
-                    return false;
-                }
+                MessageBox.Show(bgErr, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtBackgroundPath.Focus();
+                return false;
             }
-
-            // 背景画像パスのチェック（指定されている場合）
-            if (!string.IsNullOrWhiteSpace(txtBackgroundPath.Text))
+            if (!string.IsNullOrWhiteSpace(txtBackgroundPath.Text) &&
+                !string.IsNullOrEmpty(sourceGameFolder) &&
+                !PathConversionHelper.IsPathInside(sourceGameFolder, txtBackgroundPath.Text))
             {
-                if (!File.Exists(txtBackgroundPath.Text))
-                {
-                    MessageBox.Show("選択された背景画像が見つかりません。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    btnSelectBackground.Focus();
-                    return false;
-                }
-                if (!string.IsNullOrEmpty(sourceGameFolder) &&
-                    !PathConversionHelper.IsPathInside(sourceGameFolder, txtBackgroundPath.Text))
-                {
-                    MessageBox.Show("背景画像は選択されたゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    btnSelectBackground.Focus();
-                    return false;
-                }
+                MessageBox.Show("背景画像は選択されたゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtBackgroundPath.Focus();
+                return false;
             }
 
             // (#234 追加精査) 最小プレイ人数 ≤ 最大プレイ人数 を検証 (3 フォーム共通 helper)。

@@ -74,6 +74,23 @@ namespace TonePrism.Manager
 
         private void VersionUpForm_Load(object sender, EventArgs e)
         {
+            // (round 5 Phase D) path textbox を編集可能 (ReadOnly=false) に解放した分、入力時の正規化 +
+            // プレビュー連動を hook する。`/` → `\` への正規化は GameFormHelper の共通実装。
+            txtThumbnailPath.TextChanged += (s, ev) =>
+            {
+                Services.GameFormHelper.NormalizeSlashInPathTextBox(txtThumbnailPath);
+                UpdateThumbnailPreview();
+            };
+            txtBackgroundPath.TextChanged += (s, ev) =>
+            {
+                Services.GameFormHelper.NormalizeSlashInPathTextBox(txtBackgroundPath);
+                UpdateBackgroundPreview();
+            };
+            txtExecutablePath.TextChanged += (s, ev) =>
+            {
+                Services.GameFormHelper.NormalizeSlashInPathTextBox(txtExecutablePath);
+            };
+
             // (#158 H-2) ctor から移動: semverNext を currentVersion で初期化 + Patch を auto-bump
             // (= 「迷ったら Patch」default)。currentVersion が malformed (= DB に "1.0" / "alpha"
             // 等が残っていた場合) の silent v0.0.0 fallback で「気づかれずに 0.0.1 として書き戻される」

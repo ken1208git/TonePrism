@@ -123,6 +123,11 @@ namespace TonePrism.Manager.Controls
                         case "manual": trigger = "手動"; break;
                         case "auto": trigger = "自動"; break;
                         case "safety": trigger = "退避"; break;
+                        // (round 5 L1) round 4 R4-M9 で restore audit 行を NEW DB に INSERT する経路を追加したが、
+                        // 本 switch は manual/auto/safety のみで restore が default 落ち → 生 string "restore" が
+                        // 「復元」と並んで英字混在表示されていた。BackupLogEntry.TriggerType の XML doc (R4-L3)
+                        // と対称化する形で「復元」case を追加。
+                        case "restore": trigger = "復元"; break;
                         default: trigger = entry.TriggerType ?? ""; break;
                     }
                     string size = entry.FileSizeBytes.HasValue ? FormatBytes(entry.FileSizeBytes.Value) : "-";

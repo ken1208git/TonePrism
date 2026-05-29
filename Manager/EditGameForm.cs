@@ -67,6 +67,12 @@ namespace TonePrism.Manager
         private decimal _gameMinPlayersDisplayedOnLoad;
         private decimal _gameMaxPlayersDisplayedOnLoad;
 
+        // (round 5 M3) CopyExternalImagesToVersionFolder が新しく disk に書いた画像ファイル path の集約。
+        // OK 成功で commit するまでは「user が Cancel で閉じた場合に削除すべきオーファン候補」として保持し、
+        // OK 確定時にクリアする (= 残しても害なしだが、retry でない user による Cancel での disk leak を最小化)。
+        // round 4 R4-M10 の versionDir 所有 flag と同方針 (= 自分が作った disk 状態は自分で片付ける)。
+        private readonly List<string> _copiedExternalImagePaths = new List<string>();
+
         // (#158 CX-1) folder rename を 2-phase 化するための plan 単位 (Phase 1 で構築 / Phase 2 で実行)。
         // (#158 round 4 codex P1) Old{Executable,Thumbnail,Background}Path: in-memory state rollback 用に
         // path 書き換え前の値を capture。disk Move を rollback しても in-memory が NEW のままだと、同
@@ -147,35 +153,36 @@ namespace TonePrism.Manager
         }
 
         /// <summary>
-        /// (M2) NumericUpDown に DB 由来の int 値を代入する。範囲外なら clamp + warn ログ + false 返却
-        /// (= caller 側 NullOnLoad flag を立てて save 時に意図せず clamp 値が書き戻らないようにする)。
-        /// 範囲内なら true 返却 + そのまま代入。SemverInputControl が clamp + healing する pattern と揃える。
+        /// (round 5 M6) round 2 M2 で導入した clamp helper は本ファイル private static だったが、
+        /// DeveloperForm 等で同じ throw 経路 (numGrade に DB 上 999999 超え値 → ArgumentOutOfRangeException で
+        /// ダイアログ自体が開けない) が見つかったため GameFormHelper.SetClampedNumericValue に昇格。
+        /// 旧 caller との互換のためここでは forwarder 1 行で残置 (round 5 M6 で削除予定)。
         /// </summary>
-        /// <returns>範囲内で生代入できれば true、clamp 発生 (= NullOnLoad 相当扱い) なら false。</returns>
         private static bool SetClampedNumericValue(System.Windows.Forms.NumericUpDown nud, int value, string fieldName)
-        {
-            decimal d = value;
-            if (d < nud.Minimum)
-            {
-                Services.Logger.Warn($"[EditGameForm] (M2) {fieldName}={value} は許容下限 {nud.Minimum} を下回るため clamp");
-                nud.Value = nud.Minimum;
-                return false;
-            }
-            if (d > nud.Maximum)
-            {
-                Services.Logger.Warn($"[EditGameForm] (M2) {fieldName}={value} は許容上限 {nud.Maximum} を上回るため clamp");
-                nud.Value = nud.Maximum;
-                return false;
-            }
-            nud.Value = d;
-            return true;
-        }
+            => Services.GameFormHelper.SetClampedNumericValue(nud, value, fieldName, "EditGameForm");
 
         /// <summary>
         /// フォームロード時の処理
         /// </summary>
         private void EditGameForm_Load(object sender, EventArgs e)
         {
+            // (round 5 Phase D) path textbox を編集可能 (ReadOnly=false) に解放した分、入力時の正規化 +
+            // プレビュー連動を hook する。`/` → `\` への正規化は GameFormHelper の共通実装。
+            txtThumbnailPath.TextChanged += (s, ev) =>
+            {
+                Services.GameFormHelper.NormalizeSlashInPathTextBox(txtThumbnailPath);
+                UpdateThumbnailPreview();
+            };
+            txtBackgroundPath.TextChanged += (s, ev) =>
+            {
+                Services.GameFormHelper.NormalizeSlashInPathTextBox(txtBackgroundPath);
+                UpdateBackgroundPreview();
+            };
+            txtExecutablePath.TextChanged += (s, ev) =>
+            {
+                Services.GameFormHelper.NormalizeSlashInPathTextBox(txtExecutablePath);
+            };
+
             // ゲームIDは編集不可（Enabled = falseで選択も不可）
             txtGameId.Text = originalGame.GameId;
 
@@ -1478,6 +1485,9 @@ namespace TonePrism.Manager
                 }
 
                 EditedGame = game;
+                // (round 5 M3) OK commit 確定 → copy 済み画像は正規に DB と紐付いたため、
+                // OnFormClosing での「Cancel 時のオーファン削除」対象から外す。
+                _copiedExternalImagePaths.Clear();
                 DialogResult = DialogResult.OK;
                 Close();
             }
@@ -1517,6 +1527,35 @@ namespace TonePrism.Manager
         }
 
         /// <summary>
+        /// (round 5 M3) form が閉じる直前。OK 確定で commit していないオーファン画像 path を削除する。
+        /// OK 経路では btnOK_Click 末尾で _copiedExternalImagePaths.Clear() 済のため本処理は no-op、
+        /// Cancel / Close / X ボタン経路でのみ実体削除が走る。失敗は best-effort で swallow。
+        /// </summary>
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            base.OnFormClosing(e);
+            if (DialogResult == DialogResult.OK) return;
+            if (_copiedExternalImagePaths.Count == 0) return;
+
+            foreach (string path in _copiedExternalImagePaths)
+            {
+                try
+                {
+                    if (File.Exists(path))
+                    {
+                        File.Delete(path);
+                        Logger.Info("[EditGameForm] (round 5 M3) Cancel 経路でオーファン画像を削除: " + path);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("[EditGameForm] (round 5 M3) オーファン画像削除失敗 (手動削除可): " + path + ": " + ex.Message);
+                }
+            }
+            _copiedExternalImagePaths.Clear();
+        }
+
+        /// <summary>
         /// フォルダリネーム後にパステキストボックスの値を新フォルダベースに更新
         /// </summary>
         private void UpdatePathTextBox(TextBox textBox, string oldFolder, string newFolder)
@@ -1530,15 +1569,37 @@ namespace TonePrism.Manager
             // で textbox 値が偶然 `<base>\games\foobar\...` を含むと別ゲームの path を `<base>\games\<newId>bar\...`
             // に書き換える兄弟前方一致 risk があった。`IsPathInside` / `ToRelativePathAfterCopy` と同じ
             // 「等値 OR 区切り付き StartsWith」契約に揃え、defense-in-depth で兄弟誤置換を物理閉鎖する。
+            // (round 5 M4) `Path.DirectorySeparatorChar` (\) のみ境界比較の取りこぼし: textbox 値が
+            // `/` 区切り (手入力 / 外部由来 path) の場合、`StartsWith(oldFolder + '\\')` が false → 置換漏れ
+            // → 後段 `NormalizeRelative` で base 外として null 化 → DB に null 保存で path 喪失。
+            // path 側を `Path.GetFullPath` 経由で正規化 (`/` → `\` に揃う + 相対 path 解決) してから判定する。
             if (!Path.IsPathRooted(path)) return;
-            string oldFolderWithSep = oldFolder.EndsWith(Path.DirectorySeparatorChar.ToString()) ? oldFolder : oldFolder + Path.DirectorySeparatorChar;
-            if (string.Equals(path, oldFolder, StringComparison.OrdinalIgnoreCase))
+            try
+            {
+                path = Path.GetFullPath(path);
+            }
+            catch
+            {
+                // 不正 path (= 制御文字混入等) は normalize 不能、後段 validation に委ねる
+                return;
+            }
+            string oldFolderNormalized;
+            try
+            {
+                oldFolderNormalized = Path.GetFullPath(oldFolder);
+            }
+            catch
+            {
+                oldFolderNormalized = oldFolder;
+            }
+            string oldFolderWithSep = oldFolderNormalized.EndsWith(Path.DirectorySeparatorChar.ToString()) ? oldFolderNormalized : oldFolderNormalized + Path.DirectorySeparatorChar;
+            if (string.Equals(path, oldFolderNormalized, StringComparison.OrdinalIgnoreCase))
             {
                 textBox.Text = newFolder;
             }
             else if (path.StartsWith(oldFolderWithSep, StringComparison.OrdinalIgnoreCase))
             {
-                textBox.Text = newFolder + path.Substring(oldFolder.Length);
+                textBox.Text = newFolder + path.Substring(oldFolderNormalized.Length);
             }
         }
 
@@ -1749,6 +1810,9 @@ namespace TonePrism.Manager
             foreach (var p in plan)
             {
                 p.AssignBackTextBox.Text = p.DestinationPath;
+                // (round 5 M3) copy 済 path を集約。後で OK 確定すれば commit としてクリア、
+                // Cancel/Close で抜けた場合は OnFormClosing で disk から削除してオーファン化を防ぐ。
+                _copiedExternalImagePaths.Add(p.DestinationPath);
             }
             UpdateThumbnailPreview();
             UpdateBackgroundPreview();

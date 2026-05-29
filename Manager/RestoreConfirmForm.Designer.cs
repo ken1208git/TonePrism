@@ -70,7 +70,7 @@ namespace TonePrism.Manager
             this.lblWarningDetail2.Name = "lblWarningDetail2";
             this.lblWarningDetail2.Size = new System.Drawing.Size(560, 14);
             this.lblWarningDetail2.TabIndex = 3;
-            this.lblWarningDetail2.Text = "・現在のデータベースは安全のため自動的に退避されます (safety_before_restore_*.db)";
+            this.lblWarningDetail2.Text = "・現在のデータベースは安全のため自動的に退避されます (safety_*.db)";
             //
             // lblWarningDetail3
             //

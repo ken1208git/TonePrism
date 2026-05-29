@@ -252,6 +252,30 @@ namespace TonePrism.Manager.Repositories
         }
 
         /// <summary>
+        /// (round 5 M2) 復元後の NEW DB に対して、restore_lock_owner 行を所有者に関わらず強制クリアする。
+        /// snapshot 取得時に他 PC が active な lock を持っていた場合、復元すると NEW DB に他 PC 由来 lock 行が
+        /// 蘇り、自 PC の `ReleaseRestoreLock` は owner mismatch で no-op → 5 分 stale 失効まで
+        /// `CheckSessionConflictBeforeWrite` で write 全 block される UX 退行があった。
+        /// 復元直後にしか呼ばないことを前提に、所有者 check 一切なしで DELETE する。自 PC の lock 行が
+        /// あれば一緒に消えるが、上位 (RestoreService.finally) で `ReleaseRestoreLock` も走るので二重 DELETE は no-op。
+        /// </summary>
+        public void ForceClearRestoreLock()
+        {
+            _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var cmd = new SQLiteCommand("DELETE FROM settings WHERE key = @k", connection))
+                    {
+                        cmd.Parameters.AddWithValue("@k", Services.SettingsKeys.RestoreLockOwner);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+            });
+        }
+
+        /// <summary>
         /// (H5) 他 PC が現在 active な restore lock を保有しているか check。
         /// </summary>
         /// <returns>他 PC 保有なら owner pcName、保有なし / 自 PC / stale なら null。</returns>

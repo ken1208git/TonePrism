@@ -237,11 +237,22 @@ namespace TonePrism.Manager
         /// <summary>
         /// 指定したゲームのフォルダパス
         /// </summary>
+        /// <exception cref="ArgumentException">gameId が null / 空 / 空白のみのとき。
+        /// (round 5 M5) `Path.Combine(GamesFolder, "")` は GamesFolder 自身を返す .NET 仕様で、
+        /// それに `Directory.Delete(folder, true)` を当てると games/ 配下全削除の核兵器ボタンになる。
+        /// 削除経路 (GameSectionPanel L477) では caller 側の IsNullOrWhiteSpace 防御が入っているが、
+        /// 画像コピー / 編集の path 解決経路で別の caller が直呼びしているところは ValidateInput 前提で
+        /// ガード無し。PathManager 自身が defense-in-depth として入口で fence する (caller 全部に防御を頼らない)。
+        /// </exception>
         public static string GetGameFolder(string gameId)
         {
+            if (string.IsNullOrWhiteSpace(gameId))
+            {
+                throw new ArgumentException("gameId が空文字 / 空白のみのため games フォルダ自身を指してしまいます (危険)。caller 側で IsNullOrWhiteSpace 防御してください。", nameof(gameId));
+            }
             return Path.Combine(GamesFolder, gameId);
         }
-        
+
         /// <summary>
         /// version 文字列からバージョンフォルダの leaf 名 (`v<X>.<Y>.<Z>[-suffix]`、必ず小文字 v) を作る。
         /// 先頭の `v`/`V` を一度剥がしてから小文字 v を被せ直すため、生値が "1.0.0" / "v1.0.0" / "V1.0.0"
@@ -249,14 +260,23 @@ namespace TonePrism.Manager
         /// "vV1.0.0" と二重 prefix になり、disk フォルダ名と DB 保存パス (GameSectionPanel が独立計算する
         /// prefix) が食い違う死角があったため helper に集約して両者を必ず一致させる (EditGameForm.ToVersionLeaf と同規則)。
         /// </summary>
+        /// <exception cref="ArgumentException">version が null / 空 / 空白のみのとき。
+        /// (round 5 M5) 旧実装は `version ?? ""` で空文字を許容し leaf 名が `"v"` 単独になっていた。
+        /// `Path.Combine(gameFolder, "v")` は `<games>/<id>/v` のフォルダを指し、これに rmdir をかけると
+        /// 当該ゲーム全バージョン消滅の余地があった。入口 fence で必ず弾く。</exception>
         public static string GetVersionFolderLeaf(string version)
         {
-            return "v" + (version ?? "").TrimStart('v', 'V');
+            if (string.IsNullOrWhiteSpace(version))
+            {
+                throw new ArgumentException("version が空文字 / 空白のみのため leaf 名が \"v\" 単独になってしまいます (危険)。caller 側で空チェックしてください。", nameof(version));
+            }
+            return "v" + version.TrimStart('v', 'V');
         }
 
         /// <summary>
         /// 指定したゲームのバージョンフォルダパス
         /// </summary>
+        /// <exception cref="ArgumentException">gameId / version のいずれかが null / 空 / 空白のみのとき。</exception>
         public static string GetVersionFolder(string gameId, string version)
         {
             return Path.Combine(GetGameFolder(gameId), GetVersionFolderLeaf(version));

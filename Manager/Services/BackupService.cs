@@ -126,6 +126,27 @@ namespace TonePrism.Manager.Services
             {
                 return BackupResult.Skipped("自動バックアップが無効に設定されています (設定タブから有効化可能)");
             }
+
+            // (round 5 H2) round 2 H5 で導入した「他 PC が復元中なら write をブロック」する advisory lock の
+            // 横展開漏れ補正。旧実装は MainForm.CheckSessionConflictBeforeWrite (user 操作経路のみ) で
+            // GetActiveRestoreLockOwnerOrNull を check しており、起動時の自動バックアップ path は素通し
+            // だった。PC-A の File.Replace 中に PC-B の Manager が起動 → 自動バックアップが SQLite Online
+            // Backup API で File.Replace 中の DB を読みに行く → 出力 backup が partial / corrupt になり、
+            // 後日それを復元すると最新データ消失する致命的 race があった。auto path にも同 gate を入れて
+            // 構造的に防ぐ。
+            if (_settingsRepo != null)
+            {
+                string lockOwner = _settingsRepo.GetActiveRestoreLockOwnerOrNull(
+                    Environment.MachineName,
+                    DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    SettingsKeys.RestoreLockStaleThresholdMs);
+                if (!string.IsNullOrEmpty(lockOwner))
+                {
+                    Logger.Info("[BackupService] (round 5 H2) 他 PC (" + lockOwner + ") が復元中のため自動バックアップを延期");
+                    return BackupResult.Skipped("他 PC (" + lockOwner + ") が復元中のため自動バックアップを延期しました");
+                }
+            }
+
             int intervalHours = _settingsRepo.GetInt32("backup_auto_interval_hours", 24);
             long intervalSeconds = (long)intervalHours * 3600;
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -142,6 +163,20 @@ namespace TonePrism.Manager.Services
         /// </summary>
         public BackupResult RunManualBackup(IProgress<ProgressInfo> progress, CancellationToken token)
         {
+            // (round 5 H2 defense-in-depth) 手動経路は通常 UI 側 SessionConflictHelper.CheckBeforeWrite で
+            // 既に lock 確認済だが、Manager 外から direct 呼出される将来の caller のために二段目 fence。
+            if (_settingsRepo != null)
+            {
+                string lockOwner = _settingsRepo.GetActiveRestoreLockOwnerOrNull(
+                    Environment.MachineName,
+                    DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    SettingsKeys.RestoreLockStaleThresholdMs);
+                if (!string.IsNullOrEmpty(lockOwner))
+                {
+                    Logger.Warn("[BackupService] (round 5 H2) 他 PC (" + lockOwner + ") が復元中のため手動バックアップを中止");
+                    return BackupResult.Skipped("他 PC (" + lockOwner + ") が復元中のためバックアップを開始できません。完了後に再試行してください");
+                }
+            }
             return RunBackupCore(TriggerManual, progress, token, leaseAlreadyAcquired: false);
         }
 

@@ -204,6 +204,10 @@ namespace TonePrism.Manager.Services
 
         /// <summary>
         /// ゲームフォルダ内のファイルを自動検出
+        /// (round 5 L4) 旧実装は `Directory.GetFiles(... SearchOption.AllDirectories)` が junction / symbolic link
+        /// 先のファイルを拾った場合、戻り値 path が `Path.GetFullPath` 後に sourceFolder 外を指して
+        /// 「絶対 path として `RelativeExecutablePath` に流入 → 後段 assert で永久 block」する経路があった。
+        /// 各 path について sourceFolder 内 (IsPathInside) チェックを通し、外れていたら検出失敗扱いに倒す。
         /// </summary>
         /// <param name="folderPath">検索対象フォルダ</param>
         /// <returns>(実行ファイルパス, サムネイルパス, 背景パス) — 見つからない場合はnull</returns>
@@ -217,8 +221,10 @@ namespace TonePrism.Manager.Services
                 return (exePath, thumbPath, bgPath);
 
             // 実行ファイルを自動検出
-            var exeFiles = Directory.GetFiles(folderPath, "*.exe", SearchOption.AllDirectories);
-            if (exeFiles.Length > 0)
+            var exeFiles = Directory.GetFiles(folderPath, "*.exe", SearchOption.AllDirectories)
+                .Where(f => IsPathInsideSourceFolder(folderPath, f))
+                .ToList();
+            if (exeFiles.Count > 0)
             {
                 var preferredExeFiles = exeFiles
                     .Where(file =>
@@ -236,8 +242,10 @@ namespace TonePrism.Manager.Services
             var thumbnailPatterns = new[] { "thumbnail.png", "thumb.png", "thumb.jpg", "icon.png", "icon.jpg" };
             foreach (var pattern in thumbnailPatterns)
             {
-                var files = Directory.GetFiles(folderPath, pattern, SearchOption.AllDirectories);
-                if (files.Length > 0)
+                var files = Directory.GetFiles(folderPath, pattern, SearchOption.AllDirectories)
+                    .Where(f => IsPathInsideSourceFolder(folderPath, f))
+                    .ToList();
+                if (files.Count > 0)
                 {
                     thumbPath = files[0];
                     break;
@@ -248,8 +256,10 @@ namespace TonePrism.Manager.Services
             var backgroundPatterns = new[] { "background.png", "background.jpg", "bg.png", "bg.jpg", "preview.png", "preview.jpg" };
             foreach (var pattern in backgroundPatterns)
             {
-                var files = Directory.GetFiles(folderPath, pattern, SearchOption.AllDirectories);
-                if (files.Length > 0)
+                var files = Directory.GetFiles(folderPath, pattern, SearchOption.AllDirectories)
+                    .Where(f => IsPathInsideSourceFolder(folderPath, f))
+                    .ToList();
+                if (files.Count > 0)
                 {
                     bgPath = files[0];
                     break;
@@ -257,6 +267,27 @@ namespace TonePrism.Manager.Services
             }
 
             return (exePath, thumbPath, bgPath);
+        }
+
+        /// <summary>
+        /// (round 5 L4) 自動検出された path が sourceFolder 配下に物理的に含まれるかチェック。
+        /// junction / symbolic link 越しに sourceFolder 外を指す path を弾く目的。
+        /// `Path.GetFullPath` で正規化 + 等値 or 区切り境界付き StartsWith で safe な前方一致判定。
+        /// 例外時 (path 不正等) は false 倒し (= 自動検出から除外)。
+        /// </summary>
+        private static bool IsPathInsideSourceFolder(string sourceFolder, string candidatePath)
+        {
+            try
+            {
+                string sourceFull = Path.GetFullPath(sourceFolder).TrimEnd(Path.DirectorySeparatorChar);
+                string candidateFull = Path.GetFullPath(candidatePath);
+                if (string.Equals(candidateFull, sourceFull, StringComparison.OrdinalIgnoreCase)) return true;
+                return candidateFull.StartsWith(sourceFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         #endregion
@@ -310,6 +341,130 @@ namespace TonePrism.Manager.Services
                 return false;
             }
 
+            return true;
+        }
+
+        #region (round 5 Phase D) パス textbox 入力支援
+
+        /// <summary>
+        /// (round 5 Phase D) 画像ファイルとして受け入れる拡張子一覧。
+        /// </summary>
+        public static readonly string[] ImageFileExtensions = new[] { ".png", ".jpg", ".jpeg", ".bmp" };
+
+        /// <summary>
+        /// (round 5 Phase D) 実行ファイルとして受け入れる拡張子一覧。
+        /// </summary>
+        public static readonly string[] ExecutableFileExtensions = new[] { ".exe" };
+
+        /// <summary>
+        /// (round 5 Phase D) ReadOnly 解除に伴う user 入力支援。`/` を `\` に正規化、cursor 位置を保持。
+        /// TextChanged ハンドラから呼ばれることを想定 (= 再帰呼出しが起きるが 2 回目は `/` 無しで no-op)。
+        /// </summary>
+        public static void NormalizeSlashInPathTextBox(TextBox tb)
+        {
+            if (tb == null) return;
+            string current = tb.Text;
+            if (string.IsNullOrEmpty(current)) return;
+            if (current.IndexOf('/') < 0) return;
+            int caret = tb.SelectionStart;
+            tb.Text = current.Replace('/', '\\');
+            tb.SelectionStart = Math.Min(caret, tb.Text.Length);
+        }
+
+        /// <summary>
+        /// (round 5 Phase D) ファイル path の validation 共通ヘルパ。
+        /// 1. 空欄なら required=false で OK / required=true で「未入力」エラー
+        /// 2. 拡張子 check (allowedExtensions)
+        /// 3. 存在 check (相対なら baseFolder で絶対化)
+        /// </summary>
+        /// <param name="path">user 入力 path</param>
+        /// <param name="baseFolder">相対 path 解決用の基準フォルダ (null 可)</param>
+        /// <param name="allowedExtensions">受け入れる拡張子 (null = 任意)</param>
+        /// <param name="required">空欄を NG とするか</param>
+        /// <param name="fieldLabel">エラーメッセージに出す項目名</param>
+        /// <param name="errorMessage">エラー時のメッセージ (OK なら null)</param>
+        /// <returns>有効なら true</returns>
+        public static bool ValidateFilePath(string path, string baseFolder, string[] allowedExtensions, bool required, string fieldLabel, out string errorMessage)
+        {
+            errorMessage = null;
+            string trimmed = (path ?? "").Trim();
+
+            if (string.IsNullOrEmpty(trimmed))
+            {
+                if (required)
+                {
+                    errorMessage = fieldLabel + "を入力してください。";
+                    return false;
+                }
+                return true;
+            }
+
+            // 拡張子チェック
+            if (allowedExtensions != null && allowedExtensions.Length > 0)
+            {
+                string ext = Path.GetExtension(trimmed);
+                bool extOk = allowedExtensions.Any(e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase));
+                if (!extOk)
+                {
+                    errorMessage = fieldLabel + "の拡張子は " + string.Join(" / ", allowedExtensions) + " のいずれかにしてください。\n\n  指定された拡張子: " + (string.IsNullOrEmpty(ext) ? "(なし)" : ext);
+                    return false;
+                }
+            }
+
+            // 存在チェック
+            string resolved = trimmed;
+            try
+            {
+                if (!Path.IsPathRooted(resolved) && !string.IsNullOrEmpty(baseFolder))
+                {
+                    resolved = Path.Combine(baseFolder, resolved);
+                }
+                resolved = Path.GetFullPath(resolved);
+            }
+            catch (Exception ex)
+            {
+                errorMessage = fieldLabel + "のパスが不正です:\n  " + trimmed + "\n\n  " + ex.Message;
+                return false;
+            }
+
+            if (!File.Exists(resolved))
+            {
+                errorMessage = fieldLabel + "が見つかりません:\n  " + resolved + "\n\nパスを確認してください (相対パスの場合はゲームフォルダ基準で解決されます)。";
+                return false;
+            }
+
+            return true;
+        }
+
+        #endregion
+
+        /// <summary>
+        /// (round 5 M6) NumericUpDown に DB 由来 int 値を安全に代入する。範囲外は clamp + Logger.Warn + false 返却。
+        /// 範囲内なら true 返却 + そのまま代入。EditGameForm の round 2 M2 fix を helper 化し、DeveloperForm 等
+        /// 他フォームからも利用可能にした共通実装。caller は false 戻り時に「NullOnLoad / 保存時の clamp 値書き戻し抑止」
+        /// flag を立てる pattern。
+        /// </summary>
+        /// <param name="nud">対象 NumericUpDown</param>
+        /// <param name="value">代入したい値 (DB 由来など、範囲外の可能性あり)</param>
+        /// <param name="fieldName">log に出すフィールド名 (例: "MinPlayers (game)")</param>
+        /// <param name="formName">log に出すフォーム名 (例: "EditGameForm")</param>
+        /// <returns>範囲内で生代入できれば true、clamp 発生なら false</returns>
+        public static bool SetClampedNumericValue(NumericUpDown nud, int value, string fieldName, string formName = "GameFormHelper")
+        {
+            decimal d = value;
+            if (d < nud.Minimum)
+            {
+                Logger.Warn($"[{formName}] (round 5 M6) {fieldName}={value} は許容下限 {nud.Minimum} を下回るため clamp");
+                nud.Value = nud.Minimum;
+                return false;
+            }
+            if (d > nud.Maximum)
+            {
+                Logger.Warn($"[{formName}] (round 5 M6) {fieldName}={value} は許容上限 {nud.Maximum} を上回るため clamp");
+                nud.Value = nud.Maximum;
+                return false;
+            }
+            nud.Value = d;
             return true;
         }
 

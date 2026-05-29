@@ -213,6 +213,21 @@ namespace TonePrism.Manager.Services
                 // dbReplaceCompleted flag を持たずに同じ point-of-no-return 性質を達成する。
                 try
                 {
+                    // (round 5 M2) snapshot 取得時に他 PC が active な restore lock を保有していた場合、
+                    // 復元すると NEW DB に他 PC 由来の lock 行が蘇る。自 PC の `ReleaseRestoreLock` は
+                    // owner mismatch で no-op → 5 分 stale 失効まで全 write が block される UX 退行があった。
+                    // 復元直後に所有者に関わらず lock 行を強制クリアする (自 PC lock は finally でも release されるが
+                    // 二重 DELETE は no-op で害なし)。post-step なので失敗しても復元自体は成功扱いを継続。
+                    try
+                    {
+                        _settingsRepo?.ForceClearRestoreLock();
+                        Logger.Info("[RestoreService] (round 5 M2) snapshot 由来の restore_lock_owner 行を強制クリア");
+                    }
+                    catch (Exception clearEx)
+                    {
+                        Logger.Warn("[RestoreService] (round 5 M2) restore_lock_owner 強制クリア失敗 (5 分 stale で自動失効): " + clearEx.Message);
+                    }
+
                     // 5. 退避フォルダのリテンション適用（最新を残して古いのから削除）
                     progress?.Report(new ProgressInfo(95, "退避ファイルの世代管理...", ""));
                     ApplySafetyRetention(safetyDir, DefaultSafetyRetentionCount);
