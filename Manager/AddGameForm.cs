@@ -716,17 +716,13 @@ namespace TonePrism.Manager
         private bool ValidateInput()
         {
             // ゲームID
-            if (string.IsNullOrWhiteSpace(txtGameId.Text))
+            // (#206) ゲームID 検証: 理由別文言 (空 / 64文字超 / 文字種 / Windows 予約名 CON/PRN/NUL/COM1 等) を
+            // 区別して表示する。bool-only overload + ハードコード文言だと「文字種が悪い」一択で誤誘導していた。
+            // 空欄も IsValidGameId が "ゲームIDを入力してください。" を返すため、ここに一本化 (先行する空チェックは
+            // helper に内包され dead だったので削除、#257 レビュー)。
+            if (!GameFormHelper.IsValidGameId(txtGameId.Text, out string gameIdError))
             {
-                MessageBox.Show("ゲームIDを入力してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                txtGameId.Focus();
-                return false;
-            }
-
-            // ゲームIDの文字種チェック（英数字と一部の記号のみ許可）
-            if (!GameFormHelper.IsValidGameId(txtGameId.Text))
-            {
-                MessageBox.Show("ゲームIDは英数字、アンダースコア（_）、ハイフン（-）のみ使用できます。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(gameIdError, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtGameId.Focus();
                 return false;
             }
@@ -829,10 +825,11 @@ namespace TonePrism.Manager
             }
 
             // ゲームIDの重複チェック
+            // (#206 follow-up) Edit 経路 (GameRepository.UpdateGameId) と文言統一: 具体 ID + 案内。
             var existingGame = dbManager.GetGameById(txtGameId.Text.Trim());
             if (existingGame != null)
             {
-                MessageBox.Show("このゲームIDは既に使用されています。別のIDを入力してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show($"ゲームID「{txtGameId.Text.Trim()}」は既に使用されています。別のIDを入力してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtGameId.Focus();
                 return false;
             }

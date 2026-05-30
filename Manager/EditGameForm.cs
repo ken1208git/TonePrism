@@ -1757,15 +1757,13 @@ namespace TonePrism.Manager
         private bool ValidateInput()
         {
             // ゲームID
-            if (string.IsNullOrWhiteSpace(txtGameId.Text))
+            // (#206) ゲームID 検証: 理由別文言 (空 / 64文字超 / 文字種 / Windows 予約名 CON/PRN/NUL/COM1 等) を
+            // 区別して表示する (AddGameForm と同様、out errorMessage overload を使う)。
+            // 空欄も IsValidGameId が "ゲームIDを入力してください。" を返すため、ここに一本化 (先行する空チェックは
+            // helper に内包され dead だったので削除、#257 レビュー)。
+            if (!GameFormHelper.IsValidGameId(txtGameId.Text, out string gameIdError))
             {
-                MessageBox.Show("ゲームIDを入力してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                txtGameId.Focus();
-                return false;
-            }
-            if (!GameFormHelper.IsValidGameId(txtGameId.Text))
-            {
-                MessageBox.Show("ゲームIDには半角英数字、ハイフン(-)、アンダースコア(_)のみ使用できます。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(gameIdError, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtGameId.Focus();
                 return false;
             }
