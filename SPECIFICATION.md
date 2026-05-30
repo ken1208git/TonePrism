@@ -1289,7 +1289,7 @@ Release.ps1 と一致 (caller CI は `%ERRORLEVEL%` で 4 通り区別):
 
 - **`manager_sessions` table** (DB v13、§7.3 参照): 各 PC で稼働中の Manager process が `pc_name = Environment.MachineName` で 1 row 占有する SoT。heartbeat 周期で `last_heartbeat_at_unix_ms` を update、起動時に stale row を自動 cleanup。
 - **`ManagerSessionService`** (`Manager/Services/ManagerSessionService.cs`): heartbeat thread の lifecycle 管理 + 起動時 cleanup + 他 PC 検出 API を提供。`MainForm` から `Initialize` / `DetectOtherActiveSessions` / `Shutdown` で利用される。
-- **`SessionConflictDialog`** (`Manager/Services/SessionConflictDialog.cs`): 他 PC 検出時の modal 警告 dialog の SoT。`SessionConflictDialogContext` enum (`Startup` / `EditOperation`) で文言切替。
+- **`SessionConflictDialog`** (`Manager/Services/SessionConflictDialog.cs`): 別の Manager / Launcher (他 PC または同一 PC) 検出時の modal 警告 dialog の SoT (#251、同一 PC 上の Launcher も検出対象 §3.8.7.6)。`SessionConflictDialogContext` enum (`Startup` / `EditOperation`) で文言切替。
 - **`Program.cs` Named Mutex**: 同 PC 重複起動を物理 block (= LAN table は他 PC 検出専用、責務分離)。
 
 #### 3.8.2 動作仕様

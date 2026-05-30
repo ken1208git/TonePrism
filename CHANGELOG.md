@@ -1917,6 +1917,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 - **同時起動警告ダイアログが「他 PC」を前提にしていたが、同一 PC 上の Launcher も検出対象のためズレていた**: `SessionConflictDialog` は SPEC §3.8.7.6 のとおり**同一 PC 上で動く Launcher も検出**する（Manager 編集 × Launcher の SQLite read 競合も安全側で警告対象）ため、検出リストに自分の PC 名が並ぶケースがある。にもかかわらず文言が「**他 PC で** Manager / Launcher が稼働中」「**両方の PC で**同時に」「**他 PC の人に確認してから**」と他 PC 前提で、同一 PC 検出時に噛み合わなかった。Startup / EditOperation 両 context の title・body から「他 PC」前提表現を除去し、`別の Manager / Launcher` の汎用文へ統一（他 PC / 同一 PC どちらでも正しく読める）。title は両 context とも `【危険】別の Manager / Launcher が稼働中です` に統一。
 - **文言のみ・挙動は不変**: 起動時 Cancel = Manager 終了（`MainForm` L453 `Close()`）/ 操作前 Cancel = その操作中止、検出ロジック・5 件 cap・merge 表示は変更なし。SPEC §3.8.2 / §3.8.7.4（変更履歴 v1.10.44）と同期。
+- **内部記述も「他 PC」前提を一掃（#259 レビュー対応）**: user 向け文言だけでなく、同じ理由で誤りになる内部記述も統一 — enum `Startup` doc / `Show` method summary / `Logger.Warn` の「他 PC 検出」を「別の Manager / Launcher を検出」に（特にログは同一 PC Launcher 検出時に実態と食い違うため）。SPEC §3.8.1 構成要素の `SessionConflictDialog` 説明も同期（`ManagerSessionService` の「他 PC 検出 API」は Manager-Manager 限定で正しいため据え置き）。round-8 履歴コメントの旧引用文言に #251 で更に汎用化した旨を注記。
 
 #### Bump 根拠 (v0.17.1 → v0.17.2)
 

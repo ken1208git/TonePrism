@@ -11,7 +11,7 @@ namespace TonePrism.Manager.Services
     /// </summary>
     internal enum SessionConflictDialogContext
     {
-        /// <summary>Manager 起動時、`MainForm.Load` 冒頭で他 PC 検出した場合。Cancel = Manager 終了。</summary>
+        /// <summary>Manager 起動時、`MainForm.Load` 冒頭で別の Manager / Launcher を検出した場合。Cancel = Manager 終了。</summary>
         Startup,
         /// <summary>編集操作前 (ゲーム追加/編集/削除、ストア編集、設定変更、Backup/Restore 等の DB write 直前)。Cancel = その操作を中止。</summary>
         EditOperation,
@@ -32,7 +32,7 @@ namespace TonePrism.Manager.Services
     internal static class SessionConflictDialog
     {
         /// <summary>
-        /// 他 PC 検出時の dialog を表示。OK で続行、Cancel で abort。
+        /// 別の Manager / Launcher 検出時の dialog を表示。OK で続行、Cancel で abort。
         ///
         /// (#179 PR3b) Manager + Launcher の 2 系統検出を 1 dialog に merge 表示する設計。
         /// 検出 list は行毎に component 種別 (Manager / Launcher) を区別、最大 5 件 + 残件数要約は
@@ -74,6 +74,8 @@ namespace TonePrism.Manager.Services
             // 「上書き」「編集内容」依存を撤回した一般語に書換え、全 callsite で semantic と整合させる。
             // Startup 側も同方針 (= 「編集内容や バックアップが お互いに上書き」を「データや バックアップが
             // 競合して破損したり 消えたりする」に書換え)。
+            // (#251) 上記引用の「他 PC の 作業と競合して」は #251 で「別の Manager / Launcher と競合して」へ
+            // 更に汎用化済 (現行本文は Startup=L88-93 / EditOperation=L102-107 を参照)。
             string title;
             string body;
             if (context == SessionConflictDialogContext.Startup)
@@ -107,7 +109,7 @@ namespace TonePrism.Manager.Services
                     "「キャンセル」を押す: 実行を中止する (別の Manager / Launcher を閉じてから実行する)";
             }
 
-            Logger.Warn("[SessionConflictDialog] " + context + " context で他 PC 検出 (Manager=" + managerOthers.Count + " Launcher=" + launcherOthers.Count + " total=" + totalCount + " 件) → dialog 表示");
+            Logger.Warn("[SessionConflictDialog] " + context + " context で別の Manager / Launcher を検出 (Manager=" + managerOthers.Count + " Launcher=" + launcherOthers.Count + " total=" + totalCount + " 件) → dialog 表示");
             // (#179 PR3b round 3 L-2) 検出 PC の pc_name / pid を debug trail に embed。
             // 同 PC 検出時に「自 Process.Id と一致 → 自 PC Launcher」を log 解析で判定可能化。
             // dialog body (= user 視点) には pid は出さず (= 部員視点で意味なし)、log のみ。
@@ -150,8 +152,8 @@ namespace TonePrism.Manager.Services
             // 残件数要約は merge count。表示順は Manager → Launcher (= 既存 PR #184 の Manager 表示
             // を上に維持しつつ Launcher を後段に追加、user が「Manager 系の検出」を先に視覚的に確認)。
             //
-            // (round 1 L-4 既存) version embed の意義: 「他 PC が古い version で開いている」case を
-            // user が認知可能 (compatibility 警告の材料)、Launcher 側でも同 logic。
+            // (round 1 L-4 既存) version embed の意義: 「別の Manager / Launcher が古い version で開いている」
+            // case を user が認知可能 (compatibility 警告の材料)、Launcher 側でも同 logic。
             var sb = new StringBuilder();
             sb.Append("検出した PC:");
             int totalCount = managerOthers.Count + launcherOthers.Count;
