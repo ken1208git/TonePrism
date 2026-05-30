@@ -125,12 +125,21 @@ namespace TonePrism.Manager.Services
                 // (追加精査 ⑥) BackupService と同様、yyyyMMdd_HHmmss の同 1 秒衝突を suffix で回避する。
                 // 復元連打は UI 上 ProcessingDialog で block されるため発生確率は低いが、防御ラインとして
                 // BackupService と同じ pattern に揃える。
+                // (PR #236 レビュー対応 #4) safety にも実行 PC 名を埋め込む (auto/manual と同じ規約)。host 無しだと
+                // 共有 backups/safety/ で 2 台が同一秒に復元した際、両者が同名 safety_<日時>.db を作って一方が他方を
+                // Online Backup API で上書きしうる (衝突 suffix _N は自プロセス内のみで cross-PC を分離できない)。
+                // host を入れると別 PC は baseName 自体が分離して衝突しない。BackupCatalogService の SafetyRegex /
+                // ExtractHost は既に host セグメントを解釈できるため履歴表示も追従する。
                 string safetyTimestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                string safetyPath = Path.Combine(safetyDir, $"safety_{safetyTimestamp}.db");
+                string safetyHost = BackupService.SanitizeHostForFileName(pcName);
+                string safetyBaseName = string.IsNullOrEmpty(safetyHost)
+                    ? $"safety_{safetyTimestamp}"
+                    : $"safety_{safetyTimestamp}_{safetyHost}";
+                string safetyPath = Path.Combine(safetyDir, safetyBaseName + ".db");
                 int safetyCollisionSuffix = 2;
                 while (File.Exists(safetyPath))
                 {
-                    safetyPath = Path.Combine(safetyDir, $"safety_{safetyTimestamp}_{safetyCollisionSuffix}.db");
+                    safetyPath = Path.Combine(safetyDir, $"{safetyBaseName}_{safetyCollisionSuffix}.db");
                     safetyCollisionSuffix++;
                     if (safetyCollisionSuffix > 99)
                     {

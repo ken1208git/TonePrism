@@ -106,47 +106,63 @@ namespace TonePrism.Manager
                         Logger.Info("[DatabaseManager] (#247) migration 検出 (v" + versionBeforeMigration + " < v" + CurrentDbVersion + ")、foreign_keys=OFF で実行 (親テーブル recreate の CASCADE 暴発防止)");
                     }
 
-                    using (var transaction = connection.BeginTransaction())
+                    // (PR #236 レビュー対応 #5) FK=ON 復帰を finally に置く。旧実装は復帰が using(transaction) の
+                    // 後・try の外にあり、migration が例外で抜けると ON 復帰を通らず接続が FK=OFF のまま close していた。
+                    // 現状は pooling 無効 (接続文字列に Pooling=True 無し) + 次回 open 時 ON 再設定で self-healing の
+                    // ため実害は無いが、将来 pooling 有効化時に FK=OFF 接続がプールへ還る穴を構造的に閉じる。
+                    try
                     {
-                        try
+                        using (var transaction = connection.BeginTransaction())
                         {
-                            CreateTables(connection, transaction);
-                            MigrateDevelopersTable(connection, transaction);
-                            Logger.Info("[DatabaseManager] Calling MigrateGamesTable...");
-                            MigrateGamesTable(connection, transaction);
-                            MigrateSurveysTable(connection, transaction);
-                            MigrateGameVersionsTable(connection, transaction);
-                            CheckAndMigrateDatabase(connection, transaction);
-
-                            // (#247) FK を OFF にして migration した場合、commit 前に foreign_key_check で整合を
-                            // 検証する。違反は warn ログのみで起動は継続 (VerifySchema と同じ非破壊方針)。
-                            if (fkDisabledForMigration)
+                            try
                             {
-                                VerifyForeignKeyIntegrity(connection, transaction);
+                                CreateTables(connection, transaction);
+                                MigrateDevelopersTable(connection, transaction);
+                                Logger.Info("[DatabaseManager] Calling MigrateGamesTable...");
+                                MigrateGamesTable(connection, transaction);
+                                MigrateSurveysTable(connection, transaction);
+                                MigrateGameVersionsTable(connection, transaction);
+                                CheckAndMigrateDatabase(connection, transaction);
+
+                                // (#247) FK を OFF にして migration した場合、commit 前に foreign_key_check で整合を
+                                // 検証する。違反は warn ログのみで起動は継続 (VerifySchema と同じ非破壊方針)。
+                                if (fkDisabledForMigration)
+                                {
+                                    VerifyForeignKeyIntegrity(connection, transaction);
+                                }
+
+                                // 全マイグレーション完了後にスキーマ整合性を検証する。
+                                // drift があった場合でも例外は投げず警告ログのみ。
+                                // （AGENTS.md "Database Schema Management" 参照）
+                                VerifySchema(connection, transaction);
+
+                                transaction.Commit();
                             }
-
-                            // 全マイグレーション完了後にスキーマ整合性を検証する。
-                            // drift があった場合でも例外は投げず警告ログのみ。
-                            // （AGENTS.md "Database Schema Management" 参照）
-                            VerifySchema(connection, transaction);
-
-                            transaction.Commit();
-                        }
-                        catch (Exception)
-                        {
-                            transaction.Rollback();
-                            throw;
+                            catch (Exception)
+                            {
+                                transaction.Rollback();
+                                throw;
+                            }
                         }
                     }
-
-                    // (#247) 接続プール経由で FK=OFF 状態が再利用されないよう ON に戻す
-                    // (OpenConnectionWithJournalMode が次回 open 時に ON を再設定するため self-healing だが、
-                    //  状態を残さないよう明示的に戻す)。transaction 外なので PRAGMA が有効。
-                    if (fkDisabledForMigration)
+                    finally
                     {
-                        using (var cmd = new SQLiteCommand("PRAGMA foreign_keys=ON", connection))
+                        // (#247 / #5) FK を OFF にしていた場合は commit / rollback / 例外いずれの経路でも必ず ON に
+                        // 戻す。transaction は using を抜けて解放済のため PRAGMA が有効。復帰自体の失敗は握り潰す
+                        // (OpenConnectionWithJournalMode が次回 open 時に ON を再設定する self-healing が効くため)。
+                        if (fkDisabledForMigration)
                         {
-                            cmd.ExecuteNonQuery();
+                            try
+                            {
+                                using (var cmd = new SQLiteCommand("PRAGMA foreign_keys=ON", connection))
+                                {
+                                    cmd.ExecuteNonQuery();
+                                }
+                            }
+                            catch (Exception fkEx)
+                            {
+                                Logger.Warn("[DatabaseManager] (#5) foreign_keys=ON 復帰に失敗 (次回 open で self-heal): " + fkEx.Message);
+                            }
                         }
                     }
                 }

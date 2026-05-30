@@ -425,7 +425,8 @@ namespace TonePrism.Manager.Services
         /// 「末尾 `_&lt;数値&gt;` = 衝突連番」解釈との曖昧性をゼロにする)。全除去で空になった場合は host なしに
         /// fall back する (ファイル名は `&lt;種類&gt;_&lt;日時&gt;.db` 形式)。
         /// </summary>
-        private static string SanitizeHostForFileName(string host)
+        // (PR #236 レビュー対応 #4) RestoreService の safety 命名でも流用するため internal 化。
+        internal static string SanitizeHostForFileName(string host)
         {
             if (string.IsNullOrEmpty(host)) return "";
             var sb = new System.Text.StringBuilder(host.Length);
