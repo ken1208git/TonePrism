@@ -196,14 +196,26 @@ namespace TonePrism.Manager.Controls
             }
 
             string safetyPath = null;
+            RestoreDbMissingException dbMissing = null;
             DialogResult dr;
             using (var dialog = new ProcessingDialog((progress, token) =>
             {
-                safetyPath = _dbManager.RestoreService.Restore(resolvedPath, progress, token);
+                // (レビュー対応 #1) DB 喪失の最悪ケースは専用例外で捕捉して caller に伝える。re-throw して
+                // ProcessingDialog には Abort させる (例外 Message = 具体的な復旧手順がそのまま画面表示される)。
+                try { safetyPath = _dbManager.RestoreService.Restore(resolvedPath, progress, token); }
+                catch (RestoreDbMissingException dmx) { dbMissing = dmx; throw; }
             }))
             {
                 dialog.Text = "復元中";
                 dr = dialog.ShowDialog(this);
+            }
+
+            // (レビュー対応 #1) toneprism.db 喪失の最悪ケース: ProcessingDialog が既に例外 Message の具体的な
+            // 復旧手順を表示済。汎用「復元中にエラー（詳細はログ）」で上書きせず、ログを残して中止する。
+            if (dbMissing != null)
+            {
+                Logger.Error("[BackupSectionPanel] 復元中に toneprism.db が失われた可能性 (要手動復旧): " + dbMissing.Message);
+                return;
             }
 
             // ProcessingDialog は OperationCanceledException を Cancel、

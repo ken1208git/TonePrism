@@ -44,8 +44,10 @@ namespace TonePrism.Manager
             Color headColor;
             if (_result.AnalysisFailed)
             {
-                headline = "整合性チェックを実行できませんでした";
-                headColor = Color.DarkOrange;
+                // (レビュー対応 #2) 整合性チェック自体の失敗は「スキーマで DB が読めない」級の深刻状態
+                // (復元後 migration 失敗等)。orange ではなく critical 同等の赤で「対処が必要」と明示する。
+                headline = "⚠ 整合性チェックを実行できませんでした（対処が必要）";
+                headColor = Color.Firebrick;
             }
             else if (_result.HasCriticalFindings)
             {

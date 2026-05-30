@@ -37,7 +37,7 @@ namespace TonePrism.Manager.Services
         private static readonly Regex ManualRegex = new Regex(@"^manual_(\d{8})_(\d{6})(?:_(.+))?\.db$", RegexOptions.IgnoreCase);
         private static readonly Regex LegacyRegex = new Regex(@"^toneprism_(\d{8})_(\d{6})(?:_(.+))?\.db$", RegexOptions.IgnoreCase);
         // #168 ブランド改名前の旧接頭辞 `prism_` (= toneprism_ より前)。旧 folder-scan は拾わなかったが、
-        // 履歴可視性のため走査対象に含める (種類不明なので安全側 manual)。
+        // 履歴可視性のため走査対象に含める (種類不明なので "unknown" 分類 = retention 対象外で自動削除されない)。
         private static readonly Regex PrismLegacyRegex = new Regex(@"^prism_(\d{8})_(\d{6})(?:_(.+))?\.db$", RegexOptions.IgnoreCase);
         private static readonly Regex SafetyRegex = new Regex(@"^safety_(\d{8})_(\d{6})(?:_(.+))?\.db$", RegexOptions.IgnoreCase);
         private static readonly Regex SafetyLegacyRegex = new Regex(@"^safety_before_restore_(\d{8})_(\d{6})(?:_(.+))?\.db$", RegexOptions.IgnoreCase);

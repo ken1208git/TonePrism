@@ -277,17 +277,24 @@ namespace TonePrism.Manager.Services
                 {
                     Logger.Error("[RestoreService] 現 DB の置換に失敗し DB ファイルが不在の可能性があります。復元データを残します: '"
                         + tempPath + "' → これを '" + dbPath + "' にリネームするか、退避フォルダの safety バックアップから復元してください。");
+                    // (レビュー対応 #1) この経路は「現 DB を削除済み + 置換 Move 失敗」= toneprism.db が不在に
+                    // なりうる最悪ケース。caller の汎用「復元失敗（詳細はログ）」メッセージに埋もれさせず、専用例外で
+                    // 具体的な復旧手順を画面に出させる (例外 Message 自体を操作可能な案内文にする)。
+                    throw new RestoreDbMissingException(
+                        "復元中にデータベースの置き換えに失敗し、toneprism.db が一時的に失われた可能性があります。\n\n" +
+                        "【復旧方法】次のいずれかを行ってください:\n" +
+                        "  ① 「" + tempPath + "」を「" + dbPath + "」にリネームする\n" +
+                        "  ② バックアップ画面の「復元」で退避ファイル (safety_*.db) から復元する\n\n" +
+                        "復元データ (.restore-tmp) は安全のため残してあります。詳細はログを参照してください。",
+                        ex);
                 }
-                else
-                {
-                    TryDeleteTempFile(tempPath);
-                }
+                TryDeleteTempFile(tempPath);
                 throw;
             }
             finally
             {
                 // (H5) advisory restore-lock を解放。lock 取得済の場合のみ delete (= 他 PC 保有 lock は触らない)。
-                // ReleaseRestoreLock は SQL の LIKE 句で「自 PC 保有行のみ削除」を保証している。
+                // ReleaseRestoreLock は SELECT → owner 完全一致判定 → exact DELETE で「自 PC 保有行のみ削除」を保証 (旧 LIKE 句の wildcard 巻き込みは撤去済、SettingsRepository 参照)。
                 if (_settingsRepo != null)
                 {
                     try
@@ -420,5 +427,15 @@ namespace TonePrism.Manager.Services
             // 5回試して駄目ならもう一度試して例外を伝播
             File.Delete(path);
         }
+    }
+
+    /// <summary>
+    /// (レビュー対応 #1) 復元中に現 DB を削除済みで置換 Move も失敗し、toneprism.db が不在になりうる
+    /// 最悪ケースを表す専用例外。caller (BackupSectionPanel) はこれを汎用エラーと区別し、Message に
+    /// 入れた具体的な復旧手順をユーザーに提示する。
+    /// </summary>
+    public class RestoreDbMissingException : Exception
+    {
+        public RestoreDbMissingException(string message, Exception inner) : base(message, inner) { }
     }
 }
