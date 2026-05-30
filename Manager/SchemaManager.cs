@@ -1938,11 +1938,17 @@ namespace TonePrism.Manager
                 return true;
             }
 
-            // データ起因 skip 判定: 範囲外 play_time を持つ行を事前検出 (あれば INSERT-SELECT が CHECK 違反で
-            // 失敗するため、hard-fail で起動を止めず skip + 警告 + retry に倒す)。NULL は CHECK 許容なので除外。
+            // データ起因 skip 判定: 範囲外 play_time / difficulty を持つ行を事前検出 (あれば INSERT-SELECT が
+            // CHECK 違反で失敗するため、hard-fail で起動を止めず skip + 警告 + retry に倒す)。NULL は CHECK 許容なので除外。
+            // (PR #236 レビュー対応 #3) games_new は play_time / difficulty の **両方** に CHECK を強制するため、
+            // 事前検査も両方を見る。play_time は本 migration まで CHECK が無く範囲外データが既存しうる一方、
+            // difficulty は CreateTables で長く CHECK 済のため範囲外は通常存在しないが、CHECK 不在の旧 v0 DB 等で
+            // 範囲外 difficulty があると INSERT-SELECT が throw → 起動失敗 (= play_time の skip+warn と真逆) になる
+            // 非対称を防ぐため difficulty も同じ skip+warn 経路に乗せる。
             long outOfRange = 0;
             using (var cmd = new SQLiteCommand(
-                "SELECT COUNT(*) FROM games WHERE play_time IS NOT NULL AND play_time NOT BETWEEN 1 AND 3",
+                "SELECT COUNT(*) FROM games WHERE (play_time IS NOT NULL AND play_time NOT BETWEEN 1 AND 3) " +
+                "OR (difficulty IS NOT NULL AND difficulty NOT BETWEEN 1 AND 3)",
                 connection, transaction))
             {
                 var r = cmd.ExecuteScalar();
@@ -1951,9 +1957,9 @@ namespace TonePrism.Manager
             if (outOfRange > 0)
             {
                 Logger.Warn(
-                    "[DatabaseManager] WARNING: games.play_time に範囲外 (1-3 以外) の値を持つ行が " + outOfRange + " 件あるため " +
+                    "[DatabaseManager] WARNING: games.play_time / difficulty に範囲外 (1-3 以外) の値を持つ行が " + outOfRange + " 件あるため " +
                     "V19 -> V20 (CHECK 追加) を skip します (user_version 据え置き、次回起動時に再試行)。" +
-                    "tools/sqlite3/sqlite3.exe で `SELECT game_id, play_time FROM games WHERE play_time IS NOT NULL AND play_time NOT BETWEEN 1 AND 3;` " +
+                    "tools/sqlite3/sqlite3.exe で `SELECT game_id, play_time, difficulty FROM games WHERE (play_time IS NOT NULL AND play_time NOT BETWEEN 1 AND 3) OR (difficulty IS NOT NULL AND difficulty NOT BETWEEN 1 AND 3);` " +
                     "を確認し、値を 1-3 または NULL に是正してから Manager を再起動してください。");
                 return false;
             }

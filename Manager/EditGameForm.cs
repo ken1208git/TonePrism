@@ -995,11 +995,15 @@ namespace TonePrism.Manager
             var versionDups = cmbVersionList.Items
                 .OfType<GameVersion>()
                 .Where(v => !string.IsNullOrEmpty(v.Version))
+                // (PR #236 レビュー対応 #2) GroupBy を OrdinalIgnoreCase に。raw-fallback キー (正規化不能版) が
+                // 既定の Ordinal だと "V1.0" と "v1.0" のような case 違いが group 化されず UI 重複ガードを素通りし、
+                // DB の UNIQUE(game_id, version COLLATE NOCASE) に raw で当たって SQLiteException (フレンドリーで
+                // ない技術的エラー) として表面化していた。DB の NOCASE collation と UI 判定を揃えて事前に弾く。
                 .GroupBy(v =>
                 {
                     string normalized;
                     return SemverInputControl.TryNormalize(v.Version, out normalized) ? normalized : v.Version;
-                })
+                }, StringComparer.OrdinalIgnoreCase)
                 .Where(g => g.Count() > 1)
                 .Select(g =>
                 {
