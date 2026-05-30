@@ -62,7 +62,7 @@ namespace TonePrism.Manager
             this.lblFirstName.Name = "lblFirstName";
             this.lblFirstName.Size = new System.Drawing.Size(31, 15);
             this.lblFirstName.TabIndex = 2;
-            this.lblFirstName.Text = "名*";
+            this.lblFirstName.Text = "名";
             // 
             // txtFirstName
             // 

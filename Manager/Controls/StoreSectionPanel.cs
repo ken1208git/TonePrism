@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Linq;
 using System.Windows.Forms;
 using TonePrism.Manager.Models;
 
@@ -44,44 +45,54 @@ namespace TonePrism.Manager.Controls
         {
             if (dgvSections.Columns.Count == 0) return;
 
-            foreach (DataGridViewColumn col in dgvSections.Columns)
+            // (NRE 対策) `dgvSections.DataSource = null; = _sections;` 直後の transient な
+            // auto-generated column 状態で、列のプロパティ setter (`Visible` / `HeaderText` / `Width`)
+            // が WinForms 内部で NRE を起こす経路がある (=本 method 内で stack frame が止まる現象、
+            // 復元 → DatabaseChanged → 全 panel reload の流れで観測)。`SuspendLayout` で内部レイアウト
+            // 更新を抑止し、全列を確定してから一度に `ResumeLayout` する形に変える + 個別 column アクセスは
+            // null チェック付き helper に集約することで、WinForms 内部の race / null deref に届く前に
+            // 設定を完了させる。GameSectionPanel.ConfigureDataGridView の防御 pattern と趣旨は同じ
+            // (= 明示列挙 + null チェック + 局所 helper)。
+            dgvSections.SuspendLayout();
+            try
             {
-                col.Visible = false;
-            }
+                // 全列を一旦非表示。foreach 中に DataGridView 側で列コレクションが変動しないよう
+                // ToList() でスナップショット経由にする (= enumerator 維持 + col 参照保持の二重防御)。
+                foreach (var col in dgvSections.Columns.Cast<DataGridViewColumn>().ToList())
+                {
+                    if (col == null) continue;
+                    col.Visible = false;
+                }
 
-            // DisplayOrderは非表示（表の並び順がそのまま順序）
-            if (dgvSections.Columns.Contains("Title"))
-            {
-                dgvSections.Columns["Title"].Visible = true;
-                dgvSections.Columns["Title"].HeaderText = "タイトル";
-                dgvSections.Columns["Title"].Width = 150;
-            }
-            if (dgvSections.Columns.Contains("SectionTypeDisplay"))
-            {
-                dgvSections.Columns["SectionTypeDisplay"].Visible = true;
-                dgvSections.Columns["SectionTypeDisplay"].HeaderText = "タイプ";
-                dgvSections.Columns["SectionTypeDisplay"].Width = 110;
-            }
-            if (dgvSections.Columns.Contains("SectionSourceDisplay"))
-            {
-                dgvSections.Columns["SectionSourceDisplay"].Visible = true;
-                dgvSections.Columns["SectionSourceDisplay"].HeaderText = "ソース";
-                dgvSections.Columns["SectionSourceDisplay"].Width = 120;
-            }
-            if (dgvSections.Columns.Contains("MaxDisplayCount"))
-            {
-                dgvSections.Columns["MaxDisplayCount"].Visible = true;
-                dgvSections.Columns["MaxDisplayCount"].HeaderText = "表示数";
-                dgvSections.Columns["MaxDisplayCount"].Width = 60;
-            }
-            if (dgvSections.Columns.Contains("IsVisible"))
-            {
-                dgvSections.Columns["IsVisible"].Visible = true;
-                dgvSections.Columns["IsVisible"].HeaderText = "表示";
-                dgvSections.Columns["IsVisible"].Width = 50;
-            }
+                // DisplayOrder / 内部用 property は非表示のまま、表示したいものだけ helper で復帰させる。
+                ConfigureColumn("Title", "タイトル", 150);
+                ConfigureColumn("SectionTypeDisplay", "タイプ", 110);
+                ConfigureColumn("SectionSourceDisplay", "ソース", 120);
+                ConfigureColumn("MaxDisplayCount", "表示数", 60);
+                ConfigureColumn("IsVisible", "表示", 50);
 
-            dgvSections.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+                dgvSections.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            }
+            finally
+            {
+                dgvSections.ResumeLayout(true);
+            }
+        }
+
+        /// <summary>
+        /// (NRE 対策) 名前指定 column アクセスの defensive helper。`Contains` + 二重 null チェックで、
+        /// auto-generated 直後の transient state で `Columns["name"]` が unexpected に null を返す経路や、
+        /// 列が存在しないバインドソースで設定処理が落ちる経路を構造的に封じる。設定対象は Visible / HeaderText /
+        /// Width の 3 件に固定 (=旧コードの per-column block と等価)。
+        /// </summary>
+        private void ConfigureColumn(string name, string headerText, int width)
+        {
+            if (!dgvSections.Columns.Contains(name)) return;
+            var col = dgvSections.Columns[name];
+            if (col == null) return;
+            col.Visible = true;
+            col.HeaderText = headerText;
+            col.Width = width;
         }
 
         private StoreSectionInfo GetSelectedSection()

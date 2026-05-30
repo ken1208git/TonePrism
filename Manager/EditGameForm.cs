@@ -34,6 +34,65 @@ namespace TonePrism.Manager
         // 旧実装は cmbVersionList_SelectedIndexChanged 直後に宣言されてフィールド集約規約を破っていた。
         private GameVersion currentDisplayingVersion = null;
 
+        // (#234) LoadVersions が初期選択した version (= 起動対象 = games.version に一致する版) の DB id。
+        // OK 押下時に「ドロップダウンを別の版に切り替えたまま保存しようとしている」= アクティブ版の
+        // 暗黙切替を検出して確認ダイアログを出すために使う。row 単位 (DB id) で比較するため、
+        // アクティブ版を rename しただけ (同 row・version 文字列のみ変更) では誤発火しない。
+        private int? _initialSelectedVersionId = null;
+
+        // 非アクティブ版で MinPlayers / MaxPlayers が DB 上 null だった場合の null 保護用 snapshot。
+        // NumericUpDown は null 値を持てないので Load 時に Minimum (=1) を表示するが、user が触っていない
+        // 限り Save で null を維持する (= 旧実装の "前 version の数値が silent に書き換わる" 経路を閉鎖)。
+        // active 版の null は games.version mirror 仕様で「games 値で healing → DB に書き戻す」が意図された
+        // 挙動なので、本 flag は active 版では false にして従来の自己修復 path を温存する。
+        private bool _versionMinPlayersWasNullOnLoad;
+        private bool _versionMaxPlayersWasNullOnLoad;
+        private decimal _versionMinPlayersDisplayedOnLoad;
+        private decimal _versionMaxPlayersDisplayedOnLoad;
+
+        // (累積監査) difficulty / play_time は GameVersion で int? (NULL 可能) だが、UI の ComboBox は
+        // NULL を表現できず Load 時に既定 index を表示する。Min/MaxPlayers と同じ null 保護パターンで、
+        // 「Load 時 NULL + 非アクティブ + user が index を触っていない」ときは Save で NULL を維持する。
+        // 旧実装は difficulty/play_time に保護が無く、NULL の非アクティブ版を表示しただけで既定値
+        // (普通 / 5-15分) に書き換わる非対称があった。
+        private bool _versionDifficultyWasNullOnLoad;
+        private bool _versionPlayTimeWasNullOnLoad;
+        private int _versionDifficultyDisplayedOnLoad;
+        private int _versionPlayTimeDisplayedOnLoad;
+
+        // (M1) games.release_year は GameInfo.ReleaseYear が int? 型で null 可能だが、UI 側 numReleaseYear は
+        // NumericUpDown のため null を表現できない。Load 時に null だった場合は DateTime.Now.Year を仮表示する
+        // が、本 flag が true + user が値を触っていない (= 表示値と保存時の値が同一) 場合は null を維持する。
+        // Min/MaxPlayers の null 保護パターンと同じ。
+        private bool _gameReleaseYearWasNullOnLoad;
+        private decimal _gameReleaseYearDisplayedOnLoad;
+
+        // (累積監査 round 4 Low-5) games.min_players / max_players 用の null 保護 snapshot。通常経路は
+        // selectedVersion != null で UpdateVersionsAndGame の game ← selectedVersion mirror で正しい値が入るが、
+        // 防御経路 (cmbVersionList が空 = 異常 DB) で games.MinPlayers/MaxPlayers が NULL だったゲームの
+        // 編集を保存すると、numMinPlayers.Minimum=1 で常に > 0 となり Launcher の表示が「不明」→「1人」に
+        // silent 化ける drift があった。ReleaseYear と同じ pattern で防御経路でも NULL を維持する。
+        private bool _gameMinPlayersWasNullOnLoad;
+        private bool _gameMaxPlayersWasNullOnLoad;
+        private decimal _gameMinPlayersDisplayedOnLoad;
+        private decimal _gameMaxPlayersDisplayedOnLoad;
+
+        // (round 5 M3) CopyExternalImagesToVersionFolder が新しく disk に書いた画像ファイル path の集約。
+        // OK 成功で commit するまでは「user が Cancel で閉じた場合に削除すべきオーファン候補」として保持し、
+        // OK 確定時にクリアする (= 残しても害なしだが、retry でない user による Cancel での disk leak を最小化)。
+        // round 4 R4-M10 の versionDir 所有 flag と同方針 (= 自分が作った disk 状態は自分で片付ける)。
+        private readonly List<string> _copiedExternalImagePaths = new List<string>();
+
+        // (Finding #1) 版切替で失われる「gameFolder 外の画像」絶対パスを版ごとに記憶する。key = version.Id。
+        // ApplyRelativePaths は絶対 (= フォルダ外) path を null に格下げる契約のため、外部画像を選んだまま
+        // 別の版へ切り替えると textbox の選択も版オブジェクトの path も消え、OK 時のコピー (CopyExternal
+        // ImagesToVersionFolder は「表示中の版」しか対象にしない) からも漏れて silent に選択が失われていた。
+        // 切替前 (SaveGameDataToVersion) に控え、切替で戻ったとき (LoadGameDataForVersion) textbox に復元、
+        // OK 時に表示中以外の版についても各版フォルダへコピーする。コピーは OK まで遅延 (= disk を触らない)
+        // 既存方針を維持しつつ、選択の「記憶」だけ in-memory で持ち越す。
+        private readonly Dictionary<int, string> _pendingExternalThumbnailByVersionId = new Dictionary<int, string>();
+        private readonly Dictionary<int, string> _pendingExternalBackgroundByVersionId = new Dictionary<int, string>();
+
         // (#158 CX-1) folder rename を 2-phase 化するための plan 単位 (Phase 1 で構築 / Phase 2 で実行)。
         // (#158 round 4 codex P1) Old{Executable,Thumbnail,Background}Path: in-memory state rollback 用に
         // path 書き換え前の値を capture。disk Move を rollback しても in-memory が NEW のままだと、同
@@ -114,10 +173,36 @@ namespace TonePrism.Manager
         }
 
         /// <summary>
+        /// (round 5 M6) round 2 M2 で導入した clamp helper は本ファイル private static だったが、
+        /// DeveloperForm 等で同じ throw 経路 (numGrade に DB 上 999999 超え値 → ArgumentOutOfRangeException で
+        /// ダイアログ自体が開けない) が見つかったため GameFormHelper.SetClampedNumericValue に昇格。
+        /// 旧 caller との互換のためここでは forwarder 1 行で残置 (round 5 M6 で削除予定)。
+        /// </summary>
+        private static bool SetClampedNumericValue(System.Windows.Forms.NumericUpDown nud, int value, string fieldName)
+            => Services.GameFormHelper.SetClampedNumericValue(nud, value, fieldName, "EditGameForm");
+
+        /// <summary>
         /// フォームロード時の処理
         /// </summary>
         private void EditGameForm_Load(object sender, EventArgs e)
         {
+            // (round 5 Phase D) path textbox を編集可能 (ReadOnly=false) に解放した分、入力時の正規化 +
+            // プレビュー連動を hook する。`/` → `\` への正規化は GameFormHelper の共通実装。
+            txtThumbnailPath.TextChanged += (s, ev) =>
+            {
+                Services.GameFormHelper.NormalizeSlashInPathTextBox(txtThumbnailPath);
+                UpdateThumbnailPreview();
+            };
+            txtBackgroundPath.TextChanged += (s, ev) =>
+            {
+                Services.GameFormHelper.NormalizeSlashInPathTextBox(txtBackgroundPath);
+                UpdateBackgroundPreview();
+            };
+            txtExecutablePath.TextChanged += (s, ev) =>
+            {
+                Services.GameFormHelper.NormalizeSlashInPathTextBox(txtExecutablePath);
+            };
+
             // ゲームIDは編集不可（Enabled = falseで選択も不可）
             txtGameId.Text = originalGame.GameId;
 
@@ -127,12 +212,17 @@ namespace TonePrism.Manager
             
             if (originalGame.ReleaseYear.HasValue)
             {
-                numReleaseYear.Value = originalGame.ReleaseYear.Value;
+                // (M2) DB に範囲外の年 (例: 0 / 9999) があると ArgumentOutOfRangeException で edit 画面が開けなくなる。
+                // clamp 経路に乗せて空欄相当 (= NullOnLoad 扱い) で扱う。
+                _gameReleaseYearWasNullOnLoad = !SetClampedNumericValue(numReleaseYear, originalGame.ReleaseYear.Value, "ReleaseYear");
             }
             else
             {
+                // (M1) DB 上 null を NumericUpDown で「現在年」と仮表示するが、user が触っていなければ null 維持。
                 numReleaseYear.Value = DateTime.Now.Year;
+                _gameReleaseYearWasNullOnLoad = true;
             }
+            _gameReleaseYearDisplayedOnLoad = numReleaseYear.Value;
 
             // ジャンルチェックボックスリストを初期化
             clbGenre.Items.Clear();
@@ -142,23 +232,30 @@ namespace TonePrism.Manager
             }
             GameFormHelper.SetSelectedGenres(clbGenre, originalGame.Genre);
 
+            // (累積監査 round 4 Low-5) games.min_players / max_players が DB 上 NULL のときの保護 snapshot を記録。
+            // 通常経路 (selectedVersion != null) では selectedVersion 値で上書きされ救われるが、防御経路で
+            // numMinPlayers.Minimum=1 で常に > 0 となり NULL→1 の silent 上書きが起きる drift を防ぐ。
             if (originalGame.MinPlayers.HasValue)
             {
-                numMinPlayers.Value = originalGame.MinPlayers.Value;
+                _gameMinPlayersWasNullOnLoad = !SetClampedNumericValue(numMinPlayers, originalGame.MinPlayers.Value, "MinPlayers (game)");
             }
             else
             {
                 numMinPlayers.Value = 1;
+                _gameMinPlayersWasNullOnLoad = true;
             }
+            _gameMinPlayersDisplayedOnLoad = numMinPlayers.Value;
 
             if (originalGame.MaxPlayers.HasValue)
             {
-                numMaxPlayers.Value = originalGame.MaxPlayers.Value;
+                _gameMaxPlayersWasNullOnLoad = !SetClampedNumericValue(numMaxPlayers, originalGame.MaxPlayers.Value, "MaxPlayers (game)");
             }
             else
             {
                 numMaxPlayers.Value = 1;
+                _gameMaxPlayersWasNullOnLoad = true;
             }
+            _gameMaxPlayersDisplayedOnLoad = numMaxPlayers.Value;
 
             // コンボボックスを初期化
             GameFormHelper.InitializeDifficultyCombo(cmbDifficulty, originalGame.Difficulty);
@@ -258,33 +355,55 @@ namespace TonePrism.Manager
                         MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
 
+                // (H2) _initialSelectedVersionId は cmbVersionList.SelectedItem 設定 (= SelectedIndexChanged
+                // 発火 → LoadGameDataForVersion 実行) より **前** に決定する。
+                // 旧実装は代入を SelectedItem 設定の後に行っていたため、初回 load 時の LoadGameDataForVersion
+                // 内で `_initialSelectedVersionId.HasValue == false` 確定となり、#234 の active fallback
+                // (= 初期版スカスカ healing) が form open 時のみ無効化される非対称があった。dropdown を一度
+                // 切替えて戻すと正常化、という silent UX 劣化を防ぐ。
+                //
+                // (#158 round 7 M-2) `==` (= Ordinal) ではなく OrdinalIgnoreCase 比較。CX-3 で大文字
+                // V を regex 受理にした副作用で、games.version="V1.0.0" / game_versions.version="v1.0.0"
+                // (どこかの normalize 経由で書き戻された) が共存しうる。生 == 比較だと false →
+                // fallback で先頭 (= 最新版) が選択され「user が active と思っていた version と違う
+                // ものが表示される」silent UX drift になる。dup-check / rename 比較と同じ規則に揃える。
+                GameVersion initialSelected = null;
                 if (originalGame.Version != null)
                 {
-                    // (#158 round 7 M-2) `==` (= Ordinal) ではなく OrdinalIgnoreCase 比較。CX-3 で大文字
-                    // V を regex 受理にした副作用で、games.version="V1.0.0" / game_versions.version="v1.0.0"
-                    // (どこかの normalize 経由で書き戻された) が共存しうる。生 == 比較だと false →
-                    // fallback で先頭 (= 最新版) が選択され「user が active と思っていた version と違う
-                    // ものが表示される」silent UX drift になる。dup-check / rename 比較と同じ規則に揃える。
                     foreach (var item in cmbVersionList.Items)
                     {
                         if (item is GameVersion v && string.Equals(v.Version, originalGame.Version, StringComparison.OrdinalIgnoreCase))
                         {
-                            cmbVersionList.SelectedItem = item;
+                            initialSelected = v;
                             break;
                         }
                     }
-                    
-                    // 見つからなかった場合（またはVersionが設定されていない場合）は先頭（最新）を選択
-                    if (cmbVersionList.SelectedIndex == -1 && cmbVersionList.Items.Count > 0)
+                }
+                // 見つからなかった場合（またはVersionが設定されていない場合）は先頭（最新）を選択
+                if (initialSelected == null && cmbVersionList.Items.Count > 0)
+                {
+                    initialSelected = cmbVersionList.Items[0] as GameVersion;
+                    // (累積監査 round 4 Medium-14) `originalGame.Version IS NULL` の異常 DB (= 過去 migration 中断 /
+                    // 旧 Manager で games.version 未設定のまま残ったゲーム) を編集時、active fallback healing が
+                    // 無効化されて編集画面が空項目で表示される drift があった。ここで先頭版を仮 active として扱い、
+                    // OK 保存時 (line 1442 で games.version が必ず非 NULL に書き出される) に healing が自動完了する。
+                    // ユーザーへは UI 注意喚起 (warning Label 等) は出さず、Logger に trail を残すだけに留める
+                    // (= 編集動作自体は正常完遂するため、過度な驚かせ警告は避ける)。
+                    if (originalGame.Version == null && initialSelected != null)
                     {
-                        cmbVersionList.SelectedIndex = 0;
+                        Logger.Info("[EditGameForm] (Medium-14) games.version=NULL の異常 DB を編集中。先頭版 '" +
+                            initialSelected.Version + "' を仮 active とし、OK 保存で healing する: gameId=" + originalGame.GameId);
                     }
                 }
-                else if (cmbVersionList.Items.Count > 0)
+
+                // (#234) 初期選択 = 起動対象の版。OK 時のアクティブ版切替検出の基準として記録。
+                // SelectedItem 設定より前に代入することで LoadGameDataForVersion の active 判定が初回から有効。
+                _initialSelectedVersionId = initialSelected?.Id;
+                if (initialSelected != null)
                 {
-                    cmbVersionList.SelectedIndex = 0;
+                    cmbVersionList.SelectedItem = initialSelected;
                 }
-                
+
                 // 表示用にフォーマット
                 cmbVersionList.DisplayMember = "Version"; // GameVersionクラスのToStringをオーバーライドするか、DisplayMemberを設定
             }
@@ -328,12 +447,37 @@ namespace TonePrism.Manager
         {
             if (version == null) return;
 
-            version.ExecutablePath = !string.IsNullOrEmpty(txtExecutablePath.Text)
-                ? PathConversionHelper.ToRelativePath(gameFolder, txtExecutablePath.Text) : "";
-            version.ThumbnailPath = !string.IsNullOrEmpty(txtThumbnailPath.Text)
-                ? PathConversionHelper.ToRelativePath(gameFolder, txtThumbnailPath.Text) : "";
-            version.BackgroundPath = !string.IsNullOrEmpty(txtBackgroundPath.Text)
-                ? PathConversionHelper.ToRelativePath(gameFolder, txtBackgroundPath.Text) : "";
+            // (L) AddGameForm 経路 / UpdateGame 経路は空時に null 保存だが、本 path だけ "" を入れていた。
+            // Launcher 側が null と "" を別 path として扱うと silent 表示崩れの risk があるため null に統一。
+            version.ExecutablePath = NormalizeRelative(txtExecutablePath.Text, "executable_path");
+            version.ThumbnailPath = NormalizeRelative(txtThumbnailPath.Text, "thumbnail_path");
+            version.BackgroundPath = NormalizeRelative(txtBackgroundPath.Text, "background_path");
+        }
+
+        /// <summary>
+        /// (累積監査 round 3 / #9) gameFolder 基準で相対化し、絶対 path が残った場合 (= base 外) は
+        /// Logger.Warn で記録した上で null に格下げる二段目 fence。`PathConversionHelper.ToRelativePath` は
+        /// base 外の path を「絶対のまま」返す設計のため、UpdatePathTextBox の prefix 置換が部分一致しない
+        /// 経路 (例: gameId rename + 古い絶対 path) や画像 UX copy 漏れで絶対 path が DB に流入する経路を
+        /// silent 通過させてしまう risk があった。本 fence で DB 保存値が「相対 path / null」のいずれかに
+        /// 確実に collapse する契約を強制し、Launcher の path 解決が絶対と相対の混在で崩れる経路を構造閉鎖。
+        /// 絶対 path が検出された場合は画面の表示は残しつつ DB は null 保存にして user が次回 OK 時に再入力できる
+        /// 余地を残す (= silent corruption 化しない、警告 log で trail を残す)。
+        /// </summary>
+        private string NormalizeRelative(string raw, string fieldName)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+            string relative = PathConversionHelper.ToRelativePath(gameFolder, raw.Trim());
+            if (string.IsNullOrWhiteSpace(relative)) return null;
+            if (Path.IsPathRooted(relative))
+            {
+                Logger.Warn("[EditGameForm] gameFolder (" + gameFolder + ") 外の絶対パスを " + fieldName +
+                    " に保存しようとしました (raw='" + raw + "'、relative='" + relative + "')。null に格下げて保存します。" +
+                    " 画像経路は CopyExternalImagesToVersionFolder で自動コピー、それ以外は ApplyRelativePaths " +
+                    "二段目 fence で構造閉鎖。");
+                return null;
+            }
+            return relative;
         }
 
         /// <summary>
@@ -393,18 +537,74 @@ namespace TonePrism.Manager
             
             version.Genre = GameFormHelper.GetSelectedGenres(clbGenre);
             
-            version.MinPlayers = (int)numMinPlayers.Value;
-            version.MaxPlayers = (int)numMaxPlayers.Value;
-            version.Difficulty = cmbDifficulty.SelectedIndex >= 0 ? cmbDifficulty.SelectedIndex + 1 : (int?)null;
-            version.PlayTime = cmbPlayTime.SelectedIndex >= 0 ? cmbPlayTime.SelectedIndex + 1 : (int?)null;
+            // 「load 時に null かつ非 active」 + 「user が UI を触っていない (= 表示値が load 直後の snapshot のまま)」
+            // のとき null を維持する。それ以外は UI 値を書く (= active 版の自己修復 / user 編集後)。
+            if (_versionMinPlayersWasNullOnLoad && numMinPlayers.Value == _versionMinPlayersDisplayedOnLoad)
+                version.MinPlayers = null;
+            else
+                version.MinPlayers = (int)numMinPlayers.Value;
+
+            if (_versionMaxPlayersWasNullOnLoad && numMaxPlayers.Value == _versionMaxPlayersDisplayedOnLoad)
+                version.MaxPlayers = null;
+            else
+                version.MaxPlayers = (int)numMaxPlayers.Value;
+            // (累積監査) Load 時 NULL かつ user が index を触っていない場合は NULL を維持する
+            // (Min/MaxPlayers と同パターン)。それ以外は UI 値を書く (= active 版の healing / user 編集後)。
+            if (_versionDifficultyWasNullOnLoad && cmbDifficulty.SelectedIndex == _versionDifficultyDisplayedOnLoad)
+                version.Difficulty = null;
+            else
+                version.Difficulty = cmbDifficulty.SelectedIndex >= 0 ? cmbDifficulty.SelectedIndex + 1 : (int?)null;
+
+            if (_versionPlayTimeWasNullOnLoad && cmbPlayTime.SelectedIndex == _versionPlayTimeDisplayedOnLoad)
+                version.PlayTime = null;
+            else
+                version.PlayTime = cmbPlayTime.SelectedIndex >= 0 ? cmbPlayTime.SelectedIndex + 1 : (int?)null;
             version.ControllerSupport = chkControllerSupport.Checked;
             version.SupportedConnection = cmbSupportedConnection.SelectedIndex >= 0 ? cmbSupportedConnection.SelectedIndex : 0;
             
             // Developers
-            version.Developers = new List<DeveloperInfo>(developers);
+            // (累積監査 round 6 High-2) 浅いコピー (new List(developers)) は List だけ新規で中身の
+            // DeveloperInfo インスタンスを版間で共有してしまい、ある版の製作者を編集すると別の版にも
+            // 波及しうる aliasing の温床だった。AddGameForm / VersionUpForm と同じくディープコピーにして
+            // 版ごとに独立した実体を持たせる (Id はコピーしない = DELETE+INSERT 再登録のため不要)。
+            var copiedDevelopers = new List<DeveloperInfo>();
+            foreach (var d in developers)
+            {
+                copiedDevelopers.Add(new DeveloperInfo
+                {
+                    GameId = d.GameId,
+                    LastName = d.LastName,
+                    FirstName = d.FirstName,
+                    Grade = d.Grade
+                });
+            }
+            version.Developers = copiedDevelopers;
 
             // Paths: ApplyRelativePaths handles reading from text boxes and converting to relative if possible
             ApplyRelativePaths(version);
+
+            // (Finding #1) ApplyRelativePaths で null 格下げされる「gameFolder 外の画像」選択を版ごとに記憶
+            // (= 切替で戻ったとき復元 / OK 時にコピー)。内部 path / 空に変わっていれば記憶を消す (= 自己訂正)。
+            RememberPendingExternalImage(version.Id, txtThumbnailPath.Text, _pendingExternalThumbnailByVersionId);
+            RememberPendingExternalImage(version.Id, txtBackgroundPath.Text, _pendingExternalBackgroundByVersionId);
+        }
+
+        /// <summary>
+        /// (Finding #1) textbox の画像 path が gameFolder 外 (= 未コピーの外部選択) なら版 id に紐づけて記憶し、
+        /// 内部 path / 空ならその版の記憶を消す。<paramref name="versionId"/> 単位で per-version に持つことで、
+        /// 複数版を行き来しても各版の外部画像選択を取り違えずに保持・復元できる。
+        /// </summary>
+        private void RememberPendingExternalImage(int versionId, string text, Dictionary<int, string> map)
+        {
+            if (!string.IsNullOrWhiteSpace(text)
+                && !PathConversionHelper.IsPathInside(gameFolder, text))
+            {
+                map[versionId] = text.Trim();
+            }
+            else
+            {
+                map.Remove(versionId);
+            }
         }
 
         private void LoadGameDataForVersion(GameVersion version)
@@ -419,20 +619,28 @@ namespace TonePrism.Manager
             // の入力値を保持したまま OK 押下されると別 version に化けるため)。
             // (#158 round 4 L-1) 戻り値 / out error は意図的に discard。`out _` で意図を明示。
             semverVersionName.TryParseAndSet(version.Version ?? "", out _);
-            txtTitle.Text = version.Title ?? "";
+
             // (#158 round 8.6 / #164) txtDescription / txtVersionDescription はそれぞれ
             // game_versions.description (ゲーム説明文) / game_versions.update_note (更新内容) を保持。
-            // 旧実装はこの 2 行を冒頭 + 末尾 (line 421 と line 467) で重複代入していたため、片方
-            // (冒頭側) を残して末尾側を削除、関連コメントもここに集約。
-            // (#224) description / arguments は per-version の値を読む。ただし「アクティブ版」
-            // (= games.version に一致する版。games は定義上この版の mirror) に限り、版の値が空で
-            // games 側に値がある場合のみ games にフォールバックする。これは「desync と証明できる行」
-            // 限定の修復 (Codex P2 / review #1 — 非アクティブ版の意図的な空は対象外なので per-version
-            // 独立性を壊さない)。実 DB には games.description が本物・対応版が null の旧データが存在する
-            // (旧 AddGameForm 由来) ため、これを編集→保存で空消去しないための保護。フォールバックした値は
-            // OK 保存でアクティブ版に書き戻され自己修復する。
-            bool isActiveVersion = !string.IsNullOrEmpty(originalGame.Version)
-                && string.Equals(ToVersionLeaf(version.Version ?? ""), ToVersionLeaf(originalGame.Version), StringComparison.OrdinalIgnoreCase);
+            // (#224 / #234) 各項目は per-version の値を読む。ただし「アクティブ版」(= games.version に
+            // 一致する版。games は定義上この版の mirror) に限り、版の値が空のとき games にフォールバック
+            // する。これは「desync と証明できる行」限定の修復 (Codex P2 / review #1 — 非アクティブ版の
+            // 意図的な空は対象外なので per-version 独立性を壊さない)。旧 AddGameForm 由来の初期版行は
+            // Description/Arguments だけでなく Title/Genre/難易度/プレイ時間/コントローラ/通信/サムネ/
+            // 背景/製作者 も未設定だった (#234) ため、それら全項目をアクティブ版フォールバックで健全化
+            // する。フォールバックした値は OK 保存でアクティブ版に書き戻され自己修復する。
+            //
+            // (追加精査) 旧判定は version 文字列比較だったため、dropdown 上で active 版を rename したあと
+            // 別 version へ切替 → 戻る、で本来 active のはずの行が isActiveVersion=false 扱いになり
+            // healing が透過的に止まる非対称があった。保存側 (L810 付近) は既に _initialSelectedVersionId
+            // との id 比較に切り替わっているため、読込側も同じ row identity (= DB id) で揃える。
+            // _initialSelectedVersionId は LoadVersions 時に「games.version と一致する行の Id」を記録した値。
+            bool isActiveVersion = _initialSelectedVersionId.HasValue
+                && version.Id == _initialSelectedVersionId.Value;
+
+            txtTitle.Text = !string.IsNullOrWhiteSpace(version.Title)
+                ? version.Title
+                : (isActiveVersion ? (originalGame.Title ?? "") : "");
             txtDescription.Text = !string.IsNullOrWhiteSpace(version.Description)
                 ? version.Description
                 : (isActiveVersion ? (originalGame.Description ?? "") : "");
@@ -441,43 +649,145 @@ namespace TonePrism.Manager
                 : (isActiveVersion ? (originalGame.Arguments ?? "") : "");
             txtVersionDescription.Text = version.UpdateNote ?? "";
 
-            // ジャンル
-            GameFormHelper.SetSelectedGenres(clbGenre, version.Genre);
+            // ジャンル (#234: 版が空ならアクティブ版に限り games へフォールバック)
+            var genreToShow = (version.Genre != null && version.Genre.Count > 0)
+                ? version.Genre
+                : (isActiveVersion ? originalGame.Genre : null);
+            GameFormHelper.SetSelectedGenres(clbGenre, genreToShow);
 
-            // 数値系
-            if (version.MinPlayers.HasValue) numMinPlayers.Value = version.MinPlayers.Value;
-            if (version.MaxPlayers.HasValue) numMaxPlayers.Value = version.MaxPlayers.Value;
-            
-            // Difficulty (1-3)
+            // 数値系。else 欠落で「前 version の表示が残ったまま save で書き換わる」silent overwrite を
+            // 起こさないよう、null+非active のときは Minimum (=1) にリセットしつつ null 保護 flag を立てる。
+            // active 版の null フォールバック (games 値で healing) は従来通り (= save で games 値が書き戻される)。
+            // (M2) DB に NumericUpDown 範囲外の値 (例: 0 / 200) が入っている場合、生代入は
+            // ArgumentOutOfRangeException で編集画面が開けなくなる。SetClampedNumericValue で
+            // clamp + warn ログ + 注意 flag を立てる (= 保存時に意図せず clamp 値が書き戻らないよう
+            // 旧 null と同じ NullOnLoad 保護に乗せる) のが安全。
+            if (version.MinPlayers.HasValue)
+            {
+                _versionMinPlayersWasNullOnLoad = !SetClampedNumericValue(numMinPlayers, version.MinPlayers.Value, "MinPlayers (version)");
+            }
+            else if (isActiveVersion && originalGame.MinPlayers.HasValue)
+            {
+                _versionMinPlayersWasNullOnLoad = !SetClampedNumericValue(numMinPlayers, originalGame.MinPlayers.Value, "MinPlayers (game fallback)");
+            }
+            else
+            {
+                numMinPlayers.Value = numMinPlayers.Minimum;
+                _versionMinPlayersWasNullOnLoad = true;
+            }
+            _versionMinPlayersDisplayedOnLoad = numMinPlayers.Value;
+
+            if (version.MaxPlayers.HasValue)
+            {
+                _versionMaxPlayersWasNullOnLoad = !SetClampedNumericValue(numMaxPlayers, version.MaxPlayers.Value, "MaxPlayers (version)");
+            }
+            else if (isActiveVersion && originalGame.MaxPlayers.HasValue)
+            {
+                _versionMaxPlayersWasNullOnLoad = !SetClampedNumericValue(numMaxPlayers, originalGame.MaxPlayers.Value, "MaxPlayers (game fallback)");
+            }
+            else
+            {
+                numMaxPlayers.Value = numMaxPlayers.Minimum;
+                _versionMaxPlayersWasNullOnLoad = true;
+            }
+            _versionMaxPlayersDisplayedOnLoad = numMaxPlayers.Value;
+
+            // Difficulty (1-3)。null 非アクティブ版は既定 index を表示しつつ NULL 保護 flag を立てる
+            // (= user が触らなければ Save で NULL 維持。Min/MaxPlayers と同パターン)。
             if (version.Difficulty.HasValue && version.Difficulty >= 1 && version.Difficulty <= 3)
+            {
                 cmbDifficulty.SelectedIndex = version.Difficulty.Value - 1;
-            else cmbDifficulty.SelectedIndex = 1;
+                _versionDifficultyWasNullOnLoad = false;
+            }
+            else if (isActiveVersion && originalGame.Difficulty.HasValue && originalGame.Difficulty >= 1 && originalGame.Difficulty <= 3)
+            {
+                cmbDifficulty.SelectedIndex = originalGame.Difficulty.Value - 1;
+                _versionDifficultyWasNullOnLoad = false;
+            }
+            else
+            {
+                cmbDifficulty.SelectedIndex = 1;
+                _versionDifficultyWasNullOnLoad = true;
+            }
+            _versionDifficultyDisplayedOnLoad = cmbDifficulty.SelectedIndex;
 
-            // PlayTime (1-3)
+            // PlayTime (1-3)。難易度と同じ NULL 保護パターン。
             if (version.PlayTime.HasValue && version.PlayTime >= 1 && version.PlayTime <= 3)
+            {
                 cmbPlayTime.SelectedIndex = version.PlayTime.Value - 1;
-            else cmbPlayTime.SelectedIndex = 1;
+                _versionPlayTimeWasNullOnLoad = false;
+            }
+            else if (isActiveVersion && originalGame.PlayTime.HasValue && originalGame.PlayTime >= 1 && originalGame.PlayTime <= 3)
+            {
+                cmbPlayTime.SelectedIndex = originalGame.PlayTime.Value - 1;
+                _versionPlayTimeWasNullOnLoad = false;
+            }
+            else
+            {
+                cmbPlayTime.SelectedIndex = 1;
+                _versionPlayTimeWasNullOnLoad = true;
+            }
+            _versionPlayTimeDisplayedOnLoad = cmbPlayTime.SelectedIndex;
 
-            // Connection
-            if (version.SupportedConnection >= 0 && version.SupportedConnection <= 2)
-                cmbSupportedConnection.SelectedIndex = version.SupportedConnection;
+            // Connection / ControllerSupport は非 nullable で「未設定」を判別する sentinel が無い。
+            // アクティブ版は games が定義上の mirror (= 真値) なので、版値ではなく games 値を採用して
+            // 旧初期版行 (= 既定値 0 / false で保存されていた) を健全化する。非アクティブ版は版値のまま。
+            int connToShow = isActiveVersion ? originalGame.SupportedConnection : version.SupportedConnection;
+            if (connToShow >= 0 && connToShow <= 2)
+                cmbSupportedConnection.SelectedIndex = connToShow;
             else cmbSupportedConnection.SelectedIndex = 0;
 
-            chkControllerSupport.Checked = version.ControllerSupport;
-            
-            // Paths（相対パスを絶対パスに変換して表示）
-            txtExecutablePath.Text = !string.IsNullOrEmpty(version.ExecutablePath)
-                ? PathConversionHelper.ToAbsolutePath(gameFolder, version.ExecutablePath) : "";
-            txtThumbnailPath.Text = !string.IsNullOrEmpty(version.ThumbnailPath)
-                ? PathConversionHelper.ToAbsolutePath(gameFolder, version.ThumbnailPath) : "";
-            txtBackgroundPath.Text = !string.IsNullOrEmpty(version.BackgroundPath)
-                ? PathConversionHelper.ToAbsolutePath(gameFolder, version.BackgroundPath) : "";
+            chkControllerSupport.Checked = isActiveVersion ? originalGame.ControllerSupport : version.ControllerSupport;
 
-            // Developers
+            // Paths（相対パスを絶対パスに変換して表示。#234: 版が空ならアクティブ版に限り games フォールバック）
+            // (H1) ExecutablePath にも他と同じ active fallback を適用。旧 AddGameForm 経由で作られた
+            // game_versions 行は ExecutablePath が NULL のため、active 版選択中でも txt が空になり
+            // 「実行ファイルを選択してください」validation で永久 block される回帰を防ぐ。
+            string exeToShow = !string.IsNullOrEmpty(version.ExecutablePath)
+                ? version.ExecutablePath
+                : (isActiveVersion ? originalGame.ExecutablePath : null);
+            string thumbToShow = !string.IsNullOrEmpty(version.ThumbnailPath)
+                ? version.ThumbnailPath
+                : (isActiveVersion ? originalGame.ThumbnailPath : null);
+            string bgToShow = !string.IsNullOrEmpty(version.BackgroundPath)
+                ? version.BackgroundPath
+                : (isActiveVersion ? originalGame.BackgroundPath : null);
+            txtExecutablePath.Text = !string.IsNullOrEmpty(exeToShow)
+                ? PathConversionHelper.ToAbsolutePath(gameFolder, exeToShow) : "";
+            txtThumbnailPath.Text = !string.IsNullOrEmpty(thumbToShow)
+                ? PathConversionHelper.ToAbsolutePath(gameFolder, thumbToShow) : "";
+            txtBackgroundPath.Text = !string.IsNullOrEmpty(bgToShow)
+                ? PathConversionHelper.ToAbsolutePath(gameFolder, bgToShow) : "";
+
+            // (Finding #1) この版に「未コピーの外部画像」記憶があれば textbox に復元する。版オブジェクトの
+            // path は ApplyRelativePaths で null 化されていても、ユーザーの選択 (= 絶対パス) を失わない。
+            if (_pendingExternalThumbnailByVersionId.TryGetValue(version.Id, out string pendingThumb)
+                && !string.IsNullOrWhiteSpace(pendingThumb))
+                txtThumbnailPath.Text = pendingThumb;
+            if (_pendingExternalBackgroundByVersionId.TryGetValue(version.Id, out string pendingBg)
+                && !string.IsNullOrWhiteSpace(pendingBg))
+                txtBackgroundPath.Text = pendingBg;
+
+            // Developers (#234: 版が空ならアクティブ版に限り games の製作者へフォールバック)
             developers.Clear();
-            if (version.Developers != null)
+            if (version.Developers != null && version.Developers.Count > 0)
             {
-                foreach(var d in version.Developers) developers.Add(d);
+                foreach (var d in version.Developers) developers.Add(d);
+            }
+            else if (isActiveVersion && originalGame.Developers != null)
+            {
+                // games 由来の製作者をディープコピー (グリッド編集で originalGame.Developers を汚さない)。
+                // Id はコピーしない (= 保存時に version_id 付きの新規行として INSERT される)。
+                foreach (var d in originalGame.Developers)
+                {
+                    developers.Add(new DeveloperInfo
+                    {
+                        GameId = d.GameId,
+                        LastName = d.LastName,
+                        FirstName = d.FirstName,
+                        Grade = d.Grade
+                    });
+                }
             }
             RefreshDevelopersGrid();
 
@@ -531,7 +841,9 @@ namespace TonePrism.Manager
             {
                 dialog.InitialDirectory = gameFolder;
                 dialog.Filter = "画像ファイル (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp|すべてのファイル (*.*)|*.*";
-                dialog.Title = "サムネイル画像を選択（ゲームフォルダ内から選択）";
+                // (累積監査 round 3) ゲームフォルダ外の画像も選択可。OK 押下時に編集中バージョンの
+                // v{version}/ 配下へ自動コピーする (同名衝突は ImageNameConflictDialog で rename 案内)。
+                dialog.Title = "サムネイル画像を選択（ゲームフォルダ外も可。OK 時に自動コピー）";
 
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
@@ -542,7 +854,7 @@ namespace TonePrism.Manager
         }
 
         /// <summary>
-        /// 背景画像選択ボタンクリック（既存のgames/{game_id}/フォルダ内から選択）
+        /// 背景画像選択ボタンクリック（ゲームフォルダ外も可、OK 時に自動コピー）
         /// </summary>
         private void btnSelectBackground_Click(object sender, EventArgs e)
         {
@@ -550,7 +862,8 @@ namespace TonePrism.Manager
             {
                 dialog.InitialDirectory = gameFolder;
                 dialog.Filter = "画像ファイル (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp|すべてのファイル (*.*)|*.*";
-                dialog.Title = "背景画像を選択（ゲームフォルダ内から選択）";
+                // (累積監査 round 3) ゲームフォルダ外も選択可。OK 押下時に v{version}/ 配下へコピー。
+                dialog.Title = "背景画像を選択（ゲームフォルダ外も可。OK 時に自動コピー）";
 
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
@@ -682,11 +995,15 @@ namespace TonePrism.Manager
             var versionDups = cmbVersionList.Items
                 .OfType<GameVersion>()
                 .Where(v => !string.IsNullOrEmpty(v.Version))
+                // (PR #236 レビュー対応 #2) GroupBy を OrdinalIgnoreCase に。raw-fallback キー (正規化不能版) が
+                // 既定の Ordinal だと "V1.0" と "v1.0" のような case 違いが group 化されず UI 重複ガードを素通りし、
+                // DB の UNIQUE(game_id, version COLLATE NOCASE) に raw で当たって SQLiteException (フレンドリーで
+                // ない技術的エラー) として表面化していた。DB の NOCASE collation と UI 判定を揃えて事前に弾く。
                 .GroupBy(v =>
                 {
                     string normalized;
                     return SemverInputControl.TryNormalize(v.Version, out normalized) ? normalized : v.Version;
-                })
+                }, StringComparer.OrdinalIgnoreCase)
                 .Where(g => g.Count() > 1)
                 .Select(g =>
                 {
@@ -704,6 +1021,60 @@ namespace TonePrism.Manager
                     "\n\nバージョン管理ドロップダウンで該当の項目を選択し、別の名前に変更してください。",
                     "バージョン重複エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
+            }
+
+            // (Finding #4) 全版の「最小プレイ人数 > 最大プレイ人数」を検出する。OK 時の ValidateInput →
+            // ValidatePlayerCount (下の ~1800) は表示中の NumericUpDown 値しか見ないため、非表示の版で
+            // min>max にしたまま別の版を表示して OK すると素通りしていた (SemVer 重複は上で全件 scan するのに
+            // 対し非対称)。版切替時の SaveGameDataToVersion で各版に commit 済の値を全件比較し、違反版を
+            // 列挙して block する (両方とも非 null のときのみ比較。Add/VersionUp は常に ≥1 を書くため
+            // 実運用で null になる経路は限定的だが、表示中版は ValidateInput が先に弾くので本 scan は非表示版を補完)。
+            var playerCountViolations = new List<string>();
+            foreach (var item in cmbVersionList.Items)
+            {
+                if (!(item is GameVersion vPc)) continue;
+                if (vPc.MinPlayers.HasValue && vPc.MaxPlayers.HasValue && vPc.MinPlayers.Value > vPc.MaxPlayers.Value)
+                {
+                    playerCountViolations.Add("  - " + (vPc.Version ?? "(id=" + vPc.Id + ")")
+                        + ": 最小 " + vPc.MinPlayers.Value + " > 最大 " + vPc.MaxPlayers.Value);
+                }
+            }
+            if (playerCountViolations.Count > 0)
+            {
+                MessageBox.Show(this,
+                    "以下のバージョンで「最小プレイ人数 > 最大プレイ人数」になっています。\n" +
+                    "バージョン管理ドロップダウンで該当の版を選び、人数を修正してから再度 OK してください:\n\n" +
+                    string.Join("\n", playerCountViolations),
+                    "プレイ人数の入力エラー (" + playerCountViolations.Count + " 件)",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // (#234) アクティブ版 (= Launcher で起動する版) の暗黙切替を確認する。
+            // OK 時は選択中の版が games 行にミラーされ games.version = 選択版になる (= 起動対象が変わる)
+            // 設計のため、ロード時の起動対象と別の版を選んだまま保存しようとした場合に明示確認する。
+            // 「いいえ」で編集画面に戻し、ドロップダウンで元の版を選び直せるようにする (= 誤操作で
+            // 起動バージョンが入れ替わる footgun を塞ぐ。VersionUpForm のアクティブ化確認と同方針)。
+            // row 単位 (DB id) 比較なので、アクティブ版を rename しただけでは発火しない。
+            if (cmbVersionList.SelectedItem is GameVersion selForActiveCheck
+                && _initialSelectedVersionId.HasValue
+                && selForActiveCheck.Id != _initialSelectedVersionId.Value)
+            {
+                var activeDr = MessageBox.Show(this,
+                    "現在表示しているバージョン「" + (selForActiveCheck.Version ?? "(未設定)") + "」を、" +
+                    "ランチャーで表示・起動するバージョンにしますか?\n\n" +
+                    "  これまでランチャーに表示: " + (originalGame.Version ?? "(未設定)") + "\n" +
+                    "  OK 後にランチャーに表示: " + (selForActiveCheck.Version ?? "(未設定)") + "\n\n" +
+                    "「はい」を押すと、いま表示しているこのバージョンがランチャーに表示・起動されるように" +
+                    "なります。\n" +
+                    "「いいえ」を押すと編集画面に戻ります（ランチャーの表示バージョンを変えたくない場合は、" +
+                    "バージョン管理のドロップダウンで元のバージョンを選び直してから OK してください）。",
+                    "ランチャーに表示するバージョンの確認",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                if (activeDr != DialogResult.Yes)
+                {
+                    return;
+                }
             }
 
             // (#179 round 6 M-1 案 B) DB write 直前で他 PC session を再 check (race fence)。
@@ -838,23 +1209,76 @@ namespace TonePrism.Manager
                     }
                 }
 
-                // パスを相対パスに変換（可能な場合）
-                string executablePath = PathConversionHelper.ToRelativePath(gameFolder, txtExecutablePath.Text.Trim());
-                string thumbnailPath = string.IsNullOrWhiteSpace(txtThumbnailPath.Text) ? null : PathConversionHelper.ToRelativePath(gameFolder, txtThumbnailPath.Text.Trim());
-                string backgroundPath = string.IsNullOrWhiteSpace(txtBackgroundPath.Text) ? null : PathConversionHelper.ToRelativePath(gameFolder, txtBackgroundPath.Text.Trim());
+                // (累積監査 round 3) ゲームフォルダ外の画像が選ばれていれば、編集中バージョンの v{version}/ 配下へ
+                // コピーする。AddGameForm のようなコピー元フォルダ概念は EditGameForm にはなく、user が任意の場所
+                // から画像を取り込めるよう UI を緩和した分の補助。古い画像は古いバージョンが参照している可能性が
+                // あるため削除しない方針 (user 合意済)。同名衝突は ImageNameConflictDialog で user に rename を促す。
+                {
+                    var currentVersionForCopy = cmbVersionList.SelectedItem as GameVersion;
+                    if (currentVersionForCopy != null)
+                    {
+                        if (!CopyExternalImagesToVersionFolder(currentVersionForCopy))
+                        {
+                            // user が衝突 dialog で Cancel、または copy 失敗 → 編集画面に戻る (DB / 他 disk 操作は未実行)。
+                            // gameIdChanged の disk 名は既に新 ID に変更済だが、これは UpdateGameId 成功 = DB も新 ID
+                            // に同期済の状態。txtGameId.Text も新 ID で、user が再度 OK を押せばこの block は no-op で
+                            // 通過するため drift は残らない。
+                            return;
+                        }
+                    }
 
-                // 起動オプション
-                string arguments = txtArguments.Text;
+                    // (Finding #1) 表示中以外の版に「版切替で記憶した未コピーの外部画像」があれば各版へコピーする。
+                    // 表示中版 (currentVersionForCopy) は直上で処理済のため除外。rename plan 構築より前に実行する
+                    // ことで、ここで設定した版オブジェクトの (旧 leaf prefix の) 相対 path を rename ループが
+                    // 正しく新 leaf へ追従させ、rollback 用 snapshot にも正しい値が capture される。
+                    foreach (var item in cmbVersionList.Items)
+                    {
+                        if (!(item is GameVersion hiddenVersion)) continue;
+                        if (ReferenceEquals(hiddenVersion, currentVersionForCopy)) continue;
+                        if (!CopyPendingExternalImagesForHiddenVersion(hiddenVersion))
+                        {
+                            // 衝突 dialog で Cancel / copy 失敗 → 編集画面に戻る (DB write 未実行)。
+                            return;
+                        }
+                    }
+                }
+
+                // パスを相対パスに変換（可能な場合）
+                // (累積監査 round 3 / #9) `NormalizeRelative` 経由で絶対 path 流入を null 格下げ fence。
+                // 防御経路 (selectedVersion==null) でも ApplyRelativePaths と同じ契約 (= 相対 / null のみ) で
+                // DB に書く形に揃える。
+                string executablePath = NormalizeRelative(txtExecutablePath.Text, "executable_path");
+                string thumbnailPath = NormalizeRelative(txtThumbnailPath.Text, "thumbnail_path");
+                string backgroundPath = NormalizeRelative(txtBackgroundPath.Text, "background_path");
+
+                // 起動オプション (#234 追加精査: 空白は null 正規化、Add/VersionUp と DB 表現を統一。
+                // 通常経路では下の selectedVersion 反映で版の正規化値に上書きされるが、selectedVersion==null
+                // の防御経路でも games.arguments に "" を残さないよう正規化を揃える)。
+                string arguments = string.IsNullOrWhiteSpace(txtArguments.Text) ? null : txtArguments.Text.Trim();
 
                 // GameInfoオブジェクトを作成（既存の値をベースに）
                 var game = new GameInfo
                 {
                     GameId = txtGameId.Text.Trim(),
                     Title = txtTitle.Text.Trim(),
+                    // 通常経路 (selectedVersion != null) では下で `game.Version = selectedVersion.Version` に
+                    // 上書きされるが、防御経路 (cmbVersionList.Items.Count == 0、本来ありえない) では上書きが
+                    // 走らず games.version に NULL が書かれてしまう。originalGame.Version を default に置いて
+                    // 防御経路でも version 文字列を保つ。
+                    Version = originalGame.Version,
                     Description = string.IsNullOrWhiteSpace(txtDescription.Text) ? null : txtDescription.Text.Trim(),
-                    ReleaseYear = numReleaseYear.Value > 0 ? (int?)numReleaseYear.Value : null,
-                    MinPlayers = numMinPlayers.Value > 0 ? (int?)numMinPlayers.Value : null,
-                    MaxPlayers = numMaxPlayers.Value > 0 ? (int?)numMaxPlayers.Value : null,
+                    // (M1) Load 時に DB 上 null だった + user が表示値を触っていなければ null 維持。
+                    // 旧実装は numReleaseYear.Minimum=1900 で常に > 0 となるため null が現在年で silent 上書きされていた。
+                    ReleaseYear = (_gameReleaseYearWasNullOnLoad && numReleaseYear.Value == _gameReleaseYearDisplayedOnLoad)
+                        ? (int?)null
+                        : (numReleaseYear.Value > 0 ? (int?)numReleaseYear.Value : null),
+                    // (累積監査 round 4 Low-5) Load 時に NULL だった + user が触っていなければ NULL 維持。
+                    MinPlayers = (_gameMinPlayersWasNullOnLoad && numMinPlayers.Value == _gameMinPlayersDisplayedOnLoad)
+                        ? (int?)null
+                        : (numMinPlayers.Value > 0 ? (int?)numMinPlayers.Value : null),
+                    MaxPlayers = (_gameMaxPlayersWasNullOnLoad && numMaxPlayers.Value == _gameMaxPlayersDisplayedOnLoad)
+                        ? (int?)null
+                        : (numMaxPlayers.Value > 0 ? (int?)numMaxPlayers.Value : null),
                     Difficulty = cmbDifficulty.SelectedIndex >= 0 ? cmbDifficulty.SelectedIndex + 1 : (int?)null,
                     PlayTime = cmbPlayTime.SelectedIndex >= 0 ? cmbPlayTime.SelectedIndex + 1 : (int?)null,
                     SupportedConnection = cmbSupportedConnection.SelectedIndex >= 0 ? cmbSupportedConnection.SelectedIndex : 0,
@@ -872,8 +1296,12 @@ namespace TonePrism.Manager
                 // ジャンルを処理
                 game.Genre = GameFormHelper.GetSelectedGenres(clbGenre);
 
-                // 製作者情報は既存のものを保持
-                game.Developers = originalGame.Developers ?? new List<DeveloperInfo>();
+                // (#234) games 行 (version_id IS NULL) の製作者は、編集中リスト (= 選択中の版 = OK 後の
+                // アクティブ版の製作者) をミラーする。旧実装は originalGame.Developers をそのまま温存して
+                // いたため、アクティブ版から製作者を全削除しても games 行の旧製作者が残り、Launcher の
+                // 「版に紐づく製作者が空なら version_id IS NULL にフォールバック」(game_repository.gd) で
+                // 削除したはずの製作者が表示され続けるバグがあった。games を選択版のミラーに揃えて解消する。
+                game.Developers = new List<DeveloperInfo>(developers);
 
                 // 選択中のバージョン
                 var selectedVersion = cmbVersionList.SelectedItem as GameVersion;
@@ -901,10 +1329,11 @@ namespace TonePrism.Manager
                     // (#158 Q3) version 文字列が変わった version について、per-version folder を rename。
                     // _originalVersionByDbId に LoadVersions 時の DB-fetched version を保存済なので、
                     // 現 v.Version との差分で rename 必要かを判定。relative path にも v<version>/
-                    // prefix が含まれているため、rename 後同じく書き換える (= EditGameForm 経路で保存
-                    // された path のみ `<gameFolder>` 基準で v<version>/ prefix が乗る、AddGameForm
-                    // 経路は version folder 基準なので prefix なし。M2 で誤記訂正、ReplaceVersionPrefix
-                    // は前者の prefix のみ書き換える保守的処理)。
+                    // prefix が含まれているため、rename 後同じく書き換える。
+                    // (#234 ④ 以降) AddGameForm 経路もゲームルート基準で相対化するようになり exe/サムネ/
+                    // 背景すべてに v<version>/ prefix が乗る (旧コメントの「AddGameForm 経路は prefix なし」
+                    // は ④ 修正前の記述で現在は誤り)。EditGameForm 経路・AddGameForm 経路どちらの path も
+                    // ReplaceVersionPrefix で正しく書き換わる (前方一致の v<old>/ prefix のみ置換する保守的処理)。
                     //
                     // (#158 H1 fix): folder path は `gameFolder` (直前の gameIdChanged block で
                     // `gameFolder = newFolder` に上書き済) を base にする。`PathManager.GetVersionFolder(
@@ -1112,9 +1541,9 @@ namespace TonePrism.Manager
                                 }
                             }
 
-                            // version 文字列を含む相対パス (`v<old>/...` 形式) を新 prefix に置換
-                            // (EditGameForm 経路で保存された path のみ対象、AddGameForm 経路は prefix なしで
-                            // 影響を受けない、M2)
+                            // version 文字列を含む相対パス (`v<old>/...` 形式) を新 prefix に置換。
+                            // (#234 ④ 以降) AddGameForm 経路の path も v<version>/ prefix を持つため対象。
+                            // prefix を持たない path (= 旧データ等) は ReplaceVersionPrefix が前方一致 skip して無変更。
                             p.Version.ExecutablePath = ReplaceVersionPrefix(p.Version.ExecutablePath, p.OriginalVer, p.Version.Version);
                             p.Version.ThumbnailPath = ReplaceVersionPrefix(p.Version.ThumbnailPath, p.OriginalVer, p.Version.Version);
                             p.Version.BackgroundPath = ReplaceVersionPrefix(p.Version.BackgroundPath, p.OriginalVer, p.Version.Version);
@@ -1145,70 +1574,20 @@ namespace TonePrism.Manager
                         }
                     }
 
-                    // (#158 round 3 M-4 + round 5 codex P1) UpdateGameVersion ループ。
-                    // VersionRepository.Update は call ごとに独立 transaction で commit するため、N 件目で
-                    // 失敗しても 0..N-1 件目は既に DB commit 済 (per-call transaction)。
-                    // - dbSucceededCount == 0: DB 未 commit、disk rollback で OK 押下前状態に戻せる安全
-                    //   path → 従来の RollbackCompletedRenames を呼ぶ。
-                    // - dbSucceededCount  > 0: 一部 DB commit 済、disk rollback すると commit 済 row が
-                    //   指す新 folder 名を消失させて drift 拡大。disk は NEW のままにして user に partial
-                    //   commit 状態 + Manager 再起動 + 手動修復を促す。
-                    int dbSucceededCount = 0;
-                    try
-                    {
-                        foreach (var item in cmbVersionList.Items)
-                        {
-                            if (item is GameVersion v)
-                            {
-                                dbManager.UpdateGameVersion(v);
-                                dbSucceededCount++;
-                            }
-                        }
-                    }
-                    catch (Exception dbEx)
-                    {
-                        if (dbSucceededCount == 0)
-                        {
-                            // DB 一切 commit なし: disk + in-memory rollback で OK 押下前に戻す。
-                            int rolledBack, rollbackFailures;
-                            RollbackCompletedRenames(completedRenames, out rolledBack, out rollbackFailures);
-                            MessageBox.Show(
-                                "バージョン情報の DB 更新に失敗しました:\n" +
-                                "  " + dbEx.Message + "\n\n" +
-                                "  完了済の rename " + rolledBack + " 件を元の名前に rollback しました" +
-                                (rollbackFailures > 0
-                                    ? " (rollback 失敗 " + rollbackFailures + " 件、Console ログ参照、手動で元に戻してください)"
-                                    : "") +
-                                "。\n  DB は更新前なので OK 押下前の状態に戻ります。",
-                                "DB 更新失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        }
-                        else
-                        {
-                            // (#158 round 5 codex P1) 部分 commit 状態: disk rollback 不可 (commit 済 row
-                            // が指す新 folder を消すと drift 拡大)。disk は NEW のまま、user に partial
-                            // commit を通知 + Manager 再起動を促す。in-memory は結局 OK Form 終了で破棄
-                            // されるので revert 不要。
-                            MessageBox.Show(
-                                "バージョン情報の DB 更新が途中で失敗しました:\n" +
-                                "  " + dbEx.Message + "\n\n" +
-                                "  ・ DB 更新成功: " + dbSucceededCount + " 件\n" +
-                                "  ・ disk フォルダは新しい名前のまま (rename を rollback しません = 既に commit\n" +
-                                "    済の DB row を壊さないため)\n" +
-                                "  ・ 残りの version は DB が古い名前のまま、disk は新しい名前で drift 状態\n\n" +
-                                "Manager を一度終了して再起動し、該当ゲームの version 一覧を確認してください。" +
-                                "DB と disk の不整合が残っている version は手動で再編集してください。",
-                                "DB 部分更新失敗 (要手動確認)", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        }
-                        // (#158 round 6 H-1) 旧実装は `throw;` で外側 catch (System.Data.SQLite.SQLiteException
-                        // / Exception) に再投していたため、本 catch で出した詳細 MessageBox の直後に
-                        // 「ゲームの更新に失敗しました\n\n{ex.Message}」の汎用 MessageBox が必ず 2 枚目
-                        // として出る UX bug があった (= partial commit / 安全 rollback 両 path で必発)。
-                        // ここで return すれば form は閉じず DialogResult は default の None のまま、user は
-                        // 状態を見て手動で Cancel するか修正リトライできる。
-                        return;
-                    }
-                    
+                    // (累積監査 round 4 High-2) 旧実装は (a) UpdateGameVersions + (b) UpdateGame を別 transaction で
+                    // 順次実行しており、(a) 完了直後の電源断 / SMB disconnect で「version 群は新値 / games 行は
+                    // 旧版を指したまま / disk folder は新名」という partial-commit drift が残る窓があった。
+                    // UpdateVersionsAndGame で両者を 1 transaction に統合し窓を物理閉鎖 (AddVersionAndActivate と
+                    // 同じ設計)。旧コメント (#234 後続 / #158 round 7 H-2) はこの drift を user に通知する
+                    // 通常運用前提の fallback だったが、atomic 化で「全成功 or 全 rollback」の二択に整理され、
+                    // 失敗時は「DB 無変更 + 完了済 disk rename を逆順 rollback」で OK 押下前に戻せる。
+                    //
                     // 3. メインのゲーム情報を更新（選択中バージョンの全フィールドを反映）
+                    // (累積監査 round 4 High-3 防御) selectedVersion.Thumbnail/Background が null だと
+                    // games.thumbnail_path / background_path も null 化される。これは「アクティブ版を切替たので
+                    // その版のメタデータが games に流入する」正しいセマンティクスだが、新版に画像未登録のまま
+                    // active 化すると Launcher の画像が消える silent UX 退行になる。ここでは仕様通り上書きし、
+                    // 画像消去の警告は version-up 時の入力時に出す責務 (別 Low fix)。
                     game.Title = selectedVersion.Title ?? game.Title;
                     game.Description = selectedVersion.Description;
                     game.Genre = selectedVersion.Genre ?? game.Genre;
@@ -1224,40 +1603,36 @@ namespace TonePrism.Manager
                     game.Arguments = selectedVersion.Arguments;
                     game.Version = selectedVersion.Version;
 
-                    // (#158 round 7 H-2) UpdateGame は UpdateGameVersion 群が全件成功した後に呼ばれる
-                    // が、ここで一時的 SQLite 失敗等で例外が出ると「version 群 (= per-call commit 済) は
-                    // 新値 / games 行は旧値 / disk folder は新名」という drift で残る。round 5 codex P1
-                    // の partial commit pattern と同型なので同 wording で user に通知 + return (= round 6
-                    // H-1 の二重 MessageBox 防止のため throw せず form 留める)。disk rollback は行わない
-                    // (= UpdateGameVersion が既に commit 済の row が disk 新名を指しているため)。
                     try
                     {
-                        dbManager.UpdateGame(game);
+                        dbManager.UpdateVersionsAndGame(cmbVersionList.Items.OfType<GameVersion>(), game);
                     }
-                    catch (Exception gameEx)
+                    catch (Exception dbEx)
                     {
-                        // (#158 round 8 senior Low #1) gameIdChanged=true 経路では既に UpdateGameId で
-                        // games.gameId は新値、それ以外 (title/genre/people 等) は旧値の混合状態になる。
-                        // 「games 行のみ古い値」と言い切ると user が「全 fields old」と誤読する余地が
-                        // あるため、gameIdChanged 有無で文言分岐。
-                        string driftDetail = gameIdChanged
-                            ? "  ・ games 行は部分更新状態 (gameId は新値で更新済み、title / ジャンル / 人数等" +
-                              " のフィールドは旧値の可能性あり)\n"
-                            : "  ・ games 行のみ古い値で残っており drift 状態\n";
+                        // 原子的更新のため DB は OK 押下前のまま (部分コミットなし)。完了済 disk rename を
+                        // 逆順で元へ戻し、in-memory state も capture 前へ復元して「OK 押下前」に巻き戻す。
+                        int rolledBack, rollbackFailures;
+                        RollbackCompletedRenames(completedRenames, out rolledBack, out rollbackFailures);
                         MessageBox.Show(
-                            "ゲーム本体情報 (games table) の DB 更新に失敗しました:\n" +
-                            "  " + gameEx.Message + "\n\n" +
-                            "  ・ バージョン情報 (game_versions table) の更新は既に完了しています\n" +
-                            "  ・ disk フォルダは新しい名前のまま\n" +
-                            driftDetail +
-                            "\nManager を一度終了して再起動し、該当ゲームを開いて UpdateGame の項目 (タイトル / " +
-                            "ジャンル / 人数等) が想定通りか確認、必要なら手動で再編集してください。",
-                            "DB 部分更新失敗 (要手動確認)", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            "バージョン情報 + ゲーム本体情報の DB 更新に失敗しました:\n" +
+                            "  " + dbEx.Message + "\n\n" +
+                            "  完了済の rename " + rolledBack + " 件を元の名前に rollback しました" +
+                            (rollbackFailures > 0
+                                ? " (rollback 失敗 " + rollbackFailures + " 件、ログファイル参照、手動で元に戻してください)"
+                                : "") +
+                            "。\n  DB は更新前なので OK 押下前の状態に戻ります。",
+                            "DB 更新失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        // (#158 round 6 H-1) throw で再投すると外側 catch の汎用 MessageBox が 2 枚目に
+                        // 出る UX bug があるため return で form を留める (DialogResult は None のまま、
+                        // user は状態を見て Cancel か修正リトライを選べる)。
                         return;
                     }
                 }
 
                 EditedGame = game;
+                // (round 5 M3) OK commit 確定 → copy 済み画像は正規に DB と紐付いたため、
+                // OnFormClosing での「Cancel 時のオーファン削除」対象から外す。
+                _copiedExternalImagePaths.Clear();
                 DialogResult = DialogResult.OK;
                 Close();
             }
@@ -1297,17 +1672,82 @@ namespace TonePrism.Manager
         }
 
         /// <summary>
+        /// (round 5 M3) form が閉じる直前。OK 確定で commit していないオーファン画像 path を削除する。
+        /// OK 経路では btnOK_Click 末尾で _copiedExternalImagePaths.Clear() 済のため本処理は no-op、
+        /// Cancel / Close / X ボタン経路でのみ実体削除が走る。失敗は best-effort で swallow。
+        /// </summary>
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            base.OnFormClosing(e);
+            if (DialogResult == DialogResult.OK) return;
+            if (_copiedExternalImagePaths.Count == 0) return;
+
+            foreach (string path in _copiedExternalImagePaths)
+            {
+                try
+                {
+                    if (File.Exists(path))
+                    {
+                        File.Delete(path);
+                        Logger.Info("[EditGameForm] (round 5 M3) Cancel 経路でオーファン画像を削除: " + path);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("[EditGameForm] (round 5 M3) オーファン画像削除失敗 (手動削除可): " + path + ": " + ex.Message);
+                }
+            }
+            _copiedExternalImagePaths.Clear();
+        }
+
+        /// <summary>
         /// フォルダリネーム後にパステキストボックスの値を新フォルダベースに更新
         /// </summary>
         private void UpdatePathTextBox(TextBox textBox, string oldFolder, string newFolder)
         {
             string path = textBox.Text.Trim();
             if (string.IsNullOrEmpty(path)) return;
+            if (string.IsNullOrEmpty(oldFolder)) return;
 
             // 絶対パスで旧フォルダ配下の場合、新フォルダに置換
-            if (Path.IsPathRooted(path) && path.StartsWith(oldFolder, StringComparison.OrdinalIgnoreCase))
+            // (累積監査 round 4 Medium-13) 区切り文字境界を持たない StartsWith は `oldFolder="<base>\games\foo"`
+            // で textbox 値が偶然 `<base>\games\foobar\...` を含むと別ゲームの path を `<base>\games\<newId>bar\...`
+            // に書き換える兄弟前方一致 risk があった。`IsPathInside` / `ToRelativePathAfterCopy` と同じ
+            // 「等値 OR 区切り付き StartsWith」契約に揃え、defense-in-depth で兄弟誤置換を物理閉鎖する。
+            // (round 5 M4) `Path.DirectorySeparatorChar` (\) のみ境界比較の取りこぼし: textbox 値が
+            // `/` 区切り (手入力 / 外部由来 path) の場合、`StartsWith(oldFolder + '\\')` が false → 置換漏れ
+            // → 後段 `NormalizeRelative` で base 外として null 化 → DB に null 保存で path 喪失。
+            // path 側を `Path.GetFullPath` 経由で正規化 (`/` → `\` に揃う + 相対 path 解決) してから判定する。
+            if (!Path.IsPathRooted(path)) return;
+            try
             {
-                textBox.Text = newFolder + path.Substring(oldFolder.Length);
+                path = Path.GetFullPath(path);
+            }
+            catch (Exception ex)
+            {
+                // 不正 path (= 制御文字混入等) は normalize 不能、後段 validation に委ねる。
+                // (累積監査 round 6 M3) 旧実装は完全 silent だったため、rename 後に path が
+                // 旧 gameId のまま残り後段で null 化 → 喪失する経路の追跡が効かなかった。Warn を残す。
+                Logger.Warn("[EditGameForm] (round 6 M3) パス正規化に失敗、後段 validation に委ねます: " + path + ": " + ex.Message);
+                return;
+            }
+            string oldFolderNormalized;
+            try
+            {
+                oldFolderNormalized = Path.GetFullPath(oldFolder);
+            }
+            catch
+            {
+                oldFolderNormalized = oldFolder;
+            }
+            string oldFolderWithSep = oldFolderNormalized.EndsWith(Path.DirectorySeparatorChar.ToString()) ? oldFolderNormalized : oldFolderNormalized + Path.DirectorySeparatorChar;
+            if (string.Equals(path, oldFolderNormalized, StringComparison.OrdinalIgnoreCase))
+            {
+                textBox.Text = newFolder;
+            }
+            else if (path.StartsWith(oldFolderWithSep, StringComparison.OrdinalIgnoreCase))
+            {
+                textBox.Text = newFolder + path.Substring(oldFolderNormalized.Length);
             }
         }
 
@@ -1354,7 +1794,7 @@ namespace TonePrism.Manager
             }
 
             // 実行ファイルがゲームフォルダ内にあるか確認
-            if (!txtExecutablePath.Text.StartsWith(gameFolder, StringComparison.OrdinalIgnoreCase))
+            if (!PathConversionHelper.IsPathInside(gameFolder, txtExecutablePath.Text))
             {
                 MessageBox.Show("実行ファイルはゲームフォルダ内のファイルを選択してください。\n\n外部のファイルを使用する場合は、バージョンアップ機能をご利用ください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 btnSelectExecutable.Focus();
@@ -1362,6 +1802,10 @@ namespace TonePrism.Manager
             }
 
             // サムネイル画像パスのチェック（指定されている場合）
+            // (累積監査 round 3) ゲームフォルダ外も許可。外なら OK 時に CopyExternalImagesToVersionFolder で
+            // 自動コピーする (同名衝突は ImageNameConflictDialog 経由)。古い画像ファイルは古いバージョンが
+            // 参照している可能性があるため削除しない方針。File.Exists check は維持 (= 選んだ瞬間にファイルが
+            // 削除された TOCTOU や 名前タイプミスを弾く目的)。
             if (!string.IsNullOrWhiteSpace(txtThumbnailPath.Text))
             {
                 if (!File.Exists(txtThumbnailPath.Text))
@@ -1370,15 +1814,9 @@ namespace TonePrism.Manager
                     btnSelectThumbnail.Focus();
                     return false;
                 }
-                if (!txtThumbnailPath.Text.StartsWith(gameFolder, StringComparison.OrdinalIgnoreCase))
-                {
-                    MessageBox.Show("サムネイル画像はゲームフォルダ内のファイルを選択してください。\n\n外部のファイルを使用する場合は、バージョンアップ機能をご利用ください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    btnSelectThumbnail.Focus();
-                    return false;
-                }
             }
 
-            // 背景画像パスのチェック（指定されている場合）
+            // 背景画像パスのチェック（指定されている場合、ゲームフォルダ外も可）
             if (!string.IsNullOrWhiteSpace(txtBackgroundPath.Text))
             {
                 if (!File.Exists(txtBackgroundPath.Text))
@@ -1387,12 +1825,14 @@ namespace TonePrism.Manager
                     btnSelectBackground.Focus();
                     return false;
                 }
-                if (!txtBackgroundPath.Text.StartsWith(gameFolder, StringComparison.OrdinalIgnoreCase))
-                {
-                    MessageBox.Show("背景画像はゲームフォルダ内のファイルを選択してください。\n\n外部のファイルを使用する場合は、バージョンアップ機能をご利用ください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    btnSelectBackground.Focus();
-                    return false;
-                }
+            }
+
+            // (#234 追加精査) 最小プレイ人数 ≤ 最大プレイ人数 を検証 (3 フォーム共通 helper)。
+            if (!GameFormHelper.ValidatePlayerCount((int)numMinPlayers.Value, (int)numMaxPlayers.Value, out string playerCountError))
+            {
+                MessageBox.Show(playerCountError, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                numMinPlayers.Focus();
+                return false;
             }
 
             return true;
@@ -1407,6 +1847,285 @@ namespace TonePrism.Manager
 
         private void btnTestRun_Click(object sender, EventArgs e) =>
             GameFormHelper.TestRunGame(txtExecutablePath.Text.Trim(), txtArguments.Text, gameFolder);
+
+        /// <summary>
+        /// (累積監査 round 3) ゲームフォルダ外の画像を編集中バージョンの v{version}/ 配下にコピーする。
+        /// サムネイル / 背景の textbox が gameFolder 外を指している場合のみ実行する (内部なら何もしない)。
+        /// 同名衝突時は <see cref="ImageNameConflictDialog"/> を表示して user に rename を促す。
+        /// 古い画像は古いバージョンが参照している可能性があるため削除しない方針 (user 合意済)。
+        ///
+        /// 戻り値: 全件成功 (= 後続の DB write 処理に進んでよい) なら true、
+        ///         user が衝突 dialog で Cancel した / copy 中に例外で失敗した場合は false (caller は return)。
+        /// 失敗時の partial copy は本関数内で rollback される (= 中途半端な disk 状態を残さない)。
+        /// </summary>
+        private bool CopyExternalImagesToVersionFolder(GameVersion currentVersion)
+        {
+            if (currentVersion == null) return true;
+
+            string versionString = currentVersion.Version;
+            if (string.IsNullOrEmpty(versionString))
+            {
+                // 防御経路: version 文字列が無いとコピー先 v{version}/ が決まらない。silent skip して
+                // 後続の relative path 化 (= 絶対 path のまま DB に流入する経路) に進ませず、明示エラーで弾く。
+                MessageBox.Show(this,
+                    "編集中のバージョン文字列が未設定のため、外部画像のコピー先を決められません。\n" +
+                    "バージョン名を確認してから再度 OK してください。",
+                    "画像コピー エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            // (Finding 1 fix) 外部画像のコピー先は「現在ディスク上にあるバージョンフォルダ (= rename 前の leaf)」に
+            // する。currentVersion.Version は OK 処理冒頭の SaveGameDataToVersion で **rename 後の新しい値** に
+            // 更新済のことがあり、それを使うと後続のバージョンフォルダ rename の移動先 (newDir) を本コピーが
+            // 先に CreateDirectory してしまい、Phase 1 衝突 check が「移動先フォルダが既に存在します」で abort →
+            // 「バージョン番号変更 + フォルダ外画像指定」を同一保存で行うと保存不能 + 孤児フォルダ残留になる。
+            // exe パスと同じく「画像は旧 leaf のフォルダに置く → rename で一緒に移動 → ReplaceVersionPrefix で
+            // 保存パスを新 leaf に書き換える」流れに揃えることで衝突を構造的に排除する。snapshot が無い防御経路
+            // (現状ありえない) は従来通り currentVersion.Version に fall back。
+            string onDiskVersion =
+                (_originalVersionByDbId.TryGetValue(currentVersion.Id, out string snapshotVer)
+                 && !string.IsNullOrWhiteSpace(snapshotVer))
+                ? snapshotVer
+                : versionString;
+            string versionFolder = PathManager.GetVersionFolder(txtGameId.Text.Trim(), onDiskVersion);
+
+            var plan = new List<ImageCopyPlan>();
+
+            // (累積監査) サムネと背景が「別フォルダにある同名ファイル」(例: 両方 image.png) のとき、
+            // ResolveCopyPlan が disk の File.Exists だけで衝突判定すると、実コピー前は両方 false で
+            // 同じ destination を予約 → 後段の File.Copy(overwrite:false) で 2 枚目が IOException になり
+            // 保存が失敗していた。計画内で既に予約済みの destination も衝突として扱うため共有セットを渡す。
+            var reservedDestinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // Thumbnail
+            if (!string.IsNullOrWhiteSpace(txtThumbnailPath.Text)
+                && !PathConversionHelper.IsPathInside(gameFolder, txtThumbnailPath.Text))
+            {
+                var item = ResolveCopyPlan(txtThumbnailPath.Text, versionFolder, "サムネイル画像", reservedDestinations);
+                if (item == null) return false;
+                item.AssignBackTextBox = txtThumbnailPath;
+                plan.Add(item);
+            }
+
+            // Background
+            if (!string.IsNullOrWhiteSpace(txtBackgroundPath.Text)
+                && !PathConversionHelper.IsPathInside(gameFolder, txtBackgroundPath.Text))
+            {
+                var item = ResolveCopyPlan(txtBackgroundPath.Text, versionFolder, "背景画像", reservedDestinations);
+                if (item == null) return false;
+                item.AssignBackTextBox = txtBackgroundPath;
+                plan.Add(item);
+            }
+
+            if (plan.Count == 0) return true;
+
+            // (Finding #1) ProcessingDialog でのコピー実行は ExecuteImageCopyPlan に共通化
+            // (非表示版コピー CopyPendingExternalImagesForHiddenVersion と同経路)。
+            if (!ExecuteImageCopyPlan(plan, versionFolder)) return false;
+
+            // 成功 → textbox を copy 先に書き換え (= 後続の ToRelativePath が gameFolder 内として認識して
+            // v{version}/<filename> の相対 path を生成する)
+            foreach (var p in plan)
+            {
+                p.AssignBackTextBox.Text = p.DestinationPath;
+            }
+            UpdateThumbnailPreview();
+            UpdateBackgroundPreview();
+            Logger.Info("[EditGameForm] 外部画像 " + plan.Count + " 件を v{version} 配下にコピーしました (versionFolder=" + versionFolder + ")");
+            return true;
+        }
+
+        /// <summary>
+        /// (Finding #1) <see cref="ImageCopyPlan"/> 群を ProcessingDialog で実コピーする共通処理。成功で true、
+        /// ユーザー Cancel / 例外失敗で false (partial copy は本処理内で rollback)。成功した destination は
+        /// <see cref="_copiedExternalImagePaths"/> に集約し、Cancel/Close 時の OnFormClosing オーファン削除対象に
+        /// 載せる。コピー先 path の textbox / 版オブジェクトへの反映は呼び出し側が行う (表示中版は textbox、
+        /// 非表示版は版オブジェクトに書く、で経路が異なるため本処理は disk コピーと追跡のみに専念する)。
+        /// </summary>
+        private bool ExecuteImageCopyPlan(List<ImageCopyPlan> plan, string versionFolder)
+        {
+            if (plan == null || plan.Count == 0) return true;
+
+            // ProcessingDialog で copy 実行 (= SMB 越しで時間がかかるケースに備える)。
+            // 失敗 / cancel 時は本関数内で partial copy を片付ける。
+            Exception copyError = null;
+            using (var dialog = new ProcessingDialog((IProgress<ProgressInfo> progress, System.Threading.CancellationToken token) =>
+            {
+                try
+                {
+                    Directory.CreateDirectory(versionFolder);
+                    for (int i = 0; i < plan.Count; i++)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        var p = plan[i];
+                        int percent = (int)((double)i / plan.Count * 100);
+                        progress?.Report(new ProgressInfo(percent, p.Description + "をコピー中...",
+                            Path.GetFileName(p.SourcePath) + " → " + Path.GetFileName(p.DestinationPath)));
+                        File.Copy(p.SourcePath, p.DestinationPath, false);
+                    }
+                    progress?.Report(new ProgressInfo(100, "コピー完了", ""));
+                }
+                catch (Exception ex)
+                {
+                    copyError = ex;
+                    throw;
+                }
+            })
+            {
+                Text = "画像をコピー中",
+                MarqueeMode = false
+            })
+            {
+                var dr = dialog.ShowDialog(this);
+                if (dr != DialogResult.OK)
+                {
+                    // partial copy のロールバック (= 自分が作った disk 状態のみ削除、versionFolder 自体は
+                    // 既存版なら touch しない、Add 経路の versionFolderCreatedThisCall と同型方針)
+                    foreach (var p in plan)
+                    {
+                        if (File.Exists(p.DestinationPath))
+                        {
+                            try { File.Delete(p.DestinationPath); }
+                            catch (Exception delEx) { Logger.Warn("[EditGameForm] copy rollback でファイル削除失敗 '" + p.DestinationPath + "': " + delEx.Message); }
+                        }
+                    }
+
+                    if (copyError != null)
+                    {
+                        // 既に ProcessingDialog 内で MessageBox 表示済 (Abort 経路)。ここでは何もしない。
+                        Logger.Error("[EditGameForm] 外部画像コピーに失敗、入力に戻ります", copyError);
+                    }
+                    return false;
+                }
+            }
+
+            // (round 5 M3) copy 済 path を集約。後で OK 確定すれば commit としてクリア、
+            // Cancel/Close で抜けた場合は OnFormClosing で disk から削除してオーファン化を防ぐ。
+            foreach (var p in plan)
+            {
+                _copiedExternalImagePaths.Add(p.DestinationPath);
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// (Finding #1) 表示中以外の版に記憶された「未コピーの外部画像」を、その版の (rename 前 disk leaf の)
+        /// フォルダへコピーし、版オブジェクトの ThumbnailPath / BackgroundPath を相対 path に設定する。
+        /// 表示中の版は <see cref="CopyExternalImagesToVersionFolder"/> (textbox 起点) が担当するため呼び出し側で
+        /// 除外する。rename される版は path に旧 leaf prefix が乗るが、後続の rename ループ (ReplaceVersionPrefix)
+        /// が全版の path prefix を新 leaf に更新するため整合する。成功 true / Cancel・失敗 false。
+        /// </summary>
+        private bool CopyPendingExternalImagesForHiddenVersion(GameVersion version)
+        {
+            if (version == null) return true;
+
+            bool hasThumb = _pendingExternalThumbnailByVersionId.TryGetValue(version.Id, out string thumbSrc)
+                && !string.IsNullOrWhiteSpace(thumbSrc);
+            bool hasBg = _pendingExternalBackgroundByVersionId.TryGetValue(version.Id, out string bgSrc)
+                && !string.IsNullOrWhiteSpace(bgSrc);
+            if (!hasThumb && !hasBg) return true;
+
+            // コピー先は「現在 disk 上にある version フォルダ (= rename 前の leaf)」。表示中版コピーと同じく
+            // _originalVersionByDbId snapshot から旧 leaf を引く (snapshot 不在の防御経路は現 version へ fall back)。
+            string onDiskVersion =
+                (_originalVersionByDbId.TryGetValue(version.Id, out string snapshotVer) && !string.IsNullOrWhiteSpace(snapshotVer))
+                ? snapshotVer
+                : version.Version;
+            if (string.IsNullOrWhiteSpace(onDiskVersion)) return true; // version 文字列なし = コピー先決定不可、skip
+            string versionFolder = PathManager.GetVersionFolder(txtGameId.Text.Trim(), onDiskVersion);
+
+            var reservedDestinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var plan = new List<ImageCopyPlan>();
+            ImageCopyPlan thumbPlan = null, bgPlan = null;
+            if (hasThumb)
+            {
+                thumbPlan = ResolveCopyPlan(thumbSrc, versionFolder, "サムネイル画像 (" + onDiskVersion + ")", reservedDestinations);
+                if (thumbPlan == null) return false;
+                plan.Add(thumbPlan);
+            }
+            if (hasBg)
+            {
+                bgPlan = ResolveCopyPlan(bgSrc, versionFolder, "背景画像 (" + onDiskVersion + ")", reservedDestinations);
+                if (bgPlan == null) return false;
+                plan.Add(bgPlan);
+            }
+
+            if (!ExecuteImageCopyPlan(plan, versionFolder)) return false;
+
+            // 成功 → 版オブジェクトの path を相対化して設定 (非表示版なので textbox には触れない)。
+            // 旧 leaf prefix の相対 path は rename ループ (ReplaceVersionPrefix) が新 leaf に直す。
+            if (thumbPlan != null)
+            {
+                version.ThumbnailPath = PathConversionHelper.ToRelativePath(gameFolder, thumbPlan.DestinationPath);
+                _pendingExternalThumbnailByVersionId.Remove(version.Id);
+            }
+            if (bgPlan != null)
+            {
+                version.BackgroundPath = PathConversionHelper.ToRelativePath(gameFolder, bgPlan.DestinationPath);
+                _pendingExternalBackgroundByVersionId.Remove(version.Id);
+            }
+            Logger.Info("[EditGameForm] (Finding #1) 非表示版 id=" + version.Id + " (" + onDiskVersion + ") の外部画像 "
+                + plan.Count + " 件を " + versionFolder + " へコピーしました");
+            return true;
+        }
+
+        /// <summary>
+        /// (累積監査 round 3) 1 画像のコピー計画を決める。コピー先で同名衝突なら ImageNameConflictDialog で
+        /// user に rename を促し、確定した destination path を返す。Cancel なら null を返す (caller は abort)。
+        /// </summary>
+        private ImageCopyPlan ResolveCopyPlan(string sourcePath, string versionFolder, string description,
+            HashSet<string> reservedDestinations)
+        {
+            string originalFileName = Path.GetFileName(sourcePath);
+            string destPath = Path.Combine(versionFolder, originalFileName);
+
+            // disk 上の既存ファイルに加え、同一保存処理内で予約済みの destination (= 同時コピーする別画像の
+            // 行き先) も衝突として扱う。
+            if (File.Exists(destPath) || reservedDestinations.Contains(destPath))
+            {
+                // 衝突: dialog で user に rename を促す (提案名も予約済みを避ける)
+                string suggested = ImageNameConflictDialog.SuggestNonConflictingFileName(versionFolder, originalFileName, reservedDestinations);
+                using (var dlg = new ImageNameConflictDialog(sourcePath, versionFolder, suggested))
+                {
+                    dlg.Text = "同名ファイルがあります (" + description + ")";
+                    var dr = dlg.ShowDialog(this);
+                    if (dr != DialogResult.OK || string.IsNullOrEmpty(dlg.ResolvedFileName))
+                    {
+                        return null;
+                    }
+                    destPath = Path.Combine(versionFolder, dlg.ResolvedFileName);
+                }
+
+                // ImageNameConflictDialog の OK 時再衝突 check は disk の File.Exists のみで、予約済み destination
+                // を見ないため、user が予約済みと同名を手入力した場合はここで弾く。
+                if (File.Exists(destPath) || reservedDestinations.Contains(destPath))
+                {
+                    MessageBox.Show(this,
+                        "指定されたファイル名は、同時に保存する別の画像と重複しています。\n別の名前を指定してください: " +
+                        Path.GetFileName(destPath),
+                        "ファイル名の重複", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return null;
+                }
+            }
+
+            // この destination を予約 (= 次の画像が同じ行き先を選ばないようにする)。
+            reservedDestinations.Add(destPath);
+
+            return new ImageCopyPlan
+            {
+                SourcePath = sourcePath,
+                DestinationPath = destPath,
+                Description = description
+            };
+        }
+
+        private class ImageCopyPlan
+        {
+            public string SourcePath;
+            public string DestinationPath;
+            public string Description;
+            public TextBox AssignBackTextBox;
+        }
 
     }
 }

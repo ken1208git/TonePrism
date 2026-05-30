@@ -45,7 +45,9 @@ namespace TonePrism.Manager
             this.lblTargetFile.AutoEllipsis = true;
             this.lblTargetFile.Location = new System.Drawing.Point(20, 50);
             this.lblTargetFile.Name = "lblTargetFile";
-            this.lblTargetFile.Size = new System.Drawing.Size(620, 40);
+            // 4 行 (対象 / 作成日時 / サイズ / フルパス) を縦に収めるため 88px に拡張。
+            // 旧 40px だと 2 行強しか入らずサイズ・フルパス行が見切れていた。
+            this.lblTargetFile.Size = new System.Drawing.Size(620, 88);
             this.lblTargetFile.TabIndex = 1;
             this.lblTargetFile.Text = "対象: ";
             //
@@ -54,7 +56,7 @@ namespace TonePrism.Manager
             this.lblWarningDetail1.AutoSize = true;
             this.lblWarningDetail1.ForeColor = System.Drawing.Color.DarkRed;
             this.lblWarningDetail1.Font = new System.Drawing.Font("MS UI Gothic", 9F, System.Drawing.FontStyle.Bold);
-            this.lblWarningDetail1.Location = new System.Drawing.Point(20, 100);
+            this.lblWarningDetail1.Location = new System.Drawing.Point(20, 150);
             this.lblWarningDetail1.Name = "lblWarningDetail1";
             this.lblWarningDetail1.Size = new System.Drawing.Size(550, 14);
             this.lblWarningDetail1.TabIndex = 2;
@@ -64,17 +66,17 @@ namespace TonePrism.Manager
             //
             this.lblWarningDetail2.AutoSize = true;
             this.lblWarningDetail2.ForeColor = System.Drawing.Color.DarkRed;
-            this.lblWarningDetail2.Location = new System.Drawing.Point(20, 120);
+            this.lblWarningDetail2.Location = new System.Drawing.Point(20, 170);
             this.lblWarningDetail2.Name = "lblWarningDetail2";
             this.lblWarningDetail2.Size = new System.Drawing.Size(560, 14);
             this.lblWarningDetail2.TabIndex = 3;
-            this.lblWarningDetail2.Text = "・現在のデータベースは安全のため自動的に退避されます (safety_before_restore_*.db)";
+            this.lblWarningDetail2.Text = "・現在のデータベースは安全のため自動的に退避されます (safety_*.db)";
             //
             // lblWarningDetail3
             //
             this.lblWarningDetail3.AutoSize = true;
             this.lblWarningDetail3.ForeColor = System.Drawing.Color.DarkRed;
-            this.lblWarningDetail3.Location = new System.Drawing.Point(20, 140);
+            this.lblWarningDetail3.Location = new System.Drawing.Point(20, 190);
             this.lblWarningDetail3.Name = "lblWarningDetail3";
             this.lblWarningDetail3.Size = new System.Drawing.Size(560, 14);
             this.lblWarningDetail3.TabIndex = 4;
@@ -84,7 +86,7 @@ namespace TonePrism.Manager
             //
             this.lblConfirmationCode.AutoSize = true;
             this.lblConfirmationCode.Font = new System.Drawing.Font("MS UI Gothic", 10F, System.Drawing.FontStyle.Bold);
-            this.lblConfirmationCode.Location = new System.Drawing.Point(20, 175);
+            this.lblConfirmationCode.Location = new System.Drawing.Point(20, 225);
             this.lblConfirmationCode.Name = "lblConfirmationCode";
             this.lblConfirmationCode.Size = new System.Drawing.Size(125, 17);
             this.lblConfirmationCode.TabIndex = 5;
@@ -93,7 +95,7 @@ namespace TonePrism.Manager
             // txtConfirmationCode
             //
             this.txtConfirmationCode.Font = new System.Drawing.Font("MS UI Gothic", 12F, System.Drawing.FontStyle.Bold);
-            this.txtConfirmationCode.Location = new System.Drawing.Point(20, 200);
+            this.txtConfirmationCode.Location = new System.Drawing.Point(20, 250);
             this.txtConfirmationCode.MaxLength = 10;
             this.txtConfirmationCode.Name = "txtConfirmationCode";
             this.txtConfirmationCode.Size = new System.Drawing.Size(150, 27);
@@ -103,7 +105,7 @@ namespace TonePrism.Manager
             // lblInstruction
             //
             this.lblInstruction.AutoSize = true;
-            this.lblInstruction.Location = new System.Drawing.Point(20, 235);
+            this.lblInstruction.Location = new System.Drawing.Point(20, 285);
             this.lblInstruction.Name = "lblInstruction";
             this.lblInstruction.Size = new System.Drawing.Size(550, 15);
             this.lblInstruction.TabIndex = 7;
@@ -115,7 +117,7 @@ namespace TonePrism.Manager
             this.btnConfirm.BackColor = System.Drawing.Color.Red;
             this.btnConfirm.Font = new System.Drawing.Font("MS UI Gothic", 10F, System.Drawing.FontStyle.Bold);
             this.btnConfirm.ForeColor = System.Drawing.Color.White;
-            this.btnConfirm.Location = new System.Drawing.Point(380, 280);
+            this.btnConfirm.Location = new System.Drawing.Point(380, 330);
             this.btnConfirm.Name = "btnConfirm";
             this.btnConfirm.Size = new System.Drawing.Size(150, 40);
             this.btnConfirm.TabIndex = 8;
@@ -127,7 +129,7 @@ namespace TonePrism.Manager
             //
             this.btnCancel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(540, 280);
+            this.btnCancel.Location = new System.Drawing.Point(540, 330);
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(100, 40);
             this.btnCancel.TabIndex = 9;
@@ -141,7 +143,7 @@ namespace TonePrism.Manager
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(660, 340);
+            this.ClientSize = new System.Drawing.Size(660, 390);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnConfirm);
             this.Controls.Add(this.lblInstruction);

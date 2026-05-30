@@ -22,7 +22,18 @@ namespace TonePrism.Manager
         // v13: manager_sessions テーブル新設 (#179、Manager LAN-wide 同時起動検出、v0.10.0)
         // v14: games.arguments を CreateTables 内アドホック ALTER から正規 MigrateV13ToV14 に移設
         //      (累積レビュー / AGENTS.md スキーマ drift 規約準拠、v0.16.3)。最終スキーマは不変。
-        private const int CurrentDbVersion = 14;
+        // v15: game_versions(game_id, version) に UNIQUE INDEX を追加 (#234 ②)。同一ゲームに同一
+        //      バージョン番号が 2 行入る silent corruption を DB レベルで防ぐ最後の砦。重複残存時は
+        //      throw せず skip + 警告 (V10→V11 と同じ "data residual → retry" パターン)。
+        // v16: backup_log.trigger_type CHECK に 'restore' を追加 (H4)。リストアイベントの監査ログを
+        //      backup_log に記録できるようにする。既存行は影響なし (CHECK 拡張のみ)。
+        // v17: game_versions UNIQUE INDEX を COLLATE NOCASE で作り直す (M3)。`v1.0.0` と `V1.0.0` の
+        //      case 違いを semantic dup として弾く。重複残存時は v14→v15 と同じ skip + retry パターン。
+        // v18: developers.version_id に FK + ON DELETE CASCADE を追加 + dead table game_genres を DROP (Medium-22)。
+        // v19: backup_log テーブルを DROP。バックアップ履歴を DB から外し backups/ フォルダ走査
+        //      (BackupCatalogService) 由来に変更。reconcile / register / drift 対策コードを全廃し、失敗復元が
+        //      success 化する欠陥を根治。既存行は破棄されるが物理ファイルは残り初回走査で履歴に復活する。
+        private const int CurrentDbVersion = 20;
 
         public SchemaManager(DatabaseConnection conn)
         {
@@ -75,29 +86,83 @@ namespace TonePrism.Manager
                 {
                     _conn.OpenConnectionWithJournalMode(connection);
 
-                    using (var transaction = connection.BeginTransaction())
+                    // (#247) migration / 初期 stamp が必要なときだけ foreign_keys を OFF にしてから transaction を
+                    // 開始する。理由: v19→v20 の games (親テーブル) recreate は `DROP TABLE games` の暗黙 DELETE が
+                    // ON DELETE CASCADE を発火させ子テーブル (game_versions / developers / ...) を全消去する。
+                    // `defer_foreign_keys` は検査を遅延するだけで CASCADE action は止めない (sqlite3 実測で確認) ため
+                    // foreign_keys=OFF が必須。PRAGMA foreign_keys は transaction 内で変更できないので BeginTransaction
+                    // より前に設定する。通常起動 (version == CurrentDbVersion) では FK=ON のまま = 既存挙動を維持し、
+                    // blast radius を「実際に migration が走る起動」のみに限定する。OFF にした migration では commit 前に
+                    // foreign_key_check で整合を検証する (SQLite 公式のスキーマ変更手順)。
+                    bool fkDisabledForMigration = false;
+                    int versionBeforeMigration = GetDbVersion(connection);
+                    if (versionBeforeMigration < CurrentDbVersion)
                     {
-                        try
+                        using (var cmd = new SQLiteCommand("PRAGMA foreign_keys=OFF", connection))
                         {
-                            CreateTables(connection, transaction);
-                            MigrateDevelopersTable(connection, transaction);
-                            Logger.Info("[DatabaseManager] Calling MigrateGamesTable...");
-                            MigrateGamesTable(connection, transaction);
-                            MigrateSurveysTable(connection, transaction);
-                            MigrateGameVersionsTable(connection, transaction);
-                            CheckAndMigrateDatabase(connection, transaction);
-
-                            // 全マイグレーション完了後にスキーマ整合性を検証する。
-                            // drift があった場合でも例外は投げず警告ログのみ。
-                            // （AGENTS.md "Database Schema Management" 参照）
-                            VerifySchema(connection, transaction);
-
-                            transaction.Commit();
+                            cmd.ExecuteNonQuery();
                         }
-                        catch (Exception)
+                        fkDisabledForMigration = true;
+                        Logger.Info("[DatabaseManager] (#247) migration 検出 (v" + versionBeforeMigration + " < v" + CurrentDbVersion + ")、foreign_keys=OFF で実行 (親テーブル recreate の CASCADE 暴発防止)");
+                    }
+
+                    // (PR #236 レビュー対応 #5) FK=ON 復帰を finally に置く。旧実装は復帰が using(transaction) の
+                    // 後・try の外にあり、migration が例外で抜けると ON 復帰を通らず接続が FK=OFF のまま close していた。
+                    // 現状は pooling 無効 (接続文字列に Pooling=True 無し) + 次回 open 時 ON 再設定で self-healing の
+                    // ため実害は無いが、将来 pooling 有効化時に FK=OFF 接続がプールへ還る穴を構造的に閉じる。
+                    try
+                    {
+                        using (var transaction = connection.BeginTransaction())
                         {
-                            transaction.Rollback();
-                            throw;
+                            try
+                            {
+                                CreateTables(connection, transaction);
+                                MigrateDevelopersTable(connection, transaction);
+                                Logger.Info("[DatabaseManager] Calling MigrateGamesTable...");
+                                MigrateGamesTable(connection, transaction);
+                                MigrateSurveysTable(connection, transaction);
+                                MigrateGameVersionsTable(connection, transaction);
+                                CheckAndMigrateDatabase(connection, transaction);
+
+                                // (#247) FK を OFF にして migration した場合、commit 前に foreign_key_check で整合を
+                                // 検証する。違反は warn ログのみで起動は継続 (VerifySchema と同じ非破壊方針)。
+                                if (fkDisabledForMigration)
+                                {
+                                    VerifyForeignKeyIntegrity(connection, transaction);
+                                }
+
+                                // 全マイグレーション完了後にスキーマ整合性を検証する。
+                                // drift があった場合でも例外は投げず警告ログのみ。
+                                // （AGENTS.md "Database Schema Management" 参照）
+                                VerifySchema(connection, transaction);
+
+                                transaction.Commit();
+                            }
+                            catch (Exception)
+                            {
+                                transaction.Rollback();
+                                throw;
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        // (#247 / #5) FK を OFF にしていた場合は commit / rollback / 例外いずれの経路でも必ず ON に
+                        // 戻す。transaction は using を抜けて解放済のため PRAGMA が有効。復帰自体の失敗は握り潰す
+                        // (OpenConnectionWithJournalMode が次回 open 時に ON を再設定する self-healing が効くため)。
+                        if (fkDisabledForMigration)
+                        {
+                            try
+                            {
+                                using (var cmd = new SQLiteCommand("PRAGMA foreign_keys=ON", connection))
+                                {
+                                    cmd.ExecuteNonQuery();
+                                }
+                            }
+                            catch (Exception fkEx)
+                            {
+                                Logger.Warn("[DatabaseManager] (#5) foreign_keys=ON 復帰に失敗 (次回 open で self-heal): " + fkEx.Message);
+                            }
                         }
                     }
                 }
@@ -263,7 +328,7 @@ namespace TonePrism.Manager
                     min_players INTEGER,
                     max_players INTEGER,
                     difficulty INTEGER CHECK(difficulty BETWEEN 1 AND 3),
-                    play_time INTEGER,
+                    play_time INTEGER CHECK(play_time BETWEEN 1 AND 3),
                     controller_support INTEGER DEFAULT 0,
                     supported_connection INTEGER DEFAULT 0,
                     thumbnail_path TEXT,
@@ -314,7 +379,15 @@ namespace TonePrism.Manager
                 command.ExecuteNonQuery();
             }
 
+            // (#234 ②) 同一ゲームに同一バージョン番号が 2 行入る silent corruption を DB レベルで防ぐ
+            // UNIQUE INDEX。新規 DB はここで作成 (空テーブルなので重複なし)。既存 DB は MigrateV14ToV15 が
+            // dedup-skip 安全付きで追加する。重複残存時も throw しない (= 起動継続、戻り値は無視)。
+            EnsureGameVersionsVersionUniqueIndex(connection, transaction);
+
             // developersテーブル作成
+            // (累積監査 round 4 Medium-22) v18 で version_id に FK + ON DELETE CASCADE を追加した。
+            // 旧 schema は version_id INTEGER (FK なし) で、将来「単一版削除」機能 (#101 / #30 関連) が
+            // 入った時にその版に紐付く developers 行が silent orphan になる経路があった。本 FK で構造的に閉鎖。
             string createDevelopersTable = @"
                 CREATE TABLE IF NOT EXISTS developers (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -323,7 +396,8 @@ namespace TonePrism.Manager
                     first_name TEXT,
                     grade TEXT,
                     version_id INTEGER,
-                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE
+                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE,
+                    FOREIGN KEY(version_id) REFERENCES game_versions(id) ON DELETE CASCADE
                 )";
 
             using (var command = new SQLiteCommand(createDevelopersTable, connection, transaction))
@@ -331,19 +405,8 @@ namespace TonePrism.Manager
                 command.ExecuteNonQuery();
             }
 
-            // game_genresテーブル作成
-            string createGameGenresTable = @"
-                CREATE TABLE IF NOT EXISTS game_genres (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    game_id TEXT,
-                    genre TEXT,
-                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE
-                )";
-
-            using (var command = new SQLiteCommand(createGameGenresTable, connection, transaction))
-            {
-                command.ExecuteNonQuery();
-            }
+            // (累積監査 round 4 Low-28/29) game_genres は dead table のため v18 で DROP 済 (MigrateV17ToV18 参照)。
+            // 新規 install では作成しない。SoT は `games.genre` のカンマ区切り文字列 (GameRepository が直接 read/write)。
 
             // play_recordsテーブル作成（MigrateV10ToV11 でも再利用するため helper メソッド化）
             CreatePlayRecordsTable(connection, transaction);
@@ -419,8 +482,8 @@ namespace TonePrism.Manager
                 command.ExecuteNonQuery();
             }
 
-            // backup_logテーブル作成（v9 で追加）
-            CreateBackupLogTable(connection, transaction);
+            // backup_log は v19 で DROP (履歴を backups/ フォルダ走査 = BackupCatalogService に移行)。新規 DB では
+            // 作成しない。CreateBackupLogTable 本体は古い DB の v9 段階移行 (MigrateV8ToV9) が呼ぶため残置する。
 
             // (#179) manager_sessions テーブル作成 (v13 で追加、MigrateV12ToV13 でも再利用する helper)
             CreateManagerSessionsTable(connection, transaction);
@@ -497,7 +560,7 @@ namespace TonePrism.Manager
 
         /// <summary>
         /// backup_log テーブルを作成（IF NOT EXISTS で冪等）。
-        /// trigger_type は 'manual' / 'auto' / 'safety' の3種。
+        /// trigger_type は 'manual' / 'auto' / 'safety' / 'restore' の4種 (v16 で 'restore' を追加)。
         /// </summary>
         private void CreateBackupLogTable(SQLiteConnection connection, SQLiteTransaction transaction)
         {
@@ -512,7 +575,7 @@ namespace TonePrism.Manager
                     file_size_bytes INTEGER,
                     status TEXT NOT NULL CHECK (status IN ('in_progress','success','failed')),
                     error_message TEXT,
-                    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('manual','auto','safety'))
+                    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('manual','auto','safety','restore'))
                 )";
             using (var command = new SQLiteCommand(sql, connection, transaction))
             {
@@ -692,6 +755,49 @@ namespace TonePrism.Manager
                 // で失敗する (Codex P1)。idempotent な MigrateV13ToV14 を stamp 前に明示実行して
                 // 旧実装 (CreateTables 内 retrofit) と同じ v0 カバレッジを保つ。
                 MigrateV13ToV14(connection, transaction);
+
+                // (累積監査 round 6 #13) versioning 導入前 (user_version=0 のまま) から developers テーブルが
+                // 存在する旧 DB は、CreateTables の CREATE TABLE IF NOT EXISTS が既存 developers を温存するため、
+                // v18 で追加した version_id / game_id の FK + ON DELETE CASCADE が付かないまま user_version
+                // だけ 18 に刻印される schema drift があった (VerifySchema は列名のみ検証で FK 欠落を見逃す)。
+                // 新規 DB は CreateTables が FK 付きで作るので問題ない。developers に期待 FK が無い場合のみ
+                // MigrateV17ToV18 で retrofit する (新規 DB では FK 検出で skip されるため、毎回の table
+                // recreate コストを common path に乗せない)。
+                if (!DevelopersHasVersionIdForeignKey(connection, transaction))
+                {
+                    Logger.Warn("[DatabaseManager] (#13) v0 DB の developers に version_id FK が無いため MigrateV17ToV18 で retrofit します");
+                    MigrateV17ToV18(connection, transaction);
+                }
+
+                // versioning 導入前 (user_version=0) から surveys / play_records テーブルが存在する旧 DB は、
+                // CreateTables の CREATE TABLE IF NOT EXISTS が旧スキーマ (surveys: submitted_at/responses、
+                // play_records: play_count/total_play_time) を温存するため、本来 MigrateV10ToV11 が直す drift が
+                // 残ったまま user_version=19 が刻まれていた (一度刻むと再 migration 経路に乗らず永久固定)。
+                // arguments 列 (V13ToV14) / developers FK (V17ToV18) / settings KVS (EnsureSettingsTableIsKvsSchema)
+                // は v0 path で明示 retrofit するのに surveys/play_records だけ抜けていた非対称を解消する。
+                // MigrateV10ToV11 は冪等: 新規 DB (新スキーマ) では no-op で true、旧スキーマ空テーブルは再作成、
+                // データ残存時のみ skip + 警告で false (自動変換不能なため手動退避を促す。VerifySchema が以後も
+                // 列名 drift を警告し続ける)。stamp は他 retrofit と同じく実行する (= 残りのスキーマは v19 で確定済、
+                // surveys/play_records だけ古いまま 19 を名乗るのは元の挙動と同じだが、空テーブルは本 fix で救済される)。
+                if (!MigrateV10ToV11(connection, transaction))
+                {
+                    Logger.Warn("[DatabaseManager] (v0 path) surveys / play_records にデータが残存し drift 修正を skip しました。" +
+                        "tools/sqlite3/sqlite3.exe で旧データを退避のうえ手動で新スキーマへ移行してください。");
+                }
+
+                // (PR #236 レビュー対応) v0 fast-path も MigrateV19ToV20 (games.play_time に CHECK(1-3)) を明示 retrofit する。
+                // arguments (V13ToV14) / developers FK (V17ToV18) / surveys・play_records (V10ToV11) は v0 path で明示
+                // retrofit するのに play_time CHECK だけ抜けており、versioning 導入前から games テーブルを持つ旧 v0 DB は
+                // CreateTables の CREATE TABLE IF NOT EXISTS が CHECK 無し games を温存するため、CHECK が付かないまま
+                // user_version=20 を刻む非対称 (surveys と同型の drift) が残っていた。新規 DB は CreateTables が CHECK 付きで
+                // 作るため MigrateV19ToV20 の冪等ガードで no-op。範囲外 play_time 残存時は MigrateV10ToV11 と同じく
+                // warn + stamp 継続 (起動を止めない、是正後の再起動で適用)。
+                if (!MigrateV19ToV20(connection, transaction))
+                {
+                    Logger.Warn("[DatabaseManager] (v0 path) games.play_time に範囲外 (1-3 以外) の値が残存し CHECK 追加を skip しました。" +
+                        "tools/sqlite3/sqlite3.exe で値を 1-3 または NULL に是正してください。");
+                }
+
                 SetDbVersion(connection, CurrentDbVersion, transaction);
                 return;
             }
@@ -835,6 +941,128 @@ namespace TonePrism.Manager
                         else
                         {
                             Logger.Warn("[DatabaseManager] 直前の migration が未完のため user_version は " + currentVersion + " のまま据え置き (v14 物理変更のみ先行適用)");
+                        }
+                    }
+
+                    if (currentVersion < 15)
+                    {
+                        // v14 → v15: game_versions(game_id, version) に UNIQUE INDEX を追加 (#234 ②)。
+                        // 重複行が残存する場合は index を作らず false を返す。その場合 user_version を
+                        // 14 のまま据え置いて次回起動時に再試行する (V10→V11 と同じ "data residual →
+                        // skip + warn + retry" パターン、起動は継続)。index 作成自体は他 migration と独立。
+                        bool indexOk = MigrateV14ToV15(connection, migTransaction);
+                        if (currentVersion >= 14 && indexOk)
+                        {
+                            currentVersion = 15;
+                        }
+                        else if (!indexOk)
+                        {
+                            Logger.Warn("[DatabaseManager] v14→v15 が未完 (game_versions に重複残存) のため user_version は " + currentVersion + " のまま据え置き、次回起動時に再試行します");
+                        }
+                        else
+                        {
+                            Logger.Warn("[DatabaseManager] 直前の migration が未完のため user_version は " + currentVersion + " のまま据え置き (v15 物理変更のみ先行適用)");
+                        }
+                    }
+
+                    if (currentVersion < 16)
+                    {
+                        // v15 → v16: backup_log.trigger_type CHECK 拡張 ('restore' 追加、H4)。
+                        // 既存行は trigger_type が 'manual' / 'auto' / 'safety' のみなので新 CHECK に違反しない。
+                        // V9→V10 と同じ pattern (テーブル recreate)。
+                        //
+                        // (累積監査 round 4 Medium-21) 旧実装は v14→v15 が skip された場合でも v15→v16 を
+                        // 無条件実行していたため、backup_log を毎起動で DROP+RECREATE+INSERT-SELECT する
+                        // 高コスト処理が走り続けていた (= SMB 上 + 数千行で起動遅延)。前提 step が完了
+                        // (currentVersion >= 15) のときだけ走らせて idempotency を確保する。
+                        if (currentVersion >= 15)
+                        {
+                            MigrateV15ToV16(connection, migTransaction);
+                            currentVersion = 16;
+                        }
+                        else
+                        {
+                            Logger.Warn("[DatabaseManager] (Medium-21) v14→v15 が未完のため v15→v16 も skip、user_version は " + currentVersion + " のまま据え置き");
+                        }
+                    }
+
+                    if (currentVersion < 17)
+                    {
+                        // v16 → v17: game_versions UNIQUE INDEX を COLLATE NOCASE 化 (M3)。
+                        // v14→v15 と同じく重複残存時は skip + retry。case 違い重複も新たに弾くため
+                        // 旧 BINARY INDEX では通っていた `v1.0.0` + `V1.0.0` の共存があると失敗しうる。
+                        bool nocaseOk = MigrateV16ToV17(connection, migTransaction);
+                        if (currentVersion >= 16 && nocaseOk)
+                        {
+                            currentVersion = 17;
+                        }
+                        else if (!nocaseOk)
+                        {
+                            Logger.Warn("[DatabaseManager] v16→v17 が未完 (game_versions に case 違い重複残存) のため user_version は " + currentVersion + " のまま据え置き、次回起動時に再試行します");
+                        }
+                        else
+                        {
+                            Logger.Warn("[DatabaseManager] 直前の migration が未完のため user_version は " + currentVersion + " のまま据え置き (v17 物理変更のみ先行適用)");
+                        }
+                    }
+
+                    if (currentVersion < 18)
+                    {
+                        // v17 → v18: developers.version_id に FK + ON DELETE CASCADE を追加 (Medium-22)。
+                        // SQLite は ALTER で FK 追加不能のため table recreate。orphan 行 (version_id が
+                        // game_versions に存在しない) は INSERT-SELECT で除外して silent に掃除する。
+                        if (currentVersion >= 17)
+                        {
+                            MigrateV17ToV18(connection, migTransaction);
+                            currentVersion = 18;
+                        }
+                        else
+                        {
+                            Logger.Warn("[DatabaseManager] (Medium-22) 直前の migration が未完のため v17→v18 も skip、user_version は " + currentVersion + " のまま据え置き");
+                        }
+                    }
+
+                    if (currentVersion < 19)
+                    {
+                        // v18 → v19: backup_log テーブルを DROP (履歴を backups/ フォルダ走査に移行)。
+                        // game_genres v18 DROP と同じく、前段 migration が完了している場合のみ実行する。
+                        if (currentVersion >= 18)
+                        {
+                            MigrateV18ToV19(connection, migTransaction);
+                            currentVersion = 19;
+                        }
+                        else
+                        {
+                            Logger.Warn("[DatabaseManager] 直前の migration が未完のため v18→v19 も skip、user_version は " + currentVersion + " のまま据え置き");
+                        }
+                    }
+
+                    if (currentVersion < 20)
+                    {
+                        // v19 → v20: games.play_time に CHECK(1-3) を追加 (#247)。SQLite は ALTER で CHECK 追加
+                        // 不能のため games テーブル recreate。**games は親テーブル**で game_versions / developers /
+                        // play_records / surveys / store_section_games が ON DELETE CASCADE、launcher_surveys が
+                        // ON DELETE SET NULL で参照しているため、`DROP TABLE games` の暗黙 DELETE が CASCADE 発火 →
+                        // 子テーブル全消滅という致命的経路がある。`defer_foreign_keys` は検査を遅延するだけで CASCADE
+                        // action は止めない (sqlite3 実測で確認) ため、本 migration は **foreign_keys=OFF** を前提とする
+                        // (InitializeDatabase が migration 検出時に transaction 開始前へ OFF 設定 + commit 前に
+                        // foreign_key_check で整合検証)。前段 migration が完了している場合のみ実行する。
+                        if (currentVersion >= 19)
+                        {
+                            // 範囲外 play_time 残存時は false (skip + retry)、それ以外は CHECK 追加して true。
+                            bool checkOk = MigrateV19ToV20(connection, migTransaction);
+                            if (checkOk)
+                            {
+                                currentVersion = 20;
+                            }
+                            else
+                            {
+                                Logger.Warn("[DatabaseManager] v19→v20 が未完 (games.play_time に範囲外値が残存) のため user_version は " + currentVersion + " のまま据え置き、次回起動時に再試行します");
+                            }
+                        }
+                        else
+                        {
+                            Logger.Warn("[DatabaseManager] 直前の migration が未完のため v19→v20 も skip、user_version は " + currentVersion + " のまま据え置き");
                         }
                     }
 
@@ -1487,6 +1715,514 @@ namespace TonePrism.Manager
         }
 
         /// <summary>
+        /// v14 → v15: game_versions(game_id, version) に UNIQUE INDEX を追加 (#234 ②)。
+        /// 同一ゲームに同一バージョン番号が 2 行 INSERT される silent corruption をアプリ層 dup-check
+        /// (VersionUpForm / EditGameForm / GameSectionPanel) の最後の砦として DB レベルで封じる。
+        /// 複数 PC 同時操作時の「check → write」間 race のように app-level guard で塞ぎきれない経路を
+        /// DB 制約で確実に弾く。重複行が残存する場合は throw せず false を返し、user_version 据え置きで
+        /// 次回起動時に再試行する (V10→V11 と同じパターン、起動は継続)。EnsureGameVersionsVersionUniqueIndex
+        /// が CreateTables (新規 DB) と共通の実体。
+        /// </summary>
+        /// <returns>index 作成成功 / 既存なら true、重複残存で skip なら false</returns>
+        private bool MigrateV14ToV15(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            Logger.Info("[DatabaseManager] Executing migration V14 -> V15 (game_versions に (game_id, version) UNIQUE INDEX を追加, #234 ②)");
+            return EnsureGameVersionsVersionUniqueIndex(connection, transaction);
+        }
+
+        /// <summary>
+        /// v15 → v16: backup_log.trigger_type CHECK を 'restore' 受け入れに拡張 (H4)。
+        /// V9 → V10 と同じ pattern: SQLite の CHECK は ALTER で変更不能のため、新スキーマで table を recreate
+        /// + 全行 INSERT コピー + DROP/RENAME。既存行は 'manual' / 'auto' / 'safety' のみで新 CHECK に違反しない。
+        /// v11 で追加された relative_path 列も保持する (V9 → V10 の列セットからの drift に注意)。
+        /// </summary>
+        /// <summary>
+        /// (累積監査 round 4 Medium-22) v17 → v18: developers.version_id に FK + ON DELETE CASCADE を追加。
+        /// SQLite は ALTER で FK 追加不能のため、テーブル recreate + INSERT-SELECT で対応する。
+        /// orphan 行 (version_id が non-null だが game_versions に該当 id が無い) は INSERT-SELECT で除外することで
+        /// silent に掃除する (現状 single-version 削除コードが無いので通常 orphan は発生していないはずだが、
+        /// 過去 migration の残党 / 外部ツール直 DML での garbage を念のため除去する defensive sweep)。
+        /// </summary>
+        /// <summary>
+        /// (累積監査 round 6 #13) developers テーブルが version_id への FOREIGN KEY を持つか判定する。
+        /// v0 DB の retrofit 要否判定に使う。`PRAGMA foreign_key_list(developers)` の各行の `from` 列が
+        /// "version_id" のものがあれば true。検出に失敗した場合は安全側 (= retrofit を走らせない) に倒して
+        /// true を返す (= 余計な table recreate を避ける。新規 DB では CreateTables が FK 付きで作るため、
+        /// 検出失敗で skip しても実害なし)。
+        /// </summary>
+        private bool DevelopersHasVersionIdForeignKey(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            try
+            {
+                using (var cmd = new SQLiteCommand("PRAGMA foreign_key_list(developers)", connection, transaction))
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        string from = reader["from"] is DBNull ? null : reader["from"].ToString();
+                        if (string.Equals(from, "version_id", StringComparison.OrdinalIgnoreCase))
+                            return true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[DatabaseManager] (#13) developers FK 検出に失敗、retrofit を skip (安全側): " + ex.Message);
+                return true;
+            }
+            return false;
+        }
+
+        private void MigrateV17ToV18(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            Logger.Info("[DatabaseManager] Executing migration V17 -> V18 (developers.version_id に FK + ON DELETE CASCADE 追加 / game_genres dead table 除去, Medium-22 / Low-28/29)");
+
+            // (round 5 M1) SQLite 公式の「FK ありテーブル recreate」推奨手順に従い、transaction 内では
+            // foreign_keys check を deferred モードに切替する。`PRAGMA foreign_keys` は transaction 内で
+            // 変更できないため `defer_foreign_keys` を使う (3.7.5+)。これで INSERT-SELECT 中に新テーブルの
+            // FK 違反が即時 throw されず、COMMIT 直前にまとめて check される。これにより game_id orphan が
+            // 1 件でも残っている過去 DB (= 外部ツール直 DML 経験あり / round 4 以前の UpdateGameId 中断履歴)
+            // で migration 全体が即死する path を回避する。
+            using (var cmd = new SQLiteCommand("PRAGMA defer_foreign_keys = ON", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            // (累積監査 round 4 Low-28/29) game_genres は v2 で追加されたが GameRepository.Add/Update は
+            // 一切書き込まず `games.genre` のカンマ区切り文字列が SoT として動いている dead table。
+            // UpdateGameId だけが child table list に含めて更新しているため過去 v2 migration 経由の DB では
+            // 「rename 時だけ古い行が追従」する半端な状態が残っていた。本 migration で DROP して
+            // SoT を 1 本化する (CreateTables / ExpectedSchema からも同時に除去済)。
+            using (var cmd = new SQLiteCommand("DROP TABLE IF EXISTS game_genres", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            string createNew = @"
+                CREATE TABLE developers_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_id TEXT,
+                    last_name TEXT,
+                    first_name TEXT,
+                    grade TEXT,
+                    version_id INTEGER,
+                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE,
+                    FOREIGN KEY(version_id) REFERENCES game_versions(id) ON DELETE CASCADE
+                )";
+            using (var cmd = new SQLiteCommand(createNew, connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            // (round 5 M1) orphan filter を拡張: 旧実装は version_id orphan のみ除外で、game_id orphan
+            // (= games に存在しない game_id を持つ developers 行) は除外していなかった。新テーブルの
+            // game_id 側にも FK が付くため orphan 残存で COMMIT 時 FK check 失敗 → migration 全体即死の
+            // 経路があった。version_id と同パターンで game_id 側にも EXISTS filter を追加し、
+            // 「game_id IS NULL (= 製作者が特定ゲーム未紐付け) または対応 games 行が存在」かつ
+            // 「version_id IS NULL または対応 game_versions 行が存在」の両条件を満たす行のみ移行する。
+            using (var cmd = new SQLiteCommand(
+                "INSERT INTO developers_new (id, game_id, last_name, first_name, grade, version_id) " +
+                "SELECT d.id, d.game_id, d.last_name, d.first_name, d.grade, d.version_id " +
+                "FROM developers d " +
+                "WHERE (d.game_id IS NULL " +
+                "       OR EXISTS (SELECT 1 FROM games g WHERE g.game_id = d.game_id)) " +
+                "  AND (d.version_id IS NULL " +
+                "       OR EXISTS (SELECT 1 FROM game_versions gv WHERE gv.id = d.version_id))",
+                connection, transaction))
+            {
+                int copied = cmd.ExecuteNonQuery();
+                Logger.Info("[DatabaseManager] (round 5 M1 / Medium-22) developers 行を新テーブルへコピー: " + copied + " 件");
+            }
+
+            // orphan 件数を別途 log に残す (= silent sweep の trail)。version_id / game_id を別カウントで記録。
+            using (var cmd = new SQLiteCommand(
+                "SELECT COUNT(*) FROM developers WHERE version_id IS NOT NULL " +
+                "AND NOT EXISTS (SELECT 1 FROM game_versions gv WHERE gv.id = developers.version_id)",
+                connection, transaction))
+            {
+                var r = cmd.ExecuteScalar();
+                long orphans = r is DBNull ? 0 : Convert.ToInt64(r);
+                if (orphans > 0)
+                {
+                    Logger.Warn("[DatabaseManager] (Medium-22) developers.version_id 孤児行を migration で除去: " + orphans + " 件");
+                }
+            }
+            using (var cmd = new SQLiteCommand(
+                "SELECT COUNT(*) FROM developers WHERE game_id IS NOT NULL " +
+                "AND NOT EXISTS (SELECT 1 FROM games g WHERE g.game_id = developers.game_id)",
+                connection, transaction))
+            {
+                var r = cmd.ExecuteScalar();
+                long orphans = r is DBNull ? 0 : Convert.ToInt64(r);
+                if (orphans > 0)
+                {
+                    Logger.Warn("[DatabaseManager] (round 5 M1) developers.game_id 孤児行を migration で除去: " + orphans + " 件");
+                }
+            }
+
+            using (var cmd = new SQLiteCommand("DROP TABLE developers", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+            using (var cmd = new SQLiteCommand("ALTER TABLE developers_new RENAME TO developers", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            Logger.Info("[DatabaseManager] Migration V17 -> V18 completed.");
+        }
+
+        /// <summary>
+        /// v18 → v19: backup_log テーブルを DROP する。
+        ///
+        /// バックアップ履歴のメタデータを「バックアップ対象である toneprism.db の中」に持つ設計が、復元で DB が
+        /// 丸ごと置き換わるたびに履歴とディスク実ファイルのズレを生み、それを埋める reconcile / register 系の
+        /// 後付けコードがバグの温床になっていた (失敗復元が success 化する等)。履歴を backups/ フォルダ走査
+        /// (BackupCatalogService) 由来に切り替えたことで本テーブルは不要になった。
+        ///
+        /// 既存行は破棄されるが、物理バックアップファイルは残り、初回走査で履歴に復活する (失われるのは
+        /// 失敗履歴と復元監査行のみ = いずれも要件上不要)。LAN 協調 (last_backup_at lease / restore_lock_owner)
+        /// は settings テーブルにあり本 migration の影響を受けない。game_genres v18 DROP と同じパターン。
+        /// </summary>
+        private void MigrateV18ToV19(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            Logger.Info("[DatabaseManager] Executing migration V18 -> V19 (backup_log テーブルを DROP, 履歴を file-scan 化)");
+            using (var cmd = new SQLiteCommand("DROP TABLE IF EXISTS backup_log", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+            Logger.Info("[DatabaseManager] Migration V18 -> V19 completed.");
+        }
+
+        /// <summary>
+        /// v19 → v20: `games.play_time` に `CHECK(play_time BETWEEN 1 AND 3)` を追加する (#247)。
+        ///
+        /// 背景: 初代スキーマ / SPEC §7.3 は play_time に CHECK(1-3) を持っていたが、現行 `games` テーブル定義は
+        /// difficulty の CHECK は残しつつ play_time の CHECK を取りこぼしていた (新規DB/旧DB/SPEC の三者 drift)。
+        /// 値は Manager のコンボボックスで 1-3 に強制済みで実害は無いが、difficulty との非対称解消 + SPEC 整合の
+        /// ため DB レベルでも強制する。
+        ///
+        /// **重要 (FK)**: SQLite は ALTER TABLE で CHECK を追加できないため games テーブルを recreate するが、
+        /// games は親テーブルで複数の子が ON DELETE CASCADE / SET NULL で参照している。`DROP TABLE games` は
+        /// foreign_keys=ON だと暗黙 DELETE → CASCADE 発火で子行を全消去するため、本 migration は
+        /// **foreign_keys=OFF を前提**とする (InitializeDatabase が migration 検出時に transaction 開始前へ
+        /// PRAGMA foreign_keys=OFF を設定し、commit 前に PRAGMA foreign_key_check で整合を検証する)。
+        /// `defer_foreign_keys` では CASCADE action を止められない (sqlite3 実測で確認済) ため不可。
+        ///
+        /// 冪等性: 既に play_time CHECK を持つ games (= 新規DB が CreateTables で作った形 / 再実行) では skip する。
+        /// 列順・列名は CreateTables の games 定義と一致させること (drift すると INSERT-SELECT が壊れる)。
+        ///
+        /// データ起因の skip: 範囲外 play_time (NULL でも 1-3 でもない値) を持つ既存行があると新 CHECK で
+        /// INSERT-SELECT が失敗する。UI は 1-3 しか書かないため通常発生しないが、外部ツール直 DML 等で混入した
+        /// 場合に **migration を hard-fail させて Manager 起動を止めない** よう (展示運用での可用性優先)、事前検出して
+        /// skip + 警告 + false 返却にする (V14→V15 / V16→V17 の重複時 skip+retry と同パターン)。user_version は
+        /// 19 のまま据え置かれ、該当行を sqlite3 で是正すれば次回起動で適用される。
+        /// </summary>
+        /// <returns>CHECK 追加成功 / 既存(冪等) なら true、範囲外データ残存で skip なら false (user_version 据え置き)</returns>
+        private bool MigrateV19ToV20(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            Logger.Info("[DatabaseManager] Executing migration V19 -> V20 (games.play_time に CHECK(1-3) を追加, #247)");
+
+            // 冪等ガード: games の DDL に play_time の CHECK が既にあれば何もしない (新規DB / 再実行)。
+            string gamesSql = null;
+            using (var cmd = new SQLiteCommand(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='games'", connection, transaction))
+            {
+                var r = cmd.ExecuteScalar();
+                gamesSql = r is DBNull ? null : r?.ToString();
+            }
+            if (gamesSql != null && gamesSql.IndexOf("play_time", StringComparison.OrdinalIgnoreCase) >= 0
+                && gamesSql.IndexOf("play_time INTEGER CHECK", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                Logger.Info("[DatabaseManager] games.play_time に CHECK が既存のため V19 -> V20 を skip (冪等)");
+                return true;
+            }
+
+            // データ起因 skip 判定: 範囲外 play_time / difficulty を持つ行を事前検出 (あれば INSERT-SELECT が
+            // CHECK 違反で失敗するため、hard-fail で起動を止めず skip + 警告 + retry に倒す)。NULL は CHECK 許容なので除外。
+            // (PR #236 レビュー対応 #3) games_new は play_time / difficulty の **両方** に CHECK を強制するため、
+            // 事前検査も両方を見る。play_time は本 migration まで CHECK が無く範囲外データが既存しうる一方、
+            // difficulty は CreateTables で長く CHECK 済のため範囲外は通常存在しないが、CHECK 不在の旧 v0 DB 等で
+            // 範囲外 difficulty があると INSERT-SELECT が throw → 起動失敗 (= play_time の skip+warn と真逆) になる
+            // 非対称を防ぐため difficulty も同じ skip+warn 経路に乗せる。
+            long outOfRange = 0;
+            using (var cmd = new SQLiteCommand(
+                "SELECT COUNT(*) FROM games WHERE (play_time IS NOT NULL AND play_time NOT BETWEEN 1 AND 3) " +
+                "OR (difficulty IS NOT NULL AND difficulty NOT BETWEEN 1 AND 3)",
+                connection, transaction))
+            {
+                var r = cmd.ExecuteScalar();
+                outOfRange = r is DBNull ? 0 : Convert.ToInt64(r);
+            }
+            if (outOfRange > 0)
+            {
+                Logger.Warn(
+                    "[DatabaseManager] WARNING: games.play_time / difficulty に範囲外 (1-3 以外) の値を持つ行が " + outOfRange + " 件あるため " +
+                    "V19 -> V20 (CHECK 追加) を skip します (user_version 据え置き、次回起動時に再試行)。" +
+                    "tools/sqlite3/sqlite3.exe で `SELECT game_id, play_time, difficulty FROM games WHERE (play_time IS NOT NULL AND play_time NOT BETWEEN 1 AND 3) OR (difficulty IS NOT NULL AND difficulty NOT BETWEEN 1 AND 3);` " +
+                    "を確認し、値を 1-3 または NULL に是正してから Manager を再起動してください。");
+                return false;
+            }
+
+            // 前回中断の残骸があれば掃除 (transaction 内なので通常は発生しないが防御)。
+            using (var cmd = new SQLiteCommand("DROP TABLE IF EXISTS games_new", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            // 新 games を CreateTables と同一の列構成 + play_time CHECK 付きで作成。
+            string createNew = @"
+                CREATE TABLE games_new (
+                    game_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    release_year INTEGER,
+                    genre TEXT,
+                    min_players INTEGER,
+                    max_players INTEGER,
+                    difficulty INTEGER CHECK(difficulty BETWEEN 1 AND 3),
+                    play_time INTEGER CHECK(play_time BETWEEN 1 AND 3),
+                    controller_support INTEGER DEFAULT 0,
+                    supported_connection INTEGER DEFAULT 0,
+                    thumbnail_path TEXT,
+                    background_path TEXT,
+                    executable_path TEXT,
+                    display_order INTEGER DEFAULT 0,
+                    is_visible INTEGER DEFAULT 1,
+                    controls TEXT,
+                    key_mapping TEXT,
+                    arguments TEXT,
+                    version TEXT
+                )";
+            using (var cmd = new SQLiteCommand(createNew, connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            // 全列を明示列挙してコピー (SELECT * 依存を避ける)。play_time が範囲外の既存行があると CHECK 違反で
+            // ここで throw → migration 全体 rollback。UI は 1-3 しか書かないため通常は発生しないが、外部ツール
+            // 直 INSERT 等で範囲外値があれば fail-fast させ (silent な値書き換えはしない)、手動是正を促す。
+            using (var cmd = new SQLiteCommand(
+                "INSERT INTO games_new (game_id, title, description, release_year, genre, min_players, max_players, " +
+                "difficulty, play_time, controller_support, supported_connection, thumbnail_path, background_path, " +
+                "executable_path, display_order, is_visible, controls, key_mapping, arguments, version) " +
+                "SELECT game_id, title, description, release_year, genre, min_players, max_players, " +
+                "difficulty, play_time, controller_support, supported_connection, thumbnail_path, background_path, " +
+                "executable_path, display_order, is_visible, controls, key_mapping, arguments, version FROM games",
+                connection, transaction))
+            {
+                int copied = cmd.ExecuteNonQuery();
+                Logger.Info("[DatabaseManager] (#247) games 行を新テーブルへコピー: " + copied + " 件");
+            }
+
+            using (var cmd = new SQLiteCommand("DROP TABLE games", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+            using (var cmd = new SQLiteCommand("ALTER TABLE games_new RENAME TO games", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            // games には PRIMARY KEY 以外の secondary index / trigger は無い (UNIQUE INDEX は game_versions 側)
+            // ため再作成は不要。子テーブルの FK 定義はテーブル名 'games' で解決されるため rename 後も有効
+            // (foreign_key_check は InitializeDatabase が commit 前に実行して整合を検証する)。
+            Logger.Info("[DatabaseManager] Migration V19 -> V20 completed.");
+            return true;
+        }
+
+        /// <summary>
+        /// (#247) `PRAGMA foreign_key_check` で FK 整合を検証する。foreign_keys=OFF にして親テーブルを recreate
+        /// した migration (v19→v20) の commit 直前に呼び、CASCADE/SET NULL 参照が rename 後も健全かを確認する。
+        /// 違反行があっても throw せず warn ログのみ (起動継続優先、VerifySchema と同方針)。foreign_key_check は
+        /// 全テーブルを scan して (子テーブル, rowid, 親テーブル, fkid) を返す。検証は enforcement 設定 (ON/OFF) に
+        /// 依存せず常に scan する。
+        /// </summary>
+        private void VerifyForeignKeyIntegrity(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            var violations = new List<string>();
+            using (var cmd = new SQLiteCommand("PRAGMA foreign_key_check", connection, transaction))
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    string tbl = reader.IsDBNull(0) ? "?" : reader.GetValue(0).ToString();
+                    string rowid = reader.IsDBNull(1) ? "?" : reader.GetValue(1).ToString();
+                    string parent = reader.IsDBNull(2) ? "?" : reader.GetValue(2).ToString();
+                    violations.Add("  - table=" + tbl + " rowid=" + rowid + " parent=" + parent);
+                    if (violations.Count >= 50) break; // ログ肥大防止 (通常は 0 件)
+                }
+            }
+            if (violations.Count > 0)
+            {
+                Logger.Warn("[DatabaseManager] (#247) foreign_key_check で FK 不整合を検出 (migration 後)。起動は継続しますが手動確認を推奨:\n" + string.Join("\n", violations));
+            }
+            else
+            {
+                Logger.Info("[DatabaseManager] (#247) foreign_key_check: FK 整合 OK");
+            }
+        }
+
+        private void MigrateV15ToV16(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            Logger.Info("[DatabaseManager] Executing migration V15 -> V16 (backup_log.trigger_type CHECK 拡張: 'restore' 追加, H4)");
+
+            string createNew = @"
+                CREATE TABLE backup_log_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    started_at INTEGER NOT NULL,
+                    completed_at INTEGER,
+                    pc_name TEXT NOT NULL,
+                    file_path TEXT,
+                    relative_path TEXT,
+                    file_size_bytes INTEGER,
+                    status TEXT NOT NULL CHECK (status IN ('in_progress','success','failed')),
+                    error_message TEXT,
+                    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('manual','auto','safety','restore'))
+                )";
+            using (var cmd = new SQLiteCommand(createNew, connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            using (var cmd = new SQLiteCommand(
+                "INSERT INTO backup_log_new (id, started_at, completed_at, pc_name, file_path, relative_path, " +
+                "file_size_bytes, status, error_message, trigger_type) " +
+                "SELECT id, started_at, completed_at, pc_name, file_path, relative_path, " +
+                "file_size_bytes, status, error_message, trigger_type FROM backup_log",
+                connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            using (var cmd = new SQLiteCommand("DROP TABLE backup_log", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            using (var cmd = new SQLiteCommand(
+                "ALTER TABLE backup_log_new RENAME TO backup_log", connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+
+            Logger.Info("[DatabaseManager] Migration V15 -> V16 completed.");
+        }
+
+        /// <summary>
+        /// v16 → v17: game_versions UNIQUE INDEX を COLLATE NOCASE 化 (M3)。
+        /// 旧 BINARY collation index は `v1.0.0` と `V1.0.0` を別行として許容していた。SemverInputControl が
+        /// 大文字 V を受理する一方、UI 層 dup-check は OrdinalIgnoreCase のため外部ツール直 INSERT や
+        /// レガシー復元データで case 違い重複が DB に入る経路があった。NOCASE INDEX で DB レベルでも弾く。
+        /// 重複残存時は MigrateV14ToV15 と同じ skip + retry パターン。
+        /// </summary>
+        /// <returns>NOCASE INDEX 作成成功なら true、case 違い重複残存で skip なら false</returns>
+        private bool MigrateV16ToV17(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            Logger.Info("[DatabaseManager] Executing migration V16 -> V17 (game_versions UNIQUE INDEX を COLLATE NOCASE 化, M3)");
+
+            // NOCASE 重複検出 (LOWER で GROUP BY)
+            var dups = new List<string>();
+            using (var cmd = new SQLiteCommand(
+                "SELECT game_id, LOWER(version) AS v_lower, COUNT(*) AS cnt FROM game_versions " +
+                "GROUP BY game_id, LOWER(version) HAVING cnt > 1 ORDER BY game_id, v_lower",
+                connection, transaction))
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    dups.Add("  - game_id='" + reader["game_id"] + "', version (NOCASE)='" + reader["v_lower"] + "' (" + reader["cnt"] + " 行)");
+                }
+            }
+
+            if (dups.Count > 0)
+            {
+                Logger.Warn(
+                    "[DatabaseManager] WARNING: game_versions に case 違い重複を検出。NOCASE UNIQUE INDEX 作成を skip します " +
+                    "(user_version 据え置き、次回起動時に再試行)。tools/sqlite3/sqlite3.exe で重複行を確認し、不要な行を削除してから " +
+                    "Manager を再起動してください:\n" + string.Join("\n", dups));
+                // 既存の BINARY INDEX は維持 (drop しない、= 部分的 fence は継続)。
+                return false;
+            }
+
+            // 旧 BINARY INDEX を drop して NOCASE で作り直す。drop は idempotent (IF EXISTS)。
+            using (var cmd = new SQLiteCommand(
+                "DROP INDEX IF EXISTS " + GameVersionsVersionUniqueIndexName, connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+            using (var cmd = new SQLiteCommand(
+                "CREATE UNIQUE INDEX IF NOT EXISTS " + GameVersionsVersionUniqueIndexName +
+                " ON game_versions(game_id, version COLLATE NOCASE)",
+                connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+            Logger.Info("[DatabaseManager] game_versions(game_id, version COLLATE NOCASE) UNIQUE INDEX を作成しました (M3)");
+            return true;
+        }
+
+        /// <summary>(#234 ②) game_versions(game_id, version) UNIQUE INDEX 名。CreateTables / Migrate 共通。</summary>
+        private const string GameVersionsVersionUniqueIndexName = "idx_game_versions_game_id_version";
+
+        /// <summary>
+        /// game_versions(game_id, version) の UNIQUE INDEX を作成する (#234 ②)。CreateTables (新規 DB)
+        /// と MigrateV14ToV15 (既存 DB) の共通処理。version 文字列は raw 比較 (BINARY collation = index と
+        /// 同じ) で重複判定する (= 意味的正規化 "v1.0.0"/"1.0.0" の同一視はアプリ層の責務、DB は raw 一致
+        /// のみ保証)。重複 (game_id, version) が残存する場合は index 作成が制約違反で失敗するため、事前に
+        /// 検出して throw せず警告ログ + false 返却で skip する (= 起動を壊さない、V10→V11 踏襲)。CreateTables
+        /// 側は戻り値を無視 (警告のみで起動継続)、migration 側は false を user_version 据え置きへ伝播する。
+        /// </summary>
+        /// <returns>index 作成成功 / 既存なら true、重複残存で skip なら false</returns>
+        private bool EnsureGameVersionsVersionUniqueIndex(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            // 既に index があれば no-op (idempotent)。
+            using (var cmd = new SQLiteCommand(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=@name", connection, transaction))
+            {
+                cmd.Parameters.AddWithValue("@name", GameVersionsVersionUniqueIndexName);
+                if (Convert.ToInt64(cmd.ExecuteScalar()) > 0) return true;
+            }
+
+            // 重複 (game_id, version) を検出。あれば UNIQUE INDEX 作成は制約違反で失敗するので、
+            // 事前検出して throw せず skip + 警告 (起動継続)。
+            var dups = new List<string>();
+            using (var cmd = new SQLiteCommand(
+                "SELECT game_id, version, COUNT(*) AS cnt FROM game_versions GROUP BY game_id, version HAVING cnt > 1 ORDER BY game_id, version",
+                connection, transaction))
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    dups.Add("  - game_id='" + reader["game_id"] + "', version='" + reader["version"] + "' (" + reader["cnt"] + " 行)");
+                }
+            }
+
+            if (dups.Count > 0)
+            {
+                Logger.Warn(
+                    "[DatabaseManager] WARNING: game_versions に (game_id, version) の重複行を検出。UNIQUE INDEX 作成を skip します " +
+                    "(user_version 据え置き、次回起動時に再試行)。tools/sqlite3/sqlite3.exe で重複行を確認し、不要な行を削除してから " +
+                    "Manager を再起動してください:\n" + string.Join("\n", dups));
+                return false;
+            }
+
+            // (累積監査 round 3 追加 fix) COLLATE NOCASE で作る。CreateTables 経路 (新規 DB) は
+            // currentVersion=0 → SetDbVersion(17) へ直接 jump するため MigrateV16ToV17 (NOCASE rebuild) が
+            // 永久に走らない経路があった。本番 2026-05-27 まっさら install の DB は BINARY index のまま
+            // 動いており、M3 で導入した case 違い重複 fence (`v1.0.0` と `V1.0.0` の同一視) が無効化されて
+            // いた回帰を、本関数を NOCASE で揃えることで構造的に閉じる。
+            using (var cmd = new SQLiteCommand(
+                "CREATE UNIQUE INDEX IF NOT EXISTS " + GameVersionsVersionUniqueIndexName + " ON game_versions(game_id, version COLLATE NOCASE)",
+                connection, transaction))
+            {
+                cmd.ExecuteNonQuery();
+            }
+            Logger.Info("[DatabaseManager] game_versions(game_id, version COLLATE NOCASE) に UNIQUE INDEX を作成しました (#234 ②, M3)");
+            return true;
+        }
+
+        /// <summary>
         /// (#179) manager_sessions テーブル作成 (CreateTables / MigrateV12ToV13 共通)。
         /// schema は SPEC §7.3 参照。`pc_name` を PRIMARY KEY、同 PC は 1 row のみ (重複起動は Named
         /// Mutex で物理 block する設計、SPEC §3.8)。
@@ -1601,14 +2337,15 @@ namespace TonePrism.Manager
             { "games", new[] { "game_id", "title", "description", "release_year", "genre", "min_players", "max_players", "difficulty", "play_time", "controller_support", "supported_connection", "thumbnail_path", "background_path", "executable_path", "display_order", "is_visible", "controls", "key_mapping", "arguments", "version" } },
             { "game_versions", new[] { "id", "game_id", "version", "executable_path", "arguments", "description", "title", "genre", "min_players", "max_players", "difficulty", "play_time", "controller_support", "supported_connection", "thumbnail_path", "background_path", "update_note", "registered_at" } },
             { "developers", new[] { "id", "game_id", "last_name", "first_name", "grade", "version_id" } },
-            { "game_genres", new[] { "id", "game_id", "genre" } },
+            // (累積監査 round 4 Low-28/29) game_genres は v18 で DROP した dead table のため除去 (MigrateV17ToV18 参照)。
             { "play_records", new[] { "id", "game_id", "start_time", "end_time", "play_duration", "player_count" } },
             { "surveys", new[] { "id", "game_id", "rating", "comment", "created_at" } },
             { "launcher_surveys", new[] { "id", "rating", "favorite_game_id", "comment", "created_at" } },
             { "settings", new[] { "key", "value" } },
             { "store_sections", new[] { "section_id", "title", "section_type", "section_source", "display_order", "max_display_count", "is_visible" } },
             { "store_section_games", new[] { "id", "section_id", "game_id", "display_order", "display_text" } },
-            { "backup_log", new[] { "id", "started_at", "completed_at", "pc_name", "file_path", "relative_path", "file_size_bytes", "status", "error_message", "trigger_type" } },
+            // backup_log は v19 で DROP した (MigrateV18ToV19 参照、履歴を BackupCatalogService の file-scan に移行)。
+            // VerifySchema の検証対象外 = drop 済 DB / 新規 DB の両方で PASS する。
             { "manager_sessions", new[] { "pc_name", "started_at_unix_ms", "last_heartbeat_at_unix_ms", "pid", "manager_version" } },
         };
 

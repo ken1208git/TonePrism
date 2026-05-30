@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
@@ -11,18 +12,58 @@ namespace TonePrism.Manager.Services
     public static class FileOperationService
     {
         /// <summary>
-        /// ゲームエンジン/開発環境の不要フォルダ一覧
+        /// ゲームエンジン/開発環境の不要フォルダ一覧 (コピー時に除外する)。
+        ///
+        /// (Finding #2) 旧実装は "Build" / "Builds" / "Saved" / "Logs" / "Temp" も除外していたが、
+        /// これらは「ゲーム本体の中身」でもありうる総称名 (Unreal の Saved、配布物の Build/Builds、
+        /// 自作ゲームの Logs/Temp 等) で、exe / 画像がフォルダ直下にあると除外に気づかぬまま不完全
+        /// コピーで起動不能ゲームが silent 登録される穴があった。除外対象は「再生成可能で出荷物に
+        /// 含めない」ことがほぼ確実な engine cache (Library / Intermediate / DerivedDataCache / .import)
+        /// と VCS / IDE / 言語キャッシュ (dotfiles 系) に限定する。残る曖昧な名前 (Library / node_modules
+        /// 等、ごく稀に本体になりうる) は <see cref="FindExcludedFolderNames"/> + コピー前確認ダイアログで
+        /// ユーザーに明示するため、silent には落とさない。
         /// </summary>
         public static readonly string[] ExcludedFolders = new[]
         {
-            "Library", "Temp", "Logs", "Build", "Builds",
-            "Intermediate", "Saved", "DerivedDataCache",
+            "Library",
+            "Intermediate", "DerivedDataCache",
             ".import",
             ".vs", ".idea", ".vscode",
             ".git", ".svn", ".hg",
             "node_modules",
             "__pycache__", ".pytest_cache", ".mypy_cache"
         };
+
+        /// <summary>
+        /// (Finding #2) <paramref name="sourceDir"/> 配下に存在する除外対象フォルダ名 (distinct) を列挙する。
+        /// コピー前に「これらは取り込まれません」とユーザーへ確認するための事前 scan。ディレクトリのみ走査
+        /// (ファイルは見ない) のため軽量。アクセス不能フォルダは握り潰してスキップ。除外フォルダの内側は
+        /// これ以上辿らない (= コピー側 <see cref="CopyDirectoryRecursive"/> の skip 挙動と一致させ、報告内容を
+        /// 「実際にコピーされないフォルダ」と厳密に揃える)。
+        /// </summary>
+        public static List<string> FindExcludedFolderNames(string sourceDir)
+        {
+            var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            CollectExcludedFolderNames(sourceDir, found);
+            return found.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        private static void CollectExcludedFolderNames(string dir, HashSet<string> found)
+        {
+            string[] subDirs;
+            try { subDirs = Directory.GetDirectories(dir); }
+            catch { return; }
+            foreach (string subDir in subDirs)
+            {
+                string name = Path.GetFileName(subDir);
+                if (ExcludedFolders.Contains(name, StringComparer.OrdinalIgnoreCase))
+                {
+                    found.Add(name);
+                    continue; // 除外フォルダ内は走査不要 (コピーされないため)
+                }
+                CollectExcludedFolderNames(subDir, found);
+            }
+        }
 
         /// <summary>
         /// 指定ディレクトリ配下のファイル数を再帰的にカウント
@@ -52,7 +93,11 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>
-        /// ディレクトリを再帰的にコピー（進捗レポート付き）
+        /// ディレクトリを再帰的にコピー（進捗レポート付き）。
+        ///
+        /// (追加精査 ②) 個別ファイル / サブフォルダの copy 失敗は `failedFiles` に集約して呼び出し側に返す。
+        /// 旧実装は catch で Logger.Warn / Error するだけで呼び出し側に伝えず、main.exe が他プロセスにロック
+        /// されている等の状況で「DB は登録されたが実体が無い」起動不能ゲームを silent に生む経路があった。
         /// </summary>
         public static void CopyDirectoryRecursive(
             string sourceDir,
@@ -61,6 +106,7 @@ namespace TonePrism.Manager.Services
             System.Threading.CancellationToken token,
             int totalFiles,
             ref int copiedFiles,
+            List<string> failedFiles,
             Func<string, bool> excludeFolderPredicate = null)
         {
             token.ThrowIfCancellationRequested();
@@ -97,10 +143,12 @@ namespace TonePrism.Manager.Services
                 catch (PathTooLongException)
                 {
                     Logger.Warn($"[警告] パスが長すぎるためスキップ: {file}");
+                    failedFiles?.Add(file);
                 }
                 catch (Exception ex)
                 {
                     Logger.Error($"[警告] ファイルのコピーに失敗: {file}", ex);
+                    failedFiles?.Add(file);
                 }
             }
 
@@ -115,8 +163,15 @@ namespace TonePrism.Manager.Services
                     string fullSubPath = NormalizePath(subDir);
 
                     // コピー先自身やその親への再帰を防止
+                    // (累積監査 round 4 High-4) 区切り文字を含めて比較し、Foo と Foobar のような兄弟前方一致で
+                    // 正当な subdir が silent skip されるのを防ぐ (line 81-82 の sourceDirWithSep と同じ pattern)。
+                    // 旧実装は `fullDestDir.StartsWith(fullSubPath, ...)` のみで判定しており、`fullSubPath="C:\src\Foo"`
+                    // と `fullDestDir="C:\src\Foobar"` で前方一致 true → continue 経路に流れ、`Foo/` 配下が
+                    // 1 ファイルもコピーされない (取り込み後の存在 check で最終 rollback されるが、毎回必ず失敗する
+                    // 取り込み不能ゲームの源だった)。
+                    string subPathWithSep = fullSubPath.EndsWith("\\") ? fullSubPath : fullSubPath + "\\";
                     if (fullSubPath.Equals(fullDestDir, StringComparison.OrdinalIgnoreCase) ||
-                        fullDestDir.StartsWith(fullSubPath, StringComparison.OrdinalIgnoreCase))
+                        fullDestDir.StartsWith(subPathWithSep, StringComparison.OrdinalIgnoreCase))
                         continue;
 
                     if (ExcludedFolders.Contains(folderName, StringComparer.OrdinalIgnoreCase))
@@ -126,19 +181,22 @@ namespace TonePrism.Manager.Services
                         continue;
 
                     string destSubDir = Path.Combine(safeDestDir, folderName);
-                    CopyDirectoryRecursive(subDir, destSubDir, progress, token, totalFiles, ref copiedFiles, excludeFolderPredicate);
+                    CopyDirectoryRecursive(subDir, destSubDir, progress, token, totalFiles, ref copiedFiles, failedFiles, excludeFolderPredicate);
                 }
                 catch (Exception ex)
                 {
                     Logger.Error($"[警告] サブフォルダのコピーに失敗: {subDir}", ex);
+                    failedFiles?.Add(subDir);
                 }
             }
         }
 
         /// <summary>
-        /// ファイル数カウント → ディレクトリコピーを一括実行
+        /// ファイル数カウント → ディレクトリコピーを一括実行。コピーに失敗したファイル / サブフォルダの
+        /// path 一覧を返す (失敗ゼロなら空 list)。呼び出し側は List の中身を見て「致命的か続行可能か」を
+        /// 判断する責務を負う (旧実装の silent failure を伝播経路に置き換えた)。
         /// </summary>
-        public static void CopyDirectoryWithProgress(
+        public static List<string> CopyDirectoryWithProgress(
             string sourceDir,
             string destDir,
             IProgress<ProgressInfo> progress,
@@ -148,14 +206,48 @@ namespace TonePrism.Manager.Services
             progress.Report(new ProgressInfo(0, "ファイル数を計算中..."));
             int totalFiles = CountFiles(sourceDir, excludeFolderPredicate);
             int copiedFiles = 0;
-            CopyDirectoryRecursive(sourceDir, destDir, progress, token, totalFiles, ref copiedFiles, excludeFolderPredicate);
+            var failedFiles = new List<string>();
+            CopyDirectoryRecursive(sourceDir, destDir, progress, token, totalFiles, ref copiedFiles, failedFiles, excludeFolderPredicate);
+            return failedFiles;
         }
 
         /// <summary>
-        /// パスを正規化（\\?\ プレフィックスの除去と絶対パス化）
+        /// CopyDirectoryWithProgress の戻り値 (失敗 list) を整形済例外メッセージにする helper。
+        /// list 空なら null を返す (= 投げる必要なし)。先頭 10 件を表示し、それ以上は件数のみ。
+        /// </summary>
+        public static string FormatCopyFailureMessage(List<string> failedFiles, string baseDir = null)
+        {
+            if (failedFiles == null || failedFiles.Count == 0) return null;
+            const int previewLimit = 10;
+            var preview = failedFiles.Take(previewLimit).Select(p =>
+            {
+                if (!string.IsNullOrEmpty(baseDir))
+                {
+                    try
+                    {
+                        string fb = NormalizePath(baseDir);
+                        string fp = NormalizePath(p);
+                        if (fp.StartsWith(fb + "\\", StringComparison.OrdinalIgnoreCase))
+                            return fp.Substring(fb.Length + 1);
+                    }
+                    catch { }
+                }
+                return p;
+            });
+            string body = string.Join("\n  - ", preview);
+            string suffix = failedFiles.Count > previewLimit
+                ? $"\n  (他 {failedFiles.Count - previewLimit} 件)"
+                : "";
+            return $"{failedFiles.Count} 件のファイル / サブフォルダのコピーに失敗しました:\n  - {body}{suffix}";
+        }
+
+        /// <summary>
+        /// パスを正規化（\\?\ プレフィックスの除去と絶対パス化）。
+        /// (L) null / 空文字は素通し (NRE 防止)、将来 caller drift で null path を渡されても落ちないように。
         /// </summary>
         public static string NormalizePath(string path)
         {
+            if (string.IsNullOrEmpty(path)) return path;
             if (path.StartsWith(@"\\?\")) path = path.Substring(4);
             return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         }
@@ -180,17 +272,6 @@ namespace TonePrism.Manager.Services
                 fileName = fileName.Replace(c, '_');
             }
             return fileName;
-        }
-
-        /// <summary>
-        /// バージョンフォルダかどうかを判定（v + 数字 で始まるか）
-        /// </summary>
-        public static bool IsVersionFolder(string folderName)
-        {
-            if (string.IsNullOrEmpty(folderName)) return false;
-            if (!folderName.StartsWith("v", StringComparison.OrdinalIgnoreCase)) return false;
-            if (folderName.Length < 2) return false;
-            return char.IsDigit(folderName[1]);
         }
     }
 }

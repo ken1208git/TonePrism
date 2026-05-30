@@ -185,6 +185,35 @@ namespace TonePrism.Manager
         /// </returns>
         public DialogResult CheckSessionConflictBeforeWrite(string operationDescription)
         {
+            // (H5) advisory restore-lock check。他 PC が現在復元処理中なら即時 Cancel 返却。
+            // 「他 PC で復元中の数十秒間に自 PC が write した内容が File.Replace で消える」race を
+            // user 確認層で塞ぐ coordination layer。stale (= 5 分以上 lock 古い) と self lock は無視。
+            if (dbManager != null)
+            {
+                try
+                {
+                    string lockOwner = dbManager.SettingsRepository.GetActiveRestoreLockOwnerOrNull(
+                        Environment.MachineName,
+                        DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        Services.SettingsKeys.RestoreLockStaleThresholdMs);
+                    if (!string.IsNullOrEmpty(lockOwner))
+                    {
+                        Logger.Warn($"[MainForm] (H5) 他 PC '{lockOwner}' が restore lock 保有中、{operationDescription} を中止");
+                        MessageBox.Show(this,
+                            $"他 PC ({lockOwner}) が現在データベースの復元処理中です。\n\n" +
+                            $"復元処理と書込操作が衝突するとデータ消失のおそれがあるため、{operationDescription} を中止します。\n" +
+                            "復元完了 (通常 1 分以内) を待ってから再試行してください。",
+                            "他 PC で復元処理中", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return DialogResult.Cancel;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // lock check の失敗で write 全 path を block しないよう fail-soft。
+                    Logger.Warn("[MainForm] (H5) restore lock check 失敗 (fail-soft 続行): " + ex.Message);
+                }
+            }
+
             // (#179 round 7 M-1) `_sessionService == null` (= MainForm_Load 完了前) と
             // `_sessionService.IsInitialized == false` (= Initialize 失敗で heartbeat 機構なし) の両方を
             // fail-soft で OK 返却。後者を guard しないと毎 click ごとに `DetectOtherActiveSessions` →
@@ -354,9 +383,9 @@ namespace TonePrism.Manager
             //   - 検出時: `BeginInvoke` で dialog 表示を defer (= MainForm の Show 完了後に dialog が
             //     owner-modal child で開く → taskbar entry あり、他 window click で裏に行ける、natural
             //     WinForms 挙動)
-            //   - **panel.Initialize / LoadGames / RegisterUnknownSafetyFiles / CleanupStaleBackupEntries /
-            //     StartAutoBackupIfDue / CleanupZombieStagings / StartBackgroundUpdateCheckIfDue は全部
-            //     `ContinueLoadAfterSessionCheck` に切出し**、conflict 検出時は MainForm_Load 自体は
+            //   - **panel.Initialize / LoadGames / StartAutoBackupIfDue / CleanupZombieStagings /
+            //     StartBackgroundUpdateCheckIfDue は全部 `ContinueLoadAfterSessionCheck` に切出し**、
+            //     conflict 検出時は MainForm_Load 自体は
             //     return して残り init は実行しない (= gate)。
             //   - OK 押下時のみ `ContinueLoadAfterSessionCheck` を chain で起動 → 旧実装の gate 意味論
             //     を完全に維持。Cancel 時は panel init / backup / update check すべて skip して Close。
@@ -493,12 +522,8 @@ namespace TonePrism.Manager
                 Logger.Error("[MainForm] 旧 safety ファイル移動失敗", ex);
             }
 
-            // 退避ファイルの未登録分を backup_log に登録（起動時に1回）
-            RegisterUnknownSafetyFiles();
-
-            // 起動時に古い in_progress 行を掃除（クラッシュ残骸 / 自己参照スナップショット由来）
-            CleanupStaleBackupEntries();
-
+            // (backup_log 廃止 / DB v19) バックアップ履歴は backups/ フォルダ走査由来 (BackupCatalogService)
+            // になったため、起動時の register / reconcile は不要 (ファイル = 真実でズレない)。
             _backupSectionPanel.Initialize(dbManager);
             _logSectionPanel.Initialize(PathManager.LogsRootDirectory);
             _updateSectionPanel.Initialize(dbManager);
@@ -679,43 +704,6 @@ namespace TonePrism.Manager
             return true; // (round 4 codex P2 NEW) dialog 表示完了 = success
         }
 
-        private void RegisterUnknownSafetyFiles()
-        {
-            try
-            {
-                int added = dbManager.BackupLogRepository.RegisterUnknownSafetyFiles(
-                    dbManager.BackupService.GetSafetyDirectory(),
-                    Environment.MachineName);
-                if (added > 0)
-                {
-                    Logger.Info($"[MainForm] 退避ファイル {added} 件を backup_log に新規登録しました");
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("[MainForm] 退避ファイル登録に失敗", ex);
-            }
-        }
-
-        private void CleanupStaleBackupEntries()
-        {
-            try
-            {
-                // 起動時は10分以上経過した in_progress のみリコンサイル対象（実行中のバックアップに干渉しないため）
-                var (success, failed) = dbManager.BackupLogRepository.ReconcileInProgressEntries(
-                    "進行中状態のまま放置されたため自動的にfailed扱いにしました（Managerクラッシュ等でバックアップが完了しなかった可能性）",
-                    thresholdSeconds: 600);
-                if (success > 0 || failed > 0)
-                {
-                    Logger.Info($"[MainForm] 起動時リコンサイル: 成功化 {success} 件 / 失敗化 {failed} 件");
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("[MainForm] バックアップ履歴の掃除に失敗しました", ex);
-            }
-        }
-
         /// <summary>
         /// 自動バックアップが期限到来していればバックグラウンドで実行する。
         /// UIをブロックせず、ステータスバーで進捗を伝える。
@@ -749,6 +737,24 @@ namespace TonePrism.Manager
                 {
                     UpdateBackupStatus($"✗ 自動バックアップ失敗: {result.Message}",
                         System.Drawing.Color.DarkRed, autoRevert: true);
+                    // (累積監査 round 6 #9) 自動バックアップ失敗は 7 秒で消えるステータス表示だけだと、
+                    // 保存先 path の綴り間違い等で毎回静かに失敗していても運営が気づけない (履歴グリッドも
+                    // 「ファイル無し」判定で非表示になる)。バックアップは実データ保護の生命線で、失敗放置は
+                    // 「いざ復元しようとしたら過去ぶんが 1 件も無い」最悪ケースに直結するため、失敗時は
+                    // modal で明示通知して見落としを防ぐ。
+                    try
+                    {
+                        MessageBox.Show(this,
+                            "自動バックアップに失敗しました。\n\n" +
+                            result.Message + "\n\n" +
+                            "保存先フォルダの指定 (設定タブ)・ディスクの空き容量・書き込み権限を確認してください。\n" +
+                            "この状態が続くとバックアップが取得されないため、早めの対処をおすすめします。",
+                            "自動バックアップ失敗", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                    catch (Exception msgEx)
+                    {
+                        Logger.Warn("[MainForm] 自動バックアップ失敗通知の表示に失敗: " + msgEx.Message);
+                    }
                 }
                 else if (result.IsSkipped)
                 {
@@ -804,26 +810,8 @@ namespace TonePrism.Manager
                 // 復元によりスキーマやデータが変わっているので、必要なら再初期化
                 dbManager.InitializeDatabase();
 
-                // 復元時に作成された新しい safety ファイルを backup_log に登録（復元先には未登録）
-                RegisterUnknownSafetyFiles();
-
-                // 復元先のスナップショットには「バックアップ撮影時点で進行中だった自分自身の行」が
-                // 含まれている自己参照ゴーストになる。各 in_progress 行について実ファイルが
-                // 存在するか確認し、存在すれば success、存在しなければ failed としてリコンサイルする。
-                try
-                {
-                    var (success, failed) = dbManager.BackupLogRepository.ReconcileInProgressEntries(
-                        "バックアップファイルが見つかりませんでした（バックアップから復元時の自己参照スナップショット由来で、実ファイルも残っていない）");
-                    if (success > 0 || failed > 0)
-                    {
-                        Logger.Info($"[MainForm] 復元後リコンサイル: 成功化 {success} 件 / 失敗化 {failed} 件");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Error("[MainForm] 復元後の履歴リコンサイルに失敗しました", ex);
-                }
-
+                // (backup_log 廃止 / DB v19) 復元後の register / reconcile は不要。履歴は backups/ フォルダ
+                // 走査由来 (BackupCatalogService) で、復元で作られた safety_*.db も自動的に履歴へ現れる。
                 _gameSectionPanel.LoadGames();
                 _storeSectionPanel.LoadSections();
                 _settingsSectionPanel.UpdateVersionInfo();

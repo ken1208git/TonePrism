@@ -132,5 +132,22 @@ namespace TonePrism.Manager.Services
 
         public const string BackupAutoIntervalUnitHours = "hours";
         public const string BackupAutoIntervalUnitDays = "days";
+
+        // ----- (H5) リストア中の advisory lock -----
+
+        /// <summary>
+        /// (H5) リストア進行中の advisory lock。値形式: "<pcName>|<unixMs>"。空文字 / 不在 = lock なし。
+        /// RestoreService が Restore() 開始時に書込み、終了 (success/failure/cancel) で削除する。
+        /// 他 PC の Manager は SessionConflictHelper.CheckBeforeWrite で本 key を読み、自 PC 以外が保有 +
+        /// 5 分以内 (= stale でない) なら書込操作を block する。File.Replace の atomic 性自体は OS 任せだが、
+        /// 「他 PC が今まさに復元中」という状態を user/自動 path 双方に伝える coordination layer。
+        /// </summary>
+        public const string RestoreLockOwner = "restore_lock_owner";
+
+        /// <summary>
+        /// (H5) RestoreLockOwner の stale 判定 (= lock 取得 PC が crash した場合の自動失効) 閾値、ミリ秒単位。
+        /// 5 分 = 300_000 ms。通常の restore は 1 分以内で完了する想定なので、5 分超過は確実に異常 (crash 等)。
+        /// </summary>
+        public const long RestoreLockStaleThresholdMs = 5L * 60 * 1000;
     }
 }

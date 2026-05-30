@@ -204,6 +204,10 @@ namespace TonePrism.Manager.Services
 
         /// <summary>
         /// ゲームフォルダ内のファイルを自動検出
+        /// (round 5 L4) 旧実装は `Directory.GetFiles(... SearchOption.AllDirectories)` が junction / symbolic link
+        /// 先のファイルを拾った場合、戻り値 path が `Path.GetFullPath` 後に sourceFolder 外を指して
+        /// 「絶対 path として `RelativeExecutablePath` に流入 → 後段 assert で永久 block」する経路があった。
+        /// 各 path について sourceFolder 内 (IsPathInside) チェックを通し、外れていたら検出失敗扱いに倒す。
         /// </summary>
         /// <param name="folderPath">検索対象フォルダ</param>
         /// <returns>(実行ファイルパス, サムネイルパス, 背景パス) — 見つからない場合はnull</returns>
@@ -217,8 +221,10 @@ namespace TonePrism.Manager.Services
                 return (exePath, thumbPath, bgPath);
 
             // 実行ファイルを自動検出
-            var exeFiles = Directory.GetFiles(folderPath, "*.exe", SearchOption.AllDirectories);
-            if (exeFiles.Length > 0)
+            var exeFiles = Directory.GetFiles(folderPath, "*.exe", SearchOption.AllDirectories)
+                .Where(f => IsPathInsideSourceFolder(folderPath, f) && !IsInsideExcludedFolder(folderPath, f))
+                .ToList();
+            if (exeFiles.Count > 0)
             {
                 var preferredExeFiles = exeFiles
                     .Where(file =>
@@ -233,11 +239,15 @@ namespace TonePrism.Manager.Services
             }
 
             // サムネイル画像を自動検出
-            var thumbnailPatterns = new[] { "thumbnail.png", "thumb.png", "thumb.jpg", "icon.png", "icon.jpg" };
+            // (#207) thumbnail.jpg が抜けており、jpg のサムネが自動検出されず手動指定を強いられていた。
+            // thumbnail.png の直後に追加 (= png 優先、無ければ jpg の検出順)。
+            var thumbnailPatterns = new[] { "thumbnail.png", "thumbnail.jpg", "thumb.png", "thumb.jpg", "icon.png", "icon.jpg" };
             foreach (var pattern in thumbnailPatterns)
             {
-                var files = Directory.GetFiles(folderPath, pattern, SearchOption.AllDirectories);
-                if (files.Length > 0)
+                var files = Directory.GetFiles(folderPath, pattern, SearchOption.AllDirectories)
+                    .Where(f => IsPathInsideSourceFolder(folderPath, f) && !IsInsideExcludedFolder(folderPath, f))
+                    .ToList();
+                if (files.Count > 0)
                 {
                     thumbPath = files[0];
                     break;
@@ -248,8 +258,10 @@ namespace TonePrism.Manager.Services
             var backgroundPatterns = new[] { "background.png", "background.jpg", "bg.png", "bg.jpg", "preview.png", "preview.jpg" };
             foreach (var pattern in backgroundPatterns)
             {
-                var files = Directory.GetFiles(folderPath, pattern, SearchOption.AllDirectories);
-                if (files.Length > 0)
+                var files = Directory.GetFiles(folderPath, pattern, SearchOption.AllDirectories)
+                    .Where(f => IsPathInsideSourceFolder(folderPath, f) && !IsInsideExcludedFolder(folderPath, f))
+                    .ToList();
+                if (files.Count > 0)
                 {
                     bgPath = files[0];
                     break;
@@ -259,7 +271,85 @@ namespace TonePrism.Manager.Services
             return (exePath, thumbPath, bgPath);
         }
 
+        /// <summary>
+        /// (round 5 L4) 自動検出された path が sourceFolder 配下に物理的に含まれるかチェック。
+        /// junction / symbolic link 越しに sourceFolder 外を指す path を弾く目的。
+        /// `Path.GetFullPath` で正規化 + 等値 or 区切り境界付き StartsWith で safe な前方一致判定。
+        /// 例外時 (path 不正等) は false 倒し (= 自動検出から除外)。
+        /// </summary>
+        private static bool IsPathInsideSourceFolder(string sourceFolder, string candidatePath)
+        {
+            try
+            {
+                string sourceFull = Path.GetFullPath(sourceFolder).TrimEnd(Path.DirectorySeparatorChar);
+                string candidateFull = Path.GetFullPath(candidatePath);
+                if (string.Equals(candidateFull, sourceFull, StringComparison.OrdinalIgnoreCase)) return true;
+                return candidateFull.StartsWith(sourceFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// (Finding #2) <paramref name="candidatePath"/> が sourceFolder 配下の除外対象フォルダ
+        /// (<see cref="FileOperationService.ExcludedFolders"/>) の内側にあるかを判定する。自動検出が
+        /// 「コピー時に除外されて結局存在しなくなる exe / 画像」を候補に出して post-copy で不可解な
+        /// 「コピー後にファイルが見つかりません」abort を招く非対称を解消する目的。candidate の親を
+        /// sourceFolder まで遡り、途中のフォルダ名が 1 つでも除外対象なら true。例外時は false 倒し
+        /// (= 除外内とみなさず候補に残す、IsPathInsideSourceFolder と同じ保守的方針)。
+        /// </summary>
+        private static bool IsInsideExcludedFolder(string sourceFolder, string candidatePath)
+        {
+            try
+            {
+                string sourceFull = Path.GetFullPath(sourceFolder).TrimEnd(Path.DirectorySeparatorChar);
+                string dir = Path.GetDirectoryName(Path.GetFullPath(candidatePath));
+                while (!string.IsNullOrEmpty(dir)
+                       && !string.Equals(dir, sourceFull, StringComparison.OrdinalIgnoreCase))
+                {
+                    string name = Path.GetFileName(dir);
+                    if (FileOperationService.ExcludedFolders.Contains(name, StringComparer.OrdinalIgnoreCase))
+                        return true;
+                    dir = Path.GetDirectoryName(dir);
+                }
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         #endregion
+
+        /// <summary>
+        /// (Finding #2) コピー元フォルダに「コピー時に除外されるフォルダ」があれば、その一覧を提示して
+        /// 続行可否をユーザーに確認する。OK で続行 (true)、キャンセルで中止 (false)。除外対象フォルダが
+        /// 1 つも無ければダイアログを出さず即 true。AddGameForm / GameSectionPanel (バージョンアップ) の
+        /// コピー直前で共通に呼び、除外を silent にしない (= Build/Saved 等を絞り込んだ後も残る曖昧な
+        /// 除外名 Library / node_modules 等をユーザーが認知できるようにする) ための fence。
+        /// </summary>
+        public static bool ConfirmExcludedFoldersBeforeCopy(IWin32Window owner, string sourceDir)
+        {
+            if (string.IsNullOrWhiteSpace(sourceDir) || !Directory.Exists(sourceDir))
+                return true;
+
+            var names = FileOperationService.FindExcludedFolderNames(sourceDir);
+            if (names.Count == 0) return true;
+
+            var dr = MessageBox.Show(owner,
+                "コピー元フォルダ内の次のフォルダは、開発時の中間ファイル / キャッシュとみなして" +
+                "コピーされません:\n\n" +
+                "  " + string.Join("\n  ", names) + "\n\n" +
+                "通常はそのまま続行して問題ありません。\n" +
+                "もしゲームの動作に必要なフォルダが含まれている場合は「キャンセル」を押し、" +
+                "不要な開発用フォルダを取り除いてから取り込み直してください。",
+                "コピーされないフォルダの確認",
+                MessageBoxButtons.OKCancel, MessageBoxIcon.Information);
+            return dr == DialogResult.OK;
+        }
 
         /// <summary>
         /// ゲームIDが有効な文字列かチェック（半角英数字、ハイフン、アンダースコアのみ、最大64文字）
@@ -310,6 +400,194 @@ namespace TonePrism.Manager.Services
                 return false;
             }
 
+            return true;
+        }
+
+        #region (round 5 Phase D) パス textbox 入力支援
+
+        /// <summary>
+        /// (round 5 Phase D) 画像ファイルとして受け入れる拡張子一覧。
+        /// </summary>
+        public static readonly string[] ImageFileExtensions = new[] { ".png", ".jpg", ".jpeg", ".bmp" };
+
+        /// <summary>
+        /// (round 5 Phase D) 実行ファイルとして受け入れる拡張子一覧。
+        /// </summary>
+        public static readonly string[] ExecutableFileExtensions = new[] { ".exe" };
+
+        /// <summary>
+        /// (round 5 Phase D) ReadOnly 解除に伴う user 入力支援。`/` を `\` に正規化、cursor 位置を保持。
+        /// TextChanged ハンドラから呼ばれることを想定 (= 再帰呼出しが起きるが 2 回目は `/` 無しで no-op)。
+        /// </summary>
+        public static void NormalizeSlashInPathTextBox(TextBox tb)
+        {
+            if (tb == null) return;
+            string current = tb.Text;
+            if (string.IsNullOrEmpty(current)) return;
+            if (current.IndexOf('/') < 0) return;
+            int caret = tb.SelectionStart;
+            tb.Text = current.Replace('/', '\\');
+            tb.SelectionStart = Math.Min(caret, tb.Text.Length);
+        }
+
+        /// <summary>
+        /// (round 5 Phase D) ファイル path の validation 共通ヘルパ。
+        /// 1. 空欄なら required=false で OK / required=true で「未入力」エラー
+        /// 2. 拡張子 check (allowedExtensions)
+        /// 3. 存在 check (相対なら baseFolder で絶対化)
+        /// </summary>
+        /// <param name="path">user 入力 path</param>
+        /// <param name="baseFolder">相対 path 解決用の基準フォルダ (null 可)</param>
+        /// <param name="allowedExtensions">受け入れる拡張子 (null = 任意)</param>
+        /// <param name="required">空欄を NG とするか</param>
+        /// <param name="fieldLabel">エラーメッセージに出す項目名</param>
+        /// <param name="errorMessage">エラー時のメッセージ (OK なら null)</param>
+        /// <returns>有効なら true</returns>
+        public static bool ValidateFilePath(string path, string baseFolder, string[] allowedExtensions, bool required, string fieldLabel, out string errorMessage)
+        {
+            errorMessage = null;
+            string trimmed = (path ?? "").Trim();
+
+            if (string.IsNullOrEmpty(trimmed))
+            {
+                if (required)
+                {
+                    errorMessage = fieldLabel + "を入力してください。";
+                    return false;
+                }
+                return true;
+            }
+
+            // 拡張子チェック
+            if (allowedExtensions != null && allowedExtensions.Length > 0)
+            {
+                string ext = Path.GetExtension(trimmed);
+                bool extOk = allowedExtensions.Any(e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase));
+                if (!extOk)
+                {
+                    errorMessage = fieldLabel + "の拡張子は " + string.Join(" / ", allowedExtensions) + " のいずれかにしてください。\n\n  指定された拡張子: " + (string.IsNullOrEmpty(ext) ? "(なし)" : ext);
+                    return false;
+                }
+            }
+
+            // 存在チェック
+            string resolved = trimmed;
+            try
+            {
+                if (!Path.IsPathRooted(resolved) && !string.IsNullOrEmpty(baseFolder))
+                {
+                    resolved = Path.Combine(baseFolder, resolved);
+                }
+                resolved = Path.GetFullPath(resolved);
+            }
+            catch (Exception ex)
+            {
+                errorMessage = fieldLabel + "のパスが不正です:\n  " + trimmed + "\n\n  " + ex.Message;
+                return false;
+            }
+
+            if (!File.Exists(resolved))
+            {
+                errorMessage = fieldLabel + "が見つかりません:\n  " + resolved + "\n\nパスを確認してください (相対パスの場合はゲームフォルダ基準で解決されます)。";
+                return false;
+            }
+
+            return true;
+        }
+
+        #endregion
+
+        /// <summary>
+        /// (round 5 M6) NumericUpDown に DB 由来 int 値を安全に代入する。範囲外は clamp + Logger.Warn + false 返却。
+        /// 範囲内なら true 返却 + そのまま代入。EditGameForm の round 2 M2 fix を helper 化し、DeveloperForm 等
+        /// 他フォームからも利用可能にした共通実装。caller は false 戻り時に「NullOnLoad / 保存時の clamp 値書き戻し抑止」
+        /// flag を立てる pattern。
+        /// </summary>
+        /// <param name="nud">対象 NumericUpDown</param>
+        /// <param name="value">代入したい値 (DB 由来など、範囲外の可能性あり)</param>
+        /// <param name="fieldName">log に出すフィールド名 (例: "MinPlayers (game)")</param>
+        /// <param name="formName">log に出すフォーム名 (例: "EditGameForm")</param>
+        /// <returns>範囲内で生代入できれば true、clamp 発生なら false</returns>
+        public static bool SetClampedNumericValue(NumericUpDown nud, int value, string fieldName, string formName = "GameFormHelper")
+        {
+            decimal d = value;
+            if (d < nud.Minimum)
+            {
+                Logger.Warn($"[{formName}] (round 5 M6) {fieldName}={value} は許容下限 {nud.Minimum} を下回るため clamp");
+                nud.Value = nud.Minimum;
+                return false;
+            }
+            if (d > nud.Maximum)
+            {
+                Logger.Warn($"[{formName}] (round 5 M6) {fieldName}={value} は許容上限 {nud.Maximum} を上回るため clamp");
+                nud.Value = nud.Maximum;
+                return false;
+            }
+            nud.Value = d;
+            return true;
+        }
+
+        /// <summary>
+        /// 最小プレイ人数 ≤ 最大プレイ人数 を検証する。Add / Edit / VersionUp の 3 フォーム共通。
+        /// 旧実装はどのフォームも大小チェックを持たず、最小 &gt; 最大（例: 最小 4・最大 1）の
+        /// ナンセンスな値をそのまま保存できていた（起動は壊れないがランチャー表示が破綻する
+        /// データ品質欠陥）。3 フォームで drift しないよう helper に集約する。
+        /// </summary>
+        public static bool ValidatePlayerCount(int minPlayers, int maxPlayers, out string errorMessage)
+        {
+            errorMessage = null;
+            if (minPlayers > maxPlayers)
+            {
+                errorMessage =
+                    "最小プレイ人数が最大プレイ人数を上回っています。\n\n" +
+                    "  最小プレイ人数: " + minPlayers + "\n" +
+                    "  最大プレイ人数: " + maxPlayers + "\n\n" +
+                    "最小 ≤ 最大 になるよう修正してください。";
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// コピー元フォルダが games/ 配下（= Manager 管理下のゲーム本体・各版フォルダ）を指していないか
+        /// 検証する。ゲーム追加 / バージョンアップ共通。
+        ///
+        /// games/ 配下をソースに選ぶと、コピー先が games/{id}/v.../ となりソースの内側に入るため、
+        /// CopyDirectoryRecursive 冒頭の再帰ガードで「1 ファイルもコピーされない空コピー」になり破綻する。
+        /// 旧実装は IsVersionFolder 名前ベース除外でこの誤操作を糊塗していたが、守りたいケース（ルート選択）
+        /// は守れず、正当な v* 名フォルダを無言で誤除外する下しか無い保険だった。新ビルドは必ず games/ の外
+        /// から取り込む規約を境界で強制し、誤操作はここで明示的に弾く。
+        /// </summary>
+        public static bool ValidateSourceNotInGamesFolder(string sourceFolder, out string errorMessage)
+        {
+            errorMessage = null;
+            if (string.IsNullOrWhiteSpace(sourceFolder)) return true; // 空欄は別 validation が扱う
+
+            string gamesRoot;
+            string src;
+            try
+            {
+                gamesRoot = FileOperationService.NormalizePath(TonePrism.Manager.PathManager.GamesFolder);
+                src = FileOperationService.NormalizePath(sourceFolder);
+            }
+            catch
+            {
+                // 正規化不能（= パス不正）なら Directory.Exists 等の他 validation に委ねる
+                return true;
+            }
+
+            bool insideGames =
+                string.Equals(src, gamesRoot, StringComparison.OrdinalIgnoreCase)
+                || src.StartsWith(gamesRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            if (insideGames)
+            {
+                errorMessage =
+                    "コピー元として games フォルダ内のフォルダが選択されています:\n" +
+                    "  " + sourceFolder + "\n\n" +
+                    "games フォルダは Manager が管理するゲーム本体の置き場所です。\n" +
+                    "取り込むのは、games フォルダの外にある新しいビルド（配布用フォルダ）を選んでください。";
+                return false;
+            }
             return true;
         }
     }

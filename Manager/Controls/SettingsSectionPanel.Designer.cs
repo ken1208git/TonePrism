@@ -243,7 +243,7 @@ namespace TonePrism.Manager.Controls
             this.lblBackupDestHint.Location = new System.Drawing.Point(20, 75);
             this.lblBackupDestHint.Size = new System.Drawing.Size(420, 15);
             this.lblBackupDestHint.TabIndex = 3;
-            this.lblBackupDestHint.Text = "空欄にするとデフォルト（DB ファイルの隣の backups/）。指定先には toneprism_yyyyMMdd_HHmmss.db が直配置されます";
+            this.lblBackupDestHint.Text = "空欄にするとデフォルト（DB ファイルの隣の backups/）。指定先に auto / manual のサブフォルダが作られ、その中に auto_日時.db / manual_日時.db が保存されます";
             //
             // chkBackupAutoEnabled (自動バックアップ有効/無効)
             //

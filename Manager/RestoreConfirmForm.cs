@@ -11,10 +11,14 @@ namespace TonePrism.Manager
     public partial class RestoreConfirmForm : Form
     {
         private string _confirmationCode;
+        // (累積監査 round 4 Low-26) instance-shared Random で連打時の seed 衝突を防ぐ。
+        // 旧実装は GenerateConfirmationCode 内で毎回 `new Random()` を作っていたため、user の高速連打で
+        // 同 1ms 内に複数回呼ばれると同一 seed = 同一コード再出 → 「なぜ同じ？」混乱の UX bug があった。
+        // 宣言済の `_random` field を実際に再利用するよう GenerateConfirmationCode を instance method 化。
         private readonly Random _random = new Random();
-        private readonly BackupLogEntry _entry;
+        private readonly BackupCatalogEntry _entry;
 
-        public RestoreConfirmForm(BackupLogEntry entry)
+        public RestoreConfirmForm(BackupCatalogEntry entry)
         {
             InitializeComponent();
             _entry = entry;
@@ -27,23 +31,24 @@ namespace TonePrism.Manager
 
             if (_entry != null)
             {
-                string sizeStr = _entry.FileSizeBytes.HasValue ? FormatBytes(_entry.FileSizeBytes.Value) : "-";
+                // カタログ entry の FilePath は走査で得た現在の絶対パスそのもの (プロジェクト移動後も
+                // 常に現在の保存先を走査するため、昔の絶対パスが出る問題は構造的に発生しない)。
+                string resolvedPath = _entry.FilePath;
                 lblTargetFile.Text =
-                    $"対象: {Path.GetFileName(_entry.FilePath ?? "")}\n" +
+                    $"対象: {Path.GetFileName(resolvedPath)}\n" +
                     $"作成日時: {_entry.StartedAtLocal:yyyy/MM/dd HH:mm:ss}\n" +
-                    $"サイズ: {sizeStr}\n" +
-                    $"フルパス: {_entry.FilePath}";
+                    $"サイズ: {FormatBytes(_entry.FileSizeBytes)}\n" +
+                    $"フルパス: {resolvedPath}";
             }
         }
 
-        private static string GenerateConfirmationCode()
+        private string GenerateConfirmationCode()
         {
             const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-            var random = new Random();
             char[] code = new char[4];
             for (int i = 0; i < 4; i++)
             {
-                code[i] = chars[random.Next(chars.Length)];
+                code[i] = chars[_random.Next(chars.Length)];
             }
             return new string(code);
         }

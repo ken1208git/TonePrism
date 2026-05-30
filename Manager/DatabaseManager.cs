@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Linq;
 using TonePrism.Manager.Models;
 using TonePrism.Manager.Repositories;
 using TonePrism.Manager.Services;
@@ -20,8 +21,8 @@ namespace TonePrism.Manager
         private readonly DeveloperRepository _devRepo;
         private readonly StoreSectionRepository _sectionRepo;
         private readonly SettingsRepository _settingsRepo;
-        private readonly BackupLogRepository _backupLogRepo;
         private readonly BackupService _backupService;
+        private readonly BackupCatalogService _backupCatalogService;
         private readonly RestoreService _restoreService;
         private readonly ManagerSessionRepository _sessionRepo;
 
@@ -34,23 +35,26 @@ namespace TonePrism.Manager
             _versionRepo = new VersionRepository(_conn, _devRepo);
             _sectionRepo = new StoreSectionRepository(_conn);
             _settingsRepo = new SettingsRepository(_conn);
-            _backupLogRepo = new BackupLogRepository(_conn);
-            _backupService = new BackupService(_conn, _backupLogRepo, _settingsRepo);
-            _restoreService = new RestoreService(_conn);
+            _backupService = new BackupService(_conn, _settingsRepo);
+            // (backup_log 廃止 / DB v19) 履歴は backups/ フォルダ走査由来。BackupService からフォルダパスを取得する。
+            _backupCatalogService = new BackupCatalogService(_backupService);
+            // (H5) advisory restore-lock 取得/解放のため SettingsRepository を注入。
+            _restoreService = new RestoreService(_conn, _settingsRepo);
             _sessionRepo = new ManagerSessionRepository(_conn);
         }
 
         // --- バックアップ機能アクセサ ---
         public BackupService BackupService { get { return _backupService; } }
+        /// <summary>(DB v19) バックアップ履歴を backups/ フォルダ走査から導出するカタログサービス。</summary>
+        public BackupCatalogService BackupCatalogService { get { return _backupCatalogService; } }
         public RestoreService RestoreService { get { return _restoreService; } }
-        public BackupLogRepository BackupLogRepository { get { return _backupLogRepo; } }
         public SettingsRepository SettingsRepository { get { return _settingsRepo; } }
         /// <summary>(#179) Manager session tracking 用 repository。</summary>
         public ManagerSessionRepository ManagerSessionRepository { get { return _sessionRepo; } }
 
         // --- 接続・スキーマ ---
         /// <summary>
-        /// 現在の toneprism.db のフルパス (BackupPathResolver 等から参照)
+        /// 現在の toneprism.db のフルパス (バックアップ保存先の既定算出等から参照)
         /// </summary>
         public string DatabasePath => _conn.DbPath;
         public bool DatabaseExists() => _conn.DatabaseExists();
@@ -76,8 +80,165 @@ namespace TonePrism.Manager
         // --- バージョン ---
         public void AddGameVersion(GameVersion version) => _versionRepo.Add(version);
         public void UpdateGameVersion(GameVersion version) => _versionRepo.Update(version);
+        // (#234 後続) 複数バージョンを単一トランザクションで一括更新 (番号入れ替え時の UNIQUE 一時衝突回避)。
+        public void UpdateGameVersions(IEnumerable<GameVersion> versions) => _versionRepo.UpdateMany(versions);
         public List<GameVersion> GetGameVersions(string gameId) => _versionRepo.GetByGameId(gameId);
         public GameVersion GetLatestVersion(string gameId) => _versionRepo.GetLatest(gameId);
+
+        /// <summary>
+        /// (M5) 新版の追加 (game_versions INSERT) と activation (games UPDATE) を 1 transaction で atomic に
+        /// 実行する。両者を別 transaction で順次実行する旧経路では、commit 完了直後に電源断 / SMB disconnect が
+        /// 起きると game_versions のみ INSERT され games.version は旧版のまま残る partial-commit 窓があった
+        /// (= Launcher で新版が起動できないが UI 上「アクティブ化失敗」MessageBox も出ない silent corruption)。
+        /// 本 method は両 INSERT/UPDATE を共有 connection + transaction でラップして窓を物理閉鎖する。
+        /// </summary>
+        public void AddVersionAndActivate(GameVersion version, GameInfo game)
+        {
+            _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var transaction = connection.BeginTransaction())
+                    {
+                        try
+                        {
+                            _versionRepo.AddVersionRowInTransaction(connection, transaction, version);
+                            _gameRepo.UpdateGameRowInTransaction(connection, transaction, game);
+                            transaction.Commit();
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+                }
+            });
+        }
+
+        /// <summary>
+        /// (累積監査 round 4 High-2) 複数バージョンの一括更新 (UpdateGameVersions) + ゲーム本体の更新
+        /// (UpdateGame) を 1 transaction で atomic に実行する。EditGameForm のアクティブ版切替で両者を
+        /// 別 transaction で順次実行する旧経路には、game_versions だけ commit 完了直後に電源断 / SMB
+        /// disconnect が起きると games 行が旧版を指したまま残る partial-commit 窓があった (= Launcher で
+        /// 古い executable_path / thumbnail を解決して silent corruption)。AddVersionAndActivate と同じ
+        /// 設計で窓を物理閉鎖する。
+        /// </summary>
+        /// <summary>
+        /// (累積監査 round 4 Medium-10) ゲーム追加時に DisplayOrder を「現在の MIN(display_order) - 1」へ自動採番
+        /// する path を、SELECT MIN + INSERT を 1 transaction で atomic に実行する。旧経路は
+        /// `GetMinDisplayOrder()` + `AddGame()` を別 transaction で順次実行しており、並行 Manager race で
+        /// 両者が同じ MIN を取得して同 DisplayOrder で INSERT する → Launcher 並び順 invariant 「最新が一番上」が
+        /// 壊れる経路があった。`IsolationLevel.Serializable` (= BEGIN IMMEDIATE) で RESERVED lock を最初に取り、
+        /// 同時実行は SQLite 側で serialize される。
+        /// </summary>
+        public void AddGameAtTop(GameInfo game)
+        {
+            _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var transaction = connection.BeginTransaction(System.Data.IsolationLevel.Serializable))
+                    {
+                        try
+                        {
+                            // SELECT MIN は RESERVED lock 内で実行されるため、他 Manager の concurrent
+                            // AddGameAtTop は BEGIN IMMEDIATE で待たされ、commit 後に next snapshot を見る。
+                            int minOrder;
+                            using (var cmd = new SQLiteCommand("SELECT COALESCE(MIN(display_order), 0) FROM games", connection, transaction))
+                            {
+                                var r = cmd.ExecuteScalar();
+                                minOrder = r is DBNull ? 0 : Convert.ToInt32(r);
+                            }
+                            game.DisplayOrder = minOrder - 1;
+
+                            _gameRepo.AddGameRowInTransaction(connection, transaction, game);
+                            transaction.Commit();
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+                }
+            });
+        }
+
+        /// <summary>
+        /// (累積監査 round 6 High-1) ゲーム追加時の games INSERT (display_order の MIN-1 採番込み) と
+        /// 初期バージョンの game_versions INSERT を 1 transaction で atomic に実行する。
+        ///
+        /// 旧 AddGameForm は `AddGameAtTop` (games INSERT) と `AddGameVersion` (初期版 INSERT) を別 transaction で
+        /// 順次実行しており、前者 commit 完了直後の電源断 / SMB disconnect で「games 行はあるが game_versions は
+        /// ゼロ件」の起動不能孤児ゲーム (= Launcher 一覧には出るが版が無く起動できない) が残る partial-commit 窓が
+        /// あった。失敗時は補償削除 (RollbackGameRow) で救おうとするが、それ自体が失敗すると zombie が残る。
+        /// 本 method は両 INSERT を共有 connection + Serializable transaction でラップして窓を物理閉鎖する
+        /// (AddVersionAndActivate / UpdateVersionsAndGame と同じ設計)。
+        /// </summary>
+        public void AddGameAtTopWithInitialVersion(GameInfo game, GameVersion initialVersion)
+        {
+            _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var transaction = connection.BeginTransaction(System.Data.IsolationLevel.Serializable))
+                    {
+                        try
+                        {
+                            int minOrder;
+                            using (var cmd = new SQLiteCommand("SELECT COALESCE(MIN(display_order), 0) FROM games", connection, transaction))
+                            {
+                                var r = cmd.ExecuteScalar();
+                                minOrder = r is DBNull ? 0 : Convert.ToInt32(r);
+                            }
+                            game.DisplayOrder = minOrder - 1;
+
+                            _gameRepo.AddGameRowInTransaction(connection, transaction, game);
+                            // 初期版は必ず追加対象 game の id を指す (caller の取り違え防止の二段保険)。
+                            initialVersion.GameId = game.GameId;
+                            _versionRepo.AddVersionRowInTransaction(connection, transaction, initialVersion);
+                            transaction.Commit();
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+                }
+            });
+        }
+
+        public void UpdateVersionsAndGame(IEnumerable<GameVersion> versions, GameInfo game)
+        {
+            var list = versions?.Where(v => v != null).ToList() ?? new List<GameVersion>();
+
+            _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var transaction = connection.BeginTransaction())
+                    {
+                        try
+                        {
+                            _versionRepo.UpdateManyInTransaction(connection, transaction, list);
+                            _gameRepo.UpdateGameRowInTransaction(connection, transaction, game);
+                            transaction.Commit();
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+                }
+            });
+        }
 
         // --- ストアセクション ---
         public List<StoreSectionInfo> GetAllSections() => _sectionRepo.GetAll();

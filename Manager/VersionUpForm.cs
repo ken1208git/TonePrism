@@ -21,6 +21,11 @@ namespace TonePrism.Manager
         private GameVersion baseVersion; // コピー元のバージョン情報
         private GameInfo originalGameInfo; // 元のゲーム情報
 
+        // (#234 ①) 既存全バージョンの version 文字列。ValidateInput で「最新版だけでなく全版」と
+        // 重複比較するために caller (GameSectionPanel) から受け取る。null の場合は currentVersion
+        // 単体との比較に fallback (旧挙動)。
+        private readonly List<string> existingVersionStrings;
+
         /// <summary>
         /// 作成された新しいバージョン情報
         /// </summary>
@@ -46,13 +51,14 @@ namespace TonePrism.Manager
         /// </summary>
         public List<DeveloperInfo> UpdatedDevelopers => developers;
 
-        public VersionUpForm(GameInfo gameInfo, string currentVersion, GameVersion baseVersion = null)
+        public VersionUpForm(GameInfo gameInfo, string currentVersion, GameVersion baseVersion = null, IEnumerable<string> existingVersions = null)
         {
             InitializeComponent();
             this.originalGameInfo = gameInfo;
             this.gameId = gameInfo.GameId;
             this.currentVersion = currentVersion;
             this.baseVersion = baseVersion;
+            this.existingVersionStrings = existingVersions?.ToList();
             developers = new List<DeveloperInfo>();
             
             lblCurrentVersion.Text = currentVersion;
@@ -68,6 +74,23 @@ namespace TonePrism.Manager
 
         private void VersionUpForm_Load(object sender, EventArgs e)
         {
+            // (round 5 Phase D) path textbox を編集可能 (ReadOnly=false) に解放した分、入力時の正規化 +
+            // プレビュー連動を hook する。`/` → `\` への正規化は GameFormHelper の共通実装。
+            txtThumbnailPath.TextChanged += (s, ev) =>
+            {
+                Services.GameFormHelper.NormalizeSlashInPathTextBox(txtThumbnailPath);
+                UpdateThumbnailPreview();
+            };
+            txtBackgroundPath.TextChanged += (s, ev) =>
+            {
+                Services.GameFormHelper.NormalizeSlashInPathTextBox(txtBackgroundPath);
+                UpdateBackgroundPreview();
+            };
+            txtExecutablePath.TextChanged += (s, ev) =>
+            {
+                Services.GameFormHelper.NormalizeSlashInPathTextBox(txtExecutablePath);
+            };
+
             // (#158 H-2) ctor から移動: semverNext を currentVersion で初期化 + Patch を auto-bump
             // (= 「迷ったら Patch」default)。currentVersion が malformed (= DB に "1.0" / "alpha"
             // 等が残っていた場合) の silent v0.0.0 fallback で「気づかれずに 0.0.1 として書き戻される」
@@ -126,8 +149,11 @@ namespace TonePrism.Manager
                 if (baseVersion.PlayTime.HasValue && baseVersion.PlayTime.Value >= 1 && baseVersion.PlayTime.Value <= 3)
                     cmbPlayTime.SelectedIndex = baseVersion.PlayTime.Value - 1;
 
-                numMinPlayers.Value = baseVersion.MinPlayers ?? 1;
-                numMaxPlayers.Value = baseVersion.MaxPlayers ?? 1;
+                // (累積監査) baseVersion の人数が NumericUpDown 範囲外 (0 / 100+) の場合、生代入は
+                // ArgumentOutOfRangeException を投げて Form_Load が落ち、バージョンアップ画面が開けなくなる。
+                // EditGameForm と同じく SetClampedNumericValue で clamp + warn ログにして落ちないようにする。
+                GameFormHelper.SetClampedNumericValue(numMinPlayers, baseVersion.MinPlayers ?? 1, "MinPlayers", "VersionUpForm");
+                GameFormHelper.SetClampedNumericValue(numMaxPlayers, baseVersion.MaxPlayers ?? 1, "MaxPlayers", "VersionUpForm");
                 chkControllerSupport.Checked = baseVersion.ControllerSupport;
 
                 if (baseVersion.SupportedConnection >= 0 && baseVersion.SupportedConnection < cmbSupportedConnection.Items.Count)
@@ -144,7 +170,11 @@ namespace TonePrism.Manager
                         developers.Add(new DeveloperInfo
                         {
                             // IDはコピーしない（新規作成のため）
-                            GameId = dev.GameId,
+                            // (累積監査 round 6 M4) GameId は baseVersion の値を盲目コピーせず、編集中の
+                            // ゲーム ID (this.gameId) を採用する。baseVersion 由来の dev.GameId が
+                            // 移行バグ等で空 / 別 id を持っていた場合、新版の developers 行に誤った
+                            // game_id が入り FK 不整合 (親 game 削除で消えない孤児) の温床になるため。
+                            GameId = this.gameId,
                             LastName = dev.LastName,
                             FirstName = dev.FirstName,
                             Grade = dev.Grade
@@ -158,9 +188,22 @@ namespace TonePrism.Manager
                 // 実際にはユーザーが「フォルダ選択」を行うことが前提のフローになっているため、
                 // パスだけ入れてもコピー元フォルダが決まらないと意味がないかもしれない。
                 // しかし「あらゆる要素」をコピペという要望なので入れておく。
-                txtExecutablePath.Text = baseVersion.ExecutablePath;
-                txtThumbnailPath.Text = baseVersion.ThumbnailPath;
-                txtBackgroundPath.Text = baseVersion.BackgroundPath;
+                //
+                // (累積監査 round 3 / #8) baseVersion.* には DB 上の **相対 path** (例: `v1.0.0/cover.png`) が
+                // 入っていることがある。それを生のまま textbox に入れると後段の `File.Exists(txt.Text)` が
+                // CWD 基準で評価され「画像が見つかりません」エラーで OK が押せない永久 block UX 退行が
+                // 起きていた (ValidateInput L583-598 経由)。`PathConversionHelper.ToAbsolutePath` で gameFolder
+                // (= `games/<id>/`) 基準に絶対化してから textbox に入れることで、絶対 path として File.Exists
+                // が成立するように揃える。元から絶対 path だった場合は ToAbsolutePath 内 `Path.IsPathRooted`
+                // 分岐でそのまま返るので互換。
+                string baseGameFolder = !string.IsNullOrEmpty(gameId) ? PathManager.GetGameFolder(gameId) : "";
+                txtExecutablePath.Text = PathConversionHelper.ToAbsolutePath(baseGameFolder, baseVersion.ExecutablePath) ?? "";
+                txtThumbnailPath.Text = PathConversionHelper.ToAbsolutePath(baseGameFolder, baseVersion.ThumbnailPath) ?? "";
+                txtBackgroundPath.Text = PathConversionHelper.ToAbsolutePath(baseGameFolder, baseVersion.BackgroundPath) ?? "";
+                // (累積監査 round 3 / #8 follow-up) textbox 更新後にプレビュー反映。AddGameForm の AutoDetectFiles
+                // で同型の漏れがあり #234 ⑤(i) で修正された経緯と同じ pattern、baseVersion-load 経路も同様に呼ぶ。
+                UpdateThumbnailPreview();
+                UpdateBackgroundPreview();
             }
             else
             {
@@ -218,8 +261,16 @@ namespace TonePrism.Manager
                 txtExecutablePath.Text = exePath;
                 RelativeExecutablePath = PathConversionHelper.ToRelativePath(selectedFolderPath, exePath);
             }
-            if (thumbPath != null) txtThumbnailPath.Text = thumbPath;
-            if (bgPath != null) txtBackgroundPath.Text = bgPath;
+            if (thumbPath != null)
+            {
+                txtThumbnailPath.Text = thumbPath;
+                UpdateThumbnailPreview();
+            }
+            if (bgPath != null)
+            {
+                txtBackgroundPath.Text = bgPath;
+                UpdateBackgroundPreview();
+            }
         }
 
         private void btnSelectExecutable_Click(object sender, EventArgs e)
@@ -239,8 +290,8 @@ namespace TonePrism.Manager
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
                     string selectedPath = dialog.FileName;
-                    
-                    if (!selectedPath.StartsWith(selectedFolderPath, StringComparison.OrdinalIgnoreCase))
+
+                    if (!PathConversionHelper.IsPathInside(selectedFolderPath, selectedPath))
                     {
                         MessageBox.Show(
                             "実行ファイルはゲームフォルダ内から選択してください。",
@@ -249,9 +300,11 @@ namespace TonePrism.Manager
                             MessageBoxIcon.Warning);
                         return;
                     }
-                    
+
                     txtExecutablePath.Text = selectedPath;
-                    RelativeExecutablePath = selectedPath.Substring(selectedFolderPath.Length).TrimStart(Path.DirectorySeparatorChar);
+                    // (#234 追加精査 ③) 区切り安全な ToRelativePath で相対化 (AutoDetectFiles と同経路)。
+                    // 旧実装の Substring(folder.Length) は兄弟フォルダ前方一致時に誤った相対パスを生む懸念があった。
+                    RelativeExecutablePath = PathConversionHelper.ToRelativePath(selectedFolderPath, selectedPath);
                 }
             }
         }
@@ -272,6 +325,17 @@ namespace TonePrism.Manager
 
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
+                    // (#234) 実行ファイル選択と同様、サムネはコピー元フォルダ内のものに限る。フォルダ外の
+                    // ファイルだと相対化できず絶対パスのまま保存され、コピーされないファイルを指す壊れた
+                    // パスになる (GameSectionPanel が v{version}/ を前置しても絶対パスは Path.Combine で
+                    // そのまま残る)。AddGameForm と挙動を揃える。
+                    if (!PathConversionHelper.IsPathInside(selectedFolderPath, dialog.FileName))
+                    {
+                        MessageBox.Show(
+                            "サムネイル画像はゲームフォルダ内から選択してください。",
+                            "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
                     txtThumbnailPath.Text = dialog.FileName;
                     UpdateThumbnailPreview();
                 }
@@ -294,6 +358,14 @@ namespace TonePrism.Manager
 
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
+                    // (#234) 背景もコピー元フォルダ内に限る (サムネと同理由)。
+                    if (!PathConversionHelper.IsPathInside(selectedFolderPath, dialog.FileName))
+                    {
+                        MessageBox.Show(
+                            "背景画像はゲームフォルダ内から選択してください。",
+                            "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
                     txtBackgroundPath.Text = dialog.FileName;
                     UpdateBackgroundPreview();
                 }
@@ -327,8 +399,11 @@ namespace TonePrism.Manager
                     Version = semverNext.VersionString,  // (#158)
                     ExecutablePath = "", // コピー後に設定
                     Arguments = string.IsNullOrWhiteSpace(txtArguments.Text) ? null : txtArguments.Text.Trim(),
-                    Description = txtDescription.Text.Trim(), // 説明文
-                    UpdateNote = txtUpdateNote.Text.Trim(), // 更新内容
+                    // (#234) 空白は null 正規化。AddGameForm / EditGameForm と DB 表現を統一する
+                    // (#224 で「3 フォームで統一」と決めたが VersionUpForm の Description/UpdateNote が
+                    // 取り残されており、空欄入力時に "" が保存され他フォームの null と不一致だった)。
+                    Description = string.IsNullOrWhiteSpace(txtDescription.Text) ? null : txtDescription.Text.Trim(), // 説明文
+                    UpdateNote = string.IsNullOrWhiteSpace(txtUpdateNote.Text) ? null : txtUpdateNote.Text.Trim(), // 更新内容
                     
                     Title = txtTitle.Text.Trim(),
                     Genre = GameFormHelper.GetSelectedGenres(clbGenre),
@@ -339,14 +414,13 @@ namespace TonePrism.Manager
                     ControllerSupport = chkControllerSupport.Checked,
                     SupportedConnection = cmbSupportedConnection.SelectedIndex,
                     
-                    // サムネイルと背景はコピー後に相対パスになる可能性があるが、
-                    // ここではとりあえずフォームの値をセットし、MainFormで処理するか、
-                    // 相対パス計算ロジックをここに入れるか。
-                    // 既存ロジック(UpdatedGameInfo)ではMainFormではなくForm内で計算していた(lines 394+)
-                    // NewVersionにも同じロジックを適用する必要がある。
-                    // ここでは空文字または絶対パスを入れておき、後続の処理で書き換える。
-                    ThumbnailPath = txtThumbnailPath.Text,
-                    BackgroundPath = txtBackgroundPath.Text,
+                    // サムネイルと背景は L431 の File.Exists ブロックで相対パスを設定する。
+                    // (M4) 初期値を null にすることで、validate と OK click の間に画像が削除された TOCTOU
+                    // race (File.Exists false → 絶対パスが残留 → GameSectionPanel が Path.Combine の
+                    // 「絶対 path は第一引数を破棄」仕様で絶対パスのまま DB に書込まれる) を物理閉鎖。
+                    // 旧実装は txtThumbnailPath.Text の生値 (= 絶対 path) を一旦セットしていた。
+                    ThumbnailPath = null,
+                    BackgroundPath = null,
                     
                     Developers = new List<DeveloperInfo>(developers), // リストをコピー
                     
@@ -359,7 +433,8 @@ namespace TonePrism.Manager
                 {
                     GameId = originalGameInfo.GameId,
                     Title = txtTitle.Text.Trim(),
-                    Description = txtDescription.Text.Trim(),
+                    // (#234) games 側も版と同じく空白を null 正規化 (上の NewVersion と揃える)。
+                    Description = string.IsNullOrWhiteSpace(txtDescription.Text) ? null : txtDescription.Text.Trim(),
                     // (#224) 旧実装は UpdatedGameInfo に Arguments を設定しておらず、バージョンUp 時に
                     // games.arguments が新版の値に更新されなかった (Launcher は games を読むため旧引数の
                     // まま起動)。NewVersion (329) と同じ値を games 側にも反映する。
@@ -399,7 +474,32 @@ namespace TonePrism.Manager
                     UpdatedGameInfo.BackgroundPath = relativePath;
                     NewVersion.BackgroundPath = relativePath;
                 }
-                
+
+                // (累積監査 round 4 Low-27) baseVersion に画像があったのに新版で未設定のまま OK 押下すると、
+                // activation Yes 時に games.thumbnail_path / background_path が null で上書きされ、Launcher の
+                // 表示が消える silent UX 退行が起きる。新版を active 化する前提の操作なので、画像欠落を
+                // 明示的に確認して user に「了承して進む / 戻って指定する」の選択肢を出す。
+                bool baseHadThumb = baseVersion != null && !string.IsNullOrEmpty(baseVersion.ThumbnailPath);
+                bool baseHadBg = baseVersion != null && !string.IsNullOrEmpty(baseVersion.BackgroundPath);
+                bool newHasNoThumb = string.IsNullOrEmpty(NewVersion.ThumbnailPath);
+                bool newHasNoBg = string.IsNullOrEmpty(NewVersion.BackgroundPath);
+                if ((baseHadThumb && newHasNoThumb) || (baseHadBg && newHasNoBg))
+                {
+                    var missing = new List<string>();
+                    if (baseHadThumb && newHasNoThumb) missing.Add("サムネイル");
+                    if (baseHadBg && newHasNoBg) missing.Add("背景画像");
+                    var dr = MessageBox.Show(
+                        "新しいバージョンに " + string.Join(" / ", missing) + " が指定されていません。\n\n" +
+                        "このバージョンをアクティブ (= ランチャーで起動する版) にすると、" +
+                        "ランチャーでのこれらの表示が消えます (= 旧版の画像は引き継がれません)。\n\n" +
+                        "「OK」を押すとそのまま進みます。「キャンセル」を押すと、戻ってコピー元フォルダ内の" +
+                        "画像ファイルを指定し直せます。",
+                        "画像未設定の確認",
+                        MessageBoxButtons.OKCancel,
+                        MessageBoxIcon.Warning);
+                    if (dr != DialogResult.OK) return;
+                }
+
                 DialogResult = DialogResult.OK;
                 Close();
             }
@@ -434,27 +534,68 @@ namespace TonePrism.Manager
                 return false;
             }
 
-            // (#158 M-1) currentVersion は DB 由来で過去の "1.0.0" / "V1.0.0" 等のゆれを含みうる。
-            // semverNext.VersionString は常に "v<X>.<Y>.<Z>[-suffix]" の正規化形なので、生比較すると
-            // 同義値 ("v1.0.0" vs "1.0.0") をすり抜けて Launcher 側で 2 つの version が並ぶ silent
-            // danger になる。両辺を SemverInputControl.TryNormalize で正規化してから比較する。
-            // currentVersion 自体が malformed (= TryNormalize が false) のケースは ctor / Form_Load で
-            // 既に MessageBox 警告済 + v0.0.0 fallback 入力済なので、ここでは「正規化できなければ dup
-            // 判定対象外 = 続行」とする (= H-2 警告で user は修正済の前提)。
-            // (#158 round 8 senior Low #6) 両辺は TryNormalize 経由で lowercase v 強制 + 数値部正規化済
-            // なので Ordinal `==` でも機能等価だが、本 PR の他経路 (EditGameForm rename / dup-check 等)
-            // は OrdinalIgnoreCase 統一なので規約整合のため string.Equals(... OrdinalIgnoreCase) に揃える。
-            string currentNormalized;
-            if (SemverInputControl.TryNormalize(currentVersion, out currentNormalized)
-                && string.Equals(semverNext.VersionString, currentNormalized, StringComparison.OrdinalIgnoreCase))
+            // (#234 ①) 旧実装は currentVersion (=最新版) としか重複比較しておらず、数値欄を直接
+            // 編集して非最新版 (例: 過去の 1.5.0) と同じ番号を入力すると validation を通過していた。
+            // その後 GameSectionPanel が既存 version folder へ上書きマージコピー + game_versions へ
+            // 重複行 INSERT (UNIQUE 制約なし) し、Launcher 側で「どちらの版か」決定不能になる silent
+            // corruption が起きた。EditGameForm の #158 Q2 dup-check と同様、既存「全版」と比較する。
+            //
+            // 比較は SemverInputControl.TryNormalize で正規化後に行う (= 同義値 "v1.0.0"/"1.0.0"/"V1.0.0"
+            // を同一視、#158 M-1 の規則を踏襲)。malformed な既存 version は正規化不能なので比較対象外
+            // (= ctor/Form_Load で警告済の前提)。existingVersionStrings が null の旧 caller 経路では
+            // currentVersion 単体との比較に fallback する。
+            string newNormalized;
+            if (!SemverInputControl.TryNormalize(semverNext.VersionString, out newNormalized))
             {
-                // (#158 H3) bump button は round 3 で削除済 (#133 ガイドライン doc に移管予定)、
-                // その案内を撤去。NumericUpDown を直接操作する旨だけ案内。
-                MessageBox.Show("現在のバージョンと同じバージョンは指定できません。\n\n" +
-                    "Major / Minor / Patch のいずれかの数値を直接編集してください (= ▲ で +1、▼ で -1)。",
-                    "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                semverNext.Focus();
-                return false;
+                // IsValid 通過後なので通常ここには来ない。defensive に生値で比較継続。
+                newNormalized = semverNext.VersionString;
+            }
+            // (累積監査 round 6 High-6) fallback は null だけでなく「空リスト」も拾う。game_versions が
+            // ゼロ件 (= 過去の中断で games 行だけ残った等) のとき caller は空 list を渡し、旧 `?? ` は
+            // null チェックのみで空 list を素通り → dup check 全 skip → games.version と同じ番号を再入力
+            // できる穴があった (UNIQUE INDEX も空集合には発火しない)。空のときは currentVersion 単体と
+            // 比較する旧 fallback 挙動に倒す。
+            var versionsToCheck = (existingVersionStrings != null && existingVersionStrings.Count > 0)
+                ? existingVersionStrings
+                : new List<string> { currentVersion };
+            foreach (var existing in versionsToCheck)
+            {
+                string existingNormalized;
+                bool isDup;
+                if (SemverInputControl.TryNormalize(existing ?? "", out existingNormalized))
+                {
+                    // 正規化同士で比較 (= 同義表記 "v1.0.0"/"1.0.0"/"V1.0.0" を同一視)。
+                    isDup = string.Equals(newNormalized, existingNormalized, StringComparison.OrdinalIgnoreCase);
+                }
+                else
+                {
+                    // (#234 追加精査) 正規化不能な既存版 (malformed、例: DB に "1.0" / "alpha" が残存) は
+                    // 旧実装では比較対象外で素通りしており、その malformed 文字列と raw 一致する新版を
+                    // 作れる穴が残っていた。EditGameForm の dup-check が GroupBy キーを raw fallback して
+                    // 同型を捕捉しているのと同様、ここでも生値 (前後空白・大小無視) で最終比較する。
+                    bool rawDup = string.Equals((existing ?? "").Trim(), (semverNext.VersionString ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
+
+                    // (累積監査 round 4 Medium-14) raw 比較に加え、数字トークン列での semantic 比較も追加。
+                    // 例: DB に "1.0" (2 parts) が残っていて新 input が "v1.0.0" のとき、raw は不一致だが
+                    // semantic には同じ → DB UNIQUE INDEX も raw 不一致で通過 + disk leaf が `v1.0` と `v1.0.0` で
+                    // 別フォルダ → 「semantic 上 同 version だが DB 行は別」が並び、Launcher の起動対象が
+                    // user 意図と無関係に切替わる drift があった。数字トークン抽出 + 末尾 0 padding で
+                    // "1.0" と "v1.0.0" を同一視して弾く。
+                    bool tokenDup = TokenSequenceEqualPadded(existing, semverNext.VersionString);
+
+                    isDup = rawDup || tokenDup;
+                }
+                if (isDup)
+                {
+                    // (#158 H3) bump button は削除済なので NumericUpDown 直接操作のみ案内。
+                    MessageBox.Show("指定されたバージョンは既に存在します:\n\n" +
+                        "  " + existing + "\n\n" +
+                        "別のバージョン番号を指定してください。Major / Minor / Patch の数値を直接編集できます " +
+                        "(▲ で +1、▼ で -1)。",
+                        "バージョン重複エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    semverNext.Focus();
+                    return false;
+                }
             }
 
             if (string.IsNullOrWhiteSpace(txtGameFolder.Text))
@@ -467,6 +608,14 @@ namespace TonePrism.Manager
             if (!Directory.Exists(txtGameFolder.Text))
             {
                 MessageBox.Show("選択されたゲームフォルダが見つかりません。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                btnSelectGameFolder.Focus();
+                return false;
+            }
+
+            // (#234 追加精査) コピー元に games/ 配下を選ぶ誤操作を境界で弾く (Add と共通)。
+            if (!GameFormHelper.ValidateSourceNotInGamesFolder(txtGameFolder.Text, out string srcInGamesError))
+            {
+                MessageBox.Show(srcInGamesError, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 btnSelectGameFolder.Focus();
                 return false;
             }
@@ -492,7 +641,112 @@ namespace TonePrism.Manager
                 return false;
             }
 
+            // (#234 追加精査) 実行ファイルもサムネ/背景と同様にコピー元フォルダ内であることを最終検証する
+            // (Add / Edit と 3 フォーム揃え)。RelativeExecutablePath は folder 選択 / autodetect / 選択
+            // ダイアログ経由でしか設定されず textbox も ReadOnly のため現状フォルダ外には成り得ないが、
+            // 多層防御として境界でも弾く (サムネ/背景には inside チェックがあり exe だけ欠けていた非対称解消)。
+            if (!string.IsNullOrEmpty(selectedFolderPath)
+                && !PathConversionHelper.IsPathInside(selectedFolderPath, txtExecutablePath.Text))
+            {
+                MessageBox.Show("実行ファイルはゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                btnSelectExecutable.Focus();
+                return false;
+            }
+
+            // (累積監査 round 6 High-1/headline) RelativeExecutablePath を textbox の最終値から必ず再計算する。
+            // round 5 Phase D で txtExecutablePath を編集可能 (ReadOnly=false) にしたが、TextChanged は
+            // `/` → `\` 正規化しかせず RelativeExecutablePath を更新しなかった。そのため「autodetect された
+            // path が違うので手で別 exe に書き換えて OK」すると、ValidateInput は編集後の textbox 値で
+            // File.Exists + IsPathInside を通すのに、DB 保存に使われる RelativeExecutablePath は autodetect 時の
+            // 古い値のまま → GameSectionPanel が古い exe を指す path を保存 → コピーした新 exe が起動できない
+            // silent corruption だった (フォルダ丸ごとコピーで両 exe が versionDir に存在するため missing-asset
+            // check も素通り)。textbox を SoT として、検証通過したこの時点で相対 path を確定させる。
+            if (!string.IsNullOrEmpty(selectedFolderPath))
+            {
+                RelativeExecutablePath = PathConversionHelper.ToRelativePath(selectedFolderPath, txtExecutablePath.Text);
+            }
+
+            // (#234) サムネ/背景は AddGameForm と同様、OK 時点で「存在する」かつ「コピー元フォルダ内」で
+            // あることを最終検証する。これを怠ると、btnOK_Click が File.Exists(false) 時に絶対パスを
+            // そのまま NewVersion に残し、GameSectionPanel の Path.Combine(versionFolderName, 絶対パス) が
+            // 絶対パスを素通しして「コピーされない元フォルダを指す壊れた画像パス」を DB 保存する穴になる
+            // (④ と同種の silent corruption)。auto 検出値も含めてここで一律に弾く。
+            if (!string.IsNullOrWhiteSpace(txtThumbnailPath.Text))
+            {
+                if (!File.Exists(txtThumbnailPath.Text))
+                {
+                    MessageBox.Show("選択されたサムネイル画像が見つかりません。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    btnSelectThumbnail.Focus();
+                    return false;
+                }
+                if (!string.IsNullOrEmpty(selectedFolderPath)
+                    && !PathConversionHelper.IsPathInside(selectedFolderPath, txtThumbnailPath.Text))
+                {
+                    MessageBox.Show("サムネイル画像はゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    btnSelectThumbnail.Focus();
+                    return false;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(txtBackgroundPath.Text))
+            {
+                if (!File.Exists(txtBackgroundPath.Text))
+                {
+                    MessageBox.Show("選択された背景画像が見つかりません。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    btnSelectBackground.Focus();
+                    return false;
+                }
+                if (!string.IsNullOrEmpty(selectedFolderPath)
+                    && !PathConversionHelper.IsPathInside(selectedFolderPath, txtBackgroundPath.Text))
+                {
+                    MessageBox.Show("背景画像はゲームフォルダ内のファイルを選択してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    btnSelectBackground.Focus();
+                    return false;
+                }
+            }
+
+            // (#234 追加精査) 最小プレイ人数 ≤ 最大プレイ人数 を検証 (3 フォーム共通 helper)。
+            if (!GameFormHelper.ValidatePlayerCount((int)numMinPlayers.Value, (int)numMaxPlayers.Value, out string playerCountError))
+            {
+                MessageBox.Show(playerCountError, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                numMinPlayers.Focus();
+                return false;
+            }
+
             return true;
+        }
+
+        /// <summary>
+        /// (累積監査 round 4 Medium-14) 2 つの version 文字列を「数字トークン列」として比較し、末尾 0 padding で
+        /// 同一視する。例: "1.0" ↔ "v1.0.0" は両方 [1, 0, 0, ...] とみなして dup 判定する。
+        /// TryNormalize で正規化不能な malformed (parts 不足) との semantic 衝突を捕捉する目的。
+        /// 完全に数字を含まない文字列 ("alpha" 等) は []token、片方が空なら一致しない。
+        /// </summary>
+        private static bool TokenSequenceEqualPadded(string a, string b)
+        {
+            var tokensA = ExtractIntegerTokens(a);
+            var tokensB = ExtractIntegerTokens(b);
+            if (tokensA.Count == 0 || tokensB.Count == 0) return false;
+            int maxLen = Math.Max(tokensA.Count, tokensB.Count);
+            for (int i = 0; i < maxLen; i++)
+            {
+                int ai = i < tokensA.Count ? tokensA[i] : 0;
+                int bi = i < tokensB.Count ? tokensB[i] : 0;
+                if (ai != bi) return false;
+            }
+            return true;
+        }
+
+        private static List<int> ExtractIntegerTokens(string s)
+        {
+            var result = new List<int>();
+            if (string.IsNullOrEmpty(s)) return result;
+            var matches = System.Text.RegularExpressions.Regex.Matches(s, @"\d+");
+            foreach (System.Text.RegularExpressions.Match m in matches)
+            {
+                if (int.TryParse(m.Value, out int n)) result.Add(n);
+            }
+            return result;
         }
 
         private void UpdateThumbnailPreview() => ImagePreviewHelper.UpdatePreview(picThumbnailPreview, txtThumbnailPath.Text);

@@ -278,7 +278,19 @@ namespace TonePrism.Manager.Controls
         public string Suffix
         {
             get { return (txtSuffix.Text ?? "").Trim(); }
-            set { txtSuffix.Text = value ?? ""; }
+            // (L) setter で長さ制限 (txtSuffix.MaxLength と同じ 32 文字) を enforce。
+            // UI tx 入力は MaxLength で物理 block だが、setter は txt 経由しないので素通り。
+            // 32 文字超 suffix は version folder leaf 名が MAX_PATH を超え CopyDirectoryRecursive が
+            // PathTooLongException で失敗する経路を防ぐ defensive limit (caller drift 対策)。
+            set
+            {
+                string v = value ?? "";
+                if (v.Length > txtSuffix.MaxLength)
+                {
+                    v = v.Substring(0, txtSuffix.MaxLength);
+                }
+                txtSuffix.Text = v;
+            }
         }
 
         /// <summary>

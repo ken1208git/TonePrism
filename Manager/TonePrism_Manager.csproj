@@ -195,10 +195,15 @@
     <Compile Include="RestoreConfirmForm.Designer.cs">
       <DependentUpon>RestoreConfirmForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="RestoreReportForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="ImageNameConflictDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="DatabaseConnection.cs" />
     <Compile Include="DatabaseManager.cs" />
     <Compile Include="SchemaManager.cs" />
-    <Compile Include="Repositories\BackupLogRepository.cs" />
     <Compile Include="Repositories\DeveloperRepository.cs" />
     <Compile Include="Repositories\GameRepository.cs" />
     <Compile Include="Repositories\ManagerSessionRepository.cs" />
@@ -218,7 +223,7 @@
       <DependentUpon>ProcessingDialog.cs</DependentUpon>
     </Compile>
     <Compile Include="ProgressInfo.cs" />
-    <Compile Include="Models\BackupLogEntry.cs" />
+    <Compile Include="Models\BackupCatalogEntry.cs" />
     <Compile Include="Models\DeveloperInfo.cs" />
     <Compile Include="Models\GameInfo.cs" />
     <Compile Include="Models\LauncherSessionInfo.cs" />
@@ -232,8 +237,8 @@
     <Compile Include="GenreList.cs" />
     <Compile Include="PathManager.cs" />
     <Compile Include="Services\BackupService.cs" />
+    <Compile Include="Services\BackupCatalogService.cs" />
     <Compile Include="Services\DeveloperListManager.cs" />
-    <Compile Include="Services\BackupPathResolver.cs" />
     <Compile Include="Services\FileOperationService.cs" />
     <Compile Include="Services\FolderDeletionService.cs" />
     <Compile Include="Services\GameFormHelper.cs" />
@@ -254,6 +259,7 @@
     <Compile Include="Services\MarkdownRenderer.cs" />
     <Compile Include="Services\ProcessTerminator.cs" />
     <Compile Include="Services\RestoreService.cs" />
+    <Compile Include="Services\RestoreReconciliationService.cs" />
     <Compile Include="Services\SettingsKeys.cs" />
     <Compile Include="Services\UpdateChecker.cs" />
     <Compile Include="Services\UpdateDownloader.cs" />
