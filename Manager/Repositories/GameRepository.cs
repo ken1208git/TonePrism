@@ -272,7 +272,8 @@ namespace TonePrism.Manager.Repositories
                         cmd.Parameters.AddWithValue("@newId", newId);
                         long count = (long)cmd.ExecuteScalar();
                         if (count > 0)
-                            throw new InvalidOperationException($"ゲームID「{newId}」は既に使用されています。");
+                            // (#206 follow-up) AddGameForm と文言統一 (具体 ID + 案内)。
+                            throw new InvalidOperationException($"ゲームID「{newId}」は既に使用されています。別のIDを入力してください。");
                     }
 
                     // PRAGMA foreign_keys はトランザクション外でのみ変更可能

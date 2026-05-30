@@ -830,10 +830,11 @@ namespace TonePrism.Manager
             }
 
             // ゲームIDの重複チェック
+            // (#206 follow-up) Edit 経路 (GameRepository.UpdateGameId) と文言統一: 具体 ID + 案内。
             var existingGame = dbManager.GetGameById(txtGameId.Text.Trim());
             if (existingGame != null)
             {
-                MessageBox.Show("このゲームIDは既に使用されています。別のIDを入力してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show($"ゲームID「{txtGameId.Text.Trim()}」は既に使用されています。別のIDを入力してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtGameId.Focus();
                 return false;
             }
