@@ -81,9 +81,55 @@
 - `mkdocs build --strict` が内部リンク切れ・見出しアンカー切れ・ページ削除を Fail 扱いにする（CI で enforce）。ページ間リンクは相対 `.md` リンクで書き、リンク切れを strict build に検知させる。
 - ドキュメントの役割分担（INSTALL_README / docs サイト / README / SPEC）の詳細は **SPECIFICATION.md §3.7** を参照。
 
-## Launcher Implementation
-- UI やレイアウトはなるべく `.tscn`（シーンファイル）で実装する。
-- 変数はなるべく `@export` で定義し、エディタから調整可能にする。
+## UI 実装と分割方針（3軸フレーム）
+
+UI の「切り出し」を **3 つの軸**に分けて判断する（#244）。混同すると「とりあえず `.tscn`／とりあえず分割」になりがちなので、軸ごとに根拠を持つ。
+
+- **軸1 — 宣言的レイアウト表現（`.tscn` / Designer vs コード手組み）**
+  - **Launcher (Godot)**: `.tscn` を使う根拠は「**手でビジュアル編集するため**」**ではなく**、「**複数箇所で使う／条件表示する安定した再利用ノードツリー**（dialog・tile・bar 系）＝宣言的な再利用単位になるから」。純動的なコンテンツ（Manager 設定 → DB → 動的描画）は **builder スクリプトが正解**で `.tscn` を強制しない。
+  - **Manager (現状 WinForms)**: `.Designer.cs` が静的レイアウトを自動分離するので軸1 は非問題（WPF 移行 #245 *後* は XAML が同役割を担う。現時点で Manager に `.xaml` は無い）。
+- **軸2 — ビジュアルエディタでの編集・プレビュー**
+  - **Launcher では実質死んでいる**（UI は動的＋変更はほぼ AI 委譲で、エディタを開いても空コンテナが並ぶだけ）。よって「エディタで触れるように」を `.tscn` / `@export` の主目的にしない。
+  - **Manager では生きている**（管理フォームは静的骨格＋中身のデータだけ動的）。
+- **軸3 — コード分割（モジュール境界）** ← **常に有効。AI 委譲前提ではむしろ重要度が上がる**
+  - 小さく境界の明確な単位ほど AI が安全に編集でき、「遠くの無関係な箇所を壊す」事故が減る。**分割の主軸はこれ**。
+  - Launcher は `scripts/` で描画／データ単位に分割実践済（`store_banner_builder` / `carousel_controller` / `key_hint_builder` / `game_info_display` 等）。Manager の肥大は「UI コード手組み」ではなく「**振る舞いの集中**」なので、効くのは UserControl 増設より **ロジックを service/helper に抜く**こと（→「C# Code Conventions」参照）。
+
+### 切り出し判断基準（“全部割る”ではない）
+次のいずれかを満たすときに切り出す:
+- (a) 入力インターフェースが明確（親に依存せず単独で意味を持つ）
+- (b) 親と独立に触られる（別タイミングで編集・再利用される）
+- (c) 親が一定行数を超え、AI 編集が**遠くの無関係な箇所を壊しそう**（量的トリガは #241 の god-file 閾値・機械化と相補）
+
+### Launcher 実装の具体
+- 上記の「安定した再利用ノードツリー」は `.tscn`（シーンファイル）で実装する。
+- `.tscn` 内の調整値は `@export` で公開し、再利用箇所ごとに差し替え可能にする。
+- 純動的コンテンツは builder スクリプトで構築する（`.tscn` を強制しない）。
+
+## C# Code Conventions (Manager)
+
+「UI 実装と分割方針（3軸フレーム）」の C# 版（#254）。AI が一貫して綺麗に書くための**質的ルール**（量的強制＝god-file 閾値は #241 で機械化予定）。
+
+### UI は薄く、ロジックは外へ（軸3）
+- Form / UserControl は **イベント配線と表示**に留める。ビジネスロジック・DB アクセス・ファイル操作は **service / helper / repository** へ抜く。
+- 静的 UI は `.Designer.cs` が自動分離するので、肥大の主因は「振る舞いの集中」。`EditGameForm`（#242）/ `SchemaManager`（#241）のような god-file は **ロジック抽出**で割る（UserControl 増設ではない）。
+- これは将来の WPF 移行（#245。WPF 標準パターンの MVVM を採る想定）の前提でもある（ViewModel へ抜きやすくしておく）。
+
+### 例外作法
+- **握り潰さない**。失敗は `Logger.Warn/Error` に残し、ユーザーには**操作可能な復旧手順**を提示する（参照実装: `RestoreDbMissingException`）。
+- リソース解放・状態復帰（PRAGMA・ロック等）は **`finally`** で確実に行う（参照: migration の `foreign_keys=ON` 復帰）。
+- Logger 自体の障害は握り潰す（再帰ハング回避、§3.6）。
+
+### DB アクセス
+- repository 経由／明示的な transaction 境界／`ExecuteWithRetry`／`OpenConnectionWithJournalMode` を使う。
+- スキーマ変更は **SPECIFICATION.md §7.6** のワークフロー厳守（`MigrateVxToVy` / `CurrentDbVersion` 増分 / `ExpectedSchema` ↔ SPEC §7.3 同期）。
+
+### コメント
+- 「何を」より「**なぜ**」を書く（設計判断・トレードオフ・過去バグの再発防止理由）。自明な処理に冗長なコメントは付けない。
+
+### その他
+- 命名は「Naming Conventions」に従う。空文字／空白入力は DB 表現を統一する（空→null 等、フォーム間で揃える）。
+- ログは `Logger.Info/Warn/Error` を直接使う（`Console.WriteLine` は legacy、§3.6 参照）。
 
 ## GitHub Integration
 
