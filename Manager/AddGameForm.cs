@@ -723,10 +723,11 @@ namespace TonePrism.Manager
                 return false;
             }
 
-            // ゲームIDの文字種チェック（英数字と一部の記号のみ許可）
-            if (!GameFormHelper.IsValidGameId(txtGameId.Text))
+            // (#206) ゲームID 検証: 理由別文言 (空 / 64文字超 / 文字種 / Windows 予約名 CON/PRN/NUL/COM1 等) を
+            // 区別して表示する。bool-only overload + ハードコード文言だと「文字種が悪い」一択で誤誘導していた。
+            if (!GameFormHelper.IsValidGameId(txtGameId.Text, out string gameIdError))
             {
-                MessageBox.Show("ゲームIDは英数字、アンダースコア（_）、ハイフン（-）のみ使用できます。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(gameIdError, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 txtGameId.Focus();
                 return false;
             }
