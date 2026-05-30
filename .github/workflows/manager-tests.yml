@@ -5,14 +5,14 @@ name: Manager Tests
 # PackageReference 復元 (dotnet) と packages.config 復元 (nuget) の両方を行ってから dotnet test する。
 # net48 + System.Data.SQLite native interop のため Windows runner を使う。
 
+# (レビュー #1/#2) paths フィルタは付けない。将来この job を branch protection の required status check に
+# する場合、Manager 配下を触らない PR では job が起動せず、required check が永久 "Expected/Pending" のまま
+# merge をブロックする GHA の落とし穴を避けるため。push(main) / PR とも無条件で実行し対称化する。テストは
+# 数秒で、コストは runner 起動分のみ (docs PR 等も走るが required ゲート化を優先)。
 on:
   push:
     branches: [main]
   pull_request:
-    paths:
-      - "Manager/**"
-      - "Manager.Tests/**"
-      - ".github/workflows/manager-tests.yml"
 
 jobs:
   test:
