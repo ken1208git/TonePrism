@@ -7,7 +7,7 @@ using TonePrism.Manager.Models;
 namespace TonePrism.Manager.Services
 {
     /// <summary>
-    /// (#179 / #178 (c)) 他 PC で Manager が起動中の時に表示する modal dialog の context。
+    /// (#179 / #178 (c)) 別の Manager / Launcher (他 PC または同一 PC) を検出した時に表示する modal dialog の context。
     /// </summary>
     internal enum SessionConflictDialogContext
     {
@@ -18,10 +18,12 @@ namespace TonePrism.Manager.Services
     }
 
     /// <summary>
-    /// (#179 / #178 (c)) 他 PC で Manager 起動中を検出した時の modal 警告 dialog の SoT。
+    /// (#179 / #178 (c)) 別の Manager / Launcher (他 PC または同一 PC) を検出した時の modal 警告 dialog の SoT。
     ///
     /// 文言は **「データ破損」「競合」のような技術用語を避け、部員が「何が起きるか」を想像できる
-    /// 具体表現** に統一 (「お互いに上書きされて消える恐れ」「他 PC の人に確認してから」)。
+    /// 具体表現** に統一 (「データが破損したり消えたりする恐れ」「別の Manager / Launcher を閉じてから」)。
+    /// (#251) 「他 PC」前提の表現は撤回 — SPEC §3.8.7.6 のとおり同一 PC 上の Launcher も検出対象で
+    /// 検出 list に自 PC が並ぶ case があるため、他 PC / 同一 PC どちらでも読める汎用文にする。
     /// `MessageBoxIcon.Stop` + `MessageBoxButtons.OKCancel` で「OK = 続行 (data 喪失 risk 承知)」/
     /// 「Cancel = 中止 (context に応じて Manager 終了 or その操作中止)」を user 判断に委ねる設計。
     ///
@@ -79,25 +81,30 @@ namespace TonePrism.Manager.Services
                 // (#179 PR3b) Startup title を「Manager / Launcher」の汎用形に書換え。
                 // 旧 (PR #184) は「Manager が起動中」固定だったが、Launcher 検出も merge 表示するため
                 // 「Manager / Launcher が稼働中」に汎用化、文言と検出 list を一致させる。
-                title = "【危険】他 PC で Manager / Launcher が稼働中です";
+                // (#251) 「他 PC」前提を撤回: 同一 PC 上の Launcher も検出対象 (SPEC §3.8.7.6) で検出 list に
+                // 自 PC 名が並ぶ case があるため、「別の Manager / Launcher」の汎用文に統一 (他 PC / 同一 PC
+                // どちらでも正しく読める)。挙動 (Cancel = Manager 終了) は不変。
+                title = "【危険】別の Manager / Launcher が稼働中です";
                 body =
                     detectedListLines + "\n\n" +
-                    "両方の PC で同時に Manager を使うと、保存中のデータや\n" +
+                    "別の Manager や Launcher が動いたままこの Manager を使うと、保存中のデータや\n" +
                     "バックアップが競合して、データが破損したり消えたりする恐れがあります。\n\n" +
                     "「OK」を押す: このまま起動する (データが消える可能性を承知)\n" +
-                    "「キャンセル」を押す: Manager を終了する (他 PC の人に確認してから起動する)";
+                    "「キャンセル」を押す: Manager を終了する (別の Manager / Launcher を閉じてから起動し直す)";
             }
             else
             {
-                // EditOperation title は既存維持 (= Launcher 検出時も「作業中」と読める汎用表現)。
-                title = "【危険】他 PC で誰かが作業中です";
+                // (#251) EditOperation title/body も「他 PC」前提を撤回し Startup と同じ「別の Manager /
+                // Launcher」汎用形に統一 (同一 PC 上の Launcher 検出で「他 PC で誰かが作業中」が噛み合わ
+                // ない case を解消)。挙動 (Cancel = その操作中止) は不変。
+                title = "【危険】別の Manager / Launcher が稼働中です";
                 string opLabel = string.IsNullOrEmpty(operationDescription) ? "この操作" : operationDescription;
                 body =
                     detectedListLines + "\n\n" +
                     "このまま " + opLabel + " を実行すると、\n" +
-                    "他 PC の作業と競合して、データが破損したり保存内容が消えたりする恐れがあります。\n\n" +
+                    "別の Manager / Launcher と競合して、データが破損したり保存内容が消えたりする恐れがあります。\n\n" +
                     "「OK」を押す: このまま実行する (データが消える可能性を承知)\n" +
-                    "「キャンセル」を押す: 実行を中止する (他 PC の人に確認してから実行する)";
+                    "「キャンセル」を押す: 実行を中止する (別の Manager / Launcher を閉じてから実行する)";
             }
 
             Logger.Warn("[SessionConflictDialog] " + context + " context で他 PC 検出 (Manager=" + managerOthers.Count + " Launcher=" + launcherOthers.Count + " total=" + totalCount + " 件) → dialog 表示");
