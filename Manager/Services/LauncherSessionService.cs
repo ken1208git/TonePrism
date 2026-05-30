@@ -220,6 +220,15 @@ namespace TonePrism.Manager.Services
                 // 単機ケースのみ (両者とも古く見え過小警告) で、閾値 60 秒 + 運用での NTP 同期で許容する。
                 // 表示用 LastHeartbeatAtUnixMs にも effective (= max) を入れ、active 判定と「最終確認 N 秒前」
                 // 表示を一致させる (mtime はサーバ時計なので self-report より信頼できる "最終確認" でもある)。
+                //
+                // (#269 review #1) **前提 (要実機検証)**: 本 mitigation は file mtime が SMB **サーバ**の時計で
+                // 刻まれる構成に依存する。Launcher 書込側は timestamp を明示設定しない (確認済: session_heartbeat.gd
+                // は store_string → rename_absolute のみ、set_modified_time 等なし) ため、default SMB ではサーバが
+                // mtime を刻む = 前提成立。ただしサーバ構成によっては書き手クライアント時計を反映しうるため、実機
+                // SMB での確認が必要 (SPEC §3.8.7.3 F-1)。前提が崩れても max は fresh 方向のみ = 安全側で回帰はしない
+                // (= drift 防御が効かなくなるだけで、新たな過小警告は生まない)。
+                // (#269 review #4) json が parse 成功の "0" でも max(0, mtime) = mtime に倒れ mtime 判定になる
+                // (旧: 0 < threshold で常に stale 除外)。壊れた 0 値を mtime で救う安全方向の挙動変化。
                 long mtimePrimaryMs = new DateTimeOffset(File.GetLastWriteTimeUtc(path)).ToUnixTimeMilliseconds();
                 long effectiveHeartbeatMs = Math.Max(lastHeartbeat, mtimePrimaryMs);
                 if (effectiveHeartbeatMs < staleThresholdMs) return null;

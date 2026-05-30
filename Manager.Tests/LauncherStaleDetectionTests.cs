@@ -56,8 +56,14 @@ namespace TonePrism.Manager.Tests
         {
             // 書き手 PC の時計が 120 秒遅れ → json は古く見えるが、mtime (サーバ時計) は fresh。
             // max(old json, fresh mtime) = fresh ⇒ active を維持 (= 生存中 Launcher を誤って除外しない)。
-            WriteSession("PC-DRIFT", NowMs() - 120_000, DateTime.UtcNow);
-            Assert.True(Detected("PC-DRIFT"), "書き手時計が遅れていても mtime が救って active 維持されるべき");
+            long oldJsonMs = NowMs() - 120_000;
+            WriteSession("PC-DRIFT", oldJsonMs, DateTime.UtcNow);
+            var session = _service.DetectActiveLauncherSessions().FirstOrDefault(s => s.PcName == "PC-DRIFT");
+            Assert.NotNull(session); // active 維持 (誤って除外しない)
+            // (#269 review #3) effective = max(json, mtime) が表示用 LastHeartbeatAtUnixMs に入ることを検証。
+            // json は 120 秒前だが mtime は fresh なので、effective は古い json 値より十分新しい (mtime 寄り) はず。
+            Assert.True(session.LastHeartbeatAtUnixMs > oldJsonMs + 60_000,
+                "LastHeartbeatAtUnixMs は effective (max=mtime 寄り) になるべき (古い json 値のままではない)");
         }
 
         [Fact]
