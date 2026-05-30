@@ -769,6 +769,19 @@ namespace TonePrism.Manager
                         "tools/sqlite3/sqlite3.exe で旧データを退避のうえ手動で新スキーマへ移行してください。");
                 }
 
+                // (PR #236 レビュー対応) v0 fast-path も MigrateV19ToV20 (games.play_time に CHECK(1-3)) を明示 retrofit する。
+                // arguments (V13ToV14) / developers FK (V17ToV18) / surveys・play_records (V10ToV11) は v0 path で明示
+                // retrofit するのに play_time CHECK だけ抜けており、versioning 導入前から games テーブルを持つ旧 v0 DB は
+                // CreateTables の CREATE TABLE IF NOT EXISTS が CHECK 無し games を温存するため、CHECK が付かないまま
+                // user_version=20 を刻む非対称 (surveys と同型の drift) が残っていた。新規 DB は CreateTables が CHECK 付きで
+                // 作るため MigrateV19ToV20 の冪等ガードで no-op。範囲外 play_time 残存時は MigrateV10ToV11 と同じく
+                // warn + stamp 継続 (起動を止めない、是正後の再起動で適用)。
+                if (!MigrateV19ToV20(connection, transaction))
+                {
+                    Logger.Warn("[DatabaseManager] (v0 path) games.play_time に範囲外 (1-3 以外) の値が残存し CHECK 追加を skip しました。" +
+                        "tools/sqlite3/sqlite3.exe で値を 1-3 または NULL に是正してください。");
+                }
+
                 SetDbVersion(connection, CurrentDbVersion, transaction);
                 return;
             }

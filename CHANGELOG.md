@@ -1922,6 +1922,7 @@ PR #236 のコードレビュー指摘のうち、復元系の「失敗をユー
 - **#1 (RestoreService / BackupSectionPanel): 復元で toneprism.db が失われた最悪ケースが汎用エラーに埋もれる**: `File.Replace` fallback で現 DB 削除後に `File.Move` も失敗すると toneprism.db が不在になりうるが、`tempPathIsLastResort` フラグが caller に伝わらず「復元中にエラーが発生しました（詳細はログ）」の汎用 Abort メッセージしか出ず、ログを読まないスタッフが DB 喪失に気づけなかった。専用例外 `RestoreDbMissingException` を新設し Message に操作可能な復旧手順 (`.restore-tmp` を `toneprism.db` にリネーム / safety から復元) を入れて画面表示、`BackupSectionPanel` は汎用メッセージと区別して中止する。
 - **#2 (RestoreReportForm): 復元後 migration 失敗 = スキーマで DB が読めない深刻状態が「軽微」色で表示**: `RestoreReconciliationService.Analyze()` が "no such column" 等で `AnalysisFailed` になると、レポート見出しが DarkOrange (注意) 止まりだった。critical 同等の Firebrick (赤) +「対処が必要」表記に変更し深刻度を正しく示す。
 - **コメント整合 (stale)**: `RestoreService` finally の「`ReleaseRestoreLock` は LIKE 句で…」を実装 (exact-match SELECT+DELETE) に合わせて修正、`BackupCatalogService` の旧 `prism_` を「安全側 manual」→ 実装どおり「unknown 分類」に修正。
+- **(追加レビュー対応, SchemaManager): v0 fast-path が `MigrateV19ToV20` を呼ばず `games.play_time` CHECK が付かない非対称**: versioning 導入前から `games` テーブルを持つ旧 v0 DB は `CreateTables` の `CREATE TABLE IF NOT EXISTS` が CHECK 無し games を温存するため、CHECK 不在のまま `user_version=20` を刻んでいた (本 PR が surveys/play_records で解消したのと同型の drift を play_time で 1 件残していた)。v0 path の `SetDbVersion` 直前に冪等な `MigrateV19ToV20` を追加 (新規 DB では CHECK 既存で no-op、範囲外データ残存時は warn + stamp 継続)。本番 (まっさら新規 install) は `CreateTables` 由来で元から CHECK を持つため非到達 (= 影響は旧 v0 DB 限定)。
 
 #### Changed (バックアップ履歴を `backup_log` テーブルから廃し、`backups/` フォルダ走査由来に再設計 — DB v19)
 
