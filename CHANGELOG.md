@@ -1917,6 +1917,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 - **ゲームID が無効なとき、理由に関わらず「英数字…のみ」固定文言を表示していた**: `GameFormHelper.IsValidGameId(string, out errorMessage)` は理由別文言 (空 / 64文字超 / 文字種 / Windows 予約名 `CON`/`PRN`/`NUL`/`COM1` 等) を返せるのに、`AddGameForm` / `EditGameForm` の呼び出しが bool-only overload + ハードコード文言を使い**理由を握り潰していた**。64文字超や予約名で弾かれた user にも「文字種が悪い」と誤誘導する状態だった。両 callsite を `out errorMessage` overload に切替え、返ってきた理由別文言をそのまま MessageBox 表示する。**検証ロジックは不変・表示文言のみ**。`docs/usage/games.md` (#106) の「保存時に Manager が知らせてくれる」記述とも整合。
 - **ID 重複エラーの文言が Add / Edit で不統一だった (follow-up)**: 追加 (`AddGameForm`: 「このゲームIDは既に…別のIDを入力してください。」具体 ID なし) と ID 変更 (`GameRepository.UpdateGameId`: 「ゲームID「{id}」は既に…」案内なし) で文言が違っていた。両者を `ゲームID「{id}」は既に使用されています。別のIDを入力してください。`（具体 ID + 案内の両取り）に統一。
+- **`IsValidGameId` 直前の冗長な空チェックを削除し helper に一本化 (follow-up, #257 レビュー)**: `AddGameForm` / `EditGameForm` とも `IsValidGameId(out)` の直前に同一文言の `IsNullOrWhiteSpace` ガードが残っており、helper の「空」分岐 (同じ「ゲームIDを入力してください。」を返す) が dead code になっていた。コメントは「空 / …」を含むのに空欄が helper を通らない記述↔実装の不一致もあった。先行ガードを削除して空欄も `IsValidGameId` 経由に統一 (同文言・同 Focus・同 return で挙動不変)。
 
 #### Bump 根拠 (v0.17.0 → v0.17.1)
 
