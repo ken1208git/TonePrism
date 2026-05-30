@@ -1911,6 +1911,20 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.17.3] - 2026-05-30
+
+#### Fixed (#269: Launcher セッション stale 判定の clock drift 耐性)
+
+- **PC 間の時計ズレで生存中の Launcher を「死亡」と誤判定し、競合警告から除外しうる欠陥**: `LauncherSessionService` の stale 判定は「読み手 PC の `now` − JSON 内 `last_heartbeat_at_unix_ms`（書き手 PC の自己申告時計）」で計算するため、PC 間 clock drift を直接被っていた。読み手 PC の時計が書き手より進んでいると、生きている Launcher が「30 秒超＝stale」と誤判定され検出リストから除外 → Manager 編集を続行 → **データ競合リスク（過小警告）**。多 PC 同時稼働（＝文化祭運用）で踏みうる。外部レビュー指摘をコードで cross-verify して確定。
+- **修正: `max(JSON last_heartbeat, file mtime)` の新しい方で判定**: primary path で json（書き手自己申告時計）と file mtime（SMB サーバの**単一**時計）の新しい方を採用。これで「書き手 PC の時計が遅れて json が古く見える」case を mtime が救い、「mtime の SMB cache 遅延（~10 秒）」を json が救う＝**互いの弱点を補完**（どちらか fresh なら active）。表示用 `LastHeartbeatAtUnixMs` にも effective 値を入れ、active 判定と「最終確認 N 秒前」表示を一致させた。
+- **stale 閾値 30→60 秒に緩和**: 想定 skew をマージンで吸収（heartbeat 10 秒 ×6）。広げる方向は安全側（過剰警告）でデータ事故方向には倒れない。
+- **残留リスクと運用**: 読み手 PC 自身の時計が大幅に進む単機ケースのみ残る（両者とも古く見え過小警告）→ 60 秒閾値 + 運用での NTP 同期で許容。⚠️ `ManagerSessionService`（Manager-Manager 検出、DB ベース）も同じ drift を持つが per-row mtime が無く閾値のみが mitigation のため 30 秒のまま据え置き（**閾値統一は follow-up 候補**）。
+- **テスト**: `Manager.Tests/LauncherStaleDetectionTests`（#239 基盤）に 4 シナリオ追加 — json 古/mtime 新（drift 防御）、json 新/mtime 古（cache 遅延防御）、双方古（真の stale 除外）、45 秒（60 秒閾値内 active）。SPEC §3.8.7.3（変更履歴 v1.10.45）と同期。
+
+#### Bump 根拠 (v0.17.2 → v0.17.3)
+
+検出ロジックの bugfix（clock drift 耐性）のため patch bump。スキーマ変更なし・後方互換（検出が安全側に緩むのみ）。Bundle への反映は次回リリース実行時。
+
 ### [Manager v0.17.2] - 2026-05-30
 
 #### Fixed (#251: SessionConflictDialog の「他PC前提」文言を汎用化)
