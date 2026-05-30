@@ -16,9 +16,16 @@ namespace TonePrism.Manager
         public string ConnectionString => connectionString;
         public string DbPath => dbPath;
 
-        public DatabaseConnection()
+        public DatabaseConnection() : this(PathManager.DatabasePath) { }
+
+        /// <summary>
+        /// (#239 テスト基盤) 任意の DB パスを指定して接続を作る。production は `PathManager.DatabasePath` を使う
+        /// 既定 ctor 経由で、本 ctor は主にテストが一時 DB を指すために使う (PathManager のプロジェクトルート
+        /// 検出に依存せず `SchemaManager` / repository を単体で回せるようにする)。本体挙動は不変。
+        /// </summary>
+        public DatabaseConnection(string dbPath)
         {
-            dbPath = PathManager.DatabasePath;
+            this.dbPath = dbPath;
             // SMB ネットワーク共有上での運用安全性のため journal_mode=DELETE を使用 (#103)
             // Busy Timeout はライブラリ側にもフォールバックとして指定する
             connectionString = $"Data Source={dbPath};Version=3;Busy Timeout=10000;";

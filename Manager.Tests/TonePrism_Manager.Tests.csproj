@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- (#239) C# テスト基盤 0→1。SDK-style + target net48 にすることで、net10 移行 (#245 Phase 4) 時は
+       TargetFramework を一行差し替えるだけで済む (テストコード・フレームワークはそのまま carry over)。
+       本体 Manager は classic (packages.config) のままで、本テストは SDK-style から ProjectReference する。 -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <RootNamespace>TonePrism.Manager.Tests</RootNamespace>
+    <AssemblyName>TonePrism_Manager.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <Platforms>AnyCPU</Platforms>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- Manager と同版の System.Data.SQLite + native interop (Stub が SQLite.Interop.dll を出力へコピー) -->
+    <PackageReference Include="Stub.System.Data.SQLite.Core.NetFramework" Version="1.0.119.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Manager\TonePrism_Manager.csproj" />
+  </ItemGroup>
+
+</Project>
