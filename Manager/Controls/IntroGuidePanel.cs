@@ -78,7 +78,7 @@ namespace TonePrism.Manager.Controls
             }
             catch (Exception ex)
             {
-                MessageBox.Show("イントロガイド一覧の読み込みに失敗しました: " + ex.Message,
+                MessageBox.Show("初回説明一覧の読み込みに失敗しました: " + ex.Message,
                     "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -91,9 +91,8 @@ namespace TonePrism.Manager.Controls
                 col.Visible = false;
             }
             ConfigureColumn("DisplayOrder", "順", 50);
-            ConfigureColumn("BodyText", "本文", 240);
-            ConfigureColumn("ImagePath", "画像", 160);
-            ConfigureColumn("DurationSec", "秒", 50);
+            ConfigureColumn("BodyText", "本文", 300);
+            ConfigureColumn("ImagePath", "画像", 200);
             ConfigureColumn("IsVisible", "表示", 50);
             _grid.ResumeLayout();
         }
@@ -116,7 +115,7 @@ namespace TonePrism.Manager.Controls
         private void OnAdd()
         {
             if (_dbManager == null) return;
-            if (SessionConflictHelper.CheckBeforeWrite(this, "イントロガイド スライド追加") == DialogResult.Cancel) return;
+            if (SessionConflictHelper.CheckBeforeWrite(this, "初回説明 スライド追加") == DialogResult.Cancel) return;
             using (var form = new IntroSlideEditForm(_dbManager))
             {
                 if (form.ShowDialog(FindForm()) == DialogResult.OK) LoadSlides();
@@ -132,7 +131,7 @@ namespace TonePrism.Manager.Controls
                 MessageBox.Show("編集するスライドを選択してください。", "確認", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            if (SessionConflictHelper.CheckBeforeWrite(this, "イントロガイド スライド編集") == DialogResult.Cancel) return;
+            if (SessionConflictHelper.CheckBeforeWrite(this, "初回説明 スライド編集") == DialogResult.Cancel) return;
             using (var form = new IntroSlideEditForm(_dbManager, slide))
             {
                 if (form.ShowDialog(FindForm()) == DialogResult.OK) LoadSlides();
@@ -150,7 +149,7 @@ namespace TonePrism.Manager.Controls
             }
             if (MessageBox.Show("このスライドを削除しますか？", "確認",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-            if (SessionConflictHelper.CheckBeforeWrite(this, "イントロガイド スライド削除") == DialogResult.Cancel) return;
+            if (SessionConflictHelper.CheckBeforeWrite(this, "初回説明 スライド削除") == DialogResult.Cancel) return;
 
             try
             {
@@ -185,7 +184,7 @@ namespace TonePrism.Manager.Controls
             if (idx < 0 || newIdx < 0 || newIdx >= _slides.Count) return;
 
             // 選択・範囲 validation 通過後、DB write 直前で session check (StoreSectionPanel.MoveSection と同位置)。
-            if (SessionConflictHelper.CheckBeforeWrite(this, "イントロガイド スライド並び替え") == DialogResult.Cancel) return;
+            if (SessionConflictHelper.CheckBeforeWrite(this, "初回説明 スライド並び替え") == DialogResult.Cancel) return;
 
             var a = _slides[idx];
             var b = _slides[newIdx];

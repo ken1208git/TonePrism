@@ -503,7 +503,7 @@ namespace TonePrism.Manager
             // するため後付けにしている。ストアタブの次に挿入。多重呼出ガードとして未作成時のみ追加。
             if (_introTab == null)
             {
-                _introTab = new System.Windows.Forms.TabPage("イントロガイド") { UseVisualStyleBackColor = true };
+                _introTab = new System.Windows.Forms.TabPage("初回説明") { UseVisualStyleBackColor = true };
                 _introTab.Controls.Add(_introGuidePanel);
                 int introStoreIdx = tabControl1.TabPages.IndexOf(tabStore);
                 tabControl1.TabPages.Insert(introStoreIdx >= 0 ? introStoreIdx + 1 : tabControl1.TabPages.Count, _introTab);

@@ -33,7 +33,7 @@ namespace TonePrism.Manager
         // v19: backup_log テーブルを DROP。バックアップ履歴を DB から外し backups/ フォルダ走査
         //      (BackupCatalogService) 由来に変更。reconcile / register / drift 対策コードを全廃し、失敗復元が
         //      success 化する欠陥を根治。既存行は破棄されるが物理ファイルは残り初回走査で履歴に復活する。
-        private const int CurrentDbVersion = 21;
+        private const int CurrentDbVersion = 22;
 
         public SchemaManager(DatabaseConnection conn)
         {
@@ -1082,6 +1082,21 @@ namespace TonePrism.Manager
                         else
                         {
                             Logger.Warn("[DatabaseManager] 直前の migration が未完のため v20→v21 も skip、user_version は " + currentVersion + " のまま据え置き");
+                        }
+                    }
+
+                    if (currentVersion < 22)
+                    {
+                        // v21 → v22: intro_slides から duration_sec 削除 (#253 design 変更で自動送り廃止)。
+                        // table recreate (CHECK 付き列は DROP COLUMN 不可) だが FK / 子テーブル無しで安全。前段完了時のみ bump。
+                        if (currentVersion >= 21)
+                        {
+                            MigrateV21ToV22(connection, migTransaction);
+                            currentVersion = 22;
+                        }
+                        else
+                        {
+                            Logger.Warn("[DatabaseManager] 直前の migration が未完のため v21→v22 も skip、user_version は " + currentVersion + " のまま据え置き");
                         }
                     }
 
@@ -2357,11 +2372,50 @@ namespace TonePrism.Manager
         }
 
         /// <summary>
+        /// (#253) v21 → v22: intro_slides から `duration_sec` を削除 (design 変更で自動送りを廃止、Launcher は手動ナビ)。
+        /// `duration_sec` に CHECK 制約があり `ALTER TABLE DROP COLUMN` は不可 (SQLite は CHECK 参照列を drop 不能) の
+        /// ため table recreate で削除する。intro_slides は FK / 子テーブル無しの独立テーブルなので DROP TABLE の
+        /// CASCADE 暴発は無い。idempotent: `duration_sec` が既に無ければ no-op (新規 DB は CreateIntroSlidesTable が
+        /// 最初から列を持たない)。
+        /// </summary>
+        private void MigrateV21ToV22(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            if (!TableHasColumn(connection, transaction, "intro_slides", "duration_sec"))
+            {
+                Logger.Info("[DatabaseManager] v21 → v22: intro_slides に duration_sec 無し、no-op");
+                return;
+            }
+            string[] sqls =
+            {
+                @"CREATE TABLE intro_slides_new (
+                    slide_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    display_order INTEGER DEFAULT 0,
+                    body_text TEXT DEFAULT '',
+                    image_path TEXT,
+                    is_visible INTEGER DEFAULT 1
+                )",
+                @"INSERT INTO intro_slides_new (slide_id, display_order, body_text, image_path, is_visible)
+                  SELECT slide_id, display_order, body_text, image_path, is_visible FROM intro_slides",
+                "DROP TABLE intro_slides",
+                "ALTER TABLE intro_slides_new RENAME TO intro_slides"
+            };
+            foreach (var sql in sqls)
+            {
+                using (var cmd = new SQLiteCommand(sql, connection, transaction))
+                {
+                    cmd.ExecuteNonQuery();
+                }
+            }
+            Logger.Info("[DatabaseManager] v21 → v22 migration 完了 (intro_slides から duration_sec 削除、recreate)");
+        }
+
+        /// <summary>
         /// (#253) intro_slides テーブルを作成 (CreateTables / MigrateV20ToV21 共用 helper)。
         /// スクリーンセーバー → ブラウズ間に表示するイントロガイドのスライド群。画像は `guide/` にファイル別管理し、
         /// DB には相対パス (`image_path`) のみ持つ (games のサムネ/背景と同流儀)。他テーブルへの FK は無い独立テーブル。
         /// `body_text` は text-only スライド可で DEFAULT ''、`image_path` は image-only スライド可で NULL 許容。
-        /// `duration_sec` は自動送り秒数 (CHECK 1-60)、`is_visible` で削除せず一時非表示 (store_sections と同 pattern)。
+        /// `is_visible` で削除せず一時非表示 (store_sections と同 pattern)。(#253 design 変更: 自動送り `duration_sec`
+        /// は v22 で廃止、Launcher は手動ナビ = 全スキップ + 次へ/戻る。)
         /// </summary>
         private void CreateIntroSlidesTable(SQLiteConnection connection, SQLiteTransaction transaction)
         {
@@ -2371,7 +2425,6 @@ namespace TonePrism.Manager
                     display_order INTEGER DEFAULT 0,
                     body_text TEXT DEFAULT '',
                     image_path TEXT,
-                    duration_sec INTEGER NOT NULL DEFAULT 5 CHECK(duration_sec BETWEEN 1 AND 60),
                     is_visible INTEGER DEFAULT 1
                 )";
 
@@ -2401,7 +2454,7 @@ namespace TonePrism.Manager
             // backup_log は v19 で DROP した (MigrateV18ToV19 参照、履歴を BackupCatalogService の file-scan に移行)。
             // VerifySchema の検証対象外 = drop 済 DB / 新規 DB の両方で PASS する。
             { "manager_sessions", new[] { "pc_name", "started_at_unix_ms", "last_heartbeat_at_unix_ms", "pid", "manager_version" } },
-            { "intro_slides", new[] { "slide_id", "display_order", "body_text", "image_path", "duration_sec", "is_visible" } },
+            { "intro_slides", new[] { "slide_id", "display_order", "body_text", "image_path", "is_visible" } },
         };
 
         /// <summary>

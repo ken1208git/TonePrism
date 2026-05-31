@@ -26,7 +26,6 @@ namespace TonePrism.Manager
         private TextBox _txtBody;
         private TextBox _txtImage;
         private PictureBox _preview;
-        private NumericUpDown _nudDuration;
         private CheckBox _chkVisible;
 
         public IntroSlideEditForm(DatabaseManager dbManager, IntroSlide slide = null)
@@ -48,7 +47,7 @@ namespace TonePrism.Manager
 
         private void BuildUi()
         {
-            Text = _isNew ? "イントロガイド スライドの追加" : "イントロガイド スライドの編集";
+            Text = _isNew ? "初回説明 スライドの追加" : "初回説明 スライドの編集";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -72,12 +71,7 @@ namespace TonePrism.Manager
             _preview = new PictureBox { Location = new Point(12, 210), Size = new Size(444, 170), BorderStyle = BorderStyle.Fixed3D, SizeMode = PictureBoxSizeMode.Zoom };
             Controls.Add(_preview);
 
-            Controls.Add(new Label { Text = "表示秒数", Location = new Point(12, 396), AutoSize = true });
-            _nudDuration = new NumericUpDown { Location = new Point(78, 394), Size = new Size(60, 23), Minimum = 1, Maximum = 60, Value = 5 };
-            Controls.Add(_nudDuration);
-            Controls.Add(new Label { Text = "秒", Location = new Point(142, 396), AutoSize = true });
-
-            _chkVisible = new CheckBox { Text = "表示する", Location = new Point(180, 395), AutoSize = true, Checked = true };
+            _chkVisible = new CheckBox { Text = "表示する", Location = new Point(12, 396), AutoSize = true, Checked = true };
             Controls.Add(_chkVisible);
 
             var btnOk = new Button { Text = "OK", Location = new Point(290, 432), Size = new Size(80, 27), DialogResult = DialogResult.None };
@@ -93,8 +87,6 @@ namespace TonePrism.Manager
         private void LoadFromSlide()
         {
             _txtBody.Text = _slide.BodyText ?? "";
-            int dur = _slide.DurationSec <= 0 ? 5 : _slide.DurationSec;
-            _nudDuration.Value = Math.Min(60, Math.Max(1, dur));
             _chkVisible.Checked = _slide.IsVisible;
             if (!string.IsNullOrWhiteSpace(_slide.ImagePath))
             {
@@ -157,7 +149,7 @@ namespace TonePrism.Manager
             }
 
             // (#179) DB write 直前の session conflict check。
-            string opLabel = _isNew ? "イントロガイド スライド追加" : "イントロガイド スライド編集";
+            string opLabel = _isNew ? "初回説明 スライド追加" : "初回説明 スライド編集";
             if (SessionConflictHelper.CheckBeforeWrite(this, opLabel) == DialogResult.Cancel)
             {
                 return; // 編集画面に戻る
@@ -185,7 +177,6 @@ namespace TonePrism.Manager
             }
 
             _slide.BodyText = _txtBody.Text.Trim();
-            _slide.DurationSec = (int)_nudDuration.Value;
             _slide.IsVisible = _chkVisible.Checked;
 
             try
