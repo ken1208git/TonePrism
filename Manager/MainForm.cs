@@ -27,6 +27,7 @@ namespace TonePrism.Manager
         private BackupSectionPanel _backupSectionPanel;
         private LogSectionPanel _logSectionPanel;
         private UpdateSectionPanel _updateSectionPanel;
+        private IntroGuidePanel _introGuidePanel;
 
         public MainForm()
         {
@@ -39,6 +40,7 @@ namespace TonePrism.Manager
             _backupSectionPanel = new BackupSectionPanel { Dock = DockStyle.Fill };
             _logSectionPanel = new LogSectionPanel { Dock = DockStyle.Fill };
             _updateSectionPanel = new UpdateSectionPanel { Dock = DockStyle.Fill };
+            _introGuidePanel = new IntroGuidePanel { Dock = DockStyle.Fill };
 
             // (#170 followup) GameSectionPanel から送られる msg は常に「ゲーム数: N 件」で UpdateStatusBar()
             // の default と同義のため引数なし版に統一。旧 signature `UpdateStatusBar(string)` は廃止。
@@ -52,6 +54,12 @@ namespace TonePrism.Manager
             tabLog.Controls.Add(_logSectionPanel);
             tabUpdate.Controls.Add(_updateSectionPanel);
             tabSettings.Controls.Add(_settingsSectionPanel);
+
+            // (#253) イントロガイドのタブを Designer を触らずプログラム的に追加 (ストアタブの次に挿入)。
+            var tabIntro = new System.Windows.Forms.TabPage("イントロガイド") { UseVisualStyleBackColor = true };
+            tabIntro.Controls.Add(_introGuidePanel);
+            int storeIdx = tabControl1.TabPages.IndexOf(tabStore);
+            tabControl1.TabPages.Insert(storeIdx >= 0 ? storeIdx + 1 : tabControl1.TabPages.Count, tabIntro);
 
             // (#179) ManagerSessionService の shutdown (self row delete + heartbeat 停止) を form 終了時に発火
             this.FormClosed += MainForm_FormClosed;
@@ -490,6 +498,7 @@ namespace TonePrism.Manager
             _gameSectionPanel.Initialize(dbManager);
             _storeSectionPanel.Initialize(dbManager);
             _settingsSectionPanel.Initialize(dbManager);
+            _introGuidePanel.Initialize(dbManager); // (#253)
 
             // Updater log の post-hoc filtered absorb (= SPEC §3.6 Companions ログ管理規約)。
             // 直前のアップデートサイクル中に Updater が書き出した log のうち Warn/Error + 主要 milestone
@@ -529,6 +538,7 @@ namespace TonePrism.Manager
             _updateSectionPanel.Initialize(dbManager);
 
             _gameSectionPanel.LoadGames();
+            _introGuidePanel.LoadSlides(); // (#253)
             UpdateStatusBar();
 
             // 起動時に自動バックアップが必要なら走らせる（バックグラウンドで非ブロッキング）
@@ -797,6 +807,7 @@ namespace TonePrism.Manager
         {
             _gameSectionPanel.LoadGames();
             _storeSectionPanel.LoadSections();
+            _introGuidePanel.LoadSlides(); // (#253)
             UpdateStatusBar();
         }
 
@@ -814,6 +825,7 @@ namespace TonePrism.Manager
                 // 走査由来 (BackupCatalogService) で、復元で作られた safety_*.db も自動的に履歴へ現れる。
                 _gameSectionPanel.LoadGames();
                 _storeSectionPanel.LoadSections();
+                _introGuidePanel.LoadSlides(); // (#253)
                 _settingsSectionPanel.UpdateVersionInfo();
                 UpdateStatusBar();
             }

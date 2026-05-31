@@ -1911,6 +1911,21 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.19.0] - 2026-05-31
+
+#### Added (#253 part 2/3: イントロガイドの編集パネル — Manager UI)
+
+- **「イントロガイド」タブを追加**: スクリーンセーバー → ブラウズ間に表示する案内スライドを Manager から編集できるようにした（ストアタブの次に配置）。スライドの**追加 / 編集 / 削除 / 並び替え（↑↓）/ 再読み込み**を `IntroGuidePanel`（`StoreSectionPanel` をミラーした UserControl）で提供。
+- **スライド編集フォーム `IntroSlideEditForm`**: 本文（複数行・空可＝image-only）/ 画像（任意・プレビュー付き・空可＝text-only）/ 表示秒数（1-60）/ 表示 ON-OFF を編集。本文も画像も無い空スライドは保存を弾く。UI は `ImageNameConflictDialog` と同じくコード組み（Designer なし）。
+- **画像の `guide/` 取り込み**: 選択した画像を `guide/` フォルダ（`games/` の隣、`PathManager.GuideFolder`）へコピーし、DB（`intro_slides.image_path`）には `guide/<file>` の相対パスのみ保存（games のサムネと同流儀）。同名衝突は自動 suffix（`slide.png`→`slide_2.png`）。スライド削除時、その画像を他スライドが参照していなければ `guide/` から物理削除（orphan 防止）。
+- **保存ロジックは helper に抽出してテスト**: `Services/IntroGuideAssetHelper`（画像コピー/衝突 suffix/削除のコア、PathManager 非依存）を `Manager.Tests/IntroGuideAssetHelperTests` 5 件で検証（copy→leaf 返却 / 衝突自動 suffix・上書きしない / 連番 increment / source 不在で例外 / guide 配下のみ削除）。
+- **session conflict 準拠**: 追加/編集/削除/並び替え/保存の各 DB write 直前に `SessionConflictHelper.CheckBeforeWrite` を挟む（他 PC / Launcher 競合検出、StoreSectionPanel と同位置）。DB アクセスは `DatabaseManager` ファサード経由（`GetAllIntroSlides` 等を追加）。
+- **スコープ**: 本 PR は **#253 part 2/3（Manager 編集 UI）**。part 1（スキーマ v21、merged）の上に乗る。**part 3（Launcher のスライドショー表示）は後続 PR**。WinForms の画面操作部分は手動 smoke で確認（保存・画像コピーのコアロジックは上記テストで自動検証済）。
+
+#### Bump 根拠 (v0.18.0 → v0.19.0)
+
+新機能（イントロガイド編集 UI）追加のため minor bump。スキーマ変更なし（part 1 の v21 を利用）。Bundle への反映は次回リリース実行時。
+
 ### [Manager v0.18.0] - 2026-05-31
 
 #### Added (#253 part 1/3: イントロガイドのスキーマ — intro_slides テーブル + migration)
