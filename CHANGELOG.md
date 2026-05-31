@@ -1911,6 +1911,20 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.17.4] - 2026-05-30
+
+#### Fixed (#271: manager_sessions の clock drift / 破壊的 cleanup)
+
+- **Manager 同士の同時起動検出も PC 間の時計ズレに弱く、しかも起動時 cleanup が生存中の遠隔 Manager の row を物理削除しうる欠陥**: `ManagerSessionService` の stale 判定は #269 の Launcher と同根で「読み手 `now` − 書き手自己申告 `last_heartbeat`」で計算するため clock drift を被る。さらに起動時 cleanup `DeleteStaleSessions(now-30s)` が**他 PC の row も 30 秒で DELETE**するため、読み手の時計が 30 秒以上進んでいると**生きている遠隔 Manager の row を消す → 検出から外れる → 両者が同時 write → DB 破損**（#179/#184 が防ごうとした本命の write×write 脅威）に倒れうる。Launcher（read 主体・過小警告）より高 severity。PR #270 レビューで指摘・コードで cross-verify。
+- **修正① 検出 stale 閾値 30→60 秒**: `DetectOtherActiveSessions` の閾値をマージン化（heartbeat ×6）して読み手側 skew を吸収。DB ベースで per-row mtime が無く #269 の `max(json,mtime)` は使えないため、閾値が SMB 非依存でできる主防御。
+- **修正② 起動時 cleanup を「1 日 abandoned 閾値」に変更**: cleanup は stale 閾値（60秒）ではなく `now − 1 日`の明らかに放置された row のみ削除し、**clock skew で生存中の遠隔 row を消さない**。自 crash 残骸は次回起動の UPSERT（pc_name PK 上書き）で回収、検出は query 時に 60 秒閾値で stale を除外するため放置 row が残っても誤検出しない。table は 1 PC 1 row のため緩い cleanup でも肥大しない。
+- **スコープ外（SMB 確定後）**: 検出の根本解（共通参照時計＝サーバ時刻基準化、`net time` / マーカー mtime）は本番ファイルサーバの SMB 構成確認後の別案として #271 に残置。本 PR は SMB 非依存の閾値＋cleanup 限定に絞った。
+- **テスト**: `Manager.Tests/ManagerSessionDriftTests`（#239 基盤）に 3 シナリオ追加 — stale だが放置でない他 PC row は cleanup で消えない（破壊的 DELETE を塞いだ核心）／1 日超 abandoned は消える／検出は 60 秒閾値。SPEC §3.8.2・§3.8.3・§7.3（変更履歴 v1.10.46）と同期。
+
+#### Bump 根拠 (v0.17.3 → v0.17.4)
+
+検出ロジック + cleanup の bugfix（clock drift / 破壊的削除の是正）のため patch bump。スキーマ変更なし・後方互換（検出が安全側に緩む + cleanup が保守的になるのみ）。Bundle への反映は次回リリース実行時。
+
 ### [Manager v0.17.3] - 2026-05-30
 
 #### Fixed (#269: Launcher セッション stale 判定の clock drift 耐性)

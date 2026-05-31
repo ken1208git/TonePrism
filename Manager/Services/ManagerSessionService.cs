@@ -30,7 +30,18 @@ namespace TonePrism.Manager.Services
     public class ManagerSessionService
     {
         private const int HeartbeatIntervalSeconds = 10;
-        private const int StaleTimeoutSeconds = 30;
+        // (#271) 検出 stale 閾値 30→60 秒。stale 判定は「読み手 now − 書き手自己申告 heartbeat」で PC 間 clock
+        // drift を被る (#269 Launcher と同根)。DB ベースのため per-row mtime が無く max(json,mtime) は使えず、
+        // 閾値マージン (heartbeat ×6) で読み手側 skew を吸収するのが SMB 非依存でできる主防御。サーバ時刻基準化
+        // (net time / マーカー mtime) は SMB 構成確定後の別案として #271 に残す。
+        private const int StaleTimeoutSeconds = 60;
+        // (#271) 起動時 cleanup 用の「放置 (abandoned)」閾値。stale 閾値 (60秒) で他 PC row を DELETE すると、
+        // clock skew で **生存中の遠隔 Manager row を物理削除** → 検出から外れ → 両者同時 write → DB 破損、の
+        // 危険があった。1 日超の明らかに放置された row のみ削除し、live-but-skewed row は (1 日を超える clock skew が
+        // 無い限り) 消さない。table は
+        // pc_name PRIMARY KEY で 1 PC 1 row、放置 row も次回その PC 起動の UPSERT で上書きされるため緩い cleanup
+        // でも肥大しない。検出側は query 時に 60 秒閾値で stale を除外するので放置 row が残っても誤検出しない。
+        private const int AbandonedSessionTimeoutSeconds = 86400; // 1 日
 
         private readonly ManagerSessionRepository _repo;
         private readonly string _pcName;
@@ -95,11 +106,14 @@ namespace TonePrism.Manager.Services
             {
                 long now = NowUnixMs();
                 _startedAtUnixMs = now;
-                long staleThreshold = now - StaleTimeoutSeconds * 1000L;
 
-                // (1) stale row cleanup (crash 残骸の自動回収)
-                int deleted = _repo.DeleteStaleSessions(staleThreshold);
-                if (deleted > 0) Logger.Info("[ManagerSessionService] stale session を " + deleted + " 件 cleanup");
+                // (1) abandoned row cleanup (#271): clock skew で生存中の遠隔 Manager row を消さないよう、
+                // stale 閾値 (60秒) ではなく「1 日超の明らかに放置された row」だけを削除する。自 crash 残骸は
+                // この後の (2) UPSERT (pc_name PK で上書き) でも回収される。検出側 (DetectOtherActiveSessions)
+                // は query 時に 60 秒閾値で stale を除外するため、放置 row が table に残っても誤検出しない。
+                long abandonedThreshold = now - AbandonedSessionTimeoutSeconds * 1000L;
+                int deleted = _repo.DeleteSessionsOlderThan(abandonedThreshold);
+                if (deleted > 0) Logger.Info("[ManagerSessionService] abandoned session を " + deleted + " 件 cleanup (1 日超放置)");
 
                 // (2) self row INSERT OR REPLACE
                 var self = new ManagerSessionInfo
@@ -132,10 +146,11 @@ namespace TonePrism.Manager.Services
                 Logger.Error("[ManagerSessionService] Initialize 失敗 (heartbeat 機構なしで継続)", ex);
 
                 // (#179 round 7 M-3) partial-success rollback: step (2) 成功 + step (3) 失敗で self row が
-                // 残ると、他 PC からは「自 PC で起動中」と誤検出される (= 30 秒間の false positive、
-                // stale cleanup で消えるまで)。rollback で即座に DELETE、docstring claim「DB 不到達は
-                // heartbeat 不在で機能退化、self row も残らない」を物理保証する。rollback 自体の失敗は
-                // stale cleanup に委ねる (= 二重失敗の log noise のみ Warn で残す)。
+                // 残ると、他 PC からは「自 PC で起動中」と誤検出される (= 最大 60 秒間の false positive、
+                // 検出閾値で非表示になるまで。#271 で cleanup を 1 日 abandoned 化したため物理削除は次回起動
+                // UPSERT 上書きで起きるが、誤検出が止まるのは検出閾値の 60 秒)。rollback で即座に DELETE、
+                // docstring claim「DB 不到達は heartbeat 不在で機能退化、self row も残らない」を物理保証する。
+                // rollback 自体の失敗は検出閾値 (60 秒) と次回 UPSERT に委ねる (= 二重失敗の log noise のみ Warn)。
                 if (selfRegistered)
                 {
                     try
@@ -145,7 +160,7 @@ namespace TonePrism.Manager.Services
                     }
                     catch (Exception rollbackEx)
                     {
-                        Logger.Warn("[ManagerSessionService] Initialize partial-success rollback 失敗 (stale cleanup に委ねる、最大 30 秒の false positive 残存): " + rollbackEx.Message);
+                        Logger.Warn("[ManagerSessionService] Initialize partial-success rollback 失敗 (検出閾値 60 秒で非表示・次回起動 UPSERT で物理上書き、最大 60 秒の false positive 残存): " + rollbackEx.Message);
                     }
                 }
             }
@@ -175,9 +190,10 @@ namespace TonePrism.Manager.Services
                     // ExecuteWithRetry が busy_timeout=10000ms × maxRetries=3 で最悪 ~30 秒 block 中)、
                     // 直後の `DeleteSelfSession(_pcName)` 実行 → heartbeat task が遅れて UpsertHeartbeat
                     // を完了させると **zombie self row** が再登録される silent race path がある。
-                    // 30 秒以内に他 PC の stale cleanup で回収されるため致命的ではないが、log trail を
-                    // 残さないと triage 不能になるため Warn で記録する (silent fail-soft の暗黙運用を
-                    // 撤回、明示 trail に倒す)。
+                    // 他 PC からは検出閾値 (60 秒) で非表示になり、物理的には次回この PC の起動時 UPSERT で
+                    // 上書きされるため致命的ではない (#271 で他 PC cleanup を 1 日 abandoned 化したので、回収は
+                    // cleanup ではなく検出閾値 + 次回起動に依存)。log trail を残さないと triage 不能になるため
+                    // Warn で記録する (silent fail-soft の暗黙運用を撤回、明示 trail に倒す)。
                     bool completedInTime = true;
                     try
                     {
@@ -199,7 +215,7 @@ namespace TonePrism.Manager.Services
                     }
                     if (!completedInTime)
                     {
-                        Logger.Warn("[ManagerSessionService] heartbeat task が 2 秒以内に終了せず (= UpsertHeartbeat の SMB query が block 中の可能性)、stale cleanup に委ねる (zombie self row が最大 30 秒残存する可能性)");
+                        Logger.Warn("[ManagerSessionService] heartbeat task が 2 秒以内に終了せず (= UpsertHeartbeat の SMB query が block 中の可能性)、検出閾値 60 秒で非表示・次回起動 UPSERT で物理上書き (zombie self row が最大 60 秒 active 表示される可能性)");
                     }
                     // (round 3 L-1 fix) CancellationTokenSource.Dispose() 自体は idempotent で例外を
                     // 投げない (MSDN 仕様)。旧 round 2 L-1 で「Dispose の race で ObjectDisposedException」と
@@ -214,8 +230,9 @@ namespace TonePrism.Manager.Services
             }
             catch (Exception ex)
             {
-                // shutdown path 失敗は致命的でない (stale cleanup で 30 秒後に自動回収)。Warn のみ。
-                Logger.Warn("[ManagerSessionService] Shutdown 失敗 (stale cleanup に委ねる): " + ex.Message);
+                // shutdown path 失敗は致命的でない (#271: self row 残骸は検出閾値 60 秒で非表示になり、次回起動の
+                // UPSERT で物理上書きされる。旧「30 秒 stale cleanup で回収」は cleanup を 1 日 abandoned 化したため非該当)。Warn のみ。
+                Logger.Warn("[ManagerSessionService] Shutdown 失敗 (検出閾値 60 秒で非表示・次回起動 UPSERT で上書き): " + ex.Message);
             }
             _initialized = false;
         }
@@ -275,7 +292,8 @@ namespace TonePrism.Manager.Services
                     {
                         // (round 3 H-2 fix) `UPDATE WHERE pc_name = ...` だと row 不在時 silent no-op で
                         // 自 PC 永久不可視化 path があったため `INSERT OR REPLACE` UPSERT に変更。
-                        // 他 PC の stale cleanup で削除されても次の heartbeat で reanimate できる。
+                        // 万一 self row が削除されても (#271 後は他 PC cleanup が 1 日 abandoned 化したため
+                        // 通常起きないが、手動削除等) 次の heartbeat で reanimate できる safety net。
                         var self = new ManagerSessionInfo
                         {
                             PcName                = _pcName,
