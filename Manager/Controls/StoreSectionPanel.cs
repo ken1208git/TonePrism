@@ -201,14 +201,13 @@ namespace TonePrism.Manager.Controls
 
             var sectionA = _sections[idx];
             var sectionB = _sections[newIdx];
-            int tempOrder = sectionA.DisplayOrder;
-            sectionA.DisplayOrder = sectionB.DisplayOrder;
-            sectionB.DisplayOrder = tempOrder;
 
             try
             {
-                _dbManager.UpdateSection(sectionA);
-                _dbManager.UpdateSection(sectionB);
+                // display_order を **1 transaction で入れ替え** (half-write 防止)。UpdateSection を 2 回別々に
+                // 投げると片方失敗で両者が同じ display_order になるため、atomic swap に委ねる (#253/#274 で intro 側を
+                // 直したのと同型、store 側の負債解消)。a は b の order、b は a の order を持つ。
+                _dbManager.SwapSectionOrder(sectionA.SectionId, sectionB.DisplayOrder, sectionB.SectionId, sectionA.DisplayOrder);
                 LoadSections();
 
                 if (newIdx < dgvSections.Rows.Count)

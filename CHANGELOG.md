@@ -1911,6 +1911,16 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.19.1] - 2026-06-01
+
+#### Fixed (ストアセクション並び替えの half-write 解消)
+
+- **ストアセクションの「↑上へ / ↓下へ」並び替えが非トランザクションで、途中失敗時に display_order が壊れる**: `StoreSectionPanel.MoveSection` が 2 セクションの `display_order` を `UpdateSection` の**別々の DB write 2 回**で入れ替えており、片方成功・片方失敗で**両者が同じ display_order になる half-write** が起きうる経路があった（#274（#253 part 2）レビューで指摘、intro 側（`IntroGuidePanel`）は #274 で解消済の同型バグ）。`StoreSectionRepository.SwapDisplayOrder`（2 件を **1 transaction** で atomic 入替）を追加し、`MoveSection` をそれに切替。`DatabaseManager.SwapSectionOrder` facade 追加。`DataLayerRoundTripTests.StoreSection_SwapDisplayOrder_SwapsAtomically` で検証。
+
+#### Bump 根拠 (v0.19.0 → v0.19.1)
+
+既存コードの bugfix（並び替えの atomic 化）のため patch bump。スキーマ変更なし・後方互換。Bundle への反映は次回リリース実行時。
+
 ### [Manager v0.19.0] - 2026-05-31
 
 #### Added (#253 part 2/3: 初回説明の編集パネル — Manager UI)

@@ -215,6 +215,46 @@ namespace TonePrism.Manager.Repositories
             });
         }
 
+        /// <summary>
+        /// 2 セクションの display_order を **1 transaction で**入れ替える。並び替えで `UpdateSection` を 2 回
+        /// 別々に投げると、片方成功・片方失敗で両者が同じ display_order になる half-write が起きうるため、atomic な
+        /// swap を提供する (#253 part 2 / #274 で `IntroSlideRepository` に入れたのと同型、store 側の負債を解消)。
+        /// </summary>
+        public void SwapDisplayOrder(int sectionIdA, int orderA, int sectionIdB, int orderB)
+        {
+            _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var transaction = connection.BeginTransaction())
+                    {
+                        try
+                        {
+                            using (var cmd = new SQLiteCommand("UPDATE store_sections SET display_order = @o WHERE section_id = @id", connection, transaction))
+                            {
+                                cmd.Parameters.AddWithValue("@o", orderA);
+                                cmd.Parameters.AddWithValue("@id", sectionIdA);
+                                cmd.ExecuteNonQuery();
+                            }
+                            using (var cmd = new SQLiteCommand("UPDATE store_sections SET display_order = @o WHERE section_id = @id", connection, transaction))
+                            {
+                                cmd.Parameters.AddWithValue("@o", orderB);
+                                cmd.Parameters.AddWithValue("@id", sectionIdB);
+                                cmd.ExecuteNonQuery();
+                            }
+                            transaction.Commit();
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+                }
+            });
+        }
+
         private List<GameInfo> GetGamesBySectionId(int sectionId, SQLiteConnection connection, StoreSectionInfo section = null)
         {
             var games = new List<GameInfo>();
