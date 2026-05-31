@@ -1911,6 +1911,20 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.18.0] - 2026-05-31
+
+#### Added (#253 part 1/3: イントロガイドのスキーマ — intro_slides テーブル + migration)
+
+- **`intro_slides` テーブルを新設（DB v20 → v21）**: スクリーンセーバー → ブラウズ間に表示する「イントロガイド」（展示の説明 / 楽しみ方 / 注意事項 等のスライド）のデータ基盤。列は `slide_id`（PK AUTOINCREMENT）/ `display_order` / `body_text`（空可＝image-only スライド）/ `image_path`（NULL 可＝text-only スライド・相対パス、画像実体は `guide/` フォルダにファイル別管理）/ `duration_sec`（自動送り秒数、CHECK 1-60）/ `is_visible`（削除せず一時非表示）。他テーブルへの FK 無しの独立テーブル。
+- **スキーマワークフロー準拠（AGENTS §7.6）**: `SchemaManager.CurrentDbVersion` を 20→21 に増分、`CreateIntroSlidesTable` helper を `CreateTables`（新規 DB）と `MigrateV20ToV21`（既存 DB、`CREATE TABLE IF NOT EXISTS` で idempotent、manager_sessions v13 と同型）の双方から呼ぶ。migration dispatch に v21 ブロック（前段未完なら据え置きの guard pattern）+ `ExpectedSchema` に `intro_slides` を追記し SPEC §7.3 テーブル13 と同期。
+- **モデル / リポジトリ**: `Models/IntroSlide.cs` + `Repositories/IntroSlideRepository.cs`（CRUD、`StoreSectionRepository` と同流儀。空/空白の `image_path` は DB 上 null に正規化）。
+- **テスト**: `Manager.Tests/IntroSlideTests`（#239 基盤）に 5 件 — fresh DB が v21 到達・CRUD round-trip（image あり/text-only）・空 image_path の null 正規化・duration CHECK 違反の reject・v20→v21 migration がデータを保持しつつ intro_slides を追加。既存 v19→v20 migration テストの version アサートを動的ターゲット化（schema bump 耐性）。
+- **スコープ**: 本 PR は **#253 part 1/3（スキーマ）**。本番 DB 作成より前にスキーマを確定させる目的。**part 2（Manager 編集パネル）/ part 3（Launcher スライドショー）は後続 PR**。
+
+#### Bump 根拠 (v0.17.4 → v0.18.0)
+
+新機能（新テーブル＋データ層）追加のため minor bump。DB スキーマ v20→v21（migration 付き・後方互換、既存 DB は自動で intro_slides を獲得）。Bundle への反映は次回リリース実行時（schema 変更を含むため Bundle は major 候補、リリース時に判断）。
+
 ### [Manager v0.17.4] - 2026-05-30
 
 #### Fixed (#271: manager_sessions の clock drift / 破壊的 cleanup)
