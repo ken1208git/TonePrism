@@ -1911,6 +1911,22 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.19.0] - 2026-05-31
+
+#### Added (#253 part 2/3: 初回説明の編集パネル — Manager UI)
+
+- **「初回説明」タブを追加**: スクリーンセーバー → ブラウズ間に毎回表示する案内スライド（来場者は入れ替わるため各人にとって初回）を Manager から編集できるようにした（ストアタブの次に配置）。スライドの**追加 / 編集 / 削除 / 並び替え（↑↓）/ 再読み込み**を `IntroGuidePanel`（`StoreSectionPanel` をミラーした UserControl）で提供。
+- **スライド編集フォーム `IntroSlideEditForm`**: 本文（複数行・空可＝image-only）/ 画像（任意・プレビュー付き・空可＝text-only）/ 表示 ON-OFF を編集。本文も画像も無い空スライドは保存を弾く。UI は `ImageNameConflictDialog` と同じくコード組み（Designer なし）。
+- **画像の `guide/` 取り込み**: 選択した画像を `guide/` フォルダ（`games/` の隣、`PathManager.GuideFolder`）へコピーし、DB（`intro_slides.image_path`）には `guide/<file>` の相対パスのみ保存（games のサムネと同流儀）。同名衝突は自動 suffix（`slide.png`→`slide_2.png`）。スライド削除時、その画像を他スライドが参照していなければ `guide/` から物理削除（orphan 防止）。
+- **保存ロジックは helper に抽出してテスト**: `Services/IntroGuideAssetHelper`（画像コピー/衝突 suffix/削除のコア、PathManager 非依存）を `Manager.Tests/IntroGuideAssetHelperTests` 5 件で検証（copy→leaf 返却 / 衝突自動 suffix・上書きしない / 連番 increment / source 不在で例外 / guide 配下のみ削除）。
+- **session conflict 準拠**: 追加/編集/削除/並び替え/保存の各 DB write 直前に `SessionConflictHelper.CheckBeforeWrite` を挟む（他 PC / Launcher 競合検出、StoreSectionPanel と同位置）。DB アクセスは `DatabaseManager` ファサード経由（`GetAllIntroSlides` 等を追加）。
+- **design 変更（ユーザー feedback、DB v21→v22）**: part 1 で入れた自動送り `duration_sec` を**廃止**（来場者操作は**手動ナビ＝全スキップ + 次へ/戻る、自動送りなし**の方針に変更。手動ナビのボタン自体は Launcher 側＝part 3）。CHECK 付き列のため `MigrateV21ToV22` は table recreate で削除。あわせて呼称を「イントロガイド」→「**初回説明**」に統一（タブ名・フォームタイトル・session 操作ラベル）。Model/Repo/UI/テストから `duration_sec`(=秒) を全削除。
+- **スコープ**: 本 PR は **#253 part 2/3（Manager 編集 UI）**。part 1（スキーマ、merged）の上に乗る。**part 3（Launcher の手動ナビ表示）は後続 PR**。WinForms の画面（タブ表示・並び・編集フォーム）は実機起動で目視確認済（ctor の `TabPages.Insert` がハンドル前 silent fail でタブ非表示になるバグも実機で発見・修正）。保存・画像コピーのコアロジックはテストで自動検証。
+
+#### Bump 根拠 (v0.18.0 → v0.19.0)
+
+新機能（初回説明の編集 UI）追加のため minor bump。**DB スキーマ v21→v22**（`duration_sec` 削除、`MigrateV21ToV22` の table recreate・後方互換）。Bundle への反映は次回リリース実行時。
+
 ### [Manager v0.18.0] - 2026-05-31
 
 #### Added (#253 part 1/3: イントロガイドのスキーマ — intro_slides テーブル + migration)

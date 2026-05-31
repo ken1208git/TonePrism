@@ -53,11 +53,11 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
-        public void FreshDb_ReachesV21_WithIntroSlidesTable()
+        public void FreshDb_ReachesV22_WithIntroSlidesTable()
         {
             var schema = new SchemaManager(_conn);
-            Assert.Equal(21, schema.GetTargetDatabaseVersion());
-            Assert.Equal(21, schema.GetActualDatabaseVersion());
+            Assert.Equal(22, schema.GetTargetDatabaseVersion());
+            Assert.Equal(22, schema.GetActualDatabaseVersion());
             // intro_slides が存在し空で読める。
             Assert.Empty(new IntroSlideRepository(_conn).GetAll());
         }
@@ -67,8 +67,8 @@ namespace TonePrism.Manager.Tests
         {
             var repo = new IntroSlideRepository(_conn);
 
-            var s1 = new IntroSlide { DisplayOrder = 0, BodyText = "ようこそ", ImagePath = "guide/welcome.png", DurationSec = 7, IsVisible = true };
-            var s2 = new IntroSlide { DisplayOrder = 1, BodyText = "注意事項", ImagePath = null, DurationSec = 5, IsVisible = false }; // text-only
+            var s1 = new IntroSlide { DisplayOrder = 0, BodyText = "ようこそ", ImagePath = "guide/welcome.png", IsVisible = true };
+            var s2 = new IntroSlide { DisplayOrder = 1, BodyText = "注意事項", ImagePath = null, IsVisible = false }; // text-only
             repo.Add(s1);
             repo.Add(s2);
             Assert.True(s1.SlideId > 0);
@@ -79,7 +79,6 @@ namespace TonePrism.Manager.Tests
             // 表示順 (display_order) で返る。
             Assert.Equal("ようこそ", all[0].BodyText);
             Assert.Equal("guide/welcome.png", all[0].ImagePath);
-            Assert.Equal(7, all[0].DurationSec);
             Assert.True(all[0].IsVisible);
             // text-only スライドは ImagePath が null。
             Assert.Null(all[1].ImagePath);
@@ -87,11 +86,9 @@ namespace TonePrism.Manager.Tests
 
             // Update
             all[0].BodyText = "ようこそ（改）";
-            all[0].DurationSec = 10;
             repo.Update(all[0]);
             var reread = repo.GetAll();
             Assert.Equal("ようこそ（改）", reread[0].BodyText);
-            Assert.Equal(10, reread[0].DurationSec);
 
             // Delete
             repo.Delete(reread[0].SlideId);
@@ -104,7 +101,7 @@ namespace TonePrism.Manager.Tests
         public void EmptyImagePath_NormalizedToNull()
         {
             var repo = new IntroSlideRepository(_conn);
-            repo.Add(new IntroSlide { DisplayOrder = 0, BodyText = "x", ImagePath = "   ", DurationSec = 5 });
+            repo.Add(new IntroSlide { DisplayOrder = 0, BodyText = "x", ImagePath = "   " });
             Assert.Null(repo.GetAll().Single().ImagePath);
             // DB 上も NULL (空文字ではない)。
             Assert.Equal(0, Scalar("SELECT COUNT(*) FROM intro_slides WHERE image_path = ''"));
@@ -112,20 +109,11 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
-        public void DurationCheck_RejectsOutOfRange()
+        public void Migration_OldV20Db_ReachesCurrentTarget_PreservesData()
         {
-            var repo = new IntroSlideRepository(_conn);
-            // CHECK(duration_sec BETWEEN 1 AND 60) 違反は SQLiteException (Constraint)。
-            Assert.Throws<SQLiteException>(() => repo.Add(new IntroSlide { DisplayOrder = 0, BodyText = "x", DurationSec = 999 }));
-            Assert.Throws<SQLiteException>(() => repo.Add(new IntroSlide { DisplayOrder = 0, BodyText = "x", DurationSec = 0 }));
-        }
-
-        [Fact]
-        public void MigrationV20ToV21_AddsIntroSlides_PreservesExistingData()
-        {
-            // v21 の DB から intro_slides を落とし user_version を 20 に戻して「旧 v20 DB」を再現、
-            // 既存データ (games の 1 行) を seed → 再 InitializeDatabase で v20→v21 migration が走り、
-            // intro_slides が復活し、既存データが保持され、user_version が 21 になることを検証。
+            // 旧 v20 DB を再現 (intro_slides を落として user_version=20)、既存データ (games 1 行) を seed →
+            // 再 InitializeDatabase で v20 → … → 現行ターゲット (v22) まで migration が走り、intro_slides が
+            // 復活し、既存データが保持されることを検証。version は動的取得で schema bump 耐性を持たせる。
             Exec("DROP TABLE intro_slides");
             Exec("INSERT INTO games (game_id, title) VALUES ('preserve_me', '残るゲーム')");
             Exec("PRAGMA user_version = 20");
@@ -133,10 +121,48 @@ namespace TonePrism.Manager.Tests
 
             new SchemaManager(_conn).InitializeDatabase();
 
-            Assert.Equal(21, new SchemaManager(_conn).GetActualDatabaseVersion());
+            var schema = new SchemaManager(_conn);
+            Assert.Equal(schema.GetTargetDatabaseVersion(), schema.GetActualDatabaseVersion());
             // intro_slides 復活 + 既存ゲーム保持。
             Assert.Empty(new IntroSlideRepository(_conn).GetAll());
             Assert.Equal(1, Scalar("SELECT COUNT(*) FROM games WHERE game_id = 'preserve_me'"));
+        }
+
+        [Fact]
+        public void MigrationV21ToV22_RealData_DropsDurationSec_PreservesRows()
+        {
+            // (#274 review #1) 本番 risk path の実データ round-trip: v21 の **duration_sec 付き** intro_slides に
+            // 実データを入れ、InitializeDatabase で v21→v22 (MigrateV21ToV22 の recreate-and-copy) を走らせ、
+            // duration_sec 列が消えつつ全行が保持されることを検証。v20 始点のテストでは MigrateV21ToV22 が
+            // TableHasColumn 判定で no-op になり recreate 経路が未カバーだったため、本テストで明示的に走らせる。
+            Exec("DROP TABLE intro_slides");
+            Exec(@"CREATE TABLE intro_slides (
+                slide_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                display_order INTEGER DEFAULT 0,
+                body_text TEXT DEFAULT '',
+                image_path TEXT,
+                duration_sec INTEGER NOT NULL DEFAULT 5 CHECK(duration_sec BETWEEN 1 AND 60),
+                is_visible INTEGER DEFAULT 1)");
+            Exec("INSERT INTO intro_slides (display_order, body_text, image_path, duration_sec, is_visible) VALUES (0, 'スライド1', 'guide/a.png', 7, 1)");
+            Exec("INSERT INTO intro_slides (display_order, body_text, image_path, duration_sec, is_visible) VALUES (1, 'スライド2', NULL, 3, 0)");
+            Exec("PRAGMA user_version = 21");
+            Assert.Equal(21, new SchemaManager(_conn).GetActualDatabaseVersion());
+
+            new SchemaManager(_conn).InitializeDatabase();
+
+            var schema = new SchemaManager(_conn);
+            Assert.Equal(schema.GetTargetDatabaseVersion(), schema.GetActualDatabaseVersion()); // v22 到達
+            // duration_sec 列が消えていること。
+            Assert.Equal(0, Scalar("SELECT COUNT(*) FROM pragma_table_info('intro_slides') WHERE name = 'duration_sec'"));
+            // 全行が保持され、内容 (slide_id 順序・本文・画像有無・表示状態) も無傷。
+            var slides = new IntroSlideRepository(_conn).GetAll();
+            Assert.Equal(2, slides.Count);
+            Assert.Equal("スライド1", slides[0].BodyText);
+            Assert.Equal("guide/a.png", slides[0].ImagePath);
+            Assert.True(slides[0].IsVisible);
+            Assert.Equal("スライド2", slides[1].BodyText);
+            Assert.Null(slides[1].ImagePath);
+            Assert.False(slides[1].IsVisible);
         }
     }
 }

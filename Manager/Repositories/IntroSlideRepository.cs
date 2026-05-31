@@ -29,7 +29,7 @@ namespace TonePrism.Manager.Repositories
                 {
                     _conn.OpenConnectionWithJournalMode(connection);
                     string query = @"
-                        SELECT slide_id, display_order, body_text, image_path, duration_sec, is_visible
+                        SELECT slide_id, display_order, body_text, image_path, is_visible
                         FROM intro_slides
                         ORDER BY display_order ASC, slide_id ASC";
                     using (var command = new SQLiteCommand(query, connection))
@@ -55,9 +55,9 @@ namespace TonePrism.Manager.Repositories
                     _conn.OpenConnectionWithJournalMode(connection);
                     string insertSql = @"
                         INSERT INTO intro_slides
-                            (display_order, body_text, image_path, duration_sec, is_visible)
+                            (display_order, body_text, image_path, is_visible)
                         VALUES
-                            (@displayOrder, @bodyText, @imagePath, @durationSec, @isVisible)";
+                            (@displayOrder, @bodyText, @imagePath, @isVisible)";
                     using (var command = new SQLiteCommand(insertSql, connection))
                     {
                         SetSlideParameters(command, slide);
@@ -81,7 +81,6 @@ namespace TonePrism.Manager.Repositories
                             display_order = @displayOrder,
                             body_text     = @bodyText,
                             image_path    = @imagePath,
-                            duration_sec  = @durationSec,
                             is_visible    = @isVisible
                         WHERE slide_id = @slideId";
                     using (var command = new SQLiteCommand(updateSql, connection))
@@ -127,6 +126,46 @@ namespace TonePrism.Manager.Repositories
             });
         }
 
+        /// <summary>
+        /// 2 スライドの display_order を **1 transaction で**入れ替える (#274 review #2)。並び替えで
+        /// UpdateSlide を 2 回別々に投げると、片方成功・片方失敗で両者が同じ display_order になる half-write が
+        /// 起きうるため、atomic な swap を提供する。
+        /// </summary>
+        public void SwapDisplayOrder(int slideIdA, int orderA, int slideIdB, int orderB)
+        {
+            _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var transaction = connection.BeginTransaction())
+                    {
+                        try
+                        {
+                            using (var cmd = new SQLiteCommand("UPDATE intro_slides SET display_order = @o WHERE slide_id = @id", connection, transaction))
+                            {
+                                cmd.Parameters.AddWithValue("@o", orderA);
+                                cmd.Parameters.AddWithValue("@id", slideIdA);
+                                cmd.ExecuteNonQuery();
+                            }
+                            using (var cmd = new SQLiteCommand("UPDATE intro_slides SET display_order = @o WHERE slide_id = @id", connection, transaction))
+                            {
+                                cmd.Parameters.AddWithValue("@o", orderB);
+                                cmd.Parameters.AddWithValue("@id", slideIdB);
+                                cmd.ExecuteNonQuery();
+                            }
+                            transaction.Commit();
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+                }
+            });
+        }
+
         private void SetSlideParameters(SQLiteCommand command, IntroSlide slide)
         {
             command.Parameters.AddWithValue("@displayOrder", slide.DisplayOrder);
@@ -134,7 +173,6 @@ namespace TonePrism.Manager.Repositories
             // 空/空白の画像パスは DB 上 null に正規化 (AGENTS「空→null 等、フォーム間で揃える」)。
             command.Parameters.AddWithValue("@imagePath",
                 string.IsNullOrWhiteSpace(slide.ImagePath) ? (object)DBNull.Value : slide.ImagePath);
-            command.Parameters.AddWithValue("@durationSec", slide.DurationSec);
             command.Parameters.AddWithValue("@isVisible", slide.IsVisible ? 1 : 0);
         }
 
@@ -146,7 +184,6 @@ namespace TonePrism.Manager.Repositories
                 DisplayOrder = Convert.ToInt32(reader["display_order"]),
                 BodyText = reader["body_text"] is DBNull ? "" : reader["body_text"].ToString(),
                 ImagePath = reader["image_path"] is DBNull ? null : reader["image_path"].ToString(),
-                DurationSec = Convert.ToInt32(reader["duration_sec"]),
                 IsVisible = Convert.ToInt32(reader["is_visible"]) == 1,
             };
         }

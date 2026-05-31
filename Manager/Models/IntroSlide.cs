@@ -21,9 +21,6 @@ namespace TonePrism.Manager.Models
         /// <summary>画像の相対パス (`guide/` 基準)。null 可 = text-only。</summary>
         public string ImagePath { get; set; }
 
-        /// <summary>自動送り秒数 (1-60、DB CHECK)。</summary>
-        public int DurationSec { get; set; } = 5;
-
         /// <summary>表示 ON/OFF (削除せず一時非表示にできる)。</summary>
         public bool IsVisible { get; set; } = true;
     }

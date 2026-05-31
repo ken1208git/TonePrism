@@ -27,6 +27,8 @@ namespace TonePrism.Manager
         private BackupSectionPanel _backupSectionPanel;
         private LogSectionPanel _logSectionPanel;
         private UpdateSectionPanel _updateSectionPanel;
+        private IntroGuidePanel _introGuidePanel;
+        private System.Windows.Forms.TabPage _introTab; // (#253) ハンドル生成後に追加するため field 保持
 
         public MainForm()
         {
@@ -39,6 +41,7 @@ namespace TonePrism.Manager
             _backupSectionPanel = new BackupSectionPanel { Dock = DockStyle.Fill };
             _logSectionPanel = new LogSectionPanel { Dock = DockStyle.Fill };
             _updateSectionPanel = new UpdateSectionPanel { Dock = DockStyle.Fill };
+            _introGuidePanel = new IntroGuidePanel { Dock = DockStyle.Fill };
 
             // (#170 followup) GameSectionPanel から送られる msg は常に「ゲーム数: N 件」で UpdateStatusBar()
             // の default と同義のため引数なし版に統一。旧 signature `UpdateStatusBar(string)` は廃止。
@@ -52,6 +55,11 @@ namespace TonePrism.Manager
             tabLog.Controls.Add(_logSectionPanel);
             tabUpdate.Controls.Add(_updateSectionPanel);
             tabSettings.Controls.Add(_settingsSectionPanel);
+
+            // (#253) イントロガイドのタブ追加は **ハンドル生成後** (MainForm_Load → ContinueLoadAfterSessionCheck)
+            // に行う。理由: `TabControl.TabPages.Insert` / `Controls.SetChildIndex` は ctor 時点 (ハンドル前) では
+            // silent fail し、タブが表示されない / 位置調整が効かない WinForms の既知挙動があるため (実機確認で判明)。
+            // ここではパネル本体 (_introGuidePanel、上で生成済) のみ保持し、タブは AddIntroGuideTab() で後付けする。
 
             // (#179) ManagerSessionService の shutdown (self row delete + heartbeat 停止) を form 終了時に発火
             this.FormClosed += MainForm_FormClosed;
@@ -491,6 +499,17 @@ namespace TonePrism.Manager
             _storeSectionPanel.Initialize(dbManager);
             _settingsSectionPanel.Initialize(dbManager);
 
+            // (#253) イントロガイドのタブをここ (ハンドル生成後) で追加。ctor では TabPages.Insert が silent fail
+            // するため後付けにしている。ストアタブの次に挿入。多重呼出ガードとして未作成時のみ追加。
+            if (_introTab == null)
+            {
+                _introTab = new System.Windows.Forms.TabPage("初回説明") { UseVisualStyleBackColor = true };
+                _introTab.Controls.Add(_introGuidePanel);
+                int introStoreIdx = tabControl1.TabPages.IndexOf(tabStore);
+                tabControl1.TabPages.Insert(introStoreIdx >= 0 ? introStoreIdx + 1 : tabControl1.TabPages.Count, _introTab);
+            }
+            _introGuidePanel.Initialize(dbManager);
+
             // Updater log の post-hoc filtered absorb (= SPEC §3.6 Companions ログ管理規約)。
             // 直前のアップデートサイクル中に Updater が書き出した log のうち Warn/Error + 主要 milestone
             // を Manager log に embed する。Manager GUI の log viewer から 3 component に収束させる方針の
@@ -529,6 +548,7 @@ namespace TonePrism.Manager
             _updateSectionPanel.Initialize(dbManager);
 
             _gameSectionPanel.LoadGames();
+            _introGuidePanel.LoadSlides(); // (#253)
             UpdateStatusBar();
 
             // 起動時に自動バックアップが必要なら走らせる（バックグラウンドで非ブロッキング）
@@ -797,6 +817,7 @@ namespace TonePrism.Manager
         {
             _gameSectionPanel.LoadGames();
             _storeSectionPanel.LoadSections();
+            _introGuidePanel.LoadSlides(); // (#253)
             UpdateStatusBar();
         }
 
@@ -814,6 +835,7 @@ namespace TonePrism.Manager
                 // 走査由来 (BackupCatalogService) で、復元で作られた safety_*.db も自動的に履歴へ現れる。
                 _gameSectionPanel.LoadGames();
                 _storeSectionPanel.LoadSections();
+                _introGuidePanel.LoadSlides(); // (#253)
                 _settingsSectionPanel.UpdateVersionInfo();
                 UpdateStatusBar();
             }
