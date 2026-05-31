@@ -20,6 +20,7 @@ namespace TonePrism.Manager
         private readonly VersionRepository _versionRepo;
         private readonly DeveloperRepository _devRepo;
         private readonly StoreSectionRepository _sectionRepo;
+        private readonly IntroSlideRepository _introSlideRepo;
         private readonly SettingsRepository _settingsRepo;
         private readonly BackupService _backupService;
         private readonly BackupCatalogService _backupCatalogService;
@@ -34,6 +35,7 @@ namespace TonePrism.Manager
             _gameRepo = new GameRepository(_conn, _devRepo);
             _versionRepo = new VersionRepository(_conn, _devRepo);
             _sectionRepo = new StoreSectionRepository(_conn);
+            _introSlideRepo = new IntroSlideRepository(_conn);
             _settingsRepo = new SettingsRepository(_conn);
             _backupService = new BackupService(_conn, _settingsRepo);
             // (backup_log 廃止 / DB v19) 履歴は backups/ フォルダ走査由来。BackupService からフォルダパスを取得する。
@@ -247,6 +249,13 @@ namespace TonePrism.Manager
         public void AddSection(StoreSectionInfo section) => _sectionRepo.Add(section);
         public void UpdateSection(StoreSectionInfo section) => _sectionRepo.Update(section);
         public void DeleteSection(int sectionId) => _sectionRepo.Delete(sectionId);
+
+        // --- イントロガイド (#253) ---
+        public List<IntroSlide> GetAllIntroSlides() => _introSlideRepo.GetAll();
+        public int GetMaxIntroSlideDisplayOrder() => _introSlideRepo.GetMaxDisplayOrder();
+        public void AddIntroSlide(IntroSlide slide) => _introSlideRepo.Add(slide);
+        public void UpdateIntroSlide(IntroSlide slide) => _introSlideRepo.Update(slide);
+        public void DeleteIntroSlide(int slideId) => _introSlideRepo.Delete(slideId);
 
         // --- エラーメッセージ ---
         public static string GetUserFriendlyErrorMessage(SQLiteException ex) => DatabaseConnection.GetUserFriendlyErrorMessage(ex);

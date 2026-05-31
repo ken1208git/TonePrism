@@ -144,6 +144,7 @@
     <Compile Include="StoreSectionForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="IntroSlideEditForm.cs" />
     <Compile Include="StoreSectionForm.Designer.cs">
       <DependentUpon>StoreSectionForm.cs</DependentUpon>
     </Compile>
@@ -156,6 +157,7 @@
     <Compile Include="Controls\StoreSectionPanel.cs">
       <SubType>UserControl</SubType>
     </Compile>
+    <Compile Include="Controls\IntroGuidePanel.cs" />
     <Compile Include="Controls\StoreSectionPanel.Designer.cs">
       <DependentUpon>StoreSectionPanel.cs</DependentUpon>
     </Compile>
@@ -244,6 +246,7 @@
     <Compile Include="Services\FileOperationService.cs" />
     <Compile Include="Services\FolderDeletionService.cs" />
     <Compile Include="Services\GameFormHelper.cs" />
+    <Compile Include="Services\IntroGuideAssetHelper.cs" />
     <Compile Include="Services\ImagePreviewHelper.cs" />
     <Compile Include="Services\JsonEscape.cs" />
     <Compile Include="Services\LauncherLogsRootBridge.cs" />

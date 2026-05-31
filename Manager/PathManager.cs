@@ -33,6 +33,16 @@ namespace TonePrism.Manager
         {
             get { return Path.Combine(BaseDirectory, "games"); }
         }
+
+        /// <summary>
+        /// (#253) guide フォルダのパス (`&lt;install&gt;/guide/`)。イントロガイドのスライド画像を
+        /// ファイル別管理する (games/ の隣)。DB (`intro_slides.image_path`) には `guide/&lt;file&gt;`
+        /// の相対パスのみ持つ。Launcher も同 relative path を base 起点で resolve する。
+        /// </summary>
+        public static string GuideFolder
+        {
+            get { return Path.Combine(BaseDirectory, "guide"); }
+        }
         
         /// <summary>
         /// データベースファイルのパス
