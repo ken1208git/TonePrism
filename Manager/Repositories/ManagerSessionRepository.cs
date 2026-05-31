@@ -23,15 +23,16 @@ namespace TonePrism.Manager.Repositories
         }
 
         /// <summary>
-        /// `last_heartbeat_at_unix_ms < threshold` の row を DELETE する汎用メソッド。
-        /// (#271) caller (`ManagerSessionService.Initialize`) は **「放置 (abandoned)」閾値 (= now − 1 日)** を
-        /// 渡す。stale 閾値 (60秒) を渡すと clock skew で生存中の遠隔 Manager row を消し DB 破損に繋がるため、
-        /// 明らかに放置された row のみ削除する設計 (= 自 crash 残骸は `UpsertSelfSession` の INSERT OR REPLACE で
-        /// 上書き回収、検出側は query 時 60 秒閾値で stale 除外)。heartbeat thread はこれを呼ばない。
+        /// `last_heartbeat_at_unix_ms < threshold` の row を DELETE する**閾値中立**の汎用メソッド。
+        /// 削除ポリシー (どの古さで消すか) は caller が閾値で決める。(#271 review L2) メソッド名を "Stale" に
+        /// しないのは footgun 回避: stale 閾値 (60秒) を渡すと clock skew で生存中の遠隔 Manager row を消し
+        /// DB 破損に繋がるため、**stale 閾値を渡してはならない**。唯一の caller (`ManagerSessionService.Initialize`)
+        /// は「放置 (abandoned)」閾値 (= now − 1 日) を渡す。自 crash 残骸は `UpsertSelfSession` の INSERT OR REPLACE
+        /// で上書き回収、検出側は query 時 60 秒閾値で stale 除外。heartbeat thread はこれを呼ばない。
         /// </summary>
-        /// <param name="staleThresholdUnixMs">この時刻より前の heartbeat の row を削除 (#271 では abandoned 閾値)。</param>
+        /// <param name="thresholdUnixMs">この時刻より前の heartbeat の row を削除 (#271 では now − 1 日 の abandoned 閾値)。</param>
         /// <returns>削除した row 数。</returns>
-        public int DeleteStaleSessions(long staleThresholdUnixMs)
+        public int DeleteSessionsOlderThan(long thresholdUnixMs)
         {
             return _conn.ExecuteWithRetry(() =>
             {
@@ -42,7 +43,7 @@ namespace TonePrism.Manager.Repositories
                         "DELETE FROM manager_sessions WHERE last_heartbeat_at_unix_ms < @threshold",
                         connection))
                     {
-                        cmd.Parameters.AddWithValue("@threshold", staleThresholdUnixMs);
+                        cmd.Parameters.AddWithValue("@threshold", thresholdUnixMs);
                         return cmd.ExecuteNonQuery();
                     }
                 }
@@ -86,7 +87,7 @@ namespace TonePrism.Manager.Repositories
         /// だったため、自 row が物理 DELETE された case で **以降の heartbeat がすべて silent 空振り、自 PC が
         /// 他 PC から永久不可視化** する path があった。`INSERT OR REPLACE` (UPSERT) で row 不在時も自動で
         /// 再 INSERT する形に変更、reanimate 可能に。
-        /// (#271) なお「別 PC 起動の `DeleteStaleSessions` が 30 秒遅延した自 row を消す」という旧トリガは、
+        /// (#271) なお「別 PC 起動の cleanup (`DeleteSessionsOlderThan`) が 30 秒遅延した自 row を消す」という旧トリガは、
         /// cleanup を 1 日 abandoned 閾値に変えたため通常は発生しない (UPSERT reanimate は手動削除等への safety net)。
         /// </summary>
         /// <param name="info">self session info (UpsertSelfSession と同じ 5 field、heartbeat 用に毎回新規 instance)。</param>

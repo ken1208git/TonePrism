@@ -37,7 +37,8 @@ namespace TonePrism.Manager.Services
         private const int StaleTimeoutSeconds = 60;
         // (#271) 起動時 cleanup 用の「放置 (abandoned)」閾値。stale 閾値 (60秒) で他 PC row を DELETE すると、
         // clock skew で **生存中の遠隔 Manager row を物理削除** → 検出から外れ → 両者同時 write → DB 破損、の
-        // 危険があった。1 日超の明らかに放置された row のみ削除し、live-but-skewed row は決して消さない。table は
+        // 危険があった。1 日超の明らかに放置された row のみ削除し、live-but-skewed row は (1 日を超える clock skew が
+        // 無い限り) 消さない。table は
         // pc_name PRIMARY KEY で 1 PC 1 row、放置 row も次回その PC 起動の UPSERT で上書きされるため緩い cleanup
         // でも肥大しない。検出側は query 時に 60 秒閾値で stale を除外するので放置 row が残っても誤検出しない。
         private const int AbandonedSessionTimeoutSeconds = 86400; // 1 日
@@ -111,7 +112,7 @@ namespace TonePrism.Manager.Services
                 // この後の (2) UPSERT (pc_name PK で上書き) でも回収される。検出側 (DetectOtherActiveSessions)
                 // は query 時に 60 秒閾値で stale を除外するため、放置 row が table に残っても誤検出しない。
                 long abandonedThreshold = now - AbandonedSessionTimeoutSeconds * 1000L;
-                int deleted = _repo.DeleteStaleSessions(abandonedThreshold);
+                int deleted = _repo.DeleteSessionsOlderThan(abandonedThreshold);
                 if (deleted > 0) Logger.Info("[ManagerSessionService] abandoned session を " + deleted + " 件 cleanup (1 日超放置)");
 
                 // (2) self row INSERT OR REPLACE
@@ -229,8 +230,9 @@ namespace TonePrism.Manager.Services
             }
             catch (Exception ex)
             {
-                // shutdown path 失敗は致命的でない (stale cleanup で 30 秒後に自動回収)。Warn のみ。
-                Logger.Warn("[ManagerSessionService] Shutdown 失敗 (stale cleanup に委ねる): " + ex.Message);
+                // shutdown path 失敗は致命的でない (#271: self row 残骸は検出閾値 60 秒で非表示になり、次回起動の
+                // UPSERT で物理上書きされる。旧「30 秒 stale cleanup で回収」は cleanup を 1 日 abandoned 化したため非該当)。Warn のみ。
+                Logger.Warn("[ManagerSessionService] Shutdown 失敗 (検出閾値 60 秒で非表示・次回起動 UPSERT で上書き): " + ex.Message);
             }
             _initialized = false;
         }
