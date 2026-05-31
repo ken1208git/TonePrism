@@ -1911,6 +1911,21 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.17.3] - 2026-05-30
+
+#### Fixed (#269: Launcher セッション stale 判定の clock drift 耐性)
+
+- **PC 間の時計ズレで生存中の Launcher を「死亡」と誤判定し、競合警告から除外しうる欠陥**: `LauncherSessionService` の stale 判定は「読み手 PC の `now` − JSON 内 `last_heartbeat_at_unix_ms`（書き手 PC の自己申告時計）」で計算するため、PC 間 clock drift を直接被っていた。読み手 PC の時計が書き手より進んでいると、生きている Launcher が「30 秒超＝stale」と誤判定され検出リストから除外 → Manager 編集を続行 → **データ競合リスク（過小警告）**。多 PC 同時稼働（＝文化祭運用）で踏みうる。外部レビュー指摘をコードで cross-verify して確定。
+- **修正: `max(JSON last_heartbeat, file mtime)` の新しい方で判定**: primary path で json（書き手自己申告時計）と file mtime（SMB サーバの**単一**時計）の新しい方を採用。これで「書き手 PC の時計が遅れて json が古く見える」case を mtime が救い、「mtime の SMB cache 遅延（~10 秒）」を json が救う＝**互いの弱点を補完**（どちらか fresh なら active）。表示用 `LastHeartbeatAtUnixMs` にも effective 値を入れ、active 判定と「最終確認 N 秒前」表示を一致させた。json が parse 成功の `"0"` でも `max(0, mtime)=mtime` に倒れ mtime 判定になる（壊れた 0 値を救う安全方向の挙動変化、#259 review #4）。**防御の分担（#270 review #3）**: `max` が無効化するのは**書き手側**の時計ズレ（書き手が遅れて json が古く見える）。**読み手 PC 自身**のズレは json/mtime 双方が読み手 `now` に対して古く見えるため `max` では救えず、下記の 60 秒閾値 + NTP 運用が吸収する。
+- **⚠️ 前提（要実機検証、#259 review #1）**: 本 mitigation は **file mtime が SMB サーバの時計で刻まれる構成**に依存する。Launcher 書込側は timestamp を明示設定しない（確認済: `session_heartbeat.gd` は `store_string`→`rename_absolute` のみ）ため default SMB では前提成立だが、サーバ構成によっては書き手クライアント時計を反映しうる。**本番投入前に実機 SMB で要確認**（SPEC §3.8.7.3 F-1）。前提が崩れても `max` は fresh 方向のみ＝安全側で過小警告の新規回帰は無い（drift 防御が効かなくなるだけ）。
+- **stale 閾値 30→60 秒に緩和**: 想定 skew をマージンで吸収（heartbeat 10 秒 ×6）。広げる方向は安全側（過剰警告）でデータ事故方向には倒れない。
+- **残留リスクと運用**: ①読み手 PC 自身の時計が大幅に進む単機ケース（両者とも古く見え過小警告）→ 60 秒閾値 + NTP 同期で許容。②`max` が mtime を採るため、**死んだ Launcher の残骸 file の mtime を外部プロセス（バックアップ / ファイル同期 / 再 stamp 等）が touch すると、json が古くても false-active が続きうる**（過剰警告＝安全側、データ事故にはならない。次回同 PC で Launcher 起動時に同名 file が上書きされて解消。AV のスキャンは read だけで mtime を変えないため通常無関係。#270 review #2）。⚠️ `ManagerSessionService`（Manager-Manager 検出、DB ベース）も同じ drift を持つが per-row mtime が無く閾値のみが mitigation のため 30 秒のまま据え置き。**しかも起動時 cleanup の破壊的 DELETE で生存中の遠隔 Manager row を消しうる（write×write 破損）= Launcher より高 severity** のため別 issue **#271** で追跡（本 PR とは scope を分離）。
+- **テスト**: `Manager.Tests/LauncherStaleDetectionTests`（#239 基盤）に 5 シナリオ追加 — json 古/mtime 新（drift 防御 + effective 値検証）、json 新/mtime 古（cache 遅延防御）、双方古（真の stale 除外）、45 秒（60 秒閾値内 active）、heartbeat field 欠落（fallback path も 60 秒閾値で判定）。SPEC §3.8.7.3（変更履歴 v1.10.45）と同期。
+
+#### Bump 根拠 (v0.17.2 → v0.17.3)
+
+検出ロジックの bugfix（clock drift 耐性）のため patch bump。スキーマ変更なし・後方互換（検出が安全側に緩むのみ）。Bundle への反映は次回リリース実行時。
+
 ### [Manager v0.17.2] - 2026-05-30
 
 #### Fixed (#251: SessionConflictDialog の「他PC前提」文言を汎用化)

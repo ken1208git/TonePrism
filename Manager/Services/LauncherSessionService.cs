@@ -10,8 +10,8 @@ namespace TonePrism.Manager.Services
     /// (#179 PR3b) Launcher の LAN-wide session を JSON drop folder 経由で検出する service。
     ///
     /// **責務**: `&lt;base&gt;/responses/launcher_sessions/&lt;pc_name&gt;.json` を on-demand polling で
-    /// 読込、stale (= `now - last_heartbeat_at_unix_ms &gt;= 30000 ms`) を除外した active session
-    /// list を返す。`ManagerSessionService` (DB-based) と非対称の polling-only 設計。
+    /// 読込、stale (= `now - max(json_heartbeat, file_mtime) &gt;= 60000 ms`、#269) を除外した active
+    /// session list を返す。`ManagerSessionService` (DB-based) と非対称の polling-only 設計。
     ///
     /// **動作**:
     /// - `Initialize()`: directory 不在時の自動作成 + `_initialized = true`
@@ -20,10 +20,13 @@ namespace TonePrism.Manager.Services
     /// - `Shutdown()`: no-op (polling-only、Manager 側 self file なし、disk 上 Launcher session file は
     ///   Launcher 自身の責務 = `Launcher/scripts/session_heartbeat.gd` の `NOTIFICATION_PREDELETE`)
     ///
-    /// **stale 判定 baseline** (SPEC §3.8.7.3):
-    /// - **primary**: JSON 内 `last_heartbeat_at_unix_ms` (= 書込側 Launcher の自己申告 timestamp)
-    /// - **secondary fallback**: file mtime (= JSON parse 失敗 / field 欠落時の fallback)
-    /// - SMB directory cache (~10 秒、SPEC §6.5) 由来の mtime drift を JSON content で補正する 2 段 logic
+    /// **stale 判定 baseline** (SPEC §3.8.7.3、#269 で clock drift 耐性化):
+    /// - **primary**: `max(JSON last_heartbeat_at_unix_ms, file mtime)` の **新しい方** で判定。json は
+    ///   書込側 Launcher の自己申告時計 (PC 間 clock drift を被る)、mtime は SMB サーバの単一時計
+    ///   (cache 遅延 ~10 秒を被る) で、**互いの弱点を補完** (どちらか fresh なら active)。
+    /// - **fallback** (JSON parse 失敗 / field 欠落): file mtime 単独で判定。
+    /// - 閾値 60 秒 (= heartbeat 10 秒 ×6)。残留リスク = 読み手 PC 自身の時計が大幅に進む単機ケースのみ
+    ///   (両者とも古く見え過小警告)、運用での NTP 同期 + 安全側閾値で許容。
     ///
     /// **fail-soft 戦略**:
     /// - directory 不在: 自動作成、失敗時は `Logger.Error` trail + `_initialized = false`
@@ -40,7 +43,10 @@ namespace TonePrism.Manager.Services
     /// </summary>
     public class LauncherSessionService
     {
-        private const int StaleTimeoutSeconds = 30;
+        // (#269) clock drift 耐性のため 30→60 秒に緩和。stale 判定は「読み手 now − 検出 timestamp」で
+        // PC 間の時計ズレを被るため、heartbeat 10 秒 ×6 のマージンを取り、想定 skew を閾値で吸収する。
+        // 広げる方向は安全側 (= 死んだ session が長めに active 表示 = 過剰警告) で、データ事故方向には倒れない。
+        private const int StaleTimeoutSeconds = 60;
 
         private readonly string _sessionsFolder;
         private bool _initialized;
@@ -204,14 +210,41 @@ namespace TonePrism.Manager.Services
                     };
                 }
 
-                // primary path: last_heartbeat_at_unix_ms parse 成功で stale 判定
-                if (lastHeartbeat < staleThresholdMs) return null;
+                // primary path: last_heartbeat_at_unix_ms parse 成功。
+                // (#269) clock drift 耐性: json timestamp (= 書き手 Launcher の自己申告時計) と file mtime
+                // (= SMB サーバの単一時計) の **新しい方 (max)** で stale 判定する。これで両方向を吸収:
+                //   - 書き手 PC の時計が遅れ → json が古く見えても mtime (サーバ時計) が救う (drift 対策)
+                //   - mtime の SMB directory cache 遅延 (~10 秒、§6.5) → json が救う (元々 json を primary に
+                //     した理由も維持)
+                // = どちらか一方でも fresh なら active。残留リスクは「読み手 PC 自身の時計が大幅に進んでいる」
+                // 単機ケースのみ (両者とも古く見え過小警告) で、閾値 60 秒 + 運用での NTP 同期で許容する。
+                // 表示用 LastHeartbeatAtUnixMs にも effective (= max) を入れ、active 判定と「最終確認 N 秒前」
+                // 表示を一致させる (mtime はサーバ時計なので self-report より信頼できる "最終確認" でもある)。
+                //
+                // (#269 review #1) **前提 (要実機検証)**: 本 mitigation は file mtime が SMB **サーバ**の時計で
+                // 刻まれる構成に依存する。Launcher 書込側は timestamp を明示設定しない (確認済: session_heartbeat.gd
+                // は store_string → rename_absolute のみ、set_modified_time 等なし) ため、default SMB ではサーバが
+                // mtime を刻む = 前提成立。ただしサーバ構成によっては書き手クライアント時計を反映しうるため、実機
+                // SMB での確認が必要 (SPEC §3.8.7.3 F-1)。前提が崩れても max は fresh 方向のみ = 安全側で回帰はしない
+                // (= drift 防御が効かなくなるだけで、新たな過小警告は生まない)。
+                // (#269 review #4) json が parse 成功の "0" でも max(0, mtime) = mtime に倒れ mtime 判定になる
+                // (旧: 0 < threshold で常に stale 除外)。壊れた 0 値を mtime で救う安全方向の挙動変化。
+                // (#270 review #3) 防御の分担: max が無効化するのは **書き手側** の時計ズレ。**読み手自身** の
+                // ズレ (= 読み手 nowMs が真値より進む) は json/mtime 双方が読み手 threshold に対し古く見え max では
+                // 救えず、60 秒閾値 + NTP 運用が吸収する。
+                // (#270 review #2) max が mtime を採るため、死んだ Launcher の残骸 file の mtime を外部プロセス
+                // (バックアップ / 同期 / 再 stamp 等) が touch すると json が古くても false-active が続きうる
+                // (過剰警告 = 安全側。次回同 PC で Launcher 起動時に同名 file 上書きで解消。AV の read は mtime を
+                // 変えないため通常無関係)。
+                long mtimePrimaryMs = new DateTimeOffset(File.GetLastWriteTimeUtc(path)).ToUnixTimeMilliseconds();
+                long effectiveHeartbeatMs = Math.Max(lastHeartbeat, mtimePrimaryMs);
+                if (effectiveHeartbeatMs < staleThresholdMs) return null;
 
                 return new LauncherSessionInfo
                 {
                     PcName = dict.ContainsKey("pc_name") ? (dict["pc_name"]?.ToString() ?? "(unknown)") : "(unknown)",
                     StartedAtUnixMs = ParseLongOrZero(dict, "started_at_unix_ms"),
-                    LastHeartbeatAtUnixMs = lastHeartbeat,
+                    LastHeartbeatAtUnixMs = effectiveHeartbeatMs,
                     Pid = ParseLongOrZero(dict, "pid"),
                     LauncherVersion = dict.ContainsKey("launcher_version") ? (dict["launcher_version"]?.ToString() ?? "(unknown)") : "(unknown)",
                 };
