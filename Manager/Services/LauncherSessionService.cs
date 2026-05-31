@@ -229,6 +229,13 @@ namespace TonePrism.Manager.Services
                 // (= drift 防御が効かなくなるだけで、新たな過小警告は生まない)。
                 // (#269 review #4) json が parse 成功の "0" でも max(0, mtime) = mtime に倒れ mtime 判定になる
                 // (旧: 0 < threshold で常に stale 除外)。壊れた 0 値を mtime で救う安全方向の挙動変化。
+                // (#270 review #3) 防御の分担: max が無効化するのは **書き手側** の時計ズレ。**読み手自身** の
+                // ズレ (= 読み手 nowMs が真値より進む) は json/mtime 双方が読み手 threshold に対し古く見え max では
+                // 救えず、60 秒閾値 + NTP 運用が吸収する。
+                // (#270 review #2) max が mtime を採るため、死んだ Launcher の残骸 file の mtime を外部プロセス
+                // (バックアップ / 同期 / 再 stamp 等) が touch すると json が古くても false-active が続きうる
+                // (過剰警告 = 安全側。次回同 PC で Launcher 起動時に同名 file 上書きで解消。AV の read は mtime を
+                // 変えないため通常無関係)。
                 long mtimePrimaryMs = new DateTimeOffset(File.GetLastWriteTimeUtc(path)).ToUnixTimeMilliseconds();
                 long effectiveHeartbeatMs = Math.Max(lastHeartbeat, mtimePrimaryMs);
                 if (effectiveHeartbeatMs < staleThresholdMs) return null;

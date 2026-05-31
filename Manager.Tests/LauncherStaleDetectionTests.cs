@@ -90,5 +90,26 @@ namespace TonePrism.Manager.Tests
             WriteSession("PC-45S", NowMs() - 45_000, DateTime.UtcNow.AddSeconds(-45));
             Assert.True(Detected("PC-45S"), "45 秒は 60 秒閾値の内側なので active 維持されるべき (旧 30 秒なら stale)");
         }
+
+        /// <summary>heartbeat field を欠落させ、mtime 単独の fallback path を通す session を書く。</summary>
+        private void WriteSessionNoHeartbeat(string pcName, DateTime mtimeUtc)
+        {
+            string path = Path.Combine(_folder, pcName + ".json");
+            // last_heartbeat_at_unix_ms を意図的に省略 → TryParseSessionFile の fallback (mtime) path へ。
+            string json = "{\"pc_name\":\"" + pcName + "\",\"pid\":12345,\"launcher_version\":\"0.5.18\"}";
+            File.WriteAllText(path, json);
+            File.SetLastWriteTimeUtc(path, mtimeUtc);
+        }
+
+        [Fact]
+        public void FieldMissing_FallbackPath_AlsoUses60sThreshold()
+        {
+            // (#270 review カバレッジ穴 c) heartbeat field 欠落時の fallback path も 60 秒閾値で判定される
+            // ことを検証 (primary だけでなく fallback でも閾値緩和が効く)。
+            WriteSessionNoHeartbeat("PC-FB-FRESH", DateTime.UtcNow.AddSeconds(-45)); // 45s: 60s 内
+            WriteSessionNoHeartbeat("PC-FB-STALE", DateTime.UtcNow.AddSeconds(-120)); // 120s: stale
+            Assert.True(Detected("PC-FB-FRESH"), "fallback path でも mtime 45 秒は 60 秒閾値内で active のはず");
+            Assert.False(Detected("PC-FB-STALE"), "fallback path でも mtime 120 秒は stale 除外のはず");
+        }
     }
 }
