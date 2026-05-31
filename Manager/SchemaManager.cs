@@ -33,7 +33,7 @@ namespace TonePrism.Manager
         // v19: backup_log テーブルを DROP。バックアップ履歴を DB から外し backups/ フォルダ走査
         //      (BackupCatalogService) 由来に変更。reconcile / register / drift 対策コードを全廃し、失敗復元が
         //      success 化する欠陥を根治。既存行は破棄されるが物理ファイルは残り初回走査で履歴に復活する。
-        private const int CurrentDbVersion = 20;
+        private const int CurrentDbVersion = 21;
 
         public SchemaManager(DatabaseConnection conn)
         {
@@ -487,6 +487,9 @@ namespace TonePrism.Manager
 
             // (#179) manager_sessions テーブル作成 (v13 で追加、MigrateV12ToV13 でも再利用する helper)
             CreateManagerSessionsTable(connection, transaction);
+
+            // (#253) intro_slides テーブル作成 (v21 で追加、MigrateV20ToV21 でも再利用する helper)
+            CreateIntroSlidesTable(connection, transaction);
 
             // 新規DB向けにバックアップ関連の設定デフォルト値を投入
             InsertBackupDefaults(connection, transaction);
@@ -1063,6 +1066,22 @@ namespace TonePrism.Manager
                         else
                         {
                             Logger.Warn("[DatabaseManager] 直前の migration が未完のため v19→v20 も skip、user_version は " + currentVersion + " のまま据え置き");
+                        }
+                    }
+
+                    if (currentVersion < 21)
+                    {
+                        // v20 → v21: intro_slides table 新設 (#253、イントロガイドのスライド)。他テーブルへの FK が無い
+                        // 独立テーブルなので manager_sessions (v13) と同じ単純 path、CREATE TABLE IF NOT EXISTS で
+                        // idempotent。前段 migration が完了している場合のみ user_version を bump (v12→v13 等と同 guard)。
+                        if (currentVersion >= 20)
+                        {
+                            MigrateV20ToV21(connection, migTransaction);
+                            currentVersion = 21;
+                        }
+                        else
+                        {
+                            Logger.Warn("[DatabaseManager] 直前の migration が未完のため v20→v21 も skip、user_version は " + currentVersion + " のまま据え置き");
                         }
                     }
 
@@ -2328,6 +2347,41 @@ namespace TonePrism.Manager
         }
 
         /// <summary>
+        /// (#253) v20 → v21: intro_slides table 新設 (イントロガイドのスライド)。CREATE TABLE IF NOT EXISTS で
+        /// idempotent (= table 既存時も silent skip)。manager_sessions (v13) と同型の独立テーブル新設 migration。
+        /// </summary>
+        private void MigrateV20ToV21(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            CreateIntroSlidesTable(connection, transaction);
+            Logger.Info("[DatabaseManager] v20 → v21 migration 完了 (intro_slides table 確保)");
+        }
+
+        /// <summary>
+        /// (#253) intro_slides テーブルを作成 (CreateTables / MigrateV20ToV21 共用 helper)。
+        /// スクリーンセーバー → ブラウズ間に表示するイントロガイドのスライド群。画像は `guide/` にファイル別管理し、
+        /// DB には相対パス (`image_path`) のみ持つ (games のサムネ/背景と同流儀)。他テーブルへの FK は無い独立テーブル。
+        /// `body_text` は text-only スライド可で DEFAULT ''、`image_path` は image-only スライド可で NULL 許容。
+        /// `duration_sec` は自動送り秒数 (CHECK 1-60)、`is_visible` で削除せず一時非表示 (store_sections と同 pattern)。
+        /// </summary>
+        private void CreateIntroSlidesTable(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            string sql = @"
+                CREATE TABLE IF NOT EXISTS intro_slides (
+                    slide_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    display_order INTEGER DEFAULT 0,
+                    body_text TEXT DEFAULT '',
+                    image_path TEXT,
+                    duration_sec INTEGER NOT NULL DEFAULT 5 CHECK(duration_sec BETWEEN 1 AND 60),
+                    is_visible INTEGER DEFAULT 1
+                )";
+
+            using (var command = new SQLiteCommand(sql, connection, transaction))
+            {
+                command.ExecuteNonQuery();
+            }
+        }
+
+        /// <summary>
         /// 各テーブルが持つべき列名一覧（VerifySchema で使用）。
         /// SchemaManager.CreateTables() および各 MigrateVxToVy で作る最終形と一致させること。
         /// スキーマ変更時はこの定義も同時に更新する（AGENTS.md "Database Schema Management" 参照）。
@@ -2347,6 +2401,7 @@ namespace TonePrism.Manager
             // backup_log は v19 で DROP した (MigrateV18ToV19 参照、履歴を BackupCatalogService の file-scan に移行)。
             // VerifySchema の検証対象外 = drop 済 DB / 新規 DB の両方で PASS する。
             { "manager_sessions", new[] { "pc_name", "started_at_unix_ms", "last_heartbeat_at_unix_ms", "pid", "manager_version" } },
+            { "intro_slides", new[] { "slide_id", "display_order", "body_text", "image_path", "duration_sec", "is_visible" } },
         };
 
         /// <summary>

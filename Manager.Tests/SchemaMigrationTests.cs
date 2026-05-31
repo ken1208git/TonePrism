@@ -42,7 +42,10 @@ namespace TonePrism.Manager.Tests
             using (var c = new SQLiteConnection($"Data Source={_dbPath};Version=3;"))
             {
                 c.Open();
-                Assert.Equal(20L, ScalarLong(c, "PRAGMA user_version"));
+                // 全 migration 完走で現行ターゲット版に到達 (v19→v20 の games recreate + 以降の chain。
+                // #253 で v21 追加)。schema bump で数値が変わっても壊れないよう target を動的取得して比較。
+                Assert.Equal((long)new SchemaManager(new DatabaseConnection(_dbPath)).GetTargetDatabaseVersion(),
+                    ScalarLong(c, "PRAGMA user_version"));
                 // 子テーブルが CASCADE で巻き添え削除されていない
                 Assert.Equal(1L, ScalarLong(c, "SELECT COUNT(*) FROM games"));
                 Assert.Equal(2L, ScalarLong(c, "SELECT COUNT(*) FROM game_versions"));

@@ -206,6 +206,7 @@
     <Compile Include="SchemaManager.cs" />
     <Compile Include="Repositories\DeveloperRepository.cs" />
     <Compile Include="Repositories\GameRepository.cs" />
+    <Compile Include="Repositories\IntroSlideRepository.cs" />
     <Compile Include="Repositories\ManagerSessionRepository.cs" />
     <Compile Include="Repositories\SettingsRepository.cs" />
     <Compile Include="Repositories\StoreSectionRepository.cs" />
@@ -226,6 +227,7 @@
     <Compile Include="Models\BackupCatalogEntry.cs" />
     <Compile Include="Models\DeveloperInfo.cs" />
     <Compile Include="Models\GameInfo.cs" />
+    <Compile Include="Models\IntroSlide.cs" />
     <Compile Include="Models\LauncherSessionInfo.cs" />
     <Compile Include="Models\ManagerSessionInfo.cs" />
     <Compile Include="Models\PlayRecord.cs" />
