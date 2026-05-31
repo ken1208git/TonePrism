@@ -102,5 +102,15 @@ namespace TonePrism.Manager.Tests
             Assert.Equal("B", all[0].Title); // order 0 が B
             Assert.Equal("A", all[1].Title); // order 1 が A
         }
+
+        [Fact]
+        public void StoreSection_SwapDisplayOrder_MissingRow_ThrowsInsteadOfSilentNoOp()
+        {
+            // (#275 review #1) 片方の section_id が存在しないと 2 行更新できず throw (fail-loud)。
+            var repo = new StoreSectionRepository(_conn);
+            var a = new StoreSectionInfo { Title = "A", SectionSource = "manual", DisplayOrder = 0, MaxDisplayCount = 5, IsVisible = true };
+            repo.Add(a);
+            Assert.Throws<InvalidOperationException>(() => repo.SwapDisplayOrder(a.SectionId, 1, 999999, 0));
+        }
     }
 }

@@ -231,17 +231,25 @@ namespace TonePrism.Manager.Repositories
                     {
                         try
                         {
+                            int affected = 0;
                             using (var cmd = new SQLiteCommand("UPDATE store_sections SET display_order = @o WHERE section_id = @id", connection, transaction))
                             {
                                 cmd.Parameters.AddWithValue("@o", orderA);
                                 cmd.Parameters.AddWithValue("@id", sectionIdA);
-                                cmd.ExecuteNonQuery();
+                                affected += cmd.ExecuteNonQuery();
                             }
                             using (var cmd = new SQLiteCommand("UPDATE store_sections SET display_order = @o WHERE section_id = @id", connection, transaction))
                             {
                                 cmd.Parameters.AddWithValue("@o", orderB);
                                 cmd.Parameters.AddWithValue("@id", sectionIdB);
-                                cmd.ExecuteNonQuery();
+                                affected += cmd.ExecuteNonQuery();
+                            }
+                            // (#275 review #1) 片方/両方の section_id が他セッションで削除されていると 0 行更新で
+                            // silent no-op (成功表示なのに無変更) になりうるため、2 行更新できなければ throw → rollback
+                            // (fail-loud、caller の MoveSection が「並び替えに失敗」を表示)。
+                            if (affected != 2)
+                            {
+                                throw new InvalidOperationException($"並び替え対象のセクションが見つかりませんでした (更新 {affected}/2 行)。他のセッションで削除された可能性があります。");
                             }
                             transaction.Commit();
                         }

@@ -142,17 +142,24 @@ namespace TonePrism.Manager.Repositories
                     {
                         try
                         {
+                            int affected = 0;
                             using (var cmd = new SQLiteCommand("UPDATE intro_slides SET display_order = @o WHERE slide_id = @id", connection, transaction))
                             {
                                 cmd.Parameters.AddWithValue("@o", orderA);
                                 cmd.Parameters.AddWithValue("@id", slideIdA);
-                                cmd.ExecuteNonQuery();
+                                affected += cmd.ExecuteNonQuery();
                             }
                             using (var cmd = new SQLiteCommand("UPDATE intro_slides SET display_order = @o WHERE slide_id = @id", connection, transaction))
                             {
                                 cmd.Parameters.AddWithValue("@o", orderB);
                                 cmd.Parameters.AddWithValue("@id", slideIdB);
-                                cmd.ExecuteNonQuery();
+                                affected += cmd.ExecuteNonQuery();
+                            }
+                            // (#275 review #1) 片方/両方の slide_id が他セッションで削除されていると 0 行更新で silent
+                            // no-op になりうるため、2 行更新できなければ throw → rollback (fail-loud)。store 側と同型。
+                            if (affected != 2)
+                            {
+                                throw new InvalidOperationException($"並び替え対象のスライドが見つかりませんでした (更新 {affected}/2 行)。他のセッションで削除された可能性があります。");
                             }
                             transaction.Commit();
                         }
