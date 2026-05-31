@@ -156,11 +156,12 @@ namespace TonePrism.Manager.Controls
                 _dbManager.DeleteIntroSlide(slide.SlideId);
 
                 // 画像実体は「他スライドが同じ画像を参照していない」場合のみ guide/ から削除 (orphan 防止)。
+                // 参照判定は削除直後の **最新 DB** を再取得して行う (in-memory snapshot 依存だと、前回ロード以降に
+                // 他セッションが同一画像を参照するスライドを足していた場合に使用中画像を消しうる、#274 review #6)。
                 if (!string.IsNullOrWhiteSpace(slide.ImagePath))
                 {
-                    bool referencedByOthers = _slides != null && _slides.Any(s =>
-                        s.SlideId != slide.SlideId &&
-                        string.Equals(s.ImagePath, slide.ImagePath, StringComparison.OrdinalIgnoreCase));
+                    bool referencedByOthers = _dbManager.GetAllIntroSlides()
+                        .Any(s => string.Equals(s.ImagePath, slide.ImagePath, StringComparison.OrdinalIgnoreCase));
                     if (!referencedByOthers)
                     {
                         IntroGuideAssetHelper.DeleteImage(PathManager.GuideFolder, slide.ImagePath);
@@ -188,14 +189,13 @@ namespace TonePrism.Manager.Controls
 
             var a = _slides[idx];
             var b = _slides[newIdx];
-            int tmp = a.DisplayOrder;
-            a.DisplayOrder = b.DisplayOrder;
-            b.DisplayOrder = tmp;
 
             try
             {
-                _dbManager.UpdateIntroSlide(a);
-                _dbManager.UpdateIntroSlide(b);
+                // a と b の display_order を **1 transaction で入れ替え** (#274 review #2)。
+                // UpdateIntroSlide を 2 回別々に投げると、片方成功・片方失敗で両者が同じ display_order になる
+                // half-write が起きうるため、atomic な swap に委ねる (a は b の order、b は a の order を持つ)。
+                _dbManager.SwapIntroSlideOrder(a.SlideId, b.DisplayOrder, b.SlideId, a.DisplayOrder);
                 LoadSlides();
                 // 移動後の行を選び直す。
                 var moved = _slides?.FirstOrDefault(s => s.SlideId == slide.SlideId);

@@ -256,6 +256,7 @@ namespace TonePrism.Manager
         public void AddIntroSlide(IntroSlide slide) => _introSlideRepo.Add(slide);
         public void UpdateIntroSlide(IntroSlide slide) => _introSlideRepo.Update(slide);
         public void DeleteIntroSlide(int slideId) => _introSlideRepo.Delete(slideId);
+        public void SwapIntroSlideOrder(int slideIdA, int orderA, int slideIdB, int orderB) => _introSlideRepo.SwapDisplayOrder(slideIdA, orderA, slideIdB, orderB);
 
         // --- エラーメッセージ ---
         public static string GetUserFriendlyErrorMessage(SQLiteException ex) => DatabaseConnection.GetUserFriendlyErrorMessage(ex);

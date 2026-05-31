@@ -127,5 +127,42 @@ namespace TonePrism.Manager.Tests
             Assert.Empty(new IntroSlideRepository(_conn).GetAll());
             Assert.Equal(1, Scalar("SELECT COUNT(*) FROM games WHERE game_id = 'preserve_me'"));
         }
+
+        [Fact]
+        public void MigrationV21ToV22_RealData_DropsDurationSec_PreservesRows()
+        {
+            // (#274 review #1) 本番 risk path の実データ round-trip: v21 の **duration_sec 付き** intro_slides に
+            // 実データを入れ、InitializeDatabase で v21→v22 (MigrateV21ToV22 の recreate-and-copy) を走らせ、
+            // duration_sec 列が消えつつ全行が保持されることを検証。v20 始点のテストでは MigrateV21ToV22 が
+            // TableHasColumn 判定で no-op になり recreate 経路が未カバーだったため、本テストで明示的に走らせる。
+            Exec("DROP TABLE intro_slides");
+            Exec(@"CREATE TABLE intro_slides (
+                slide_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                display_order INTEGER DEFAULT 0,
+                body_text TEXT DEFAULT '',
+                image_path TEXT,
+                duration_sec INTEGER NOT NULL DEFAULT 5 CHECK(duration_sec BETWEEN 1 AND 60),
+                is_visible INTEGER DEFAULT 1)");
+            Exec("INSERT INTO intro_slides (display_order, body_text, image_path, duration_sec, is_visible) VALUES (0, 'スライド1', 'guide/a.png', 7, 1)");
+            Exec("INSERT INTO intro_slides (display_order, body_text, image_path, duration_sec, is_visible) VALUES (1, 'スライド2', NULL, 3, 0)");
+            Exec("PRAGMA user_version = 21");
+            Assert.Equal(21, new SchemaManager(_conn).GetActualDatabaseVersion());
+
+            new SchemaManager(_conn).InitializeDatabase();
+
+            var schema = new SchemaManager(_conn);
+            Assert.Equal(schema.GetTargetDatabaseVersion(), schema.GetActualDatabaseVersion()); // v22 到達
+            // duration_sec 列が消えていること。
+            Assert.Equal(0, Scalar("SELECT COUNT(*) FROM pragma_table_info('intro_slides') WHERE name = 'duration_sec'"));
+            // 全行が保持され、内容 (slide_id 順序・本文・画像有無・表示状態) も無傷。
+            var slides = new IntroSlideRepository(_conn).GetAll();
+            Assert.Equal(2, slides.Count);
+            Assert.Equal("スライド1", slides[0].BodyText);
+            Assert.Equal("guide/a.png", slides[0].ImagePath);
+            Assert.True(slides[0].IsVisible);
+            Assert.Equal("スライド2", slides[1].BodyText);
+            Assert.Null(slides[1].ImagePath);
+            Assert.False(slides[1].IsVisible);
+        }
     }
 }

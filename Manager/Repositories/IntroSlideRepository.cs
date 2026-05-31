@@ -126,6 +126,46 @@ namespace TonePrism.Manager.Repositories
             });
         }
 
+        /// <summary>
+        /// 2 スライドの display_order を **1 transaction で**入れ替える (#274 review #2)。並び替えで
+        /// UpdateSlide を 2 回別々に投げると、片方成功・片方失敗で両者が同じ display_order になる half-write が
+        /// 起きうるため、atomic な swap を提供する。
+        /// </summary>
+        public void SwapDisplayOrder(int slideIdA, int orderA, int slideIdB, int orderB)
+        {
+            _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var transaction = connection.BeginTransaction())
+                    {
+                        try
+                        {
+                            using (var cmd = new SQLiteCommand("UPDATE intro_slides SET display_order = @o WHERE slide_id = @id", connection, transaction))
+                            {
+                                cmd.Parameters.AddWithValue("@o", orderA);
+                                cmd.Parameters.AddWithValue("@id", slideIdA);
+                                cmd.ExecuteNonQuery();
+                            }
+                            using (var cmd = new SQLiteCommand("UPDATE intro_slides SET display_order = @o WHERE slide_id = @id", connection, transaction))
+                            {
+                                cmd.Parameters.AddWithValue("@o", orderB);
+                                cmd.Parameters.AddWithValue("@id", slideIdB);
+                                cmd.ExecuteNonQuery();
+                            }
+                            transaction.Commit();
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+                }
+            });
+        }
+
         private void SetSlideParameters(SQLiteCommand command, IntroSlide slide)
         {
             command.Parameters.AddWithValue("@displayOrder", slide.DisplayOrder);

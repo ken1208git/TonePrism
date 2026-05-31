@@ -10,7 +10,7 @@ namespace TonePrism.Manager
     /// <summary>
     /// (#253) イントロガイドのスライド 1 枚を編集する Form (`StoreSectionForm` をミラー、画像ピッカー付き)。
     /// UI は `ImageNameConflictDialog` と同じくコード組み (Designer なし)。
-    /// 本文 (空可=image-only) / 画像 (任意=text-only) / 表示秒数 / 表示 ON-OFF を編集する。
+    /// 本文 (空可=image-only) / 画像 (任意=text-only) / 表示 ON-OFF を編集する。
     /// 画像は OK 時に `IntroGuideAssetHelper.ImportImage` で `guide/` へコピーし、DB には相対パスを保存。
     /// </summary>
     public class IntroSlideEditForm : Form
@@ -156,11 +156,15 @@ namespace TonePrism.Manager
             }
 
             // 画像取り込み (guide/ へコピー → 相対パス)。失敗時は保存せず編集画面に戻る。
+            // (#274 review #3) 本 OnOk で新規にコピーした画像の相対パスを控え、後段の DB write が失敗したら
+            // orphan として guide/ に残らないよう best-effort で削除する。
+            string newlyImportedRel = null;
             try
             {
                 if (_pendingImageAbsolute != null)
                 {
                     _slide.ImagePath = IntroGuideAssetHelper.ImportImage(_pendingImageAbsolute);
+                    newlyImportedRel = _slide.ImagePath;
                 }
                 else if (_clearImage)
                 {
@@ -189,6 +193,12 @@ namespace TonePrism.Manager
             catch (Exception ex)
             {
                 Logger.Error("[IntroSlideEditForm] スライド保存失敗", ex);
+                // (#274 review #3) 保存失敗時、この OnOk でコピーした新規画像は DB 参照が付かない orphan に
+                // なるため best-effort で削除する (削除失敗は握り潰し)。既存画像 (newlyImportedRel == null) は触らない。
+                if (newlyImportedRel != null)
+                {
+                    try { IntroGuideAssetHelper.DeleteImage(PathManager.GuideFolder, newlyImportedRel); } catch { /* best-effort */ }
+                }
                 MessageBox.Show(this, "保存に失敗しました: " + ex.Message, "エラー",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
