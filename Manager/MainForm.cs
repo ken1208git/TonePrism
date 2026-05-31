@@ -28,6 +28,7 @@ namespace TonePrism.Manager
         private LogSectionPanel _logSectionPanel;
         private UpdateSectionPanel _updateSectionPanel;
         private IntroGuidePanel _introGuidePanel;
+        private System.Windows.Forms.TabPage _introTab; // (#253) ハンドル生成後に追加するため field 保持
 
         public MainForm()
         {
@@ -55,11 +56,10 @@ namespace TonePrism.Manager
             tabUpdate.Controls.Add(_updateSectionPanel);
             tabSettings.Controls.Add(_settingsSectionPanel);
 
-            // (#253) イントロガイドのタブを Designer を触らずプログラム的に追加 (ストアタブの次に挿入)。
-            var tabIntro = new System.Windows.Forms.TabPage("イントロガイド") { UseVisualStyleBackColor = true };
-            tabIntro.Controls.Add(_introGuidePanel);
-            int storeIdx = tabControl1.TabPages.IndexOf(tabStore);
-            tabControl1.TabPages.Insert(storeIdx >= 0 ? storeIdx + 1 : tabControl1.TabPages.Count, tabIntro);
+            // (#253) イントロガイドのタブ追加は **ハンドル生成後** (MainForm_Load → ContinueLoadAfterSessionCheck)
+            // に行う。理由: `TabControl.TabPages.Insert` / `Controls.SetChildIndex` は ctor 時点 (ハンドル前) では
+            // silent fail し、タブが表示されない / 位置調整が効かない WinForms の既知挙動があるため (実機確認で判明)。
+            // ここではパネル本体 (_introGuidePanel、上で生成済) のみ保持し、タブは AddIntroGuideTab() で後付けする。
 
             // (#179) ManagerSessionService の shutdown (self row delete + heartbeat 停止) を form 終了時に発火
             this.FormClosed += MainForm_FormClosed;
@@ -498,7 +498,17 @@ namespace TonePrism.Manager
             _gameSectionPanel.Initialize(dbManager);
             _storeSectionPanel.Initialize(dbManager);
             _settingsSectionPanel.Initialize(dbManager);
-            _introGuidePanel.Initialize(dbManager); // (#253)
+
+            // (#253) イントロガイドのタブをここ (ハンドル生成後) で追加。ctor では TabPages.Insert が silent fail
+            // するため後付けにしている。ストアタブの次に挿入。多重呼出ガードとして未作成時のみ追加。
+            if (_introTab == null)
+            {
+                _introTab = new System.Windows.Forms.TabPage("イントロガイド") { UseVisualStyleBackColor = true };
+                _introTab.Controls.Add(_introGuidePanel);
+                int introStoreIdx = tabControl1.TabPages.IndexOf(tabStore);
+                tabControl1.TabPages.Insert(introStoreIdx >= 0 ? introStoreIdx + 1 : tabControl1.TabPages.Count, _introTab);
+            }
+            _introGuidePanel.Initialize(dbManager);
 
             // Updater log の post-hoc filtered absorb (= SPEC §3.6 Companions ログ管理規約)。
             // 直前のアップデートサイクル中に Updater が書き出した log のうち Warn/Error + 主要 milestone
