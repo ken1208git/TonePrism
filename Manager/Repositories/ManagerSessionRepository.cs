@@ -23,10 +23,13 @@ namespace TonePrism.Manager.Repositories
         }
 
         /// <summary>
-        /// stale row (= `last_heartbeat_at_unix_ms < threshold`) を DELETE。
-        /// 起動時 self row INSERT 前 + heartbeat 周期 check 前に呼ぶことで crash 残骸を自動 cleanup。
+        /// `last_heartbeat_at_unix_ms < threshold` の row を DELETE する汎用メソッド。
+        /// (#271) caller (`ManagerSessionService.Initialize`) は **「放置 (abandoned)」閾値 (= now − 1 日)** を
+        /// 渡す。stale 閾値 (60秒) を渡すと clock skew で生存中の遠隔 Manager row を消し DB 破損に繋がるため、
+        /// 明らかに放置された row のみ削除する設計 (= 自 crash 残骸は `UpsertSelfSession` の INSERT OR REPLACE で
+        /// 上書き回収、検出側は query 時 60 秒閾値で stale 除外)。heartbeat thread はこれを呼ばない。
         /// </summary>
-        /// <param name="staleThresholdUnixMs">この時刻より前の heartbeat の row を削除。</param>
+        /// <param name="staleThresholdUnixMs">この時刻より前の heartbeat の row を削除 (#271 では abandoned 閾値)。</param>
         /// <returns>削除した row 数。</returns>
         public int DeleteStaleSessions(long staleThresholdUnixMs)
         {
@@ -49,8 +52,9 @@ namespace TonePrism.Manager.Repositories
         /// <summary>
         /// self row を INSERT OR REPLACE で登録 (同 pc_name 既存なら上書き)。
         /// 起動時に 1 度だけ呼ぶ。Named Mutex で同 PC 重複起動は block されている前提のため、
-        /// 「同 pc_name 既存」は通常 crash 残骸 (= 30 秒以上前の heartbeat) で `DeleteStaleSessions`
-        /// 後の no-op、または manual INSERT (test) ケース。
+        /// 「同 pc_name 既存」は通常 crash 残骸 (= 前回 session の row) で、本 INSERT OR REPLACE が
+        /// そのまま上書き回収する (#271 で起動時 cleanup は 1 日 abandoned 化したので、60 秒程度の残骸は
+        /// cleanup ではなく本 UPSERT で上書きされる)。または manual INSERT (test) ケース。
         /// </summary>
         public void UpsertSelfSession(ManagerSessionInfo session)
         {
@@ -79,11 +83,11 @@ namespace TonePrism.Manager.Repositories
         /// <summary>
         /// self row の heartbeat を update。heartbeat thread が周期実行する。
         /// (round 3 H-2 fix) 旧実装は `UPDATE WHERE pc_name = @pc_name` で row 不在時に silent no-op
-        /// だったため、他 PC が stale cleanup で自 row を物理 DELETE した case (= network blip で自 heartbeat
-        /// が 30 秒以上遅延 → 別 PC 起動の `DeleteStaleSessions` で自 row 削除) で **以降の heartbeat が
-        /// すべて silent 空振り、自 PC が他 PC から永久不可視化** する path があった。本 PR の主目的
-        /// (LAN-wide 同時起動検出) が最初の network blip 後に sustained に機能不全になる silent failure。
-        /// `INSERT OR REPLACE` (UPSERT) で row 不在時も自動で再 INSERT する形に変更、reanimate 可能に。
+        /// だったため、自 row が物理 DELETE された case で **以降の heartbeat がすべて silent 空振り、自 PC が
+        /// 他 PC から永久不可視化** する path があった。`INSERT OR REPLACE` (UPSERT) で row 不在時も自動で
+        /// 再 INSERT する形に変更、reanimate 可能に。
+        /// (#271) なお「別 PC 起動の `DeleteStaleSessions` が 30 秒遅延した自 row を消す」という旧トリガは、
+        /// cleanup を 1 日 abandoned 閾値に変えたため通常は発生しない (UPSERT reanimate は手動削除等への safety net)。
         /// </summary>
         /// <param name="info">self session info (UpsertSelfSession と同じ 5 field、heartbeat 用に毎回新規 instance)。</param>
         public void UpsertHeartbeat(ManagerSessionInfo info)
