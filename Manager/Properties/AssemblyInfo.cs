@@ -2,6 +2,9 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
+// (#281) 単体テスト (Manager.Tests) から internal 型 (VersionInventory.ParseConfigVersion 等) を参照可能にする。
+[assembly: InternalsVisibleTo("TonePrism_Manager.Tests")]
+
 // アセンブリに関する一般的な情報は、次の方法で制御されます
 // 制御されます。アセンブリに関連付けられている情報を変更するには、
 // これらの属性値を変更します。
@@ -29,5 +32,5 @@ using System.Runtime.InteropServices;
 //      ビルド番号
 //      リビジョン
 //
-[assembly: AssemblyVersion("0.19.3.0")]
-[assembly: AssemblyFileVersion("0.19.3.0")]
+[assembly: AssemblyVersion("0.19.4.0")]
+[assembly: AssemblyFileVersion("0.19.4.0")]
