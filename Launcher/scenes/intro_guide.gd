@@ -24,10 +24,11 @@ var _current: int = 0
 var _transitioning: bool = false
 var _texture_cache: Dictionary = {}      # image_path(String) -> ImageTexture（再ナビ時の再読込回避）
 var _font_regular_cache: FontFile = null
+var _font_bold_cache: FontFile = null
 
 # --- コードで構築するノード参照 ---
 var _stage: Control                       # スライド本体（image+body）が横スライドする領域
-var _page_label: Label
+var _dots: Array[Panel] = []              # スライド位置のドット表示（白=現在 / 灰=他）
 var _current_content: Control = null       # 現在表示中のスライドコンテンツ
 var _outgoing_content: Control = null      # 退場アニメ中の旧スライドコンテンツ
 var _nav_tween: Tween = null
@@ -87,27 +88,81 @@ func _build_ui() -> void:
 	_stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_stage)
 
-	# 以降（ページ表示・操作ボタン・グロー枠・操作説明バー）はスライド領域より前面に固定表示
-	_build_page_indicator()
+	# 以降（見出し・操作ボタン・ドット・グロー枠・操作説明バー）はスライド領域より前面に固定表示
+	_build_heading()
 	_build_nav_buttons()
+	_build_dots()
 	_build_focus_border()
 	_build_bottom_bar()
 
-## ページ表示（上部中央 "1 / 3"）
-func _build_page_indicator() -> void:
+## 上部の見出し「はじめに」。カルーセルのグループ名（すべてのゲーム等）と同じ NotoSansJP-Bold / 56px。
+func _build_heading() -> void:
 	var top_margin := MarginContainer.new()
 	top_margin.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	top_margin.add_theme_constant_override("margin_top", 40)
+	top_margin.add_theme_constant_override("margin_top", 56)
 	top_margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(top_margin)
 
-	_page_label = Label.new()
-	_page_label.add_theme_font_override("font", _font_regular())
-	_page_label.add_theme_font_size_override("font_size", 24)
-	_page_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.6))
-	_page_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_page_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	top_margin.add_child(_page_label)
+	var heading := Label.new()
+	heading.text = "はじめに"
+	heading.add_theme_font_override("font", _font_bold())
+	heading.add_theme_font_size_override("font_size", 56)
+	heading.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top_margin.add_child(heading)
+
+## スライド位置のドット（戻る/進むの少し上に、白=現在 / 灰=他）。スライド数ぶん生成。
+func _build_dots() -> void:
+	var dots_band := Control.new()
+	dots_band.anchor_left = 0.0
+	dots_band.anchor_right = 1.0
+	dots_band.anchor_top = 1.0
+	dots_band.anchor_bottom = 1.0
+	dots_band.offset_left = 0.0
+	dots_band.offset_right = 0.0
+	dots_band.offset_top = -212.0    # ボタン帯(top -168)の少し上
+	dots_band.offset_bottom = -180.0
+	dots_band.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(dots_band)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dots_band.add_child(center)
+
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 14)
+	hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	center.add_child(hb)
+
+	_dots.clear()
+	for i in range(_slides.size()):
+		var dot := _make_dot()
+		hb.add_child(dot)
+		_dots.append(dot)
+	_update_dots()
+
+## ドット1つ（10px の丸）。色は _update_dots で設定。
+func _make_dot() -> Panel:
+	var d := Panel.new()
+	d.custom_minimum_size = Vector2(10, 10)
+	d.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	d.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	d.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return d
+
+func _dot_style(c: Color) -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.bg_color = c
+	s.set_corner_radius_all(5)   # 直径10の半分 = 丸
+	return s
+
+## 現在スライドのドットを白、他を灰に更新。
+func _update_dots() -> void:
+	for i in range(_dots.size()):
+		var c := Color(1, 1, 1, 0.95) if i == _current else Color(1, 1, 1, 0.30)
+		_dots[i].add_theme_stylebox_override("panel", _dot_style(c))
 
 ## 操作ボタン（下端）。戻る/進む＝中央の2分割（左=戻る・右=進む(青)、非対称角丸のまま少し隙間をあけて並べる）、
 ## スキップ＝右端の独立ピル。全ボタン枠なし。クリック操作用（キー ←/→/Enter 併用）。
@@ -434,6 +489,11 @@ func _font_regular() -> FontFile:
 		_font_regular_cache = load("res://fonts/NotoSansJP-Regular.ttf")
 	return _font_regular_cache
 
+func _font_bold() -> FontFile:
+	if _font_bold_cache == null:
+		_font_bold_cache = load("res://fonts/NotoSansJP-Bold.ttf")
+	return _font_bold_cache
+
 ## guide/ 相対パスを絶対パスに解決（GamePathResolver.resolve_path の guide 版）
 func _resolve_image_path(rel: String) -> String:
 	if rel.is_empty():
@@ -457,10 +517,10 @@ func _resolve_image_path(rel: String) -> String:
 ## 初回表示（アニメなし。シーン遷移のフェードと二重がけしない）
 func _set_initial_slide(index: int) -> void:
 	_current = index
-	_page_label.text = "%d / %d" % [index + 1, _slides.size()]
 	_current_content = _make_slide_content(_slides[index])
 	_stage.add_child(_current_content)
 	_update_nav_buttons()
+	_update_dots()
 	# 初期フォーカスは「進む」（連続で決定すれば読み進められる）。先頭で「戻る」は無効。
 	_btn_next.grab_focus()
 
@@ -490,8 +550,8 @@ func _animate_to(index: int, direction: int) -> void:
 		_current_content.modulate.a = 1.0
 
 	_current = index
-	_page_label.text = "%d / %d" % [index + 1, _slides.size()]
 	_update_nav_buttons()
+	_update_dots()
 
 	var new_content := _make_slide_content(_slides[index])
 	_stage.add_child(new_content)
