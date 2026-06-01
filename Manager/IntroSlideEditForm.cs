@@ -106,6 +106,18 @@ namespace TonePrism.Manager
                 dlg.Title = "スライド画像を選択";
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
+                    // 「すべてのファイル (*.*)」で gif 等の Launcher 非対応形式も選べてしまうため、
+                    // 拡張子を明示検証して弾く (Codex 指摘)。Manager プレビューは出ても来場者画面で
+                    // 表示されない silent な失敗を防ぐ。対応は png/jpg/jpeg/bmp。
+                    string ext = Path.GetExtension(dlg.FileName).ToLowerInvariant();
+                    if (ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".bmp")
+                    {
+                        MessageBox.Show(this,
+                            "この形式の画像は来場者画面（Launcher）で表示できません。\n\n" +
+                            "png / jpg / jpeg / bmp のいずれかを選んでください。",
+                            "未対応の画像形式", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
                     _pendingImageAbsolute = dlg.FileName;
                     _clearImage = false;
                     _txtImage.Text = Path.GetFileName(dlg.FileName) + "（保存時に取り込み）";

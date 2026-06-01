@@ -1946,7 +1946,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **初回説明スライドの画像選択で、選んだファイルが既に `guide/` 直下にある場合は複製せずその実体を再利用する** (`IntroGuideAssetHelper.CopyImageInto` / `ImportImage`)。従来は常に `guide/` へコピーしていたため、`guide/` 内の画像（孤児含む）を選ぶたびに `_2` / `_3` の重複コピーが増えていた。**別の場所にある同名の別画像は従来どおり自動 suffix で取り込む**（衝突回避は維持）。判定は「選択パスの親フォルダ == `guide/`」（`Path.GetFullPath` 正規化 + Windows 前提で大小・末尾セパレータ無視）。`createdNewFile` を返し、新規コピーか再利用かを caller が判別できるようにした。
 - **保存失敗時の orphan 掃除を「新規コピーしたときのみ」に限定** (`IntroSlideEditForm.OnOk`)。再利用した既存 `guide/` 画像（他スライドが参照しているかもしれない）を、DB write 失敗時の後始末で誤って削除しないようにした (#274 review #3 の掃除ロジックの安全化)。
 - `Manager.Tests/IntroGuideAssetHelperTests` に再利用ケース2件を追加（guide/ 内選択→複製しない・ファイル数不変／外部選択→従来どおりコピー）。全12件緑。
-- **スライド画像ピッカーの形式フィルタから `gif` を除外** (`IntroSlideEditForm`、Codex 指摘)。`gif` は Manager プレビュー (GDI+) では表示できても Launcher の `Image.load_from_file` で読めず、来場者画面で画像が出ない。両方が扱える `png/jpg/jpeg/bmp` に限定（`*.*` の手動エスケープは残すが、Launcher 側でも読めない画像のみスライドは除外して blank を防ぐ）。
+- **スライド画像ピッカーの形式フィルタから `gif` を除外** (`IntroSlideEditForm`、Codex 指摘)。`gif` は Manager プレビュー (GDI+) では表示できても Launcher の `Image.load_from_file` で読めず、来場者画面で画像が出ない。両方が扱える `png/jpg/jpeg/bmp` に限定。さらに **`すべてのファイル (*.*)` で未対応形式を選んだ場合も `OnSelectImage` で拡張子を検証して弾き警告**（Codex 2nd: プレビューは出るのに来場者画面で出ない silent 失敗を防止）。Launcher 側でも読めない画像のみスライドは除外して blank を防ぐ多層防御。
 
 #### Bump 根拠 (v0.19.1 → v0.19.2)
 
