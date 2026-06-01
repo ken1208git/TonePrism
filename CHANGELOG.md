@@ -1289,6 +1289,34 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.10.0] - 2026-06-01
+
+#### Added (#253 part 3/3 — 初回説明の表示)
+
+- **初回説明画面 (`scenes/intro_guide.gd` / `.tscn`)** を追加。スクリーンセーバーの「PRESS ANY KEY」後、ストアブラウズに入る前に案内スライドを表示する。各来場者にとって毎回が「初回」になるため**毎回表示**、**手動ナビ**（`→`/`Enter` 次へ・`←` 戻る・`Esc` スキップ、自動送りなし）。最終スライドで「次へ」=案内終了→ストアへ。背景は `store_browse` の Background と同じ単色 `Color(0.08,0.08,0.08)` に統一。**レイアウトは中身で分岐**: 画像＋本文の両方は**左に画像・右に本文の横並び**、画像のみ／本文のみはそれを中央に1つ（いずれもアスペクト維持・折り返しあり）。#244 方針に従い DB 由来の動的コンテンツは builder（シーン script 内で構築）で組み、`.tscn` はルート + script の最小構成。
+- **上部左に見出し「はじめに」**（カルーセルのグループ名「すべてのゲーム」等と同じ `NotoSansJP-Bold` / 56px、左揃え。内部呼称「初回説明」は Manager タブ名のまま、来場者向け表示は柔らかい語に）。スライド位置表示は **「1/3」テキストをやめ、戻る/進むの少し上に**ドット（白=現在 / 灰=他、スライド数ぶん）で表現。白⇄灰の切替は `modulate.a` を tween して**フェード**（地は白固定で明暗のみ変える）。
+- **送り/戻しは横スライド + フェード**（中断メニュー `overlay_menu` 登場と同じ `TRANS_QUINT`/`EASE_OUT`）。次へ=新スライドが右から入り旧が左へ抜ける、戻る=逆。`_stage`(clip_contents) 内でスライドコンテンツを都度生成し `position.x` を tween、旧/新を同時にアニメ（cross-slide）、完了/割り込みで旧を破棄。
+- **画面下部に操作ボタン**を追加。配置は **戻る・進む＝中央 / スキップ＝右端の独立ピル**。戻る・進むは **2分割の segmented**（左=戻る(左だけ角丸・グレー地)・右=進む(右だけ角丸・**青アクセント**)を **非対称角丸のまま少し隙間をあけて並べる**＝合わせ目は角丸なしの直線エッジが 8px のギャップを挟んで向かい合う。`clip_contents` は角丸でクリップしないため各ボタンに非対称角丸を当てる方式）。**全ボタン枠なし**（`StyleBoxFlat` の border 幅0）。**キーボード/コントローラーは `←`/`→` でボタン間をフォーカス移動し、`Enter`/決定 (`ui_accept`) で押下する形式**（中断メニューと同じ操作系。Godot 標準のフォーカス系に委ね、`_input` では `ui_left`/`ui_right`/`ui_accept` を consume しない）。マウス/タッチは直接クリック。初期フォーカスは「進む」、先頭スライドでは「戻る」を無効化（`focus_mode=NONE` にして ← でも選べないようにし、無効化した瞬間にフォーカスを持っていれば「進む」へ自動退避）、最終スライドでは「進む」を「ストアへ」表記に（seg ボタンの内側パディングを 18 にして最長ラベル「ストアへ  →」を min 幅 160 に収め、表記変更でボタン幅が伸びないよう固定）。`Esc` (`ui_cancel`) は素早いスキップ用ショートカットとして残置。
+- **フォーカス表示はブラウズ/カルーセルと同じ「追従するグロー枠」** (`store_browse` の `FocusBorder` と同 StyleBox: `draw_center=false` + shadow でやわらかく発光、`GlowAnimator` で明滅) を流用。フォーカス中のボタンへ毎フレーム lerp 追従（speed=delta×25）。**初出現は他画面（store_browse）と同じ zoom-in + フェードイン pop**（中心基準に scale 1.15→1.0・α 0→1 を 0.25s、CUBIC/EASE_OUT）で現れ、以降の移動は lerp で滑らかに。ボタン自身の標準フォーカス装飾は空 StyleBox で抑止し二重表示を防止。**ダイアログ等が出てフォーカスが自分の 3 ボタン以外へ移ったら枠を隠す＝追従も奪い返しもしない**（`grab_focus` は初期化と「戻る」無効化退避のみ、いずれも自ボタンが focus を持つ時だけ）。シーン遷移中は枠を隠す。**マウス操作中（ポインタ移動を検知）はグロー枠を隠し**、キー/パッドに戻ると再び pop で出す（store_browse と同じ「マウス時はフォーカス表示を出さない」分離）。マウス移動でカーソル表示・キー/パッドで非表示。
+- **操作説明バー**（カルーセル/ブラウズ共通の `BottomBar` コンポーネント）を流用して追加。ヒントは **`Enter` 決定のみ**（`set_hints([["Enter","決定"]])`）。グロー枠と同様に**マウス操作中は隠す**（`get_panel().visible = not _using_mouse`）。CanvasLayer ベースなのでシーン遷移のフェードにも追従。操作ボタンの帯は本バーに重ならないよう下端から ~104px に一段上げた（従来 ~48px でバーに隠れ気味だった）。ボタンバーは下端中央にアンカー+offset で高さ72pxの帯として明示配置（`MarginContainer`+preset の min-size タイミング依存で高さ0に潰れる問題を回避）。
+- **`scripts/models/intro_slide_info.gd`**: `intro_slides`（DB v22）に対応する読み取りモデル（`slide_id` / `display_order` / `body_text` / `image_path` / `is_visible`）。
+- **`scripts/intro_slide_repository.gd`**: `intro_slides` の読み取り専用クエリ（`GameRepository` と同流儀）。`get_visible_slides()`（`is_visible=1` を表示順で取得、`image_path` の DB NULL を空文字へ正規化）+ `has_visible_slides()`（COUNT による軽量存在チェック）。
+- **`scripts/path_manager.gd`**: `get_guide_folder()` を追加（スライド画像の格納先 `guide/`、Manager の `PathManager.GuideFolder` と対応）。
+
+#### Changed
+
+- **`scenes/screensaver.gd`**: キー押下時の遷移先を、表示対象スライドが**あれば** `intro_guide` を挟み、**無ければ**従来どおり直接 `store_browse` へ、と事前分岐（`_has_visible_intro_slides()`）。空スライドのとき `intro_guide` を挟むと `TransitionManager` の遷移中再入ガードで `intro_guide → store_browse` の再遷移が無視され画面が固まりうるため、screensaver 側でルーティングする（まっさら新規インストールはスライド 0 件なので通常はこの経路）。`intro_guide` 側にも稀な race 用の空フォールバック（遷移完了待ち後にストアへ）を保持。
+- **incoming 遷移 (screensaver → intro) 中のユーザー操作で固まる経路を塞いだ** (コードレビュー指摘)。`_go_to_store` / `_navigate` / `_input` がローカル `_transitioning` だけ見て `TransitionManager._transitioning`（incoming 遷移進行中）を見ておらず、遷移中（≈0.45s）の `Esc`・「進む/ストアへ」押下で `change_scene` が再入ガードに弾かれ、ローカル `_transitioning=true` が残り永続フリーズしうる非対称があった（空スライド経路だけ待ち保護されていた）。全 store 遷移経路を `TransitionManager._transitioning` 完了まで gate して統一。空フォールバックも固定 0.5s タイマでなく `TransitionManager._transitioning` の落下を待つ形に変更（遷移時間定数への暗黙依存を排除）。
+- **`.gitignore` に `guide/` を追加**。スライド画像の runtime 置き場（SPEC §7.2）を `games/` と同様に除外（誤コミット防止）。
+- **対応 DB スキーマを v14 → v22 に追従** (`database_manager.gd` `CURRENT_DB_VERSION`)。Launcher が本リリースで `intro_slides`（v21 新設 / v22 で `duration_sec` 削除）を読むようになったため。v15〜v20 は Launcher が読まないテーブル / index / 制約のみの変更で読み取り不変（コメントに各版数の根拠を明記）。これで本番 DB(v22) 起動時に毎回出ていた「対応版より新しい」警告を解消。
+- **放置時のスクリーンセーバー復帰を追加** (Codex 指摘)。screensaver は既に本シーンに置換されているため、来場者が起こして離席すると初回説明のまま固定されてしまう。store_browse / game_selection と同じ `IdleManager`（60s 警告 → 90s 復帰、入力で reset）を `_process`/`_input` に組み込み。
+- **OS キーリピート(echo) を無視** (Codex 指摘)。スクリーンセーバーを起こしたキーを握り続けると echo が連続ナビ／1枚デッキでの即スキップを起こすため、`InputEventKey.is_echo()` を focus 系に渡さず破棄（意図的な押し直しのみ受理）。
+- **本文なし かつ 画像が読めないスライドを除外** (Codex 指摘)。画像のみスライドの画像がファイル欠落/非対応形式で読めないとブランクページが出るため、`_load_slides` で除外（全滅時は空フォールバックでストア直行）。あわせて `_get_texture_for` の画像解決/読込失敗を `push_warning` でログし失敗も cache（無言失敗の解消＋再試行抑制、コードレビュー指摘）。
+
+#### Bump 根拠 (v0.9.1 → v0.10.0)
+
+新機能（初回説明画面）の追加のため SemVer minor (`version.gd` MINOR 9→10 / PATCH 0)。読み取り専用追加で DB 破壊的変更なし。Bundle 反映は #253 part 1/2 と合わせてリリース実行時に行う。
+
 ### [Launcher v0.9.1] - 2026-05-27
 
 #### Fixed (累積コードレビュー指摘の対応)
@@ -1910,6 +1938,19 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.19.2] - 2026-06-01
+
+#### Changed (#253 — guide/ 内画像の再利用)
+
+- **初回説明スライドの画像選択で、選んだファイルが既に `guide/` 直下にある場合は複製せずその実体を再利用する** (`IntroGuideAssetHelper.CopyImageInto` / `ImportImage`)。従来は常に `guide/` へコピーしていたため、`guide/` 内の画像（孤児含む）を選ぶたびに `_2` / `_3` の重複コピーが増えていた。**別の場所にある同名の別画像は従来どおり自動 suffix で取り込む**（衝突回避は維持）。判定は「選択パスの親フォルダ == `guide/`」（`Path.GetFullPath` 正規化 + Windows 前提で大小・末尾セパレータ無視）。`createdNewFile` を返し、新規コピーか再利用かを caller が判別できるようにした。
+- **保存失敗時の orphan 掃除を「新規コピーしたときのみ」に限定** (`IntroSlideEditForm.OnOk`)。再利用した既存 `guide/` 画像（他スライドが参照しているかもしれない）を、DB write 失敗時の後始末で誤って削除しないようにした (#274 review #3 の掃除ロジックの安全化)。
+- `Manager.Tests/IntroGuideAssetHelperTests` に再利用ケース2件を追加（guide/ 内選択→複製しない・ファイル数不変／外部選択→従来どおりコピー）。全12件緑。
+- **スライド画像ピッカーの形式フィルタから `gif` を除外** (`IntroSlideEditForm`、Codex 指摘)。`gif` は Manager プレビュー (GDI+) では表示できても Launcher の `Image.load_from_file` で読めず、来場者画面で画像が出ない。両方が扱える `png/jpg/jpeg/bmp` に限定。さらに **`すべてのファイル (*.*)` で未対応形式を選んだ場合も `OnSelectImage` で拡張子を検証して弾き警告**（Codex 2nd: プレビューは出るのに来場者画面で出ない silent 失敗を防止）。Launcher 側でも読めない画像のみスライドは除外して blank を防ぐ多層防御。
+
+#### Bump 根拠 (v0.19.1 → v0.19.2)
+
+既存挙動の改良（重複コピー防止）＋保存失敗時の掃除の安全化のため SemVer patch。スキーマ・DB 変更なし。Bundle 反映はリリース実行時。
 
 ### [Manager v0.19.1] - 2026-06-01
 

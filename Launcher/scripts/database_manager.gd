@@ -13,8 +13,14 @@ var db_path: String = ""
 # (v9, v10, v12 は backup_log 関連 / v13 は manager_sessions で Launcher は触らない /
 #  v11 の surveys・play_records 新スキーマには Launcher のクエリが既に対応済 /
 #  v14 は games.arguments の正規 migration 化のみで最終スキーマ不変・Launcher は arguments 対応済
-#  → いずれも単に定数追従のみ)
-const CURRENT_DB_VERSION: int = 14
+#  v15/v17 は game_versions の UNIQUE INDEX 強化 (NOCASE 化含む)、v16 は backup_log CHECK 拡張、
+#  v19 は backup_log DROP → いずれも Launcher が読まないテーブル / index のみで読み取り不変 /
+#  v18 は developers.version_id FK + ON DELETE CASCADE 追加 / game_genres dead table 除去・
+#  v20 は games.play_time に CHECK(1-3) 追加 → 制約追加のみで Launcher の読み取りクエリは不変 /
+#  v21/v22 は intro_slides テーブル新設と duration_sec 削除 (#253)。Launcher は本テーブルを
+#  IntroSlideRepository (手動ナビの初回説明) で読むため、ここで明示的に対応版数を v22 へ追従させる
+#  → v15〜v22 は定数追従 (intro_slides は本リリースで実クエリ対応済))
+const CURRENT_DB_VERSION: int = 22
 
 ## データベースを開く
 func open() -> bool:

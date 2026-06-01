@@ -99,10 +99,25 @@ namespace TonePrism.Manager
         {
             using (var dlg = new OpenFileDialog())
             {
-                dlg.Filter = "画像ファイル (*.png;*.jpg;*.jpeg;*.bmp;*.gif)|*.png;*.jpg;*.jpeg;*.bmp;*.gif|すべてのファイル (*.*)|*.*";
+                // Launcher の Image.load_from_file が読める形式に限定する。gif は Manager のプレビュー
+                // (GDI+) では表示できても Launcher では読めず、来場者画面で画像が出ない (Codex 指摘)。
+                // png/jpg/jpeg/bmp は Manager プレビュー・Launcher 読込の両方に対応。
+                dlg.Filter = "画像ファイル (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp|すべてのファイル (*.*)|*.*";
                 dlg.Title = "スライド画像を選択";
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
+                    // 「すべてのファイル (*.*)」で gif 等の Launcher 非対応形式も選べてしまうため、
+                    // 拡張子を明示検証して弾く (Codex 指摘)。Manager プレビューは出ても来場者画面で
+                    // 表示されない silent な失敗を防ぐ。対応は png/jpg/jpeg/bmp。
+                    string ext = Path.GetExtension(dlg.FileName).ToLowerInvariant();
+                    if (ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".bmp")
+                    {
+                        MessageBox.Show(this,
+                            "この形式の画像は来場者画面（Launcher）で表示できません。\n\n" +
+                            "png / jpg / jpeg / bmp のいずれかを選んでください。",
+                            "未対応の画像形式", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
                     _pendingImageAbsolute = dlg.FileName;
                     _clearImage = false;
                     _txtImage.Text = Path.GetFileName(dlg.FileName) + "（保存時に取り込み）";
@@ -163,8 +178,12 @@ namespace TonePrism.Manager
             {
                 if (_pendingImageAbsolute != null)
                 {
-                    _slide.ImagePath = IntroGuideAssetHelper.ImportImage(_pendingImageAbsolute);
-                    newlyImportedRel = _slide.ImagePath;
+                    bool createdNewFile;
+                    _slide.ImagePath = IntroGuideAssetHelper.ImportImage(_pendingImageAbsolute, out createdNewFile);
+                    // 既存 guide/ 画像を再利用した場合 (createdNewFile == false) は、保存失敗時の orphan 掃除で
+                    // その既存ファイル (他スライドが参照しているかもしれない) を誤って消さないよう追跡しない。
+                    // 新規にコピーしたときだけ「保存失敗なら消す対象」として控える。
+                    newlyImportedRel = createdNewFile ? _slide.ImagePath : null;
                 }
                 else if (_clearImage)
                 {

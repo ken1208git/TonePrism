@@ -64,6 +64,37 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
+        public void CopyImageInto_SourceAlreadyInGuide_ReusesWithoutDuplicate()
+        {
+            // guide/ 直下に既に在る画像 (= 孤児等) を選び直したケース。複製せずその leaf を再利用する。
+            Directory.CreateDirectory(_guide);
+            string existing = Path.Combine(_guide, "shot.png");
+            File.WriteAllText(existing, "orig");
+
+            bool created;
+            string leaf = IntroGuideAssetHelper.CopyImageInto(_guide, existing, out created);
+
+            Assert.Equal("shot.png", leaf);
+            Assert.False(created);                                   // 新規コピーしていない
+            Assert.False(File.Exists(Path.Combine(_guide, "shot_2.png"))); // suffix 複製を作らない
+            Assert.Single(Directory.GetFiles(_guide));               // ファイルは増えていない
+            Assert.Equal("orig", File.ReadAllText(existing));        // 既存実体は無傷
+        }
+
+        [Fact]
+        public void CopyImageInto_SourceOutsideGuide_SetsCreatedTrue()
+        {
+            // 別の場所からの取り込みは従来どおりコピー (createdNewFile=true)。
+            string src = MakeSource("outside.png");
+            bool created;
+            string leaf = IntroGuideAssetHelper.CopyImageInto(_guide, src, out created);
+
+            Assert.Equal("outside.png", leaf);
+            Assert.True(created);
+            Assert.True(File.Exists(Path.Combine(_guide, "outside.png")));
+        }
+
+        [Fact]
         public void ResolveNonConflictingLeaf_FreeThenIncrement()
         {
             Directory.CreateDirectory(_guide);
