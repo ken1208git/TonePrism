@@ -128,11 +128,11 @@ func _build_nav_buttons() -> void:
 	_btn_next.pressed.connect(func() -> void: _navigate(1))
 	hbox.add_child(_btn_next)
 
-## ナビボタン1つを生成。キーボード/パッドは _input で処理するため focus は取らせない (Enter 二重発火防止)。
+## ナビボタン1つを生成。キーボード/コントローラーでフォーカス選択 → 決定 (ui_accept) で実行する形式。
 func _make_nav_button(text: String) -> Button:
 	var btn := Button.new()
 	btn.text = text
-	btn.focus_mode = Control.FOCUS_NONE
+	btn.focus_mode = Control.FOCUS_ALL  # ←/→ でフォーカス移動・Enter/決定で押下 (中断メニューと同じ操作系)
 	btn.custom_minimum_size = Vector2(180, 56)
 	btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER  # 72px 帯の中で 56px のまま縦中央に
 	btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -140,20 +140,23 @@ func _make_nav_button(text: String) -> Button:
 	btn.add_theme_font_size_override("font_size", 22)
 	btn.add_theme_color_override("font_color", Color(1, 1, 1, 0.9))
 	btn.add_theme_color_override("font_hover_color", Color(1, 1, 1, 1))
+	btn.add_theme_color_override("font_focus_color", Color(1, 1, 1, 1))
 	btn.add_theme_color_override("font_pressed_color", Color(1, 1, 1, 1))
 	btn.add_theme_color_override("font_disabled_color", Color(1, 1, 1, 0.25))
-	btn.add_theme_stylebox_override("normal", _button_style(Color(1, 1, 1, 0.12)))
-	btn.add_theme_stylebox_override("hover", _button_style(Color(1, 1, 1, 0.22)))
-	btn.add_theme_stylebox_override("pressed", _button_style(Color(1, 1, 1, 0.30)))
-	btn.add_theme_stylebox_override("disabled", _button_style(Color(1, 1, 1, 0.05)))
+	btn.add_theme_stylebox_override("normal", _button_style(Color(1, 1, 1, 0.12), Color(1, 1, 1, 0.3), 1))
+	btn.add_theme_stylebox_override("hover", _button_style(Color(1, 1, 1, 0.22), Color(1, 1, 1, 0.3), 1))
+	btn.add_theme_stylebox_override("pressed", _button_style(Color(1, 1, 1, 0.30), Color(1, 1, 1, 0.5), 1))
+	btn.add_theme_stylebox_override("disabled", _button_style(Color(1, 1, 1, 0.05), Color(1, 1, 1, 0.15), 1))
+	# フォーカス枠: 選択中が一目で分かるよう明るい太枠を重ねる (kiosk の遠目でも視認可)。
+	btn.add_theme_stylebox_override("focus", _button_style(Color(1, 1, 1, 0.22), Color(1, 1, 1, 0.95), 2))
 	return btn
 
-## ナビボタンのスタイル（キーキャップ風の半透明パネル + 角丸）
-func _button_style(bg: Color) -> StyleBoxFlat:
+## ナビボタンのスタイル（キーキャップ風の半透明パネル + 角丸）。bg/枠色/枠幅を指定。
+func _button_style(bg: Color, border: Color, border_w: int) -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()
 	s.bg_color = bg
-	s.border_color = Color(1, 1, 1, 0.3)
-	s.set_border_width_all(1)
+	s.border_color = border
+	s.set_border_width_all(border_w)
 	s.set_corner_radius_all(10)
 	s.content_margin_left = 24
 	s.content_margin_right = 24
@@ -165,6 +168,9 @@ func _button_style(bg: Color) -> StyleBoxFlat:
 func _update_nav_buttons() -> void:
 	if _btn_back:
 		_btn_back.disabled = (_current <= 0)
+		# 無効化した「戻る」がフォーカスを持っていたら「進む」へ逃がす (無効ボタンは決定できないため)。
+		if _btn_back.disabled and _btn_back.has_focus() and _btn_next:
+			_btn_next.grab_focus()
 	if _btn_next:
 		_btn_next.text = "ストアへ  →" if _current >= _slides.size() - 1 else "進む  →"
 
@@ -264,6 +270,8 @@ func _set_initial_slide(index: int) -> void:
 	_current_content = _make_slide_content(_slides[index])
 	_stage.add_child(_current_content)
 	_update_nav_buttons()
+	# 初期フォーカスは「進む」（連続で決定すれば読み進められる）。先頭で「戻る」は無効。
+	_btn_next.grab_focus()
 
 ## 送り/戻し（キー入力・ボタン共通）。端での挙動: 最終で「進む」→ストア、先頭で「戻る」→何もしない。
 func _navigate(direction: int) -> void:
@@ -362,12 +370,8 @@ func _input(event: InputEvent) -> void:
 	if not viewport:
 		return
 
+	# ←/→ でのボタン間フォーカス移動・Enter/決定でのボタン押下は Godot の標準フォーカス系に委ねる
+	# (ここで consume しない)。Esc(ui_cancel) だけは素早いスキップ用ショートカットとして直接処理する。
 	if event.is_action_pressed("ui_cancel"):
 		_go_to_store()
-		viewport.set_input_as_handled()
-	elif event.is_action_pressed("ui_left"):
-		_navigate(-1)
-		viewport.set_input_as_handled()
-	elif event.is_action_pressed("ui_right") or event.is_action_pressed("ui_accept"):
-		_navigate(1)
 		viewport.set_input_as_handled()
