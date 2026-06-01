@@ -100,11 +100,12 @@ func _build_ui() -> void:
 	_build_focus_border()
 	_build_bottom_bar()
 
-## 上部の見出し「はじめに」。カルーセルのグループ名（すべてのゲーム等）と同じ NotoSansJP-Bold / 56px。
+## 上部左の見出し「はじめに」。カルーセルのグループ名（すべてのゲーム等）と同じ NotoSansJP-Bold / 56px。
 func _build_heading() -> void:
 	var top_margin := MarginContainer.new()
 	top_margin.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	top_margin.add_theme_constant_override("margin_top", 56)
+	top_margin.add_theme_constant_override("margin_left", 56)
 	top_margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(top_margin)
 
@@ -113,7 +114,7 @@ func _build_heading() -> void:
 	heading.add_theme_font_override("font", _font_bold())
 	heading.add_theme_font_size_override("font_size", 56)
 	heading.add_theme_color_override("font_color", Color(1, 1, 1, 1))
-	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_margin.add_child(heading)
 
