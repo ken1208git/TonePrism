@@ -99,7 +99,10 @@ namespace TonePrism.Manager
         {
             using (var dlg = new OpenFileDialog())
             {
-                dlg.Filter = "画像ファイル (*.png;*.jpg;*.jpeg;*.bmp;*.gif)|*.png;*.jpg;*.jpeg;*.bmp;*.gif|すべてのファイル (*.*)|*.*";
+                // Launcher の Image.load_from_file が読める形式に限定する。gif は Manager のプレビュー
+                // (GDI+) では表示できても Launcher では読めず、来場者画面で画像が出ない (Codex 指摘)。
+                // png/jpg/jpeg/bmp は Manager プレビュー・Launcher 読込の両方に対応。
+                dlg.Filter = "画像ファイル (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp|すべてのファイル (*.*)|*.*";
                 dlg.Title = "スライド画像を選択";
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {

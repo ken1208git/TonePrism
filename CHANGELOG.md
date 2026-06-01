@@ -1309,6 +1309,9 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 - **incoming 遷移 (screensaver → intro) 中のユーザー操作で固まる経路を塞いだ** (コードレビュー指摘)。`_go_to_store` / `_navigate` / `_input` がローカル `_transitioning` だけ見て `TransitionManager._transitioning`（incoming 遷移進行中）を見ておらず、遷移中（≈0.45s）の `Esc`・「進む/ストアへ」押下で `change_scene` が再入ガードに弾かれ、ローカル `_transitioning=true` が残り永続フリーズしうる非対称があった（空スライド経路だけ待ち保護されていた）。全 store 遷移経路を `TransitionManager._transitioning` 完了まで gate して統一。空フォールバックも固定 0.5s タイマでなく `TransitionManager._transitioning` の落下を待つ形に変更（遷移時間定数への暗黙依存を排除）。
 - **`.gitignore` に `guide/` を追加**。スライド画像の runtime 置き場（SPEC §7.2）を `games/` と同様に除外（誤コミット防止）。
 - **対応 DB スキーマを v14 → v22 に追従** (`database_manager.gd` `CURRENT_DB_VERSION`)。Launcher が本リリースで `intro_slides`（v21 新設 / v22 で `duration_sec` 削除）を読むようになったため。v15〜v20 は Launcher が読まないテーブル / index / 制約のみの変更で読み取り不変（コメントに各版数の根拠を明記）。これで本番 DB(v22) 起動時に毎回出ていた「対応版より新しい」警告を解消。
+- **放置時のスクリーンセーバー復帰を追加** (Codex 指摘)。screensaver は既に本シーンに置換されているため、来場者が起こして離席すると初回説明のまま固定されてしまう。store_browse / game_selection と同じ `IdleManager`（60s 警告 → 90s 復帰、入力で reset）を `_process`/`_input` に組み込み。
+- **OS キーリピート(echo) を無視** (Codex 指摘)。スクリーンセーバーを起こしたキーを握り続けると echo が連続ナビ／1枚デッキでの即スキップを起こすため、`InputEventKey.is_echo()` を focus 系に渡さず破棄（意図的な押し直しのみ受理）。
+- **本文なし かつ 画像が読めないスライドを除外** (Codex 指摘)。画像のみスライドの画像がファイル欠落/非対応形式で読めないとブランクページが出るため、`_load_slides` で除外（全滅時は空フォールバックでストア直行）。
 
 #### Bump 根拠 (v0.9.1 → v0.10.0)
 
@@ -1943,6 +1946,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **初回説明スライドの画像選択で、選んだファイルが既に `guide/` 直下にある場合は複製せずその実体を再利用する** (`IntroGuideAssetHelper.CopyImageInto` / `ImportImage`)。従来は常に `guide/` へコピーしていたため、`guide/` 内の画像（孤児含む）を選ぶたびに `_2` / `_3` の重複コピーが増えていた。**別の場所にある同名の別画像は従来どおり自動 suffix で取り込む**（衝突回避は維持）。判定は「選択パスの親フォルダ == `guide/`」（`Path.GetFullPath` 正規化 + Windows 前提で大小・末尾セパレータ無視）。`createdNewFile` を返し、新規コピーか再利用かを caller が判別できるようにした。
 - **保存失敗時の orphan 掃除を「新規コピーしたときのみ」に限定** (`IntroSlideEditForm.OnOk`)。再利用した既存 `guide/` 画像（他スライドが参照しているかもしれない）を、DB write 失敗時の後始末で誤って削除しないようにした (#274 review #3 の掃除ロジックの安全化)。
 - `Manager.Tests/IntroGuideAssetHelperTests` に再利用ケース2件を追加（guide/ 内選択→複製しない・ファイル数不変／外部選択→従来どおりコピー）。全12件緑。
+- **スライド画像ピッカーの形式フィルタから `gif` を除外** (`IntroSlideEditForm`、Codex 指摘)。`gif` は Manager プレビュー (GDI+) では表示できても Launcher の `Image.load_from_file` で読めず、来場者画面で画像が出ない。両方が扱える `png/jpg/jpeg/bmp` に限定（`*.*` の手動エスケープは残すが、Launcher 側でも読めない画像のみスライドは除外して blank を防ぐ）。
 
 #### Bump 根拠 (v0.19.1 → v0.19.2)
 

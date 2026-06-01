@@ -49,10 +49,14 @@ var _focus_pop_tween: Tween = null         # 初出現の zoom-in + フェード
 var _focus_tweening: bool = false          # pop 中は追従 lerp を止める（scale 中の位置ドリフト防止）
 var _using_mouse: bool = false             # マウス操作中はグローフォーカス/操作説明バーを隠す（store_browse と同じ分離）
 var _bottom_bar: CanvasLayer               # 操作説明バー（カルーセル/ブラウズと共通の BottomBar コンポーネント）
+var _idle_mgr: IdleManager                 # 放置時にスクリーンセーバーへ戻す（store_browse / game_selection と同じ）
 
 func _ready() -> void:
 	set_process_input(true)
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# 放置検知。スクリーンセーバーは既にこのシーンに置換されているため、ここで戻さないと
+	# 来場者が離席した際に初回説明のまま固定されてしまう（store_browse 等と同じ IdleManager）。
+	_idle_mgr = IdleManager.new()
 
 	_load_slides()
 
@@ -73,8 +77,16 @@ func _load_slides() -> void:
 		# DBを開けない場合は説明をスキップ（ストア側のエラー表示に委ねる）
 		return
 	var repo := IntroSlideRepository.new(_db_manager)
-	_slides = repo.get_visible_slides()
+	var raw := repo.get_visible_slides()
 	_db_manager.close()
+
+	# 表示しても空になるスライド（本文なし かつ 画像が読めない＝ファイル欠落/非対応形式）を除外し、
+	# ブランクページを出さない。ここで _get_texture_for を呼ぶとテクスチャ cache も温まる
+	# （後段の _make_slide_content が再読込せず再利用できる）。全滅すれば空フォールバックでストア直行。
+	_slides.clear()
+	for s in raw:
+		if not s.body_text.is_empty() or _get_texture_for(s) != null:
+			_slides.append(s)
 
 # --- UI構築 ---
 
@@ -351,6 +363,10 @@ func _make_focus_border_style() -> StyleBoxFlat:
 	return s
 
 func _process(delta: float) -> void:
+	# 放置でスクリーンセーバーへ復帰（60s 警告 → 90s 復帰、store_browse と同じ）。
+	if _idle_mgr and _idle_mgr.update(delta, get_tree().paused):
+		IdleManager.transition_to_screensaver(get_tree())
+		return
 	if _glow:
 		_glow.update(delta)        # グロー明滅（ブリージング）
 	_update_focus_border(delta)
@@ -632,6 +648,10 @@ func _input(event: InputEvent) -> void:
 	if _transitioning or TransitionManager._transitioning:
 		return
 
+	# 何らかの操作でアイドルタイマーをリセット。
+	if _idle_mgr:
+		_idle_mgr.reset()
+
 	# マウス移動でカーソル表示（ボタンをクリック操作可能に）、キー/パッドで非表示（キオスク既定）。
 	# store_browse と同じ分離。マウスクリックは下の action 判定に一致せずボタン側で処理される。
 	if event is InputEventMouseMotion:
@@ -643,6 +663,12 @@ func _input(event: InputEvent) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 
 	if not event.is_pressed():
+		return
+
+	# OS キーリピート(echo)は focus 系にも渡さず無視。スクリーンセーバーを起こしたキーを握り続けても
+	# 連続ナビ／1枚デッキでの即スキップにならないようにする（意図的な押し直しのみ受け付ける）。
+	if event is InputEventKey and event.is_echo():
+		get_viewport().set_input_as_handled()
 		return
 
 	var viewport := get_viewport()
