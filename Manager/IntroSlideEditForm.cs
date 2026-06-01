@@ -163,8 +163,12 @@ namespace TonePrism.Manager
             {
                 if (_pendingImageAbsolute != null)
                 {
-                    _slide.ImagePath = IntroGuideAssetHelper.ImportImage(_pendingImageAbsolute);
-                    newlyImportedRel = _slide.ImagePath;
+                    bool createdNewFile;
+                    _slide.ImagePath = IntroGuideAssetHelper.ImportImage(_pendingImageAbsolute, out createdNewFile);
+                    // 既存 guide/ 画像を再利用した場合 (createdNewFile == false) は、保存失敗時の orphan 掃除で
+                    // その既存ファイル (他スライドが参照しているかもしれない) を誤って消さないよう追跡しない。
+                    // 新規にコピーしたときだけ「保存失敗なら消す対象」として控える。
+                    newlyImportedRel = createdNewFile ? _slide.ImagePath : null;
                 }
                 else if (_clearImage)
                 {
