@@ -483,14 +483,13 @@ namespace TonePrism.Manager
             string versionFolder = PathManager.GetVersionFolder(originalGame.GameId, diskVersion);
             bool deletedIsActive = _initialSelectedVersionId.HasValue && target.Id == _initialSelectedVersionId.Value;
 
-            // 確認ダイアログ (必須・即時確定・取り消し不可を明示)。
+            // 確認ダイアログ (必須・取り消し不可を明示)。
             var confirm = MessageBox.Show(this,
                 "次のバージョンを削除します。\n\n" +
                 "  ゲーム: " + originalGame.Title + "\n" +
                 "  バージョン: " + target.Version + "\n" +
                 "  フォルダ: " + versionFolder + "\n\n" +
                 "・この操作は取り消せません。\n" +
-                "・「OK」を押さなくても、このダイアログで「はい」を押した時点で即座に削除されます。\n" +
                 (deletedIsActive
                     ? "・このバージョンは現在ランチャーで表示中のため、削除後は残りの最新バージョンが自動で表示版になります。\n"
                     : "") +
