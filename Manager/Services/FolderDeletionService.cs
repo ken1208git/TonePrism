@@ -21,9 +21,11 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>
-        /// フォルダを最大 5 回 × 200ms 間隔でリトライ削除する。
-        /// IOException / UnauthorizedAccessException のみ捕捉、それ以外は throw。
-        /// path が null/空、またはフォルダが存在しない場合は Success=true を返す。
+        /// フォルダを最大 5 回 × 200ms 間隔でリトライ削除する (read-only 属性は ForceDeleteDirectory が再帰解除、#209)。
+        /// `IOException` / `UnauthorizedAccessException` は transient lock とみなし retry、それ以外の想定外例外は retry せず
+        /// 即 `Result` (`Success=false`, `LastError` セット) を返す。**本メソッドは throw しない (best-effort never-throw API)**
+        /// (#288): cleanup / rollback の呼び出し側が全例外 swallow を各所で書かずに `Result.Success` だけ見れば済む。
+        /// path が null/空、またはフォルダが存在しない場合は `Success=true` を返す。
         /// </summary>
         public static Result TryDelete(string path)
         {
