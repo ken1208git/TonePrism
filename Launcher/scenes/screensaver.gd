@@ -75,8 +75,24 @@ func _input(event):
 			return
 
 ## ゲーム選択画面に遷移
+## 表示対象の初回説明スライドがあれば intro_guide を挟み、無ければ直接ストアへ。
+## 空スライドのときに intro_guide を挟むと、TransitionManager の遷移中再入ガードにより
+## intro_guide → store_browse の再遷移が無視され画面が固まりうるため、ここで事前分岐する (#253)。
 func _transition_to_game_selection():
-	TransitionManager.change_scene("res://scenes/store_browse.tscn")
+	var target := "res://scenes/store_browse.tscn"
+	if _has_visible_intro_slides():
+		target = "res://scenes/intro_guide.tscn"
+	TransitionManager.change_scene(target)
+
+## 表示対象スライドが1件以上あるか（遷移先ルーティング用の軽量チェック）
+func _has_visible_intro_slides() -> bool:
+	var db := DatabaseManager.new()
+	if not db.open():
+		return false
+	var repo := IntroSlideRepository.new(db)
+	var has_slides := repo.has_visible_slides()
+	db.close()
+	return has_slides
 
 ## ロゴ表示画面に遷移
 func _transition_to_logo_display():

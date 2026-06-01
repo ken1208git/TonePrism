@@ -1289,6 +1289,24 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.10.0] - 2026-06-01
+
+#### Added (#253 part 3/3 — 初回説明の表示)
+
+- **初回説明画面 (`scenes/intro_guide.gd` / `.tscn`)** を追加。スクリーンセーバーの「PRESS ANY KEY」後、ストアブラウズに入る前に案内スライドを表示する。各来場者にとって毎回が「初回」になるため**毎回表示**、**手動ナビ**（`→`/`Enter` 次へ・`←` 戻る・`Esc` スキップ、自動送りなし）。最終スライドで「次へ」=案内終了→ストアへ。画像はアスペクト維持で中央表示、本文のみ（画像なし）スライドも可。#244 方針に従い DB 由来の動的コンテンツは builder（シーン script 内で構築）で組み、`.tscn` はルート + script の最小構成。
+- **`scripts/models/intro_slide_info.gd`**: `intro_slides`（DB v22）に対応する読み取りモデル（`slide_id` / `display_order` / `body_text` / `image_path` / `is_visible`）。
+- **`scripts/intro_slide_repository.gd`**: `intro_slides` の読み取り専用クエリ（`GameRepository` と同流儀）。`get_visible_slides()`（`is_visible=1` を表示順で取得、`image_path` の DB NULL を空文字へ正規化）+ `has_visible_slides()`（COUNT による軽量存在チェック）。
+- **`scripts/path_manager.gd`**: `get_guide_folder()` を追加（スライド画像の格納先 `guide/`、Manager の `PathManager.GuideFolder` と対応）。
+
+#### Changed
+
+- **`scenes/screensaver.gd`**: キー押下時の遷移先を、表示対象スライドが**あれば** `intro_guide` を挟み、**無ければ**従来どおり直接 `store_browse` へ、と事前分岐（`_has_visible_intro_slides()`）。空スライドのとき `intro_guide` を挟むと `TransitionManager` の遷移中再入ガードで `intro_guide → store_browse` の再遷移が無視され画面が固まりうるため、screensaver 側でルーティングする（まっさら新規インストールはスライド 0 件なので通常はこの経路）。`intro_guide` 側にも稀な race 用の空フォールバック（遷移完了待ち後にストアへ）を保持。
+- **対応 DB スキーマを v14 → v22 に追従** (`database_manager.gd` `CURRENT_DB_VERSION`)。Launcher が本リリースで `intro_slides`（v21 新設 / v22 で `duration_sec` 削除）を読むようになったため。v15〜v20 は Launcher が読まないテーブル / index / 制約のみの変更で読み取り不変（コメントに各版数の根拠を明記）。これで本番 DB(v22) 起動時に毎回出ていた「対応版より新しい」警告を解消。
+
+#### Bump 根拠 (v0.9.1 → v0.10.0)
+
+新機能（初回説明画面）の追加のため SemVer minor (`version.gd` MINOR 9→10 / PATCH 0)。読み取り専用追加で DB 破壊的変更なし。Bundle 反映は #253 part 1/2 と合わせてリリース実行時に行う。
+
 ### [Launcher v0.9.1] - 2026-05-27
 
 #### Fixed (累積コードレビュー指摘の対応)

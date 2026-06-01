@@ -17,6 +17,11 @@ static func get_base_directory() -> String:
 static func get_games_folder() -> String:
 	return get_base_directory().path_join("games")
 
+## guideフォルダのパス（初回説明スライドの画像格納先 / #253）
+## Manager の PathManager.GuideFolder と対応。保護対象 + バックアップ対象 (SPEC §7.2)。
+static func get_guide_folder() -> String:
+	return get_base_directory().path_join("guide")
+
 ## データベースファイルのパス
 static func get_database_path() -> String:
 	return get_base_directory().path_join("toneprism.db")
