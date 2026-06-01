@@ -146,7 +146,7 @@
 #### Changed (#281 — Launcher 版数 SoT 移行に伴う release 基盤の追従)
 
 - **`Assert-LauncherVersion` を `version.gd` の `MAJOR/MINOR/PATCH` 読み → `project.godot` の `config/version="X.Y.Z"` 読みに変更**（Launcher 版数の SoT が project.godot config/version に移行、#281）。`config/version`（スラッシュ）を読み `config_version`（Godot ファイル形式版）には誤マッチしない。
-- **Phase 2 (`Set-ManifestVersions`) の project.godot config/version 同期を撤去**。config/version は SoT 自身（`Assert-LauncherVersion` がそこから読む）なので同期不要。派生先である `export_presets.cfg` の `file_version`/`product_version` の stamp は維持。
+- **Phase 2 の project.godot config/version 同期を撤去**。config/version は SoT 自身（`Assert-LauncherVersion` がそこから読む）なので同期不要。派生先である `export_presets.cfg` の `file_version`/`product_version` の stamp は維持。責務が export_presets.cfg のみに縮小したため関数を **`Set-ManifestVersions` → `Set-ExportPresetVersions` に rename**（レビュー指摘、名称の実態整合）。
 - **install 先同梱ファイルを `Launcher/version.gd` → `Launcher/project.godot` に差し替え**（`$filesTemplates` と `$script:BundleManifestFiles` の両 SoT を更新）。エクスポート済み Launcher exe は project.godot を .pck 内に隠匿するため、Manager UI の `VersionInventory` が parse できるよう project.godot のコピーを明示同梱する（旧 version.gd 同梱と同じ理由）。manifest 駆動の `UpdateDownloader.ValidateStaging` は `$script:BundleManifestFiles` 更新で自動追従。`ValidateStagingLegacy`（v0.3.0 zip 構造に凍結された fallback）は実在の旧 zip に match させる必要があるため version.gd 参照のまま据え置き。
 - ヘッダの「version.gd = Launcher version の SoT」コメントを「project.godot config/version = SoT」に更新。
 - bump 判断: 配布スクリプトの変更のみ。patch (v0.1.22 → v0.1.23)。Bundle への反映は次回リリース実行時。

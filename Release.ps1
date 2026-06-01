@@ -843,14 +843,14 @@ function Resolve-Nuget {
 
 # ============================================================================
 # git working tree が clean か検証 (Codex P1 #137 への対応)
-# Set-ManifestVersions が project.godot / export_presets.cfg を書き換えうるため、
+# Set-ExportPresetVersions が export_presets.cfg を書き換えうるため、
 # preflight と sync 後の 2 回呼ぶ
 # ============================================================================
 
 function Assert-WorkingTreeClean {
     param(
         [string]$Context,    # phase identifier (Fail / Warn message にも含まれる、user-facing diagnostic)
-        [switch]$PostSync    # 特例メッセージ (Set-ManifestVersions が書き換えた旨) のトリガ
+        [switch]$PostSync    # 特例メッセージ (Set-ExportPresetVersions が書き換えた旨) のトリガ
     )
     # pattern: CAPTURE_STDOUT_PASS_STDERR
     $gitStatus = & git -C $RepoRoot status --porcelain
@@ -866,7 +866,7 @@ function Assert-WorkingTreeClean {
             Write-Host "    uncommitted change が検出されました ($Context):" -ForegroundColor Yellow
             ($gitStatus -split "`n") | ForEach-Object { Write-Host "        $_" -ForegroundColor Yellow }
             if ($PostSync) {
-                Fail "Set-ManifestVersions が tracked files を書き換えました。差分をコミットしてから再実行してください (一度書き換えれば idempotent なので次回 sync は no-op)。-Force でバイパス可能。"
+                Fail "Set-ExportPresetVersions が tracked files を書き換えました。差分をコミットしてから再実行してください (一度書き換えれば idempotent なので次回 sync は no-op)。-Force でバイパス可能。"
             } else {
                 Fail "コミットしてから再実行するか、-Force で続行してください。"
             }
@@ -1282,7 +1282,7 @@ function Write-FileUtf8NoBom {
     [System.IO.File]::WriteAllText($Path, $Content, $script:Utf8NoBomEncoding)
 }
 
-function Set-ManifestVersions {
+function Set-ExportPresetVersions {
     Write-Step "派生バージョン情報を同期 (Launcher v$script:LauncherVersion 基準)"
 
     $launcherVer = $script:LauncherVersion
@@ -2097,8 +2097,8 @@ Assert-ComponentVersions
 Resolve-Godot
 Resolve-MsBuild
 Resolve-Nuget
-Set-ManifestVersions
-Assert-WorkingTreeClean -Context "manifest sync 後" -PostSync
+Set-ExportPresetVersions
+Assert-WorkingTreeClean -Context "export_presets sync 後" -PostSync
 Clear-Staging
 Build-Launcher
 Build-Manager
