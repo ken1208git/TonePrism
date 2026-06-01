@@ -66,6 +66,14 @@ namespace TonePrism.Manager.Services
                     if (i == maxRetries - 1) return result;
                     Thread.Sleep(delayMs);
                 }
+                catch (Exception ex)
+                {
+                    // (#288 review) 想定外例外 (ArgumentException 等) は transient lock ではないので retry せず失敗を返す。
+                    // TryDelete は best-effort 削除サービスとして「throw せず常に Result を返す」契約にし、cleanup /
+                    // rollback の呼び出し側が「全例外 swallow」を各所で書かずに Result.Success だけ見れば済むようにする。
+                    result.LastError = ex;
+                    return result;
+                }
             }
             return result;
         }
