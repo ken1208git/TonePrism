@@ -1305,7 +1305,7 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 - **`version.gd` から版数の数字（`const MAJOR/MINOR/PATCH`）を撤去し、`project.godot` の `[application] config/version="X.Y.Z"` を SoT に一本化**。version.gd は `ProjectSettings.get_setting("application/config/version")` を読むだけの薄いアクセサに変更（API `get_version_string()` / `get_version_number()` は不変なので consumer〔`debug_overlay` / `service_mode_overlay` / `session_heartbeat`〕は無改修）。従来は version.gd の定数と project.godot config/version の二重持ちで、開発バンプのたびに手で両方を合わせる必要があった。
 - 旧 version.gd 冒頭の「DO NOT CHANGE FORMAT（Manager が parse する）」制約を撤廃（Manager は version.gd を parse しなくなった、下記 Manager v0.19.4 参照）。
-- 検証: 同梱 Godot 4.6.2 ヘッドレスで `Version.get_version_string()` が project.godot から `v0.10.2` を返すことを確認（parse エラーなし）。
+- 検証: 同梱 Godot 4.6.2 ヘッドレスで `Version.get_version_string()` が project.godot から `v0.10.2` を返すことを確認（parse エラーなし）。**加えて `--export-pack` で実際のエクスポート pck を生成し、ディスク上に project.godot を置かない状態で pck 単体をロードして実行 → `has_setting=true` / `config/version=0.10.2` を確認**（= 配布版 exe と同条件＝pck 内 project.binary のみが情報源、でも runtime で読めることを実証。「ProjectSettings 経由読みは旧 const と違いエクスポート版で初実行される新経路」というレビュー懸念への直接対応）。
 - bump 判断: 版数の出力は不変（出どころを移しただけ）の内部リファクタだが、.pck（version.gd）が変わるため patch (v0.10.1 → v0.10.2)。
 
 ### [Launcher v0.10.1] - 2026-06-01
