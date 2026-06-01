@@ -1414,6 +1414,33 @@ function Build-Launcher {
     }
 }
 
+function Assert-ExportedLauncherVersion {
+    # (#283) エクスポート済み Launcher exe の FileVersion が SoT (project.godot config/version) と一致するか検証。
+    # Manager UI は prod でこの FileVersion から Launcher 版数を読む (VersionInventory.ReadLauncherVersion)。
+    # 版数 stamp は config/version → Set-ExportPresetVersions → export_presets.cfg → Godot/rcedit → exe の
+    # 多段パイプライン経由のため、どこか一手が抜けると exe が古い/欠落版数を焼き、Manager が silent に
+    # 嘘版数を表示する (#283 で受容した trade-off の安全網)。zip/upload より前にここで hard fail させ、
+    # 誤版数の publish を防ぐ。Build-Launcher の後に呼ぶこと。
+    Write-Step "エクスポート exe の版数を検証 (SoT 一致)"
+    $exe = Join-Path (Join-Path $FilesDir 'Launcher') 'TonePrism_Launcher.exe'
+    if (-not (Test-Path $exe)) {
+        Fail "検証対象の exe が見つかりません: $exe (Build-Launcher の後に呼ぶこと)"
+    }
+    $fileVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe).FileVersion
+    $parsed = $null
+    if (-not [version]::TryParse($fileVersion, [ref]$parsed)) {
+        Fail "exe の FileVersion を parse できません ('$fileVersion'、path=$exe)。export_presets.cfg の application/file_version / modify_resources (rcedit stamp) を確認。"
+    }
+    # exe は 4 part (X.Y.Z.0)、SoT は 3 part (X.Y.Z)。Major.Minor.Build で比較。
+    $exe3 = "$($parsed.Major).$($parsed.Minor).$($parsed.Build)"
+    if ($exe3 -ne $script:LauncherVersion) {
+        Fail ("エクスポート exe の FileVersion ($fileVersion → $exe3) が SoT ($script:LauncherVersion) と不一致。" +
+            "Set-ExportPresetVersions の stamp が未反映の疑い (export_presets.cfg / rcedit)。" +
+            "Manager は prod でこの exe から版数を読むため、誤版数の publish を防ぐべく中止。")
+    }
+    Write-Ok "exe FileVersion = $fileVersion (SoT $script:LauncherVersion と一致)"
+}
+
 # ============================================================================
 # Phase 5: Build Manager
 # ============================================================================
@@ -2095,6 +2122,7 @@ Set-ExportPresetVersions
 Assert-WorkingTreeClean -Context "export_presets sync 後" -PostSync
 Clear-Staging
 Build-Launcher
+Assert-ExportedLauncherVersion
 Build-Manager
 Build-Updater
 Build-LauncherAgent
