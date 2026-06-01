@@ -18,12 +18,20 @@ namespace TonePrism.Manager.Services
             public bool Success { get; set; }
             public Exception LastError { get; set; }
             public string Path { get; set; }
+
+            /// <summary>(#288 review) ログ/メッセージ用の最終エラー文言。LastError 不在時は "(不明)"。呼び出し側の null-guard 重複を集約。</summary>
+            public string ErrorMessage => LastError != null ? LastError.Message : "(不明)";
         }
 
         /// <summary>
         /// フォルダを最大 5 回 × 200ms 間隔でリトライ削除する。
-        /// IOException / UnauthorizedAccessException のみ捕捉、それ以外は throw。
-        /// path が null/空、またはフォルダが存在しない場合は Success=true を返す。
+        /// `IOException`（使用中ロック等）と一時的な `UnauthorizedAccessException` は待機 retry で解消を狙う。
+        /// **read-only 属性由来の `UnauthorizedAccessException` は待っても消えない**が、2 回目以降は `Directory.Delete` →
+        /// `ForceDeleteDirectory`（属性を再帰解除しながら削除）に切り替わるため解決する（fast-path→robust-path 切替、#209）。
+        /// それ以外の想定外例外は retry せず即 `Result` (`Success=false`, `LastError` セット) を返す。
+        /// **本メソッドは throw しない (best-effort never-throw API、#288)**: cleanup / rollback の呼び出し側が
+        /// 全例外 swallow を各所で書かずに `Result.Success` だけ見れば済む。
+        /// path が null/空、またはフォルダが存在しない場合は `Success=true` を返す。
         /// </summary>
         public static Result TryDelete(string path)
         {
@@ -65,6 +73,14 @@ namespace TonePrism.Manager.Services
                     result.LastError = ex;
                     if (i == maxRetries - 1) return result;
                     Thread.Sleep(delayMs);
+                }
+                catch (Exception ex)
+                {
+                    // (#288 review) 想定外例外 (ArgumentException 等) は transient lock ではないので retry せず失敗を返す。
+                    // TryDelete は best-effort 削除サービスとして「throw せず常に Result を返す」契約にし、cleanup /
+                    // rollback の呼び出し側が「全例外 swallow」を各所で書かずに Result.Success だけ見れば済むようにする。
+                    result.LastError = ex;
+                    return result;
                 }
             }
             return result;

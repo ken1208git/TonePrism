@@ -338,8 +338,9 @@ namespace TonePrism.Manager.Controls
                         {
                             if (versionDirOwnedByThisCall)
                             {
-                                try { if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true); }
-                                catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (追加精査 ②) versionDir 削除失敗: " + versionDir + ": " + delEx.Message); }
+                                // (#288) read-only な Unity/Godot コピー (Assets/Library 等) でも消せるよう FolderDeletionService 経由。
+                                var delResult = FolderDeletionService.TryDelete(versionDir);
+                                if (!delResult.Success) Logger.Warn("[GameSectionPanel] (追加精査 ②) versionDir 削除失敗 (read-only/ロック等): " + versionDir + ": " + delResult.ErrorMessage);
                             }
                             MessageBox.Show(
                                 "コピー後のファイルが見つかりません。バージョンアップを中止しました:\n\n  " +
@@ -362,7 +363,9 @@ namespace TonePrism.Manager.Controls
                         {
                             if (versionDirOwnedByThisCall)
                             {
-                                try { if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true); } catch { /* swallow */ }
+                                // (#288) read-only コピー対応のため FolderDeletionService 経由。
+                                var delResult = FolderDeletionService.TryDelete(versionDir);
+                                if (!delResult.Success) Logger.Warn("[GameSectionPanel] (M4) versionDir 削除失敗 (read-only/ロック等): " + versionDir + ": " + delResult.ErrorMessage);
                             }
                             MessageBox.Show(
                                 "実行ファイルの相対パス計算に失敗しました。バージョンアップを中止しました。\n\n" +
@@ -435,8 +438,9 @@ namespace TonePrism.Manager.Controls
                             string cleanupNote;
                             if (versionDirOwnedByThisCall)
                             {
-                                try { if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true); }
-                                catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (M5) versionDir rollback 削除失敗: " + versionDir + ": " + delEx.Message); }
+                                // (#288) read-only コピー対応のため FolderDeletionService 経由。
+                                var delResult = FolderDeletionService.TryDelete(versionDir);
+                                if (!delResult.Success) Logger.Warn("[GameSectionPanel] (M5) versionDir rollback 削除失敗 (read-only/ロック等): " + versionDir + ": " + delResult.ErrorMessage);
                                 cleanupNote = "\n\nコピーしたファイルは削除しました。";
                             }
                             else
@@ -462,8 +466,9 @@ namespace TonePrism.Manager.Controls
                         // 防止のため掃除する。
                         // (Critical-1) この経路は ProcessingDialog 内 = Move 前なので、片付け対象は tempDir のみ。
                         // versionDir は触らない (= 我々はまだ owner ではない、勝者が既に作っていれば破壊しない)。
-                        try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); }
-                        catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (H3) 中断時の tempDir 削除失敗: " + tempDir + ": " + delEx.Message); }
+                        // (#288) read-only コピー (.pending-create) でも消せるよう FolderDeletionService 経由。
+                        var delResult = FolderDeletionService.TryDelete(tempDir);
+                        if (!delResult.Success) Logger.Warn("[GameSectionPanel] (H3) 中断時の tempDir 削除失敗 (read-only/ロック等): " + tempDir + ": " + delResult.ErrorMessage);
 
                         if (processingDialog.DialogResult == DialogResult.Cancel)
                         {
@@ -484,8 +489,9 @@ namespace TonePrism.Manager.Controls
         /// </summary>
         private static void HandleVersionDirMoveFailure(string tempDir, string versionDir, Exception moveEx)
         {
-            try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); }
-            catch (Exception delEx) { Logger.Warn("[GameSectionPanel] (round 5 H1) tempDir 削除失敗: " + tempDir + ": " + delEx.Message); }
+            // (#288) read-only コピー (.pending-create) でも消せるよう FolderDeletionService 経由。
+            var delResult = FolderDeletionService.TryDelete(tempDir);
+            if (!delResult.Success) Logger.Warn("[GameSectionPanel] (round 5 H1) tempDir 削除失敗 (read-only/ロック等): " + tempDir + ": " + delResult.ErrorMessage);
 
             string detail = moveEx is UnauthorizedAccessException
                 ? "別の Manager が同じバージョン番号で既にフォルダを作成した、または対象フォルダの権限が制限されている可能性があります。"

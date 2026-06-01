@@ -1974,6 +1974,16 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.20.1] - 2026-06-01
+
+#### Fixed (#288 — 版アップ/ゲーム追加のロールバック削除を read-only 対応に)
+
+- **ゲーム/版フォルダのコピー失敗・中断時のロールバック削除に残っていた生 `Directory.Delete(..., true)` を `FolderDeletionService.TryDelete`（read-only 再帰解除込み、#209）に寄せた**。コピー元が Unity/Godot プロジェクト（`Assets`/`Library` 等が read-only）だと、これらの生 delete がロールバックで `UnauthorizedAccessException` で失敗し、中途半端な版/ゲームフォルダが残って次回追加の「フォルダが既に存在します」エラーの種になりうる取りこぼしだった（#209 review finding 5）。
+  - **`GameSectionPanel`（バージョンアップ）5 箇所**: missing-asset 中止 / 相対パス計算失敗(M4) / DB 保存失敗(M5) / 中断時 tempDir(H3) / `HandleVersionDirMoveFailure` の tempDir。`versionDirOwnedByThisCall` ガード（並行 Manager の勝者フォルダを敗者が消さない不変条件、#234）は維持。
+  - **`AddGameForm`（ゲーム追加）2 箇所**（#288 review 指摘で追加）: 既存フォルダ上書き時の wipe（失敗時は従来通り friendly 例外で中断）/ rollback の版フォルダ削除（**旧 bare `catch {}` を `Result` 判定 + `Logger.Warn` 化**＝silent な zombie ゲームフォルダ残留の痕跡を残す）。`versionFolderCreatedThisCall`/`baseGameFolderCreated` ガードは維持。空の親フォルダの非再帰削除（空チェック付き）は対象外。
+- **`FolderDeletionService.TryDelete` を「throw せず常に `Result` を返す」契約に**（#288 review）: 従来は `IOException`/`UnauthorizedAccessException` のみ捕捉し他は伝播していたが、cleanup/rollback の呼び出し側が「全例外 swallow」を各所で書かずに `Result.Success` だけ見れば済むよう、想定外例外も捕捉して失敗 `Result` を返す。
+- bump 判断: read-only バグの取りこぼし修正。patch (v0.20.0 → v0.20.1)。全 87 テスト合格。
+
 ### [Manager v0.20.0] - 2026-06-01
 
 #### Added (#209 — ゲーム編集で個別バージョンを削除)

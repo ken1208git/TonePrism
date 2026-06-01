@@ -289,14 +289,15 @@ namespace TonePrism.Manager
             }
             if (wipeExistingOnCopy && Directory.Exists(gameBaseFolder))
             {
-                try
+                // (#288) read-only な Unity/Godot 既存フォルダ (Assets/Library 等が read-only) でも消せるよう
+                // FolderDeletionService 経由。失敗時は従来通り friendly 例外で中断 (Launcher 等の使用中ロックを想定)。
+                var wipeResult = FolderDeletionService.TryDelete(gameBaseFolder);
+                if (!wipeResult.Success)
                 {
-                    Directory.Delete(gameBaseFolder, true);
-                }
-                catch (Exception ex)
-                {
+                    // (#288 review) 原因はロック (Launcher 等が使用中) が大半だが、権限/属性の問題もありうるため断定せず併記。
                     throw new Exception(
-                        $"既存のゲームフォルダの削除に失敗しました（Launcher 等が使用中の可能性があります）:\n  {gameBaseFolder}\n\n{ex.Message}", ex);
+                        $"既存のゲームフォルダの削除に失敗しました（Launcher 等が使用中、またはフォルダの権限・属性の問題の可能性があります）:\n  {gameBaseFolder}\n\n{wipeResult.ErrorMessage}",
+                        wipeResult.LastError);
                 }
             }
 
@@ -685,7 +686,10 @@ namespace TonePrism.Manager
             // 触らない。baseGameFolderCreated と同じパターン。
             if (versionFolderCreatedThisCall && !string.IsNullOrEmpty(destinationGameFolder) && Directory.Exists(destinationGameFolder))
             {
-                try { Directory.Delete(destinationGameFolder, true); } catch { }
+                // (#288) read-only な Unity/Godot コピー (Assets/Library 等) でも消せるよう FolderDeletionService 経由。
+                // 旧 bare catch を Result 判定 + Logger.Warn に変更 (silent な zombie ゲームフォルダ残留の痕跡を残す)。
+                var delResult = FolderDeletionService.TryDelete(destinationGameFolder);
+                if (!delResult.Success) Logger.Warn("[AddGameForm] (#288) rollback の versionDir 削除失敗 (read-only/ロック等): " + destinationGameFolder + ": " + delResult.ErrorMessage);
             }
 
             if (baseGameFolderCreated && !string.IsNullOrEmpty(baseGameFolder) && Directory.Exists(baseGameFolder))
