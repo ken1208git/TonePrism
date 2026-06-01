@@ -71,10 +71,10 @@ func _load_slides() -> void:
 # --- UI構築 ---
 
 func _build_ui() -> void:
-	# 背景（静止。スライドしない）
+	# 背景（静止。スライドしない）。store_browse の Background ColorRect と同じ単色に揃える。
 	var bg := ColorRect.new()
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	bg.color = Color(0.08, 0.08, 0.1, 1)
+	bg.color = Color(0.08, 0.08, 0.08, 1)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
 
@@ -106,44 +106,70 @@ func _build_page_indicator() -> void:
 	_page_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_margin.add_child(_page_label)
 
-## 操作ボタン（下部中央）。戻る / スキップ / 進む。クリック操作用（キーボード ←/→/Esc は _input で併用）。
+## 操作ボタン（下端）。スキップ＝左端の独立ピル、戻る/進む＝中央の「1つの角丸四角を2分割」した
+## segmented 風（中央に細いディバイダ）。全ボタン枠なし。クリック操作用（キーボード ←/→/Enter は併用）。
 func _build_nav_buttons() -> void:
-	# 下端中央に固定。MarginContainer + preset は「子追加前に min-size が確定せず高さ0に潰れる」ため
-	# 使わず、アンカー (下端いっぱい) + offset で高さ 72px の帯を明示指定する (min-size 非依存で確実)。
-	var hbox := HBoxContainer.new()
-	hbox.anchor_left = 0.0
-	hbox.anchor_top = 1.0
-	hbox.anchor_right = 1.0
-	hbox.anchor_bottom = 1.0
-	hbox.offset_left = 0.0
-	hbox.offset_right = 0.0
-	hbox.offset_top = -112.0    # 下から112px
-	hbox.offset_bottom = -40.0  # 下端から40px 上げる (= 高さ72px の帯)
-	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	hbox.add_theme_constant_override("separation", 24)
-	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(hbox)
+	# 下端いっぱいの帯 (高さ72px)。MarginContainer+preset は子追加前に min-size が潰れるため
+	# アンカー+offset で明示。中の配置は band の子として絶対アンカーで置く (Container 非依存で確実)。
+	var band := Control.new()
+	band.anchor_left = 0.0
+	band.anchor_right = 1.0
+	band.anchor_top = 1.0
+	band.anchor_bottom = 1.0
+	band.offset_left = 0.0
+	band.offset_right = 0.0
+	band.offset_top = -112.0
+	band.offset_bottom = -40.0
+	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(band)
 
-	_btn_back = _make_nav_button("←  戻る")
+	# 中央: 戻る/進む の分割ピル。CenterContainer で帯の中央に置く。
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	band.add_child(center)
+
+	var seg := PanelContainer.new()
+	seg.clip_contents = true   # 内側の矩形ボタンを角丸でクリップ → 外周だけ丸い1つの四角に見せる
+	seg.add_theme_stylebox_override("panel", _seg_panel_style())
+	seg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	center.add_child(seg)
+
+	var seg_hb := HBoxContainer.new()
+	seg_hb.add_theme_constant_override("separation", 0)
+	seg_hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	seg.add_child(seg_hb)
+
+	_btn_back = _make_seg_button("←  戻る")
 	_btn_back.pressed.connect(func() -> void: _navigate(-1))
-	hbox.add_child(_btn_back)
+	seg_hb.add_child(_btn_back)
 
-	_btn_skip = _make_nav_button("スキップ")
-	_btn_skip.pressed.connect(func() -> void: _go_to_store())
-	hbox.add_child(_btn_skip)
+	seg_hb.add_child(_make_divider())
 
-	_btn_next = _make_nav_button("進む  →")
+	_btn_next = _make_seg_button("進む  →")
 	_btn_next.pressed.connect(func() -> void: _navigate(1))
-	hbox.add_child(_btn_next)
+	seg_hb.add_child(_btn_next)
 
-## ナビボタン1つを生成。キーボード/コントローラーでフォーカス選択 → 決定 (ui_accept) で実行する形式。
-func _make_nav_button(text: String) -> Button:
+	# 左端: スキップ (独立した枠なしピル)。帯の左に絶対アンカーで配置・縦中央。
+	_btn_skip = _make_pill_button("スキップ")
+	_btn_skip.pressed.connect(func() -> void: _go_to_store())
+	_btn_skip.anchor_left = 0.0
+	_btn_skip.anchor_right = 0.0
+	_btn_skip.anchor_top = 0.5
+	_btn_skip.anchor_bottom = 0.5
+	_btn_skip.offset_left = 40.0
+	_btn_skip.offset_right = 40.0 + 160.0
+	_btn_skip.offset_top = -28.0
+	_btn_skip.offset_bottom = 28.0
+	band.add_child(_btn_skip)
+
+## ボタン共通設定（フォント・フォーカス可・サイズ・標準フォーカス装飾の抑止）。
+## フォーカス表示はグロー枠 (_focus_border) が担うので focus stylebox は空にする。
+func _make_button_base(text: String) -> Button:
 	var btn := Button.new()
 	btn.text = text
-	btn.focus_mode = Control.FOCUS_ALL  # ←/→ でフォーカス移動・Enter/決定で押下 (中断メニューと同じ操作系)
-	btn.custom_minimum_size = Vector2(180, 56)
-	btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER  # 72px 帯の中で 56px のまま縦中央に
-	btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	btn.focus_mode = Control.FOCUS_ALL
+	btn.custom_minimum_size = Vector2(160, 56)
 	btn.add_theme_font_override("font", _font_regular())
 	btn.add_theme_font_size_override("font_size", 22)
 	btn.add_theme_color_override("font_color", Color(1, 1, 1, 0.9))
@@ -151,22 +177,53 @@ func _make_nav_button(text: String) -> Button:
 	btn.add_theme_color_override("font_focus_color", Color(1, 1, 1, 1))
 	btn.add_theme_color_override("font_pressed_color", Color(1, 1, 1, 1))
 	btn.add_theme_color_override("font_disabled_color", Color(1, 1, 1, 0.25))
-	btn.add_theme_stylebox_override("normal", _button_style(Color(1, 1, 1, 0.12), Color(1, 1, 1, 0.3), 1))
-	btn.add_theme_stylebox_override("hover", _button_style(Color(1, 1, 1, 0.22), Color(1, 1, 1, 0.3), 1))
-	btn.add_theme_stylebox_override("pressed", _button_style(Color(1, 1, 1, 0.30), Color(1, 1, 1, 0.5), 1))
-	btn.add_theme_stylebox_override("disabled", _button_style(Color(1, 1, 1, 0.05), Color(1, 1, 1, 0.15), 1))
-	# フォーカス表示はブラウズ/カルーセルと同じ「追従するグロー枠」(_focus_border) が担うので、
-	# ボタン自身の標準フォーカス装飾は空 StyleBox で抑止する (二重表示を防ぐ)。
 	btn.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	return btn
 
-## ナビボタンのスタイル（キーキャップ風の半透明パネル + 角丸）。bg/枠色/枠幅を指定。
-func _button_style(bg: Color, border: Color, border_w: int) -> StyleBoxFlat:
+## 独立ピル（スキップ用）。枠なし・角丸14。
+func _make_pill_button(text: String) -> Button:
+	var btn := _make_button_base(text)
+	btn.add_theme_stylebox_override("normal", _flat_style(Color(1, 1, 1, 0.10), 14))
+	btn.add_theme_stylebox_override("hover", _flat_style(Color(1, 1, 1, 0.18), 14))
+	btn.add_theme_stylebox_override("pressed", _flat_style(Color(1, 1, 1, 0.26), 14))
+	btn.add_theme_stylebox_override("disabled", _flat_style(Color(1, 1, 1, 0.04), 14))
+	return btn
+
+## segmented の片側（戻る/進む）。通常は透明（パネル地が透ける）・hover/pressed のみ薄く光る・角丸なし
+## （外周の角丸は親 PanelContainer の clip が担う）。枠なし。
+func _make_seg_button(text: String) -> Button:
+	var btn := _make_button_base(text)
+	btn.add_theme_stylebox_override("normal", _flat_style(Color(1, 1, 1, 0.0), 0))
+	btn.add_theme_stylebox_override("hover", _flat_style(Color(1, 1, 1, 0.14), 0))
+	btn.add_theme_stylebox_override("pressed", _flat_style(Color(1, 1, 1, 0.24), 0))
+	btn.add_theme_stylebox_override("disabled", _flat_style(Color(1, 1, 1, 0.0), 0))
+	return btn
+
+## segmented 全体の地（1つの角丸四角）。枠なし・角丸14・内側 padding 0（子が端まで埋まる）。
+func _seg_panel_style() -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.bg_color = Color(1, 1, 1, 0.10)
+	s.set_corner_radius_all(14)
+	s.content_margin_left = 0
+	s.content_margin_right = 0
+	s.content_margin_top = 0
+	s.content_margin_bottom = 0
+	return s
+
+## 戻る|進む の境目の細いディバイダ（縦1px・高さ36px・中央寄せ）。
+func _make_divider() -> ColorRect:
+	var d := ColorRect.new()
+	d.color = Color(1, 1, 1, 0.18)
+	d.custom_minimum_size = Vector2(1, 36)
+	d.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	d.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return d
+
+## ボタン地のスタイル（枠なし＝border幅0）。bg と角丸半径を指定。
+func _flat_style(bg: Color, corner: int) -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()
 	s.bg_color = bg
-	s.border_color = border
-	s.set_border_width_all(border_w)
-	s.set_corner_radius_all(10)
+	s.set_corner_radius_all(corner)
 	s.content_margin_left = 24
 	s.content_margin_right = 24
 	s.content_margin_top = 10
