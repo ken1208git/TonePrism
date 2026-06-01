@@ -41,7 +41,8 @@ var _glow: GlowAnimator
 var _focus_initialized: bool = false       # 初出現は zoom-in pop、以降 lerp 追従
 var _focus_pop_tween: Tween = null         # 初出現の zoom-in + フェードイン pop (他画面と同じ)
 var _focus_tweening: bool = false          # pop 中は追従 lerp を止める（scale 中の位置ドリフト防止）
-var _using_mouse: bool = false             # マウス操作中はグローフォーカスを隠す（store_browse と同じ分離）
+var _using_mouse: bool = false             # マウス操作中はグローフォーカス/操作説明バーを隠す（store_browse と同じ分離）
+var _bottom_bar: CanvasLayer               # 操作説明バー（カルーセル/ブラウズと共通の BottomBar コンポーネント）
 
 func _ready() -> void:
 	set_process_input(true)
@@ -86,10 +87,11 @@ func _build_ui() -> void:
 	_stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_stage)
 
-	# 以降（ページ表示・ヒントバー）はスライド領域より前面に固定表示
+	# 以降（ページ表示・操作ボタン・グロー枠・操作説明バー）はスライド領域より前面に固定表示
 	_build_page_indicator()
 	_build_nav_buttons()
 	_build_focus_border()
+	_build_bottom_bar()
 
 ## ページ表示（上部中央 "1 / 3"）
 func _build_page_indicator() -> void:
@@ -224,6 +226,17 @@ func _flat_style(bg: Color, corner: int) -> StyleBoxFlat:
 	s.content_margin_bottom = 10
 	return s
 
+## 操作説明バー（カルーセル/ブラウズ共通の BottomBar）。ヒントは Enter のみ。
+## 可視は _process で _using_mouse に応じて切替（マウス操作中は非表示、store_browse と同じ）。
+func _build_bottom_bar() -> void:
+	var packed := load("res://scenes/components/bottom_bar.tscn") as PackedScene
+	if packed == null:
+		return
+	_bottom_bar = packed.instantiate()
+	add_child(_bottom_bar)
+	if _bottom_bar.has_method("set_hints"):
+		_bottom_bar.set_hints([["Enter", "決定"]])
+
 ## ボタンの状態更新: 先頭で「戻る」無効、最終で「進む」を「ストアへ」表記に。
 func _update_nav_buttons() -> void:
 	if _btn_back:
@@ -266,6 +279,9 @@ func _process(delta: float) -> void:
 	if _glow:
 		_glow.update(delta)        # グロー明滅（ブリージング）
 	_update_focus_border(delta)
+	# 操作説明バーもマウス操作中は隠す（store_browse と同じ分離）
+	if _bottom_bar:
+		_bottom_bar.get_panel().visible = not _using_mouse
 
 ## フォーカス中のボタンへグロー枠を lerp 追従させる。
 ## フォーカスが自分のボタン以外（ダイアログ等）へ移ったら枠を隠す＝追従も奪い返しもしない。
