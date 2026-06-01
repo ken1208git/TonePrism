@@ -17,6 +17,10 @@ const STORE_BROWSE_SCENE := "res://scenes/store_browse.tscn"
 const SLIDE_DX := 320.0   # 横スライド量(px)。旧は -dir*SLIDE_DX へ、新は +dir*SLIDE_DX から 0 へ
 const NAV_DUR := 0.4
 
+# スライド位置ドットの明暗（modulate.a）。アクティブ=白に近く、非アクティブ=灰。
+const DOT_ACTIVE_A := 0.95
+const DOT_INACTIVE_A := 0.30
+
 # --- 状態 ---
 var _db_manager: DatabaseManager
 var _slides: Array[IntroSlideInfo] = []
@@ -29,6 +33,7 @@ var _font_bold_cache: FontFile = null
 # --- コードで構築するノード参照 ---
 var _stage: Control                       # スライド本体（image+body）が横スライドする領域
 var _dots: Array[Panel] = []              # スライド位置のドット表示（白=現在 / 灰=他）
+var _dot_tween: Tween = null              # ドットの白⇄灰フェード用
 var _current_content: Control = null       # 現在表示中のスライドコンテンツ
 var _outgoing_content: Control = null      # 退場アニメ中の旧スライドコンテンツ
 var _nav_tween: Tween = null
@@ -143,26 +148,32 @@ func _build_dots() -> void:
 		_dots.append(dot)
 	_update_dots()
 
-## ドット1つ（10px の丸）。色は _update_dots で設定。
+## ドット1つ（10px の丸）。白固定の地で、明暗（白⇄灰）は modulate.a で表現しフェードできるようにする。
 func _make_dot() -> Panel:
 	var d := Panel.new()
 	d.custom_minimum_size = Vector2(10, 10)
 	d.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	d.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	d.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var s := StyleBoxFlat.new()
+	s.bg_color = Color(1, 1, 1, 1)   # 白固定。明暗は modulate.a で制御（フェード用）
+	s.set_corner_radius_all(5)        # 直径10の半分 = 丸
+	d.add_theme_stylebox_override("panel", s)
+	d.modulate.a = DOT_INACTIVE_A     # 既定は灰（非アクティブ）
 	return d
 
-func _dot_style(c: Color) -> StyleBoxFlat:
-	var s := StyleBoxFlat.new()
-	s.bg_color = c
-	s.set_corner_radius_all(5)   # 直径10の半分 = 丸
-	return s
-
-## 現在スライドのドットを白、他を灰に更新。
+## 現在スライドのドットを白、他を灰へ。切替はフェード（modulate.a を tween）。
 func _update_dots() -> void:
+	if _dots.is_empty():
+		return
+	if _dot_tween and _dot_tween.is_valid():
+		_dot_tween.kill()
+	_dot_tween = create_tween()
+	_dot_tween.set_parallel(true)
 	for i in range(_dots.size()):
-		var c := Color(1, 1, 1, 0.95) if i == _current else Color(1, 1, 1, 0.30)
-		_dots[i].add_theme_stylebox_override("panel", _dot_style(c))
+		var target_a := DOT_ACTIVE_A if i == _current else DOT_INACTIVE_A
+		_dot_tween.tween_property(_dots[i], "modulate:a", target_a, 0.2)\
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 ## 操作ボタン（下端）。戻る/進む＝中央の2分割（左=戻る・右=進む(青)、非対称角丸のまま少し隙間をあけて並べる）、
 ## スキップ＝右端の独立ピル。全ボタン枠なし。クリック操作用（キー ←/→/Enter 併用）。
@@ -298,7 +309,10 @@ func _build_bottom_bar() -> void:
 func _update_nav_buttons() -> void:
 	if _btn_back:
 		_btn_back.disabled = (_current <= 0)
-		# 無効化した「戻る」がフォーカスを持っていたら「進む」へ逃がす (無効ボタンは決定できないため)。
+		# 無効時は focus_mode を NONE にして「灰色なのに ← で選べてしまう」のを防ぐ
+		# （←/→ のフォーカス移動は無効ボタンをスキップする）。有効時は ALL に戻す。
+		_btn_back.focus_mode = Control.FOCUS_NONE if _btn_back.disabled else Control.FOCUS_ALL
+		# 無効化した瞬間にフォーカスを持っていたら「進む」へ逃がす。
 		if _btn_back.disabled and _btn_back.has_focus() and _btn_next:
 			_btn_next.grab_focus()
 	if _btn_next:
