@@ -162,6 +162,13 @@ namespace TonePrism.Manager
         /// </summary>
         public GameInfo EditedGame { get; private set; }
 
+        /// <summary>
+        /// (#209 review finding 1) OK/Cancel と独立に DB へ確定した破壊的変更 (= バージョン即時削除) が発生したか。
+        /// 即時削除は DialogResult.OK を介さず commit されるため、呼び出し側 (GameSectionPanel) は本フラグが true なら
+        /// DialogResult に関わらず一覧を再読込してメイン画面グリッドの stale 表示 (特に active 版付け替え後) を防ぐ。
+        /// </summary>
+        public bool DataChangedOutsideOk { get; private set; }
+
         public EditGameForm(DatabaseManager dbManager, GameInfo game)
         {
             InitializeComponent();
@@ -437,6 +444,221 @@ namespace TonePrism.Manager
             if (cmbVersionList.SelectedItem is GameVersion selectedVersion)
             {
                 LoadGameDataForVersion(selectedVersion);
+            }
+        }
+
+        /// <summary>
+        /// (#209) 「このバージョンを削除」: 選択中の版を即時削除する (DB 行 + 版フォルダ)。
+        /// OK/Cancel とは独立した確定操作 (確認ダイアログで明示)。最後の 1 版は削除不可。アクティブ版を
+        /// 削除した場合は残りの最新版に自動で付け替える。フォルダ + DB の整合は GameVersionDeletionService が
+        /// 3-phase + rollback で担保する。
+        /// </summary>
+        private void btnDeleteVersion_Click(object sender, EventArgs e)
+        {
+            if (!(cmbVersionList.SelectedItem is GameVersion target))
+            {
+                return; // 異常 (版が 1 件も無い等)。通常は到達しない。
+            }
+
+            // ガード: 最後の 1 版は削除不可 (ゲームは最低 1 版必要)。
+            if (cmbVersionList.Items.Count <= 1)
+            {
+                MessageBox.Show(this,
+                    "このゲームにはバージョンが 1 つしかないため、このバージョンだけを削除することはできません。\n" +
+                    "（ゲームには最低 1 つのバージョンが必要です。）\n\n" +
+                    "ゲームごと消したい場合は、ゲーム一覧の「削除」からゲームを削除してください。",
+                    "削除できません", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // セッション競合チェック (行 DML 扱い = Launcher 単独なら警告なし。フォルダロックは下の FolderLocked で処理)。
+            if (SessionConflictHelper.CheckBeforeWrite(this, "ゲームのバージョン削除") == DialogResult.Cancel)
+            {
+                return;
+            }
+
+            // フォルダパスは DB/disk 上の版数 (= _originalVersionByDbId) で解決する。フォーム上で版番号を
+            // pending リネーム中でも、disk フォルダはまだ旧名のため (rename は OK 押下時)。これを誤ると旧フォルダが orphan 化する。
+            string diskVersion = _originalVersionByDbId.TryGetValue(target.Id, out string ov) ? ov : target.Version;
+
+            // (#209 review finding 1) version 文字列が空だとフォルダパスを解決できず PathManager.GetVersionFolderLeaf が
+            // throw する (LoadVersions は空/異常 version をブロックせず警告のみ。version は NOT NULL だが空文字は許す)。
+            // ハンドラ内未捕捉の crash を避け、friendly に弾く。
+            if (string.IsNullOrWhiteSpace(diskVersion))
+            {
+                MessageBox.Show(this,
+                    "このバージョンは版数が空のため、フォルダの場所を特定できず削除できません。\n" +
+                    "先にバージョン番号を正しい値に直して保存してから、再度削除してください。",
+                    "削除できません", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string versionFolder = PathManager.GetVersionFolder(originalGame.GameId, diskVersion);
+            bool deletedIsActive = _initialSelectedVersionId.HasValue && target.Id == _initialSelectedVersionId.Value;
+
+            // 確認ダイアログ (必須・取り消し不可を明示)。版数は実際に消える disk/DB 上の確定値 (diskVersion) を表示する
+            // (#209 review finding 4: pending リネーム中は in-memory の target.Version と disk 版数が食い違うため、
+            //  下のフォルダ表示と一致する確定版数で揃える)。
+            var confirm = MessageBox.Show(this,
+                "次のバージョンを削除します。\n\n" +
+                "  ゲーム: " + originalGame.Title + "\n" +
+                "  バージョン: " + diskVersion + "\n" +
+                "  フォルダ: " + versionFolder + "\n\n" +
+                "・この操作は取り消せません。\n" +
+                (deletedIsActive
+                    ? "・このバージョンは現在ランチャーで表示中のため、削除後は残りの最新バージョンが自動で表示版になります。\n"
+                    : "") +
+                "\n削除してよろしいですか？",
+                "バージョン削除の確認", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+            if (confirm != DialogResult.Yes)
+            {
+                return;
+            }
+
+            // 削除実行 (フォルダ I/O + DB をワーカーで)。
+            GameVersionDeletionService.Result result = null;
+            using (var dialog = new ProcessingDialog((IProgress<ProgressInfo> progress, CancellationToken token) =>
+            {
+                progress?.Report(new ProgressInfo(-1, "バージョンを削除中...", diskVersion));
+                result = GameVersionDeletionService.Delete(dbManager, originalGame.GameId, target.Id, versionFolder);
+            })
+            {
+                Text = "バージョン削除中",
+                MarqueeMode = true,
+                AllowCancel = false
+            })
+            {
+                dialog.ShowDialog(this);
+            }
+
+            if (result == null)
+            {
+                MessageBox.Show(this, "バージョン削除処理が完了しませんでした。", "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            switch (result.Outcome)
+            {
+                case GameVersionDeletionService.Outcome.FolderLocked:
+                    MessageBox.Show(this,
+                        "バージョンフォルダを削除できませんでした。\n" +
+                        "このバージョンが Launcher でプレイ中の可能性があります。\n\n" +
+                        "Launcher を閉じてから、もう一度「このバージョンを削除」を押してください。\n\n" +
+                        "詳細: " + (result.Error != null ? result.Error.Message : "(不明)"),
+                        "削除できませんでした", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+
+                case GameVersionDeletionService.Outcome.DbFailedRolledBack:
+                    MessageBox.Show(this,
+                        "データベースからのバージョン削除に失敗しました。\n" +
+                        "退避したフォルダは元に戻したので、削除前の状態のままです。\n\n" +
+                        "詳細: " + (result.Error != null ? result.Error.Message : "(不明)"),
+                        "データベースエラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+
+                case GameVersionDeletionService.Outcome.DbFailedRollbackAlsoFailed:
+                    MessageBox.Show(this,
+                        "データベースからのバージョン削除に失敗し、退避したフォルダの復元にも失敗しました。\n" +
+                        "お手数ですが、次のフォルダを手動で元の場所に戻してください:\n" +
+                        "  退避先: " + result.PendingFolderPath + "\n" +
+                        "  本来の場所: " + versionFolder + "\n\n" +
+                        "詳細: " + (result.Error != null ? result.Error.Message : "(不明)"),
+                        "復旧が必要です", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+
+                case GameVersionDeletionService.Outcome.PhysicalDeleteDeferred:
+                    RemoveDeletedVersionFromUi(target, deletedIsActive, result.NewActiveVersion);
+                    MessageBox.Show(this,
+                        "バージョン「" + diskVersion + "」を削除しました。\n" +
+                        "ただし退避したフォルダの物理削除に失敗しました。後で手動で削除してください:\n  " + result.PendingFolderPath,
+                        "削除（フォルダ残存の警告）", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+
+                case GameVersionDeletionService.Outcome.Success:
+                    RemoveDeletedVersionFromUi(target, deletedIsActive, result.NewActiveVersion);
+                    MessageBox.Show(this, "バージョン「" + diskVersion + "」を削除しました。",
+                        "完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+            }
+        }
+
+        /// <summary>
+        /// (#209) 版削除が成功した後にフォーム内 in-memory 状態を同期する。cmbVersionList から削除版を除き、
+        /// 再選択先を **id 基準** で決める (in-memory の pending リネーム文字列に依存しない):
+        /// アクティブ版を消した → 残りの最新 (id 最大) を新アクティブに / それ以外を消した → 既存アクティブを選び直す。
+        /// _originalVersionByDbId / pending external image 追跡 / _initialSelectedVersionId も整合させる。
+        /// </summary>
+        private void RemoveDeletedVersionFromUi(GameVersion target, bool deletedWasActive, string newActiveVersionFromDb)
+        {
+            // (#209 review finding 1) DialogResult に依らず親へ再読込を促すフラグ。即時削除は OK を介さず DB 確定する。
+            DataChangedOutsideOk = true;
+            // combo を安全に mutate するため SelectedIndexChanged を一時的に外す (途中発火で削除版へ save するのを防ぐ)。
+            cmbVersionList.SelectedIndexChanged -= cmbVersionList_SelectedIndexChanged;
+            GameVersion reselect = null;
+            try
+            {
+                cmbVersionList.Items.Remove(target);
+                currentDisplayingVersion = null; // 削除済オブジェクトに SaveGameDataToVersion しないよう無効化。
+
+                if (deletedWasActive)
+                {
+                    // 残りの最新 (id 最大) を新アクティブに。
+                    foreach (var item in cmbVersionList.Items)
+                    {
+                        if (item is GameVersion gv && (reselect == null || gv.Id > reselect.Id)) reselect = gv;
+                    }
+                    _initialSelectedVersionId = reselect?.Id; // アクティブが新版へ移動 (DB 側も付け替え済)。
+                }
+                else
+                {
+                    // 既存アクティブ (id 一致) を選び直す。見つからなければ最新 (id 最大) に fallback。
+                    foreach (var item in cmbVersionList.Items)
+                    {
+                        if (item is GameVersion gv && _initialSelectedVersionId.HasValue && gv.Id == _initialSelectedVersionId.Value)
+                        {
+                            reselect = gv;
+                            break;
+                        }
+                    }
+                    if (reselect == null)
+                    {
+                        foreach (var item in cmbVersionList.Items)
+                        {
+                            if (item is GameVersion gv && (reselect == null || gv.Id > reselect.Id)) reselect = gv;
+                        }
+                    }
+                }
+
+                cmbVersionList.SelectedItem = reselect;
+            }
+            finally
+            {
+                cmbVersionList.SelectedIndexChanged += cmbVersionList_SelectedIndexChanged;
+            }
+
+            if (deletedWasActive)
+            {
+                // (#209 review finding 2/3) active を消した場合、originalGame.Version を DB が確定した新 active
+                // (= DeleteGameVersionAndReassignActive の戻り値 = DB 真値) に同期する。怠ると OK 時の active 切替
+                // 確認ダイアログ等が削除済みの旧版数を「現在の表示版」として提示してしまう。再選択 (reselect, id 基準) は
+                // DB が付け替えた版と同じ行を指すが、in-memory は pending リネーム文字列を持ちうるため、表示用の
+                // 真値としては DB 戻り値 newActiveVersionFromDb を使う (OK 押下時に in-memory 値へ収束する)。
+                // (#209 review D1) originalGame の他ミラー列 (ExecutablePath/Thumbnail 等) は意図的に未同期。
+                // active 切替確認が使うのは .Version のみで、OK 保存は選択中 version オブジェクト + フォーム値から
+                // games 行を再構築するため、ここで他列を直さなくても stale 値は使われない (originalGame を
+                // 「DB の完全スナップショット」と誤読しないこと)。DB 側のミラーは MirrorActiveVersionIntoGame で更新済。
+                originalGame.Version = newActiveVersionFromDb;
+            }
+
+            // 追跡 dict から削除版を除去。
+            _originalVersionByDbId.Remove(target.Id);
+            _pendingExternalThumbnailByVersionId.Remove(target.Id);
+            _pendingExternalBackgroundByVersionId.Remove(target.Id);
+
+            // 再選択した版を UI に反映 (currentDisplayingVersion も更新される)。
+            if (reselect != null)
+            {
+                LoadGameDataForVersion(reselect);
             }
         }
 
@@ -901,10 +1123,10 @@ namespace TonePrism.Manager
             }
 
             // (#158 Q2) cmbVersionList 内で version 文字列の重複が無いか check。
-            // game_versions table は (game_id, version) UNIQUE 制約を持たないので、ユーザーが
-            // EditGameForm でうっかり 2 つの version を同じ名前にすると DB に同 (gameId, version)
-            // の row が並ぶ silent danger があった (= Launcher 側で「どちらの version か」決定不能)。
-            // app-level check で OK 押下時に block する形で fix。
+            // 【補足 #209】このコメントは #158 当時の記述。現在は v15/v17 で game_versions(game_id, version COLLATE
+            // NOCASE) に UNIQUE INDEX があり (SchemaManager.EnsureGameVersionsVersionUniqueIndex)、DB レベルでも
+            // 重複は不可。本 app-level check は DB 制約違反の生エラーより前に friendly な block を出す pre-check として
+            // 残す (= 同一 version 文字列の行は DB に並ばないため、active 判定が文字列でも行を一意特定できる)。
             // 現在編集中の表示内容も反映させるため、選択中 version に対して SaveGameDataToVersion
             // を 1 回呼んでから判定する (= まだ commit してない最新 version 文字列も拾う)。
             if (cmbVersionList.SelectedItem is GameVersion currentSelected)

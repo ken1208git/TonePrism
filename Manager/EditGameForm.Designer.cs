@@ -59,6 +59,7 @@ namespace TonePrism.Manager
             this.txtBackgroundPath = new System.Windows.Forms.TextBox();
             this.lblVersionManagement = new System.Windows.Forms.Label();
             this.cmbVersionList = new System.Windows.Forms.ComboBox();
+            this.btnDeleteVersion = new System.Windows.Forms.Button();
             this.btnSelectBackground = new System.Windows.Forms.Button();
             this.lblExecutablePath = new System.Windows.Forms.Label();
             this.txtExecutablePath = new System.Windows.Forms.TextBox();
@@ -563,6 +564,17 @@ namespace TonePrism.Manager
             this.cmbVersionList.TabIndex = 44;
             this.cmbVersionList.SelectedIndexChanged += new System.EventHandler(this.cmbVersionList_SelectedIndexChanged);
             //
+            // btnDeleteVersion
+            //
+            this.btnDeleteVersion.Location = new System.Drawing.Point(800, 381);
+            this.btnDeleteVersion.Margin = new System.Windows.Forms.Padding(2);
+            this.btnDeleteVersion.Name = "btnDeleteVersion";
+            this.btnDeleteVersion.Size = new System.Drawing.Size(140, 23);
+            this.btnDeleteVersion.TabIndex = 45;
+            this.btnDeleteVersion.Text = "このバージョンを削除";
+            this.btnDeleteVersion.UseVisualStyleBackColor = true;
+            this.btnDeleteVersion.Click += new System.EventHandler(this.btnDeleteVersion_Click);
+            //
             // lblVersionDescription
             //
             this.lblVersionDescription.AutoSize = true;
@@ -702,6 +714,7 @@ namespace TonePrism.Manager
             this.Controls.Add(this.txtThumbnailPath);
             this.Controls.Add(this.lblThumbnailPath);
             this.Controls.Add(this.cmbVersionList);
+            this.Controls.Add(this.btnDeleteVersion);
             this.Controls.Add(this.lblVersionManagement);
             this.Controls.Add(this.chkIsVisible);
             this.Controls.Add(this.cmbSupportedConnection);
@@ -779,6 +792,7 @@ namespace TonePrism.Manager
         private System.Windows.Forms.TextBox txtBackgroundPath;
         private System.Windows.Forms.Label lblVersionManagement;
         private System.Windows.Forms.ComboBox cmbVersionList;
+        private System.Windows.Forms.Button btnDeleteVersion;
         private System.Windows.Forms.Button btnSelectBackground;
         private System.Windows.Forms.Label lblExecutablePath;
         private System.Windows.Forms.TextBox txtExecutablePath;

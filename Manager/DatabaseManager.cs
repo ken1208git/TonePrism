@@ -27,9 +27,16 @@ namespace TonePrism.Manager
         private readonly RestoreService _restoreService;
         private readonly ManagerSessionRepository _sessionRepo;
 
-        public DatabaseManager()
+        public DatabaseManager() : this(new DatabaseConnection()) { }
+
+        /// <summary>
+        /// (#209 テスト基盤) 任意の <see cref="DatabaseConnection"/> (一時 DB) を指して構築する。production は
+        /// 既定 ctor (= PathManager.DatabasePath) 経由。DataLayerRoundTripTests と同じ #239 方針 (PathManager の
+        /// プロジェクトルート検出に依存せずデータ層を単体で回す)。
+        /// </summary>
+        internal DatabaseManager(DatabaseConnection conn)
         {
-            _conn = new DatabaseConnection();
+            _conn = conn;
             _schema = new SchemaManager(_conn);
             _devRepo = new DeveloperRepository(_conn);
             _gameRepo = new GameRepository(_conn, _devRepo);
@@ -117,6 +124,94 @@ namespace TonePrism.Manager
                     }
                 }
             });
+        }
+
+        /// <summary>
+        /// (#209) 個別バージョンを削除し、削除版が games の active 版 (= Launcher 表示中) だった場合は残りの最新版
+        /// (id DESC 先頭) に **games 行を full mirror して** 付け替える。版行削除 + active 付け替えを 1 transaction で
+        /// atomic に行う (AddVersionAndActivate と同じ partial-commit 窓閉鎖)。version 別 developers は version_id FK の
+        /// ON DELETE CASCADE で自動削除される。
+        ///
+        /// **付け替えは version 文字列だけでなく executable_path / thumbnail 等のミラー列も更新する** (#209 review Codex P1)。
+        /// version 文字列だけ書き換えると games.executable_path 等が削除済みフォルダを指したまま残り、Launcher が games.* を
+        /// 直読みするため**そのゲームが起動不能**になる。`GameRepository.MirrorActiveVersionIntoGameInTransaction` を使う。
+        ///
+        /// **active 判定は DB の真値で行う**: 引数は versionId のみで、版数文字列は DB から引く (フォーム上で版番号を pending
+        /// リネーム中でも dangling を起こさない)。**games.version が NULL のゲーム** (異常 DB) も「付け替えが必要」として
+        /// 扱う (#209 review Codex P3、NULL のまま残して mirror が stale になるのを防ぐ)。
+        ///
+        /// **最後の 1 版は削除不可を transaction 内でも enforce** (#209 review Codex P2): UI ガードが並行 Manager で
+        /// stale になっても 0 版ゲームを作らないよう、残存版数を数えて 1 以下なら例外を投げる。並行削除の race を
+        /// 防ぐため BEGIN IMMEDIATE (Serializable) で RESERVED lock を先取りする (AddGameAtTop と同パターン)。
+        /// </summary>
+        /// <returns>削除後の games.version (= アクティブ版数文字列、DB の値)。</returns>
+        /// <exception cref="InvalidOperationException">最後の 1 版を削除しようとした場合 (= 0 版になる)。</exception>
+        public string DeleteGameVersionAndReassignActive(string gameId, int versionId)
+        {
+            return _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var transaction = connection.BeginTransaction(System.Data.IsolationLevel.Serializable))
+                    {
+                        try
+                        {
+                            // (P2) transaction 内で残存版数を確認。最後の 1 版なら拒否 (0 版ゲームを作らない)。
+                            int count = _versionRepo.CountVersionsInTransaction(connection, transaction, gameId);
+                            if (count <= 1)
+                            {
+                                throw new InvalidOperationException(
+                                    "最後の 1 バージョンは削除できません (このゲームの残存バージョン数=" + count
+                                    + ")。別の Manager が同時に削除した可能性があります。");
+                            }
+
+                            // 削除対象版の DB version 文字列 (active 判定の真値) を先に取得。
+                            string deletedVersionString = _versionRepo.GetVersionStringByIdInTransaction(connection, transaction, versionId);
+
+                            // 版行を削除 (developers は version_id FK cascade)。
+                            _versionRepo.DeleteVersionRowInTransaction(connection, transaction, versionId);
+
+                            // games.version が「削除版」または NULL (P3) なら、残り最新版を games 行へ full mirror して付け替え。
+                            string currentActive = ReadGameVersionColumn(connection, transaction, gameId);
+                            string newActive = currentActive;
+                            bool needsReassign = currentActive == null
+                                || (deletedVersionString != null
+                                    && string.Equals(currentActive, deletedVersionString, StringComparison.OrdinalIgnoreCase));
+                            if (needsReassign)
+                            {
+                                int? newActiveId = _versionRepo.GetLatestRemainingVersionIdInTransaction(connection, transaction, gameId);
+                                if (newActiveId == null)
+                                {
+                                    // count>=2 を確認済なので通常到達しない (defensive)。
+                                    throw new InvalidOperationException("残存バージョンが見つからず active を付け替えできません。");
+                                }
+                                _gameRepo.MirrorActiveVersionIntoGameInTransaction(connection, transaction, gameId, newActiveId.Value);
+                                newActive = ReadGameVersionColumn(connection, transaction, gameId);
+                            }
+
+                            transaction.Commit();
+                            return newActive;
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+                }
+            });
+        }
+
+        // (#209) games.version 列を読む helper (DeleteGameVersionAndReassignActive の active 判定 / 戻り値用)。
+        private static string ReadGameVersionColumn(SQLiteConnection connection, SQLiteTransaction transaction, string gameId)
+        {
+            using (var command = new SQLiteCommand("SELECT version FROM games WHERE game_id = @gameId", connection, transaction))
+            {
+                command.Parameters.AddWithValue("@gameId", gameId);
+                object result = command.ExecuteScalar();
+                return result == null || result == DBNull.Value ? null : (string)result;
+            }
         }
 
         /// <summary>
