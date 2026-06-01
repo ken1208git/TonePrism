@@ -145,7 +145,7 @@ namespace TonePrism.Manager.Services
                 {
                     Logger.Warn("[GameVersionDeletionService] (#209) DB 削除済だが退避フォルダの物理削除に失敗 (orphan 残存): "
                         + pendingFolder + ": "
-                        + (del.LastError != null ? del.LastError.Message : "(不明)")
+                        + del.ErrorMessage
                         + (phase3Unexpected != null ? " (想定外例外: " + phase3Unexpected.GetType().Name + ")" : ""));
                     return new Result
                     {

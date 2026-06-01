@@ -18,13 +18,19 @@ namespace TonePrism.Manager.Services
             public bool Success { get; set; }
             public Exception LastError { get; set; }
             public string Path { get; set; }
+
+            /// <summary>(#288 review) ログ/メッセージ用の最終エラー文言。LastError 不在時は "(不明)"。呼び出し側の null-guard 重複を集約。</summary>
+            public string ErrorMessage => LastError != null ? LastError.Message : "(不明)";
         }
 
         /// <summary>
-        /// フォルダを最大 5 回 × 200ms 間隔でリトライ削除する (read-only 属性は ForceDeleteDirectory が再帰解除、#209)。
-        /// `IOException` / `UnauthorizedAccessException` は transient lock とみなし retry、それ以外の想定外例外は retry せず
-        /// 即 `Result` (`Success=false`, `LastError` セット) を返す。**本メソッドは throw しない (best-effort never-throw API)**
-        /// (#288): cleanup / rollback の呼び出し側が全例外 swallow を各所で書かずに `Result.Success` だけ見れば済む。
+        /// フォルダを最大 5 回 × 200ms 間隔でリトライ削除する。
+        /// `IOException`（使用中ロック等）と一時的な `UnauthorizedAccessException` は待機 retry で解消を狙う。
+        /// **read-only 属性由来の `UnauthorizedAccessException` は待っても消えない**が、2 回目以降は `Directory.Delete` →
+        /// `ForceDeleteDirectory`（属性を再帰解除しながら削除）に切り替わるため解決する（fast-path→robust-path 切替、#209）。
+        /// それ以外の想定外例外は retry せず即 `Result` (`Success=false`, `LastError` セット) を返す。
+        /// **本メソッドは throw しない (best-effort never-throw API、#288)**: cleanup / rollback の呼び出し側が
+        /// 全例外 swallow を各所で書かずに `Result.Success` だけ見れば済む。
         /// path が null/空、またはフォルダが存在しない場合は `Success=true` を返す。
         /// </summary>
         public static Result TryDelete(string path)

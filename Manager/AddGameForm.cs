@@ -294,8 +294,9 @@ namespace TonePrism.Manager
                 var wipeResult = FolderDeletionService.TryDelete(gameBaseFolder);
                 if (!wipeResult.Success)
                 {
+                    // (#288 review) 原因はロック (Launcher 等が使用中) が大半だが、権限/属性の問題もありうるため断定せず併記。
                     throw new Exception(
-                        $"既存のゲームフォルダの削除に失敗しました（Launcher 等が使用中の可能性があります）:\n  {gameBaseFolder}\n\n{(wipeResult.LastError != null ? wipeResult.LastError.Message : "(不明)")}",
+                        $"既存のゲームフォルダの削除に失敗しました（Launcher 等が使用中、またはフォルダの権限・属性の問題の可能性があります）:\n  {gameBaseFolder}\n\n{wipeResult.ErrorMessage}",
                         wipeResult.LastError);
                 }
             }
@@ -688,7 +689,7 @@ namespace TonePrism.Manager
                 // (#288) read-only な Unity/Godot コピー (Assets/Library 等) でも消せるよう FolderDeletionService 経由。
                 // 旧 bare catch を Result 判定 + Logger.Warn に変更 (silent な zombie ゲームフォルダ残留の痕跡を残す)。
                 var delResult = FolderDeletionService.TryDelete(destinationGameFolder);
-                if (!delResult.Success) Logger.Warn("[AddGameForm] (#288) rollback の versionDir 削除失敗 (read-only/ロック等): " + destinationGameFolder + ": " + (delResult.LastError != null ? delResult.LastError.Message : "(不明)"));
+                if (!delResult.Success) Logger.Warn("[AddGameForm] (#288) rollback の versionDir 削除失敗 (read-only/ロック等): " + destinationGameFolder + ": " + delResult.ErrorMessage);
             }
 
             if (baseGameFolderCreated && !string.IsNullOrEmpty(baseGameFolder) && Directory.Exists(baseGameFolder))
