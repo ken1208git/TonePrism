@@ -1973,6 +1973,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **`VersionInventory.ReadLauncherVersion` の読み取り対象を `Launcher/version.gd` の `MAJOR/MINOR/PATCH` 3 正規表現 → `Launcher/project.godot` の `[application] config/version="X.Y.Z"` 1 正規表現に変更**（#281 で Launcher 版数の SoT が project.godot config/version に移行したため）。Manager は Godot を実行できないので、従来どおりファイルを直接 parse する。不要になった `MajorRegex`/`MinorRegex`/`PatchRegex`/`TryReadInt` を削除し、`ConfigVersionRegex` 1 本に集約。読み取り失敗時 `null` → UI「不明」表示の fail-soft 方針は不変。
 - `ConfigVersionRegex` は `config/version`（スラッシュ）を literal match し、project.godot 先頭の `config_version`（アンダースコア、Godot ファイル形式版）には誤マッチしない。
 - 配布側: Release.ps1 が install 先に同梱するファイルを `Launcher/version.gd` → `Launcher/project.godot` に差し替え済（下記 Release Tooling 参照）。dev では `BaseDirectory` がリポジトリルートに解決され `Launcher/project.godot`（ソース）を直読み、prod では `<install>/Launcher/project.godot`（Release.ps1 同梱コピー）を読む。
+- レビュー対応: パース部を純関数 `ParseConfigVersion(content)` に切り出し（I/O から分離）、`Manager.Tests/VersionInventoryTests`（16 ケース: 正常 3 part / `config_version=5` への誤マッチ防止 / CRLF / 2・4 part 不可 / クォート・記法違い / Int32 超過 / null）で SoT パーサの回帰を固定。`InternalsVisibleTo("TonePrism_Manager.Tests")` でテストから internal 参照可に。C# `ConfigVersionRegex` ↔ Release.ps1 `Assert-LauncherVersion` の同一 regex に相互同期コメントを追加（format 変更時の両側更新を discoverable に）。
 - bump 判断: 版数表示の出力は不変の内部リファクタだが exe が変わるため patch (v0.19.3 → v0.19.4)。
 
 ### [Manager v0.19.3] - 2026-06-01

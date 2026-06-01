@@ -1235,6 +1235,7 @@ function Assert-ChangelogLinkDefs {
 function Assert-LauncherVersion {
     # (#281) Launcher 版数の SoT は project.godot の [application] config/version="X.Y.Z"。
     # `config/version`(スラッシュ) を読む (line 9 の `config_version`(アンダースコア、Godot ファイル形式版) と別物)。
+    # ※同一パターンを Manager/Services/VersionInventory.cs `ConfigVersionRegex` も持つ。format 変更時は両方同期 (SPEC §3.7.8)。
     $projectGodot = Join-Path $LauncherDir 'project.godot'
     if (-not (Test-Path $projectGodot)) {
         Fail "project.godot が見つかりません: $projectGodot"

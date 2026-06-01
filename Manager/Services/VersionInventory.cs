@@ -83,6 +83,8 @@ namespace TonePrism.Manager.Services
         // `config/version`(スラッシュ) を literal match する (line 9 の Godot ファイル形式版 `config_version`
         // (アンダースコア) には誤マッチしない)。値は 3 part SemVer (X.Y.Z)。Manager は Godot を実行できない
         // ため、ProjectSettings ではなくファイルを直接 regex parse する。
+        // ※同一パターンを Release.ps1 `Assert-LauncherVersion` も持つ。project.godot の format が変わったら
+        //   両方を同期更新すること (SPEC §3.7.8 チェックリスト)。本パターンの回帰は `VersionInventoryTests` が守る。
         private static readonly Regex ConfigVersionRegex = new Regex(
             "^\\s*config/version\\s*=\\s*\"(?<v>\\d+\\.\\d+\\.\\d+)\"\\s*$",
             RegexOptions.Multiline | RegexOptions.Compiled);
@@ -99,25 +101,34 @@ namespace TonePrism.Manager.Services
                     return null;
                 }
                 string content = File.ReadAllText(path, System.Text.Encoding.UTF8);
-                Match m = ConfigVersionRegex.Match(content);
-                if (!m.Success)
+                Version v = ParseConfigVersion(content);
+                if (v == null)
                 {
-                    // (#281) config/version 行が見つからない = project.godot format 想定外。
+                    // (#281) config/version 行が見つからない / 値が SemVer でない = project.godot format 想定外。
                     // SPEC §3.7.8 の同期チェックリストを更新の手掛かりとして trail を残す。
                     Logger.Warn("[VersionInventory] ReadLauncherVersion: project.godot から config/version を読み取れず "
                         + "(path=" + path + ") — SPEC §3.7.8 / project.godot [application] config/version 参照");
-                    return null;
                 }
-                Version v;
-                if (Version.TryParse(m.Groups["v"].Value, out v)) return v;
-                Logger.Warn("[VersionInventory] ReadLauncherVersion: config/version parse 失敗 ('" + m.Groups["v"].Value + "')");
-                return null;
+                return v;
             }
             catch (Exception ex)
             {
                 Logger.Warn("[VersionInventory] ReadLauncherVersion 例外: " + ex.Message);
                 return null;
             }
+        }
+
+        /// <summary>
+        /// (#281) project.godot の本文から `config/version="X.Y.Z"` を抽出する純関数 (テスト可能なように I/O から分離)。
+        /// 該当行なし / 値が 3 part SemVer でない / 各 part が Int32 超過 (TryParse 失敗) の場合は null。
+        /// </summary>
+        internal static Version ParseConfigVersion(string content)
+        {
+            if (string.IsNullOrEmpty(content)) return null;
+            Match m = ConfigVersionRegex.Match(content);
+            if (!m.Success) return null;
+            Version v;
+            return Version.TryParse(m.Groups["v"].Value, out v) ? v : null;
         }
 
         public static Version ReadUpdaterVersion()
