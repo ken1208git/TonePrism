@@ -1947,9 +1947,9 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
-### [Manager v0.20.0] - 2026-06-01
+### [Manager v0.19.3] - 2026-06-01
 
-#### Added (#278 ① — Launcher 起動中でもゲーム情報を編集できるよう警告をスコープ分け)
+#### Changed (#278 ① — Launcher 起動中でもゲーム情報を編集できるよう警告をスコープ分け)
 
 - **文化祭当日、Launcher を立てたまま Manager で編集してもセッション競合警告を出さない**（通常の行編集に限る）。背景: Launcher は DB 読み取り専用（SELECT のみ、heartbeat は file）で、`journal_mode=DELETE` + `busy_timeout` の下では「Manager の行 write」と「Launcher の read」を SQLite が安全に調停する（write-write 競合なし・持続ロックなし）。従来は Launcher 稼働を検出すると編集のたびに警告が出ていた。
 - 判定を純ロジック **`Services/SessionConflictPolicy.ShouldWarn(otherManagerCount, launcherCount, op)`** に抽出（AGENTS「UI は薄く、ロジックは外へ」）。ルール: **別 Manager 検出時は操作種別を問わず常に警告**（write-write の本当の危険）／**Launcher 単独稼働なら、`toneprism.db` をファイルごと差し替える操作（"バックアップ復元" / "データベース初期化"）だけ警告し、通常の行編集（ゲーム/セクション/初回説明/設定/バックアップ作成・削除等）は警告しない**。`MainForm.CheckSessionConflictBeforeWrite` から委譲。
