@@ -141,6 +141,16 @@
 
 **注意 (#160 で section 責務分離)**: `Updater` 等の **runtime exe 群** (= SPEC §2.4 Companions 配置) の changelog は本 section ではなく **`## Companions`** (旧 `## Updater (Companions/Updater)`、本 PR で section 名を一般化) に記載する。本 section は build / 配布スクリプトのみ対象。Bundle v0.4.0 以前 (= 本 PR merge 前) の Updater 変更履歴は `## Release Tooling` の過去 entry (= round 1〜8 review 詳細等) に retain、retroactive consolidation は scope creep のため見送り (= PR #159 round 4 「SPEC 1 PR 1 bump 規約」導入時と同 pattern)。
 
+### [Release Tooling v0.1.23] - 2026-06-01
+
+#### Changed (#281 — Launcher 版数 SoT 移行に伴う release 基盤の追従)
+
+- **`Assert-LauncherVersion` を `version.gd` の `MAJOR/MINOR/PATCH` 読み → `project.godot` の `config/version="X.Y.Z"` 読みに変更**（Launcher 版数の SoT が project.godot config/version に移行、#281）。`config/version`（スラッシュ）を読み `config_version`（Godot ファイル形式版）には誤マッチしない。
+- **Phase 2 (`Set-ManifestVersions`) の project.godot config/version 同期を撤去**。config/version は SoT 自身（`Assert-LauncherVersion` がそこから読む）なので同期不要。派生先である `export_presets.cfg` の `file_version`/`product_version` の stamp は維持。
+- **install 先同梱ファイルを `Launcher/version.gd` → `Launcher/project.godot` に差し替え**（`$filesTemplates` と `$script:BundleManifestFiles` の両 SoT を更新）。エクスポート済み Launcher exe は project.godot を .pck 内に隠匿するため、Manager UI の `VersionInventory` が parse できるよう project.godot のコピーを明示同梱する（旧 version.gd 同梱と同じ理由）。manifest 駆動の `UpdateDownloader.ValidateStaging` は `$script:BundleManifestFiles` 更新で自動追従。`ValidateStagingLegacy`（v0.3.0 zip 構造に凍結された fallback）は実在の旧 zip に match させる必要があるため version.gd 参照のまま据え置き。
+- ヘッダの「version.gd = Launcher version の SoT」コメントを「project.godot config/version = SoT」に更新。
+- bump 判断: 配布スクリプトの変更のみ。patch (v0.1.22 → v0.1.23)。Bundle への反映は次回リリース実行時。
+
 ### [Release Tooling v0.1.22] - 2026-05-27
 
 #### Fixed (累積コードレビュー指摘の対応)
@@ -1289,6 +1299,15 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.10.2] - 2026-06-01
+
+#### Changed (#281 — Launcher 版数の SoT を project.godot config/version に一本化)
+
+- **`version.gd` から版数の数字（`const MAJOR/MINOR/PATCH`）を撤去し、`project.godot` の `[application] config/version="X.Y.Z"` を SoT に一本化**。version.gd は `ProjectSettings.get_setting("application/config/version")` を読むだけの薄いアクセサに変更（API `get_version_string()` / `get_version_number()` は不変なので consumer〔`debug_overlay` / `service_mode_overlay` / `session_heartbeat`〕は無改修）。従来は version.gd の定数と project.godot config/version の二重持ちで、開発バンプのたびに手で両方を合わせる必要があった。
+- 旧 version.gd 冒頭の「DO NOT CHANGE FORMAT（Manager が parse する）」制約を撤廃（Manager は version.gd を parse しなくなった、下記 Manager v0.19.4 参照）。
+- 検証: 同梱 Godot 4.6.2 ヘッドレスで `Version.get_version_string()` が project.godot から `v0.10.2` を返すことを確認（parse エラーなし）。
+- bump 判断: 版数の出力は不変（出どころを移しただけ）の内部リファクタだが、.pck（version.gd）が変わるため patch (v0.10.1 → v0.10.2)。
+
 ### [Launcher v0.10.1] - 2026-06-01
 
 #### Changed (#278 ② — ブラウズが DB ハンドルを握りっぱなしにしない)
@@ -1946,6 +1965,15 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.19.4] - 2026-06-01
+
+#### Changed (#281 — Launcher 版数読み取りを project.godot config/version に変更)
+
+- **`VersionInventory.ReadLauncherVersion` の読み取り対象を `Launcher/version.gd` の `MAJOR/MINOR/PATCH` 3 正規表現 → `Launcher/project.godot` の `[application] config/version="X.Y.Z"` 1 正規表現に変更**（#281 で Launcher 版数の SoT が project.godot config/version に移行したため）。Manager は Godot を実行できないので、従来どおりファイルを直接 parse する。不要になった `MajorRegex`/`MinorRegex`/`PatchRegex`/`TryReadInt` を削除し、`ConfigVersionRegex` 1 本に集約。読み取り失敗時 `null` → UI「不明」表示の fail-soft 方針は不変。
+- `ConfigVersionRegex` は `config/version`（スラッシュ）を literal match し、project.godot 先頭の `config_version`（アンダースコア、Godot ファイル形式版）には誤マッチしない。
+- 配布側: Release.ps1 が install 先に同梱するファイルを `Launcher/version.gd` → `Launcher/project.godot` に差し替え済（下記 Release Tooling 参照）。dev では `BaseDirectory` がリポジトリルートに解決され `Launcher/project.godot`（ソース）を直読み、prod では `<install>/Launcher/project.godot`（Release.ps1 同梱コピー）を読む。
+- bump 判断: 版数表示の出力は不変の内部リファクタだが exe が変わるため patch (v0.19.3 → v0.19.4)。
 
 ### [Manager v0.19.3] - 2026-06-01
 

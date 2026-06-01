@@ -5,7 +5,7 @@
 .DESCRIPTION
     Phase 1 (#108): Launcher + Manager のビルドと zip 化のみ。
         - CHANGELOG.md の最新 `### [Bundle v<X.Y.Z>]` エントリが Bundle version + release_notes 両方の SoT
-        - version.gd = Launcher version の SoT、AssemblyInfo.cs = Manager version の SoT
+        - project.godot config/version = Launcher version の SoT (#281)、AssemblyInfo.cs = Manager version の SoT
         - Bundle version は zip タグに使う（例: v0.1.0）
         - GitHub Releases の本文は CHANGELOG.md の該当 Bundle セクションから自動抽出
         - Godot エディタとエクスポートテンプレートは tools/godot/ + %APPDATA%/Godot/export_templates/ に自動ダウンロード（バージョンピン留め + SHA256 検証 + キャッシュ + 3 回 retry）
@@ -1233,18 +1233,18 @@ function Assert-ChangelogLinkDefs {
 # ============================================================================
 
 function Assert-LauncherVersion {
-    $versionGd = Join-Path $LauncherDir 'version.gd'
-    if (-not (Test-Path $versionGd)) {
-        Fail "version.gd が見つかりません: $versionGd"
+    # (#281) Launcher 版数の SoT は project.godot の [application] config/version="X.Y.Z"。
+    # `config/version`(スラッシュ) を読む (line 9 の `config_version`(アンダースコア、Godot ファイル形式版) と別物)。
+    $projectGodot = Join-Path $LauncherDir 'project.godot'
+    if (-not (Test-Path $projectGodot)) {
+        Fail "project.godot が見つかりません: $projectGodot"
     }
-    $content = Get-Content $versionGd -Raw
-    $major = [regex]::Match($content, 'const\s+MAJOR\s*:\s*int\s*=\s*(\d+)').Groups[1].Value
-    $minor = [regex]::Match($content, 'const\s+MINOR\s*:\s*int\s*=\s*(\d+)').Groups[1].Value
-    $patch = [regex]::Match($content, 'const\s+PATCH\s*:\s*int\s*=\s*(\d+)').Groups[1].Value
-    if (-not $major -or -not $minor -or -not $patch) {
-        Fail "version.gd から MAJOR/MINOR/PATCH を読み取れませんでした"
+    $content = Get-Content $projectGodot -Raw
+    $m = [regex]::Match($content, '(?m)^\s*config/version\s*=\s*"(\d+\.\d+\.\d+)"\s*$')
+    if (-not $m.Success) {
+        Fail "project.godot から config/version (X.Y.Z) を読み取れませんでした"
     }
-    return "$major.$minor.$patch"
+    return $m.Groups[1].Value
 }
 
 function Assert-ManagerVersion {
@@ -1269,7 +1269,9 @@ function Assert-ComponentVersions {
 }
 
 # ============================================================================
-# Phase 2: project.godot / export_presets.cfg を Launcher version で同期
+# Phase 2: export_presets.cfg を Launcher version で同期
+# (#281) project.godot config/version は SoT 自身なので同期対象から外す。
+#         派生先である export_presets.cfg の file_version / product_version のみ stamp する。
 # ============================================================================
 
 function Write-FileUtf8NoBom {
@@ -1285,16 +1287,9 @@ function Set-ManifestVersions {
     $launcherVer = $script:LauncherVersion
     $fourPart = "$launcherVer.0"
 
-    # project.godot: config/version
-    $projectGodot = Join-Path $LauncherDir 'project.godot'
-    $content = [System.IO.File]::ReadAllText($projectGodot, [System.Text.Encoding]::UTF8)
-    $new = [regex]::Replace($content, '(config/version=")[^"]*(")', "`${1}$launcherVer`${2}")
-    if ($new -ne $content) {
-        Write-FileUtf8NoBom -Path $projectGodot -Content $new
-        Write-Ok "project.godot config/version → $launcherVer"
-    } else {
-        Write-Info "project.godot config/version は既に $launcherVer"
-    }
+    # (#281) project.godot config/version は Launcher 版数の SoT 自身なので、ここでは同期しない
+    # (Assert-LauncherVersion がそこから $script:LauncherVersion を読んでいる)。派生先である
+    # export_presets.cfg の file_version / product_version のみ SoT 基準で stamp する。
 
     # export_presets.cfg: application/file_version & product_version
     $exportPresets = Join-Path $LauncherDir 'export_presets.cfg'
@@ -1718,14 +1713,17 @@ function Copy-Templates {
     #     `Launcher/` `Manager/` 等と同階層)。Project 全体の SoT という semantic に整合。
     #     Manager UI Phase 4 のアップデートフロー [7]〜[10] では `FileReplacer.ReplaceFile` の単体
     #     file copy で更新 (Launcher.bat / Manager.bat の shortcut bat 置換と同 pattern)。
-    #   - Launcher/version.gd: Phase 4 で Manager UI の VersionInventory が Launcher 版数を抽出
-    #     するのに使う。Godot エクスポート成果物 (`bin/TonePrism_Launcher.exe` + `.pck` 等) には
-    #     `.gd` source が含まれない (= `.pck` 内に compile されて隠匿) ため、`Launcher/version.gd`
-    #     を staging 段階で明示的に同梱して install dir 配下に置く。Manager は
-    #     `<install>/Launcher/version.gd` を直接 parse して MAJOR/MINOR/PATCH 定数を読み取る。
+    #   - Launcher/project.godot: Phase 4 で Manager UI の VersionInventory が Launcher 版数を抽出
+    #     するのに使う (#281 で version.gd → project.godot config/version に SoT 移行)。Godot
+    #     エクスポート成果物 (`bin/TonePrism_Launcher.exe` + 埋め込み `.pck`) には project.godot が
+    #     `.pck` 内に焼き込まれて隠匿されるため、`Launcher/project.godot` を staging 段階で明示的に同梱して
+    #     install dir 配下に置く。Manager は `<install>/Launcher/project.godot` を直接 parse して
+    #     `[application] config/version="X.Y.Z"` を読み取る。
+    #     (loose な project.godot を exe の隣に置いても、配布版 exe は埋め込み pck を使うため runtime は無視する
+    #      = 旧来の version.gd 同梱と同じく inert。)
     $filesTemplates = @(
         @{ Src = 'CHANGELOG.md'; Dest = 'bundle\files\CHANGELOG.md'; Label = 'CHANGELOG.md (Bundle SoT for Manager UI, Phase 4 #108)' },
-        @{ Src = 'Launcher\version.gd'; Dest = 'bundle\files\Launcher\version.gd'; Label = 'Launcher/version.gd (Launcher SoT for Manager UI VersionInventory, Phase 4 #108)' }
+        @{ Src = 'Launcher\project.godot'; Dest = 'bundle\files\Launcher\project.godot'; Label = 'Launcher/project.godot (Launcher SoT for Manager UI VersionInventory, #281)' }
     )
 
     foreach ($tpl in ($rootTemplates + $bundleTemplates + $filesTemplates)) {
@@ -1799,7 +1797,7 @@ $script:BundleManifestFiles = @(
     'Manager.bat',
     # bundle/files/ 配下 = インストール後の <親>\TonePrism\ に展開される payload
     'files\Launcher\TonePrism_Launcher.exe',
-    'files\Launcher\version.gd',                # Phase 4 #108: Manager UI VersionInventory が parse する SoT
+    'files\Launcher\project.godot',             # #281: Manager UI VersionInventory が parse する SoT (config/version)
     'files\Manager\TonePrism_Manager.exe',
     'files\Manager\TonePrism_Manager.exe.config',
     'files\Manager\System.Data.SQLite.dll',

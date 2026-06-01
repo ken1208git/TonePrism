@@ -12,7 +12,7 @@ namespace TonePrism.Manager.Services
     /// 対象:
     ///   - **Bundle**: `<install>/CHANGELOG.md` の最新 `### [Bundle vX.Y.Z]` から抽出 (zip 同梱、§3.7.7)
     ///   - **Manager**: 自身の Assembly.GetName().Version (AssemblyInfo.cs)
-    ///   - **Launcher**: `<install>/Launcher/version.gd` の `MAJOR / MINOR / PATCH` 定数を parse
+    ///   - **Launcher**: `<install>/Launcher/project.godot` の `[application] config/version="X.Y.Z"` を parse (#281)
     ///   - **Updater**: `<install>/Companions/Updater/TonePrism_Updater.exe` の FileVersionInfo
     ///   - **DB Schema**: SchemaManager.GetTargetDatabaseVersion() (= CurrentDbVersion)
     ///
@@ -23,7 +23,7 @@ namespace TonePrism.Manager.Services
     {
         /// <summary>
         /// 全 component のバージョンを 1 度に採取する。各 field は読み取り失敗時 null。
-        /// 同期 I/O 呼び出し (CHANGELOG read + version.gd read + FileVersionInfo) が走るので、UI thread から
+        /// 同期 I/O 呼び出し (CHANGELOG read + project.godot read + FileVersionInfo) が走るので、UI thread から
         /// 呼ぶ場合は MainForm_Load の DB 初期化と同レベルの latency (数 ms オーダー) を想定。
         /// </summary>
         public static InventorySnapshot Snapshot(int? dbSchemaVersion = null)
@@ -76,46 +76,42 @@ namespace TonePrism.Manager.Services
             }
         }
 
-        // version.gd は GDScript で:
-        //   const MAJOR: int = 0
-        //   const MINOR: int = 5
-        //   const PATCH: int = 17
-        // という 3 行を持つ。各行を regex で抽出。コメント / 空行 / 順序入れ替えにも耐える形で書く。
-        private static readonly Regex MajorRegex = new Regex(@"^\s*const\s+MAJOR\s*:\s*int\s*=\s*(?<v>\d+)\s*$",
-            RegexOptions.Multiline | RegexOptions.Compiled);
-        private static readonly Regex MinorRegex = new Regex(@"^\s*const\s+MINOR\s*:\s*int\s*=\s*(?<v>\d+)\s*$",
-            RegexOptions.Multiline | RegexOptions.Compiled);
-        private static readonly Regex PatchRegex = new Regex(@"^\s*const\s+PATCH\s*:\s*int\s*=\s*(?<v>\d+)\s*$",
+        // (#281) Launcher 版数の SoT は project.godot の `[application] config/version="X.Y.Z"` 1 行。
+        // 例:
+        //   [application]
+        //   config/version="0.10.1"
+        // `config/version`(スラッシュ) を literal match する (line 9 の Godot ファイル形式版 `config_version`
+        // (アンダースコア) には誤マッチしない)。値は 3 part SemVer (X.Y.Z)。Manager は Godot を実行できない
+        // ため、ProjectSettings ではなくファイルを直接 regex parse する。
+        private static readonly Regex ConfigVersionRegex = new Regex(
+            "^\\s*config/version\\s*=\\s*\"(?<v>\\d+\\.\\d+\\.\\d+)\"\\s*$",
             RegexOptions.Multiline | RegexOptions.Compiled);
 
         public static Version ReadLauncherVersion()
         {
             try
             {
-                string path = Path.Combine(PathManager.LauncherDir, "version.gd");
+                string path = Path.Combine(PathManager.LauncherDir, "project.godot");
                 if (!File.Exists(path))
                 {
-                    // (#108 Phase 4 round 6 M-2) version.gd 不在の診断 trail。
-                    Logger.Warn("[VersionInventory] ReadLauncherVersion: version.gd 不在 (path=" + path + ")");
+                    // (#108 Phase 4 round 6 M-2) project.godot 不在の診断 trail。
+                    Logger.Warn("[VersionInventory] ReadLauncherVersion: project.godot 不在 (path=" + path + ")");
                     return null;
                 }
                 string content = File.ReadAllText(path, System.Text.Encoding.UTF8);
-                int? major = TryReadInt(MajorRegex, content);
-                int? minor = TryReadInt(MinorRegex, content);
-                int? patch = TryReadInt(PatchRegex, content);
-                if (!major.HasValue || !minor.HasValue || !patch.HasValue)
+                Match m = ConfigVersionRegex.Match(content);
+                if (!m.Success)
                 {
-                    // (#108 Phase 4 round 6 M-2) 3 regex のどれかが miss = version.gd format 想定外
-                    // (型注釈削除 / rename / inline comment 等)。SPEC §3.7.8 の同期チェックリストと
-                    // version.gd 側 `DO NOT CHANGE FORMAT` コメントを更新の手掛かりとして trail を残す。
-                    Logger.Warn("[VersionInventory] ReadLauncherVersion: version.gd format 想定外 "
-                        + "(major=" + (major.HasValue ? major.Value.ToString() : "miss")
-                        + " minor=" + (minor.HasValue ? minor.Value.ToString() : "miss")
-                        + " patch=" + (patch.HasValue ? patch.Value.ToString() : "miss")
-                        + ") — SPEC §3.7.8 / version.gd の DO NOT CHANGE FORMAT 参照");
+                    // (#281) config/version 行が見つからない = project.godot format 想定外。
+                    // SPEC §3.7.8 の同期チェックリストを更新の手掛かりとして trail を残す。
+                    Logger.Warn("[VersionInventory] ReadLauncherVersion: project.godot から config/version を読み取れず "
+                        + "(path=" + path + ") — SPEC §3.7.8 / project.godot [application] config/version 参照");
                     return null;
                 }
-                return new Version(major.Value, minor.Value, patch.Value);
+                Version v;
+                if (Version.TryParse(m.Groups["v"].Value, out v)) return v;
+                Logger.Warn("[VersionInventory] ReadLauncherVersion: config/version parse 失敗 ('" + m.Groups["v"].Value + "')");
+                return null;
             }
             catch (Exception ex)
             {
@@ -149,13 +145,6 @@ namespace TonePrism.Manager.Services
             }
         }
 
-        private static int? TryReadInt(Regex regex, string content)
-        {
-            Match m = regex.Match(content);
-            if (!m.Success) return null;
-            int v;
-            return int.TryParse(m.Groups["v"].Value, out v) ? (int?)v : null;
-        }
     }
 
     /// <summary>
