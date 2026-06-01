@@ -31,6 +31,9 @@ var _page_label: Label
 var _current_content: Control = null       # 現在表示中のスライドコンテンツ
 var _outgoing_content: Control = null      # 退場アニメ中の旧スライドコンテンツ
 var _nav_tween: Tween = null
+var _btn_back: Button                      # 戻る（先頭スライドで無効化）
+var _btn_skip: Button                      # スキップ（→ストアへ）
+var _btn_next: Button                      # 進む（最終スライドでは「ストアへ」表記）
 
 func _ready() -> void:
 	set_process_input(true)
@@ -77,7 +80,7 @@ func _build_ui() -> void:
 
 	# 以降（ページ表示・ヒントバー）はスライド領域より前面に固定表示
 	_build_page_indicator()
-	_build_hint_bar()
+	_build_nav_buttons()
 
 ## ページ表示（上部中央 "1 / 3"）
 func _build_page_indicator() -> void:
@@ -95,24 +98,70 @@ func _build_page_indicator() -> void:
 	_page_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_margin.add_child(_page_label)
 
-## 操作ヒント（下部中央）。← 戻る / → Enter 次へ / Esc スキップ。
-func _build_hint_bar() -> void:
+## 操作ボタン（下部中央）。戻る / スキップ / 進む。クリック操作用（キーボード ←/→/Esc は _input で併用）。
+func _build_nav_buttons() -> void:
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	margin.add_theme_constant_override("margin_bottom", 40)
+	margin.add_theme_constant_override("margin_bottom", 48)
 	margin.add_theme_constant_override("margin_top", 20)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(margin)
 
 	var hbox := HBoxContainer.new()
 	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	hbox.add_theme_constant_override("separation", 40)
+	hbox.add_theme_constant_override("separation", 24)
 	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.add_child(hbox)
 
-	hbox.add_child(KeyHintBuilder.create_hint("←", "戻る"))
-	hbox.add_child(KeyHintBuilder.create_hint("→ / Enter", "次へ"))
-	hbox.add_child(KeyHintBuilder.create_hint("Esc", "スキップ"))
+	_btn_back = _make_nav_button("←  戻る")
+	_btn_back.pressed.connect(func() -> void: _navigate(-1))
+	hbox.add_child(_btn_back)
+
+	_btn_skip = _make_nav_button("スキップ")
+	_btn_skip.pressed.connect(func() -> void: _go_to_store())
+	hbox.add_child(_btn_skip)
+
+	_btn_next = _make_nav_button("進む  →")
+	_btn_next.pressed.connect(func() -> void: _navigate(1))
+	hbox.add_child(_btn_next)
+
+## ナビボタン1つを生成。キーボード/パッドは _input で処理するため focus は取らせない (Enter 二重発火防止)。
+func _make_nav_button(text: String) -> Button:
+	var btn := Button.new()
+	btn.text = text
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.custom_minimum_size = Vector2(180, 56)
+	btn.add_theme_font_override("font", _font_regular())
+	btn.add_theme_font_size_override("font_size", 22)
+	btn.add_theme_color_override("font_color", Color(1, 1, 1, 0.9))
+	btn.add_theme_color_override("font_hover_color", Color(1, 1, 1, 1))
+	btn.add_theme_color_override("font_pressed_color", Color(1, 1, 1, 1))
+	btn.add_theme_color_override("font_disabled_color", Color(1, 1, 1, 0.25))
+	btn.add_theme_stylebox_override("normal", _button_style(Color(1, 1, 1, 0.12)))
+	btn.add_theme_stylebox_override("hover", _button_style(Color(1, 1, 1, 0.22)))
+	btn.add_theme_stylebox_override("pressed", _button_style(Color(1, 1, 1, 0.30)))
+	btn.add_theme_stylebox_override("disabled", _button_style(Color(1, 1, 1, 0.05)))
+	return btn
+
+## ナビボタンのスタイル（キーキャップ風の半透明パネル + 角丸）
+func _button_style(bg: Color) -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.bg_color = bg
+	s.border_color = Color(1, 1, 1, 0.3)
+	s.set_border_width_all(1)
+	s.set_corner_radius_all(10)
+	s.content_margin_left = 24
+	s.content_margin_right = 24
+	s.content_margin_top = 10
+	s.content_margin_bottom = 10
+	return s
+
+## ボタンの状態更新: 先頭で「戻る」無効、最終で「進む」を「ストアへ」表記に。
+func _update_nav_buttons() -> void:
+	if _btn_back:
+		_btn_back.disabled = (_current <= 0)
+	if _btn_next:
+		_btn_next.text = "ストアへ  →" if _current >= _slides.size() - 1 else "進む  →"
 
 # --- スライドコンテンツ生成 ---
 
@@ -209,9 +258,12 @@ func _set_initial_slide(index: int) -> void:
 	_page_label.text = "%d / %d" % [index + 1, _slides.size()]
 	_current_content = _make_slide_content(_slides[index])
 	_stage.add_child(_current_content)
+	_update_nav_buttons()
 
-## 入力からの送り/戻し。端での挙動: 最終で「次へ」→ストア、先頭で「戻る」→何もしない。
+## 送り/戻し（キー入力・ボタン共通）。端での挙動: 最終で「進む」→ストア、先頭で「戻る」→何もしない。
 func _navigate(direction: int) -> void:
+	if _transitioning:
+		return
 	var target := _current + direction
 	if direction > 0 and target >= _slides.size():
 		_go_to_store()
@@ -235,6 +287,7 @@ func _animate_to(index: int, direction: int) -> void:
 
 	_current = index
 	_page_label.text = "%d / %d" % [index + 1, _slides.size()]
+	_update_nav_buttons()
 
 	var new_content := _make_slide_content(_slides[index])
 	_stage.add_child(new_content)
@@ -288,6 +341,15 @@ func _go_to_store_when_free() -> void:
 func _input(event: InputEvent) -> void:
 	if _transitioning:
 		return
+
+	# マウス移動でカーソル表示（ボタンをクリック操作可能に）、キー/パッドで非表示（キオスク既定）。
+	# store_browse と同じ分離。マウスクリックは下の action 判定に一致せずボタン側で処理される。
+	if event is InputEventMouseMotion:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		return
+	if event is InputEventKey or event is InputEventJoypadButton:
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+
 	if not event.is_pressed():
 		return
 
