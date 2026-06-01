@@ -40,6 +40,7 @@ var _focus_border: Panel
 var _glow: GlowAnimator
 var _focus_initialized: bool = false       # 初出現は zoom-in pop、以降 lerp 追従
 var _focus_pop_tween: Tween = null         # 初出現の zoom-in + フェードイン pop (他画面と同じ)
+var _focus_tweening: bool = false          # pop 中は追従 lerp を止める（scale 中の位置ドリフト防止）
 
 func _ready() -> void:
 	set_process_input(true)
@@ -247,6 +248,7 @@ func _update_focus_border(delta: float) -> void:
 		_focus_border.modulate.a = 0.0
 		_focus_border.visible = true
 		_focus_initialized = true
+		_focus_tweening = true   # pop 中は下の lerp を止める（後述）
 		if _focus_pop_tween and _focus_pop_tween.is_valid():
 			_focus_pop_tween.kill()
 		_focus_pop_tween = create_tween()
@@ -255,6 +257,12 @@ func _update_focus_border(delta: float) -> void:
 			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 		_focus_pop_tween.tween_property(_focus_border, "modulate:a", 1.0, 0.25)\
 			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		_focus_pop_tween.finished.connect(func() -> void: _focus_tweening = false)
+		return
+
+	# pop（zoom-in）中は位置/サイズの lerp を行わない。scale 中に global_position を読み書きすると
+	# 位置がドリフトして「拡大しながら動く」見え方になるため（store_browse の _focus_tweening と同じガード）。
+	if _focus_tweening:
 		return
 
 	# 以降は lerp で滑らかに追従（store_browse と同じ speed=delta*25）
