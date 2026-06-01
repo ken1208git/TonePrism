@@ -111,6 +111,13 @@ func _ready():
 
 	print("[StoreBrowse] %d 件のセクションを読み込みました" % _sections.size())
 
+	# (#278 ②) 必要なデータ (_sections と各 section.games) は get_store_sections で eager ロード済で、
+	# 以降の段階的 build はメモリ上のデータだけを使い DB を引かない。そこでここで接続を閉じ、store_browse
+	# 表示中に DB ファイルハンドルを握り続けないようにする → Manager の Restore / DB 初期化が表示中でも
+	# 衝突しなくなる (#278 ① の Restore 例外を緩める defense in depth、screensaver/カルーセルと同じ open→close)。
+	# 「すべて見る」「すべてのゲーム」ナビは repo が is_open()→open() で自動再接続する。
+	_db_manager.close()
+
 	# ExitButton設定（TopBarコンポーネントから取得）
 	_exit_button = _top_bar.get_exit_button()
 	_top_bar.exit_pressed.connect(_on_exit_button_pressed)
@@ -618,8 +625,9 @@ func _on_select() -> void:
 	var data = _section_ui[_current_section]
 	var section: StoreSectionInfo = data["section"]
 
-	# 全ゲーム取得（LIMIT なし）
+	# 全ゲーム取得（LIMIT なし）。repo が is_open()→open() で一時再接続するので、取得後すぐ閉じる (#278 ②)。
 	var all_games = _section_repo.get_all_games_for_section(section)
+	_db_manager.close()
 	if all_games.is_empty():
 		return
 
@@ -1000,6 +1008,7 @@ func _on_view_all_pressed(section_index: int) -> void:
 
 func _on_all_games_pressed() -> void:
 	var all_games = _game_repo.get_all_games()
+	_db_manager.close()   # (#278 ②) repo が一時再接続するので取得後すぐ閉じる
 	if all_games.is_empty():
 		return
 	AppState.filtered_games = all_games

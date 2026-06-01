@@ -248,6 +248,19 @@ namespace TonePrism.Manager
             }
 
             if (others.Count == 0 && launcherOthers.Count == 0) return DialogResult.OK;
+
+            // (#278 ①) 警告要否は SessionConflictPolicy に委譲 (純ロジック=単体テスト可能)。
+            // 別 Manager がいれば常に警告 (write-write の本当の危険)。Launcher は DB 読み取り専用なので、
+            // Launcher 単独稼働なら DB ファイルを丸ごと差し替える操作 (Restore / DB 初期化) のみ警告し、
+            // 通常の行編集は抑制する (SQLite が行 write と Launcher の read を安全に調停するため、文化祭
+            // 当日に Launcher を立てたままゲーム/セクション/初回説明等を編集してよい)。
+            if (!Services.SessionConflictPolicy.ShouldWarn(others.Count, launcherOthers.Count, operationDescription))
+            {
+                if (launcherOthers.Count > 0)
+                    Logger.Info($"[MainForm] (#278) Launcher 稼働中だが通常編集のため競合警告を省略: {operationDescription} (Launcher {launcherOthers.Count} 件)");
+                return DialogResult.OK;
+            }
+
             return SessionConflictDialog.Show(
                 this, SessionConflictDialogContext.EditOperation, others, launcherOthers, operationDescription);
         }
@@ -421,7 +434,11 @@ namespace TonePrism.Manager
             {
                 launcherSessionsAtStartup = new List<LauncherSessionInfo>();
             }
-            if (otherSessionsAtStartup.Count > 0 || launcherSessionsAtStartup.Count > 0)
+            // (#278 ①) 起動時ダイアログは「別 Manager 検出時のみ」出す。Launcher は DB 読み取り専用で
+            // Manager の起動・通常編集を妨げないため、Launcher 単独稼働では出さない（危険な Restore /
+            // DB 初期化は操作時に CheckSessionConflictBeforeWrite で警告される）。dialog には検出した
+            // Launcher も併せて渡し（別 Manager 検出時は全体像を見せる）、判定だけを Policy に委譲。
+            if (Services.SessionConflictPolicy.ShouldWarnAtStartup(otherSessionsAtStartup.Count, launcherSessionsAtStartup.Count))
             {
                 BeginInvoke(new Action(() =>
                 {
@@ -479,7 +496,10 @@ namespace TonePrism.Manager
                 return;
             }
 
-            // 競合なし: 残り init を直接呼出 (= 旧実装と同じ sync 起動 path、user 視点で挙動不変)。
+            // (#278 ①) ここに来るのは「別 Manager 無し」= 競合なし or Launcher 単独稼働。どちらも起動を妨げない。
+            if (launcherSessionsAtStartup.Count > 0)
+                Logger.Info($"[MainForm] (#278) 起動時に Launcher 稼働中だが別 Manager は無いため競合ダイアログを省略 (Launcher {launcherSessionsAtStartup.Count} 件)");
+            // 残り init を直接呼出 (= 旧実装と同じ sync 起動 path、user 視点で挙動不変)。
             ContinueLoadAfterSessionCheck();
         }
 
