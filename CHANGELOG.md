@@ -1293,7 +1293,7 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 #### Changed (#278 ② — ブラウズが DB ハンドルを握りっぱなしにしない)
 
-- **`store_browse` が DB 接続を表示中ずっと保持するのをやめ、初回ロード後に `close()`**。必要データ（`_sections` と各 `section.games`）は `get_store_sections()` で eager ロード済で、段階的 build はメモリ上のデータのみ使い DB を引かないため、`_ready` のロード直後に閉じてよい。「すべて見る」(`_on_select`) /「すべてのゲーム」(`_on_all_games_pressed`) のナビは repo の `is_open()`→`open()` ガードで一時再接続し、取得後すぐ閉じる。
+- **`store_browse` が DB 接続を表示中ずっと保持するのをやめ、初回ロード後に `close()`**。必要データ（`_sections` と各 `section.games`）は `get_store_sections()` で eager ロード済で、段階的 build はメモリ上のデータのみ使い DB を引かないため、`_ready` のロード直後に閉じてよい。「すべて見る」(`_on_select`) /「すべてのゲーム」(`_on_all_games_pressed`) のナビは repo の `is_open()`→`open()` ガードで一時再接続し、取得後すぐ閉じる。**※コードレビュー指摘 (Critical)**: 「すべて見る」が使う `StoreSectionRepository._get_games_for_section` には元々この再接続ガードが無く、close 後に `_db_manager.db=null` を叩いて空配列/エラーになる回帰があった（`game_repository.get_all_games` / `get_store_sections` だけがガードを持っていた）。`_get_games_for_section` に同じガードを追加して対称化。ヘッドレスで close 後 `get_all_games_for_section` が再接続し全 7 セクション計 55 件取得を確認。
 - **効果**: store_browse 表示中も OS ファイルハンドルを握らない（screensaver / カルーセル / intro_guide と同じ open→query→close に統一）。これで Manager の **Restore / DB 初期化が store 表示中でもファイル差し替えで衝突しない**ようになり、#278 ① の「Restore/Reset は Launcher 単独でも警告維持」の根拠（表示中だけハンドルを握る窓）自体を縮小する defense in depth。
 - 検証: 同梱 Godot 4.6.2 ヘッドレスで store_browse を起動し、`_ready` 後 `is_open()=false`・ナビ相当の `get_all_games()` が自動再接続で 20 件取得を確認。
 

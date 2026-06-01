@@ -51,6 +51,12 @@ func get_store_sections() -> Array[StoreSectionInfo]:
 
 ## セクションソースに応じてゲーム一覧を取得
 func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
+	# (#278 ②) DB が閉じていたら開く。store_browse は表示中 DB を閉じておき「すべて見る」
+	# (get_all_games_for_section) で初めて再接続する経路があるため、game_repository / get_store_sections と
+	# 同じ自動再接続ガードを置く（無いと close 後に _db_manager.db=null を叩いて空配列/エラーになる）。
+	if not _db_manager.is_open():
+		if not _db_manager.open():
+			return []
 	var source = section.section_source
 	var query: String = ""
 	var bindings: Array = []
