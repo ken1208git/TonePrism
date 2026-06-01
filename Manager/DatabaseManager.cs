@@ -249,6 +249,7 @@ namespace TonePrism.Manager
         public void AddSection(StoreSectionInfo section) => _sectionRepo.Add(section);
         public void UpdateSection(StoreSectionInfo section) => _sectionRepo.Update(section);
         public void DeleteSection(int sectionId) => _sectionRepo.Delete(sectionId);
+        public void SwapSectionOrder(int sectionIdA, int orderA, int sectionIdB, int orderB) => _sectionRepo.SwapDisplayOrder(sectionIdA, orderA, sectionIdB, orderB);
 
         // --- イントロガイド (#253) ---
         public List<IntroSlide> GetAllIntroSlides() => _introSlideRepo.GetAll();

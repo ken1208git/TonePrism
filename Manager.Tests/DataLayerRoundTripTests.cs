@@ -84,5 +84,33 @@ namespace TonePrism.Manager.Tests
             Assert.Equal("v1.0.0", read.Version);
             Assert.Contains("アクション", read.Genre);
         }
+
+        [Fact]
+        public void StoreSection_SwapDisplayOrder_SwapsAtomically()
+        {
+            // 並び替えの atomic swap (half-write 解消、store 側) を検証。
+            var repo = new StoreSectionRepository(_conn);
+            var a = new StoreSectionInfo { Title = "A", SectionSource = "manual", DisplayOrder = 0, MaxDisplayCount = 5, IsVisible = true };
+            var b = new StoreSectionInfo { Title = "B", SectionSource = "manual", DisplayOrder = 1, MaxDisplayCount = 5, IsVisible = true };
+            repo.Add(a);
+            repo.Add(b);
+
+            // a→b の order(1)、b→a の order(0) に入れ替え。
+            repo.SwapDisplayOrder(a.SectionId, b.DisplayOrder, b.SectionId, a.DisplayOrder);
+
+            var all = repo.GetAll(); // display_order 昇順
+            Assert.Equal("B", all[0].Title); // order 0 が B
+            Assert.Equal("A", all[1].Title); // order 1 が A
+        }
+
+        [Fact]
+        public void StoreSection_SwapDisplayOrder_MissingRow_ThrowsInsteadOfSilentNoOp()
+        {
+            // (#275 review #1) 片方の section_id が存在しないと 2 行更新できず throw (fail-loud)。
+            var repo = new StoreSectionRepository(_conn);
+            var a = new StoreSectionInfo { Title = "A", SectionSource = "manual", DisplayOrder = 0, MaxDisplayCount = 5, IsVisible = true };
+            repo.Add(a);
+            Assert.Throws<InvalidOperationException>(() => repo.SwapDisplayOrder(a.SectionId, 1, 999999, 0));
+        }
     }
 }
