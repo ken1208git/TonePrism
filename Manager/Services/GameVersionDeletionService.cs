@@ -121,13 +121,31 @@ namespace TonePrism.Manager.Services
             }
 
             // ===== Phase 3: 退避フォルダの物理削除 (best-effort) =====
+            // (#209 review finding 3) Phase 2 (DB) は既に commit 済。ここから先で例外が外へ抜けると、呼び出し側は
+            // result=null の generic エラー経路に入り UI 同期/グリッド再読込をしない = DB だけ確定して画面が stale に
+            // なる窓ができる。FolderDeletionService.TryDelete は IOException/UnauthorizedAccessException 以外を再 throw
+            // しうるため、Phase 3 全体を try で囲み、想定外例外も PhysicalDeleteDeferred (DB 確定済) に落とす
+            // (= 「Phase 2 成功後は必ず Result を返す/throw しない」契約)。
             if (renamed)
             {
-                FolderDeletionService.Result del = FolderDeletionService.TryDelete(pendingFolder);
+                FolderDeletionService.Result del;
+                Exception phase3Unexpected = null;
+                try
+                {
+                    del = FolderDeletionService.TryDelete(pendingFolder);
+                }
+                catch (Exception ex)
+                {
+                    phase3Unexpected = ex;
+                    del = new FolderDeletionService.Result { Success = false, LastError = ex, Path = pendingFolder };
+                }
+
                 if (!del.Success)
                 {
                     Logger.Warn("[GameVersionDeletionService] (#209) DB 削除済だが退避フォルダの物理削除に失敗 (orphan 残存): "
-                        + pendingFolder + ": " + (del.LastError != null ? del.LastError.Message : "(不明)"));
+                        + pendingFolder + ": "
+                        + (del.LastError != null ? del.LastError.Message : "(不明)")
+                        + (phase3Unexpected != null ? " (想定外例外: " + phase3Unexpected.GetType().Name + ")" : ""));
                     return new Result
                     {
                         Outcome = Outcome.PhysicalDeleteDeferred,

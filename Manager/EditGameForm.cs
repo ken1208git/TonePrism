@@ -480,14 +480,29 @@ namespace TonePrism.Manager
             // フォルダパスは DB/disk 上の版数 (= _originalVersionByDbId) で解決する。フォーム上で版番号を
             // pending リネーム中でも、disk フォルダはまだ旧名のため (rename は OK 押下時)。これを誤ると旧フォルダが orphan 化する。
             string diskVersion = _originalVersionByDbId.TryGetValue(target.Id, out string ov) ? ov : target.Version;
+
+            // (#209 review finding 1) version 文字列が空だとフォルダパスを解決できず PathManager.GetVersionFolderLeaf が
+            // throw する (LoadVersions は空/異常 version をブロックせず警告のみ。version は NOT NULL だが空文字は許す)。
+            // ハンドラ内未捕捉の crash を避け、friendly に弾く。
+            if (string.IsNullOrWhiteSpace(diskVersion))
+            {
+                MessageBox.Show(this,
+                    "このバージョンは版数が空のため、フォルダの場所を特定できず削除できません。\n" +
+                    "先にバージョン番号を正しい値に直して保存してから、再度削除してください。",
+                    "削除できません", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             string versionFolder = PathManager.GetVersionFolder(originalGame.GameId, diskVersion);
             bool deletedIsActive = _initialSelectedVersionId.HasValue && target.Id == _initialSelectedVersionId.Value;
 
-            // 確認ダイアログ (必須・取り消し不可を明示)。
+            // 確認ダイアログ (必須・取り消し不可を明示)。版数は実際に消える disk/DB 上の確定値 (diskVersion) を表示する
+            // (#209 review finding 4: pending リネーム中は in-memory の target.Version と disk 版数が食い違うため、
+            //  下のフォルダ表示と一致する確定版数で揃える)。
             var confirm = MessageBox.Show(this,
                 "次のバージョンを削除します。\n\n" +
                 "  ゲーム: " + originalGame.Title + "\n" +
-                "  バージョン: " + target.Version + "\n" +
+                "  バージョン: " + diskVersion + "\n" +
                 "  フォルダ: " + versionFolder + "\n\n" +
                 "・この操作は取り消せません。\n" +
                 (deletedIsActive
@@ -1104,10 +1119,10 @@ namespace TonePrism.Manager
             }
 
             // (#158 Q2) cmbVersionList 内で version 文字列の重複が無いか check。
-            // game_versions table は (game_id, version) UNIQUE 制約を持たないので、ユーザーが
-            // EditGameForm でうっかり 2 つの version を同じ名前にすると DB に同 (gameId, version)
-            // の row が並ぶ silent danger があった (= Launcher 側で「どちらの version か」決定不能)。
-            // app-level check で OK 押下時に block する形で fix。
+            // 【補足 #209】このコメントは #158 当時の記述。現在は v15/v17 で game_versions(game_id, version COLLATE
+            // NOCASE) に UNIQUE INDEX があり (SchemaManager.EnsureGameVersionsVersionUniqueIndex)、DB レベルでも
+            // 重複は不可。本 app-level check は DB 制約違反の生エラーより前に friendly な block を出す pre-check として
+            // 残す (= 同一 version 文字列の行は DB に並ばないため、active 判定が文字列でも行を一意特定できる)。
             // 現在編集中の表示内容も反映させるため、選択中 version に対して SaveGameDataToVersion
             // を 1 回呼んでから判定する (= まだ commit してない最新 version 文字列も拾う)。
             if (cmbVersionList.SelectedItem is GameVersion currentSelected)
