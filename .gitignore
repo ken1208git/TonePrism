@@ -56,6 +56,9 @@ safety_before_restore_*.db
 # ゲームファイル（容量が大きいため除外）
 games/
 
+# 初回説明スライドの画像（runtime データ。SPEC §7.2、games/ と同様に除外）
+guide/
+
 # ランタイム生成ファイル: SPEC §6.5 + §3.8.7 の drop folder / heartbeat 等。
 # Launcher session JSON / unified logs root JSON 等は runtime に生成され、commit 対象ではない。
 responses/

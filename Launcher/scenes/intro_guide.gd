@@ -544,7 +544,8 @@ func _set_initial_slide(index: int) -> void:
 
 ## 送り/戻し（キー入力・ボタン共通）。端での挙動: 最終で「進む」→ストア、先頭で「戻る」→何もしない。
 func _navigate(direction: int) -> void:
-	if _transitioning:
+	# incoming 遷移中はボタン押下 (マウスクリックは _input を通らない) でも動かさない（指摘1、固まり防止）。
+	if _transitioning or TransitionManager._transitioning:
 		return
 	var target := _current + direction
 	if direction > 0 and target >= _slides.size():
@@ -603,7 +604,10 @@ func _animate_to(index: int, direction: int) -> void:
 		)
 
 func _go_to_store() -> void:
-	if _transitioning:
+	# incoming 遷移 (screensaver → 本シーン) がまだ進行中だと TransitionManager が再入を弾き、
+	# change_scene が無視されたまま _transitioning=true が残って固まる。incoming 遷移中は何もしない
+	# (遷移完了後にユーザーが押し直せる)。
+	if _transitioning or TransitionManager._transitioning:
 		return
 	_transitioning = true
 	TransitionManager.change_scene(STORE_BROWSE_SCENE)
@@ -615,13 +619,17 @@ func _go_to_store_when_free() -> void:
 	if _transitioning:
 		return
 	_transitioning = true
-	await get_tree().create_timer(0.5).timeout
+	# タイマ近似 (0.5s) でなく incoming 遷移フラグの落下を実際に待つ（遷移時間定数への暗黙依存を排除）。
+	while TransitionManager._transitioning:
+		await get_tree().process_frame
 	TransitionManager.change_scene(STORE_BROWSE_SCENE)
 
 # --- 入力 ---
 
 func _input(event: InputEvent) -> void:
-	if _transitioning:
+	# 自分の遷移中、および incoming 遷移 (screensaver → 本シーン) 中は入力を受けない。
+	# 後者を見ないと、遷移中の Esc 等で _go_to_store が再入ガードに弾かれて固まる (指摘1)。
+	if _transitioning or TransitionManager._transitioning:
 		return
 
 	# マウス移動でカーソル表示（ボタンをクリック操作可能に）、キー/パッドで非表示（キオスク既定）。

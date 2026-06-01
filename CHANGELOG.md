@@ -1306,6 +1306,8 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 #### Changed
 
 - **`scenes/screensaver.gd`**: キー押下時の遷移先を、表示対象スライドが**あれば** `intro_guide` を挟み、**無ければ**従来どおり直接 `store_browse` へ、と事前分岐（`_has_visible_intro_slides()`）。空スライドのとき `intro_guide` を挟むと `TransitionManager` の遷移中再入ガードで `intro_guide → store_browse` の再遷移が無視され画面が固まりうるため、screensaver 側でルーティングする（まっさら新規インストールはスライド 0 件なので通常はこの経路）。`intro_guide` 側にも稀な race 用の空フォールバック（遷移完了待ち後にストアへ）を保持。
+- **incoming 遷移 (screensaver → intro) 中のユーザー操作で固まる経路を塞いだ** (コードレビュー指摘)。`_go_to_store` / `_navigate` / `_input` がローカル `_transitioning` だけ見て `TransitionManager._transitioning`（incoming 遷移進行中）を見ておらず、遷移中（≈0.45s）の `Esc`・「進む/ストアへ」押下で `change_scene` が再入ガードに弾かれ、ローカル `_transitioning=true` が残り永続フリーズしうる非対称があった（空スライド経路だけ待ち保護されていた）。全 store 遷移経路を `TransitionManager._transitioning` 完了まで gate して統一。空フォールバックも固定 0.5s タイマでなく `TransitionManager._transitioning` の落下を待つ形に変更（遷移時間定数への暗黙依存を排除）。
+- **`.gitignore` に `guide/` を追加**。スライド画像の runtime 置き場（SPEC §7.2）を `games/` と同様に除外（誤コミット防止）。
 - **対応 DB スキーマを v14 → v22 に追従** (`database_manager.gd` `CURRENT_DB_VERSION`)。Launcher が本リリースで `intro_slides`（v21 新設 / v22 で `duration_sec` 削除）を読むようになったため。v15〜v20 は Launcher が読まないテーブル / index / 制約のみの変更で読み取り不変（コメントに各版数の根拠を明記）。これで本番 DB(v22) 起動時に毎回出ていた「対応版より新しい」警告を解消。
 
 #### Bump 根拠 (v0.9.1 → v0.10.0)
