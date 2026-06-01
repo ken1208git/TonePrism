@@ -1974,6 +1974,14 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.20.1] - 2026-06-01
+
+#### Fixed (#288 — バージョンアップ/追加のロールバック削除を read-only 対応に)
+
+- **`GameSectionPanel` のバージョンアップ/ゲーム追加のロールバック・クリーンアップ経路の生 `Directory.Delete(..., true)`（5 箇所）を `FolderDeletionService.TryDelete`（read-only 再帰解除込み）に寄せた**。#209 で `FolderDeletionService` は read-only 対応済みだが、これらの経路だけ生 `Directory.Delete` のままで、コピー元が Unity/Godot プロジェクト（`Assets`/`Library` 等が read-only）だと**コピー失敗/中断時のロールバック削除が `UnauthorizedAccessException` で失敗**し、中途半端な版フォルダ（`.pending-create-*` や昇格済 `versionDir`）が残って次回バージョンアップの「フォルダが既に存在します」エラーの種になりうる取りこぼしだった（#209 review finding 5）。
+- 対象: missing-asset 中止 / 相対パス計算失敗 / DB 保存失敗（M5）/ 中断時 tempDir / `HandleVersionDirMoveFailure` の tempDir。**`versionDirOwnedByThisCall` ガード（並行 Manager の勝者 versionDir を敗者が消さない不変条件、#234）は維持**し、内部の delete のみ差し替え。
+- bump 判断: read-only バグの取りこぼし修正。patch (v0.20.0 → v0.20.1)。
+
 ### [Manager v0.20.0] - 2026-06-01
 
 #### Added (#209 — ゲーム編集で個別バージョンを削除)
