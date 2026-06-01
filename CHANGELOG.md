@@ -1311,7 +1311,7 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 - **対応 DB スキーマを v14 → v22 に追従** (`database_manager.gd` `CURRENT_DB_VERSION`)。Launcher が本リリースで `intro_slides`（v21 新設 / v22 で `duration_sec` 削除）を読むようになったため。v15〜v20 は Launcher が読まないテーブル / index / 制約のみの変更で読み取り不変（コメントに各版数の根拠を明記）。これで本番 DB(v22) 起動時に毎回出ていた「対応版より新しい」警告を解消。
 - **放置時のスクリーンセーバー復帰を追加** (Codex 指摘)。screensaver は既に本シーンに置換されているため、来場者が起こして離席すると初回説明のまま固定されてしまう。store_browse / game_selection と同じ `IdleManager`（60s 警告 → 90s 復帰、入力で reset）を `_process`/`_input` に組み込み。
 - **OS キーリピート(echo) を無視** (Codex 指摘)。スクリーンセーバーを起こしたキーを握り続けると echo が連続ナビ／1枚デッキでの即スキップを起こすため、`InputEventKey.is_echo()` を focus 系に渡さず破棄（意図的な押し直しのみ受理）。
-- **本文なし かつ 画像が読めないスライドを除外** (Codex 指摘)。画像のみスライドの画像がファイル欠落/非対応形式で読めないとブランクページが出るため、`_load_slides` で除外（全滅時は空フォールバックでストア直行）。
+- **本文なし かつ 画像が読めないスライドを除外** (Codex 指摘)。画像のみスライドの画像がファイル欠落/非対応形式で読めないとブランクページが出るため、`_load_slides` で除外（全滅時は空フォールバックでストア直行）。あわせて `_get_texture_for` の画像解決/読込失敗を `push_warning` でログし失敗も cache（無言失敗の解消＋再試行抑制、コードレビュー指摘）。
 
 #### Bump 根拠 (v0.9.1 → v0.10.0)
 

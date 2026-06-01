@@ -510,9 +510,14 @@ func _get_texture_for(slide: IntroSlideInfo) -> Texture2D:
 
 	var resolved := _resolve_image_path(slide.image_path)
 	if resolved.is_empty() or not FileAccess.file_exists(resolved):
+		# 無言にせずログを残す（保存後に guide/ 実体が欠落した等の診断手がかり）。失敗も cache して再試行/再警告を避ける。
+		push_warning("[IntroGuide] スライド画像が見つかりません: " + slide.image_path)
+		_texture_cache[slide.image_path] = null
 		return null
 	var image := Image.load_from_file(resolved)
 	if image == null:
+		push_warning("[IntroGuide] スライド画像を読み込めません(非対応形式など): " + resolved)
+		_texture_cache[slide.image_path] = null
 		return null
 	var tex := ImageTexture.create_from_image(image)
 	_texture_cache[slide.image_path] = tex
