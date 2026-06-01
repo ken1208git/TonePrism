@@ -102,6 +102,10 @@ namespace TonePrism.Manager
 
             UpdateSourceParameterVisibility();
             UpdateGameListVisibility();
+            // (#212) タイプ→ソース制限を適用 (legacy のスライドショー/タイルグリッド×自動は手動へ coerce + 案内)。
+            ApplyTypeSourceConstraint(informOnCoerce: true);
+            // (#211) ソースに応じて最大表示数の有効/無効を初期反映 (coerce が走らなかった場合も明示的に)。
+            UpdateMaxDisplayCountEnabled();
         }
 
         private void SetSourceControls(string source)
@@ -174,10 +178,15 @@ namespace TonePrism.Manager
         {
             UpdateSourceParameterVisibility();
             UpdateGameListVisibility();
+            UpdateMaxDisplayCountEnabled();
         }
 
         private void CmbSectionType_SelectedIndexChanged(object sender, EventArgs e)
         {
+            // (#212) スライドショー/タイルグリッドは手動ソースのみに制限 (自動ソースだと背景画像/16:9/表示テキストが
+            // 前提を満たせず破綻しやすい)。ユーザーがタイプを変えたタイミングで coerce + 案内する。
+            ApplyTypeSourceConstraint(informOnCoerce: true);
+
             // タイルグリッドに変更された場合、割当済みが3件超えていたら警告
             if (cmbSectionType.SelectedIndex == 2 && lstAssigned.Items.Count > 3)
             {
@@ -186,6 +195,50 @@ namespace TonePrism.Manager
                     "現在 " + lstAssigned.Items.Count + " 件割り当てられています。\n" +
                     "4件目以降は表示されません。複数行にしたい場合はセクションを分けてください。",
                     "注意", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        // (#211) ランキング系ソース (人気=1 / 新作=2 / 最近プレイ=3 / ランダム=10)。TOP5 のような特集枠が成立するため
+        // 最大表示数の上限が意味を持つ。これら以外 (手動 / ジャンル等のフィルター系) は「全件表示」基本で上限は無効化する。
+        private static bool IsRankingSource(int sourceIndex)
+            => sourceIndex == 1 || sourceIndex == 2 || sourceIndex == 3 || sourceIndex == 10;
+
+        // (#212) このセクションタイプはソースを手動のみに制限するか。スライドショー(1) / タイルグリッド(2)。
+        private static bool TypeRequiresManualSource(int typeIndex)
+            => typeIndex == 1 || typeIndex == 2;
+
+        // (#211) 最大表示数 (nud + ラベル) を、ランキング系ソースのときだけ有効化する。手動/フィルター系はグレーアウト。
+        private void UpdateMaxDisplayCountEnabled()
+        {
+            bool enabled = IsRankingSource(cmbSectionSource.SelectedIndex);
+            nudMaxDisplayCount.Enabled = enabled;
+            lblMaxDisplayCount.Enabled = enabled;
+        }
+
+        // (#212) スライドショー/タイルグリッドのときソースを手動に固定する。既存の「自動ソース」データ (legacy) は
+        // 手動へ coerce し、informOnCoerce=true なら案内ダイアログを出す (= 編集時に手動化を促す)。通常カテゴリ行は
+        // 全ソース選択可。coerce で SelectedIndex を変えると CmbSectionSource_SelectedIndexChanged 経由で nud/可視性も追従する。
+        private void ApplyTypeSourceConstraint(bool informOnCoerce)
+        {
+            if (TypeRequiresManualSource(cmbSectionType.SelectedIndex))
+            {
+                if (cmbSectionSource.SelectedIndex != 0) // 0 = 手動
+                {
+                    cmbSectionSource.SelectedIndex = 0;
+                    if (informOnCoerce)
+                    {
+                        MessageBox.Show(
+                            "スライドショー / タイルグリッドは「手動」ソースのみ対応です。\n" +
+                            "（背景画像や表示テキストを手で設定して魅せる厳選枠のため）\n\n" +
+                            "ソースを「手動」に変更しました。表示するゲームを割り当ててください。",
+                            "ソースを手動に変更", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                }
+                cmbSectionSource.Enabled = false; // 手動に固定
+            }
+            else
+            {
+                cmbSectionSource.Enabled = true; // 通常カテゴリ行は手動＋自動すべて可
             }
         }
 
@@ -334,7 +387,10 @@ namespace TonePrism.Manager
             _section.Title = txtTitle.Text.Trim();
             _section.SectionType = cmbSectionType.SelectedIndex;
             _section.SectionSource = GetSourceString();
-            _section.MaxDisplayCount = (int)nudMaxDisplayCount.Value;
+            // (#211) 最大表示数が意味を持つのはランキング系 (人気/新作/最近プレイ/ランダム) のみ。手動は「割り当てた
+            // ゲームを全件表示」、フィルター系は「条件に合うものを全件表示」が基本なので 0 (= 上限なし、Launcher の
+            // max_display_count<=0 解釈) で保存し、意図せず切られないようにする (nud はグレーアウト中で値も信頼しない)。
+            _section.MaxDisplayCount = IsRankingSource(cmbSectionSource.SelectedIndex) ? (int)nudMaxDisplayCount.Value : 0;
             _section.IsVisible = chkIsVisible.Checked;
 
             // 割当済みゲーム

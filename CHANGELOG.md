@@ -1974,6 +1974,17 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.21.0] - 2026-06-01
+
+#### Changed (#211 / #212 — ストアセクション編集の条件付き UI)
+
+- **(#212) スライドショー / タイルグリッドのソースを「手動」のみに制限**。タイプをこの 2 つにすると `cmbSectionSource` を「手動」に固定（combo 無効化）。背景画像・16:9・表示テキスト前提の「厳選枠」で、自動選択だと見栄え崩れ/表示テキスト未設定で破綻するため。通常カテゴリ行は従来どおり手動＋全自動ソース可。既存の「スライドショー/タイルグリッド×自動」(legacy) は編集を開いた時点で手動へ coerce し案内ダイアログを出す（保存するまで DB は不変）。
+- **(#211) 最大表示数 (`nudMaxDisplayCount`) をソース別に有効/グレーアウト**。**ランキング系**（人気/新作/最近プレイ/ランダム）のみ有効（TOP5 等の特集枠で上限が意味を持つ）。**手動**（割り当て全件表示）と**フィルター系**（ジャンル/プレイ人数/難易度/プレイ時間/通信プレイ/コントローラー、条件一致を全件表示）はグレーアウトし、保存時に `MaxDisplayCount=0`（= 上限なし、Launcher の `max_display_count<=0` 解釈）で書き、手で選んだ/条件一致のゲームが意図せず切られないようにする。
+- 新規ヘルパ `IsRankingSource` / `TypeRequiresManualSource` / `UpdateMaxDisplayCountEnabled` / `ApplyTypeSourceConstraint`（Load・タイプ変更・ソース変更で適用）。スキーマ変更なし（`max_display_count` の値の使い方を変えるのみ、既存の手動/フィルターセクションは次回保存で 0 に正規化）。
+- docs `usage/store.md`・SPEC §7.3 を新ルールに更新。
+- **※実機 UI 確認は未実施**（条件付き有効/無効・coerce 挙動は WinForms UI のため実機目視が必要）。
+- bump 判断: ユーザー向け UI 機能の追加。minor (v0.20.1 → v0.21.0)。
+
 ### [Manager v0.20.1] - 2026-06-01
 
 #### Fixed (#288 — 版アップ/ゲーム追加のロールバック削除を read-only 対応に)
