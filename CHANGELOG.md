@@ -1289,6 +1289,14 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.10.1] - 2026-06-01
+
+#### Changed (#278 ② — ブラウズが DB ハンドルを握りっぱなしにしない)
+
+- **`store_browse` が DB 接続を表示中ずっと保持するのをやめ、初回ロード後に `close()`**。必要データ（`_sections` と各 `section.games`）は `get_store_sections()` で eager ロード済で、段階的 build はメモリ上のデータのみ使い DB を引かないため、`_ready` のロード直後に閉じてよい。「すべて見る」(`_on_select`) /「すべてのゲーム」(`_on_all_games_pressed`) のナビは repo の `is_open()`→`open()` ガードで一時再接続し、取得後すぐ閉じる。
+- **効果**: store_browse 表示中も OS ファイルハンドルを握らない（screensaver / カルーセル / intro_guide と同じ open→query→close に統一）。これで Manager の **Restore / DB 初期化が store 表示中でもファイル差し替えで衝突しない**ようになり、#278 ① の「Restore/Reset は Launcher 単独でも警告維持」の根拠（表示中だけハンドルを握る窓）自体を縮小する defense in depth。
+- 検証: 同梱 Godot 4.6.2 ヘッドレスで store_browse を起動し、`_ready` 後 `is_open()=false`・ナビ相当の `get_all_games()` が自動再接続で 20 件取得を確認。
+
 ### [Launcher v0.10.0] - 2026-06-01
 
 #### Added (#253 part 3/3 — 初回説明の表示)
@@ -1938,6 +1946,15 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.20.0] - 2026-06-01
+
+#### Added (#278 ① — Launcher 起動中でもゲーム情報を編集できるよう警告をスコープ分け)
+
+- **文化祭当日、Launcher を立てたまま Manager で編集してもセッション競合警告を出さない**（通常の行編集に限る）。背景: Launcher は DB 読み取り専用（SELECT のみ、heartbeat は file）で、`journal_mode=DELETE` + `busy_timeout` の下では「Manager の行 write」と「Launcher の read」を SQLite が安全に調停する（write-write 競合なし・持続ロックなし）。従来は Launcher 稼働を検出すると編集のたびに警告が出ていた。
+- 判定を純ロジック **`Services/SessionConflictPolicy.ShouldWarn(otherManagerCount, launcherCount, op)`** に抽出（AGENTS「UI は薄く、ロジックは外へ」）。ルール: **別 Manager 検出時は操作種別を問わず常に警告**（write-write の本当の危険）／**Launcher 単独稼働なら、`toneprism.db` をファイルごと差し替える操作（"バックアップ復元" / "データベース初期化"）だけ警告し、通常の行編集（ゲーム/セクション/初回説明/設定/バックアップ作成・削除等）は警告しない**。`MainForm.CheckSessionConflictBeforeWrite` から委譲。
+- 注意: 操作種別を文字列ラベルで判定するため、**新たに DB ファイルを置換/再作成する操作を追加したら `IsWholeDbReplacingOperation` に対応ラベルを足すこと**（足し忘れると Launcher 稼働中に警告なしで実行され、store 表示中だとファイル差し替えが衝突しうる。#278 ② で store_browse が DB ハンドルを握らなくなれば緩められる）。
+- `Manager.Tests/SessionConflictPolicyTests` で 29 ケース（nobody / 別 Manager 常時警告 / Launcher 単独×通常編集18種は警告なし / Launcher 単独×Restore・Reset は警告 / 分類）を検証。
 
 ### [Manager v0.19.2] - 2026-06-01
 
