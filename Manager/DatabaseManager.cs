@@ -27,9 +27,16 @@ namespace TonePrism.Manager
         private readonly RestoreService _restoreService;
         private readonly ManagerSessionRepository _sessionRepo;
 
-        public DatabaseManager()
+        public DatabaseManager() : this(new DatabaseConnection()) { }
+
+        /// <summary>
+        /// (#209 テスト基盤) 任意の <see cref="DatabaseConnection"/> (一時 DB) を指して構築する。production は
+        /// 既定 ctor (= PathManager.DatabasePath) 経由。DataLayerRoundTripTests と同じ #239 方針 (PathManager の
+        /// プロジェクトルート検出に依存せずデータ層を単体で回す)。
+        /// </summary>
+        internal DatabaseManager(DatabaseConnection conn)
         {
-            _conn = new DatabaseConnection();
+            _conn = conn;
             _schema = new SchemaManager(_conn);
             _devRepo = new DeveloperRepository(_conn);
             _gameRepo = new GameRepository(_conn, _devRepo);
@@ -117,6 +124,81 @@ namespace TonePrism.Manager
                     }
                 }
             });
+        }
+
+        /// <summary>
+        /// (#209) 個別バージョンを削除し、削除版が games.version (= Launcher 表示中のアクティブ版) だった場合は
+        /// 残りの最新版 (id DESC 先頭) に付け替える。版行削除 + active 付け替えを 1 transaction で atomic に行う
+        /// (AddVersionAndActivate と同じ partial-commit 窓閉鎖の方針)。version 別 developers は version_id FK の
+        /// ON DELETE CASCADE で自動削除される。
+        ///
+        /// **active 判定は DB の真値で行う**: 引数は versionId のみで、版数文字列は DB から引く。EditGameForm 上で
+        /// 版番号が pending リネームされていても (in-memory の v.Version と DB 値が乖離していても)、games.version の
+        /// dangling を起こさないため。
+        ///
+        /// **呼び出し側の契約**: 「最後の 1 版は削除不可」を事前にガードすること (本 method は最後の 1 版でも削除し、
+        /// その場合 games.version は NULL になる = 版なしゲームという壊れた状態を作りうる)。
+        /// </summary>
+        /// <returns>削除後の games.version (= アクティブ版数文字列、DB の値)。削除版が active でなければ元の値のまま。</returns>
+        public string DeleteGameVersionAndReassignActive(string gameId, int versionId)
+        {
+            return _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var transaction = connection.BeginTransaction())
+                    {
+                        try
+                        {
+                            // 1) 削除対象版の DB version 文字列を先に取得 (active 判定の真値)。
+                            string deletedVersionString = _versionRepo.GetVersionStringByIdInTransaction(connection, transaction, versionId);
+
+                            // 2) 版行を削除 (developers は version_id FK cascade)。
+                            _versionRepo.DeleteVersionRowInTransaction(connection, transaction, versionId);
+
+                            // 3) games.version を読み、削除版と一致 (= active を消した) なら残り最新版に付け替え。
+                            string currentActive = ReadGameVersionColumn(connection, transaction, gameId);
+                            string newActive = currentActive;
+                            if (deletedVersionString != null && currentActive != null &&
+                                string.Equals(currentActive, deletedVersionString, StringComparison.OrdinalIgnoreCase))
+                            {
+                                newActive = _versionRepo.GetLatestRemainingVersionStringInTransaction(connection, transaction, gameId);
+                                WriteGameVersionColumn(connection, transaction, gameId, newActive);
+                            }
+
+                            transaction.Commit();
+                            return newActive;
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+                }
+            });
+        }
+
+        // (#209) games.version 列の読み書き helper (DeleteGameVersionAndReassignActive 専用の最小 SQL)。
+        private static string ReadGameVersionColumn(SQLiteConnection connection, SQLiteTransaction transaction, string gameId)
+        {
+            using (var command = new SQLiteCommand("SELECT version FROM games WHERE game_id = @gameId", connection, transaction))
+            {
+                command.Parameters.AddWithValue("@gameId", gameId);
+                object result = command.ExecuteScalar();
+                return result == null || result == DBNull.Value ? null : (string)result;
+            }
+        }
+
+        private static void WriteGameVersionColumn(SQLiteConnection connection, SQLiteTransaction transaction, string gameId, string version)
+        {
+            using (var command = new SQLiteCommand("UPDATE games SET version = @version WHERE game_id = @gameId", connection, transaction))
+            {
+                command.Parameters.AddWithValue("@version", (object)version ?? DBNull.Value);
+                command.Parameters.AddWithValue("@gameId", gameId);
+                command.ExecuteNonQuery();
+            }
         }
 
         /// <summary>
