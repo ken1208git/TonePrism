@@ -4,6 +4,7 @@ using System.Data.SQLite;
 using System.IO;
 using TonePrism.Manager;
 using TonePrism.Manager.Models;
+using TonePrism.Manager.Services;
 using Xunit;
 
 namespace TonePrism.Manager.Tests
@@ -18,6 +19,7 @@ namespace TonePrism.Manager.Tests
         private readonly string _dbPath;
         private readonly DatabaseConnection _conn;
         private readonly DatabaseManager _db;
+        private readonly string _tmpDir; // GameVersionDeletionService のフォルダ操作検証用の一時ディレクトリ。
 
         public VersionDeletionTests()
         {
@@ -25,6 +27,8 @@ namespace TonePrism.Manager.Tests
             _conn = new DatabaseConnection(_dbPath);
             new SchemaManager(_conn).InitializeDatabase();
             _db = new DatabaseManager(_conn);
+            _tmpDir = Path.Combine(Path.GetTempPath(), "tp_vdel_dir_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(_tmpDir);
         }
 
         public void Dispose()
@@ -34,6 +38,7 @@ namespace TonePrism.Manager.Tests
             {
                 try { if (File.Exists(p)) File.Delete(p); } catch { /* ignore */ }
             }
+            try { if (Directory.Exists(_tmpDir)) Directory.Delete(_tmpDir, true); } catch { /* ignore */ }
         }
 
         private void SeedGame(string gameId, string activeVersion)
@@ -153,6 +158,65 @@ namespace TonePrism.Manager.Tests
 
             Assert.Equal(0, CountDevelopersForVersion(v1.Id)); // version_id FK cascade で消える
             Assert.Equal(1, CountDevelopersForVersion(v2.Id)); // 他版の developers は残る
+        }
+
+        // ---- GameVersionDeletionService (フォルダ + DB の 3-phase) の統合テスト (#209 review finding 4) ----
+        // 注: DB 失敗時の rollback 経路 (DbFailedRolledBack / DbFailedRollbackAlsoFailed) は DB 例外を決定的に
+        //     起こせないため未カバー。正常系・フォルダ不在系・active 付け替えの戻り値を実フォルダ + 一時 DB で検証する。
+
+        private string CreateVersionFolderWithFile(string leaf)
+        {
+            string dir = Path.Combine(_tmpDir, leaf);
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, "game.exe"), "dummy");
+            return dir;
+        }
+
+        [Fact]
+        public void Service_Delete_Success_RemovesFolderAndRow()
+        {
+            SeedGame("sg1", "v1.1.0");
+            var v1 = AddVersion("sg1", "v1.0.0");
+            AddVersion("sg1", "v1.1.0");
+            string folder = CreateVersionFolderWithFile("sg1_v1.0.0");
+
+            var result = GameVersionDeletionService.Delete(_db, "sg1", v1.Id, folder);
+
+            Assert.Equal(GameVersionDeletionService.Outcome.Success, result.Outcome);
+            Assert.False(Directory.Exists(folder));          // Phase 1 退避 → Phase 3 物理削除済
+            Assert.Empty(Directory.GetDirectories(_tmpDir));  // .pending-delete も残らない
+            Assert.Single(_db.GetGameVersions("sg1"));        // DB 行も削除
+            Assert.Equal("v1.1.0", ReadGamesVersion("sg1"));  // 非アクティブ削除 → active 据え置き
+        }
+
+        [Fact]
+        public void Service_Delete_FolderAbsent_StillRemovesRow()
+        {
+            SeedGame("sg2", "v1.1.0");
+            var v1 = AddVersion("sg2", "v1.0.0");
+            AddVersion("sg2", "v1.1.0");
+            string folder = Path.Combine(_tmpDir, "does_not_exist_v1.0.0"); // 作らない
+
+            var result = GameVersionDeletionService.Delete(_db, "sg2", v1.Id, folder);
+
+            Assert.Equal(GameVersionDeletionService.Outcome.Success, result.Outcome);
+            Assert.Single(_db.GetGameVersions("sg2")); // フォルダ不在でも DB は削除
+        }
+
+        [Fact]
+        public void Service_DeleteActive_ReassignsAndReturnsNewActive()
+        {
+            SeedGame("sg3", "v1.1.0");
+            AddVersion("sg3", "v1.0.0");
+            var v2 = AddVersion("sg3", "v1.1.0");
+            string folder = CreateVersionFolderWithFile("sg3_v1.1.0");
+
+            var result = GameVersionDeletionService.Delete(_db, "sg3", v2.Id, folder); // active を削除
+
+            Assert.Equal(GameVersionDeletionService.Outcome.Success, result.Outcome);
+            Assert.Equal("v1.0.0", result.NewActiveVersion);  // service 戻り値 = DB 真値
+            Assert.Equal("v1.0.0", ReadGamesVersion("sg3"));  // DB も付け替え済
+            Assert.False(Directory.Exists(folder));
         }
     }
 }

@@ -52,12 +52,14 @@ namespace TonePrism.Manager.Services
         /// <param name="db">DatabaseManager。</param>
         /// <param name="gameId">ゲーム ID。</param>
         /// <param name="versionId">削除する game_versions.id。</param>
-        /// <param name="versionString">フォルダパス解決用の版数文字列 (フォルダ名 v{version} の元、PathManager.GetVersionFolder に渡す)。</param>
-        public static Result Delete(DatabaseManager db, string gameId, int versionId, string versionString)
+        /// <param name="versionFolder">削除する版フォルダの絶対パス (`games/&lt;gameId&gt;/v&lt;version&gt;/`)。呼び出し側が
+        /// PathManager.GetVersionFolder で解決して渡す (= 本サービスを PathManager 非依存にしてテスト可能にする)。
+        /// disk 上のフォルダ名は DB/disk 確定の版数なので、フォーム上の pending リネーム版数でなく確定版数で解決すること。</param>
+        public static Result Delete(DatabaseManager db, string gameId, int versionId, string versionFolder)
         {
             if (db == null) throw new ArgumentNullException(nameof(db));
+            if (string.IsNullOrEmpty(versionFolder)) throw new ArgumentException("versionFolder が空です。", nameof(versionFolder));
 
-            string versionFolder = PathManager.GetVersionFolder(gameId, versionString);
             string pendingFolder = versionFolder + ".pending-delete-" + Guid.NewGuid().ToString("N");
             bool renamed = false;
 

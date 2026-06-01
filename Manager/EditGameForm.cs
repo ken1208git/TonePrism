@@ -162,6 +162,13 @@ namespace TonePrism.Manager
         /// </summary>
         public GameInfo EditedGame { get; private set; }
 
+        /// <summary>
+        /// (#209 review finding 1) OK/Cancel と独立に DB へ確定した破壊的変更 (= バージョン即時削除) が発生したか。
+        /// 即時削除は DialogResult.OK を介さず commit されるため、呼び出し側 (GameSectionPanel) は本フラグが true なら
+        /// DialogResult に関わらず一覧を再読込してメイン画面グリッドの stale 表示 (特に active 版付け替え後) を防ぐ。
+        /// </summary>
+        public bool DataChangedOutsideOk { get; private set; }
+
         public EditGameForm(DatabaseManager dbManager, GameInfo game)
         {
             InitializeComponent();
@@ -499,7 +506,7 @@ namespace TonePrism.Manager
             using (var dialog = new ProcessingDialog((IProgress<ProgressInfo> progress, CancellationToken token) =>
             {
                 progress?.Report(new ProgressInfo(-1, "バージョンを削除中...", target.Version));
-                result = GameVersionDeletionService.Delete(dbManager, originalGame.GameId, target.Id, diskVersion);
+                result = GameVersionDeletionService.Delete(dbManager, originalGame.GameId, target.Id, versionFolder);
             })
             {
                 Text = "バージョン削除中",
@@ -546,7 +553,7 @@ namespace TonePrism.Manager
                     return;
 
                 case GameVersionDeletionService.Outcome.PhysicalDeleteDeferred:
-                    RemoveDeletedVersionFromUi(target, deletedIsActive);
+                    RemoveDeletedVersionFromUi(target, deletedIsActive, result.NewActiveVersion);
                     MessageBox.Show(this,
                         "バージョン「" + target.Version + "」を削除しました。\n" +
                         "ただし退避したフォルダの物理削除に失敗しました。後で手動で削除してください:\n  " + result.PendingFolderPath,
@@ -554,7 +561,7 @@ namespace TonePrism.Manager
                     return;
 
                 case GameVersionDeletionService.Outcome.Success:
-                    RemoveDeletedVersionFromUi(target, deletedIsActive);
+                    RemoveDeletedVersionFromUi(target, deletedIsActive, result.NewActiveVersion);
                     MessageBox.Show(this, "バージョン「" + target.Version + "」を削除しました。",
                         "完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
@@ -567,8 +574,10 @@ namespace TonePrism.Manager
         /// アクティブ版を消した → 残りの最新 (id 最大) を新アクティブに / それ以外を消した → 既存アクティブを選び直す。
         /// _originalVersionByDbId / pending external image 追跡 / _initialSelectedVersionId も整合させる。
         /// </summary>
-        private void RemoveDeletedVersionFromUi(GameVersion target, bool deletedWasActive)
+        private void RemoveDeletedVersionFromUi(GameVersion target, bool deletedWasActive, string newActiveVersionFromDb)
         {
+            // (#209 review finding 1) DialogResult に依らず親へ再読込を促すフラグ。即時削除は OK を介さず DB 確定する。
+            DataChangedOutsideOk = true;
             // combo を安全に mutate するため SelectedIndexChanged を一時的に外す (途中発火で削除版へ save するのを防ぐ)。
             cmbVersionList.SelectedIndexChanged -= cmbVersionList_SelectedIndexChanged;
             GameVersion reselect = null;
@@ -611,6 +620,16 @@ namespace TonePrism.Manager
             finally
             {
                 cmbVersionList.SelectedIndexChanged += cmbVersionList_SelectedIndexChanged;
+            }
+
+            if (deletedWasActive)
+            {
+                // (#209 review finding 2/3) active を消した場合、originalGame.Version を DB が確定した新 active
+                // (= DeleteGameVersionAndReassignActive の戻り値 = DB 真値) に同期する。怠ると OK 時の active 切替
+                // 確認ダイアログ等が削除済みの旧版数を「現在の表示版」として提示してしまう。再選択 (reselect, id 基準) は
+                // DB が付け替えた版と同じ行を指すが、in-memory は pending リネーム文字列を持ちうるため、表示用の
+                // 真値としては DB 戻り値 newActiveVersionFromDb を使う (OK 押下時に in-memory 値へ収束する)。
+                originalGame.Version = newActiveVersionFromDb;
             }
 
             // 追跡 dict から削除版を除去。

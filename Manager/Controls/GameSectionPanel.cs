@@ -178,6 +178,12 @@ namespace TonePrism.Manager.Controls
                         $"ゲーム「{form.EditedGame.Title}」を更新しました。",
                         "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
+                else if (form.DataChangedOutsideOk)
+                {
+                    // (#209 review finding 1) バージョン即時削除は OK を介さず DB 確定するため、Cancel/×で閉じても
+                    // グリッドを再読込する。怠ると active 版付け替え後にメイン画面が削除済み版を出し続ける (stale)。
+                    LoadGames();
+                }
             }
         }
 

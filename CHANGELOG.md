@@ -1984,6 +1984,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **重要な堅牢化**: active 判定とフォルダパス解決は **DB / disk の確定値**で行う（フォーム上で版番号を pending リネーム中でも `games.version` の dangling や旧フォルダ orphan を起こさないため。DB 側は `versionId` で操作、フォルダは `_originalVersionByDbId` の旧版数で解決）。
 - スキーマ変更なし（version_id FK cascade は schema v18 で導入済）。`Manager.Tests/VersionDeletionTests`（4 ケース: 非アクティブ削除で active 据え置き / アクティブ削除で残り版へ付け替え / 3 版で id DESC 付け替え / version 別 developers の cascade）を一時 DB で検証、全 80 テスト合格。テスト基盤として `DatabaseManager(DatabaseConnection)` 内部 ctor を追加（#239 方針）。
 - docs: `docs/usage/games.md` 編集セクションに「バージョンを個別に削除する」を追記。
+- レビュー対応: ①即時削除は OK を介さず DB 確定するため、`EditGameForm.DataChangedOutsideOk` フラグを追加し `GameSectionPanel` が Cancel/×で閉じても一覧を再読込（active 付け替え後のメイン画面 stale 防止）。②アクティブ版削除後に `originalGame.Version` を DB 戻り値（真値）へ同期（OK 時の active 切替確認が削除済み版数を出す不整合を解消）。③`GameVersionDeletionService.Delete` をフォルダパス注入式に変更（PathManager 非依存）→ フォルダ 3-phase の統合テスト 3 件を追加（正常系で実フォルダが退避→物理削除される / フォルダ不在でも DB 削除 / active 付け替え戻り値）。④版フォルダ削除は file ロックで調停（プレイ中は `FolderLocked` で安全に弾く）。Phase 1 退避リネーム失敗はゲーム削除のようなリトライループでなく `FolderLocked` を返しボタン再押下で再試行する（ワーカースレッドから UI を出さない設計）。
 - bump 判断: ユーザー向け新機能の追加のため minor (v0.19.5 → v0.20.0)。
 - **※実機 UI 確認は未実施**（破壊的操作のため作業 DB 上で実行できない）。ボタン表示・選択切替後のメモリ同期・削除後の再選択は、DB コピー等を用いた実機目視を別途行うこと（メモリ「UIは実機起動で確認」）。
 
