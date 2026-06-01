@@ -63,7 +63,8 @@ namespace TonePrism.Manager
                 "プレイ時間",
                 "通信プレイ",
                 "ランダム",
-                "コントローラー"
+                "コントローラー",
+                "制作年指定"
             });
 
             // ジャンルComboBox
@@ -136,18 +137,27 @@ namespace TonePrism.Manager
             else if (source.StartsWith("difficulty:"))
             {
                 cmbSectionSource.SelectedIndex = 7;
-                if (int.TryParse(source.Substring(11), out int val))
-                    nudSourceValue.Value = val;
+                // (#290 review) 数字直打ちでなくゲーム編集と同じラベル付きドロップダウンで指定する。
+                int? dv = int.TryParse(source.Substring(11), out int dval) ? dval : (int?)null;
+                cmbSourceValue.Items.Clear();
+                GameFormHelper.InitializeDifficultyCombo(cmbSourceValue, dv);
             }
             else if (source.StartsWith("play_time:"))
             {
                 cmbSectionSource.SelectedIndex = 8;
-                if (int.TryParse(source.Substring(10), out int val))
-                    nudSourceValue.Value = val;
+                int? pv = int.TryParse(source.Substring(10), out int pval) ? pval : (int?)null;
+                cmbSourceValue.Items.Clear();
+                GameFormHelper.InitializePlayTimeCombo(cmbSourceValue, pv);
             }
             else if (source == "online") cmbSectionSource.SelectedIndex = 9;
             else if (source == "random") cmbSectionSource.SelectedIndex = 10;
             else if (source == "controller") cmbSectionSource.SelectedIndex = 11;
+            else if (source.StartsWith("release_year:")) // (#291) 制作年指定
+            {
+                cmbSectionSource.SelectedIndex = 12;
+                if (int.TryParse(source.Substring(13), out int year))
+                    nudSourceValue.Value = year;
+            }
             else cmbSectionSource.SelectedIndex = 0;
         }
 
@@ -165,20 +175,35 @@ namespace TonePrism.Manager
                     return string.IsNullOrEmpty(genre) ? "manual" : "genre:" + genre;
                 case 5: return "players_min:" + (int)nudSourceValue.Value;
                 case 6: return "players_max:" + (int)nudSourceValue.Value;
-                case 7: return "difficulty:" + (int)nudSourceValue.Value;
-                case 8: return "play_time:" + (int)nudSourceValue.Value;
+                // (#290 review) 難易度/プレイ時間はラベル付き cmbSourceValue (index+1 = 値 1..3)。
+                case 7: return "difficulty:" + (cmbSourceValue.SelectedIndex >= 0 ? cmbSourceValue.SelectedIndex + 1 : 2);
+                case 8: return "play_time:" + (cmbSourceValue.SelectedIndex >= 0 ? cmbSourceValue.SelectedIndex + 1 : 2);
                 case 9: return "online";
                 case 10: return "random";
                 case 11: return "controller";
+                case 12: return "release_year:" + (int)nudSourceValue.Value; // (#291)
                 default: return "manual";
             }
         }
 
         private void CmbSectionSource_SelectedIndexChanged(object sender, EventArgs e)
         {
+            // (#290 review) 難易度/プレイ時間のラベル付き選択肢を入れ直す (対話的にソースを変えたとき)。
+            PopulateSourceValueCombo(cmbSectionSource.SelectedIndex);
+            // (#291) 制作年指定に切り替えたとき nud が年らしくない値なら今年を初期値に。
+            if (cmbSectionSource.SelectedIndex == 12 && nudSourceValue.Value < 2000)
+                nudSourceValue.Value = System.DateTime.Now.Year;
             UpdateSourceParameterVisibility();
             UpdateGameListVisibility();
             UpdateMaxDisplayCountEnabled();
+        }
+
+        // (#290 review) 難易度(7)/プレイ時間(8) のときだけ cmbSourceValue にゲーム編集と同じラベル付き選択肢を入れる。
+        private void PopulateSourceValueCombo(int sourceIndex)
+        {
+            cmbSourceValue.Items.Clear();
+            if (sourceIndex == 7) GameFormHelper.InitializeDifficultyCombo(cmbSourceValue);
+            else if (sourceIndex == 8) GameFormHelper.InitializePlayTimeCombo(cmbSourceValue);
         }
 
         private void CmbSectionType_SelectedIndexChanged(object sender, EventArgs e)
@@ -249,13 +274,18 @@ namespace TonePrism.Manager
             int idx = cmbSectionSource.SelectedIndex;
             // ジャンル選択: idx=4
             lblGenre.Visible = cmbGenre.Visible = (idx == 4);
-            // 数値入力: idx=5,6,7,8
-            lblSourceValue.Visible = nudSourceValue.Visible = (idx >= 5 && idx <= 8);
+            // (#290 review / #291) ラベル付きドロップダウン: 難易度=7 / プレイ時間=8。数値入力: プレイ人数=5,6 / 制作年=12。
+            bool useValueCombo = (idx == 7 || idx == 8);
+            bool useValueNud = (idx == 5 || idx == 6 || idx == 12);
+            cmbSourceValue.Visible = useValueCombo;
+            nudSourceValue.Visible = useValueNud;
+            lblSourceValue.Visible = useValueCombo || useValueNud;
 
             // ラベル更新
             if (idx == 5 || idx == 6) lblSourceValue.Text = "人数:";
             else if (idx == 7) lblSourceValue.Text = "難易度:";
             else if (idx == 8) lblSourceValue.Text = "プレイ時間:";
+            else if (idx == 12) lblSourceValue.Text = "制作年:";
         }
 
         private void UpdateGameListVisibility()

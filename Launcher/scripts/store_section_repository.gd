@@ -154,6 +154,16 @@ func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 			WHERE is_visible = 1 AND controller_support = 1
 			ORDER BY display_order ASC, title ASC
 		"""
+	elif source.begins_with("release_year:"):
+		# (#291) 制作年指定: 指定した release_year のゲームを全件 (display_order 順)。新作(recent)が「今年固定」なのに対し
+		# こちらは任意年を指定できる汎用フィルター。max_display_count はグレーアウト=0(全件) で保存される (Manager #211)。
+		var year = int(source.substr(13))
+		query = """
+			SELECT * FROM games
+			WHERE is_visible = 1 AND release_year = ?
+			ORDER BY display_order ASC, title ASC
+		"""
+		bindings = [year]
 	else:
 		return []
 

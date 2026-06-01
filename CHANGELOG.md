@@ -1307,6 +1307,16 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.10.3] - 2026-06-01
+
+#### Added (#291 — ストアセクションソース「制作年指定」)
+
+- **`store_section_repository.gd` に `release_year:YYYY` ソース分岐を追加**。`source.begins_with("release_year:")` で `int(source.substr(13))` を取り出し、`SELECT * FROM games WHERE is_visible=1 AND release_year=? ORDER BY display_order ASC, title ASC`（指定年のゲームを表示順で全件）を実行。既存の `genre:` / `difficulty:` / `players_min:` 等のフィルタ分岐と同型。
+- **新作 (`recent`) との違い**: `recent` は `release_year=今年`（システム日付）固定だが、`release_year:YYYY` は Manager 側で指定した**任意の年**を引く。`max_display_count<=0`（Manager が 0 保存）で該当年を全件表示。
+- Manager 側 UI（ソース「制作年指定」の追加・値入力・条件系グレーアウト）は上記 [Manager v0.21.0] を参照。
+- 検証: 同梱 Godot 4.6.2 ヘッドレスで `store_section_repository.gd` のロード（パースエラーなし）を確認。**※実 DB での年フィルタ取得の実機確認は Manager 実機 UI 確認とあわせて別途必要**。
+- bump 判断: ユーザー向けソース種別の追加（機能追加）。.pck も変わるが pre-1.0 の小さな追加分岐のため patch (v0.10.2 → v0.10.3)。
+
 ### [Launcher v0.10.2] - 2026-06-01
 
 #### Changed (#281 — Launcher 版数の SoT を project.godot config/version に一本化)
@@ -1976,11 +1986,13 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ### [Manager v0.21.0] - 2026-06-01
 
-#### Changed (#211 / #212 — ストアセクション編集の条件付き UI)
+#### Changed (#211 / #212 / #291 — ストアセクション編集の条件付き UI)
 
 - **(#212) スライドショー / タイルグリッドのソースを「手動」のみに制限**。タイプをこの 2 つにすると `cmbSectionSource` を「手動」に固定（combo 無効化）。背景画像・16:9・表示テキスト前提の「厳選枠」で、自動選択だと見栄え崩れ/表示テキスト未設定で破綻するため。通常カテゴリ行は従来どおり手動＋全自動ソース可。既存の「スライドショー/タイルグリッド×自動」(legacy) は編集を開いた時点で手動へ coerce し案内ダイアログを出す（保存するまで DB は不変）。
 - **(#211) 最大表示数 (`nudMaxDisplayCount`) をソース別に有効/グレーアウト**。**ランキング系**（人気=play_count順/最近プレイ=last_played順/ランダム）のみ有効（TOP5 等の特集枠で上限が意味を持つ）。**手動**（割り当て全件表示）と**条件系**（ジャンル/プレイ人数/難易度/プレイ時間/通信プレイ/コントローラー、および **新作**［`release_year=今年` を display_order 順に並べるだけで本物のランキングでないため #290 review で条件系に分類変更］、条件一致を全件表示）はグレーアウトし、保存時に `MaxDisplayCount=0`（= 上限なし、Launcher の `max_display_count<=0` 解釈）で書き、手で選んだ/条件一致のゲームが意図せず切られないようにする。
 - 新規ヘルパ `IsRankingSource` / `TypeRequiresManualSource` / `UpdateMaxDisplayCountEnabled` / `ApplyTypeSourceConstraint`（Load・タイプ変更・ソース変更で適用）。スキーマ変更なし（`max_display_count` の値の使い方を変えるのみ、既存の手動/フィルターセクションは次回保存で 0 に正規化）。
+- **(#291) 新ソース「制作年指定」(`release_year:YYYY`) を追加**（ソース combo 末尾 idx=12）。「値」に西暦を入れるとその制作年のゲームを `display_order` 順で全件表示。**新作**（今年固定）に対し**任意の年**を選べる汎用フィルター。条件系扱いで `max_display_count` はグレーアウト（0 保存）。切替時は現在年を初期値に補完。`nudSourceValue.Maximum` を 10→2100 に拡張。Launcher 側のクエリ分岐は下記 Launcher v0.10.3 参照。
+- **(#290 review) 難易度 / プレイ時間の値指定を数字直打ちからラベル付きドロップダウンに変更**。`cmbSourceValue`（新規 combo, idx=7/8 で表示）にゲーム編集と同じ選択肢（`1 - 易しい` / `2 - 5分～15分` 等、`GameFormHelper.InitializeDifficultyCombo` / `InitializePlayTimeCombo` を再利用）を入れ、保存時に `SelectedIndex+1` を値に。プレイ人数・制作年は従来どおり数値入力 (`nudSourceValue`)。「指定の数字だけ不親切」だったのを解消。
 - docs `usage/store.md`・SPEC §7.3 を新ルールに更新。
 - **※実機 UI 確認は未実施**（条件付き有効/無効・coerce 挙動は WinForms UI のため実機目視が必要）。
 - bump 判断: ユーザー向け UI 機能の追加。minor (v0.20.1 → v0.21.0)。
