@@ -519,7 +519,7 @@ namespace TonePrism.Manager
             GameVersionDeletionService.Result result = null;
             using (var dialog = new ProcessingDialog((IProgress<ProgressInfo> progress, CancellationToken token) =>
             {
-                progress?.Report(new ProgressInfo(-1, "バージョンを削除中...", target.Version));
+                progress?.Report(new ProgressInfo(-1, "バージョンを削除中...", diskVersion));
                 result = GameVersionDeletionService.Delete(dbManager, originalGame.GameId, target.Id, versionFolder);
             })
             {
@@ -569,14 +569,14 @@ namespace TonePrism.Manager
                 case GameVersionDeletionService.Outcome.PhysicalDeleteDeferred:
                     RemoveDeletedVersionFromUi(target, deletedIsActive, result.NewActiveVersion);
                     MessageBox.Show(this,
-                        "バージョン「" + target.Version + "」を削除しました。\n" +
+                        "バージョン「" + diskVersion + "」を削除しました。\n" +
                         "ただし退避したフォルダの物理削除に失敗しました。後で手動で削除してください:\n  " + result.PendingFolderPath,
                         "削除（フォルダ残存の警告）", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
 
                 case GameVersionDeletionService.Outcome.Success:
                     RemoveDeletedVersionFromUi(target, deletedIsActive, result.NewActiveVersion);
-                    MessageBox.Show(this, "バージョン「" + target.Version + "」を削除しました。",
+                    MessageBox.Show(this, "バージョン「" + diskVersion + "」を削除しました。",
                         "完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
             }
@@ -643,6 +643,10 @@ namespace TonePrism.Manager
                 // 確認ダイアログ等が削除済みの旧版数を「現在の表示版」として提示してしまう。再選択 (reselect, id 基準) は
                 // DB が付け替えた版と同じ行を指すが、in-memory は pending リネーム文字列を持ちうるため、表示用の
                 // 真値としては DB 戻り値 newActiveVersionFromDb を使う (OK 押下時に in-memory 値へ収束する)。
+                // (#209 review D1) originalGame の他ミラー列 (ExecutablePath/Thumbnail 等) は意図的に未同期。
+                // active 切替確認が使うのは .Version のみで、OK 保存は選択中 version オブジェクト + フォーム値から
+                // games 行を再構築するため、ここで他列を直さなくても stale 値は使われない (originalGame を
+                // 「DB の完全スナップショット」と誤読しないこと)。DB 側のミラーは MirrorActiveVersionIntoGame で更新済。
                 originalGame.Version = newActiveVersionFromDb;
             }
 
