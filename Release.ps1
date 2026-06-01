@@ -1714,17 +1714,12 @@ function Copy-Templates {
     #     `Launcher/` `Manager/` 等と同階層)。Project 全体の SoT という semantic に整合。
     #     Manager UI Phase 4 のアップデートフロー [7]〜[10] では `FileReplacer.ReplaceFile` の単体
     #     file copy で更新 (Launcher.bat / Manager.bat の shortcut bat 置換と同 pattern)。
-    #   - Launcher/project.godot: Phase 4 で Manager UI の VersionInventory が Launcher 版数を抽出
-    #     するのに使う (#281 で version.gd → project.godot config/version に SoT 移行)。Godot
-    #     エクスポート成果物 (`bin/TonePrism_Launcher.exe` + 埋め込み `.pck`) には project.godot が
-    #     `.pck` 内に焼き込まれて隠匿されるため、`Launcher/project.godot` を staging 段階で明示的に同梱して
-    #     install dir 配下に置く。Manager は `<install>/Launcher/project.godot` を直接 parse して
-    #     `[application] config/version="X.Y.Z"` を読み取る。
-    #     (loose な project.godot を exe の隣に置いても、配布版 exe は埋め込み pck を使うため runtime は無視する
-    #      = 旧来の version.gd 同梱と同じく inert。)
+    #   (#283) Launcher 版数の同梱ファイル (version.gd → #281 で project.godot) は**廃止**。Manager UI の
+    #   VersionInventory は `<install>/Launcher/TonePrism_Launcher.exe` の FileVersionInfo (= export_presets.cfg
+    #   `application/file_version` を Set-ExportPresetVersions が SoT から stamp → Godot/rcedit が exe に焼く) を
+    #   読むようになったため、版数読み取り用の loose ファイルを別途同梱する必要がなくなった (exe は元々同梱)。
     $filesTemplates = @(
-        @{ Src = 'CHANGELOG.md'; Dest = 'bundle\files\CHANGELOG.md'; Label = 'CHANGELOG.md (Bundle SoT for Manager UI, Phase 4 #108)' },
-        @{ Src = 'Launcher\project.godot'; Dest = 'bundle\files\Launcher\project.godot'; Label = 'Launcher/project.godot (Launcher SoT for Manager UI VersionInventory, #281)' }
+        @{ Src = 'CHANGELOG.md'; Dest = 'bundle\files\CHANGELOG.md'; Label = 'CHANGELOG.md (Bundle SoT for Manager UI, Phase 4 #108)' }
     )
 
     foreach ($tpl in ($rootTemplates + $bundleTemplates + $filesTemplates)) {
@@ -1797,8 +1792,7 @@ $script:BundleManifestFiles = @(
     'Launcher.bat',
     'Manager.bat',
     # bundle/files/ 配下 = インストール後の <親>\TonePrism\ に展開される payload
-    'files\Launcher\TonePrism_Launcher.exe',
-    'files\Launcher\project.godot',             # #281: Manager UI VersionInventory が parse する SoT (config/version)
+    'files\Launcher\TonePrism_Launcher.exe',    # #283: Manager UI VersionInventory が FileVersionInfo で版数を読む対象 (project.godot 同梱は廃止)
     'files\Manager\TonePrism_Manager.exe',
     'files\Manager\TonePrism_Manager.exe.config',
     'files\Manager\System.Data.SQLite.dll',

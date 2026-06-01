@@ -12,7 +12,8 @@ namespace TonePrism.Manager.Services
     /// 対象:
     ///   - **Bundle**: `<install>/CHANGELOG.md` の最新 `### [Bundle vX.Y.Z]` から抽出 (zip 同梱、§3.7.7)
     ///   - **Manager**: 自身の Assembly.GetName().Version (AssemblyInfo.cs)
-    ///   - **Launcher**: `<install>/Launcher/project.godot` の `[application] config/version="X.Y.Z"` を parse (#281)
+    ///   - **Launcher**: `<install>/Launcher/TonePrism_Launcher.exe` の FileVersionInfo を読む (#283、Updater と同方式)。
+    ///     exe 不在の dev では `<repo>/Launcher/project.godot` の `config/version` parse に fallback (#281 の機構を dev 用に残置)
     ///   - **Updater**: `<install>/Companions/Updater/TonePrism_Updater.exe` の FileVersionInfo
     ///   - **DB Schema**: SchemaManager.GetTargetDatabaseVersion() (= CurrentDbVersion)
     ///
@@ -23,7 +24,7 @@ namespace TonePrism.Manager.Services
     {
         /// <summary>
         /// 全 component のバージョンを 1 度に採取する。各 field は読み取り失敗時 null。
-        /// 同期 I/O 呼び出し (CHANGELOG read + project.godot read + FileVersionInfo) が走るので、UI thread から
+        /// 同期 I/O 呼び出し (CHANGELOG read + Launcher/Updater exe の FileVersionInfo + dev は project.godot read) が走るので、UI thread から
         /// 呼ぶ場合は MainForm_Load の DB 初期化と同レベルの latency (数 ms オーダー) を想定。
         /// </summary>
         public static InventorySnapshot Snapshot(int? dbSchemaVersion = null)
@@ -76,40 +77,60 @@ namespace TonePrism.Manager.Services
             }
         }
 
-        // (#281) Launcher 版数の SoT は project.godot の `[application] config/version="X.Y.Z"` 1 行。
-        // 例:
-        //   [application]
-        //   config/version="0.10.1"
+        // (#281/#283) dev fallback 用の project.godot config/version parser。
+        // SoT は project.godot の `[application] config/version="X.Y.Z"` 1 行 (例: `config/version="0.10.2"`)。
         // `config/version`(スラッシュ) を literal match する (line 9 の Godot ファイル形式版 `config_version`
-        // (アンダースコア) には誤マッチしない)。値は 3 part SemVer (X.Y.Z)。Manager は Godot を実行できない
-        // ため、ProjectSettings ではなくファイルを直接 regex parse する。
+        // (アンダースコア) には誤マッチしない)。値は 3 part SemVer (X.Y.Z)。
         // ※同一パターンを Release.ps1 `Assert-LauncherVersion` も持つ。project.godot の format が変わったら
         //   両方を同期更新すること (SPEC §3.7.8 チェックリスト)。本パターンの回帰は `VersionInventoryTests` が守る。
         private static readonly Regex ConfigVersionRegex = new Regex(
             "^\\s*config/version\\s*=\\s*\"(?<v>\\d+\\.\\d+\\.\\d+)\"\\s*$",
             RegexOptions.Multiline | RegexOptions.Compiled);
 
+        /// <summary>
+        /// Launcher 版数を読む。
+        /// (#283) **prod**: エクスポート済み `TonePrism_Launcher.exe` の FileVersionInfo を読む (Updater と同方式)。
+        /// この FileVersion は export_presets.cfg の `application/file_version` を Release.ps1 `Set-ExportPresetVersions`
+        /// が SoT (project.godot config/version) から stamp → Godot/rcedit が exe リソースに焼いた派生値。
+        /// **dev**: リポジトリには exe を置かないので、exe 不在時は `<repo>/Launcher/project.godot` の
+        /// config/version 直 parse に fallback する (= dev でも版数が「不明」にならない、#281 の機構を残置)。
+        /// 失敗時は null (UI で「不明」表示) の fail-soft。
+        /// </summary>
         public static Version ReadLauncherVersion()
         {
             try
             {
-                string path = Path.Combine(PathManager.LauncherDir, "project.godot");
-                if (!File.Exists(path))
+                // prod: exe の FileVersionInfo を優先。
+                string exePath = PathManager.LauncherExePath;
+                if (File.Exists(exePath))
                 {
-                    // (#108 Phase 4 round 6 M-2) project.godot 不在の診断 trail。
-                    Logger.Warn("[VersionInventory] ReadLauncherVersion: project.godot 不在 (path=" + path + ")");
-                    return null;
+                    FileVersionInfo info = FileVersionInfo.GetVersionInfo(exePath);
+                    Version exeVer;
+                    if (Version.TryParse(info.FileVersion, out exeVer)) return exeVer;
+                    // exe はあるが FileVersion が読めない (= rcedit stamp 不発等)。dev fallback を試さず
+                    // ここで止めると prod で誤って project.godot 不在 → null になるが、prod に project.godot は
+                    // 同梱しないため fallback は no-op。診断 trail を残して下の fallback (no-op) に流す。
+                    Logger.Warn("[VersionInventory] ReadLauncherVersion: Launcher exe の FileVersion を parse できず ('"
+                        + (info.FileVersion ?? "(null)") + "', path=" + exePath + ")");
                 }
-                string content = File.ReadAllText(path, System.Text.Encoding.UTF8);
-                Version v = ParseConfigVersion(content);
-                if (v == null)
+
+                // dev fallback: exe 不在 (リポジトリ作業時) は repo の project.godot を直 parse。
+                string projPath = Path.Combine(PathManager.LauncherDir, "project.godot");
+                if (File.Exists(projPath))
                 {
-                    // (#281) config/version 行が見つからない / 値が SemVer でない = project.godot format 想定外。
-                    // SPEC §3.7.8 の同期チェックリストを更新の手掛かりとして trail を残す。
-                    Logger.Warn("[VersionInventory] ReadLauncherVersion: project.godot から config/version を読み取れず "
-                        + "(path=" + path + ") — SPEC §3.7.8 / project.godot [application] config/version 参照");
+                    Version projVer = ParseConfigVersion(File.ReadAllText(projPath, System.Text.Encoding.UTF8));
+                    if (projVer == null)
+                    {
+                        Logger.Warn("[VersionInventory] ReadLauncherVersion: project.godot fallback でも config/version を読み取れず "
+                            + "(path=" + projPath + ") — SPEC §3.7.8 / project.godot [application] config/version 参照");
+                    }
+                    return projVer;
                 }
-                return v;
+
+                // exe も project.godot も無い (broken install 等)。
+                Logger.Warn("[VersionInventory] ReadLauncherVersion: Launcher exe も project.godot も不在 (exe="
+                    + exePath + ")");
+                return null;
             }
             catch (Exception ex)
             {
@@ -120,7 +141,8 @@ namespace TonePrism.Manager.Services
 
         /// <summary>
         /// (#281) project.godot の本文から `config/version="X.Y.Z"` を抽出する純関数 (テスト可能なように I/O から分離)。
-        /// 該当行なし / 値が 3 part SemVer でない / 各 part が Int32 超過 (TryParse 失敗) の場合は null。
+        /// (#283 で dev fallback 専用になったが parser 自体は不変)。該当行なし / 値が 3 part SemVer でない /
+        /// 各 part が Int32 超過 (TryParse 失敗) の場合は null。
         /// </summary>
         internal static Version ParseConfigVersion(string content)
         {

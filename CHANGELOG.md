@@ -141,6 +141,13 @@
 
 **注意 (#160 で section 責務分離)**: `Updater` 等の **runtime exe 群** (= SPEC §2.4 Companions 配置) の changelog は本 section ではなく **`## Companions`** (旧 `## Updater (Companions/Updater)`、本 PR で section 名を一般化) に記載する。本 section は build / 配布スクリプトのみ対象。Bundle v0.4.0 以前 (= 本 PR merge 前) の Updater 変更履歴は `## Release Tooling` の過去 entry (= round 1〜8 review 詳細等) に retain、retroactive consolidation は scope creep のため見送り (= PR #159 round 4 「SPEC 1 PR 1 bump 規約」導入時と同 pattern)。
 
+### [Release Tooling v0.1.24] - 2026-06-01
+
+#### Changed (#283 — Launcher/project.godot の同梱を廃止)
+
+- **release zip への `Launcher/project.godot` 同梱を廃止**（`$filesTemplates` と `$script:BundleManifestFiles` から `files\Launcher\project.godot` を除去）。Manager UI の VersionInventory が Launcher 版数を `<install>/Launcher/TonePrism_Launcher.exe` の FileVersionInfo から読むようになった（上記 Manager v0.19.5）ため、版数読み取り用の loose ファイルを別途同梱する必要がなくなった（exe は元々同梱）。manifest 駆動の `UpdateDownloader.ValidateStaging` は `$BundleManifestFiles` 更新で自動追従（`ValidateStagingLegacy` は v0.3.0 zip 構造凍結のため据置）。
+- bump 判断: 配布スクリプトの変更のみ。patch (v0.1.23 → v0.1.24)。Bundle への反映は次回リリース実行時。
+
 ### [Release Tooling v0.1.23] - 2026-06-01
 
 #### Changed (#281 — Launcher 版数 SoT 移行に伴う release 基盤の追従)
@@ -1965,6 +1972,17 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.19.5] - 2026-06-01
+
+#### Changed (#283 — Launcher 版数読み取りを exe FileVersionInfo に変更 / project.godot 同梱廃止)
+
+- **`VersionInventory.ReadLauncherVersion` を「prod=エクスポート済み `TonePrism_Launcher.exe` の FileVersionInfo / dev=`project.godot` 直 parse の fallback」に変更**（#281 派生・案D 採用）。exe の FileVersion は `export_presets.cfg` の `application/file_version` を Release.ps1 `Set-ExportPresetVersions` が SoT（config/version）から stamp → Godot/rcedit が exe リソースに焼いた派生値で、Updater 版数読み取り（`ReadUpdaterVersion`）と同方式。リポジトリには exe を置かないため、dev では exe 不在 → `<repo>/Launcher/project.godot` の `config/version` を `ConfigVersionRegex`/`ParseConfigVersion` で読む（#281 の機構を dev fallback として残置、`VersionInventoryTests` も有効）。
+- 新規 `PathManager.LauncherExePath`（`<install>/Launcher/TonePrism_Launcher.exe`）。
+- 配布側: `Launcher/project.godot` の release zip 同梱を廃止（下記 Release Tooling v0.1.24）。prod は exe から読むため版数用 loose ファイルが不要に。
+- **トレードオフ（重要）**: prod の版数は多段 stamp パイプライン（config/version → `Set-ExportPresetVersions` → export_presets.cfg → Godot/rcedit → exe VERSIONINFO）の派生値になるため、stamp が一手抜けると silent に古い/欠落版数を表示しうる（実際、検証時に stamp 前の exe が stale `0.9.1.0` を焼いていた）。→ **リリース時に成果物の版数を目視確認する**こと（SPEC §3.7.8）。
+- 検証: `export_presets` を SoT 値に stamp 後 `--export-release` で exe を生成し FileVersionInfo が当該版数を返すことを実機確認。dev fallback は exe 不在で `project.godot` を読むことを確認。build 緑 + 全76テスト合格。
+- bump 判断: Manager の版数読み取り経路変更（Manager.exe が変わる）。patch (v0.19.4 → v0.19.5)。
 
 ### [Manager v0.19.4] - 2026-06-01
 
