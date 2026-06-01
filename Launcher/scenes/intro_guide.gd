@@ -107,8 +107,8 @@ func _build_page_indicator() -> void:
 	_page_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_margin.add_child(_page_label)
 
-## 操作ボタン（下端）。戻る/進む＝中央の「1つの角丸四角を2分割」した segmented（左=戻る・右=進む(青)、
-## 区切り線/隙間なしで密着）、スキップ＝右端の独立ピル。全ボタン枠なし。クリック操作用（キー ←/→/Enter 併用）。
+## 操作ボタン（下端）。戻る/進む＝中央の2分割（左=戻る・右=進む(青)、非対称角丸のまま少し隙間をあけて並べる）、
+## スキップ＝右端の独立ピル。全ボタン枠なし。クリック操作用（キー ←/→/Enter 併用）。
 func _build_nav_buttons() -> void:
 	# 下端いっぱいの帯 (高さ72px)。MarginContainer+preset は子追加前に min-size が潰れるため
 	# アンカー+offset で明示。中の配置は band の子として絶対アンカーで置く (Container 非依存で確実)。
@@ -124,15 +124,15 @@ func _build_nav_buttons() -> void:
 	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(band)
 
-	# 中央: 戻る/進む の分割ピル。左=戻る(左だけ角丸)・右=進む(青・右だけ角丸)を密着させ、
-	# 全体で「1つの角丸四角を2分割」に見せる（区切り線・隙間なし）。
+	# 中央: 戻る/進む の2分割。左=戻る(左だけ角丸)・右=進む(青・右だけ角丸)。
+	# 非対称角丸のまま少し隙間をあけて並べる（合わせ目は角丸なしの直線エッジが向かい合う）。
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	band.add_child(center)
 
 	var seg_hb := HBoxContainer.new()
-	seg_hb.add_theme_constant_override("separation", 0)
+	seg_hb.add_theme_constant_override("separation", 8)   # 戻る/進む の間を少しだけ空ける
 	seg_hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	center.add_child(seg_hb)
 
