@@ -248,6 +248,19 @@ namespace TonePrism.Manager
             }
 
             if (others.Count == 0 && launcherOthers.Count == 0) return DialogResult.OK;
+
+            // (#278 ①) 警告要否は SessionConflictPolicy に委譲 (純ロジック=単体テスト可能)。
+            // 別 Manager がいれば常に警告 (write-write の本当の危険)。Launcher は DB 読み取り専用なので、
+            // Launcher 単独稼働なら DB ファイルを丸ごと差し替える操作 (Restore / DB 初期化) のみ警告し、
+            // 通常の行編集は抑制する (SQLite が行 write と Launcher の read を安全に調停するため、文化祭
+            // 当日に Launcher を立てたままゲーム/セクション/初回説明等を編集してよい)。
+            if (!Services.SessionConflictPolicy.ShouldWarn(others.Count, launcherOthers.Count, operationDescription))
+            {
+                if (launcherOthers.Count > 0)
+                    Logger.Info($"[MainForm] (#278) Launcher 稼働中だが通常編集のため競合警告を省略: {operationDescription} (Launcher {launcherOthers.Count} 件)");
+                return DialogResult.OK;
+            }
+
             return SessionConflictDialog.Show(
                 this, SessionConflictDialogContext.EditOperation, others, launcherOthers, operationDescription);
         }
