@@ -272,8 +272,11 @@ func _update_focus_border(delta: float) -> void:
 
 # --- スライドコンテンツ生成 ---
 
-## 1スライド分のコンテンツ（画像 + 本文）を full-rect の Control として生成。
+## 1スライド分のコンテンツを full-rect の Control として生成。
 ## 横スライドさせるため position を直接いじれる素の Control を root にし、中身は CenterContainer で中央寄せ。
+## レイアウトは中身に応じて分岐:
+##   - 画像＋本文の両方 → 左に画像・右に本文の横並び (HBox)
+##   - 画像のみ / 本文のみ → それを中央に1つ
 func _make_slide_content(slide: IntroSlideInfo) -> Control:
 	var root := Control.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -284,38 +287,55 @@ func _make_slide_content(slide: IntroSlideInfo) -> Control:
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(center)
 
-	var vbox := VBoxContainer.new()
-	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.add_theme_constant_override("separation", 40)
-	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	center.add_child(vbox)
+	var tex := _get_texture_for(slide)
+	var has_image := tex != null
+	var has_text := not slide.body_text.is_empty()
 
-	# 画像（アスペクト維持・中央寄せ）。画像なしスライドでは非表示にして本文のみ。
+	if has_image and has_text:
+		# 両方 → 左:画像 / 右:本文 の横並び（互いに縦中央そろえ）
+		var hbox := HBoxContainer.new()
+		hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+		hbox.add_theme_constant_override("separation", 60)
+		hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		center.add_child(hbox)
+
+		var img := _make_image_rect(tex, Vector2(820, 500))
+		img.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		hbox.add_child(img)
+
+		# 右側の本文は左揃え（列として読みやすい）。
+		var body := _make_body_label(slide.body_text, 640, HORIZONTAL_ALIGNMENT_LEFT)
+		body.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		hbox.add_child(body)
+	elif has_image:
+		center.add_child(_make_image_rect(tex, Vector2(960, 540)))
+	else:
+		center.add_child(_make_body_label(slide.body_text, 1100, HORIZONTAL_ALIGNMENT_CENTER))
+
+	return root
+
+## 画像 TextureRect を生成（アスペクト維持・中央寄せ）。
+func _make_image_rect(tex: Texture2D, min_size: Vector2) -> TextureRect:
 	var image_rect := TextureRect.new()
-	image_rect.custom_minimum_size = Vector2(960, 540)
+	image_rect.custom_minimum_size = min_size
 	image_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	image_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	image_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var tex := _get_texture_for(slide)
-	if tex != null:
-		image_rect.texture = tex
-	else:
-		image_rect.visible = false
-	vbox.add_child(image_rect)
+	image_rect.texture = tex
+	return image_rect
 
-	# 本文
+## 本文 Label を生成（幅・水平揃えを指定、折り返しあり）。
+func _make_body_label(text: String, width: float, halign: int) -> Label:
 	var body := Label.new()
-	body.text = slide.body_text
+	body.text = text
 	body.add_theme_font_override("font", _font_regular())
 	body.add_theme_font_size_override("font_size", 32)
 	body.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
-	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	body.horizontal_alignment = halign
 	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	body.custom_minimum_size = Vector2(1100, 0)
+	body.custom_minimum_size = Vector2(width, 0)
 	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vbox.add_child(body)
-
-	return root
+	return body
 
 ## スライドの画像を解決・読込してテクスチャを返す（image_path 単位でキャッシュ）。画像なし/失敗は null。
 func _get_texture_for(slide: IntroSlideInfo) -> Texture2D:
