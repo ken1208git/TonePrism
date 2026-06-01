@@ -107,8 +107,8 @@ func _build_page_indicator() -> void:
 	_page_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_margin.add_child(_page_label)
 
-## 操作ボタン（下端）。スキップ＝左端の独立ピル、戻る/進む＝中央の「1つの角丸四角を2分割」した
-## segmented 風（中央に細いディバイダ）。全ボタン枠なし。クリック操作用（キーボード ←/→/Enter は併用）。
+## 操作ボタン（下端）。戻る/進む＝中央の「1つの角丸四角を2分割」した segmented（左=戻る・右=進む(青)、
+## 区切り線/隙間なしで密着）、スキップ＝右端の独立ピル。全ボタン枠なし。クリック操作用（キー ←/→/Enter 併用）。
 func _build_nav_buttons() -> void:
 	# 下端いっぱいの帯 (高さ72px)。MarginContainer+preset は子追加前に min-size が潰れるため
 	# アンカー+offset で明示。中の配置は band の子として絶対アンカーで置く (Container 非依存で確実)。
@@ -124,34 +124,33 @@ func _build_nav_buttons() -> void:
 	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(band)
 
-	# 中央: 戻る/進む の分割ピル。CenterContainer で帯の中央に置く。
+	# 中央: 戻る/進む の分割ピル。左=戻る(左だけ角丸)・右=進む(青・右だけ角丸)を密着させ、
+	# 全体で「1つの角丸四角を2分割」に見せる（区切り線・隙間なし）。
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	band.add_child(center)
 
-	var seg := PanelContainer.new()
-	seg.clip_contents = true   # 内側の矩形ボタンを角丸でクリップ → 外周だけ丸い1つの四角に見せる
-	seg.add_theme_stylebox_override("panel", _seg_panel_style())
-	seg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	center.add_child(seg)
-
 	var seg_hb := HBoxContainer.new()
 	seg_hb.add_theme_constant_override("separation", 0)
 	seg_hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	seg.add_child(seg_hb)
+	center.add_child(seg_hb)
 
-	_btn_back = _make_seg_button("←  戻る")
+	# 戻る（左半分・左だけ角丸・グレー地）
+	_btn_back = _make_button_base("←  戻る")
+	_btn_back.add_theme_stylebox_override("normal", _seg_style(Color(1, 1, 1, 0.10), true))
+	_btn_back.add_theme_stylebox_override("hover", _seg_style(Color(1, 1, 1, 0.18), true))
+	_btn_back.add_theme_stylebox_override("pressed", _seg_style(Color(1, 1, 1, 0.26), true))
+	_btn_back.add_theme_stylebox_override("disabled", _seg_style(Color(1, 1, 1, 0.04), true))
 	_btn_back.pressed.connect(func() -> void: _navigate(-1))
 	seg_hb.add_child(_btn_back)
 
-	seg_hb.add_child(_make_divider())
-
-	_btn_next = _make_seg_button("進む  →")
-	# 進むは青のアクセント（主要操作を目立たせる）。segmented の右半分が青く塗られる。
-	_btn_next.add_theme_stylebox_override("normal", _flat_style(Color(0.20, 0.50, 0.95, 0.9), 0))
-	_btn_next.add_theme_stylebox_override("hover", _flat_style(Color(0.30, 0.58, 1.0, 1.0), 0))
-	_btn_next.add_theme_stylebox_override("pressed", _flat_style(Color(0.15, 0.42, 0.85, 1.0), 0))
+	# 進む（右半分・右だけ角丸・青アクセント）
+	_btn_next = _make_button_base("進む  →")
+	_btn_next.add_theme_stylebox_override("normal", _seg_style(Color(0.20, 0.50, 0.95, 1.0), false))
+	_btn_next.add_theme_stylebox_override("hover", _seg_style(Color(0.30, 0.58, 1.0, 1.0), false))
+	_btn_next.add_theme_stylebox_override("pressed", _seg_style(Color(0.15, 0.42, 0.85, 1.0), false))
+	_btn_next.add_theme_stylebox_override("disabled", _seg_style(Color(0.20, 0.50, 0.95, 0.5), false))
 	_btn_next.pressed.connect(func() -> void: _navigate(1))
 	seg_hb.add_child(_btn_next)
 
@@ -194,35 +193,22 @@ func _make_pill_button(text: String) -> Button:
 	btn.add_theme_stylebox_override("disabled", _flat_style(Color(1, 1, 1, 0.04), 14))
 	return btn
 
-## segmented の片側（戻る/進む）。通常は透明（パネル地が透ける）・hover/pressed のみ薄く光る・角丸なし
-## （外周の角丸は親 PanelContainer の clip が担う）。枠なし。
-func _make_seg_button(text: String) -> Button:
-	var btn := _make_button_base(text)
-	btn.add_theme_stylebox_override("normal", _flat_style(Color(1, 1, 1, 0.0), 0))
-	btn.add_theme_stylebox_override("hover", _flat_style(Color(1, 1, 1, 0.14), 0))
-	btn.add_theme_stylebox_override("pressed", _flat_style(Color(1, 1, 1, 0.24), 0))
-	btn.add_theme_stylebox_override("disabled", _flat_style(Color(1, 1, 1, 0.0), 0))
-	return btn
-
-## segmented 全体の地（1つの角丸四角）。枠なし・角丸14・内側 padding 0（子が端まで埋まる）。
-func _seg_panel_style() -> StyleBoxFlat:
+## segmented の片側スタイル（枠なし）。bg と「左だけ角丸 / 右だけ角丸」を指定。
+## 2つを密着させると合わせ目は角丸なし＝外周だけ丸い1つの四角に見える（clip_contents は角丸で
+## クリップしないため、各ボタンに非対称角丸を当てるこの方式にする）。
+func _seg_style(bg: Color, left_rounded: bool) -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()
-	s.bg_color = Color(1, 1, 1, 0.10)
-	s.set_corner_radius_all(14)
-	s.content_margin_left = 0
-	s.content_margin_right = 0
-	s.content_margin_top = 0
-	s.content_margin_bottom = 0
+	s.bg_color = bg
+	var r := 14
+	s.corner_radius_top_left = r if left_rounded else 0
+	s.corner_radius_bottom_left = r if left_rounded else 0
+	s.corner_radius_top_right = 0 if left_rounded else r
+	s.corner_radius_bottom_right = 0 if left_rounded else r
+	s.content_margin_left = 24
+	s.content_margin_right = 24
+	s.content_margin_top = 10
+	s.content_margin_bottom = 10
 	return s
-
-## 戻る|進む の境目の細いディバイダ（縦1px・高さ36px・中央寄せ）。
-func _make_divider() -> ColorRect:
-	var d := ColorRect.new()
-	d.color = Color(1, 1, 1, 0.18)
-	d.custom_minimum_size = Vector2(1, 36)
-	d.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	d.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	return d
 
 ## ボタン地のスタイル（枠なし＝border幅0）。bg と角丸半径を指定。
 func _flat_style(bg: Color, corner: int) -> StyleBoxFlat:
