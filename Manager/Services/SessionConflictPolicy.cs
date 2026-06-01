@@ -4,8 +4,10 @@ namespace TonePrism.Manager.Services
     /// (#278) セッション競合警告を出すべきかの**純粋な判定ロジック**。UI / セッション検出から切り離して
     /// 単体テスト可能にするためのポリシークラス（`MainForm.CheckSessionConflictBeforeWrite` から委譲）。
     ///
-    /// 背景: 文化祭当日、Launcher を立てたまま Manager でゲーム情報等を編集したい。Launcher は DB を
-    /// 読み取り専用でしか触らない (SELECT のみ、heartbeat は file 書き込み) ため、journal_mode=DELETE +
+    /// 背景: 文化祭当日、Launcher を立てたまま Manager でゲーム情報等を編集したい。Launcher は DB の
+    /// **行 DML (INSERT/UPDATE/DELETE) を一切行わない** (接続時に journal_mode=DELETE / busy_timeout 等の
+    /// セッション PRAGMA は発行するが DB 内容は書き換えない。版差があっても migrate せず push_warning のみ。
+    /// heartbeat は DB でなく file 書き込み)。よって journal_mode=DELETE +
     /// busy_timeout の下で「Manager の行 write」と「Launcher の read」は SQLite が安全に調停する
     /// (write-write 競合なし・持続ロックなし)。したがって Launcher 単独稼働なら通常の行編集で警告は不要。
     /// ただし toneprism.db を**ファイルごと差し替える/再作成する**操作 (Restore / DB 初期化) は、Launcher が
