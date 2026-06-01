@@ -41,6 +41,7 @@ var _glow: GlowAnimator
 var _focus_initialized: bool = false       # 初出現は zoom-in pop、以降 lerp 追従
 var _focus_pop_tween: Tween = null         # 初出現の zoom-in + フェードイン pop (他画面と同じ)
 var _focus_tweening: bool = false          # pop 中は追従 lerp を止める（scale 中の位置ドリフト防止）
+var _using_mouse: bool = false             # マウス操作中はグローフォーカスを隠す（store_browse と同じ分離）
 
 func _ready() -> void:
 	set_process_input(true)
@@ -147,18 +148,22 @@ func _build_nav_buttons() -> void:
 	seg_hb.add_child(_make_divider())
 
 	_btn_next = _make_seg_button("進む  →")
+	# 進むは青のアクセント（主要操作を目立たせる）。segmented の右半分が青く塗られる。
+	_btn_next.add_theme_stylebox_override("normal", _flat_style(Color(0.20, 0.50, 0.95, 0.9), 0))
+	_btn_next.add_theme_stylebox_override("hover", _flat_style(Color(0.30, 0.58, 1.0, 1.0), 0))
+	_btn_next.add_theme_stylebox_override("pressed", _flat_style(Color(0.15, 0.42, 0.85, 1.0), 0))
 	_btn_next.pressed.connect(func() -> void: _navigate(1))
 	seg_hb.add_child(_btn_next)
 
-	# 左端: スキップ (独立した枠なしピル)。帯の左に絶対アンカーで配置・縦中央。
+	# 右端: スキップ (独立した枠なしピル)。帯の右に絶対アンカーで配置・縦中央。
 	_btn_skip = _make_pill_button("スキップ")
 	_btn_skip.pressed.connect(func() -> void: _go_to_store())
-	_btn_skip.anchor_left = 0.0
-	_btn_skip.anchor_right = 0.0
+	_btn_skip.anchor_left = 1.0
+	_btn_skip.anchor_right = 1.0
 	_btn_skip.anchor_top = 0.5
 	_btn_skip.anchor_bottom = 0.5
-	_btn_skip.offset_left = 40.0
-	_btn_skip.offset_right = 40.0 + 160.0
+	_btn_skip.offset_left = -(40.0 + 160.0)
+	_btn_skip.offset_right = -40.0
 	_btn_skip.offset_top = -28.0
 	_btn_skip.offset_bottom = 28.0
 	band.add_child(_btn_skip)
@@ -280,6 +285,12 @@ func _update_focus_border(delta: float) -> void:
 		return
 	# シーン遷移中は枠を隠す（遷移完了後に再表示・スナップ）
 	if _transitioning or TransitionManager._transitioning:
+		_focus_border.visible = false
+		_focus_initialized = false
+		return
+
+	# マウス操作中はグローフォーカスを隠す（キー/パッドに戻ったら再度 pop で出る）。
+	if _using_mouse:
 		_focus_border.visible = false
 		_focus_initialized = false
 		return
@@ -531,9 +542,11 @@ func _input(event: InputEvent) -> void:
 	# マウス移動でカーソル表示（ボタンをクリック操作可能に）、キー/パッドで非表示（キオスク既定）。
 	# store_browse と同じ分離。マウスクリックは下の action 判定に一致せずボタン側で処理される。
 	if event is InputEventMouseMotion:
+		_using_mouse = true
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		return
 	if event is InputEventKey or event is InputEventJoypadButton:
+		_using_mouse = false
 		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 
 	if not event.is_pressed():
