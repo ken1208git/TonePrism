@@ -308,12 +308,15 @@ func _build_bottom_bar() -> void:
 ## ボタンの状態更新: 先頭で「戻る」無効、最終で「進む」を「ストアへ」表記に。
 func _update_nav_buttons() -> void:
 	if _btn_back:
+		# focus_mode=NONE をセットすると focus が即座に外れ has_focus() が false になるため、
+		# 変更前に「戻るが focus を持っていたか」を捕まえておく（さもないと退避が走らず focus が消える）。
+		var back_had_focus := _btn_back.has_focus()
 		_btn_back.disabled = (_current <= 0)
 		# 無効時は focus_mode を NONE にして「灰色なのに ← で選べてしまう」のを防ぐ
 		# （←/→ のフォーカス移動は無効ボタンをスキップする）。有効時は ALL に戻す。
 		_btn_back.focus_mode = Control.FOCUS_NONE if _btn_back.disabled else Control.FOCUS_ALL
-		# 無効化した瞬間にフォーカスを持っていたら「進む」へ逃がす。
-		if _btn_back.disabled and _btn_back.has_focus() and _btn_next:
+		# 無効化した瞬間に戻るが focus を持っていたら「進む」へ逃がす（focus 喪失を防ぐ）。
+		if _btn_back.disabled and back_had_focus and _btn_next:
 			_btn_next.grab_focus()
 	if _btn_next:
 		_btn_next.text = "ストアへ  →" if _current >= _slides.size() - 1 else "進む  →"
