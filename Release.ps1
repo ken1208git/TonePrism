@@ -1414,6 +1414,33 @@ function Build-Launcher {
     }
 }
 
+function Assert-ExportedLauncherVersion {
+    # (#283) エクスポート済み Launcher exe の FileVersion が SoT (project.godot config/version) と一致するか検証。
+    # Manager UI は prod でこの FileVersion から Launcher 版数を読む (VersionInventory.ReadLauncherVersion)。
+    # 版数 stamp は config/version → Set-ExportPresetVersions → export_presets.cfg → Godot/rcedit → exe の
+    # 多段パイプライン経由のため、どこか一手が抜けると exe が古い/欠落版数を焼き、Manager が silent に
+    # 嘘版数を表示する (#283 で受容した trade-off の安全網)。zip/upload より前にここで hard fail させ、
+    # 誤版数の publish を防ぐ。Build-Launcher の後に呼ぶこと。
+    Write-Step "エクスポート exe の版数を検証 (SoT 一致)"
+    $exe = Join-Path (Join-Path $FilesDir 'Launcher') 'TonePrism_Launcher.exe'
+    if (-not (Test-Path $exe)) {
+        Fail "検証対象の exe が見つかりません: $exe (Build-Launcher の後に呼ぶこと)"
+    }
+    $fileVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe).FileVersion
+    $parsed = $null
+    if (-not [version]::TryParse($fileVersion, [ref]$parsed)) {
+        Fail "exe の FileVersion を parse できません ('$fileVersion'、path=$exe)。export_presets.cfg の application/file_version / modify_resources (rcedit stamp) を確認。"
+    }
+    # exe は 4 part (X.Y.Z.0)、SoT は 3 part (X.Y.Z)。Major.Minor.Build で比較。
+    $exe3 = "$($parsed.Major).$($parsed.Minor).$($parsed.Build)"
+    if ($exe3 -ne $script:LauncherVersion) {
+        Fail ("エクスポート exe の FileVersion ($fileVersion → $exe3) が SoT ($script:LauncherVersion) と不一致。" +
+            "Set-ExportPresetVersions の stamp が未反映の疑い (export_presets.cfg / rcedit)。" +
+            "Manager は prod でこの exe から版数を読むため、誤版数の publish を防ぐべく中止。")
+    }
+    Write-Ok "exe FileVersion = $fileVersion (SoT $script:LauncherVersion と一致)"
+}
+
 # ============================================================================
 # Phase 5: Build Manager
 # ============================================================================
@@ -1714,17 +1741,12 @@ function Copy-Templates {
     #     `Launcher/` `Manager/` 等と同階層)。Project 全体の SoT という semantic に整合。
     #     Manager UI Phase 4 のアップデートフロー [7]〜[10] では `FileReplacer.ReplaceFile` の単体
     #     file copy で更新 (Launcher.bat / Manager.bat の shortcut bat 置換と同 pattern)。
-    #   - Launcher/project.godot: Phase 4 で Manager UI の VersionInventory が Launcher 版数を抽出
-    #     するのに使う (#281 で version.gd → project.godot config/version に SoT 移行)。Godot
-    #     エクスポート成果物 (`bin/TonePrism_Launcher.exe` + 埋め込み `.pck`) には project.godot が
-    #     `.pck` 内に焼き込まれて隠匿されるため、`Launcher/project.godot` を staging 段階で明示的に同梱して
-    #     install dir 配下に置く。Manager は `<install>/Launcher/project.godot` を直接 parse して
-    #     `[application] config/version="X.Y.Z"` を読み取る。
-    #     (loose な project.godot を exe の隣に置いても、配布版 exe は埋め込み pck を使うため runtime は無視する
-    #      = 旧来の version.gd 同梱と同じく inert。)
+    #   (#283) Launcher 版数の同梱ファイル (version.gd → #281 で project.godot) は**廃止**。Manager UI の
+    #   VersionInventory は `<install>/Launcher/TonePrism_Launcher.exe` の FileVersionInfo (= export_presets.cfg
+    #   `application/file_version` を Set-ExportPresetVersions が SoT から stamp → Godot/rcedit が exe に焼く) を
+    #   読むようになったため、版数読み取り用の loose ファイルを別途同梱する必要がなくなった (exe は元々同梱)。
     $filesTemplates = @(
-        @{ Src = 'CHANGELOG.md'; Dest = 'bundle\files\CHANGELOG.md'; Label = 'CHANGELOG.md (Bundle SoT for Manager UI, Phase 4 #108)' },
-        @{ Src = 'Launcher\project.godot'; Dest = 'bundle\files\Launcher\project.godot'; Label = 'Launcher/project.godot (Launcher SoT for Manager UI VersionInventory, #281)' }
+        @{ Src = 'CHANGELOG.md'; Dest = 'bundle\files\CHANGELOG.md'; Label = 'CHANGELOG.md (Bundle SoT for Manager UI, Phase 4 #108)' }
     )
 
     foreach ($tpl in ($rootTemplates + $bundleTemplates + $filesTemplates)) {
@@ -1797,8 +1819,7 @@ $script:BundleManifestFiles = @(
     'Launcher.bat',
     'Manager.bat',
     # bundle/files/ 配下 = インストール後の <親>\TonePrism\ に展開される payload
-    'files\Launcher\TonePrism_Launcher.exe',
-    'files\Launcher\project.godot',             # #281: Manager UI VersionInventory が parse する SoT (config/version)
+    'files\Launcher\TonePrism_Launcher.exe',    # #283: Manager UI VersionInventory が FileVersionInfo で版数を読む対象 (project.godot 同梱は廃止)
     'files\Manager\TonePrism_Manager.exe',
     'files\Manager\TonePrism_Manager.exe.config',
     'files\Manager\System.Data.SQLite.dll',
@@ -2101,6 +2122,7 @@ Set-ExportPresetVersions
 Assert-WorkingTreeClean -Context "export_presets sync 後" -PostSync
 Clear-Staging
 Build-Launcher
+Assert-ExportedLauncherVersion
 Build-Manager
 Build-Updater
 Build-LauncherAgent

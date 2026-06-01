@@ -63,6 +63,16 @@ namespace TonePrism.Manager
             get { return Path.Combine(BaseDirectory, "Launcher"); }
         }
 
+        /// <summary>
+        /// Launcher 実行 exe (`<install>/Launcher/TonePrism_Launcher.exe`)。(#283) Manager UI の VersionInventory が
+        /// Launcher 版数を FileVersionInfo から読む対象 (Updater 読み取りと同方式)。dev (= exe 不在) では
+        /// VersionInventory が `project.godot` 直 parse に fallback する。
+        /// </summary>
+        public static string LauncherExePath
+        {
+            get { return Path.Combine(LauncherDir, "TonePrism_Launcher.exe"); }
+        }
+
         /// <summary>Manager dir (`<install>/Manager/`)。Updater が rename-rollback する対象。</summary>
         public static string ManagerDir
         {
