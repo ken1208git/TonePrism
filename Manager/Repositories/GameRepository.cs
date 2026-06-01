@@ -239,6 +239,46 @@ namespace TonePrism.Manager.Repositories
             }
         }
 
+        /// <summary>
+        /// (#209) 指定 version 行の「active 版ミラー列」を games 行へコピーする (= active 版の付け替え)。
+        /// 個別バージョン削除でアクティブ版を消したとき、残存版へ **version 文字列だけでなく executable_path /
+        /// thumbnail / title 等のミラー列も** 付け替えるために使う。これを怠ると games.executable_path 等が
+        /// 削除済みフォルダを指したまま残り、Launcher が games.* を直読みするため**そのゲームが起動不能**になる
+        /// (#209 review Codex P1)。
+        ///
+        /// **列リストは <see cref="UpdateGameRowInTransaction"/> の version 由来列と同期させること** (両者が
+        /// games の「active 版ミラー」の SoT)。games 固有列 (release_year / display_order / is_visible /
+        /// controls / key_mapping) は touch しない。developers は Launcher が games.version ↔ game_versions.version
+        /// の JOIN で active 版の製作者を解決するため (game_repository.gd)、ここでは触らない。
+        /// title は NOT NULL のため、万一 version 側が NULL でも COALESCE で既存値を保持する。
+        /// </summary>
+        internal void MirrorActiveVersionIntoGameInTransaction(SQLiteConnection connection, SQLiteTransaction transaction, string gameId, int versionId)
+        {
+            string sql = @"
+                UPDATE games SET
+                    version = (SELECT version FROM game_versions WHERE id = @vid),
+                    executable_path = (SELECT executable_path FROM game_versions WHERE id = @vid),
+                    arguments = (SELECT arguments FROM game_versions WHERE id = @vid),
+                    description = (SELECT description FROM game_versions WHERE id = @vid),
+                    title = COALESCE((SELECT title FROM game_versions WHERE id = @vid), title),
+                    genre = COALESCE((SELECT genre FROM game_versions WHERE id = @vid), genre),
+                    min_players = (SELECT min_players FROM game_versions WHERE id = @vid),
+                    max_players = (SELECT max_players FROM game_versions WHERE id = @vid),
+                    difficulty = (SELECT difficulty FROM game_versions WHERE id = @vid),
+                    play_time = (SELECT play_time FROM game_versions WHERE id = @vid),
+                    controller_support = (SELECT controller_support FROM game_versions WHERE id = @vid),
+                    supported_connection = (SELECT supported_connection FROM game_versions WHERE id = @vid),
+                    thumbnail_path = (SELECT thumbnail_path FROM game_versions WHERE id = @vid),
+                    background_path = (SELECT background_path FROM game_versions WHERE id = @vid)
+                WHERE game_id = @gameId";
+            using (var command = new SQLiteCommand(sql, connection, transaction))
+            {
+                command.Parameters.AddWithValue("@vid", versionId);
+                command.Parameters.AddWithValue("@gameId", gameId);
+                command.ExecuteNonQuery();
+            }
+        }
+
         public void Delete(string gameId)
         {
             _conn.ExecuteWithRetry(() =>

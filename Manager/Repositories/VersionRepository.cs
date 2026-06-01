@@ -109,18 +109,33 @@ namespace TonePrism.Manager.Repositories
         }
 
         /// <summary>
-        /// (#209) 指定ゲームの「最新の残存版」(id DESC 先頭) の version 文字列を既存 transaction 内で取得する。
+        /// (#209) 指定ゲームの「最新の残存版」(id DESC 先頭) の **id** を既存 transaction 内で取得する。
         /// GameRepository.GetAll の `COALESCE(version, ... id DESC LIMIT 1)` fallback と同じ「最新 = id 最大」基準。
-        /// 版が 1 件も無ければ null (呼び出し側が「最後の 1 版は削除不可」をガードしている前提)。
+        /// active 付け替え時に当該版を games 行へ full mirror するための id。版が 1 件も無ければ null。
         /// </summary>
-        internal string GetLatestRemainingVersionStringInTransaction(SQLiteConnection connection, SQLiteTransaction transaction, string gameId)
+        internal int? GetLatestRemainingVersionIdInTransaction(SQLiteConnection connection, SQLiteTransaction transaction, string gameId)
         {
             using (var command = new SQLiteCommand(
-                "SELECT version FROM game_versions WHERE game_id = @gameId ORDER BY id DESC LIMIT 1", connection, transaction))
+                "SELECT id FROM game_versions WHERE game_id = @gameId ORDER BY id DESC LIMIT 1", connection, transaction))
             {
                 command.Parameters.AddWithValue("@gameId", gameId);
                 object result = command.ExecuteScalar();
-                return result == null || result == DBNull.Value ? null : (string)result;
+                return result == null || result == DBNull.Value ? (int?)null : Convert.ToInt32(result);
+            }
+        }
+
+        /// <summary>
+        /// (#209 review P2) 指定ゲームの残存版数を既存 transaction 内で数える。「最後の 1 版は削除不可」を
+        /// UI ガードだけでなく DB トランザクション内でも enforce するために使う (並行 Manager で UI ガードが
+        /// stale になっても 0 版ゲームを作らない)。
+        /// </summary>
+        internal int CountVersionsInTransaction(SQLiteConnection connection, SQLiteTransaction transaction, string gameId)
+        {
+            using (var command = new SQLiteCommand(
+                "SELECT COUNT(*) FROM game_versions WHERE game_id = @gameId", connection, transaction))
+            {
+                command.Parameters.AddWithValue("@gameId", gameId);
+                return Convert.ToInt32(command.ExecuteScalar());
             }
         }
 

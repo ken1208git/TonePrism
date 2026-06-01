@@ -48,6 +48,10 @@ namespace TonePrism.Manager.Tests
                 GameId = gameId,
                 Title = gameId,
                 Version = activeVersion,
+                // games 行は production 同様 active 版のミラー (executable_path/thumbnail) を持つ前提で seed する。
+                // 削除→付け替えでミラー列が新 active へ更新されるか (Codex P1) を検証できるようにするため。
+                ExecutablePath = activeVersion != null ? activeVersion + "/game.exe" : null,
+                ThumbnailPath = activeVersion != null ? activeVersion + "/thumb.png" : null,
                 Genre = new List<string>(),
                 Developers = new List<DeveloperInfo>(),
                 IsVisible = true,
@@ -63,6 +67,7 @@ namespace TonePrism.Manager.Tests
                 GameId = gameId,
                 Version = version,
                 ExecutablePath = version + "/game.exe",
+                ThumbnailPath = version + "/thumb.png",
                 Genre = new List<string>(),
                 Developers = devs,
             };
@@ -80,6 +85,21 @@ namespace TonePrism.Manager.Tests
                     cmd.Parameters.AddWithValue("@g", gameId);
                     object r = cmd.ExecuteScalar();
                     return r == null || r == DBNull.Value ? null : (string)r;
+                }
+            }
+        }
+
+        private string ReadGamesColumn(string gameId, string column)
+        {
+            // column はテスト内のリテラル列名のみ (注入リスクなし)。
+            using (var c = new SQLiteConnection(_conn.ConnectionString))
+            {
+                c.Open();
+                using (var cmd = new SQLiteCommand("SELECT " + column + " FROM games WHERE game_id = @g", c))
+                {
+                    cmd.Parameters.AddWithValue("@g", gameId);
+                    object r = cmd.ExecuteScalar();
+                    return r == null || r == DBNull.Value ? null : r.ToString();
                 }
             }
         }
@@ -127,6 +147,35 @@ namespace TonePrism.Manager.Tests
             Assert.Equal("v1.0.0", remaining[0].Version);
             Assert.Equal("v1.0.0", ReadGamesVersion("g2")); // 残り版へ付け替え
             Assert.Equal("v1.0.0", newActive);
+            // (Codex P1) version 文字列だけでなく games のミラー列 (executable_path/thumbnail) も新 active へ更新される。
+            Assert.Equal("v1.0.0/game.exe", ReadGamesColumn("g2", "executable_path"));
+            Assert.Equal("v1.0.0/thumb.png", ReadGamesColumn("g2", "thumbnail_path"));
+        }
+
+        [Fact]
+        public void DeleteLastVersion_Throws_AndKeepsRow()
+        {
+            // (Codex P2) UI ガードを通り抜けた (並行 Manager で stale) としても、transaction 内で最後の 1 版削除を拒否。
+            SeedGame("p2", "v1.0.0");
+            var only = AddVersion("p2", "v1.0.0");
+
+            Assert.Throws<InvalidOperationException>(() => _db.DeleteGameVersionAndReassignActive("p2", only.Id));
+            Assert.Single(_db.GetGameVersions("p2")); // rollback: 版行は残る (0 版ゲームを作らない)
+        }
+
+        [Fact]
+        public void DeleteActive_WhenGamesVersionNull_ReassignsAndMirrors()
+        {
+            // (Codex P3) games.version = NULL の異常 DB。LoadVersions は latest を仮 active 扱いする。
+            SeedGame("p3", null);
+            AddVersion("p3", "v1.0.0");
+            var latest = AddVersion("p3", "v1.1.0"); // NULL active の fallback = latest (id 最大)
+
+            string newActive = _db.DeleteGameVersionAndReassignActive("p3", latest.Id); // 仮 active を削除
+
+            Assert.Equal("v1.0.0", ReadGamesVersion("p3"));                            // NULL → 残り最新へ付け替え
+            Assert.Equal("v1.0.0", newActive);
+            Assert.Equal("v1.0.0/game.exe", ReadGamesColumn("p3", "executable_path")); // ミラー列も更新
         }
 
         [Fact]

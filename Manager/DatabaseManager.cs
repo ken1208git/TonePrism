@@ -127,19 +127,25 @@ namespace TonePrism.Manager
         }
 
         /// <summary>
-        /// (#209) 個別バージョンを削除し、削除版が games.version (= Launcher 表示中のアクティブ版) だった場合は
-        /// 残りの最新版 (id DESC 先頭) に付け替える。版行削除 + active 付け替えを 1 transaction で atomic に行う
-        /// (AddVersionAndActivate と同じ partial-commit 窓閉鎖の方針)。version 別 developers は version_id FK の
+        /// (#209) 個別バージョンを削除し、削除版が games の active 版 (= Launcher 表示中) だった場合は残りの最新版
+        /// (id DESC 先頭) に **games 行を full mirror して** 付け替える。版行削除 + active 付け替えを 1 transaction で
+        /// atomic に行う (AddVersionAndActivate と同じ partial-commit 窓閉鎖)。version 別 developers は version_id FK の
         /// ON DELETE CASCADE で自動削除される。
         ///
-        /// **active 判定は DB の真値で行う**: 引数は versionId のみで、版数文字列は DB から引く。EditGameForm 上で
-        /// 版番号が pending リネームされていても (in-memory の v.Version と DB 値が乖離していても)、games.version の
-        /// dangling を起こさないため。
+        /// **付け替えは version 文字列だけでなく executable_path / thumbnail 等のミラー列も更新する** (#209 review Codex P1)。
+        /// version 文字列だけ書き換えると games.executable_path 等が削除済みフォルダを指したまま残り、Launcher が games.* を
+        /// 直読みするため**そのゲームが起動不能**になる。`GameRepository.MirrorActiveVersionIntoGameInTransaction` を使う。
         ///
-        /// **呼び出し側の契約**: 「最後の 1 版は削除不可」を事前にガードすること (本 method は最後の 1 版でも削除し、
-        /// その場合 games.version は NULL になる = 版なしゲームという壊れた状態を作りうる)。
+        /// **active 判定は DB の真値で行う**: 引数は versionId のみで、版数文字列は DB から引く (フォーム上で版番号を pending
+        /// リネーム中でも dangling を起こさない)。**games.version が NULL のゲーム** (異常 DB) も「付け替えが必要」として
+        /// 扱う (#209 review Codex P3、NULL のまま残して mirror が stale になるのを防ぐ)。
+        ///
+        /// **最後の 1 版は削除不可を transaction 内でも enforce** (#209 review Codex P2): UI ガードが並行 Manager で
+        /// stale になっても 0 版ゲームを作らないよう、残存版数を数えて 1 以下なら例外を投げる。並行削除の race を
+        /// 防ぐため BEGIN IMMEDIATE (Serializable) で RESERVED lock を先取りする (AddGameAtTop と同パターン)。
         /// </summary>
-        /// <returns>削除後の games.version (= アクティブ版数文字列、DB の値)。削除版が active でなければ元の値のまま。</returns>
+        /// <returns>削除後の games.version (= アクティブ版数文字列、DB の値)。</returns>
+        /// <exception cref="InvalidOperationException">最後の 1 版を削除しようとした場合 (= 0 版になる)。</exception>
         public string DeleteGameVersionAndReassignActive(string gameId, int versionId)
         {
             return _conn.ExecuteWithRetry(() =>
@@ -147,24 +153,41 @@ namespace TonePrism.Manager
                 using (var connection = new SQLiteConnection(_conn.ConnectionString))
                 {
                     _conn.OpenConnectionWithJournalMode(connection);
-                    using (var transaction = connection.BeginTransaction())
+                    using (var transaction = connection.BeginTransaction(System.Data.IsolationLevel.Serializable))
                     {
                         try
                         {
-                            // 1) 削除対象版の DB version 文字列を先に取得 (active 判定の真値)。
+                            // (P2) transaction 内で残存版数を確認。最後の 1 版なら拒否 (0 版ゲームを作らない)。
+                            int count = _versionRepo.CountVersionsInTransaction(connection, transaction, gameId);
+                            if (count <= 1)
+                            {
+                                throw new InvalidOperationException(
+                                    "最後の 1 バージョンは削除できません (このゲームの残存バージョン数=" + count
+                                    + ")。別の Manager が同時に削除した可能性があります。");
+                            }
+
+                            // 削除対象版の DB version 文字列 (active 判定の真値) を先に取得。
                             string deletedVersionString = _versionRepo.GetVersionStringByIdInTransaction(connection, transaction, versionId);
 
-                            // 2) 版行を削除 (developers は version_id FK cascade)。
+                            // 版行を削除 (developers は version_id FK cascade)。
                             _versionRepo.DeleteVersionRowInTransaction(connection, transaction, versionId);
 
-                            // 3) games.version を読み、削除版と一致 (= active を消した) なら残り最新版に付け替え。
+                            // games.version が「削除版」または NULL (P3) なら、残り最新版を games 行へ full mirror して付け替え。
                             string currentActive = ReadGameVersionColumn(connection, transaction, gameId);
                             string newActive = currentActive;
-                            if (deletedVersionString != null && currentActive != null &&
-                                string.Equals(currentActive, deletedVersionString, StringComparison.OrdinalIgnoreCase))
+                            bool needsReassign = currentActive == null
+                                || (deletedVersionString != null
+                                    && string.Equals(currentActive, deletedVersionString, StringComparison.OrdinalIgnoreCase));
+                            if (needsReassign)
                             {
-                                newActive = _versionRepo.GetLatestRemainingVersionStringInTransaction(connection, transaction, gameId);
-                                WriteGameVersionColumn(connection, transaction, gameId, newActive);
+                                int? newActiveId = _versionRepo.GetLatestRemainingVersionIdInTransaction(connection, transaction, gameId);
+                                if (newActiveId == null)
+                                {
+                                    // count>=2 を確認済なので通常到達しない (defensive)。
+                                    throw new InvalidOperationException("残存バージョンが見つからず active を付け替えできません。");
+                                }
+                                _gameRepo.MirrorActiveVersionIntoGameInTransaction(connection, transaction, gameId, newActiveId.Value);
+                                newActive = ReadGameVersionColumn(connection, transaction, gameId);
                             }
 
                             transaction.Commit();
@@ -180,7 +203,7 @@ namespace TonePrism.Manager
             });
         }
 
-        // (#209) games.version 列の読み書き helper (DeleteGameVersionAndReassignActive 専用の最小 SQL)。
+        // (#209) games.version 列を読む helper (DeleteGameVersionAndReassignActive の active 判定 / 戻り値用)。
         private static string ReadGameVersionColumn(SQLiteConnection connection, SQLiteTransaction transaction, string gameId)
         {
             using (var command = new SQLiteCommand("SELECT version FROM games WHERE game_id = @gameId", connection, transaction))
@@ -188,16 +211,6 @@ namespace TonePrism.Manager
                 command.Parameters.AddWithValue("@gameId", gameId);
                 object result = command.ExecuteScalar();
                 return result == null || result == DBNull.Value ? null : (string)result;
-            }
-        }
-
-        private static void WriteGameVersionColumn(SQLiteConnection connection, SQLiteTransaction transaction, string gameId, string version)
-        {
-            using (var command = new SQLiteCommand("UPDATE games SET version = @version WHERE game_id = @gameId", connection, transaction))
-            {
-                command.Parameters.AddWithValue("@version", (object)version ?? DBNull.Value);
-                command.Parameters.AddWithValue("@gameId", gameId);
-                command.ExecuteNonQuery();
             }
         }
 
