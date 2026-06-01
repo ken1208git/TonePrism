@@ -71,5 +71,17 @@ namespace TonePrism.Manager.Tests
         {
             Assert.Equal(expected, SessionConflictPolicy.IsWholeDbReplacingOperation(op));
         }
+
+        // (#278 ①) Manager 起動時ダイアログ: 別 Manager がいる時だけ警告 / Launcher 単独や誰もいなければ出さない。
+        [Theory]
+        [InlineData(0, 0, false)]   // 誰もいない
+        [InlineData(0, 1, false)]   // Launcher 単独 → 起動を妨げない（出さない）
+        [InlineData(0, 3, false)]   // Launcher 複数でも別 Manager がいなければ出さない
+        [InlineData(1, 0, true)]    // 別 Manager → 警告
+        [InlineData(1, 2, true)]    // 別 Manager + Launcher → 警告
+        public void ShouldWarnAtStartup_OnlyWhenOtherManager(int otherManager, int launcher, bool expected)
+        {
+            Assert.Equal(expected, SessionConflictPolicy.ShouldWarnAtStartup(otherManager, launcher));
+        }
     }
 }

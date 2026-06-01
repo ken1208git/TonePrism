@@ -1953,8 +1953,9 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 - **文化祭当日、Launcher を立てたまま Manager で編集してもセッション競合警告を出さない**（通常の行編集に限る）。背景: Launcher は DB 読み取り専用（SELECT のみ、heartbeat は file）で、`journal_mode=DELETE` + `busy_timeout` の下では「Manager の行 write」と「Launcher の read」を SQLite が安全に調停する（write-write 競合なし・持続ロックなし）。従来は Launcher 稼働を検出すると編集のたびに警告が出ていた。
 - 判定を純ロジック **`Services/SessionConflictPolicy.ShouldWarn(otherManagerCount, launcherCount, op)`** に抽出（AGENTS「UI は薄く、ロジックは外へ」）。ルール: **別 Manager 検出時は操作種別を問わず常に警告**（write-write の本当の危険）／**Launcher 単独稼働なら、`toneprism.db` をファイルごと差し替える操作（"バックアップ復元" / "データベース初期化"）だけ警告し、通常の行編集（ゲーム/セクション/初回説明/設定/バックアップ作成・削除等）は警告しない**。`MainForm.CheckSessionConflictBeforeWrite` から委譲。
+- **Manager 起動時の競合ダイアログも同方針でスコープ分け** (`SessionConflictPolicy.ShouldWarnAtStartup`)。起動時は操作未定なので「別 Manager がいるか」だけで判定し、**Launcher 単独稼働では起動時ダイアログを出さない**（Launcher 立てっぱなしで Manager を開くたびに「【危険】別の Manager / Launcher が稼働中」が出る摩擦を解消。危険な Restore / 初期化は操作時に警告される）。別 Manager 検出時は従来どおり起動時ダイアログを表示し、検出 Launcher も併せて一覧表示。`MainForm.MainForm_Load` の起動時判定を委譲。
 - 注意: 操作種別を文字列ラベルで判定するため、**新たに DB ファイルを置換/再作成する操作を追加したら `IsWholeDbReplacingOperation` に対応ラベルを足すこと**（足し忘れると Launcher 稼働中に警告なしで実行され、store 表示中だとファイル差し替えが衝突しうる。#278 ② で store_browse が DB ハンドルを握らなくなれば緩められる）。
-- `Manager.Tests/SessionConflictPolicyTests` で 29 ケース（nobody / 別 Manager 常時警告 / Launcher 単独×通常編集18種は警告なし / Launcher 単独×Restore・Reset は警告 / 分類）を検証。
+- `Manager.Tests/SessionConflictPolicyTests` で 34 ケース（nobody / 別 Manager 常時警告 / Launcher 単独×通常編集18種は警告なし / Launcher 単独×Restore・Reset は警告 / 分類 / 起動時判定5種）を検証。
 
 ### [Manager v0.19.2] - 2026-06-01
 

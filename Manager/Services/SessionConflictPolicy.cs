@@ -38,6 +38,20 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>
+        /// (#278) Manager **起動時**に競合ダイアログを出すべきか。起動時はまだ操作が未定なので
+        /// 「別 Manager がいるか」だけで判定する。Launcher は DB 読み取り専用で Manager の起動・通常編集を
+        /// 妨げないため、**Launcher 単独稼働では起動時ダイアログを出さない**（文化祭当日に Launcher を立てた
+        /// まま Manager を開くたびに警告が出る摩擦を解消）。危険な Restore / DB 初期化は操作時に
+        /// <see cref="ShouldWarn"/> で警告されるため、起動時に塞ぐ必要はない。
+        /// </summary>
+        /// <param name="otherManagerCount">自分以外に検出した稼働中 Manager セッション数。</param>
+        /// <param name="launcherCount">検出した稼働中 Launcher セッション数（起動時判定では意図的に未使用）。</param>
+        public static bool ShouldWarnAtStartup(int otherManagerCount, int launcherCount)
+        {
+            return otherManagerCount > 0;
+        }
+
+        /// <summary>
         /// toneprism.db を**ファイルごと差し替える/再作成する**破壊的操作か。
         ///
         /// 注意: 操作種別を文字列ラベルで判定している (呼び出し API が operationDescription の string のみ
