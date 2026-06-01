@@ -7,20 +7,30 @@ extends Control
 ## データは intro_slides テーブル（DB v22, Manager 側で編集）。画像実体は guide/ フォルダ。
 ## #244 方針: DB 由来の純動的コンテンツは builder スクリプトで構築する（.tscn を強制しない）。
 ## 本シーンは単一用途（再利用しない1画面）のため、シーン script 内で直接 UI を組み立てる。
+##
+## 送り/戻しは「中断メニュー (overlay_menu) 登場」と同じ流儀の横スライド + フェード
+## (TRANS_QUINT / EASE_OUT)。次へ=新スライドが右から入り旧が左へ抜ける、戻る=その逆。
 
 const STORE_BROWSE_SCENE := "res://scenes/store_browse.tscn"
+
+# スライド送りアニメ (overlay_menu の ANIM_OPEN_DUR=0.55 / QUINT・EASE_OUT を踏襲、やや速め)
+const SLIDE_DX := 320.0   # 横スライド量(px)。旧は -dir*SLIDE_DX へ、新は +dir*SLIDE_DX から 0 へ
+const NAV_DUR := 0.4
 
 # --- 状態 ---
 var _db_manager: DatabaseManager
 var _slides: Array[IntroSlideInfo] = []
 var _current: int = 0
 var _transitioning: bool = false
-var _texture_cache: Dictionary = {}  # slide index -> ImageTexture（再ナビ時の再読込回避）
+var _texture_cache: Dictionary = {}      # image_path(String) -> ImageTexture（再ナビ時の再読込回避）
+var _font_regular_cache: FontFile = null
 
 # --- コードで構築するノード参照 ---
-var _image_rect: TextureRect
-var _body_label: Label
+var _stage: Control                       # スライド本体（image+body）が横スライドする領域
 var _page_label: Label
+var _current_content: Control = null       # 現在表示中のスライドコンテンツ
+var _outgoing_content: Control = null      # 退場アニメ中の旧スライドコンテンツ
+var _nav_tween: Tween = null
 
 func _ready() -> void:
 	set_process_input(true)
@@ -36,7 +46,7 @@ func _ready() -> void:
 		return
 
 	_build_ui()
-	_show_slide(0)
+	_set_initial_slide(0)
 
 ## DBから表示対象スライドを読み込む
 func _load_slides() -> void:
@@ -51,44 +61,21 @@ func _load_slides() -> void:
 # --- UI構築 ---
 
 func _build_ui() -> void:
-	# 背景
+	# 背景（静止。スライドしない）
 	var bg := ColorRect.new()
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	bg.color = Color(0.08, 0.08, 0.1, 1)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
 
-	# 中央コンテンツ（画像 + 本文）
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(center)
+	# スライド領域（この中のコンテンツが左右にスライドする）。画面端からはみ出す分はクリップ。
+	_stage = Control.new()
+	_stage.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_stage.clip_contents = true
+	_stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_stage)
 
-	var vbox := VBoxContainer.new()
-	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.add_theme_constant_override("separation", 40)
-	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	center.add_child(vbox)
-
-	# 画像（アスペクト維持・中央寄せ）。画像なしスライドでは visible=false にして本文のみ表示。
-	_image_rect = TextureRect.new()
-	_image_rect.custom_minimum_size = Vector2(960, 540)
-	_image_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_image_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_image_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vbox.add_child(_image_rect)
-
-	# 本文
-	_body_label = Label.new()
-	_body_label.add_theme_font_override("font", load("res://fonts/NotoSansJP-Regular.ttf"))
-	_body_label.add_theme_font_size_override("font_size", 32)
-	_body_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
-	_body_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_body_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_body_label.custom_minimum_size = Vector2(1100, 0)
-	_body_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vbox.add_child(_body_label)
-
+	# 以降（ページ表示・ヒントバー）はスライド領域より前面に固定表示
 	_build_page_indicator()
 	_build_hint_bar()
 
@@ -101,7 +88,7 @@ func _build_page_indicator() -> void:
 	add_child(top_margin)
 
 	_page_label = Label.new()
-	_page_label.add_theme_font_override("font", load("res://fonts/NotoSansJP-Regular.ttf"))
+	_page_label.add_theme_font_override("font", _font_regular())
 	_page_label.add_theme_font_size_override("font_size", 24)
 	_page_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.6))
 	_page_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -127,47 +114,74 @@ func _build_hint_bar() -> void:
 	hbox.add_child(KeyHintBuilder.create_hint("→ / Enter", "次へ"))
 	hbox.add_child(KeyHintBuilder.create_hint("Esc", "スキップ"))
 
-# --- スライド表示 ---
+# --- スライドコンテンツ生成 ---
 
-func _show_slide(index: int) -> void:
-	if index < 0 or index >= _slides.size():
-		return
-	_current = index
-	var slide := _slides[index]
+## 1スライド分のコンテンツ（画像 + 本文）を full-rect の Control として生成。
+## 横スライドさせるため position を直接いじれる素の Control を root にし、中身は CenterContainer で中央寄せ。
+func _make_slide_content(slide: IntroSlideInfo) -> Control:
+	var root := Control.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
-	_body_label.text = slide.body_text
-	_page_label.text = "%d / %d" % [index + 1, _slides.size()]
-	_update_image(index, slide)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(center)
 
-func _update_image(index: int, slide: IntroSlideInfo) -> void:
-	# キャッシュ済みならそのまま適用
-	if _texture_cache.has(index):
-		_apply_texture(_texture_cache[index])
-		return
+	var vbox := VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 40)
+	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	center.add_child(vbox)
+
+	# 画像（アスペクト維持・中央寄せ）。画像なしスライドでは非表示にして本文のみ。
+	var image_rect := TextureRect.new()
+	image_rect.custom_minimum_size = Vector2(960, 540)
+	image_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	image_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	image_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var tex := _get_texture_for(slide)
+	if tex != null:
+		image_rect.texture = tex
+	else:
+		image_rect.visible = false
+	vbox.add_child(image_rect)
+
+	# 本文
+	var body := Label.new()
+	body.text = slide.body_text
+	body.add_theme_font_override("font", _font_regular())
+	body.add_theme_font_size_override("font_size", 32)
+	body.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
+	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.custom_minimum_size = Vector2(1100, 0)
+	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(body)
+
+	return root
+
+## スライドの画像を解決・読込してテクスチャを返す（image_path 単位でキャッシュ）。画像なし/失敗は null。
+func _get_texture_for(slide: IntroSlideInfo) -> Texture2D:
+	if slide.image_path.is_empty():
+		return null
+	if _texture_cache.has(slide.image_path):
+		return _texture_cache[slide.image_path]
 
 	var resolved := _resolve_image_path(slide.image_path)
 	if resolved.is_empty() or not FileAccess.file_exists(resolved):
-		# 画像なし / 見つからない → 本文のみ表示
-		_image_rect.texture = null
-		_image_rect.visible = false
-		return
-
+		return null
 	var image := Image.load_from_file(resolved)
 	if image == null:
-		_image_rect.texture = null
-		_image_rect.visible = false
-		return
-
+		return null
 	var tex := ImageTexture.create_from_image(image)
-	_texture_cache[index] = tex
-	_apply_texture(tex)
+	_texture_cache[slide.image_path] = tex
+	return tex
 
-func _apply_texture(tex: Texture2D) -> void:
-	_image_rect.visible = true
-	_image_rect.texture = tex
-	_image_rect.modulate = Color(1, 1, 1, 0)
-	var tween := create_tween()
-	tween.tween_property(_image_rect, "modulate:a", 1.0, 0.2)
+func _font_regular() -> FontFile:
+	if _font_regular_cache == null:
+		_font_regular_cache = load("res://fonts/NotoSansJP-Regular.ttf")
+	return _font_regular_cache
 
 ## guide/ 相対パスを絶対パスに解決（GamePathResolver.resolve_path の guide 版）
 func _resolve_image_path(rel: String) -> String:
@@ -187,19 +201,71 @@ func _resolve_image_path(rel: String) -> String:
 
 	return guide_path
 
-# --- ナビゲーション ---
+# --- スライド表示・ナビゲーション ---
 
-func _next_slide() -> void:
-	if _current >= _slides.size() - 1:
-		# 最終スライドで「次へ」→ 説明終了、ストアへ
+## 初回表示（アニメなし。シーン遷移のフェードと二重がけしない）
+func _set_initial_slide(index: int) -> void:
+	_current = index
+	_page_label.text = "%d / %d" % [index + 1, _slides.size()]
+	_current_content = _make_slide_content(_slides[index])
+	_stage.add_child(_current_content)
+
+## 入力からの送り/戻し。端での挙動: 最終で「次へ」→ストア、先頭で「戻る」→何もしない。
+func _navigate(direction: int) -> void:
+	var target := _current + direction
+	if direction > 0 and target >= _slides.size():
 		_go_to_store()
 		return
-	_show_slide(_current + 1)
-
-func _prev_slide() -> void:
-	if _current <= 0:
+	if target < 0 or target >= _slides.size():
 		return
-	_show_slide(_current - 1)
+	_animate_to(target, direction)
+
+## index のスライドへ横スライド + フェードで切り替える。
+## direction = +1(次へ): 新が右(+SLIDE_DX)から中央へ、旧が左(-SLIDE_DX)へ抜ける。-1(戻る)はその逆。
+func _animate_to(index: int, direction: int) -> void:
+	# 進行中アニメの割り込み: 旧 tween を kill し、宙に浮いた旧コンテンツを片付け、現コンテンツを定位置へ戻す。
+	if _nav_tween and _nav_tween.is_valid():
+		_nav_tween.kill()
+	if is_instance_valid(_outgoing_content):
+		_outgoing_content.queue_free()
+	_outgoing_content = null
+	if is_instance_valid(_current_content):
+		_current_content.position = Vector2.ZERO
+		_current_content.modulate.a = 1.0
+
+	_current = index
+	_page_label.text = "%d / %d" % [index + 1, _slides.size()]
+
+	var new_content := _make_slide_content(_slides[index])
+	_stage.add_child(new_content)
+	new_content.position = Vector2(direction * SLIDE_DX, 0.0)
+	new_content.modulate.a = 0.0
+
+	_outgoing_content = _current_content
+	_current_content = new_content
+
+	_nav_tween = create_tween()
+	_nav_tween.set_parallel(true)
+	# 新スライド: 横から中央へ + フェードイン
+	_nav_tween.tween_property(new_content, "position:x", 0.0, NAV_DUR)\
+		.set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
+	_nav_tween.tween_property(new_content, "modulate:a", 1.0, NAV_DUR)\
+		.set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
+	# 旧スライド: 反対側へ抜けつつフェードアウト → 完了後に破棄
+	var outgoing := _outgoing_content
+	if is_instance_valid(outgoing):
+		_nav_tween.tween_property(outgoing, "position:x", -direction * SLIDE_DX, NAV_DUR)\
+			.set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
+		_nav_tween.tween_property(outgoing, "modulate:a", 0.0, NAV_DUR)\
+			.set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
+		# chain(): 上の parallel が出揃ってから実行。kill 時はコールバックも発火しないため、
+		# 自然完了かつ未割り込みのときだけここに来る（その場合 _outgoing_content は依然 outgoing を指す）。
+		_nav_tween.chain().tween_callback(func() -> void:
+			if is_instance_valid(outgoing):
+				outgoing.queue_free()
+			if _outgoing_content == outgoing:
+				_outgoing_content = null
+		)
 
 func _go_to_store() -> void:
 	if _transitioning:
@@ -233,8 +299,8 @@ func _input(event: InputEvent) -> void:
 		_go_to_store()
 		viewport.set_input_as_handled()
 	elif event.is_action_pressed("ui_left"):
-		_prev_slide()
+		_navigate(-1)
 		viewport.set_input_as_handled()
 	elif event.is_action_pressed("ui_right") or event.is_action_pressed("ui_accept"):
-		_next_slide()
+		_navigate(1)
 		viewport.set_input_as_handled()
