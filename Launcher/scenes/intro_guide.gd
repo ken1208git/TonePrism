@@ -204,8 +204,11 @@ func _seg_style(bg: Color, left_rounded: bool) -> StyleBoxFlat:
 	s.corner_radius_bottom_left = r if left_rounded else 0
 	s.corner_radius_top_right = 0 if left_rounded else r
 	s.corner_radius_bottom_right = 0 if left_rounded else r
-	s.content_margin_left = 24
-	s.content_margin_right = 24
+	# 左右パディングは 18。最長ラベル「ストアへ  →」(120px) でも min 幅 160 に収まり、
+	# 「進む  →」↔「ストアへ  →」でボタン幅が変わらない（伸びない）ようにするため。
+	# 短いラベルは中央寄せなので見た目の余白は詰まらない。
+	s.content_margin_left = 18
+	s.content_margin_right = 18
 	s.content_margin_top = 10
 	s.content_margin_bottom = 10
 	return s
