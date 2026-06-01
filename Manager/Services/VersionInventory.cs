@@ -89,9 +89,12 @@ namespace TonePrism.Manager.Services
 
         /// <summary>
         /// Launcher 版数を読む。
-        /// (#283) **prod**: エクスポート済み `TonePrism_Launcher.exe` の FileVersionInfo を読む (Updater と同方式)。
-        /// この FileVersion は export_presets.cfg の `application/file_version` を Release.ps1 `Set-ExportPresetVersions`
-        /// が SoT (project.godot config/version) から stamp → Godot/rcedit が exe リソースに焼いた派生値。
+        /// (#283) **prod**: エクスポート済み `TonePrism_Launcher.exe` の FileVersionInfo を読む。**読み取り API** は
+        /// Updater の <see cref="ReadUpdaterVersion"/> と同じ FileVersionInfo 方式だが、**版数を exe に焼く機構は別系統**:
+        /// Updater は .NET の AssemblyFileVersion 属性、Launcher は export_presets.cfg の `application/file_version` を
+        /// Release.ps1 `Set-ExportPresetVersions` が SoT (project.godot config/version) から stamp → Godot/rcedit が
+        /// exe の VERSIONINFO リソースに焼いた派生値。後者は本変更で初めて prod の版数 SoT として consume するため、
+        /// stamp 経路の不発を `Release.ps1 Assert-ExportedLauncherVersion` が公開前に hard fail で守る。
         /// **dev**: リポジトリには exe を置かないので、exe 不在時は `<repo>/Launcher/project.godot` の
         /// config/version 直 parse に fallback する (= dev でも版数が「不明」にならない、#281 の機構を残置)。
         /// 失敗時は null (UI で「不明」表示) の fail-soft。
@@ -102,14 +105,14 @@ namespace TonePrism.Manager.Services
             {
                 // prod: exe の FileVersionInfo を優先。
                 string exePath = PathManager.LauncherExePath;
-                if (File.Exists(exePath))
+                bool exeExists = File.Exists(exePath);
+                if (exeExists)
                 {
                     FileVersionInfo info = FileVersionInfo.GetVersionInfo(exePath);
                     Version exeVer;
                     if (Version.TryParse(info.FileVersion, out exeVer)) return exeVer;
-                    // exe はあるが FileVersion が読めない (= rcedit stamp 不発等)。dev fallback を試さず
-                    // ここで止めると prod で誤って project.godot 不在 → null になるが、prod に project.godot は
-                    // 同梱しないため fallback は no-op。診断 trail を残して下の fallback (no-op) に流す。
+                    // exe はあるが FileVersion が読めない (= rcedit stamp 不発等)。prod に project.godot は
+                    // 同梱しないため下の fallback は no-op になり最終 warn に流れる。診断 trail を残す。
                     Logger.Warn("[VersionInventory] ReadLauncherVersion: Launcher exe の FileVersion を parse できず ('"
                         + (info.FileVersion ?? "(null)") + "', path=" + exePath + ")");
                 }
@@ -127,9 +130,13 @@ namespace TonePrism.Manager.Services
                     return projVer;
                 }
 
-                // exe も project.godot も無い (broken install 等)。
-                Logger.Warn("[VersionInventory] ReadLauncherVersion: Launcher exe も project.godot も不在 (exe="
-                    + exePath + ")");
+                // 版数を特定できず。exe の有無で原因を分けて trail を残す (exe あり=FileVersion 読取不可で
+                // rcedit stamp 不発の疑い / exe 不在=broken install の疑い)。前者は project.godot 同梱廃止 (#283) の
+                // ため fallback で拾えない経路だが、本来 Assert-ExportedLauncherVersion が公開前に止めるべきもの。
+                Logger.Warn("[VersionInventory] ReadLauncherVersion: 版数を特定できず — "
+                    + (exeExists
+                        ? "Launcher exe (" + exePath + ") はあるが FileVersion 読取不可、かつ project.godot fallback も不在 (prod の rcedit stamp 不発の疑い)"
+                        : "Launcher exe (" + exePath + ") も project.godot も不在 (broken install の疑い)"));
                 return null;
             }
             catch (Exception ex)
