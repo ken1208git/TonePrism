@@ -100,18 +100,21 @@ func _build_page_indicator() -> void:
 
 ## 操作ボタン（下部中央）。戻る / スキップ / 進む。クリック操作用（キーボード ←/→/Esc は _input で併用）。
 func _build_nav_buttons() -> void:
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	margin.add_theme_constant_override("margin_bottom", 48)
-	margin.add_theme_constant_override("margin_top", 20)
-	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(margin)
-
+	# 下端中央に固定。MarginContainer + preset は「子追加前に min-size が確定せず高さ0に潰れる」ため
+	# 使わず、アンカー (下端いっぱい) + offset で高さ 72px の帯を明示指定する (min-size 非依存で確実)。
 	var hbox := HBoxContainer.new()
+	hbox.anchor_left = 0.0
+	hbox.anchor_top = 1.0
+	hbox.anchor_right = 1.0
+	hbox.anchor_bottom = 1.0
+	hbox.offset_left = 0.0
+	hbox.offset_right = 0.0
+	hbox.offset_top = -112.0    # 下から112px
+	hbox.offset_bottom = -40.0  # 下端から40px 上げる (= 高さ72px の帯)
 	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	hbox.add_theme_constant_override("separation", 24)
 	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	margin.add_child(hbox)
+	add_child(hbox)
 
 	_btn_back = _make_nav_button("←  戻る")
 	_btn_back.pressed.connect(func() -> void: _navigate(-1))
@@ -131,6 +134,8 @@ func _make_nav_button(text: String) -> Button:
 	btn.text = text
 	btn.focus_mode = Control.FOCUS_NONE
 	btn.custom_minimum_size = Vector2(180, 56)
+	btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER  # 72px 帯の中で 56px のまま縦中央に
+	btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	btn.add_theme_font_override("font", _font_regular())
 	btn.add_theme_font_size_override("font_size", 22)
 	btn.add_theme_color_override("font_color", Color(1, 1, 1, 0.9))
