@@ -1314,8 +1314,17 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 - **`store_section_repository.gd` に `release_year:YYYY` ソース分岐を追加**。`source.begins_with("release_year:")` で `int(source.substr(13))` を取り出し、`SELECT * FROM games WHERE is_visible=1 AND release_year=? ORDER BY display_order ASC, title ASC`（指定年のゲームを表示順で全件）を実行。既存の `genre:` / `difficulty:` / `players_min:` 等のフィルタ分岐と同型。
 - **新作 (`recent`) との違い**: `recent` は `release_year=今年`（システム日付）固定だが、`release_year:YYYY` は Manager 側で指定した**任意の年**を引く。`max_display_count<=0`（Manager が 0 保存）で該当年を全件表示。
 - Manager 側 UI（ソース「制作年指定」の追加・値入力・条件系グレーアウト）は上記 [Manager v0.21.0] を参照。
-- 検証: 同梱 Godot 4.6.2 ヘッドレスで `store_section_repository.gd` のロード（パースエラーなし）を確認。**※実 DB での年フィルタ取得の実機確認は Manager 実機 UI 確認とあわせて別途必要**。
-- bump 判断: ユーザー向けソース種別の追加（機能追加）。.pck も変わるが pre-1.0 の小さな追加分岐のため patch (v0.10.2 → v0.10.3)。
+
+#### Fixed (#211 起因 — タイルグリッドが空表示になる回帰)
+
+- **`store_banner_builder.gd` `build_tile_grid_section` が `max_display_count<=0` を「上限なし（最大 3 枚）」と扱うよう修正**。従来は `mini(section.max_display_count, 3)` をガード無しで取っており、#211 で手動/フィルター系ソースが `0` 保存になった結果＋#212 でタイルグリッドが手動固定 → `mini(0,3)=0` で `tile_count=0` → **1 枚も出ない空グリッド**になっていた。通常セクションの `>0 else max_tiles` ガードと同じ扱いに揃えた（ランダム等で `max>0` のときは従来どおり `mini(max,3)`）。
+
+#### Changed (#212 — 厳選枠でランダムソースを許可)
+
+- **スライドショー / タイルグリッドで「ランダム」ソースを許可**（Manager v0.21.0 の #212 改と対）。背景画像・タイトルはゲーム自身のものを使うため、ランダムでも見栄えが保てる。
+- **スライドショーは `max_display_count>0` のときスライド枚数を上限する**（`build_slideshow_section`）。手動は `0` 保存＝全件（従来どおり）、ランダムは max が有効なので「特集 N 枚」が成立する。生成枚数を container の `slide_count` meta に持たせ、**`store_browse.gd` `_switch_slide` の wrap-around を `section.games.size()` から `slide_count` に変更**（枚数を絞った際に存在しない `Banner_*` へ飛んで空スライドになるのを防止）。バナー画像の遅延ロードは `Banner_*` を null まで走査する `while` ループなので追従済（無改修）。
+- 検証: 同梱 Godot 4.6.2 ヘッドレスで `store_section_repository.gd` / `store_banner_builder.gd` / `store_browse.gd` のロード（パースエラーなし）を確認。**※実 DB でのランダム/制作年取得・タイルグリッド/スライドショーの実描画は Manager 実機 UI 確認とあわせて別途必要**（特にタイルグリッド空表示修正・スライド wrap は実機目視）。
+- bump 判断: ユーザー向けソース種別の追加（#291）＋表示回帰修正（#211 起因）＋ランダム許可（#212）。.pck が変わるため patch (v0.10.2 → v0.10.3)。
 
 ### [Launcher v0.10.2] - 2026-06-01
 
@@ -1988,7 +1997,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 #### Changed (#211 / #212 / #291 — ストアセクション編集の条件付き UI)
 
-- **(#212) スライドショー / タイルグリッドのソースを「手動」のみに制限**。タイプをこの 2 つにすると `cmbSectionSource` を「手動」に固定（combo 無効化）。背景画像・16:9・表示テキスト前提の「厳選枠」で、自動選択だと見栄え崩れ/表示テキスト未設定で破綻するため。通常カテゴリ行は従来どおり手動＋全自動ソース可。既存の「スライドショー/タイルグリッド×自動」(legacy) は編集を開いた時点で手動へ coerce し案内ダイアログを出す（保存するまで DB は不変）。
+- **(#212) スライドショー / タイルグリッドのソースを「手動」または「ランダム」に制限**。背景画像・表示テキストは**ゲーム自身のもの**にフォールバックするため、**ランダムなら自動でも崩れず**、4 秒ごとに切り替わるヒーロー枠と相性が良い（毎回ちがうゲームを大きく見せる枠）。一方 popular/genre 等の**絞り込み系は大判ヒーローに不向き**なため不可。許可外ソースを選ぶと「手動」へ戻し案内ダイアログを出す（`cmbSectionSource` は無効化せず手動/ランダムの 2 択を選べる）。通常カテゴリ行は従来どおり手動＋全自動ソース可。legacy の「絞り込み系×厳選枠」も編集を開いた時点で手動へ coerce（手動/ランダムならそのまま、保存するまで DB は不変）。新規 helper `TypeIsShowcase` / `TypeAllowsSource`、`ApplyTypeSourceConstraint` は coerce したかを bool で返し Source ハンドラの二重更新を抑止。**ランダム=ランキング系**なので厳選枠×ランダムでは最大表示数も有効（スライドショー＝スライド枚数 / タイルグリッド＝最大 3 枚）。Launcher 側の空グリッド修正・スライド枚数上限は下記 Launcher v0.10.3 参照。
 - **(#211) 最大表示数 (`nudMaxDisplayCount`) をソース別に有効/グレーアウト**。**ランキング系**（人気=play_count順/最近プレイ=last_played順/ランダム）のみ有効（TOP5 等の特集枠で上限が意味を持つ）。**手動**（割り当て全件表示）と**条件系**（ジャンル/プレイ人数/難易度/プレイ時間/通信プレイ/コントローラー、および **新作**［`release_year=今年` を display_order 順に並べるだけで本物のランキングでないため #290 review で条件系に分類変更］、条件一致を全件表示）はグレーアウトし、保存時に `MaxDisplayCount=0`（= 上限なし、Launcher の `max_display_count<=0` 解釈）で書き、手で選んだ/条件一致のゲームが意図せず切られないようにする。
 - 新規ヘルパ `IsRankingSource` / `TypeRequiresManualSource` / `UpdateMaxDisplayCountEnabled` / `ApplyTypeSourceConstraint`（Load・タイプ変更・ソース変更で適用）。スキーマ変更なし（`max_display_count` の値の使い方を変えるのみ、既存の手動/フィルターセクションは次回保存で 0 に正規化）。
 - **(#291) 新ソース「制作年指定」(`release_year:YYYY`) を追加**（ソース combo 末尾 idx=12）。「値」に西暦を入れるとその制作年のゲームを `display_order` 順で全件表示。**新作**（今年固定）に対し**任意の年**を選べる汎用フィルター。条件系扱いで `max_display_count` はグレーアウト（0 保存）。切替時は現在年を初期値に補完。`nudSourceValue.Maximum` を 10→2100 に拡張。Launcher 側のクエリ分岐は下記 Launcher v0.10.3 参照。

@@ -15,6 +15,15 @@ static func build_slideshow_section(section: StoreSectionInfo, viewport_width: f
 	if section.games.is_empty():
 		return container
 
+	# (#212 改 / #211) スライド枚数の上限。手動は max=0 保存=全件 (従来どおり)。ランダム等を許可したので
+	# max>0 のときは枚数を絞り「特集 N 枚」が成立するようにする (ガードが無いと全ゲームが延々流れて特集にならない)。
+	var slide_count = section.games.size()
+	if section.max_display_count > 0:
+		slide_count = mini(slide_count, section.max_display_count)
+	# 実際に生成するスライド枚数を container に持たせる。store_browse の _switch_slide が wrap-around に使い、
+	# section.games.size() で割って存在しない Banner_* に飛ぶのを防ぐ (max で枚数を絞ったランダム等で重要)。
+	container.set_meta("slide_count", slide_count)
+
 	# バナークリップ領域（角丸窓）
 	var clip_panel = Panel.new()
 	clip_panel.name = "BannerClip"
@@ -28,7 +37,7 @@ static func build_slideshow_section(section: StoreSectionInfo, viewport_width: f
 	container.add_child(clip_panel)
 
 	# バナー画像をクリップ領域内に配置
-	for i in range(section.games.size()):
+	for i in range(slide_count):
 		var game = section.games[i]
 		var banner = create_banner(game, Vector2(banner_width, StoreBrowseBuilder.FEATURED_HEIGHT))
 		banner.name = "Banner_%d" % i
@@ -48,7 +57,7 @@ static func build_slideshow_section(section: StoreSectionInfo, viewport_width: f
 	var bars = HBoxContainer.new()
 	bars.name = "BarIndicator"
 	bars.add_theme_constant_override("separation", StoreBrowseBuilder.BAR_GAP)
-	for i in range(section.games.size()):
+	for i in range(slide_count):
 		var bar = Panel.new()
 		bar.name = "Bar_%d" % i
 		bar.custom_minimum_size = Vector2(StoreBrowseBuilder.BAR_WIDTH, StoreBrowseBuilder.BAR_HEIGHT)
@@ -66,7 +75,7 @@ static func build_slideshow_section(section: StoreSectionInfo, viewport_width: f
 		bar.add_child(fill)
 		bars.add_child(bar)
 
-	var total_width = section.games.size() * StoreBrowseBuilder.BAR_WIDTH + (section.games.size() - 1) * StoreBrowseBuilder.BAR_GAP
+	var total_width = slide_count * StoreBrowseBuilder.BAR_WIDTH + (slide_count - 1) * StoreBrowseBuilder.BAR_GAP
 	bars.position = Vector2(banner_width / 2 - total_width / 2.0, StoreBrowseBuilder.FEATURED_HEIGHT + 15)
 	bars.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	container.add_child(bars)
@@ -103,7 +112,7 @@ static func build_slideshow_section(section: StoreSectionInfo, viewport_width: f
 	clip_panel.add_child(title_scroll)
 
 	# 左右矢印ボタン
-	if section.games.size() > 1:
+	if slide_count > 1:
 		_add_arrow_buttons(container, banner_width)
 
 	return container
@@ -115,7 +124,12 @@ static func build_tile_grid_section(section: StoreSectionInfo, viewport_width: f
 	container.add_theme_constant_override("separation", StoreBrowseBuilder.TILE_GAP)
 
 	var available_width = viewport_width - StoreBrowseBuilder.FEATURED_PADDING * 2
-	var tile_count = mini(section.games.size(), mini(section.max_display_count, 3))
+	# (#211 fix) max_display_count<=0 は「上限なし」(=タイルグリッドの物理上限 3 枚) と解釈する。手動/フィルター系
+	# ソースは 0 保存される (Manager #211) ため、ガード無しの mini(0,3)=0 だと tile_count=0 で 1 枚も出ない空グリッド
+	# になっていた (= #212 でタイルグリッドが手動固定 → 全タイルグリッドが空表示になる回帰)。通常セクションの
+	# `>0 else max_tiles` ガードと同じ扱いに揃える。ランダム等で max>0 のときは従来どおり mini(max,3)。
+	var cap = 3 if section.max_display_count <= 0 else mini(section.max_display_count, 3)
+	var tile_count = mini(section.games.size(), cap)
 
 	if tile_count == 0:
 		return container

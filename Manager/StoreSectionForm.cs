@@ -188,6 +188,10 @@ namespace TonePrism.Manager
 
         private void CmbSectionSource_SelectedIndexChanged(object sender, EventArgs e)
         {
+            // (#212 改) 厳選枠 (スライドショー/タイルグリッド) で許可外ソースを選んだら手動へ戻す。戻した時点で
+            // 本ハンドラが再帰的に走り index=0 用の更新が済むので、ここでは return して二重更新を避ける。
+            if (ApplyTypeSourceConstraint(informOnCoerce: true)) return;
+
             // (#290 review) 難易度/プレイ時間のラベル付き選択肢を入れ直す (対話的にソースを変えたとき)。
             PopulateSourceValueCombo(cmbSectionSource.SelectedIndex);
             // (#291) 制作年指定に切り替えたとき nud が年らしくない値なら今年を初期値に。
@@ -230,9 +234,17 @@ namespace TonePrism.Manager
         private static bool IsRankingSource(int sourceIndex)
             => sourceIndex == 1 || sourceIndex == 3 || sourceIndex == 10;
 
-        // (#212) このセクションタイプはソースを手動のみに制限するか。スライドショー(1) / タイルグリッド(2)。
-        private static bool TypeRequiresManualSource(int typeIndex)
+        // (#212) スライドショー(1) / タイルグリッド(2) は背景画像・表示テキストで魅せる厳選枠。
+        private static bool TypeIsShowcase(int typeIndex)
             => typeIndex == 1 || typeIndex == 2;
+
+        // (#212 改) 厳選枠で許可するソース: 手動(0) と ランダム(10) のみ。背景画像/表示テキストはゲーム自身の
+        // ものにフォールバックするので random でも崩れず、4 秒ごとに切り替わるヒーロー枠と相性が良い。一方
+        // popular/genre 等の「絞り込み」系は厳選の意図に合わない (大判ヒーローに不向き) ため不可。通常カテゴリ行(0)
+        // は全ソース可。random=10 は IsRankingSource でもあるので、厳選枠×ランダムでは最大表示数も有効になる
+        // (スライドショー=スライド枚数 / タイルグリッド=最大3枚の上限)。
+        private static bool TypeAllowsSource(int typeIndex, int sourceIndex)
+            => !TypeIsShowcase(typeIndex) || sourceIndex == 0 || sourceIndex == 10;
 
         // (#211) 最大表示数 (nud + ラベル) を、ランキング系ソースのときだけ有効化する。手動/フィルター系はグレーアウト。
         private void UpdateMaxDisplayCountEnabled()
@@ -242,31 +254,29 @@ namespace TonePrism.Manager
             lblMaxDisplayCount.Enabled = enabled;
         }
 
-        // (#212) スライドショー/タイルグリッドのときソースを手動に固定する。既存の「自動ソース」データ (legacy) は
-        // 手動へ coerce し、informOnCoerce=true なら案内ダイアログを出す (= 編集時に手動化を促す)。通常カテゴリ行は
-        // 全ソース選択可。coerce で SelectedIndex を変えると CmbSectionSource_SelectedIndexChanged 経由で nud/可視性も追従する。
-        private void ApplyTypeSourceConstraint(bool informOnCoerce)
+        // (#212 改) 厳選枠 (スライドショー/タイルグリッド) で許可外ソース (手動/ランダム以外) が選ばれていたら
+        // 手動へ coerce し、informOnCoerce=true なら案内ダイアログを出す。legacy の「絞り込み系×厳選枠」データも
+        // 開いた時点でここで手動化される (手動/ランダムならそのまま)。coerce で SelectedIndex を変えると
+        // CmbSectionSource_SelectedIndexChanged 経由で nud/可視性/最大表示数も追従する。
+        // 戻り値: coerce したか (= true なら呼び出し側の Source ハンドラは二重更新を避けて return してよい)。
+        // ※ combo は無効化しない (手動/ランダムの 2 択を選べるように常に有効)。
+        private bool ApplyTypeSourceConstraint(bool informOnCoerce)
         {
-            if (TypeRequiresManualSource(cmbSectionType.SelectedIndex))
+            if (TypeIsShowcase(cmbSectionType.SelectedIndex)
+                && !TypeAllowsSource(cmbSectionType.SelectedIndex, cmbSectionSource.SelectedIndex))
             {
-                if (cmbSectionSource.SelectedIndex != 0) // 0 = 手動
+                cmbSectionSource.SelectedIndex = 0; // 手動へ
+                if (informOnCoerce)
                 {
-                    cmbSectionSource.SelectedIndex = 0;
-                    if (informOnCoerce)
-                    {
-                        MessageBox.Show(
-                            "スライドショー / タイルグリッドは「手動」ソースのみ対応です。\n" +
-                            "（背景画像や表示テキストを手で設定して魅せる厳選枠のため）\n\n" +
-                            "ソースを「手動」に変更しました。表示するゲームを割り当ててください。",
-                            "ソースを手動に変更", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
+                    MessageBox.Show(
+                        "スライドショー / タイルグリッドのソースは「手動」または「ランダム」のみ対応です。\n" +
+                        "（背景画像・表示テキストで魅せる厳選枠のため、絞り込み系の自動ソースは不可）\n\n" +
+                        "ソースを「手動」に変更しました。",
+                        "ソースを変更", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
-                cmbSectionSource.Enabled = false; // 手動に固定
+                return true;
             }
-            else
-            {
-                cmbSectionSource.Enabled = true; // 通常カテゴリ行は手動＋自動すべて可
-            }
+            return false;
         }
 
         private void UpdateSourceParameterVisibility()

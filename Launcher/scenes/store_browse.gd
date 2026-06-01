@@ -675,7 +675,11 @@ func _switch_slide(section_index: int, dir: int) -> void:
 		return
 	var section: StoreSectionInfo = data["section"]
 	var container: Control = data["container"]
-	if section.games.size() <= 1:
+	# (#212 改) 実際に生成したスライド枚数で wrap する。max_display_count で枚数を絞った場合 (ランダム等)、
+	# section.games.size() で割ると存在しない Banner_* に飛んで空スライドになるため、builder が container に
+	# set_meta した slide_count を使う (未設定の旧経路では games.size() にフォールバック)。
+	var game_count = int(container.get_meta("slide_count", section.games.size()))
+	if game_count <= 1:
 		return
 
 	var current_idx = _slideshow_indices.get(section_index, 0)
@@ -685,7 +689,6 @@ func _switch_slide(section_index: int, dir: int) -> void:
 	var old_banner = clip.get_node_or_null("Banner_%d" % current_idx)
 
 	# 新しいインデックス（ラップアラウンド）
-	var game_count = section.games.size()
 	var new_idx = (current_idx + dir) % game_count
 	if new_idx < 0:
 		new_idx += game_count
