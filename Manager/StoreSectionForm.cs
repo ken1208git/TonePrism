@@ -198,10 +198,12 @@ namespace TonePrism.Manager
             }
         }
 
-        // (#211) ランキング系ソース (人気=1 / 新作=2 / 最近プレイ=3 / ランダム=10)。TOP5 のような特集枠が成立するため
-        // 最大表示数の上限が意味を持つ。これら以外 (手動 / ジャンル等のフィルター系) は「全件表示」基本で上限は無効化する。
+        // (#211) 最大表示数の上限が意味を持つランキング系ソース: 人気=1 (play_count DESC) / 最近プレイ=3 (last_played DESC)
+        // / ランダム=10 (RANDOM())。TOP5 のような特集枠が成立する。
+        // **新作=2 は除外** (#290 review): 実装上は `release_year=今年` のフィルタを display_order 順で並べるだけで本物の
+        // ランキングではない (=「新しい順 TOP N」にならない) ため、ジャンル等と同じフィルター系として全件表示 (max グレーアウト) 扱いにする。
         private static bool IsRankingSource(int sourceIndex)
-            => sourceIndex == 1 || sourceIndex == 2 || sourceIndex == 3 || sourceIndex == 10;
+            => sourceIndex == 1 || sourceIndex == 3 || sourceIndex == 10;
 
         // (#212) このセクションタイプはソースを手動のみに制限するか。スライドショー(1) / タイルグリッド(2)。
         private static bool TypeRequiresManualSource(int typeIndex)
@@ -387,7 +389,7 @@ namespace TonePrism.Manager
             _section.Title = txtTitle.Text.Trim();
             _section.SectionType = cmbSectionType.SelectedIndex;
             _section.SectionSource = GetSourceString();
-            // (#211) 最大表示数が意味を持つのはランキング系 (人気/新作/最近プレイ/ランダム) のみ。手動は「割り当てた
+            // (#211) 最大表示数が意味を持つのはランキング系 (人気/最近プレイ/ランダム) のみ。手動は「割り当てた
             // ゲームを全件表示」、フィルター系は「条件に合うものを全件表示」が基本なので 0 (= 上限なし、Launcher の
             // max_display_count<=0 解釈) で保存し、意図せず切られないようにする (nud はグレーアウト中で値も信頼しない)。
             _section.MaxDisplayCount = IsRankingSource(cmbSectionSource.SelectedIndex) ? (int)nudMaxDisplayCount.Value : 0;
