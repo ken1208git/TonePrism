@@ -121,8 +121,10 @@ func _build_nav_buttons() -> void:
 	band.anchor_bottom = 1.0
 	band.offset_left = 0.0
 	band.offset_right = 0.0
-	band.offset_top = -112.0
-	band.offset_bottom = -40.0
+	# 操作説明バー(BottomBar: 下端 ~100px のグラデ + 下 50px のヒント) に重ならないよう一段上げる。
+	# 帯の高さ72px は維持したまま、下端を 40px→96px に持ち上げ（ボタン下端が下端から ~104px=バーの上）。
+	band.offset_top = -168.0
+	band.offset_bottom = -96.0
 	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(band)
 
