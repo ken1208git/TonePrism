@@ -313,7 +313,7 @@ namespace TonePrism.Manager.Controls
             this.lblBackupRetentionUnit.TabIndex = 11;
             this.lblBackupRetentionUnit.Text = "個 (これを超えた古いバックアップは自動削除されます)";
             //
-            // lblBackupUnsaved (未保存マーカー、初期 hidden)
+            // lblBackupUnsaved (round9: ゲーム本体の enable/世代数 controls は撤去、DB と一括バックアップに統一) (未保存マーカー、初期 hidden)
             //
             this.lblBackupUnsaved.AutoSize = true;
             this.lblBackupUnsaved.ForeColor = System.Drawing.Color.DarkOrange;

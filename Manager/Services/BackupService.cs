@@ -22,11 +22,38 @@ namespace TonePrism.Manager.Services
 
         private readonly DatabaseConnection _conn;
         private readonly SettingsRepository _settingsRepo;
+        // (#250 PR1) games/ + guide/ のアセットスナップショット。循環依存回避のため後付け注入 (AttachSnapshotService)。
+        private AssetSnapshotService _assetSnapshotService;
 
         public BackupService(DatabaseConnection conn, SettingsRepository settingsRepo)
         {
             _conn = conn;
             _settingsRepo = settingsRepo;
+        }
+
+        /// <summary>(#250) DatabaseManager から AssetSnapshotService を後付け注入する (BackupService 生成後に作るため)。</summary>
+        public void AttachSnapshotService(AssetSnapshotService snapshotService)
+        {
+            _assetSnapshotService = snapshotService;
+        }
+
+        /// <summary>(#250 レビュー Low) 内側の 0-100% を外側の [lo,hi]% にマップして親 progress に流す薄い adapter。
+        /// アセット段 (最も重い) にバーの大半 [lo,hi] を割り当て、ファイル単位で動かすために使う (round9 UI)。</summary>
+        private sealed class RangeProgress : IProgress<ProgressInfo>
+        {
+            private readonly IProgress<ProgressInfo> _inner;
+            private readonly int _lo, _span;
+            private readonly string _message;
+            public RangeProgress(IProgress<ProgressInfo> inner, int lo, int hi, string message)
+            { _inner = inner; _lo = lo; _span = Math.Max(0, hi - lo); _message = message; }
+            public void Report(ProgressInfo value)
+            {
+                int inner = value != null ? value.Percentage : 0;
+                if (inner < 0) inner = 0;
+                if (inner > 100) inner = 100;
+                int mapped = _lo + (int)((long)inner * _span / 100);
+                _inner.Report(new ProgressInfo(mapped, _message, value != null ? value.Detail : ""));
+            }
         }
 
         /// <summary>
@@ -251,8 +278,12 @@ namespace TonePrism.Manager.Services
                                     if (percent < 0) percent = 0;
                                     if (percent > 100) percent = 100;
                                 }
+                                // (round9 UI) DB コピー (124KB級で一瞬) はバーの 0-10% に圧縮し、残り 10-99% を
+                                // 重いアセット取得 (初回 ~6GB) に割り当てる。旧実装は DB に 0-100% を与え、その後
+                                // retention で 95% に逆戻り→アセットを 95-99% に圧縮しており、一番長いアセット段が
+                                // バーの 4% しか動かず「95% で固まって遅い」ように見えていた。
                                 progress?.Report(new ProgressInfo(
-                                    percent,
+                                    percent / 10,
                                     "バックアップ中...",
                                     $"{totalPages - remainingPages}/{totalPages} ページ"));
                                 return true;
@@ -300,11 +331,30 @@ namespace TonePrism.Manager.Services
                 }
 
                 // リテンションは成功時のみ適用
-                progress?.Report(new ProgressInfo(95, "古いバックアップを整理中...", ""));
+                progress?.Report(new ProgressInfo(10, "古いバックアップを整理中...", ""));
                 ApplyRetention();
 
+                // (#250 PR1) DB バックアップ成功確定後に games/ + guide/ を同一 timestamp/triggerType で best-effort 取得。
+                // **失敗・キャンセルしても DB バックアップの成否・last_backup_at は一切壊さない** (last_backup_at 更新は
+                // この呼び出しより前の SetInt64("last_backup_at", ...) で完了済、AssetSnapshotService は throw しない契約)。
+                // 世代名 timestamp は .db ファイル名と対応する。
+                Models.SnapshotResult assetSnap = null;
+                if (_assetSnapshotService != null)
+                {
+                    // (round9 UI) アセット取得が最も重い (初回 ~6GB の SMB 読込) ので、バーの大半 (10-99%) を
+                    // 割り当ててファイル単位で動かす (lblDetail にファイル名が流れる)。DB コピー (0-10%) + retention (10%) は
+                    // 一瞬。旧実装は 95-99% に圧縮しており「95% で固まって遅い」ように見える主因だった。内側 0-100 を 10-99 にマップ。
+                    var assetProgress = progress != null ? new RangeProgress(progress, 10, 99, "ゲーム本体をバックアップ中...") : null;
+                    assetSnap = _assetSnapshotService.CreateSnapshot(timestamp, triggerType, assetProgress, token);
+                    if (assetSnap.IsFailed)
+                        Logger.Warn("[BackupService] アセット控え取得失敗 (DB バックアップは成功): " + assetSnap.Message);
+                }
+
                 progress?.Report(new ProgressInfo(100, "バックアップ完了", destinationPath));
-                return BackupResult.Success(destinationPath, fileSize);
+                // (レビュー M2) アセット控えの結果を UI へ持ち回る (失敗/異常を成功ダイアログに併記するため)。
+                var result = BackupResult.Success(destinationPath, fileSize);
+                result.AssetSnapshot = assetSnap;
+                return result;
             }
             catch (OperationCanceledException)
             {
@@ -535,6 +585,10 @@ namespace TonePrism.Manager.Services
         public string FilePath { get; private set; }
         public long FileSizeBytes { get; private set; }
         public string Message { get; private set; }
+        /// <summary>(#250) この DB バックアップに同梱したアセット控えの結果 (best-effort)。null = 機能未注入。
+        /// UI が成功/失敗/異常を併記するため持ち回る。(レビュー L1) 他プロパティと同様に外部からは不変にし、
+        /// 代入は同一アセンブリの RunBackupCore のみ (internal set)。</summary>
+        public Models.SnapshotResult AssetSnapshot { get; internal set; }
 
         public bool IsSuccess { get { return Kind == ResultKind.SuccessKind; } }
         public bool IsSkipped { get { return Kind == ResultKind.SkippedKind; } }

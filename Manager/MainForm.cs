@@ -768,9 +768,32 @@ namespace TonePrism.Manager
 
                 if (result.IsSuccess)
                 {
-                    UpdateBackupStatus(
-                        $"✓ 自動バックアップ完了: {System.IO.Path.GetFileName(result.FilePath)}",
-                        System.Drawing.Color.DarkGreen, autoRevert: true);
+                    // (レビュー round5 #1) auto は無人の主動線。DB バックアップは成功でも、アセット控えが
+                    // 失敗/異常 (SMB 不達・games/ 欠損等) なら「緑チェック＝アセットも守られた」と誤認させない。
+                    // DB 失敗ほど致命的でない (アセットは best-effort・復元は PR3) ため modal は出さず橙ステータスで明示。
+                    var snap = result.AssetSnapshot;
+                    if (snap != null && (snap.IsFailed || snap.IsAnomaly))
+                    {
+                        UpdateBackupStatus(
+                            $"✓ DB バックアップ完了 ／ ⚠ ゲーム本体のバックアップは取得できませんでした ({snap.Message})",
+                            System.Drawing.Color.DarkOrange, autoRevert: true);
+                        Logger.Warn("[MainForm] 自動バックアップ: DB は成功、アセット控えは取得できませんでした: " + snap.Message);
+                    }
+                    else if (snap != null && snap.IsPartial)
+                    {
+                        // (round8 C1) 取得は成功したが一部フォルダを列挙できず skip = 部分的な控えの可能性。
+                        // 緑チェック (完全控え) と誤認させないため橙で明示する。
+                        UpdateBackupStatus(
+                            $"✓ DB バックアップ完了 ／ ⚠ ゲーム本体のバックアップで一部のフォルダを取得できませんでした ({snap.SkippedDirCount} 個スキップ)",
+                            System.Drawing.Color.DarkOrange, autoRevert: true);
+                        Logger.Warn($"[MainForm] 自動バックアップ: DB は成功、アセット控えは部分的 ({snap.SkippedDirCount} 個のフォルダを列挙できずスキップ)。");
+                    }
+                    else
+                    {
+                        UpdateBackupStatus(
+                            $"✓ 自動バックアップ完了: {System.IO.Path.GetFileName(result.FilePath)}",
+                            System.Drawing.Color.DarkGreen, autoRevert: true);
+                    }
                     _backupSectionPanel.RefreshDisplay();
                 }
                 else if (result.IsFailed)

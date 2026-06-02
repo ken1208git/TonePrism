@@ -227,6 +227,7 @@
     </Compile>
     <Compile Include="ProgressInfo.cs" />
     <Compile Include="Models\BackupCatalogEntry.cs" />
+    <Compile Include="Models\AssetSnapshotInfo.cs" />
     <Compile Include="Models\DeveloperInfo.cs" />
     <Compile Include="Models\GameInfo.cs" />
     <Compile Include="Models\IntroSlide.cs" />
@@ -240,6 +241,7 @@
     <Compile Include="Models\UpdateCheckResult.cs" />
     <Compile Include="GenreList.cs" />
     <Compile Include="PathManager.cs" />
+    <Compile Include="Services\AssetSnapshotService.cs" />
     <Compile Include="Services\BackupService.cs" />
     <Compile Include="Services\BackupCatalogService.cs" />
     <Compile Include="Services\DeveloperListManager.cs" />

@@ -596,7 +596,11 @@ namespace TonePrism.Manager
                 new[] { "last_backup_at", "0" },
                 new[] { "backup_destination_path", "" },
                 new[] { "backup_auto_interval_hours", "24" },
-                new[] { "backup_retention_count", "30" }
+                new[] { "backup_retention_count", "30" },
+                // (#250 PR1 / round9) ゲーム本体バックアップの ON/OFF (隠し既定 true、UI 無し)。保持世代数は
+                // backup_retention_count に統一したため専用 key は廃止。既存 v22 DB には migration では入らないが
+                // GetString の default で吸収 (settings は K/V data、schema 版不変)。
+                new[] { "asset_snapshot_enabled", "true" }
             };
 
             foreach (var kv in defaults)

@@ -133,6 +133,17 @@ namespace TonePrism.Manager.Services
         public const string BackupAutoIntervalUnitHours = "hours";
         public const string BackupAutoIntervalUnitDays = "days";
 
+        // ----- (#250 PR1) アセット控え (games/ + guide/ の共有プール (CAS / SHA-256) バックアップ) -----
+
+        /// <summary>
+        /// (#250) DB バックアップと同時に games/ + guide/ を共有プール (CAS) で控えるか ("true"/"false")。default "true"。
+        /// 比較は `BackupAutoEnabled` と同じく **"false" 厳密一致 (case-insensitive) のみ無効、それ以外はすべて有効扱い**
+        /// (手動 DB 編集耐性)。値は SQL literal 制約 (alphanumeric + underscore) 準拠。
+        /// (round9) UI からは設定不可の隠し既定 true。DB+ゲーム本体は 1 バックアップとしてまとめて取得し、保持世代数も
+        /// `backup_retention_count` に統一したため専用 retention key は廃止 (この enable は将来/開発用の escape hatch として残置)。
+        /// </summary>
+        public const string AssetSnapshotEnabled = "asset_snapshot_enabled";
+
         // ----- (H5) リストア中の advisory lock -----
 
         /// <summary>

@@ -43,11 +43,13 @@ namespace TonePrism.Manager
             // 
             // lblMessage
             // 
-            this.lblMessage.AutoSize = true;
+            // (round9 UI) AutoSize 依存だと実機で幅が足りずメッセージが見切れる (例「古いバックアップを整[理中...]」)。
+            // 進捗バーと同じ固定幅 (460) にして、想定メッセージが必ず収まるようにする。
+            this.lblMessage.AutoSize = false;
             this.lblMessage.Font = new System.Drawing.Font("Meiryo UI", 9F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(128)));
             this.lblMessage.Location = new System.Drawing.Point(12, 18);
             this.lblMessage.Name = "lblMessage";
-            this.lblMessage.Size = new System.Drawing.Size(89, 15);
+            this.lblMessage.Size = new System.Drawing.Size(460, 19);
             this.lblMessage.TabIndex = 1;
             this.lblMessage.Text = "処理中...";
             // 
