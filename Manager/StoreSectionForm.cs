@@ -23,17 +23,19 @@ namespace TonePrism.Manager
         // canonical な「ソース ID (0-12)」がズレる。AllSources が全ソースの (ラベル, canonical ID) のマスタで、
         // _sourceMap が「現在 combo に並んでいる表示 index → canonical ID」の対応表。フォーム内のロジックは
         // 表示 index ではなく SelectedSource (canonical) を見る。
+        // 並び順 = ドロップダウンの表示順。canonical ID (Source) とは独立なので、ここを並べ替えても DB 解釈は不変。
+        // 「制作年」(ID=12) は release_year つながりで「新作」(ID=2) の隣に置く。
         private static readonly (string Label, int Source)[] AllSources = new[]
         {
-            ("手動", 0), ("人気ランキング", 1), ("新作", 2), ("最近プレイ", 3),
+            ("手動", 0), ("人気ランキング", 1), ("新作", 2), ("制作年", 12), ("最近プレイ", 3),
             ("ジャンル指定", 4), ("プレイ人数(以上)", 5), ("プレイ人数(以下)", 6),
             ("難易度", 7), ("プレイ時間", 8), ("通信プレイ", 9), ("ランダム", 10),
-            ("コントローラー", 11), ("制作年指定", 12),
+            ("コントローラー", 11),
         };
         private readonly List<int> _sourceMap = new List<int>();
         private bool _suppressSourceEvent = false;
 
-        // 現在選択中の canonical なソース ID (0=手動 … 12=制作年指定)。未構築/未選択は 0。
+        // 現在選択中の canonical なソース ID (0=手動 … 12=制作年)。未構築/未選択は 0。
         private int SelectedSource
             => (cmbSectionSource.SelectedIndex >= 0 && cmbSectionSource.SelectedIndex < _sourceMap.Count)
                 ? _sourceMap[cmbSectionSource.SelectedIndex] : 0;
