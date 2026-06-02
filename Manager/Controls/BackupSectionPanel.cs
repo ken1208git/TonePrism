@@ -135,9 +135,17 @@ namespace TonePrism.Manager.Controls
 
             if (result.IsSuccess)
             {
-                MessageBox.Show(
-                    $"バックアップが完了しました。\n\nファイル: {result.FilePath}\nサイズ: {FormatBytes(result.FileSizeBytes)}",
-                    "バックアップ成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                string msg = $"バックアップが完了しました。\n\nデータベース: {result.FilePath}\nサイズ: {FormatBytes(result.FileSizeBytes)}";
+                // (#250) このバックアップと同 timestamp のアセットスナップショット (games/ + guide/) が取れていれば併記。
+                // 取れていない場合 (設定で無効 / 非対応保存先で失敗) は触れない (= DB バックアップ自体は成功)。
+                var snap = _dbManager.AssetSnapshotService.GetLatestSnapshot();
+                if (snap != null && !string.IsNullOrEmpty(snap.Timestamp)
+                    && System.IO.Path.GetFileName(result.FilePath ?? "").Contains(snap.Timestamp))
+                {
+                    string share = snap.UsedHardLinks ? "ハードリンク共有" : "実コピー";
+                    msg += $"\n\nアセット (games/guide) も保存しました:\n{snap.FileCount} ファイル / {FormatBytes(snap.LogicalBytes)} / {share}";
+                }
+                MessageBox.Show(msg, "バックアップ成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else if (result.IsFailed)
             {
