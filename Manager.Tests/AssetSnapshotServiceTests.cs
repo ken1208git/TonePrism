@@ -52,6 +52,13 @@ namespace TonePrism.Manager.Tests
             File.WriteAllText(p, content);
         }
 
+        private void WriteGuideFile(string rel, string content)
+        {
+            string p = Path.Combine(_root, "guide", rel.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(p));
+            File.WriteAllText(p, content);
+        }
+
         private SnapshotResult Snap(string trigger, string ts)
             => _svc.CreateSnapshot(ts, trigger, null, default(System.Threading.CancellationToken));
 
@@ -179,6 +186,22 @@ namespace TonePrism.Manager.Tests
             Directory.Delete(_games, true);        // games/ 消失 (guide は元々無い)
             var r = Snap("auto", "20260101_000002");
             Assert.True(r.IsSkipped);
+            Assert.True(r.IsAnomaly);
+        }
+
+        [Fact]
+        public void AsymmetricMissing_GamesGoneGuideRemains_ReturnsSkipped()
+        {
+            // (レビュー M1) 非対称欠損: guide/ は残っているが games/ だけ消えた → guide-only manifest を黙って
+            // Success で書かず、異常として世代まるごとスキップする (games blob の将来 GC を防ぐ)。
+            WriteGameFile("g1/a.txt", "x");
+            WriteGuideFile("slide.png", "img");
+            Snap("auto", "20260101_000001");       // manifest に games/ と guide/ 両方
+            Directory.Delete(_games, true);         // games/ だけ消失、guide/ は残る
+            var r = Snap("auto", "20260101_000002");
+            Assert.True(r.IsSkipped);
+            Assert.True(r.IsAnomaly);
+            Assert.Equal(1, ManifestCount("auto")); // 新しい (guide-only) manifest は書かれない
         }
 
         [Fact]

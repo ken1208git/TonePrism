@@ -137,15 +137,19 @@ namespace TonePrism.Manager.Controls
             if (result.IsSuccess)
             {
                 string msg = $"バックアップが完了しました。\n\nデータベース: {result.FilePath}\nサイズ: {FormatBytes(result.FileSizeBytes)}";
-                // (#250) このバックアップと同 timestamp のアセット控え (games/ + guide/) が取れていれば併記。
-                // 取れていない場合 (設定で無効 / 失敗) は触れない (= DB バックアップ自体は成功)。控えは中身を共有
-                // プールに集約するので、「控え全体の実使用量」を出す (見かけより小さい正直な値)。
-                var snap = _dbManager.AssetSnapshotService.GetLatestSnapshot();
-                if (snap != null && !string.IsNullOrEmpty(snap.Timestamp)
-                    && System.IO.Path.GetFileName(result.FilePath ?? "").Contains(snap.Timestamp))
+                // (#250 / レビュー M2・L2) このバックアップに同梱したアセット控えの結果を **result から直接** 使う
+                // (GetLatestSnapshot + 文字列マッチは多ホスト同秒で別ホストの世代を拾う恐れがあるため廃止)。
+                var snap = result.AssetSnapshot;
+                if (snap != null && snap.IsSuccess && snap.FileCount > 0)
                 {
+                    // 控えは中身を共有プールに集約するので「控え全体の実使用量」を出す (見かけより小さい正直な値)。
                     long poolBytes = _dbManager.AssetSnapshotService.GetPoolPhysicalBytes();
                     msg += $"\n\nアセット (games/guide) も控えました:\n{snap.FileCount} ファイル ／ 控え全体の実使用: {FormatBytes(poolBytes)}";
+                }
+                else if (snap != null && (snap.IsFailed || snap.IsAnomaly))
+                {
+                    // (レビュー M2) 失敗/異常は黙らず併記 (DB バックアップ自体は成功)。設定で無効・通常スキップは触れない。
+                    msg += $"\n\n⚠ アセット (games/guide) の控えは取得できませんでした（DB バックアップは成功）。\n{snap.Message}";
                 }
                 MessageBox.Show(msg, "バックアップ成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }

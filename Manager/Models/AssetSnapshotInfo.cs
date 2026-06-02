@@ -45,6 +45,9 @@ namespace TonePrism.Manager.Models
         public long NewBytesCopied { get; private set; }
         /// <summary>Skipped の理由 / Failed のメッセージ。</summary>
         public string Message { get; private set; }
+        /// <summary>「想定外で控えられなかった」異常 (SMB 不達等での sources 欠損)。Failed と合わせて UI で警告を出す。
+        /// 通常の Skipped (設定で無効 / キャンセル) は false。</summary>
+        public bool IsAnomaly { get; private set; }
 
         public bool IsSuccess => Kind == ResultKind.Success;
         public bool IsSkipped => Kind == ResultKind.Skipped;
@@ -55,6 +58,10 @@ namespace TonePrism.Manager.Models
 
         public static SnapshotResult Skipped(string reason)
             => new SnapshotResult { Kind = ResultKind.Skipped, Message = reason };
+
+        /// <summary>異常 (sources 欠損等) による Skipped。UI で「控えられなかった」と警告する。</summary>
+        public static SnapshotResult SkippedAnomaly(string reason)
+            => new SnapshotResult { Kind = ResultKind.Skipped, Message = reason, IsAnomaly = true };
 
         public static SnapshotResult Failed(string message)
             => new SnapshotResult { Kind = ResultKind.Failed, Message = message };

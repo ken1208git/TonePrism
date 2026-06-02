@@ -70,7 +70,7 @@ namespace TonePrism.Manager.Services
                     if (hadHistory)
                     {
                         Logger.Warn("[AssetSnapshot] games/ も guide/ も見つかりません (以前は控えがあるため SMB 不達等の異常の可能性)。今回の控えはスキップします。");
-                        return SnapshotResult.Skipped("アセットフォルダが見つからない (異常の可能性)");
+                        return SnapshotResult.SkippedAnomaly("アセットフォルダが見つからない (異常の可能性)");
                     }
                     Logger.Info("[AssetSnapshot] games/ も guide/ も無いため控えなし (まだ登録の無い install と判断)。");
                     return SnapshotResult.Success(null, 0, 0, 0);
@@ -82,6 +82,21 @@ namespace TonePrism.Manager.Services
                 Directory.CreateDirectory(manifestTriggerDir);
 
                 var cache = LoadHashCache();                 // 直近 manifest から relpath→(size,mtime,hash)
+
+                // (レビュー M1) games/ や guide/ の「非対称欠損」を検出する。以前は控え (直近 manifest) に当該 sub の
+                // エントリがあったのに今 dir が無い (= SMB で games/ だけ不可視等) のに先へ進むと、games を含まない
+                // guide-only manifest を Success で書いてしまい、retention 世代を跨いで games blob が GC される。
+                // 異常として世代まるごとスキップ (既存の完全な manifest 群は温存)。
+                foreach (var sub in SubFolders)
+                {
+                    bool existedBefore = cache.Keys.Any(k => k.StartsWith(sub + "/", StringComparison.Ordinal));
+                    if (existedBefore && !Directory.Exists(Path.Combine(baseInstallDir, sub)))
+                    {
+                        Logger.Warn("[AssetSnapshot] " + sub + "/ が以前は控えにあったのに見つかりません (SMB 不達等の異常の可能性)。今回の控えはスキップします。");
+                        return SnapshotResult.SkippedAnomaly(sub + "/ が見つからない (異常の可能性)");
+                    }
+                }
+
                 var entries = new List<string>();
                 var stats = new Stats();
                 // (レビュー#2) 進捗分母は概算。CountFiles は ExcludedFolders (Library 等) を除外して数えるが WalkTree は
@@ -187,7 +202,7 @@ namespace TonePrism.Manager.Services
             {
                 var newest = EnumerateManifests().OrderByDescending(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase).FirstOrDefault();
                 if (newest == null) return cache;
-                foreach (var line in File.ReadLines(newest))
+                foreach (var line in File.ReadLines(FileOperationService.EnsureLongPath(newest)))
                 {
                     if (line.StartsWith(MetaLinePrefix + "\t")) continue;
                     var f = line.Split(new[] { '\t' }, 4);
@@ -350,7 +365,8 @@ namespace TonePrism.Manager.Services
             {
                 string dir = Path.Combine(root, trigger);
                 if (!Directory.Exists(dir)) continue;
-                foreach (var f in Directory.GetFiles(dir, "*" + ManifestExt)) yield return f;
+                // (レビュー M3) 列挙も長パス対応 (backup_dest が深いと manifest 実パスが MAX_PATH 超になりうる)。
+                foreach (var f in Directory.GetFiles(ForceLong(dir), "*" + ManifestExt)) yield return f;
             }
         }
 
@@ -395,7 +411,7 @@ namespace TonePrism.Manager.Services
                         string autoDir = Path.Combine(GetSnapshotRootDirectory(), "auto");
                         if (Directory.Exists(autoDir))
                         {
-                            var stale = Directory.GetFiles(autoDir, "*" + ManifestExt)
+                            var stale = Directory.GetFiles(ForceLong(autoDir), "*" + ManifestExt)
                                 .OrderByDescending(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase).Skip(count).ToList();
                             foreach (var m in stale)
                             {
@@ -429,7 +445,7 @@ namespace TonePrism.Manager.Services
                 {
                     try
                     {
-                        foreach (var line in File.ReadLines(manifest))
+                        foreach (var line in File.ReadLines(FileOperationService.EnsureLongPath(manifest)))
                         {
                             if (line.StartsWith(MetaLinePrefix + "\t")) continue;
                             int tab = line.IndexOf('\t');
@@ -440,7 +456,7 @@ namespace TonePrism.Manager.Services
                 }
                 DateTime cutoff = DateTime.UtcNow - GcGracePeriod;
                 int removed = 0; long freed = 0; long surviving = 0;
-                foreach (var f in Directory.EnumerateFiles(pool, "*", SearchOption.AllDirectories))
+                foreach (var f in Directory.EnumerateFiles(ForceLong(pool), "*", SearchOption.AllDirectories))
                 {
                     string name = Path.GetFileName(f);
                     if (name == PoolSizeFileName) continue; // メタファイルは触らない・サイズにも数えない

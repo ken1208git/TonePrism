@@ -332,19 +332,24 @@ namespace TonePrism.Manager.Services
 
                 // (#250 PR1) DB バックアップ成功確定後に games/ + guide/ を同一 timestamp/triggerType で best-effort 取得。
                 // **失敗・キャンセルしても DB バックアップの成否・last_backup_at は一切壊さない** (last_backup_at 更新は
-                // 上の L299 で完了済、AssetSnapshotService は throw しない契約)。世代名 timestamp は .db ファイル名と対応する。
+                // この呼び出しより前の SetInt64("last_backup_at", ...) で完了済、AssetSnapshotService は throw しない契約)。
+                // 世代名 timestamp は .db ファイル名と対応する。
+                Models.SnapshotResult assetSnap = null;
                 if (_assetSnapshotService != null)
                 {
                     // (レビュー Low) アセット段の進捗は 0-100 でなく 95-99% にマップし、DB 段で 95% まで進んだ後に
                     // バーが逆行 (95→低%→100) して見えるのを防ぐ。
                     var assetProgress = progress != null ? new RangeProgress(progress, 95, 99, "アセットを控え中...") : null;
-                    var snap = _assetSnapshotService.CreateSnapshot(timestamp, triggerType, assetProgress, token);
-                    if (snap.IsFailed)
-                        Logger.Warn("[BackupService] アセット控え取得失敗 (DB バックアップは成功): " + snap.Message);
+                    assetSnap = _assetSnapshotService.CreateSnapshot(timestamp, triggerType, assetProgress, token);
+                    if (assetSnap.IsFailed)
+                        Logger.Warn("[BackupService] アセット控え取得失敗 (DB バックアップは成功): " + assetSnap.Message);
                 }
 
                 progress?.Report(new ProgressInfo(100, "バックアップ完了", destinationPath));
-                return BackupResult.Success(destinationPath, fileSize);
+                // (レビュー M2) アセット控えの結果を UI へ持ち回る (失敗/異常を成功ダイアログに併記するため)。
+                var result = BackupResult.Success(destinationPath, fileSize);
+                result.AssetSnapshot = assetSnap;
+                return result;
             }
             catch (OperationCanceledException)
             {
@@ -575,6 +580,9 @@ namespace TonePrism.Manager.Services
         public string FilePath { get; private set; }
         public long FileSizeBytes { get; private set; }
         public string Message { get; private set; }
+        /// <summary>(#250) この DB バックアップに同梱したアセット控えの結果 (best-effort)。null = 機能未注入。
+        /// UI が成功/失敗/異常を併記するため持ち回る。</summary>
+        public Models.SnapshotResult AssetSnapshot { get; set; }
 
         public bool IsSuccess { get { return Kind == ResultKind.SuccessKind; } }
         public bool IsSkipped { get { return Kind == ResultKind.SkippedKind; } }
