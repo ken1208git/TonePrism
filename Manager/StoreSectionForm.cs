@@ -78,7 +78,9 @@ namespace TonePrism.Manager
 
             // 値を設定
             txtTitle.Text = _section.Title ?? "";
-            cmbSectionType.SelectedIndex = _section.SectionType;
+            // (レビュー) section_type が schema 外 (0-2 以外) の legacy 異常値でも SelectedIndex 代入で例外にならないよう
+            // クランプ (同 load 経路の nudMaxDisplayCount #211 クラッシュ修正と一貫させる)。
+            cmbSectionType.SelectedIndex = Math.Max(0, Math.Min(cmbSectionType.Items.Count - 1, _section.SectionType));
             // (#211 fix) 手動/フィルター系は max_display_count=0 で保存されるが nudMaxDisplayCount.Minimum=1 のため
             // 0 をそのまま代入すると例外になる。グレーアウト時の表示値は保存に影響しない (btnOK で 0 を書く) ので
             // Min/Max にクランプして読み込む。
@@ -119,6 +121,11 @@ namespace TonePrism.Manager
         private bool SetSourceControls(string source)
         {
             int canon = CanonSourceFromString(source);
+            // (レビュー) 認識できないソース文字列は manual として扱う (= GetSourceString が "manual" を書き元の値を破棄する)。
+            // 現状すべてのソースを網羅しているので通常は起きないが、将来 Launcher 側にだけソースを追加して Manager の
+            // 解釈を更新し忘れた場合などに silent でデータが書き換わるのを防ぐため、最低限ログに残す (CLAUDE.md §3.6)。
+            if (canon == 0 && !string.IsNullOrEmpty(source) && source != "manual")
+                Logger.Warn("StoreSectionForm: 未知のソース文字列 '" + source + "' を manual として解釈しました (このまま保存すると元の値は失われます)。");
 
             // タイプに応じて combo を構築 + 該当ソースを選択 (許可外なら手動に落ちる)。OnSourceChanged が走り
             // 値コントロールはいったん既定化されるので、保存値の反映はこの後に行う。
@@ -214,9 +221,13 @@ namespace TonePrism.Manager
             int src = SelectedSource;
             // (#290 review) 難易度(7)/プレイ時間(8) のラベル付き選択肢を入れ直す。
             PopulateSourceValueCombo(src);
-            // (#291) 制作年指定に切り替えたとき nud が年らしくない値なら今年を初期値に。
+            // (#291 / レビュー) nud (プレイ人数 / 制作年) は共有コントロールなので、ソース種別に対して値が不自然なら
+            // 既定へ補正する。制作年へ切替時は年らしくなければ今年に。プレイ人数へ切替時に年(>=1000)が残っていたら 1 に。
+            // (= 制作年 2026 のままプレイ人数へ切替えて players_min:2026 と保存されるのを防ぐ。load 時は直後に保存値で上書き。)
             if (src == 12 && nudSourceValue.Value < 2000)
                 nudSourceValue.Value = System.DateTime.Now.Year;
+            else if ((src == 5 || src == 6) && nudSourceValue.Value >= 1000)
+                nudSourceValue.Value = 1;
             UpdateSourceParameterVisibility();
             UpdateGameListVisibility();
             UpdateMaxDisplayCountEnabled();
