@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using TonePrism.Manager.Models;
 using TonePrism.Manager.Repositories;
@@ -9,16 +12,16 @@ using TonePrism.Manager.Repositories;
 namespace TonePrism.Manager.Services
 {
     /// <summary>
-    /// (#250 PR1) DB バックアップと同時に `games/` + `guide/` を**ハードリンク世代スナップショット**
-    /// (rsync `--link-dest` 方式) として取得する service。
+    /// (#250 PR1) DB バックアップと同時に `games/` + `guide/` を **共有プール方式 (CAS / SHA-256)** で控える service。
     ///
-    /// 各世代は「前世代から不変のファイルはハードリンク (実体非複製)、新規/変更分だけ実コピー」で構成され、
-    /// 実ディスク消費は ≈ ベースライン 1 本 + 版追加差分 で世代数に比例しない。各世代は独立・完全に復元可能
-    /// (ハードリンク = 同一実体への対等なエントリのため、retention で古い世代を消しても新世代は無傷)。
+    /// 中身ごとに `asset_pool/<hash>` に実体 1 個だけ置き、各世代は「相対パス→ハッシュ」の小さな manifest にする。
+    /// 同じ中身は (別ゲーム間・版違い間でも) 1 個に集約されるため、ファイルサイズを単純合計するどんな仕組み
+    /// (エクスプローラー / SMB サーバーの容量計算 / quota) でも**実サイズしか出ない** (= 削減が見える)。
+    /// SHA-256 なので「中身が違うのに同じハッシュ」は起こらず、名前が同じでも中身が違えば必ず別保存される。
+    /// コピーベースなので SMB 越し / 別ボリュームでも有効 (ハードリンクと違う)。
     ///
-    /// **best-effort**: スナップショット取得の失敗・キャンセルは throw せず <see cref="SnapshotResult"/> で返す。
-    /// 呼び出し側 (BackupService) が DB バックアップの成否や last_backup_at を巻き戻さないことを保証する
-    /// (= 完了済みの DB バックアップを守る)。
+    /// **best-effort**: 失敗・キャンセルは throw せず <see cref="SnapshotResult"/> で返し、DB バックアップの成否・
+    /// last_backup_at を壊さない (完了済み DB バックアップを守る)。
     /// </summary>
     public class AssetSnapshotService
     {
@@ -26,11 +29,13 @@ namespace TonePrism.Manager.Services
         private readonly SettingsRepository _settingsRepo;
         private readonly BackupService _backupService;
 
-        /// <summary>size+mtime 一致判定の mtime 許容差 (秒)。rsync の --modify-window 相当。FAT の 2 秒粒度 / SMB 丸めを吸収。</summary>
-        private const int MtimeToleranceSeconds = 2;
         private static readonly string[] SubFolders = { "games", "guide" };
-        private const string MetaFileName = ".snapshot_meta.txt";
-        private const string SnapshotRootName = "asset_snapshots";
+        private const string PoolDirName = "asset_pool";
+        private const string ManifestDirName = "asset_snapshots";
+        private const string ManifestExt = ".manifest";
+        private const string MetaLinePrefix = "META";
+        /// <summary>GC で未参照 pool ファイルを消すときの猶予 (直近書込/並行 backup のレース回避)。テストで 0 に上書き可。</summary>
+        internal TimeSpan GcGracePeriod = TimeSpan.FromHours(1);
 
         public AssetSnapshotService(DatabaseConnection conn, SettingsRepository settingsRepo, BackupService backupService)
         {
@@ -39,116 +44,95 @@ namespace TonePrism.Manager.Services
             _backupService = backupService;
         }
 
-        /// <summary>`<backup_dest>/asset_snapshots/` の絶対パス。</summary>
-        public string GetSnapshotRootDirectory()
-            => Path.Combine(_backupService.GetEffectiveDestinationDirectory(), SnapshotRootName);
+        public string GetSnapshotRootDirectory() => Path.Combine(_backupService.GetEffectiveDestinationDirectory(), ManifestDirName);
+        private string GetPoolRootDirectory() => Path.Combine(_backupService.GetEffectiveDestinationDirectory(), PoolDirName);
 
-        /// <summary>
-        /// games/ + guide/ を 1 世代取得する。DB バックアップ成功直後に**同一 timestamp / triggerType** で呼ばれる。
-        /// best-effort (throw しない)。`asset_snapshot_enabled=false` なら Skipped。
-        /// </summary>
+        /// <summary>games/ + guide/ を 1 世代取得する。DB バックアップ成功直後に同一 timestamp/trigger で best-effort 呼び出し。</summary>
         public SnapshotResult CreateSnapshot(string timestamp, string triggerType,
             IProgress<ProgressInfo> progress = null, CancellationToken token = default(CancellationToken))
-            => CreateSnapshot(timestamp, triggerType, progress, token, null);
-
-        /// <summary>テスト用 seam: capableOverride でハードリンク可否を強制注入 (null = 実プローブ)。</summary>
-        internal SnapshotResult CreateSnapshot(string timestamp, string triggerType,
-            IProgress<ProgressInfo> progress, CancellationToken token, bool? capableOverride)
         {
-            string tmpDir = null;
+            string tmpManifest = null;
             try
             {
-                if (!IsEnabled())
-                    return SnapshotResult.Skipped("asset_snapshot_enabled=false");
+                if (!IsEnabled()) return SnapshotResult.Skipped("asset_snapshot_enabled=false");
 
                 string baseInstallDir = Path.GetDirectoryName(_conn.DbPath);
-                bool anySource = SubFolders.Any(s => Directory.Exists(Path.Combine(baseInstallDir, s)));
-                if (!anySource)
-                    return SnapshotResult.Success(null, 0, 0, false); // games//guide/ がそもそも無い install
+                if (!SubFolders.Any(s => Directory.Exists(Path.Combine(baseInstallDir, s))))
+                    return SnapshotResult.Success(null, 0, 0, 0); // games//guide/ が無い install
 
-                string triggerDir = Path.Combine(GetSnapshotRootDirectory(), triggerType);
-                Directory.CreateDirectory(triggerDir);
-                CleanupStaleTempDirs(triggerDir);
+                string poolRoot = GetPoolRootDirectory();
+                Directory.CreateDirectory(poolRoot);
+                string manifestTriggerDir = Path.Combine(GetSnapshotRootDirectory(), triggerType);
+                Directory.CreateDirectory(manifestTriggerDir);
 
-                string host = BackupService.SanitizeHostForFileName(Environment.MachineName);
-                string leaf = string.IsNullOrEmpty(host) ? timestamp : timestamp + "_" + host;
-                string finalDir = ResolveUniqueFinalDir(triggerDir, leaf);
-                tmpDir = Path.Combine(triggerDir, ".tmp_" + Path.GetFileName(finalDir));
-
-                bool capable = capableOverride ?? HardLinkSupport.ProbeHardLinkSupport(triggerDir);
-                if (!capable)
-                    Logger.Warn("[AssetSnapshot] 保存先がハードリンク非対応のため全実コピーになります。容量増を避けるには asset_snapshot_retention_count を小さく: " + triggerDir);
-
-                WarnIfLowDiskSpace(triggerDir);
-                string baseDir = SelectBaseSnapshot(triggerDir);
-
-                int total = SubFolders.Sum(s => SafeCountFiles(Path.Combine(baseInstallDir, s)));
+                var cache = LoadHashCache();                 // 直近 manifest から relpath→(size,mtime,hash)
+                var entries = new List<string>();
                 var stats = new Stats();
+                int total = SubFolders.Sum(s => SafeCountFiles(Path.Combine(baseInstallDir, s)));
 
-                Directory.CreateDirectory(tmpDir);
                 foreach (var sub in SubFolders)
                 {
                     string src = Path.Combine(baseInstallDir, sub);
-                    if (!Directory.Exists(src)) continue;
-                    string dst = Path.Combine(tmpDir, sub);
-                    string bse = baseDir != null ? Path.Combine(baseDir, sub) : null;
-                    CopyOrLinkTree(src, dst, bse, capable, progress, token, total, stats);
+                    if (Directory.Exists(src))
+                        WalkTree(src, sub, poolRoot, cache, entries, stats, progress, token, total);
                 }
                 token.ThrowIfCancellationRequested();
 
-                WriteMeta(tmpDir, stats, capable, triggerType);
-                Directory.Move(tmpDir, finalDir); // 同一ボリューム rename = 事実上 atomic
-                ApplyRetention(triggerType);
+                // manifest を temp→rename で atomic 書き出し
+                string host = BackupService.SanitizeHostForFileName(Environment.MachineName);
+                string leaf = string.IsNullOrEmpty(host) ? timestamp : timestamp + "_" + host;
+                string manifestPath = ResolveUniqueManifest(manifestTriggerDir, leaf);
+                tmpManifest = manifestPath + ".tmp";
+                WriteManifest(tmpManifest, timestamp, host, triggerType, stats, entries);
+                if (File.Exists(manifestPath)) File.Delete(manifestPath);
+                File.Move(tmpManifest, manifestPath);
+                tmpManifest = null;
 
-                Logger.Info(string.Format("[AssetSnapshot] 取得完了: {0} ({1} files, copied={2}, linked={3}, hardlink={4})",
-                    finalDir, stats.FileCount, stats.Copied, stats.Linked, capable));
-                return SnapshotResult.Success(finalDir, stats.FileCount, stats.Bytes, stats.Linked > 0);
+                ApplyRetentionAndGc(triggerType);
+
+                Logger.Info(string.Format("[AssetSnapshot] 控え完了: {0} ({1} files / 論理 {2:F2}GB / 新規コピー {3:F2}MB)",
+                    Path.GetFileName(manifestPath), stats.FileCount, stats.Bytes / 1073741824.0, stats.NewBytes / 1048576.0));
+                return SnapshotResult.Success(manifestPath, stats.FileCount, stats.Bytes, stats.NewBytes);
             }
             catch (OperationCanceledException)
             {
-                // キャンセルされても **完了済みの DB バックアップは守る** ため、ここでは再 throw せず Skipped を返す
-                // (再 throw すると BackupService の OperationCanceled ハンドラが成功済みの .db を削除してしまう)。
-                if (tmpDir != null) FolderDeletionService.TryDelete(tmpDir);
+                TryDeleteFile(tmpManifest); // pool に途中コピーした実体は無参照のまま GC で回収される
                 Logger.Info("[AssetSnapshot] 取得がキャンセルされました (DB バックアップは保持)");
                 return SnapshotResult.Skipped("キャンセル");
             }
             catch (Exception ex)
             {
-                if (tmpDir != null) FolderDeletionService.TryDelete(tmpDir);
+                TryDeleteFile(tmpManifest);
                 Logger.Error("[AssetSnapshot] 取得に失敗しました (DB バックアップは保持)", ex);
                 return SnapshotResult.Failed(ex.Message);
             }
         }
 
-        /// <summary>最新の完成スナップショット 1 件 (auto/manual 横断)。無ければ null。UI 表示用。</summary>
+        /// <summary>最新の世代 1 件 (auto/manual 横断)。無ければ null。UI 用。</summary>
         public AssetSnapshotInfo GetLatestSnapshot()
         {
             try
             {
-                string root = GetSnapshotRootDirectory();
-                if (!Directory.Exists(root)) return null;
-
-                AssetSnapshotInfo best = null;
-                foreach (var triggerType in new[] { "auto", "manual" })
-                {
-                    string triggerDir = Path.Combine(root, triggerType);
-                    if (!Directory.Exists(triggerDir)) continue;
-                    foreach (var dir in Directory.GetDirectories(triggerDir))
-                    {
-                        string name = Path.GetFileName(dir);
-                        if (name.StartsWith(".")) continue; // 構築中 .tmp_* 除外
-                        var info = BuildInfo(dir, triggerType, name);
-                        if (best == null || string.CompareOrdinal(info.Timestamp, best.Timestamp) > 0)
-                            best = info;
-                    }
-                }
-                return best;
+                var newest = EnumerateManifests().OrderByDescending(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase).FirstOrDefault();
+                return newest != null ? ReadManifestHeader(newest) : null;
             }
             catch (Exception ex)
             {
-                Logger.Warn("[AssetSnapshot] 最新スナップショット情報の取得に失敗: " + ex.Message);
+                Logger.Warn("[AssetSnapshot] 最新世代の取得に失敗: " + ex.Message);
                 return null;
             }
+        }
+
+        /// <summary>アセットプールが実際に使っているディスク量 (= 重複排除後の物理サイズ)。UI 用。無ければ 0。</summary>
+        public long GetPoolPhysicalBytes()
+        {
+            try
+            {
+                string pool = GetPoolRootDirectory();
+                if (!Directory.Exists(pool)) return 0;
+                return Directory.EnumerateFiles(pool, "*", SearchOption.AllDirectories).Sum(f => SafeLen(f));
+            }
+            catch { return 0; }
         }
 
         // ---- 内部 ----
@@ -159,160 +143,236 @@ namespace TonePrism.Manager.Services
             return !string.Equals(v, "false", StringComparison.OrdinalIgnoreCase);
         }
 
-        /// <summary>同一 trigger 内の直近の完成世代を base に選ぶ (`.` 始まり除外・名前降順 first)。無ければ null = 初回全コピー。</summary>
-        private static string SelectBaseSnapshot(string triggerDir)
-        {
-            if (!Directory.Exists(triggerDir)) return null;
-            return Directory.GetDirectories(triggerDir)
-                .Where(d => !Path.GetFileName(d).StartsWith("."))
-                .OrderByDescending(d => Path.GetFileName(d), StringComparer.OrdinalIgnoreCase)
-                .FirstOrDefault();
-        }
+        private sealed class CacheEntry { public long Size; public long MtimeTicks; public string Hash; }
 
-        private static string ResolveUniqueFinalDir(string triggerDir, string leaf)
+        /// <summary>直近 manifest を読み「relpath → (size, mtime, hash)」のキャッシュを作る。SMB で不変ファイルを再ハッシュしないため。</summary>
+        private Dictionary<string, CacheEntry> LoadHashCache()
         {
-            string candidate = Path.Combine(triggerDir, leaf);
-            int suffix = 2;
-            while (Directory.Exists(candidate) || File.Exists(candidate))
+            var cache = new Dictionary<string, CacheEntry>(StringComparer.Ordinal);
+            try
             {
-                candidate = Path.Combine(triggerDir, leaf + "_" + suffix);
-                suffix++;
-                if (suffix > 99)
-                    throw new Exception("スナップショット世代名の衝突回避に失敗しました (同 1 秒に 100 件以上): " + triggerDir);
+                var newest = EnumerateManifests().OrderByDescending(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase).FirstOrDefault();
+                if (newest == null) return cache;
+                foreach (var line in File.ReadLines(newest))
+                {
+                    if (line.StartsWith(MetaLinePrefix + "\t")) continue;
+                    var f = line.Split(new[] { '\t' }, 4);
+                    if (f.Length < 4) continue;
+                    long size, mt;
+                    if (!long.TryParse(f[1], out size) || !long.TryParse(f[2], out mt)) continue;
+                    cache[f[3]] = new CacheEntry { Hash = f[0], Size = size, MtimeTicks = mt };
+                }
             }
-            return candidate;
+            catch (Exception ex) { Logger.Warn("[AssetSnapshot] ハッシュキャッシュ読込失敗 (全ハッシュし直す): " + ex.Message); }
+            return cache;
         }
 
-        /// <summary>link-dest 本体。base に「相対パス+サイズ+mtime 一致」で存在すればハードリンク、無ければ実コピー。</summary>
-        private void CopyOrLinkTree(string srcDir, string dstDir, string baseDir, bool capable,
-            IProgress<ProgressInfo> progress, CancellationToken token, int total, Stats stats)
+        private void WalkTree(string srcDir, string relPrefix, string poolRoot,
+            Dictionary<string, CacheEntry> cache, List<string> entries, Stats stats,
+            IProgress<ProgressInfo> progress, CancellationToken token, int total)
         {
             token.ThrowIfCancellationRequested();
-            Directory.CreateDirectory(FileOperationService.EnsureLongPath(dstDir));
-
             foreach (string file in Directory.GetFiles(srcDir))
             {
                 token.ThrowIfCancellationRequested();
-                string name = Path.GetFileName(file);
-                string dst = Path.Combine(dstDir, name);
-                string baseFile = baseDir != null ? Path.Combine(baseDir, name) : null;
-                bool linked = false;
-                long size = 0;
-                try { size = new FileInfo(FileOperationService.EnsureLongPath(file)).Length; } catch { }
+                string relpath = relPrefix + "/" + Path.GetFileName(file);
+                string safe = FileOperationService.EnsureLongPath(file);
+                long size = SafeLen(file);
+                long mtime = File.GetLastWriteTimeUtc(safe).Ticks;
 
-                if (capable && baseFile != null && FilesEquivalent(file, baseFile))
-                {
-                    try
-                    {
-                        HardLinkSupport.CreateHardLink(FileOperationService.EnsureLongPath(dst), FileOperationService.EnsureLongPath(baseFile));
-                        linked = true;
-                        stats.Linked++;
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Warn("[AssetSnapshot] ハードリンク失敗→実コピー: " + dst + " : " + ex.Message);
-                    }
-                }
+                // キャッシュ命中 (relpath + size + mtime 完全一致) なら再ハッシュしない。
+                string hash;
+                CacheEntry c;
+                if (cache.TryGetValue(relpath, out c) && c.Size == size && c.MtimeTicks == mtime)
+                    hash = c.Hash;
+                else
+                    hash = ComputeSha256(safe);
 
-                if (!linked)
-                {
-                    try
-                    {
-                        File.Copy(FileOperationService.EnsureLongPath(file), FileOperationService.EnsureLongPath(dst), false);
-                        stats.Copied++;
-                    }
-                    catch (PathTooLongException)
-                    {
-                        Logger.Warn("[AssetSnapshot] パスが長すぎてスキップ: " + file);
-                        stats.Failed++;
-                        continue;
-                    }
-                }
+                if (CopyToPoolIfAbsent(safe, hash, poolRoot)) stats.NewBytes += size;
 
+                entries.Add(hash + "\t" + size.ToString(CultureInfo.InvariantCulture) + "\t"
+                    + mtime.ToString(CultureInfo.InvariantCulture) + "\t" + relpath);
                 stats.FileCount++;
                 stats.Bytes += size;
                 if (total > 0 && progress != null)
                 {
                     int pct = (int)((double)stats.FileCount / total * 100);
-                    if (pct > 100) pct = 100;
-                    progress.Report(new ProgressInfo(pct, "アセットを保存中...", name));
+                    progress.Report(new ProgressInfo(pct > 100 ? 100 : pct, "アセットを控え中...", Path.GetFileName(file)));
                 }
             }
-
             foreach (string subDir in Directory.GetDirectories(srcDir))
             {
                 token.ThrowIfCancellationRequested();
-                // symlink / junction は辿らない+コピーしない (無限ループ / コピー爆発防止)。
                 FileAttributes attr;
-                try { attr = File.GetAttributes(subDir); }
-                catch { continue; }
+                try { attr = File.GetAttributes(subDir); } catch { continue; }
                 if ((attr & FileAttributes.ReparsePoint) == FileAttributes.ReparsePoint)
                 {
                     Logger.Warn("[AssetSnapshot] reparse point をスキップ: " + subDir);
                     continue;
                 }
-                string folder = Path.GetFileName(subDir);
-                CopyOrLinkTree(subDir, Path.Combine(dstDir, folder),
-                    baseDir != null ? Path.Combine(baseDir, folder) : null, capable, progress, token, total, stats);
+                WalkTree(subDir, relPrefix + "/" + Path.GetFileName(subDir), poolRoot, cache, entries, stats, progress, token, total);
             }
         }
 
-        /// <summary>base にハードリンクしてよいか (= 同一内容とみなせるか)。size + mtime(UTC, 2 秒許容)。</summary>
-        private static bool FilesEquivalent(string srcFile, string baseFile)
+        private static string ComputeSha256(string safePath)
         {
+            using (var sha = SHA256.Create())
+            using (var fs = new FileStream(safePath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20))
+            {
+                byte[] h = sha.ComputeHash(fs);
+                var sb = new StringBuilder(h.Length * 2);
+                foreach (var b in h) sb.Append(b.ToString("x2"));
+                return sb.ToString();
+            }
+        }
+
+        private static string PoolPathFor(string poolRoot, string hash)
+            => Path.Combine(poolRoot, hash.Substring(0, 2), hash);
+
+        /// <summary>pool に hash が無ければ temp→rename で atomic コピー。新規コピーしたら true。</summary>
+        private static bool CopyToPoolIfAbsent(string safeSrc, string hash, string poolRoot)
+        {
+            string dst = PoolPathFor(poolRoot, hash);
+            string safeDst = FileOperationService.EnsureLongPath(dst);
+            if (File.Exists(safeDst)) return false; // 既に同一中身がプールにある = 重複排除
+            Directory.CreateDirectory(FileOperationService.EnsureLongPath(Path.GetDirectoryName(dst)));
+            string tmp = dst + ".tmp_" + Guid.NewGuid().ToString("N");
+            string safeTmp = FileOperationService.EnsureLongPath(tmp);
             try
             {
-                string sb = FileOperationService.EnsureLongPath(baseFile);
-                if (!File.Exists(sb)) return false;
-                var src = new FileInfo(FileOperationService.EnsureLongPath(srcFile));
-                var bse = new FileInfo(sb);
-                if (src.Length != bse.Length) return false;
-                return Math.Abs((src.LastWriteTimeUtc - bse.LastWriteTimeUtc).TotalSeconds) <= MtimeToleranceSeconds;
+                File.Copy(safeSrc, safeTmp, false);
+                try { File.Move(safeTmp, safeDst); }
+                catch (IOException) { TryDeleteFile(tmp); return File.Exists(safeDst) ? false : throw new IOException("pool への配置に失敗: " + dst); }
+                return true;
             }
             catch
             {
-                return false;
+                TryDeleteFile(tmp);
+                throw;
             }
         }
 
-        /// <summary>auto 世代のみ retention 適用 (manual は温存)。古い世代の**ディレクトリエントリのみ**削除 (実体は共有新世代が残れば生存)。</summary>
-        private void ApplyRetention(string triggerType)
+        private static string ResolveUniqueManifest(string dir, string leaf)
         {
-            if (!string.Equals(triggerType, "auto", StringComparison.OrdinalIgnoreCase)) return;
-            int count = _settingsRepo.GetInt32(SettingsKeys.AssetSnapshotRetentionCount, SettingsKeys.DefaultAssetSnapshotRetentionCount);
-            if (count <= 0) return;
-            string autoDir = Path.Combine(GetSnapshotRootDirectory(), "auto");
-            if (!Directory.Exists(autoDir)) return;
-
-            var stale = Directory.GetDirectories(autoDir)
-                .Where(d => !Path.GetFileName(d).StartsWith("."))
-                .OrderByDescending(d => Path.GetFileName(d), StringComparer.OrdinalIgnoreCase)
-                .Skip(count)
-                .ToList();
-            foreach (var dir in stale)
+            string candidate = Path.Combine(dir, leaf + ManifestExt);
+            int suffix = 2;
+            while (File.Exists(candidate))
             {
-                var r = FolderDeletionService.TryDelete(dir);
-                if (r.Success) Logger.Info("[AssetSnapshot] 古い世代を削除: " + dir);
-                else Logger.Warn("[AssetSnapshot] 世代削除に失敗 (次回再試行): " + dir + " : " + r.ErrorMessage);
+                candidate = Path.Combine(dir, leaf + "_" + suffix + ManifestExt);
+                if (++suffix > 99) throw new Exception("manifest 名の衝突回避に失敗 (同 1 秒に 100 件以上): " + dir);
+            }
+            return candidate;
+        }
+
+        private static void WriteManifest(string path, string timestamp, string host, string trigger, Stats stats, List<string> entries)
+        {
+            var sb = new StringBuilder();
+            sb.Append(MetaLinePrefix).Append('\t').Append(timestamp).Append('\t').Append(host).Append('\t')
+              .Append(trigger).Append('\t').Append(stats.FileCount).Append('\t').Append(stats.Bytes).Append('\n');
+            foreach (var e in entries) sb.Append(e).Append('\n');
+            File.WriteAllText(FileOperationService.EnsureLongPath(path), sb.ToString(), new UTF8Encoding(false));
+        }
+
+        private IEnumerable<string> EnumerateManifests()
+        {
+            string root = GetSnapshotRootDirectory();
+            foreach (var trigger in new[] { "auto", "manual" })
+            {
+                string dir = Path.Combine(root, trigger);
+                if (!Directory.Exists(dir)) continue;
+                foreach (var f in Directory.GetFiles(dir, "*" + ManifestExt)) yield return f;
             }
         }
 
-        /// <summary>前回中断の `.tmp_*` を 30 分超で回収する。</summary>
-        private static void CleanupStaleTempDirs(string triggerDir)
+        private static AssetSnapshotInfo ReadManifestHeader(string manifestPath)
+        {
+            var info = new AssetSnapshotInfo { ManifestPath = manifestPath };
+            using (var r = new StreamReader(FileOperationService.EnsureLongPath(manifestPath)))
+            {
+                string first = r.ReadLine();
+                if (first != null && first.StartsWith(MetaLinePrefix + "\t"))
+                {
+                    var f = first.Split('\t');
+                    if (f.Length >= 6)
+                    {
+                        info.Timestamp = f[1];
+                        info.Host = f[2];
+                        info.TriggerType = f[3];
+                        int fc; int.TryParse(f[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out fc); info.FileCount = fc;
+                        long lb; long.TryParse(f[5], NumberStyles.Integer, CultureInfo.InvariantCulture, out lb); info.LogicalBytes = lb;
+                    }
+                }
+            }
+            DateTime local;
+            info.StartedAtLocal = (info.Timestamp != null && DateTime.TryParseExact(info.Timestamp, "yyyyMMdd_HHmmss",
+                CultureInfo.InvariantCulture, DateTimeStyles.None, out local)) ? local : DateTime.MinValue;
+            return info;
+        }
+
+        /// <summary>auto の古い manifest を削除 (manual 温存) → 残る全 manifest が参照する hash 集合を作り、未参照 pool を mark-sweep GC。</summary>
+        private void ApplyRetentionAndGc(string triggerType)
+        {
+            if (string.Equals(triggerType, "auto", StringComparison.OrdinalIgnoreCase))
+            {
+                int count = _settingsRepo.GetInt32(SettingsKeys.AssetSnapshotRetentionCount, SettingsKeys.DefaultAssetSnapshotRetentionCount);
+                if (count > 0)
+                {
+                    string autoDir = Path.Combine(GetSnapshotRootDirectory(), "auto");
+                    if (Directory.Exists(autoDir))
+                    {
+                        var stale = Directory.GetFiles(autoDir, "*" + ManifestExt)
+                            .OrderByDescending(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase).Skip(count).ToList();
+                        foreach (var m in stale)
+                        {
+                            try { File.Delete(FileOperationService.EnsureLongPath(m)); Logger.Info("[AssetSnapshot] 古い世代(manifest)を削除: " + Path.GetFileName(m)); }
+                            catch (Exception ex) { Logger.Warn("[AssetSnapshot] manifest 削除失敗: " + m + " : " + ex.Message); }
+                        }
+                    }
+                }
+            }
+            GarbageCollectPool();
+        }
+
+        /// <summary>残る全 manifest が参照する hash 集合に無い pool ファイルを削除 (直近書込は grace で残す)。</summary>
+        private void GarbageCollectPool()
         {
             try
             {
-                foreach (var dir in Directory.GetDirectories(triggerDir, ".tmp_*"))
+                string pool = GetPoolRootDirectory();
+                if (!Directory.Exists(pool)) return;
+                var referenced = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var manifest in EnumerateManifests())
                 {
                     try
                     {
-                        if ((DateTime.UtcNow - Directory.GetLastWriteTimeUtc(dir)).TotalMinutes >= 30)
-                            FolderDeletionService.TryDelete(dir);
+                        foreach (var line in File.ReadLines(manifest))
+                        {
+                            if (line.StartsWith(MetaLinePrefix + "\t")) continue;
+                            int tab = line.IndexOf('\t');
+                            if (tab > 0) referenced.Add(line.Substring(0, tab));
+                        }
                     }
-                    catch { }
+                    catch (Exception ex) { Logger.Warn("[AssetSnapshot] GC: manifest 読込失敗のためこの世代の参照は保守的に維持できず: " + manifest + " : " + ex.Message); return; }
                 }
+                DateTime cutoff = DateTime.UtcNow - GcGracePeriod;
+                int removed = 0; long freed = 0;
+                foreach (var f in Directory.EnumerateFiles(pool, "*", SearchOption.AllDirectories))
+                {
+                    string name = Path.GetFileName(f);
+                    if (name.Contains(".tmp_")) continue; // 進行中コピーは触らない
+                    if (referenced.Contains(name)) continue;
+                    try
+                    {
+                        if (File.GetLastWriteTimeUtc(f) > cutoff) continue; // grace: 直近書込は残す
+                        long len = SafeLen(f);
+                        File.Delete(FileOperationService.EnsureLongPath(f));
+                        removed++; freed += len;
+                    }
+                    catch (Exception ex) { Logger.Warn("[AssetSnapshot] GC: pool 削除失敗: " + f + " : " + ex.Message); }
+                }
+                if (removed > 0) Logger.Info(string.Format("[AssetSnapshot] GC: 未参照 {0} 件 / {1:F2}MB を解放", removed, freed / 1048576.0));
             }
-            catch { }
+            catch (Exception ex) { Logger.Warn("[AssetSnapshot] GC 失敗 (無害、次回再試行): " + ex.Message); }
         }
 
         private static int SafeCountFiles(string dir)
@@ -321,84 +381,22 @@ namespace TonePrism.Manager.Services
             catch { return 0; }
         }
 
-        private static void WarnIfLowDiskSpace(string triggerDir)
+        private static long SafeLen(string path)
         {
-            try
-            {
-                string root = Path.GetPathRoot(Path.GetFullPath(triggerDir));
-                if (string.IsNullOrEmpty(root)) return;
-                var drive = new DriveInfo(root);
-                if (drive.IsReady && drive.AvailableFreeSpace < 200L * 1024 * 1024) // 200MB
-                    Logger.Warn("[AssetSnapshot] 保存先の空き容量が少ない可能性: " + root + " 残り " + (drive.AvailableFreeSpace / (1024 * 1024)) + "MB");
-            }
-            catch { /* 空き容量チェックは best-effort */ }
+            try { return new FileInfo(FileOperationService.EnsureLongPath(path)).Length; } catch { return 0; }
         }
 
-        private static void WriteMeta(string snapshotDir, Stats stats, bool usedHardLinks, string triggerType)
+        private static void TryDeleteFile(string path)
         {
-            try
-            {
-                string path = Path.Combine(snapshotDir, MetaFileName);
-                File.WriteAllText(path, string.Join("\n", new[]
-                {
-                    "fileCount=" + stats.FileCount.ToString(CultureInfo.InvariantCulture),
-                    "logicalBytes=" + stats.Bytes.ToString(CultureInfo.InvariantCulture),
-                    "usedHardLinks=" + (usedHardLinks ? "true" : "false"),
-                    "trigger=" + triggerType
-                }));
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn("[AssetSnapshot] meta 書込失敗 (無害): " + ex.Message);
-            }
-        }
-
-        private static AssetSnapshotInfo BuildInfo(string dir, string triggerType, string name)
-        {
-            // name = "yyyyMMdd_HHmmss" or "yyyyMMdd_HHmmss_host" (+ optional _N collision)
-            string ts = name.Length >= 15 ? name.Substring(0, 15) : name; // yyyyMMdd_HHmmss = 15 文字
-            string host = name.Length > 16 ? name.Substring(16) : "";
-            DateTime local;
-            if (!DateTime.TryParseExact(ts, "yyyyMMdd_HHmmss", CultureInfo.InvariantCulture, DateTimeStyles.None, out local))
-                local = DateTime.MinValue;
-
-            var info = new AssetSnapshotInfo
-            {
-                Timestamp = ts,
-                StartedAtLocal = local,
-                TriggerType = triggerType,
-                Host = host,
-                DirectoryPath = dir
-            };
-            // meta があれば件数/サイズ/リンク有無を読む (無ければ 0/false)。
-            try
-            {
-                string metaPath = Path.Combine(dir, MetaFileName);
-                if (File.Exists(metaPath))
-                {
-                    foreach (var line in File.ReadAllLines(metaPath))
-                    {
-                        int eq = line.IndexOf('=');
-                        if (eq <= 0) continue;
-                        string k = line.Substring(0, eq);
-                        string v = line.Substring(eq + 1);
-                        if (k == "fileCount") { int fc; int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out fc); info.FileCount = fc; }
-                        else if (k == "logicalBytes") { long lb; long.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out lb); info.LogicalBytes = lb; }
-                        else if (k == "usedHardLinks") info.UsedHardLinks = string.Equals(v, "true", StringComparison.OrdinalIgnoreCase);
-                    }
-                }
-            }
+            try { if (!string.IsNullOrEmpty(path) && File.Exists(FileOperationService.EnsureLongPath(path))) File.Delete(FileOperationService.EnsureLongPath(path)); }
             catch { }
-            return info;
         }
 
         private sealed class Stats
         {
             public int FileCount;
-            public int Copied;
-            public int Linked;
-            public int Failed;
-            public long Bytes;
+            public long Bytes;     // 論理合計
+            public long NewBytes;  // 今回プールへ新規コピーした分
         }
     }
 }

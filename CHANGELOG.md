@@ -2000,17 +2000,19 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ### [Manager v0.21.0] - 2026-06-02
 
-#### Added (#250 PR1 — アセットスナップショット: games/ + guide/ のハードリンク世代バックアップ)
+#### Added (#250 PR1 — アセット控え: games/ + guide/ の共有プール (CAS) バックアップ)
 
-- **DB バックアップ作成時に `games/` + `guide/` フォルダを「ハードリンク世代スナップショット」(rsync `--link-dest` 方式) として同時取得**。従来 `toneprism.db` 単体のみだったバックアップを Manager 管理アセット一式に拡張する #250 の **PR1 (取得エンジン)**。**復元 2 モードは PR3、`RestoreReconciliationService` の guide/ 拡張は PR2**（本 PR は取得 + retention + 設定 + UI 可視化まで）。
-- **仕組み / 容量**: 各世代は「前世代から不変のファイルはハードリンク (実体非複製・コスト数百バイト)、新規/変更分だけ実コピー」。実ディスク消費は ≈ ベースライン 1 本 + 版追加差分で**世代数に比例しない**（naive な丸ごと×30世代の ≈180GB を回避）。`games/` がほぼ追記専用 (version-up は新 `v{}/`、既存不変) のため成立。**各世代は独立・完全**（ハードリンク = 同一実体への対等なエントリのため、retention で古い世代を消しても新世代は無傷。base が消えてもチェーン依存ゼロ）。削除/縮小した内容は「それを参照する旧世代が retention 内にいる間は保持」され、全世代がウィンドウから抜けて解放される (point-in-time 保持)。
-- **新規 `AssetSnapshotService`**: `CreateSnapshot(timestamp, triggerType)` を DB バックアップ成功直後に**同一 timestamp/trigger** で best-effort 呼び出し (`BackupService.RunBackupCore`)。失敗・キャンセルは throw せず `SnapshotResult` で返し、**DB バックアップの成否・`last_backup_at` を一切壊さない** (完了済み DB バックアップを守る)。レイアウト `<backup_dest>/asset_snapshots/<auto|manual>/<yyyyMMdd_HHmmss>[_host]/{games,guide}/`。構築は `.tmp_*` → 完了後 `Directory.Move` で atomic 昇格 (部分世代を base/履歴に上げない)。
-- **新規 `HardLinkSupport`**: `CreateHardLink` (kernel32 P/Invoke) + **動的可否プローブ** (実際に 1 本テストリンクを張って消す。FS 名でなく「実際にリンクできるか」を判定)。重複排除は「新↔前スナップショット」間 (両方 dest 上) なので判定軸は **dest が NTFS か**だけ。**FAT/exFAT・非対応時は全実コピー fallback** + Logger.Warn (「retention を小さく」案内)。リンク失敗は当該ファイルのみ実コピー fallback。
-- **link-dest 判定**: base に「相対パス + サイズ + mtime(UTC, 2 秒許容) 一致」で存在すればリンク、無ければ実コピー (rsync の size+mtime、`--modify-window` 相当)。symlink/junction (reparse point) は辿らない+コピーしない。長パスは `\\?\` (`FileOperationService.EnsureLongPath`)。除外リストは**適用しない** (games/ 丸ごと、取り込み時に Library 等除外済)。
-- **retention**: **auto 世代のみ** `asset_snapshot_retention_count` (既定 30) で名前降順 Skip 削除 (ディレクトリエントリのみ削除 = 実体は共有新世代が残れば生存)。**manual は温存** (#235 同様)。`backup_retention_count` とは独立 (アセットは GB 級でサイズ特性が桁違い)。
-- **設定**: `asset_snapshot_enabled` (既定 "true") / `asset_snapshot_retention_count` (既定 30) を settings(K/V) に追加。設定タブ「バックアップ」section に enable チェック + 世代数 NumericUpDown (右カラム)。**schema 版据置 v22** (settings は K/V data、migration 不要、既存 DB は GetString/GetInt32 の default 引数で吸収)。
-- **UI**: バックアップタブに「最終スナップショット」ラベル (時刻 / ファイル数 / サイズ / ハードリンク共有 or 実コピー) を追加。
-- 検証: Manager build 緑 / **テスト 101 件合格** (新規 `HardLinkSupportTests` 4 + `AssetSnapshotServiceTests` 10: 初回全コピー / 不変→ハードリンク共有 / 変更→実コピー / retention / manual 温存 / 無効 skip / 空 / 中断 tmp 回収 / 失敗 never-throw / 非対応 fallback)。**※実機 NTFS round-trip (再取得で容量がほぼ増えない / FAT fallback / 長パス) は別途必要**。
+- **DB バックアップ作成時に `games/` + `guide/` を「共有プール方式 (CAS / SHA-256)」で同時に控える**。従来 `toneprism.db` 単体のみだったバックアップを Manager 管理アセット一式に拡張する #250 の **PR1 (取得エンジン)**。**復元 2 モードは PR3、`RestoreReconciliationService` の guide/ 拡張は PR2**（本 PR は取得 + retention/GC + 設定 + UI 可視化まで）。
+- **方式の選定経緯 (実機指摘で改訂)**: 当初ハードリンク世代スナップショットで実装したが、**プロジェクト全体が SMB 上にあり顧問のファイルサイズ管理がシビア**。ハードリンクは「1 実体に複数エントリ」のためエクスプローラー / SMB サーバーの容量計算が**二重カウント**し、実際は減っていても削減が見えない（=実質意味がない）。実測で **games/ は中身の 63% が重複ファイル**（学生作品が共通ランタイム/エンジンを多数共有、版違いフォルダの重複）→ 共有プールなら **5.73GB → 2.1GB**。**共有プールは中身ごとに実体 1 個だけ置く**ので、ファイルサイズを単純合計するどんな仕組みでも実サイズしか出ない（削減が見える）。コピーベースなので **SMB 越し / 別ボリュームでも有効**（ハードリンクと違う）。
+- **新規 `AssetSnapshotService` (共有プール)**: `CreateSnapshot(timestamp, triggerType)` を DB バックアップ成功直後に**同一 timestamp/trigger** で best-effort 呼び出し (`BackupService.RunBackupCore`)。失敗・キャンセルは throw せず `SnapshotResult` で返し、**DB バックアップの成否・`last_backup_at` を一切壊さない**。
+  - **プール**: `<backup_dest>/asset_pool/<hash[0:2]>/<sha256hex>` に中身ごとに実体 1 個（先頭 2 桁で分散）。**SHA-256** なので「中身違いが同一 hash」は起こらず、**名前が同じでも中身が違えば必ず別保存**、名前が違っても中身が同じなら 1 個に集約。
+  - **目録 (manifest)**: `<backup_dest>/asset_snapshots/<auto|manual>/<yyyyMMdd_HHmmss>[_host].manifest`（`META\t…` ヘッダ + `hash\tsize\tmtimeTicks\trelpath` 行、relpath は `games/…`/`guide/…`）。temp→rename で atomic。
+  - **SMB ハッシュキャッシュ**: 直近 manifest を読み `relpath+size+mtime` 完全一致なら**前回 hash を流用（再ハッシュ＝再読込しない）**。2 回目以降は新規/変更ファイルだけネットワーク越しに読む（初回のみ全読み）。size+mtime 据え置きで中身だけ変える特殊ケースに弱い rsync 同等のトレードオフ（games/ は追記専用で実害なし）。
+  - **dedup**: `pool/<hash>` が既存ならコピーしない（temp→rename で atomic、配置レースは既存なら no-op）。symlink/junction はスキップ、長パスは `\\?\`、除外リストは適用しない（丸ごと）。
+- **retention / GC**: **auto の古い manifest のみ削除**（`asset_snapshot_retention_count` 既定 30、manual 温存、#235 同様）。その後 **mark-sweep GC**＝残る全 manifest が参照する hash 集合を作り、pool 内の未参照ファイルを削除（**直近 1 時間以内に更新された pool ファイルは grace で残す**＝並行/直近書込のレース回避）。`backup_retention_count` とは独立。
+- **設定**: `asset_snapshot_enabled` (既定 "true") / `asset_snapshot_retention_count` (既定 30) を settings(K/V) に追加。設定タブ「バックアップ」section に enable チェック + 世代数 NumericUpDown。**schema 版据置 v22**（settings は K/V data、migration 不要、既存 DB は default 引数で吸収）。
+- **UI**: バックアップタブに「最終アセット控え」ラベル（時刻 / ファイル数 / **控えの実使用量＝プール物理サイズ**）。手動バックアップ成功ダイアログにも「アセットも控えました（N ファイル / 控え全体の実使用 X）」を併記。
+- 検証: Manager build 緑 / **テスト 97 件合格**（新規 `AssetSnapshotServiceTests` 10: 初回プール格納 / **同一中身は別パスでも 1 個** / **名前同じ中身違いは別保存** / 不変は新規 0 / 変更で新 blob / retention+GC で未参照 pool 削除 / manual 温存 / 無効 / 空 / 失敗 never-throw）。**※実機 SMB round-trip（再取得で控えがほぼ増えない / サーバー容量計算で実サイズが出る / 長パス）は別途必要**。
 - bump 判断: ユーザー向け新機能 (データ保護)、破壊的変更なし・既存 DB 自動互換。minor (v0.20.2 → v0.21.0)。Launcher/Updater は無関係。
 
 ### [Manager v0.20.2] - 2026-06-01

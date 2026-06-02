@@ -69,16 +69,17 @@ namespace TonePrism.Manager.Controls
                     lblLastBackup.Text = "最終バックアップ: 未取得";
                 }
 
-                // (#250) 最終アセットスナップショット (games/ + guide/ のハードリンク世代バックアップ)。
+                // (#250) 最終アセット控え (games/ + guide/ の共有プール)。控えの「実使用量」(重複排除後の物理サイズ)
+                // を出す。エクスプローラーの見かけ (論理) と違い、これがディスクを実際に食っている量。
                 var snap = _dbManager.AssetSnapshotService.GetLatestSnapshot();
                 if (snap != null && snap.StartedAtLocal != DateTime.MinValue)
                 {
-                    string share = snap.UsedHardLinks ? "ハードリンク共有" : "実コピー";
-                    lblLastSnapshot.Text = $"最終スナップショット: {snap.StartedAtLocal:yyyy/MM/dd HH:mm:ss} ({snap.FileCount} ファイル / {FormatBytes(snap.LogicalBytes)} / {share})";
+                    long poolBytes = _dbManager.AssetSnapshotService.GetPoolPhysicalBytes();
+                    lblLastSnapshot.Text = $"最終アセット控え: {snap.StartedAtLocal:yyyy/MM/dd HH:mm:ss} ({snap.FileCount} ファイル) ／ 控え実使用: {FormatBytes(poolBytes)}";
                 }
                 else
                 {
-                    lblLastSnapshot.Text = "最終スナップショット: 未取得";
+                    lblLastSnapshot.Text = "最終アセット控え: 未取得";
                 }
 
                 lblDestPath.Text = $"保存先: {_dbManager.BackupService.GetEffectiveDestinationDirectory()}";
@@ -136,14 +137,15 @@ namespace TonePrism.Manager.Controls
             if (result.IsSuccess)
             {
                 string msg = $"バックアップが完了しました。\n\nデータベース: {result.FilePath}\nサイズ: {FormatBytes(result.FileSizeBytes)}";
-                // (#250) このバックアップと同 timestamp のアセットスナップショット (games/ + guide/) が取れていれば併記。
-                // 取れていない場合 (設定で無効 / 非対応保存先で失敗) は触れない (= DB バックアップ自体は成功)。
+                // (#250) このバックアップと同 timestamp のアセット控え (games/ + guide/) が取れていれば併記。
+                // 取れていない場合 (設定で無効 / 失敗) は触れない (= DB バックアップ自体は成功)。控えは中身を共有
+                // プールに集約するので、「控え全体の実使用量」を出す (見かけより小さい正直な値)。
                 var snap = _dbManager.AssetSnapshotService.GetLatestSnapshot();
                 if (snap != null && !string.IsNullOrEmpty(snap.Timestamp)
                     && System.IO.Path.GetFileName(result.FilePath ?? "").Contains(snap.Timestamp))
                 {
-                    string share = snap.UsedHardLinks ? "ハードリンク共有" : "実コピー";
-                    msg += $"\n\nアセット (games/guide) も保存しました:\n{snap.FileCount} ファイル / {FormatBytes(snap.LogicalBytes)} / {share}";
+                    long poolBytes = _dbManager.AssetSnapshotService.GetPoolPhysicalBytes();
+                    msg += $"\n\nアセット (games/guide) も控えました:\n{snap.FileCount} ファイル ／ 控え全体の実使用: {FormatBytes(poolBytes)}";
                 }
                 MessageBox.Show(msg, "バックアップ成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }

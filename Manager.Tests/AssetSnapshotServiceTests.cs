@@ -11,15 +11,14 @@ using Xunit;
 namespace TonePrism.Manager.Tests
 {
     /// <summary>
-    /// (#250 PR1) `AssetSnapshotService` の検証。%TEMP% が NTFS 前提 (ハードリンク共有の確認に必要)。
-    /// 一時 DB + 一時 games/guide + 既定 backup_dest (`<tmp>/backups`) で純単体実行。
+    /// (#250 PR1) `AssetSnapshotService`（共有プール / SHA-256）の検証。一時 DB + 一時 games/guide +
+    /// 既定 backup_dest (`&lt;tmp&gt;/backups`) で純単体実行。
     /// </summary>
     public class AssetSnapshotServiceTests : IDisposable
     {
-        private readonly string _root;       // <tmp>/tp_snap_xxx
-        private readonly string _dbPath;     // <root>/toneprism.db
-        private readonly string _games;      // <root>/games
-        private readonly string _guide;      // <root>/guide
+        private readonly string _root;
+        private readonly string _dbPath;
+        private readonly string _games;
         private readonly DatabaseConnection _conn;
         private readonly SettingsRepository _settings;
         private readonly BackupService _backup;
@@ -31,13 +30,12 @@ namespace TonePrism.Manager.Tests
             Directory.CreateDirectory(_root);
             _dbPath = Path.Combine(_root, "toneprism.db");
             _games = Path.Combine(_root, "games");
-            _guide = Path.Combine(_root, "guide");
-
             _conn = new DatabaseConnection(_dbPath);
-            new SchemaManager(_conn).InitializeDatabase(); // settings テーブル等を作る
+            new SchemaManager(_conn).InitializeDatabase();
             _settings = new SettingsRepository(_conn);
             _backup = new BackupService(_conn, _settings);
             _svc = new AssetSnapshotService(_conn, _settings, _backup);
+            _svc.GcGracePeriod = TimeSpan.Zero; // テストでは grace を無効化して GC を即時検証
         }
 
         public void Dispose()
@@ -54,129 +52,131 @@ namespace TonePrism.Manager.Tests
             File.WriteAllText(p, content);
         }
 
-        private SnapshotResult Snap(string trigger, string ts, bool? capable)
-            => _svc.CreateSnapshot(ts, trigger, null, default(System.Threading.CancellationToken), capable);
+        private SnapshotResult Snap(string trigger, string ts)
+            => _svc.CreateSnapshot(ts, trigger, null, default(System.Threading.CancellationToken));
 
-        private string SnapFile(SnapshotResult r, string rel)
-            => Path.Combine(r.DirectoryPath, "games", rel.Replace('/', Path.DirectorySeparatorChar));
-
-        private string AutoDir => Path.Combine(_svc.GetSnapshotRootDirectory(), "auto");
+        private string PoolDir => Path.Combine(_backup.GetEffectiveDestinationDirectory(), "asset_pool");
+        private int PoolBlobCount()
+            => Directory.Exists(PoolDir)
+                ? Directory.GetFiles(PoolDir, "*", SearchOption.AllDirectories).Count(f => !Path.GetFileName(f).Contains(".tmp_"))
+                : 0;
+        private string ManifestDir(string trigger) => Path.Combine(_backup.GetEffectiveDestinationDirectory(), "asset_snapshots", trigger);
+        private int ManifestCount(string trigger)
+            => Directory.Exists(ManifestDir(trigger)) ? Directory.GetFiles(ManifestDir(trigger), "*.manifest").Length : 0;
 
         // ---- tests ----
 
         [Fact]
-        public void FirstSnapshot_NoBase_CopiesAllContents()
+        public void FirstSnapshot_CopiesUniqueContentToPool()
         {
-            WriteGameFile("g1/exe.txt", "hello");
-            var r = Snap("auto", "20260101_000001", true);
+            WriteGameFile("g1/a.txt", "alpha");
+            WriteGameFile("g1/b.txt", "beta");
+            var r = Snap("auto", "20260101_000001");
             Assert.True(r.IsSuccess);
-            Assert.Equal(1, r.FileCount);
-            Assert.Equal("hello", File.ReadAllText(SnapFile(r, "g1/exe.txt")));
+            Assert.Equal(2, r.FileCount);
+            Assert.Equal(2, PoolBlobCount());           // 2 つの異なる中身
+            Assert.True(r.NewBytesCopied > 0);
+            Assert.Equal(1, ManifestCount("auto"));
         }
 
         [Fact]
-        public void SecondSnapshot_Unchanged_SharesViaHardLink()
+        public void SameContent_DifferentPaths_StoredOnce()
         {
-            WriteGameFile("g1/exe.txt", "data");
-            var r1 = Snap("auto", "20260101_000001", true);
-            var r2 = Snap("auto", "20260101_000002", true); // 不変
-            Assert.True(r1.IsSuccess && r2.IsSuccess);
-            Assert.True(HardLinkSupport.AreSameFile(SnapFile(r1, "g1/exe.txt"), SnapFile(r2, "g1/exe.txt")));
+            // 別ゲーム・別名でも中身が同じなら pool には 1 個 (CAS の肝)
+            WriteGameFile("g1/data.bin", "SHARED-RUNTIME");
+            WriteGameFile("g2/other-name.bin", "SHARED-RUNTIME");
+            var r = Snap("auto", "20260101_000001");
+            Assert.True(r.IsSuccess);
+            Assert.Equal(2, r.FileCount);               // 目録は 2 エントリ
+            Assert.Equal(1, PoolBlobCount());           // 実体は 1 個に集約
         }
 
         [Fact]
-        public void ChangedFile_IsRealCopy_NotLinked()
+        public void DifferentContent_SameName_StoredSeparately()
         {
-            WriteGameFile("g1/exe.txt", "old");
-            var r1 = Snap("auto", "20260101_000001", true);
-            WriteGameFile("g1/exe.txt", "new-and-longer"); // サイズも変わる
-            var r2 = Snap("auto", "20260101_000002", true);
-            Assert.False(HardLinkSupport.AreSameFile(SnapFile(r1, "g1/exe.txt"), SnapFile(r2, "g1/exe.txt")));
-            Assert.Equal("old", File.ReadAllText(SnapFile(r1, "g1/exe.txt"))); // 旧世代は不変
-            Assert.Equal("new-and-longer", File.ReadAllText(SnapFile(r2, "g1/exe.txt")));
+            // 名前が同じでも中身が違えば必ず別保存 (ユーザー懸念の核心)
+            WriteGameFile("g1/data.dat", "CONTENT-A");
+            WriteGameFile("g2/data.dat", "CONTENT-B-different");
+            var r = Snap("auto", "20260101_000001");
+            Assert.True(r.IsSuccess);
+            Assert.Equal(2, PoolBlobCount());           // 中身が違う → 2 個
         }
 
         [Fact]
-        public void Retention_DeletesOldestAutoDirs()
+        public void SecondSnapshot_Unchanged_AddsNoNewBytes()
+        {
+            WriteGameFile("g1/a.txt", "alpha");
+            var r1 = Snap("auto", "20260101_000001");
+            int poolAfter1 = PoolBlobCount();
+            var r2 = Snap("auto", "20260101_000002"); // 不変
+            Assert.True(r2.IsSuccess);
+            Assert.Equal(0, r2.NewBytesCopied);         // 既に pool にあるので新規コピー無し
+            Assert.Equal(poolAfter1, PoolBlobCount());  // pool は増えない
+            Assert.Equal(2, ManifestCount("auto"));     // 目録は 2 世代
+        }
+
+        [Fact]
+        public void ChangedContent_AddsNewBlob()
+        {
+            WriteGameFile("g1/a.txt", "old");
+            Snap("auto", "20260101_000001");
+            WriteGameFile("g1/a.txt", "new-and-different"); // 中身変更 (mtime も変わる)
+            var r2 = Snap("auto", "20260101_000002");
+            Assert.True(r2.IsSuccess);
+            Assert.True(r2.NewBytesCopied > 0);
+            Assert.Equal(2, PoolBlobCount());           // 旧 + 新 の 2 個 (旧は retention 内なので残る)
+        }
+
+        [Fact]
+        public void Retention_PrunesOldManifests_AndGcRemovesUnreferenced()
         {
             _settings.SetInt32(SettingsKeys.AssetSnapshotRetentionCount, 2);
-            WriteGameFile("g1/exe.txt", "x");
-            Snap("auto", "20260101_000001", true);
-            Snap("auto", "20260101_000002", true);
-            Snap("auto", "20260101_000003", true);
-            var dirs = Directory.GetDirectories(AutoDir).Select(Path.GetFileName).Where(n => !n.StartsWith(".")).ToList();
-            Assert.Equal(2, dirs.Count);
-            Assert.DoesNotContain(dirs, n => n.StartsWith("20260101_000001"));
-            Assert.Contains(dirs, n => n.StartsWith("20260101_000003"));
+            // 各世代で中身を変える → 古い blob が未参照になる
+            WriteGameFile("g1/a.txt", "v1"); Snap("auto", "20260101_000001");
+            WriteGameFile("g1/a.txt", "v2"); Snap("auto", "20260101_000002");
+            WriteGameFile("g1/a.txt", "v3"); Snap("auto", "20260101_000003");
+            Assert.Equal(2, ManifestCount("auto"));     // 最古 manifest が削除され 2 世代
+            Assert.Equal(2, PoolBlobCount());           // v1 の blob が GC され v2/v3 の 2 個
         }
 
         [Fact]
-        public void Retention_KeepsManual()
+        public void Retention_KeepsManualManifests()
         {
             _settings.SetInt32(SettingsKeys.AssetSnapshotRetentionCount, 1);
-            WriteGameFile("g1/exe.txt", "x");
-            Snap("manual", "20260101_000001", true);
-            Snap("manual", "20260101_000002", true);
-            string manualDir = Path.Combine(_svc.GetSnapshotRootDirectory(), "manual");
-            var dirs = Directory.GetDirectories(manualDir).Select(Path.GetFileName).Where(n => !n.StartsWith(".")).ToList();
-            Assert.Equal(2, dirs.Count); // manual は retention 対象外
+            WriteGameFile("g1/a.txt", "x");
+            Snap("manual", "20260101_000001");
+            Snap("manual", "20260101_000002");
+            Assert.Equal(2, ManifestCount("manual"));   // manual は retention 対象外
         }
 
         [Fact]
-        public void Disabled_ReturnsSkipped_NoSnapshotDir()
+        public void Disabled_ReturnsSkipped()
         {
             _settings.SetString(SettingsKeys.AssetSnapshotEnabled, "false");
-            WriteGameFile("g1/exe.txt", "x");
-            var r = Snap("auto", "20260101_000001", true);
+            WriteGameFile("g1/a.txt", "x");
+            var r = Snap("auto", "20260101_000001");
             Assert.True(r.IsSkipped);
-            Assert.False(Directory.Exists(_svc.GetSnapshotRootDirectory()));
+            Assert.Equal(0, PoolBlobCount());
         }
 
         [Fact]
         public void EmptyGamesAndGuide_Succeeds()
         {
-            // games//guide/ を作らない
-            var r = Snap("auto", "20260101_000001", true);
+            var r = Snap("auto", "20260101_000001");
             Assert.True(r.IsSuccess);
             Assert.Equal(0, r.FileCount);
         }
 
         [Fact]
-        public void InterruptedTmp_IsCleaned_AndNotBase()
+        public void Failure_DoesNotThrow_ReturnsFailed()
         {
-            WriteGameFile("g1/exe.txt", "data");
-            string autoDir = AutoDir;
-            Directory.CreateDirectory(autoDir);
-            string stale = Path.Combine(autoDir, ".tmp_stale");
-            Directory.CreateDirectory(stale);
-            Directory.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddMinutes(-31)); // 30 分超
-            var r = Snap("auto", "20260101_000001", true);
-            Assert.True(r.IsSuccess);
-            Assert.False(Directory.Exists(stale)); // 回収された
-        }
-
-        [Fact]
-        public void SnapshotFailure_DoesNotThrow_ReturnsFailed()
-        {
-            // asset_snapshots をファイルにして triggerDir 作成を失敗させる
+            // asset_pool をファイルにして pool ディレクトリ作成を失敗させる
             string dest = _backup.GetEffectiveDestinationDirectory();
             Directory.CreateDirectory(dest);
-            File.WriteAllText(Path.Combine(dest, "asset_snapshots"), "blocker");
-            WriteGameFile("g1/exe.txt", "x");
-            var r = Snap("auto", "20260101_000001", true);
+            File.WriteAllText(Path.Combine(dest, "asset_pool"), "blocker");
+            WriteGameFile("g1/a.txt", "x");
+            var r = Snap("auto", "20260101_000001");
             Assert.True(r.IsFailed); // throw せず Failed
-        }
-
-        [Fact]
-        public void FallbackWhenNotCapable_AllRealCopy()
-        {
-            WriteGameFile("g1/exe.txt", "data");
-            var r1 = Snap("auto", "20260101_000001", false); // ハードリンク不可を注入
-            var r2 = Snap("auto", "20260101_000002", false);
-            Assert.True(r1.IsSuccess && r2.IsSuccess);
-            // 全実コピー = 別実体
-            Assert.False(HardLinkSupport.AreSameFile(SnapFile(r1, "g1/exe.txt"), SnapFile(r2, "g1/exe.txt")));
-            Assert.Equal("data", File.ReadAllText(SnapFile(r2, "g1/exe.txt")));
         }
     }
 }
