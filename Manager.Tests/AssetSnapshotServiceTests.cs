@@ -177,6 +177,23 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
+        public void MissingSources_GamesRegisteredInDb_ReturnsSkipped()
+        {
+            // (round7 M-2) games/ も guide/ も無いが DB に games 登録済 → 「未登録の新規 install」でなく
+            // 「SMB 不達等の異常」と判別し SkippedAnomaly。到達不能共有を unit で再現できないため
+            // 「DB に games 有り ∧ フォルダ無し」で代理検証（判別軸 = DB games 件数が効くこと）。
+            using (var c = new SQLiteConnection(_conn.ConnectionString))
+            {
+                c.Open();
+                using (var cmd = new SQLiteCommand("INSERT INTO games (game_id, title) VALUES ('g1','T')", c))
+                    cmd.ExecuteNonQuery();
+            }
+            var r = Snap("auto", "20260101_000001"); // games/ も guide/ も作らない
+            Assert.True(r.IsSkipped);
+            Assert.True(r.IsAnomaly);
+        }
+
+        [Fact]
         public void MissingSources_AfterHistory_ReturnsSkipped()
         {
             // (レビュー#1) 以前は控えがあったのに games/ も guide/ も見えない = SMB 不達等の異常。

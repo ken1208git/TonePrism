@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -50,6 +51,22 @@ namespace TonePrism.Manager.Services
         public string GetSnapshotRootDirectory() => Path.Combine(_backupService.GetEffectiveDestinationDirectory(), ManifestDirName);
         private string GetPoolRootDirectory() => Path.Combine(_backupService.GetEffectiveDestinationDirectory(), PoolDirName);
 
+        /// <summary>(round7 M-2) DB に登録された games 件数。games/ も guide/ も見えないときに「未登録の新規 install」と
+        /// 「SMB 不達等の異常」を区別する権威ある判別軸 (DB は直前の DB バックアップ成功で到達済 = 「本来 games が
+        /// あるはず」を知っている。到達不能共有では Directory.Exists も manifest 列挙も空に見え判別不能なため)。</summary>
+        private int CountRegisteredGames()
+        {
+            return _conn.ExecuteWithRetry(() =>
+            {
+                using (var connection = new SQLiteConnection(_conn.ConnectionString))
+                {
+                    _conn.OpenConnectionWithJournalMode(connection);
+                    using (var command = new SQLiteCommand("SELECT COUNT(*) FROM games", connection))
+                        return Convert.ToInt32(command.ExecuteScalar());
+                }
+            });
+        }
+
         /// <summary>games/ + guide/ を 1 世代取得する。DB バックアップ成功直後に同一 timestamp/trigger で best-effort 呼び出し。</summary>
         public SnapshotResult CreateSnapshot(string timestamp, string triggerType,
             IProgress<ProgressInfo> progress = null, CancellationToken token = default(CancellationToken))
@@ -62,17 +79,24 @@ namespace TonePrism.Manager.Services
                 string baseInstallDir = Path.GetDirectoryName(_conn.DbPath);
                 if (!SubFolders.Any(s => Directory.Exists(Path.Combine(baseInstallDir, s))))
                 {
-                    // (レビュー#1) games/ と guide/ の両方が見えない。「まだ登録が無い install」と「SMB 一時不達等で
-                    // 一時的に見えない異常」を区別する: 以前に控え (manifest) があるなら後者の可能性が高い → silent に
-                    // せず Warn + Skipped で異常を通知 (本番 install は常に games/ を持つため、このブランチ自体が異常)。
+                    // (レビュー#1 / round7 M-2) games/ と guide/ の両方が見えない。「まだ登録が無い新規 install」と
+                    // 「SMB 一過性不達等の異常」を区別する。到達不能な共有では Directory.Exists が false を返し、manifest
+                    // 履歴も空に見える (EnumerateManifests は Directory.Exists ガードで throw せず空を返す) ため、manifest の
+                    // 有無だけでは判別できない。DB は直前の DB バックアップ成功で到達済 = 「本来 games があるはず」を知って
+                    // いるので、DB の games 件数を権威ある判別軸に加える: games 件数 > 0 (or 履歴あり) なのに games/ が
+                    // 見えない → 異常 (silent Success にしない)。どちらも無い → 真に未登録の新規 install。
+                    int gameCount = 0;
+                    try { gameCount = CountRegisteredGames(); }
+                    catch (Exception ex) { Logger.Warn("[AssetSnapshot] games 件数の取得に失敗 (判別軸の一つが欠落): " + ex.Message); }
                     bool hadHistory = false;
-                    try { hadHistory = EnumerateManifests().Any(); } catch { }
-                    if (hadHistory)
+                    try { hadHistory = EnumerateManifests().Any(); }
+                    catch (Exception ex) { Logger.Warn("[AssetSnapshot] manifest 列挙に失敗 (判別軸の一つが欠落): " + ex.Message); }
+                    if (gameCount > 0 || hadHistory)
                     {
-                        Logger.Warn("[AssetSnapshot] games/ も guide/ も見つかりません (以前は控えがあるため SMB 不達等の異常の可能性)。今回の控えはスキップします。");
+                        Logger.Warn("[AssetSnapshot] games/ も guide/ も見つかりません (DB games=" + gameCount + " / 履歴=" + hadHistory + " → SMB 不達等の異常の可能性)。今回の控えはスキップします。");
                         return SnapshotResult.SkippedAnomaly("アセットフォルダが見つからない (異常の可能性)");
                     }
-                    Logger.Info("[AssetSnapshot] games/ も guide/ も無いため控えなし (まだ登録の無い install と判断)。");
+                    Logger.Info("[AssetSnapshot] games/ も guide/ も無く DB にも games 未登録のため控えなし (新規 install と判断)。");
                     return SnapshotResult.Success(null, 0, 0, 0);
                 }
 
@@ -92,10 +116,22 @@ namespace TonePrism.Manager.Services
                 foreach (var sub in SubFolders)
                 {
                     bool existedBefore = cache.Keys.Any(k => k.StartsWith(sub + "/", StringComparison.Ordinal));
-                    if (existedBefore && !Directory.Exists(Path.Combine(baseInstallDir, sub)))
+                    if (!existedBefore) continue;
+                    string subPath = Path.Combine(baseInstallDir, sub);
+                    if (!Directory.Exists(subPath))
                     {
                         Logger.Warn("[AssetSnapshot] " + sub + "/ が以前は控えにあったのに見つかりません (SMB 不達等の異常の可能性)。今回の控えはスキップします。");
                         return SnapshotResult.SkippedAnomaly(sub + "/ が見つからない (異常の可能性)");
+                    }
+                    // (round7 M-1) dir は存在するが root 列挙が失敗 = 「見えるが読めない」異常 (SMB 一過性 I/O / 権限等)。
+                    // WalkTree はフォルダ列挙失敗を best-effort で skip して進むため、放置すると当該 sub がほぼ空の sparse
+                    // manifest を Success で書き、auto なら直後の GC が将来 blob を刈りうる。不在検出と同じ安全側 = 世代まるごと
+                    // Skip にする (深部サブフォルダの単発失敗は従来どおり best-effort skip。ここで見るのは sub の root のみ)。
+                    try { Directory.GetFiles(ForceLong(subPath)); }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn("[AssetSnapshot] " + sub + "/ は存在するが列挙に失敗 (SMB 一過性 I/O / 権限等の異常の可能性)。今回の控えはスキップします: " + ex.Message);
+                        return SnapshotResult.SkippedAnomaly(sub + "/ の列挙に失敗 (異常の可能性)");
                     }
                 }
 
@@ -332,7 +368,11 @@ namespace TonePrism.Manager.Services
                 Directory.CreateDirectory(FileOperationService.EnsureLongPath(Path.GetDirectoryName(final)));
                 try { File.Move(safeTmp, safeFinal); }
                 catch (IOException) { TryDeleteFile(tmp); if (File.Exists(safeFinal)) return false; throw; }
-                try { File.SetLastWriteTimeUtc(safeFinal, DateTime.UtcNow); } catch { } // grace 用に配置時刻を刻む
+                // grace 用に配置時刻を刻む。(round7 M-3) 失敗を握り潰さず Warn を残す: これに失敗すると blob は元ファイルの
+                // 古い mtime を継承し、GC の grace (直近書込保護) が静かに無効化される = 多ホスト並行 backup で他ホストの
+                // 取得中 blob を誤 GC しうる。本番 SMB が mtime 変更を拒否しないかは実機検証 (F-2)、世代基準 GC での根治は PR2/PR3。
+                try { File.SetLastWriteTimeUtc(safeFinal, DateTime.UtcNow); }
+                catch (Exception ex) { Logger.Warn("[AssetSnapshot] pool blob の配置時刻スタンプに失敗 (GC grace が無効化される恐れ): " + final + " : " + ex.Message); }
                 return true;
             }
             catch
