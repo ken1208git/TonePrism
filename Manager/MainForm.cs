@@ -768,9 +768,23 @@ namespace TonePrism.Manager
 
                 if (result.IsSuccess)
                 {
-                    UpdateBackupStatus(
-                        $"✓ 自動バックアップ完了: {System.IO.Path.GetFileName(result.FilePath)}",
-                        System.Drawing.Color.DarkGreen, autoRevert: true);
+                    // (レビュー round5 #1) auto は無人の主動線。DB バックアップは成功でも、アセット控えが
+                    // 失敗/異常 (SMB 不達・games/ 欠損等) なら「緑チェック＝アセットも守られた」と誤認させない。
+                    // DB 失敗ほど致命的でない (アセットは best-effort・復元は PR3) ため modal は出さず橙ステータスで明示。
+                    var snap = result.AssetSnapshot;
+                    if (snap != null && (snap.IsFailed || snap.IsAnomaly))
+                    {
+                        UpdateBackupStatus(
+                            $"✓ DB バックアップ完了 ／ ⚠ アセット控えは取得できませんでした ({snap.Message})",
+                            System.Drawing.Color.DarkOrange, autoRevert: true);
+                        Logger.Warn("[MainForm] 自動バックアップ: DB は成功、アセット控えは取得できませんでした: " + snap.Message);
+                    }
+                    else
+                    {
+                        UpdateBackupStatus(
+                            $"✓ 自動バックアップ完了: {System.IO.Path.GetFileName(result.FilePath)}",
+                            System.Drawing.Color.DarkGreen, autoRevert: true);
+                    }
                     _backupSectionPanel.RefreshDisplay();
                 }
                 else if (result.IsFailed)

@@ -87,6 +87,8 @@ namespace TonePrism.Manager.Services
                 // エントリがあったのに今 dir が無い (= SMB で games/ だけ不可視等) のに先へ進むと、games を含まない
                 // guide-only manifest を Success で書いてしまい、retention 世代を跨いで games blob が GC される。
                 // 異常として世代まるごとスキップ (既存の完全な manifest 群は温存)。
+                // (レビュー round5 #3) 判定は **直近 manifest 1 件**基準。直近がたまたま当該 sub 0 件の瞬間だと検知漏れ
+                // しうるが、本番 games/ は常に非空なので実害ほぼ無し。全 manifest 横断は SMB でコスト高のため採らない。
                 foreach (var sub in SubFolders)
                 {
                     bool existedBefore = cache.Keys.Any(k => k.StartsWith(sub + "/", StringComparison.Ordinal));
@@ -111,14 +113,15 @@ namespace TonePrism.Manager.Services
                 }
                 token.ThrowIfCancellationRequested();
 
-                // manifest を temp→rename で atomic 書き出し
+                // manifest を temp→rename で atomic 書き出し。(レビュー#2) 書込/rename も長パス対応 (深い backup_dest で
+                // manifest 実パスが MAX_PATH 超になりうる。WriteManifest 内は EnsureLongPath 済だが Move/Delete も揃える)。
+                // manifestPath は ResolveUniqueManifest が非存在を保証するので削除チェックは不要 (デッドコードを除去)。
                 string host = BackupService.SanitizeHostForFileName(Environment.MachineName);
                 string leaf = string.IsNullOrEmpty(host) ? timestamp : timestamp + "_" + host;
                 string manifestPath = ResolveUniqueManifest(manifestTriggerDir, leaf);
                 tmpManifest = manifestPath + ".tmp";
                 WriteManifest(tmpManifest, timestamp, host, triggerType, stats, entries);
-                if (File.Exists(manifestPath)) File.Delete(manifestPath);
-                File.Move(tmpManifest, manifestPath);
+                File.Move(FileOperationService.EnsureLongPath(tmpManifest), FileOperationService.EnsureLongPath(manifestPath));
                 tmpManifest = null;
 
                 ApplyRetentionAndGc(triggerType, stats.NewBytes);
@@ -341,7 +344,7 @@ namespace TonePrism.Manager.Services
         {
             string candidate = Path.Combine(dir, leaf + ManifestExt);
             int suffix = 2;
-            while (File.Exists(candidate))
+            while (File.Exists(FileOperationService.EnsureLongPath(candidate)))
             {
                 candidate = Path.Combine(dir, leaf + "_" + suffix + ManifestExt);
                 if (++suffix > 99) throw new Exception("manifest 名の衝突回避に失敗 (同 1 秒に 100 件以上): " + dir);
