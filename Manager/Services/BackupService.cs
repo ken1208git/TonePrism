@@ -38,7 +38,7 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>(#250 レビュー Low) 内側の 0-100% を外側の [lo,hi]% にマップして親 progress に流す薄い adapter。
-        /// アセット段の進捗が DB 段 (95%) の後にバーを逆行させて見えるのを防ぐ。</summary>
+        /// アセット段 (最も重い) にバーの大半 [lo,hi] を割り当て、ファイル単位で動かすために使う (round9 UI)。</summary>
         private sealed class RangeProgress : IProgress<ProgressInfo>
         {
             private readonly IProgress<ProgressInfo> _inner;
@@ -278,8 +278,12 @@ namespace TonePrism.Manager.Services
                                     if (percent < 0) percent = 0;
                                     if (percent > 100) percent = 100;
                                 }
+                                // (round9 UI) DB コピー (124KB級で一瞬) はバーの 0-10% に圧縮し、残り 10-99% を
+                                // 重いアセット取得 (初回 ~6GB) に割り当てる。旧実装は DB に 0-100% を与え、その後
+                                // retention で 95% に逆戻り→アセットを 95-99% に圧縮しており、一番長いアセット段が
+                                // バーの 4% しか動かず「95% で固まって遅い」ように見えていた。
                                 progress?.Report(new ProgressInfo(
-                                    percent,
+                                    percent / 10,
                                     "バックアップ中...",
                                     $"{totalPages - remainingPages}/{totalPages} ページ"));
                                 return true;
@@ -327,7 +331,7 @@ namespace TonePrism.Manager.Services
                 }
 
                 // リテンションは成功時のみ適用
-                progress?.Report(new ProgressInfo(95, "古いバックアップを整理中...", ""));
+                progress?.Report(new ProgressInfo(10, "古いバックアップを整理中...", ""));
                 ApplyRetention();
 
                 // (#250 PR1) DB バックアップ成功確定後に games/ + guide/ を同一 timestamp/triggerType で best-effort 取得。
@@ -337,9 +341,10 @@ namespace TonePrism.Manager.Services
                 Models.SnapshotResult assetSnap = null;
                 if (_assetSnapshotService != null)
                 {
-                    // (レビュー Low) アセット段の進捗は 0-100 でなく 95-99% にマップし、DB 段で 95% まで進んだ後に
-                    // バーが逆行 (95→低%→100) して見えるのを防ぐ。
-                    var assetProgress = progress != null ? new RangeProgress(progress, 95, 99, "アセットを控え中...") : null;
+                    // (round9 UI) アセット取得が最も重い (初回 ~6GB の SMB 読込) ので、バーの大半 (10-99%) を
+                    // 割り当ててファイル単位で動かす (lblDetail にファイル名が流れる)。DB コピー (0-10%) + retention (10%) は
+                    // 一瞬。旧実装は 95-99% に圧縮しており「95% で固まって遅い」ように見える主因だった。内側 0-100 を 10-99 にマップ。
+                    var assetProgress = progress != null ? new RangeProgress(progress, 10, 99, "ゲーム本体をバックアップ中...") : null;
                     assetSnap = _assetSnapshotService.CreateSnapshot(timestamp, triggerType, assetProgress, token);
                     if (assetSnap.IsFailed)
                         Logger.Warn("[BackupService] アセット控え取得失敗 (DB バックアップは成功): " + assetSnap.Message);

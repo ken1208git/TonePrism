@@ -65,22 +65,24 @@ namespace TonePrism.Manager.Controls
             //
             // lblLastBackup
             //
+            // (round9 UI) DB(設定込み)+ゲーム本体を 1 バックアップとして 2 行で表示 (1 行だと右端の更新ボタンに被るため)。
+            // 1 行目 = 取得日時、2 行目 (灰) = 中身 (ゲーム本体のファイル数 + プール実使用)。どちらも短く更新ボタンに被らない。
             this.lblLastBackup.AutoSize = true;
-            this.lblLastBackup.Location = new System.Drawing.Point(220, 38);
+            this.lblLastBackup.Location = new System.Drawing.Point(244, 38);
             this.lblLastBackup.Name = "lblLastBackup";
             this.lblLastBackup.Size = new System.Drawing.Size(150, 15);
             this.lblLastBackup.TabIndex = 1;
             this.lblLastBackup.Text = "最終バックアップ: 未取得";
             //
-            // lblLastSnapshot
+            // lblLastSnapshot (2 行目、ゲーム本体の中身)
             //
             this.lblLastSnapshot.AutoSize = true;
             this.lblLastSnapshot.ForeColor = System.Drawing.Color.DimGray;
-            this.lblLastSnapshot.Location = new System.Drawing.Point(220, 56);
+            this.lblLastSnapshot.Location = new System.Drawing.Point(244, 56);
             this.lblLastSnapshot.Name = "lblLastSnapshot";
             this.lblLastSnapshot.Size = new System.Drawing.Size(150, 15);
             this.lblLastSnapshot.TabIndex = 3;
-            this.lblLastSnapshot.Text = "最終アセット控え: 未取得";
+            this.lblLastSnapshot.Text = "ゲーム本体: 未取得";
             //
             // btnRefresh
             //

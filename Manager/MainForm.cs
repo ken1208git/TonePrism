@@ -775,7 +775,7 @@ namespace TonePrism.Manager
                     if (snap != null && (snap.IsFailed || snap.IsAnomaly))
                     {
                         UpdateBackupStatus(
-                            $"✓ DB バックアップ完了 ／ ⚠ アセット控えは取得できませんでした ({snap.Message})",
+                            $"✓ DB バックアップ完了 ／ ⚠ ゲーム本体のバックアップは取得できませんでした ({snap.Message})",
                             System.Drawing.Color.DarkOrange, autoRevert: true);
                         Logger.Warn("[MainForm] 自動バックアップ: DB は成功、アセット控えは取得できませんでした: " + snap.Message);
                     }
@@ -784,7 +784,7 @@ namespace TonePrism.Manager
                         // (round8 C1) 取得は成功したが一部フォルダを列挙できず skip = 部分的な控えの可能性。
                         // 緑チェック (完全控え) と誤認させないため橙で明示する。
                         UpdateBackupStatus(
-                            $"✓ DB バックアップ完了 ／ ⚠ アセット控えは一部のフォルダを取得できませんでした ({snap.SkippedDirCount} 個スキップ)",
+                            $"✓ DB バックアップ完了 ／ ⚠ ゲーム本体のバックアップで一部のフォルダを取得できませんでした ({snap.SkippedDirCount} 個スキップ)",
                             System.Drawing.Color.DarkOrange, autoRevert: true);
                         Logger.Warn($"[MainForm] 自動バックアップ: DB は成功、アセット控えは部分的 ({snap.SkippedDirCount} 個のフォルダを列挙できずスキップ)。");
                     }

@@ -58,31 +58,30 @@ namespace TonePrism.Manager.Controls
                 // (ファイル = 真実、欠落 = 不在、で恒常的にズレない)。
                 var catalog = _dbManager.BackupCatalogService;
 
-                // 最終バックアップ表示 (auto / manual / safety のうち最新 1 件)
+                // 最終バックアップ表示 (auto / manual / safety のうち最新 1 件)。DB(設定込み)+ゲーム本体(games/guide)は
+                // 1 操作でまとめて控える「1 つのバックアップ」。横は左右にボタンがあり狭いので、1 行目=取得日時 /
+                // 2 行目(灰)=中身(ゲーム本体のファイル数 + プール実使用=重複排除後の物理サイズ=実際に食っている量) の 2 行で表示。
                 var last = catalog.GetLastSuccess();
-                if (last != null)
-                {
-                    lblLastBackup.Text = $"最終バックアップ: {last.StartedAtLocal:yyyy/MM/dd HH:mm:ss} ({FormatBytes(last.FileSizeBytes)})";
-                }
-                else
+                if (last == null)
                 {
                     lblLastBackup.Text = "最終バックアップ: 未取得";
-                }
-
-                // (#250) 最終アセット控え (games/ + guide/ の共有プール)。控えの「実使用量」(重複排除後の物理サイズ)
-                // を出す。エクスプローラーの見かけ (論理) と違い、これがディスクを実際に食っている量。
-                var snap = _dbManager.AssetSnapshotService.GetLatestSnapshot();
-                if (snap != null && snap.StartedAtLocal != DateTime.MinValue)
-                {
-                    long poolBytes = _dbManager.AssetSnapshotService.GetPoolPhysicalBytes();
-                    // (round8 A/L1) .poolsize 未更新/読込失敗時は 0 が返る。N ファイル有るのに「0 B」と矛盾表示しないよう
-                    // 0 は「計測中」に倒す (実使用 0 と未計測を区別)。
-                    string poolDisp = poolBytes > 0 ? FormatBytes(poolBytes) : "計測中";
-                    lblLastSnapshot.Text = $"最終アセット控え: {snap.StartedAtLocal:yyyy/MM/dd HH:mm:ss} ({snap.FileCount} ファイル) ／ 控え実使用: {poolDisp}";
+                    lblLastSnapshot.Text = "";
                 }
                 else
                 {
-                    lblLastSnapshot.Text = "最終アセット控え: 未取得";
+                    lblLastBackup.Text = $"最終バックアップ: {last.StartedAtLocal:yyyy/MM/dd HH:mm:ss}";
+                    var snap = _dbManager.AssetSnapshotService.GetLatestSnapshot();
+                    if (snap != null && snap.StartedAtLocal != DateTime.MinValue)
+                    {
+                        long poolBytes = _dbManager.AssetSnapshotService.GetPoolPhysicalBytes();
+                        // (round8 A/L1) .poolsize 未更新/読込失敗時の 0 は「計測中」に倒す (実使用 0 と未計測を区別)。
+                        string poolDisp = poolBytes > 0 ? FormatBytes(poolBytes) : "計測中";
+                        lblLastSnapshot.Text = $"ゲーム本体 {snap.FileCount} ファイル（実使用 {poolDisp}）";
+                    }
+                    else
+                    {
+                        lblLastSnapshot.Text = "ゲーム本体: 未取得";
+                    }
                 }
 
                 lblDestPath.Text = $"保存先: {_dbManager.BackupService.GetEffectiveDestinationDirectory()}";
@@ -148,15 +147,15 @@ namespace TonePrism.Manager.Controls
                     // 控えは中身を共有プールに集約するので「控え全体の実使用量」を出す (見かけより小さい正直な値)。
                     long poolBytes = _dbManager.AssetSnapshotService.GetPoolPhysicalBytes();
                     string poolDisp = poolBytes > 0 ? FormatBytes(poolBytes) : "計測中"; // (round8 A/L1) 0 B 矛盾表示を回避
-                    msg += $"\n\nアセット (games/guide) も控えました:\n{snap.FileCount} ファイル ／ 控え全体の実使用: {poolDisp}";
+                    msg += $"\n\nゲーム本体 (games/guide) もバックアップしました:\n{snap.FileCount} ファイル ／ 全体の実使用: {poolDisp}";
                     // (round8 C1) 深部フォルダの列挙失敗で一部 skip した場合は「部分的な控え」を明示 (完全控えと誤認させない)。
                     if (snap.IsPartial)
-                        msg += $"\n\n⚠ ただし {snap.SkippedDirCount} 個のフォルダを列挙できずスキップしました（部分的な控えの可能性。SMB 一過性 I/O / 権限等）。";
+                        msg += $"\n\n⚠ ただし {snap.SkippedDirCount} 個のフォルダを列挙できずスキップしました（部分的なバックアップの可能性。SMB 一過性 I/O / 権限等）。";
                 }
                 else if (snap != null && (snap.IsFailed || snap.IsAnomaly))
                 {
                     // (レビュー M2) 失敗/異常は黙らず併記 (DB バックアップ自体は成功)。設定で無効・通常スキップは触れない。
-                    msg += $"\n\n⚠ アセット (games/guide) の控えは取得できませんでした（DB バックアップは成功）。\n{snap.Message}";
+                    msg += $"\n\n⚠ ゲーム本体 (games/guide) のバックアップは取得できませんでした（DB バックアップは成功）。\n{snap.Message}";
                 }
                 MessageBox.Show(msg, "バックアップ成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }

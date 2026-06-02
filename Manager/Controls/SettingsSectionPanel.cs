@@ -258,8 +258,6 @@ namespace TonePrism.Manager.Controls
             numBackupInterval.ValueChanged -= NumBackupInterval_ValueChanged;
             cmbBackupIntervalUnit.SelectedIndexChanged -= CmbBackupIntervalUnit_SelectedIndexChanged;
             numBackupRetention.ValueChanged -= NumBackupRetention_ValueChanged;
-            chkSnapshotEnabled.CheckedChanged -= ChkSnapshotEnabled_CheckedChanged;
-            numSnapshotRetention.ValueChanged -= NumSnapshotRetention_ValueChanged;
             try
             {
                 var repo = _dbManager.SettingsRepository;
@@ -290,15 +288,6 @@ namespace TonePrism.Manager.Controls
                 if (retention > numBackupRetention.Maximum) retention = (int)numBackupRetention.Maximum;
                 numBackupRetention.Value = retention;
 
-                // (#250) アセットスナップショット enable / 世代数
-                string snapEnabled = repo.GetString(SettingsKeys.AssetSnapshotEnabled, "true");
-                chkSnapshotEnabled.Checked = !string.Equals(snapEnabled, "false", StringComparison.OrdinalIgnoreCase);
-                int snapRetention = repo.GetInt32(SettingsKeys.AssetSnapshotRetentionCount, SettingsKeys.DefaultAssetSnapshotRetentionCount);
-                if (snapRetention < numSnapshotRetention.Minimum) snapRetention = (int)numSnapshotRetention.Minimum;
-                if (snapRetention > numSnapshotRetention.Maximum) snapRetention = (int)numSnapshotRetention.Maximum;
-                numSnapshotRetention.Value = snapRetention;
-                numSnapshotRetention.Enabled = chkSnapshotEnabled.Checked;
-
                 // checkbox に従って interval section の enable/disable
                 ApplyAutoBackupEnabledUi(chkBackupAutoEnabled.Checked);
             }
@@ -311,8 +300,6 @@ namespace TonePrism.Manager.Controls
             numBackupInterval.ValueChanged += NumBackupInterval_ValueChanged;
             cmbBackupIntervalUnit.SelectedIndexChanged += CmbBackupIntervalUnit_SelectedIndexChanged;
             numBackupRetention.ValueChanged += NumBackupRetention_ValueChanged;
-            chkSnapshotEnabled.CheckedChanged += ChkSnapshotEnabled_CheckedChanged;
-            numSnapshotRetention.ValueChanged += NumSnapshotRetention_ValueChanged;
             // (#201) load 完了時点では UI = DB なので未保存なし
             SetBackupSectionDirty(false);
         }
@@ -412,18 +399,6 @@ namespace TonePrism.Manager.Controls
             SetBackupSectionDirty(true);
         }
 
-        // (#250) アセットスナップショット enable / 世代数
-        private void ChkSnapshotEnabled_CheckedChanged(object sender, EventArgs e)
-        {
-            numSnapshotRetention.Enabled = chkSnapshotEnabled.Checked;
-            SetBackupSectionDirty(true);
-        }
-
-        private void NumSnapshotRetention_ValueChanged(object sender, EventArgs e)
-        {
-            SetBackupSectionDirty(true);
-        }
-
         /// <summary>
         /// (#201) バックアップ section の「適用」: CheckBeforeWrite → 5 key を DB flush → dirty clear。
         /// 戻り値: true = 適用成功 / false = CheckBeforeWrite Cancel or DB 書込失敗 (= dirty 維持)。
@@ -449,9 +424,6 @@ namespace TonePrism.Manager.Controls
                 repo.SetString(SettingsKeys.BackupAutoIntervalUnit,
                     _prevIntervalUnit == "日" ? SettingsKeys.BackupAutoIntervalUnitDays : SettingsKeys.BackupAutoIntervalUnitHours);
                 repo.SetInt32("backup_retention_count", (int)numBackupRetention.Value);
-                // (#250) アセットスナップショット設定
-                repo.SetString(SettingsKeys.AssetSnapshotEnabled, chkSnapshotEnabled.Checked ? "true" : "false");
-                repo.SetInt32(SettingsKeys.AssetSnapshotRetentionCount, (int)numSnapshotRetention.Value);
 
                 _lastSavedBackupDest = destValue;
                 Logger.Info("[SettingsSectionPanel] バックアップ設定を適用 (保存先=" + destValue

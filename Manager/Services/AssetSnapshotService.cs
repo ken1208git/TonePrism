@@ -94,7 +94,7 @@ namespace TonePrism.Manager.Services
                     if (gameCount > 0 || hadHistory)
                     {
                         Logger.Warn("[AssetSnapshot] games/ も guide/ も見つかりません (DB games=" + gameCount + " / 履歴=" + hadHistory + " → SMB 不達等の異常の可能性)。今回の控えはスキップします。");
-                        return SnapshotResult.SkippedAnomaly("アセットフォルダが見つからない (異常の可能性)");
+                        return SnapshotResult.SkippedAnomaly("ゲーム本体のフォルダが見つかりません (異常の可能性)");
                     }
                     Logger.Info("[AssetSnapshot] games/ も guide/ も無く DB にも games 未登録のため控えなし (新規 install と判断)。");
                     return SnapshotResult.Success(null, 0, 0, 0);
@@ -307,7 +307,7 @@ namespace TonePrism.Manager.Services
                 if (total > 0 && progress != null)
                 {
                     int pct = (int)((double)stats.FileCount / total * 100);
-                    progress.Report(new ProgressInfo(pct > 100 ? 100 : pct, "アセットを控え中...", Path.GetFileName(file)));
+                    progress.Report(new ProgressInfo(pct > 100 ? 100 : pct, "ゲーム本体をバックアップ中...", Path.GetFileName(file)));
                 }
             }
             string[] dirs;
@@ -456,7 +456,8 @@ namespace TonePrism.Manager.Services
             {
                 if (string.Equals(triggerType, "auto", StringComparison.OrdinalIgnoreCase))
                 {
-                    int count = _settingsRepo.GetInt32(SettingsKeys.AssetSnapshotRetentionCount, SettingsKeys.DefaultAssetSnapshotRetentionCount);
+                    // (round9) DB バックアップと同じ保持世代数に統一 (1 バックアップ = .db + アセット manifest をペア保持/削除)。
+                    int count = _settingsRepo.GetInt32("backup_retention_count", 30);
                     if (count > 0)
                     {
                         string autoDir = Path.Combine(GetSnapshotRootDirectory(), "auto");

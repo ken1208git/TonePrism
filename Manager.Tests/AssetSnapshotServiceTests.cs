@@ -150,7 +150,7 @@ namespace TonePrism.Manager.Tests
         [Fact]
         public void Retention_PrunesOldManifests_AndGcRemovesUnreferenced()
         {
-            _settings.SetInt32(SettingsKeys.AssetSnapshotRetentionCount, 2);
+            _settings.SetInt32("backup_retention_count", 2);
             // 各世代で中身を変える → 古い blob が未参照になる
             WriteGameFile("g1/a.txt", "v1"); Snap("auto", "20260101_000001");
             WriteGameFile("g1/a.txt", "v2"); Snap("auto", "20260101_000002");
@@ -162,7 +162,7 @@ namespace TonePrism.Manager.Tests
         [Fact]
         public void Retention_KeepsManualManifests()
         {
-            _settings.SetInt32(SettingsKeys.AssetSnapshotRetentionCount, 1);
+            _settings.SetInt32("backup_retention_count", 1);
             WriteGameFile("g1/a.txt", "x");
             Snap("manual", "20260101_000001");
             Snap("manual", "20260101_000002");
@@ -264,7 +264,7 @@ namespace TonePrism.Manager.Tests
         {
             // (レビュー#1) grace を効かせると、未参照になっても直近配置の blob は残る (= 並行/直近書込の保護)。
             _svc.GcGracePeriod = TimeSpan.FromHours(1);
-            _settings.SetInt32(SettingsKeys.AssetSnapshotRetentionCount, 1);
+            _settings.SetInt32("backup_retention_count", 1);
             WriteGameFile("g1/a.txt", "v1"); Snap("auto", "20260101_000001");
             WriteGameFile("g1/a.txt", "v2"); Snap("auto", "20260101_000002"); // manifest1 が retention で削除 → v1 blob 未参照
             Assert.Equal(1, ManifestCount("auto"));
