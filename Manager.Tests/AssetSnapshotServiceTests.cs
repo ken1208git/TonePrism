@@ -75,6 +75,18 @@ namespace TonePrism.Manager.Tests
         // ---- tests ----
 
         [Fact]
+        public void SnapshotResult_Success_WithSkippedDirs_IsPartial()
+        {
+            // (round8 C1) 深部フォルダ列挙失敗を skip して完走した Success は IsPartial=true になり、件数を持つ。
+            // 深部 I/O 失敗を unit で決定的に再現できないため、部分取得を UI/ログへ伝える契約 (factory) を固定する。
+            Assert.False(SnapshotResult.Success("m", 10, 100, 50, 0).IsPartial);   // skip 0 = 完全
+            var partial = SnapshotResult.Success("m", 10, 100, 50, 3);
+            Assert.True(partial.IsPartial);
+            Assert.Equal(3, partial.SkippedDirCount);
+            Assert.True(partial.IsSuccess);                                        // 部分でも Success ではある
+        }
+
+        [Fact]
         public void FirstSnapshot_CopiesUniqueContentToPool()
         {
             WriteGameFile("g1/a.txt", "alpha");

@@ -75,7 +75,10 @@ namespace TonePrism.Manager.Controls
                 if (snap != null && snap.StartedAtLocal != DateTime.MinValue)
                 {
                     long poolBytes = _dbManager.AssetSnapshotService.GetPoolPhysicalBytes();
-                    lblLastSnapshot.Text = $"最終アセット控え: {snap.StartedAtLocal:yyyy/MM/dd HH:mm:ss} ({snap.FileCount} ファイル) ／ 控え実使用: {FormatBytes(poolBytes)}";
+                    // (round8 A/L1) .poolsize 未更新/読込失敗時は 0 が返る。N ファイル有るのに「0 B」と矛盾表示しないよう
+                    // 0 は「計測中」に倒す (実使用 0 と未計測を区別)。
+                    string poolDisp = poolBytes > 0 ? FormatBytes(poolBytes) : "計測中";
+                    lblLastSnapshot.Text = $"最終アセット控え: {snap.StartedAtLocal:yyyy/MM/dd HH:mm:ss} ({snap.FileCount} ファイル) ／ 控え実使用: {poolDisp}";
                 }
                 else
                 {
@@ -144,7 +147,11 @@ namespace TonePrism.Manager.Controls
                 {
                     // 控えは中身を共有プールに集約するので「控え全体の実使用量」を出す (見かけより小さい正直な値)。
                     long poolBytes = _dbManager.AssetSnapshotService.GetPoolPhysicalBytes();
-                    msg += $"\n\nアセット (games/guide) も控えました:\n{snap.FileCount} ファイル ／ 控え全体の実使用: {FormatBytes(poolBytes)}";
+                    string poolDisp = poolBytes > 0 ? FormatBytes(poolBytes) : "計測中"; // (round8 A/L1) 0 B 矛盾表示を回避
+                    msg += $"\n\nアセット (games/guide) も控えました:\n{snap.FileCount} ファイル ／ 控え全体の実使用: {poolDisp}";
+                    // (round8 C1) 深部フォルダの列挙失敗で一部 skip した場合は「部分的な控え」を明示 (完全控えと誤認させない)。
+                    if (snap.IsPartial)
+                        msg += $"\n\n⚠ ただし {snap.SkippedDirCount} 個のフォルダを列挙できずスキップしました（部分的な控えの可能性。SMB 一過性 I/O / 権限等）。";
                 }
                 else if (snap != null && (snap.IsFailed || snap.IsAnomaly))
                 {

@@ -165,7 +165,13 @@ namespace TonePrism.Manager.Services
 
                 Logger.Info(string.Format("[AssetSnapshot] 控え完了: {0} ({1} files / 論理 {2:F2}GB / 新規コピー {3:F2}MB)",
                     Path.GetFileName(manifestPath), stats.FileCount, stats.Bytes / 1073741824.0, stats.NewBytes / 1048576.0));
-                return SnapshotResult.Success(manifestPath, stats.FileCount, stats.Bytes, stats.NewBytes);
+                // (round8 C1) 深部フォルダの列挙失敗を best-effort で skip して完走した場合、この世代は部分的な控えの
+                // 可能性がある。個別 Warn は出ているが、件数を集計して「部分取得」を明示し UI にも伝える (緑チェック=
+                // 完全控えと誤認させない)。世代まるごとの異常 (SkippedAnomaly) ほどではないので Success のまま IsPartial で返す。
+                if (stats.SkippedDirCount > 0)
+                    Logger.Warn(string.Format("[AssetSnapshot] ⚠ {0} 個のフォルダを列挙できずスキップしました (SMB 一過性 I/O / 権限等)。この世代は部分的な控えの可能性があります ({1} files)。",
+                        stats.SkippedDirCount, stats.FileCount));
+                return SnapshotResult.Success(manifestPath, stats.FileCount, stats.Bytes, stats.NewBytes, stats.SkippedDirCount);
             }
             catch (OperationCanceledException)
             {
@@ -267,7 +273,7 @@ namespace TonePrism.Manager.Services
             // スキップ (best-effort、世代全体は落とさない)。
             string[] files;
             try { files = Directory.GetFiles(ForceLong(srcDir)); }
-            catch (Exception ex) { Logger.Warn("[AssetSnapshot] ファイル列挙に失敗 (このフォルダをスキップ): " + srcDir + " : " + ex.Message); files = new string[0]; }
+            catch (Exception ex) { Logger.Warn("[AssetSnapshot] ファイル列挙に失敗 (このフォルダをスキップ): " + srcDir + " : " + ex.Message); files = new string[0]; stats.SkippedDirCount++; }
             foreach (string file in files)
             {
                 token.ThrowIfCancellationRequested();
@@ -306,7 +312,7 @@ namespace TonePrism.Manager.Services
             }
             string[] dirs;
             try { dirs = Directory.GetDirectories(ForceLong(srcDir)); }
-            catch (Exception ex) { Logger.Warn("[AssetSnapshot] サブフォルダ列挙に失敗 (スキップ): " + srcDir + " : " + ex.Message); dirs = new string[0]; }
+            catch (Exception ex) { Logger.Warn("[AssetSnapshot] サブフォルダ列挙に失敗 (スキップ): " + srcDir + " : " + ex.Message); dirs = new string[0]; stats.SkippedDirCount++; }
             foreach (string subDir in dirs)
             {
                 token.ThrowIfCancellationRequested();
@@ -551,6 +557,7 @@ namespace TonePrism.Manager.Services
             public int FileCount;
             public long Bytes;     // 論理合計
             public long NewBytes;  // 今回プールへ新規コピーした分
+            public int SkippedDirCount; // (round8 C1) 列挙できず skip した深部フォルダ数 (= 部分取得の根拠)
         }
     }
 }

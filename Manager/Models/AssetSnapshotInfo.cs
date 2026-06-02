@@ -49,12 +49,20 @@ namespace TonePrism.Manager.Models
         /// 通常の Skipped (設定で無効 / キャンセル) は false。</summary>
         public bool IsAnomaly { get; private set; }
 
+        /// <summary>(round8 C1) 取得は成功 (Success) したが、深部フォルダの列挙失敗 (SMB 一過性 I/O / 権限等) で
+        /// 一部フォルダを skip しており **この世代が部分的な控えの可能性がある** こと。完全失敗 (Failed) でも
+        /// 異常 skip (IsAnomaly) でもないが、緑チェック＝完全控えと誤認させないため UI/ログで警告する。</summary>
+        public bool IsPartial { get; private set; }
+
+        /// <summary>(round8 C1) 列挙できず skip した深部フォルダ数 (IsPartial の根拠)。</summary>
+        public int SkippedDirCount { get; private set; }
+
         public bool IsSuccess => Kind == ResultKind.Success;
         public bool IsSkipped => Kind == ResultKind.Skipped;
         public bool IsFailed => Kind == ResultKind.Failed;
 
-        public static SnapshotResult Success(string manifestPath, int fileCount, long logicalBytes, long newBytesCopied)
-            => new SnapshotResult { Kind = ResultKind.Success, ManifestPath = manifestPath, FileCount = fileCount, LogicalBytes = logicalBytes, NewBytesCopied = newBytesCopied };
+        public static SnapshotResult Success(string manifestPath, int fileCount, long logicalBytes, long newBytesCopied, int skippedDirCount = 0)
+            => new SnapshotResult { Kind = ResultKind.Success, ManifestPath = manifestPath, FileCount = fileCount, LogicalBytes = logicalBytes, NewBytesCopied = newBytesCopied, SkippedDirCount = skippedDirCount, IsPartial = skippedDirCount > 0 };
 
         public static SnapshotResult Skipped(string reason)
             => new SnapshotResult { Kind = ResultKind.Skipped, Message = reason };
