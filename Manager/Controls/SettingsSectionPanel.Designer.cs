@@ -358,6 +358,7 @@ namespace TonePrism.Manager.Controls
             this.lblSnapshotRetentionUnit.Location = new System.Drawing.Point(518, 218);
             this.lblSnapshotRetentionUnit.Name = "lblSnapshotRetentionUnit";
             this.lblSnapshotRetentionUnit.Size = new System.Drawing.Size(180, 15);
+            this.lblSnapshotRetentionUnit.TabIndex = 18;
             this.lblSnapshotRetentionUnit.Text = "個 (auto のみ。manual は残ります)";
             //
             // lblBackupUnsaved (未保存マーカー、初期 hidden)

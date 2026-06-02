@@ -284,7 +284,14 @@ namespace TonePrism.Manager.Services
         /// </summary>
         private static string ApplyLongPathPrefix(string path)
         {
-            string full = Path.GetFullPath(path);
+            // (round9 B-1) Path.GetFullPath は .NET Framework 既定の legacy path handling では ≥260 字入力で
+            // PathTooLongException を投げる (= 長パスを安全化する関数が、まさに対象の長パスで落ちる自己矛盾)。
+            // 通常は GetFullPath で正規化 (相対 / ".." / 区切り) するが、長すぎて throw した場合は caller が渡すのは
+            // 常に絶対・正規化済みパス (DbPath 由来 / 列挙結果 / backup_dest) なので、生パスをそのまま \\?\ 化して
+            // 深い backup_dest でも Failed にせず控えられるようにする。
+            string full;
+            try { full = Path.GetFullPath(path); }
+            catch (PathTooLongException) { full = path; }
             if (full.StartsWith(@"\\")) return @"\\?\UNC\" + full.Substring(2); // UNC: \\server\share → \\?\UNC\server\share
             return @"\\?\" + full;
         }

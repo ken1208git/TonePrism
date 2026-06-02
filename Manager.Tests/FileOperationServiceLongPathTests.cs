@@ -47,6 +47,23 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
+        public void ForceLongPath_VeryLongLocalPath_DoesNotThrow_AndPrefixes()
+        {
+            // (round9 B-1) 260 字超の入力で legacy path handling の Path.GetFullPath が PathTooLongException を投げても、
+            // 長パス安全化関数自身が落ちず正しい \\?\ 形を返す (自己矛盾の解消)。長パス対応が有効な環境では GetFullPath が
+            // throw しないが、出力が正しいことはどちらの経路でも保証される。
+            string longLocal = @"C:\" + new string('a', 300);
+            Assert.Equal(@"\\?\C:\" + new string('a', 300), FileOperationService.ForceLongPath(longLocal));
+        }
+
+        [Fact]
+        public void ForceLongPath_VeryLongUncPath_DoesNotThrow_AndUncPrefixes()
+        {
+            string longUnc = @"\\srv\share\" + new string('a', 300);
+            Assert.Equal(@"\\?\UNC\srv\share\" + new string('a', 300), FileOperationService.ForceLongPath(longUnc));
+        }
+
+        [Fact]
         public void NormalizePath_StripsUncLongPrefix_Symmetric()
         {
             // ForceLongPath/EnsureLongPath が付ける UNC プレフィックスの逆変換 (剥がし漏れで相対パス化しないこと)
