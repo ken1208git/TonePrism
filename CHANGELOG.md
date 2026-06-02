@@ -1313,7 +1313,7 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 - **`store_section_repository.gd` に `release_year:YYYY` ソース分岐を追加**。`source.begins_with("release_year:")` で `int(source.substr(13))` を取り出し、`SELECT * FROM games WHERE is_visible=1 AND release_year=? ORDER BY display_order ASC, title ASC`（指定年のゲームを表示順で全件）を実行。既存の `genre:` / `difficulty:` / `players_min:` 等のフィルタ分岐と同型。
 - **新作 (`recent`) との違い**: `recent` は `release_year=今年`（システム日付）固定だが、`release_year:YYYY` は Manager 側で指定した**任意の年**を引く。`max_display_count<=0`（Manager が 0 保存）で該当年を全件表示。
-- Manager 側 UI（ソース「制作年指定」の追加・値入力・条件系グレーアウト）は上記 [Manager v0.21.0] を参照。
+- Manager 側 UI（ソース「制作年」の追加・値入力・条件系グレーアウト）は上記 [Manager v0.20.2] を参照。
 
 #### Fixed (#211 起因 — タイルグリッドが空表示になる回帰)
 
@@ -1321,7 +1321,7 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 #### Changed (#212 — 厳選枠でランキング系ソースを許可)
 
-- **スライドショー / タイルグリッドで「ランキング系（人気ランキング・最近プレイ・ランダム）」ソースを許可**（Manager v0.21.0 の #212 改と対。どのソースを許可するかは Manager 側のゲートで決まり、Launcher の描画はソース非依存）。背景画像・タイトルはゲーム自身のものを使うため、ランキング系でも見栄えが保てる。
+- **スライドショー / タイルグリッドで「ランキング系（人気ランキング・最近プレイ・ランダム）」ソースを許可**（Manager v0.20.2 の #212 改と対。どのソースを許可するかは Manager 側のゲートで決まり、Launcher の描画はソース非依存）。背景画像・タイトルはゲーム自身のものを使うため、ランキング系でも見栄えが保てる。
 - **スライドショーは `max_display_count>0` のときスライド枚数を上限する**（`build_slideshow_section`）。手動は `0` 保存＝全件（従来どおり）、ランキング系は max が有効なので「特集 N 枚（TOP N）」が成立する。生成枚数を container の `slide_count` meta に持たせ、**`store_browse.gd` `_switch_slide` の wrap-around を `section.games.size()` から `slide_count` に変更**（枚数を絞った際に存在しない `Banner_*` へ飛んで空スライドになるのを防止）。バナー画像の遅延ロードは `Banner_*` を null まで走査する `while` ループなので追従済（無改修）。
 #### Changed (フィルター系ソースの並びを「なるべく最新の制作年を頭に」)
 
@@ -1998,7 +1998,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
-### [Manager v0.21.0] - 2026-06-01
+### [Manager v0.20.2] - 2026-06-01
 
 #### Changed (#211 / #212 / #291 — ストアセクション編集の条件付き UI)
 
@@ -2014,7 +2014,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **(#290 review) 難易度 / プレイ時間の値指定を数字直打ちからラベル付きドロップダウンに変更**。`cmbSourceValue`（新規 combo, idx=7/8 で表示）にゲーム編集と同じ選択肢（`1 - 易しい` / `2 - 5分～15分` 等、`GameFormHelper.InitializeDifficultyCombo` / `InitializePlayTimeCombo` を再利用）を入れ、保存時に `SelectedIndex+1` を値に。プレイ人数・制作年は従来どおり数値入力 (`nudSourceValue`)。「指定の数字だけ不親切」だったのを解消。
 - docs `usage/store.md`・SPEC §7.3 を新ルールに更新。
 - **※実機 UI 確認は未実施**（条件付き有効/無効・coerce 挙動は WinForms UI のため実機目視が必要）。
-- bump 判断: ユーザー向け UI 機能の追加。minor (v0.20.1 → v0.21.0)。
+- bump 判断: 既存ストアセクションエディタの段階的改善（条件付き UI #211/#212・制作年ソース #291・ドロップダウン値指定 #290review）＋クラッシュ/表示バグ修正。新ソース追加は機能だが、**Launcher 側の同 #291 追加も patch (v0.10.3) としており component 版は patch で揃える**（feature としての版上げはリリース時に Bundle 側で minor 反映する）。patch (v0.20.1 → v0.20.2)。
 
 ### [Manager v0.20.1] - 2026-06-01
 
