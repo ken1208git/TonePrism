@@ -172,7 +172,14 @@ namespace TonePrism.Manager.Services
             IProgress<ProgressInfo> progress, CancellationToken token, int total)
         {
             token.ThrowIfCancellationRequested();
-            foreach (string file in Directory.GetFiles(srcDir))
+            // (レビュー#3) 列挙対象 dir も \\?\ で長パス対応にする (per-file だけでなく enumerate も)。EnsureLongPath は
+            // 240 字未満だと \\?\ を付けないため、短い srcDir 配下に MAX_PATH 超のファイルがあると GetFiles 自体が
+            // PathTooLong を投げ世代まるごと Failed になる。ForceLong で常に長パス列挙にし、失敗時もそのフォルダだけ
+            // スキップ (best-effort、世代全体は落とさない)。
+            string[] files;
+            try { files = Directory.GetFiles(ForceLong(srcDir)); }
+            catch (Exception ex) { Logger.Warn("[AssetSnapshot] ファイル列挙に失敗 (このフォルダをスキップ): " + srcDir + " : " + ex.Message); files = new string[0]; }
+            foreach (string file in files)
             {
                 token.ThrowIfCancellationRequested();
                 string relpath = relPrefix + "/" + Path.GetFileName(file);
@@ -180,15 +187,19 @@ namespace TonePrism.Manager.Services
                 long size = SafeLen(file);
                 long mtime = File.GetLastWriteTimeUtc(safe).Ticks;
 
-                // キャッシュ命中 (relpath + size + mtime 完全一致) なら再ハッシュしない。
+                // キャッシュ命中 (relpath+size+mtime 一致) かつ pool に実体があれば再ハッシュ・再読込しない。
                 string hash;
                 CacheEntry c;
-                if (cache.TryGetValue(relpath, out c) && c.Size == size && c.MtimeTicks == mtime)
+                if (cache.TryGetValue(relpath, out c) && c.Size == size && c.MtimeTicks == mtime
+                    && File.Exists(FileOperationService.EnsureLongPath(PoolPathFor(poolRoot, c.Hash))))
+                {
                     hash = c.Hash;
+                }
                 else
-                    hash = ComputeSha256(safe);
-
-                if (CopyToPoolIfAbsent(safe, hash, poolRoot)) stats.NewBytes += size;
+                {
+                    // (レビュー#4) ソースを 1 回だけ読み、ハッシュ計算と pool 配置を同時に行う (SMB の二重読込を回避)。
+                    if (HashAndStore(safe, poolRoot, token, out hash)) stats.NewBytes += size;
+                }
 
                 entries.Add(hash + "\t" + size.ToString(CultureInfo.InvariantCulture) + "\t"
                     + mtime.ToString(CultureInfo.InvariantCulture) + "\t" + relpath);
@@ -200,11 +211,14 @@ namespace TonePrism.Manager.Services
                     progress.Report(new ProgressInfo(pct > 100 ? 100 : pct, "アセットを控え中...", Path.GetFileName(file)));
                 }
             }
-            foreach (string subDir in Directory.GetDirectories(srcDir))
+            string[] dirs;
+            try { dirs = Directory.GetDirectories(ForceLong(srcDir)); }
+            catch (Exception ex) { Logger.Warn("[AssetSnapshot] サブフォルダ列挙に失敗 (スキップ): " + srcDir + " : " + ex.Message); dirs = new string[0]; }
+            foreach (string subDir in dirs)
             {
                 token.ThrowIfCancellationRequested();
                 FileAttributes attr;
-                try { attr = File.GetAttributes(subDir); } catch { continue; }
+                try { attr = File.GetAttributes(FileOperationService.EnsureLongPath(subDir)); } catch { continue; }
                 if ((attr & FileAttributes.ReparsePoint) == FileAttributes.ReparsePoint)
                 {
                     Logger.Warn("[AssetSnapshot] reparse point をスキップ: " + subDir);
@@ -214,35 +228,53 @@ namespace TonePrism.Manager.Services
             }
         }
 
-        private static string ComputeSha256(string safePath)
-        {
-            using (var sha = SHA256.Create())
-            using (var fs = new FileStream(safePath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20))
-            {
-                byte[] h = sha.ComputeHash(fs);
-                var sb = new StringBuilder(h.Length * 2);
-                foreach (var b in h) sb.Append(b.ToString("x2"));
-                return sb.ToString();
-            }
-        }
+        /// <summary>常に \\?\ を付けて長パス対応の列挙にする (EnsureLongPath は 240 字未満だと付けないため)。</summary>
+        private static string ForceLong(string path)
+            => path.StartsWith(@"\\?\") ? path : @"\\?\" + Path.GetFullPath(path);
 
         private static string PoolPathFor(string poolRoot, string hash)
             => Path.Combine(poolRoot, hash.Substring(0, 2), hash);
 
-        /// <summary>pool に hash が無ければ temp→rename で atomic コピー。新規コピーしたら true。</summary>
-        private static bool CopyToPoolIfAbsent(string safeSrc, string hash, string poolRoot)
+        /// <summary>
+        /// (レビュー#4) ソースを 1 回だけ読み、SHA-256 を計算しつつ pool の temp に書き、内容ハッシュ名へ rename する。
+        /// 既に同一中身が pool にあれば temp を捨てる (重複排除)。新規配置したら true (= NewBytes 計上)。チャンク読みで
+        /// token を観測しキャンセルに反応できる。
+        /// (レビュー#1) 配置直後に mtime を**配置時刻**に打つ。pool blob は content-addressed で mtime は内容と無関係。
+        /// File.Copy だと元ファイルの古い mtime を継承し、GC の grace (直近書込保護) が常に無効化される (= 多ホスト並行
+        /// backup で他ホストの取得中 blob を誤って GC しうる) ため、配置時刻を刻んで grace を機能させる。
+        /// </summary>
+        private bool HashAndStore(string safeSrc, string poolRoot, CancellationToken token, out string hash)
         {
-            string dst = PoolPathFor(poolRoot, hash);
-            string safeDst = FileOperationService.EnsureLongPath(dst);
-            if (File.Exists(safeDst)) return false; // 既に同一中身がプールにある = 重複排除
-            Directory.CreateDirectory(FileOperationService.EnsureLongPath(Path.GetDirectoryName(dst)));
-            string tmp = dst + ".tmp_" + Guid.NewGuid().ToString("N");
+            string tmp = Path.Combine(poolRoot, ".tmp_" + Guid.NewGuid().ToString("N"));
             string safeTmp = FileOperationService.EnsureLongPath(tmp);
+            Directory.CreateDirectory(FileOperationService.EnsureLongPath(poolRoot));
             try
             {
-                File.Copy(safeSrc, safeTmp, false);
-                try { File.Move(safeTmp, safeDst); }
-                catch (IOException) { TryDeleteFile(tmp); return File.Exists(safeDst) ? false : throw new IOException("pool への配置に失敗: " + dst); }
+                using (var sha = SHA256.Create())
+                using (var src = new FileStream(safeSrc, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20))
+                using (var dst = new FileStream(safeTmp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
+                {
+                    byte[] buf = new byte[1 << 20];
+                    int n;
+                    while ((n = src.Read(buf, 0, buf.Length)) > 0)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        sha.TransformBlock(buf, 0, n, null, 0);
+                        dst.Write(buf, 0, n);
+                    }
+                    sha.TransformFinalBlock(new byte[0], 0, 0);
+                    var sb = new StringBuilder(sha.Hash.Length * 2);
+                    foreach (var b in sha.Hash) sb.Append(b.ToString("x2"));
+                    hash = sb.ToString();
+                }
+
+                string final = PoolPathFor(poolRoot, hash);
+                string safeFinal = FileOperationService.EnsureLongPath(final);
+                if (File.Exists(safeFinal)) { TryDeleteFile(tmp); return false; } // 既存 = 重複排除
+                Directory.CreateDirectory(FileOperationService.EnsureLongPath(Path.GetDirectoryName(final)));
+                try { File.Move(safeTmp, safeFinal); }
+                catch (IOException) { TryDeleteFile(tmp); if (File.Exists(safeFinal)) return false; throw; }
+                try { File.SetLastWriteTimeUtc(safeFinal, DateTime.UtcNow); } catch { } // grace 用に配置時刻を刻む
                 return true;
             }
             catch
@@ -359,11 +391,13 @@ namespace TonePrism.Manager.Services
                 foreach (var f in Directory.EnumerateFiles(pool, "*", SearchOption.AllDirectories))
                 {
                     string name = Path.GetFileName(f);
-                    if (name.Contains(".tmp_")) continue; // 進行中コピーは触らない
-                    if (referenced.Contains(name)) continue;
+                    bool isTmp = name.Contains(".tmp_");
+                    // 進行中コピーの temp は触らない。ただし grace を超えて残る temp はクラッシュ起因の orphan として掃除
+                    // (レビュー Low)。参照されている blob はスキップ。
+                    if (!isTmp && referenced.Contains(name)) continue;
                     try
                     {
-                        if (File.GetLastWriteTimeUtc(f) > cutoff) continue; // grace: 直近書込は残す
+                        if (File.GetLastWriteTimeUtc(f) > cutoff) continue; // grace: 直近書込は残す (進行中/直近配置)
                         long len = SafeLen(f);
                         File.Delete(FileOperationService.EnsureLongPath(f));
                         removed++; freed += len;

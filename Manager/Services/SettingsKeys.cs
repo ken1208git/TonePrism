@@ -133,10 +133,10 @@ namespace TonePrism.Manager.Services
         public const string BackupAutoIntervalUnitHours = "hours";
         public const string BackupAutoIntervalUnitDays = "days";
 
-        // ----- (#250 PR1) アセットスナップショット (games/ + guide/ のハードリンク世代バックアップ) -----
+        // ----- (#250 PR1) アセット控え (games/ + guide/ の共有プール (CAS / SHA-256) バックアップ) -----
 
         /// <summary>
-        /// (#250) DB バックアップと同時に games/ + guide/ のハードリンク世代スナップショットを取得するか
+        /// (#250) DB バックアップと同時に games/ + guide/ を共有プール (CAS) で控えるか
         /// ("true"/"false")。default "true"。比較は `BackupAutoEnabled` と同じく **"false" 厳密一致 (case-insensitive)
         /// のみ無効、それ以外はすべて有効扱い** (手動 DB 編集耐性、UI からは "true"/"false" のみ書込まれる)。
         /// 値は SQL literal 制約 (alphanumeric + underscore) 準拠。
@@ -144,7 +144,7 @@ namespace TonePrism.Manager.Services
         public const string AssetSnapshotEnabled = "asset_snapshot_enabled";
 
         /// <summary>
-        /// (#250) auto アセットスナップショットの保持世代数 (INTEGER, default 30)。manual は対象外 (温存、#235 同様)。
+        /// (#250) auto アセット控え (manifest) の保持世代数 (INTEGER, default 30)。manual は対象外 (温存、#235 同様)。
         /// DB バックアップの `backup_retention_count` とは独立 (アセットは GB 級でサイズ特性が桁違いのため別調整)。
         /// </summary>
         public const string AssetSnapshotRetentionCount = "asset_snapshot_retention_count";

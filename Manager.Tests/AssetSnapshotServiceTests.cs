@@ -178,5 +178,31 @@ namespace TonePrism.Manager.Tests
             var r = Snap("auto", "20260101_000001");
             Assert.True(r.IsFailed); // throw せず Failed
         }
+
+        [Fact]
+        public void PoolBlob_StampedWithPlacementTime_NotSourceMtime()
+        {
+            // (レビュー#1) pool blob の mtime は「配置時刻」であるべき (元ファイルの古い mtime を継承すると
+            // GC の grace が常に無効化される)。元ファイルの mtime を 2 年前にしても blob は直近時刻になること。
+            WriteGameFile("g1/a.txt", "x");
+            string srcFile = Path.Combine(_games, "g1", "a.txt");
+            File.SetLastWriteTimeUtc(srcFile, DateTime.UtcNow.AddYears(-2));
+            var r = Snap("auto", "20260101_000001");
+            Assert.True(r.IsSuccess);
+            string blob = Directory.GetFiles(PoolDir, "*", SearchOption.AllDirectories).First(f => !Path.GetFileName(f).Contains(".tmp_"));
+            Assert.True((DateTime.UtcNow - File.GetLastWriteTimeUtc(blob)).TotalMinutes < 5); // 古い mtime を継承していない
+        }
+
+        [Fact]
+        public void Gc_Grace_KeepsRecentUnreferencedBlob()
+        {
+            // (レビュー#1) grace を効かせると、未参照になっても直近配置の blob は残る (= 並行/直近書込の保護)。
+            _svc.GcGracePeriod = TimeSpan.FromHours(1);
+            _settings.SetInt32(SettingsKeys.AssetSnapshotRetentionCount, 1);
+            WriteGameFile("g1/a.txt", "v1"); Snap("auto", "20260101_000001");
+            WriteGameFile("g1/a.txt", "v2"); Snap("auto", "20260101_000002"); // manifest1 が retention で削除 → v1 blob 未参照
+            Assert.Equal(1, ManifestCount("auto"));
+            Assert.Equal(2, PoolBlobCount()); // v1 は未参照だが直近配置なので grace で残る (v1 + v2)
+        }
     }
 }

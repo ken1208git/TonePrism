@@ -2012,7 +2012,8 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **retention / GC**: **auto の古い manifest のみ削除**（`asset_snapshot_retention_count` 既定 30、manual 温存、#235 同様）。その後 **mark-sweep GC**＝残る全 manifest が参照する hash 集合を作り、pool 内の未参照ファイルを削除（**直近 1 時間以内に更新された pool ファイルは grace で残す**＝並行/直近書込のレース回避）。`backup_retention_count` とは独立。
 - **設定**: `asset_snapshot_enabled` (既定 "true") / `asset_snapshot_retention_count` (既定 30) を settings(K/V) に追加。設定タブ「バックアップ」section に enable チェック + 世代数 NumericUpDown。**schema 版据置 v22**（settings は K/V data、migration 不要、既存 DB は default 引数で吸収）。
 - **UI**: バックアップタブに「最終アセット控え」ラベル（時刻 / ファイル数 / **控えの実使用量＝プール物理サイズ**）。手動バックアップ成功ダイアログにも「アセットも控えました（N ファイル / 控え全体の実使用 X）」を併記。
-- 検証: Manager build 緑 / **テスト 97 件合格**（新規 `AssetSnapshotServiceTests` 10: 初回プール格納 / **同一中身は別パスでも 1 個** / **名前同じ中身違いは別保存** / 不変は新規 0 / 変更で新 blob / retention+GC で未参照 pool 削除 / manual 温存 / 無効 / 空 / 失敗 never-throw）。**※実機 SMB round-trip（再取得で控えがほぼ増えない / サーバー容量計算で実サイズが出る / 長パス）は別途必要**。
+- **レビュー対応 (commit 後追い)**: ①**GC の grace を機能させる**＝pool blob の mtime を「配置時刻」に刻む（`File.Copy` は元ファイルの古い mtime を継承し grace が常に無効化＝多ホスト並行 backup で他ホストの取得中 blob を誤 GC しうる重大バグを修正）。②**列挙も `\\?\` 長パス対応**（深い games/ で `GetFiles` 自体が PathTooLong → 世代 Failed を防止、列挙失敗はそのフォルダだけスキップ）。③**ソースを 1 回だけ読む**（ハッシュ計算と pool 配置を同一ストリームで、SMB の二重読込を回避＋チャンク読みで token 観測しキャンセル可）。④進捗バーを 95-99% にマップ（DB 段 95% 後の逆行を防止）。⑤GC が orphan `.tmp_` を grace 経過後に掃除。
+- 検証: Manager build 緑 / **テスト 99 件合格**（`AssetSnapshotServiceTests` 12: 初回プール格納 / **同一中身は別パスでも 1 個** / **名前同じ中身違いは別保存** / 不変は新規 0 / 変更で新 blob / retention+GC で未参照 pool 削除 / **grace で直近未参照 blob は残る** / **blob mtime は配置時刻** / manual 温存 / 無効 / 空 / 失敗 never-throw）。**※実機 SMB round-trip（再取得で控えがほぼ増えない / サーバー容量計算で実サイズが出る / 長パス / 多ホスト並行 GC 安全性）は別途必要**。
 - bump 判断: ユーザー向け新機能 (データ保護)、破壊的変更なし・既存 DB 自動互換。minor (v0.20.2 → v0.21.0)。Launcher/Updater は無関係。
 
 ### [Manager v0.20.2] - 2026-06-01

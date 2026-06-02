@@ -61,7 +61,7 @@ namespace TonePrism.Manager
         public BackupService BackupService { get { return _backupService; } }
         /// <summary>(DB v19) バックアップ履歴を backups/ フォルダ走査から導出するカタログサービス。</summary>
         public BackupCatalogService BackupCatalogService { get { return _backupCatalogService; } }
-        /// <summary>(#250) games/ + guide/ のアセットスナップショット (ハードリンク世代バックアップ)。</summary>
+        /// <summary>(#250) games/ + guide/ のアセット控え (共有プール CAS / SHA-256 バックアップ)。</summary>
         public AssetSnapshotService AssetSnapshotService { get { return _assetSnapshotService; } }
         public RestoreService RestoreService { get { return _restoreService; } }
         public SettingsRepository SettingsRepository { get { return _settingsRepo; } }

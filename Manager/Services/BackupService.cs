@@ -37,6 +37,24 @@ namespace TonePrism.Manager.Services
             _assetSnapshotService = snapshotService;
         }
 
+        /// <summary>(#250 レビュー Low) 内側の 0-100% を外側の [lo,hi]% にマップして親 progress に流す薄い adapter。
+        /// アセット段の進捗が DB 段 (95%) の後にバーを逆行させて見えるのを防ぐ。</summary>
+        private sealed class RangeProgress : IProgress<ProgressInfo>
+        {
+            private readonly IProgress<ProgressInfo> _inner;
+            private readonly int _lo, _span;
+            private readonly string _message;
+            public RangeProgress(IProgress<ProgressInfo> inner, int lo, int hi, string message)
+            { _inner = inner; _lo = lo; _span = Math.Max(0, hi - lo); _message = message; }
+            public void Report(ProgressInfo value)
+            {
+                int inner = value != null ? value.Percentage : 0;
+                if (inner < 0) inner = 0; if (inner > 100) inner = 100;
+                int mapped = _lo + (int)((long)inner * _span / 100);
+                _inner.Report(new ProgressInfo(mapped, _message, value != null ? value.Detail : ""));
+            }
+        }
+
         /// <summary>
         /// (#170 followup round 3 review L-4) 「自動バックアップが UI 上で有効か」の判定 SoT helper。
         /// `IsAutoBackupDue` と `RunAutoBackupIfDue` の両方で参照、`"false"` 厳密一致 (case-insensitive) で
@@ -316,9 +334,12 @@ namespace TonePrism.Manager.Services
                 // 上の L299 で完了済、AssetSnapshotService は throw しない契約)。世代名 timestamp は .db ファイル名と対応する。
                 if (_assetSnapshotService != null)
                 {
-                    var snap = _assetSnapshotService.CreateSnapshot(timestamp, triggerType, progress, token);
+                    // (レビュー Low) アセット段の進捗は 0-100 でなく 95-99% にマップし、DB 段で 95% まで進んだ後に
+                    // バーが逆行 (95→低%→100) して見えるのを防ぐ。
+                    var assetProgress = progress != null ? new RangeProgress(progress, 95, 99, "アセットを控え中...") : null;
+                    var snap = _assetSnapshotService.CreateSnapshot(timestamp, triggerType, assetProgress, token);
                     if (snap.IsFailed)
-                        Logger.Warn("[BackupService] アセットスナップショット取得失敗 (DB バックアップは成功): " + snap.Message);
+                        Logger.Warn("[BackupService] アセット控え取得失敗 (DB バックアップは成功): " + snap.Message);
                 }
 
                 progress?.Report(new ProgressInfo(100, "バックアップ完了", destinationPath));
