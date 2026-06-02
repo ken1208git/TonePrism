@@ -101,8 +101,9 @@ namespace TonePrism.Manager.Services
 
                 var entries = new List<string>();
                 var stats = new Stats();
-                // (レビュー#2) 進捗分母は概算。CountFiles は ExcludedFolders (Library 等) を除外して数えるが WalkTree は
-                // 丸ごと走査する (除外なし)。games/ には通常それらは無いので実害ほぼ無く、超過分は下の pct で 100 に clamp。
+                // (レビュー#2 / #250 M1) 進捗分母は概算。SafeCountFiles は WalkTree と同じく ExcludedFolders を除外せず
+                // 数える (= 分母と走査数を一致させる。旧実装は除外ありで数えており分母過小 → pct が 100 に張り付いた)。
+                // 深い木で CountFiles 側が PathTooLong すると partial になりうるが、超過分は下の pct で 100 に clamp。
                 int total = SubFolders.Sum(s => SafeCountFiles(Path.Combine(baseInstallDir, s)));
 
                 foreach (var sub in SubFolders)
@@ -284,9 +285,10 @@ namespace TonePrism.Manager.Services
             }
         }
 
-        /// <summary>常に \\?\ を付けて長パス対応の列挙にする (EnsureLongPath は 240 字未満だと付けないため)。</summary>
-        private static string ForceLong(string path)
-            => path.StartsWith(@"\\?\") ? path : @"\\?\" + Path.GetFullPath(path);
+        /// <summary>常に \\?\ を付けて長パス対応の列挙にする (EnsureLongPath は 240 字未満だと付けないため)。
+        /// UNC 対応は FileOperationService.ForceLongPath に集約 (#250 C1: 旧実装は UNC で "\\?\\\server\..." という
+        /// 構文不正パスを生成し、SMB 上の列挙が全件失敗 → 空の控えを Success 扱いにする欠陥があった)。</summary>
+        private static string ForceLong(string path) => FileOperationService.ForceLongPath(path);
 
         private static string PoolPathFor(string poolRoot, string hash)
             => Path.Combine(poolRoot, hash.Substring(0, 2), hash);
@@ -455,7 +457,10 @@ namespace TonePrism.Manager.Services
                             if (tab > 0) referenced.Add(line.Substring(0, tab));
                         }
                     }
-                    catch (Exception ex) { Logger.Warn("[AssetSnapshot] GC: manifest 読込失敗のためこの世代の参照は保守的に維持できず: " + manifest + " : " + ex.Message); return; }
+                    // (レビュー L2) manifest を 1 件でも読めなければ参照集合が不完全 → 誤って参照中 blob を消しうるので
+                    // GC 全体を保守的に中止する。この早期 return では WritePoolSizeCache に到達せず .poolsize は前回値の
+                    // まま据え置き = サイズ表示が一時 stale になるが、過大表示はあれど過小表示はしない安全側。
+                    catch (Exception ex) { Logger.Warn("[AssetSnapshot] GC: manifest 読込失敗のため全 GC を保守的に中止 (.poolsize 据え置き): " + manifest + " : " + ex.Message); return; }
                 }
                 DateTime cutoff = DateTime.UtcNow - GcGracePeriod;
                 int removed = 0; long freed = 0; long surviving = 0;
@@ -483,7 +488,10 @@ namespace TonePrism.Manager.Services
 
         private static int SafeCountFiles(string dir)
         {
-            try { return Directory.Exists(dir) ? FileOperationService.CountFiles(dir) : 0; }
+            // (#250 M1) WalkTree は ExcludedFolders を除外せず丸ごと控える (バックアップなので Electron 系の
+            // node_modules 等の「実行時に必須」なフォルダも残す。除外すると復元データが壊れる)。進捗分母も
+            // applyExclusions:false で walk と揃える。
+            try { return Directory.Exists(dir) ? FileOperationService.CountFiles(dir, null, applyExclusions: false) : 0; }
             catch { return 0; }
         }
 

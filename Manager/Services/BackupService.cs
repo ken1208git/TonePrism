@@ -581,8 +581,9 @@ namespace TonePrism.Manager.Services
         public long FileSizeBytes { get; private set; }
         public string Message { get; private set; }
         /// <summary>(#250) この DB バックアップに同梱したアセット控えの結果 (best-effort)。null = 機能未注入。
-        /// UI が成功/失敗/異常を併記するため持ち回る。</summary>
-        public Models.SnapshotResult AssetSnapshot { get; set; }
+        /// UI が成功/失敗/異常を併記するため持ち回る。(レビュー L1) 他プロパティと同様に外部からは不変にし、
+        /// 代入は同一アセンブリの RunBackupCore のみ (internal set)。</summary>
+        public Models.SnapshotResult AssetSnapshot { get; internal set; }
 
         public bool IsSuccess { get { return Kind == ResultKind.SuccessKind; } }
         public bool IsSkipped { get { return Kind == ResultKind.SkippedKind; } }

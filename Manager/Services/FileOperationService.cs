@@ -66,9 +66,11 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>
-        /// 指定ディレクトリ配下のファイル数を再帰的にカウント
+        /// 指定ディレクトリ配下のファイル数を再帰的にカウント。
+        /// (#250 M1) <paramref name="applyExclusions"/>=false で ExcludedFolders (Library/.import/node_modules 等) を
+        /// 除外せず数える。アセット控え (AssetSnapshotService) は丸ごと走査するので、進捗分母も除外なしで揃える。
         /// </summary>
-        public static int CountFiles(string dir, Func<string, bool> excludeFolderPredicate = null)
+        public static int CountFiles(string dir, Func<string, bool> excludeFolderPredicate = null, bool applyExclusions = true)
         {
             int count = 0;
             try
@@ -79,13 +81,13 @@ namespace TonePrism.Manager.Services
                 {
                     string folderName = Path.GetFileName(subDir);
 
-                    if (ExcludedFolders.Contains(folderName, StringComparer.OrdinalIgnoreCase))
+                    if (applyExclusions && ExcludedFolders.Contains(folderName, StringComparer.OrdinalIgnoreCase))
                         continue;
 
                     if (excludeFolderPredicate != null && excludeFolderPredicate(folderName))
                         continue;
 
-                    count += CountFiles(subDir, excludeFolderPredicate);
+                    count += CountFiles(subDir, excludeFolderPredicate, applyExclusions);
                 }
             }
             catch { }
@@ -248,7 +250,10 @@ namespace TonePrism.Manager.Services
         public static string NormalizePath(string path)
         {
             if (string.IsNullOrEmpty(path)) return path;
-            if (path.StartsWith(@"\\?\")) path = path.Substring(4);
+            // (#250 C1) \\?\UNC\server\share → \\server\share。UNC 長パスを先に判定してから素の \\?\ を剥がす
+            // (ForceLongPath/EnsureLongPath が付ける UNC プレフィックスと対称にし、剥がし漏れで相対パス化するのを防ぐ)。
+            if (path.StartsWith(@"\\?\UNC\")) path = @"\\" + path.Substring(8);
+            else if (path.StartsWith(@"\\?\")) path = path.Substring(4);
             return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         }
 
@@ -258,8 +263,30 @@ namespace TonePrism.Manager.Services
         public static string EnsureLongPath(string path)
         {
             if (path.Length >= 240 && !path.StartsWith(@"\\?\"))
-                return @"\\?\" + Path.GetFullPath(path);
+                return ApplyLongPathPrefix(path);
             return path;
+        }
+
+        /// <summary>
+        /// (#250 C1) 長さに関わらず常に \\?\ プレフィックスを付ける版。深い木の列挙対象 dir に使う
+        /// (EnsureLongPath は 240 字未満だと付けないため、短い親 + MAX_PATH 超の子で列挙自体が PathTooLong になる)。
+        /// 既に \\?\ 付きなら素通し。UNC 対応は ApplyLongPathPrefix に集約。
+        /// </summary>
+        public static string ForceLongPath(string path)
+            => path.StartsWith(@"\\?\") ? path : ApplyLongPathPrefix(path);
+
+        /// <summary>
+        /// (#250 C1) \\?\ 長パスプレフィックスを正しく付与する内部 helper。UNC パス (\\server\share\...) は正しい
+        /// 長パス形 \\?\UNC\server\share\... へ変換する。単純な "\\?\" + path だと UNC で "\\?\\\server\..." という
+        /// Win32 構文不正パスを生成し、SMB 上の Directory.GetFiles 等が "syntax is incorrect" 例外で全件失敗する
+        /// (= アセット控えが silent に空のまま Success 扱いになる) ため UNC 分岐が必須。ローカルは \\?\C:\... 。
+        /// caller (EnsureLongPath / ForceLongPath) が既存 \\?\ 付きを除外してから呼ぶ前提。
+        /// </summary>
+        private static string ApplyLongPathPrefix(string path)
+        {
+            string full = Path.GetFullPath(path);
+            if (full.StartsWith(@"\\")) return @"\\?\UNC\" + full.Substring(2); // UNC: \\server\share → \\?\UNC\server\share
+            return @"\\?\" + full;
         }
 
         /// <summary>
