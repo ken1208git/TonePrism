@@ -27,6 +27,7 @@ namespace TonePrism.Manager
             this.cmbGenre = new System.Windows.Forms.ComboBox();
             this.lblSourceValue = new System.Windows.Forms.Label();
             this.nudSourceValue = new System.Windows.Forms.NumericUpDown();
+            this.cmbSourceValue = new System.Windows.Forms.ComboBox();
             this.lblMaxDisplayCount = new System.Windows.Forms.Label();
             this.nudMaxDisplayCount = new System.Windows.Forms.NumericUpDown();
             this.chkIsVisible = new System.Windows.Forms.CheckBox();
@@ -121,12 +122,20 @@ namespace TonePrism.Manager
             // nudSourceValue
             //
             this.nudSourceValue.Location = new System.Drawing.Point(100, 111);
-            this.nudSourceValue.Maximum = new decimal(new int[] { 10, 0, 0, 0 });
+            this.nudSourceValue.Maximum = new decimal(new int[] { 2100, 0, 0, 0 });
             this.nudSourceValue.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             this.nudSourceValue.Name = "nudSourceValue";
             this.nudSourceValue.Size = new System.Drawing.Size(80, 23);
             this.nudSourceValue.Value = new decimal(new int[] { 1, 0, 0, 0 });
             this.nudSourceValue.Visible = false;
+            //
+            // cmbSourceValue
+            //
+            this.cmbSourceValue.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbSourceValue.Location = new System.Drawing.Point(100, 111);
+            this.cmbSourceValue.Name = "cmbSourceValue";
+            this.cmbSourceValue.Size = new System.Drawing.Size(200, 23);
+            this.cmbSourceValue.Visible = false;
             //
             // lblMaxDisplayCount
             //
@@ -285,6 +294,7 @@ namespace TonePrism.Manager
             this.Controls.Add(this.cmbGenre);
             this.Controls.Add(this.lblSourceValue);
             this.Controls.Add(this.nudSourceValue);
+            this.Controls.Add(this.cmbSourceValue);
             this.Controls.Add(this.lblMaxDisplayCount);
             this.Controls.Add(this.nudMaxDisplayCount);
             this.Controls.Add(this.chkIsVisible);
@@ -318,6 +328,7 @@ namespace TonePrism.Manager
         private System.Windows.Forms.ComboBox cmbGenre;
         private System.Windows.Forms.Label lblSourceValue;
         private System.Windows.Forms.NumericUpDown nudSourceValue;
+        private System.Windows.Forms.ComboBox cmbSourceValue;
         private System.Windows.Forms.Label lblMaxDisplayCount;
         private System.Windows.Forms.NumericUpDown nudMaxDisplayCount;
         private System.Windows.Forms.CheckBox chkIsVisible;
