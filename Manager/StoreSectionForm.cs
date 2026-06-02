@@ -238,13 +238,16 @@ namespace TonePrism.Manager
         private static bool TypeIsShowcase(int typeIndex)
             => typeIndex == 1 || typeIndex == 2;
 
-        // (#212 改) 厳選枠で許可するソース: 手動(0) と ランダム(10) のみ。背景画像/表示テキストはゲーム自身の
-        // ものにフォールバックするので random でも崩れず、4 秒ごとに切り替わるヒーロー枠と相性が良い。一方
-        // popular/genre 等の「絞り込み」系は厳選の意図に合わない (大判ヒーローに不向き) ため不可。通常カテゴリ行(0)
-        // は全ソース可。random=10 は IsRankingSource でもあるので、厳選枠×ランダムでは最大表示数も有効になる
-        // (スライドショー=スライド枚数 / タイルグリッド=最大3枚の上限)。
+        // (#212 改) 厳選枠で許可するソース: 手動(0) ＋ ランキング系 (= IsRankingSource: 人気/最近プレイ/ランダム)。
+        // 厳選枠は「少数を大きく見せる」枠なので、表示数をコントロールできるソースだけが合う:
+        //   - 手動       = 割り当てで枚数を決める
+        //   - ランキング系 = max_display_count で TOP N を指定できる (背景画像/表示テキストはゲーム自身のものに
+        //                    フォールバックするので自動でも崩れず、ローテーションするヒーロー枠と相性が良い)
+        // 一方フィルター系 (genre/players_*/difficulty/play_time/online/controller/recent/release_year) は条件一致を
+        // 「全件」表示で枚数を絞れず "厳選" にならないため不可。結果として「厳選枠で許可するソース集合」=
+        // 「max_display_count が有効なソース集合 ∪ 手動」と一致する (1 つの原則で説明できる)。通常カテゴリ行(0) は全ソース可。
         private static bool TypeAllowsSource(int typeIndex, int sourceIndex)
-            => !TypeIsShowcase(typeIndex) || sourceIndex == 0 || sourceIndex == 10;
+            => !TypeIsShowcase(typeIndex) || sourceIndex == 0 || IsRankingSource(sourceIndex);
 
         // (#211) 最大表示数 (nud + ラベル) を、ランキング系ソースのときだけ有効化する。手動/フィルター系はグレーアウト。
         private void UpdateMaxDisplayCountEnabled()
@@ -269,8 +272,8 @@ namespace TonePrism.Manager
                 if (informOnCoerce)
                 {
                     MessageBox.Show(
-                        "スライドショー / タイルグリッドのソースは「手動」または「ランダム」のみ対応です。\n" +
-                        "（背景画像・表示テキストで魅せる厳選枠のため、絞り込み系の自動ソースは不可）\n\n" +
+                        "スライドショー / タイルグリッドのソースは「手動」か「ランキング系（人気ランキング・最近プレイ・ランダム）」のみ対応です。\n" +
+                        "（少数を大きく見せる厳選枠のため、ジャンル等の絞り込み系は表示数を絞れず不可）\n\n" +
                         "ソースを「手動」に変更しました。",
                         "ソースを変更", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
