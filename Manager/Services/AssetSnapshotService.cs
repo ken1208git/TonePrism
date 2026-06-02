@@ -34,6 +34,9 @@ namespace TonePrism.Manager.Services
         private const string ManifestDirName = "asset_snapshots";
         private const string ManifestExt = ".manifest";
         private const string MetaLinePrefix = "META";
+        /// <summary>(レビュー M1) pool 物理サイズのキャッシュ。UI から pool 全列挙 (SMB で重い) を避けるため、
+        /// バックアップ時にバックグラウンドスレッドで算出してここに書き、UI は即時読みする。</summary>
+        private const string PoolSizeFileName = ".poolsize";
         /// <summary>GC で未参照 pool ファイルを消すときの猶予 (直近書込/並行 backup のレース回避)。テストで 0 に上書き可。</summary>
         internal TimeSpan GcGracePeriod = TimeSpan.FromHours(1);
 
@@ -123,16 +126,46 @@ namespace TonePrism.Manager.Services
             }
         }
 
-        /// <summary>アセットプールが実際に使っているディスク量 (= 重複排除後の物理サイズ)。UI 用。無ければ 0。</summary>
+        /// <summary>アセットプールが実際に使っているディスク量 (= 重複排除後の物理サイズ)。UI 用。
+        /// (レビュー M1) pool 全列挙は SMB で重く UI スレッドをフリーズさせうるので、バックアップ時に算出済の
+        /// `.poolsize` キャッシュを即時読みする。無ければ 0 (= まだ取得していない)。</summary>
         public long GetPoolPhysicalBytes()
         {
             try
             {
-                string pool = GetPoolRootDirectory();
-                if (!Directory.Exists(pool)) return 0;
-                return Directory.EnumerateFiles(pool, "*", SearchOption.AllDirectories).Sum(f => SafeLen(f));
+                string sizeFile = FileOperationService.EnsureLongPath(Path.Combine(GetPoolRootDirectory(), PoolSizeFileName));
+                if (!File.Exists(sizeFile)) return 0;
+                long v;
+                return long.TryParse(File.ReadAllText(sizeFile).Trim(), out v) ? v : 0;
             }
             catch { return 0; }
+        }
+
+        private void WritePoolSizeCache(long bytes)
+        {
+            try
+            {
+                string pool = GetPoolRootDirectory();
+                if (!Directory.Exists(pool)) return;
+                File.WriteAllText(FileOperationService.EnsureLongPath(Path.Combine(pool, PoolSizeFileName)),
+                    bytes.ToString(CultureInfo.InvariantCulture));
+            }
+            catch (Exception ex) { Logger.Warn("[AssetSnapshot] poolsize キャッシュ書込失敗 (無害): " + ex.Message); }
+        }
+
+        /// <summary>pool 内の blob 実体合計 (メタ `.poolsize` と進行中 `.tmp_` は除外、レビュー L4)。バックグラウンドスレッド用。</summary>
+        private long EnumeratePoolBytes()
+        {
+            string pool = GetPoolRootDirectory();
+            if (!Directory.Exists(pool)) return 0;
+            long sum = 0;
+            foreach (var f in Directory.EnumerateFiles(pool, "*", SearchOption.AllDirectories))
+            {
+                string name = Path.GetFileName(f);
+                if (name == PoolSizeFileName || name.Contains(".tmp_")) continue;
+                sum += SafeLen(f);
+            }
+            return sum;
         }
 
         // ---- 内部 ----
@@ -182,8 +215,12 @@ namespace TonePrism.Manager.Services
             foreach (string file in files)
             {
                 token.ThrowIfCancellationRequested();
-                string relpath = relPrefix + "/" + Path.GetFileName(file);
                 string safe = FileOperationService.EnsureLongPath(file);
+                // (レビュー L3) ファイルの symlink/junction も辿らない (dir と同扱い、spec 整合)。リンク先を
+                // ハッシュ/コピーすると意図せぬ実体を取り込むため。
+                try { if ((File.GetAttributes(safe) & FileAttributes.ReparsePoint) == FileAttributes.ReparsePoint) { Logger.Warn("[AssetSnapshot] reparse file をスキップ: " + file); continue; } }
+                catch { }
+                string relpath = relPrefix + "/" + Path.GetFileName(file);
                 long size = SafeLen(file);
                 long mtime = File.GetLastWriteTimeUtc(safe).Ticks;
 
@@ -341,28 +378,39 @@ namespace TonePrism.Manager.Services
             return info;
         }
 
-        /// <summary>auto の古い manifest を削除 (manual 温存) → 残る全 manifest が参照する hash 集合を作り、未参照 pool を mark-sweep GC。</summary>
+        /// <summary>(レビュー L2) 全体を try/catch で best-effort 化し、retention/GC の例外で「manifest 書込済なのに
+        /// 控え全体が Failed」と誤報告されるのを防ぐ。(レビュー M3) **GC は auto に限定**: auto は lease で多ホスト排他
+        /// されるため並行 GC が起きない。manual manifest は retention 対象外で未参照 blob を生まないので GC 不要、
+        /// サイズキャッシュだけ更新する。</summary>
         private void ApplyRetentionAndGc(string triggerType)
         {
-            if (string.Equals(triggerType, "auto", StringComparison.OrdinalIgnoreCase))
+            try
             {
-                int count = _settingsRepo.GetInt32(SettingsKeys.AssetSnapshotRetentionCount, SettingsKeys.DefaultAssetSnapshotRetentionCount);
-                if (count > 0)
+                if (string.Equals(triggerType, "auto", StringComparison.OrdinalIgnoreCase))
                 {
-                    string autoDir = Path.Combine(GetSnapshotRootDirectory(), "auto");
-                    if (Directory.Exists(autoDir))
+                    int count = _settingsRepo.GetInt32(SettingsKeys.AssetSnapshotRetentionCount, SettingsKeys.DefaultAssetSnapshotRetentionCount);
+                    if (count > 0)
                     {
-                        var stale = Directory.GetFiles(autoDir, "*" + ManifestExt)
-                            .OrderByDescending(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase).Skip(count).ToList();
-                        foreach (var m in stale)
+                        string autoDir = Path.Combine(GetSnapshotRootDirectory(), "auto");
+                        if (Directory.Exists(autoDir))
                         {
-                            try { File.Delete(FileOperationService.EnsureLongPath(m)); Logger.Info("[AssetSnapshot] 古い世代(manifest)を削除: " + Path.GetFileName(m)); }
-                            catch (Exception ex) { Logger.Warn("[AssetSnapshot] manifest 削除失敗: " + m + " : " + ex.Message); }
+                            var stale = Directory.GetFiles(autoDir, "*" + ManifestExt)
+                                .OrderByDescending(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase).Skip(count).ToList();
+                            foreach (var m in stale)
+                            {
+                                try { File.Delete(FileOperationService.EnsureLongPath(m)); Logger.Info("[AssetSnapshot] 古い世代(manifest)を削除: " + Path.GetFileName(m)); }
+                                catch (Exception ex) { Logger.Warn("[AssetSnapshot] manifest 削除失敗: " + m + " : " + ex.Message); }
+                            }
                         }
                     }
+                    GarbageCollectPool(); // GC + .poolsize 更新
+                }
+                else
+                {
+                    WritePoolSizeCache(EnumeratePoolBytes()); // manual: GC せずサイズキャッシュのみ更新
                 }
             }
-            GarbageCollectPool();
+            catch (Exception ex) { Logger.Warn("[AssetSnapshot] retention/GC 失敗 (無害、控え自体は成功): " + ex.Message); }
         }
 
         /// <summary>残る全 manifest が参照する hash 集合に無い pool ファイルを削除 (直近書込は grace で残す)。</summary>
@@ -387,24 +435,25 @@ namespace TonePrism.Manager.Services
                     catch (Exception ex) { Logger.Warn("[AssetSnapshot] GC: manifest 読込失敗のためこの世代の参照は保守的に維持できず: " + manifest + " : " + ex.Message); return; }
                 }
                 DateTime cutoff = DateTime.UtcNow - GcGracePeriod;
-                int removed = 0; long freed = 0;
+                int removed = 0; long freed = 0; long surviving = 0;
                 foreach (var f in Directory.EnumerateFiles(pool, "*", SearchOption.AllDirectories))
                 {
                     string name = Path.GetFileName(f);
+                    if (name == PoolSizeFileName) continue; // メタファイルは触らない・サイズにも数えない
                     bool isTmp = name.Contains(".tmp_");
-                    // 進行中コピーの temp は触らない。ただし grace を超えて残る temp はクラッシュ起因の orphan として掃除
-                    // (レビュー Low)。参照されている blob はスキップ。
-                    if (!isTmp && referenced.Contains(name)) continue;
+                    long len = SafeLen(f);
+                    // 参照されている blob は残す。進行中 temp は触らない。grace 超過の未参照/orphan-temp は削除。
+                    if (!isTmp && referenced.Contains(name)) { surviving += len; continue; }
                     try
                     {
-                        if (File.GetLastWriteTimeUtc(f) > cutoff) continue; // grace: 直近書込は残す (進行中/直近配置)
-                        long len = SafeLen(f);
+                        if (File.GetLastWriteTimeUtc(f) > cutoff) { if (!isTmp) surviving += len; continue; } // grace: 直近書込は残す
                         File.Delete(FileOperationService.EnsureLongPath(f));
                         removed++; freed += len;
                     }
-                    catch (Exception ex) { Logger.Warn("[AssetSnapshot] GC: pool 削除失敗: " + f + " : " + ex.Message); }
+                    catch (Exception ex) { Logger.Warn("[AssetSnapshot] GC: pool 削除失敗: " + f + " : " + ex.Message); if (!isTmp) surviving += len; }
                 }
                 if (removed > 0) Logger.Info(string.Format("[AssetSnapshot] GC: 未参照 {0} 件 / {1:F2}MB を解放", removed, freed / 1048576.0));
+                WritePoolSizeCache(surviving); // (レビュー M1) UI 即時読み用にサイズを記録
             }
             catch (Exception ex) { Logger.Warn("[AssetSnapshot] GC 失敗 (無害、次回再試行): " + ex.Message); }
         }

@@ -49,7 +49,8 @@ namespace TonePrism.Manager.Services
             public void Report(ProgressInfo value)
             {
                 int inner = value != null ? value.Percentage : 0;
-                if (inner < 0) inner = 0; if (inner > 100) inner = 100;
+                if (inner < 0) inner = 0;
+                if (inner > 100) inner = 100;
                 int mapped = _lo + (int)((long)inner * _span / 100);
                 _inner.Report(new ProgressInfo(mapped, _message, value != null ? value.Detail : ""));
             }

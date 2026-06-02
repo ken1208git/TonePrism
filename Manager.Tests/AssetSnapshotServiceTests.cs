@@ -56,9 +56,10 @@ namespace TonePrism.Manager.Tests
             => _svc.CreateSnapshot(ts, trigger, null, default(System.Threading.CancellationToken));
 
         private string PoolDir => Path.Combine(_backup.GetEffectiveDestinationDirectory(), "asset_pool");
+        // blob は hex ハッシュ名。メタ (.poolsize) / 進行中 (.tmp_) などドット始まりは数えない。
         private int PoolBlobCount()
             => Directory.Exists(PoolDir)
-                ? Directory.GetFiles(PoolDir, "*", SearchOption.AllDirectories).Count(f => !Path.GetFileName(f).Contains(".tmp_"))
+                ? Directory.GetFiles(PoolDir, "*", SearchOption.AllDirectories).Count(f => !Path.GetFileName(f).StartsWith("."))
                 : 0;
         private string ManifestDir(string trigger) => Path.Combine(_backup.GetEffectiveDestinationDirectory(), "asset_snapshots", trigger);
         private int ManifestCount(string trigger)
@@ -189,7 +190,7 @@ namespace TonePrism.Manager.Tests
             File.SetLastWriteTimeUtc(srcFile, DateTime.UtcNow.AddYears(-2));
             var r = Snap("auto", "20260101_000001");
             Assert.True(r.IsSuccess);
-            string blob = Directory.GetFiles(PoolDir, "*", SearchOption.AllDirectories).First(f => !Path.GetFileName(f).Contains(".tmp_"));
+            string blob = Directory.GetFiles(PoolDir, "*", SearchOption.AllDirectories).First(f => !Path.GetFileName(f).StartsWith("."));
             Assert.True((DateTime.UtcNow - File.GetLastWriteTimeUtc(blob)).TotalMinutes < 5); // 古い mtime を継承していない
         }
 
