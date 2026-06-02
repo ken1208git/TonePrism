@@ -20,6 +20,7 @@ namespace TonePrism.Manager.Controls
             this.grpActions = new System.Windows.Forms.GroupBox();
             this.btnBackupNow = new System.Windows.Forms.Button();
             this.lblLastBackup = new System.Windows.Forms.Label();
+            this.lblLastSnapshot = new System.Windows.Forms.Label();
             this.btnRefresh = new System.Windows.Forms.Button();
             this.grpHistory = new System.Windows.Forms.GroupBox();
             this.gridHistory = new System.Windows.Forms.DataGridView();
@@ -40,6 +41,7 @@ namespace TonePrism.Manager.Controls
             | System.Windows.Forms.AnchorStyles.Right)));
             this.grpActions.Controls.Add(this.btnBackupNow);
             this.grpActions.Controls.Add(this.lblLastBackup);
+            this.grpActions.Controls.Add(this.lblLastSnapshot);
             this.grpActions.Controls.Add(this.btnRefresh);
             this.grpActions.Location = new System.Drawing.Point(20, 20);
             this.grpActions.Name = "grpActions";
@@ -69,6 +71,16 @@ namespace TonePrism.Manager.Controls
             this.lblLastBackup.Size = new System.Drawing.Size(150, 15);
             this.lblLastBackup.TabIndex = 1;
             this.lblLastBackup.Text = "最終バックアップ: 未取得";
+            //
+            // lblLastSnapshot
+            //
+            this.lblLastSnapshot.AutoSize = true;
+            this.lblLastSnapshot.ForeColor = System.Drawing.Color.DimGray;
+            this.lblLastSnapshot.Location = new System.Drawing.Point(220, 56);
+            this.lblLastSnapshot.Name = "lblLastSnapshot";
+            this.lblLastSnapshot.Size = new System.Drawing.Size(150, 15);
+            this.lblLastSnapshot.TabIndex = 3;
+            this.lblLastSnapshot.Text = "最終スナップショット: 未取得";
             //
             // btnRefresh
             //
@@ -181,6 +193,7 @@ namespace TonePrism.Manager.Controls
         private System.Windows.Forms.GroupBox grpActions;
         private System.Windows.Forms.Button btnBackupNow;
         private System.Windows.Forms.Label lblLastBackup;
+        private System.Windows.Forms.Label lblLastSnapshot;
         private System.Windows.Forms.Button btnRefresh;
         private System.Windows.Forms.GroupBox grpHistory;
         private System.Windows.Forms.DataGridView gridHistory;

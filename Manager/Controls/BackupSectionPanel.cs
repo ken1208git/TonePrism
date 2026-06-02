@@ -69,6 +69,18 @@ namespace TonePrism.Manager.Controls
                     lblLastBackup.Text = "最終バックアップ: 未取得";
                 }
 
+                // (#250) 最終アセットスナップショット (games/ + guide/ のハードリンク世代バックアップ)。
+                var snap = _dbManager.AssetSnapshotService.GetLatestSnapshot();
+                if (snap != null && snap.StartedAtLocal != DateTime.MinValue)
+                {
+                    string share = snap.UsedHardLinks ? "ハードリンク共有" : "実コピー";
+                    lblLastSnapshot.Text = $"最終スナップショット: {snap.StartedAtLocal:yyyy/MM/dd HH:mm:ss} ({snap.FileCount} ファイル / {FormatBytes(snap.LogicalBytes)} / {share})";
+                }
+                else
+                {
+                    lblLastSnapshot.Text = "最終スナップショット: 未取得";
+                }
+
                 lblDestPath.Text = $"保存先: {_dbManager.BackupService.GetEffectiveDestinationDirectory()}";
 
                 // 履歴: 走査結果は実在ファイルのみなので File.Exists 追加フィルタ不要。新しい順 100 件。

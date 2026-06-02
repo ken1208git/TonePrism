@@ -22,11 +22,19 @@ namespace TonePrism.Manager.Services
 
         private readonly DatabaseConnection _conn;
         private readonly SettingsRepository _settingsRepo;
+        // (#250 PR1) games/ + guide/ のアセットスナップショット。循環依存回避のため後付け注入 (AttachSnapshotService)。
+        private AssetSnapshotService _assetSnapshotService;
 
         public BackupService(DatabaseConnection conn, SettingsRepository settingsRepo)
         {
             _conn = conn;
             _settingsRepo = settingsRepo;
+        }
+
+        /// <summary>(#250) DatabaseManager から AssetSnapshotService を後付け注入する (BackupService 生成後に作るため)。</summary>
+        public void AttachSnapshotService(AssetSnapshotService snapshotService)
+        {
+            _assetSnapshotService = snapshotService;
         }
 
         /// <summary>
@@ -302,6 +310,16 @@ namespace TonePrism.Manager.Services
                 // リテンションは成功時のみ適用
                 progress?.Report(new ProgressInfo(95, "古いバックアップを整理中...", ""));
                 ApplyRetention();
+
+                // (#250 PR1) DB バックアップ成功確定後に games/ + guide/ を同一 timestamp/triggerType で best-effort 取得。
+                // **失敗・キャンセルしても DB バックアップの成否・last_backup_at は一切壊さない** (last_backup_at 更新は
+                // 上の L299 で完了済、AssetSnapshotService は throw しない契約)。世代名 timestamp は .db ファイル名と対応する。
+                if (_assetSnapshotService != null)
+                {
+                    var snap = _assetSnapshotService.CreateSnapshot(timestamp, triggerType, progress, token);
+                    if (snap.IsFailed)
+                        Logger.Warn("[BackupService] アセットスナップショット取得失敗 (DB バックアップは成功): " + snap.Message);
+                }
 
                 progress?.Report(new ProgressInfo(100, "バックアップ完了", destinationPath));
                 return BackupResult.Success(destinationPath, fileSize);

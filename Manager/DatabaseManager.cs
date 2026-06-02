@@ -24,6 +24,7 @@ namespace TonePrism.Manager
         private readonly SettingsRepository _settingsRepo;
         private readonly BackupService _backupService;
         private readonly BackupCatalogService _backupCatalogService;
+        private readonly AssetSnapshotService _assetSnapshotService;
         private readonly RestoreService _restoreService;
         private readonly ManagerSessionRepository _sessionRepo;
 
@@ -47,6 +48,10 @@ namespace TonePrism.Manager
             _backupService = new BackupService(_conn, _settingsRepo);
             // (backup_log 廃止 / DB v19) 履歴は backups/ フォルダ走査由来。BackupService からフォルダパスを取得する。
             _backupCatalogService = new BackupCatalogService(_backupService);
+            // (#250 PR1) games/ + guide/ のアセットスナップショット。BackupService の保存先計算を流用するため後付け注入
+            // (循環依存回避)。BackupService は DB バックアップ成功直後に best-effort で CreateSnapshot を呼ぶ。
+            _assetSnapshotService = new AssetSnapshotService(_conn, _settingsRepo, _backupService);
+            _backupService.AttachSnapshotService(_assetSnapshotService);
             // (H5) advisory restore-lock 取得/解放のため SettingsRepository を注入。
             _restoreService = new RestoreService(_conn, _settingsRepo);
             _sessionRepo = new ManagerSessionRepository(_conn);
@@ -56,6 +61,8 @@ namespace TonePrism.Manager
         public BackupService BackupService { get { return _backupService; } }
         /// <summary>(DB v19) バックアップ履歴を backups/ フォルダ走査から導出するカタログサービス。</summary>
         public BackupCatalogService BackupCatalogService { get { return _backupCatalogService; } }
+        /// <summary>(#250) games/ + guide/ のアセットスナップショット (ハードリンク世代バックアップ)。</summary>
+        public AssetSnapshotService AssetSnapshotService { get { return _assetSnapshotService; } }
         public RestoreService RestoreService { get { return _restoreService; } }
         public SettingsRepository SettingsRepository { get { return _settingsRepo; } }
         /// <summary>(#179) Manager session tracking 用 repository。</summary>

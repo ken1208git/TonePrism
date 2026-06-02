@@ -30,6 +30,10 @@ namespace TonePrism.Manager.Controls
             this.lblBackupRetention = new System.Windows.Forms.Label();
             this.numBackupRetention = new System.Windows.Forms.NumericUpDown();
             this.lblBackupRetentionUnit = new System.Windows.Forms.Label();
+            this.chkSnapshotEnabled = new System.Windows.Forms.CheckBox();
+            this.lblSnapshotRetention = new System.Windows.Forms.Label();
+            this.numSnapshotRetention = new System.Windows.Forms.NumericUpDown();
+            this.lblSnapshotRetentionUnit = new System.Windows.Forms.Label();
             this.lblBackupUnsaved = new System.Windows.Forms.Label();
             this.btnBackupRevert = new System.Windows.Forms.Button();
             this.btnBackupApply = new System.Windows.Forms.Button();
@@ -56,6 +60,7 @@ namespace TonePrism.Manager.Controls
             ((System.ComponentModel.ISupportInitialize)(this.numLogRetention)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numBackupInterval)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numBackupRetention)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numSnapshotRetention)).BeginInit();
             this.SuspendLayout();
             //
             // grpLog (バックアップの下、ログ保存先 + 保存日数)
@@ -201,6 +206,10 @@ namespace TonePrism.Manager.Controls
             this.grpBackup.Controls.Add(this.lblBackupRetention);
             this.grpBackup.Controls.Add(this.numBackupRetention);
             this.grpBackup.Controls.Add(this.lblBackupRetentionUnit);
+            this.grpBackup.Controls.Add(this.chkSnapshotEnabled);
+            this.grpBackup.Controls.Add(this.lblSnapshotRetention);
+            this.grpBackup.Controls.Add(this.numSnapshotRetention);
+            this.grpBackup.Controls.Add(this.lblSnapshotRetentionUnit);
             this.grpBackup.Controls.Add(this.lblBackupUnsaved);
             this.grpBackup.Controls.Add(this.btnBackupRevert);
             this.grpBackup.Controls.Add(this.btnBackupApply);
@@ -313,6 +322,44 @@ namespace TonePrism.Manager.Controls
             this.lblBackupRetentionUnit.TabIndex = 11;
             this.lblBackupRetentionUnit.Text = "個 (これを超えた古いバックアップは自動削除されます)";
             //
+            // chkSnapshotEnabled (#250 アセットスナップショット有効/無効、右カラム)
+            //
+            this.chkSnapshotEnabled.AutoSize = true;
+            this.chkSnapshotEnabled.Checked = true;
+            this.chkSnapshotEnabled.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.chkSnapshotEnabled.Location = new System.Drawing.Point(430, 110);
+            this.chkSnapshotEnabled.Name = "chkSnapshotEnabled";
+            this.chkSnapshotEnabled.TabIndex = 15;
+            this.chkSnapshotEnabled.Text = "アセット (games/guide) も世代保存する";
+            this.chkSnapshotEnabled.UseVisualStyleBackColor = true;
+            //
+            // lblSnapshotRetention (#250)
+            //
+            this.lblSnapshotRetention.AutoSize = true;
+            this.lblSnapshotRetention.Location = new System.Drawing.Point(430, 195);
+            this.lblSnapshotRetention.Name = "lblSnapshotRetention";
+            this.lblSnapshotRetention.Size = new System.Drawing.Size(120, 15);
+            this.lblSnapshotRetention.TabIndex = 16;
+            this.lblSnapshotRetention.Text = "アセット保持世代数:";
+            //
+            // numSnapshotRetention (#250)
+            //
+            this.numSnapshotRetention.Location = new System.Drawing.Point(430, 215);
+            this.numSnapshotRetention.Maximum = new decimal(new int[] { 999, 0, 0, 0 });
+            this.numSnapshotRetention.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
+            this.numSnapshotRetention.Name = "numSnapshotRetention";
+            this.numSnapshotRetention.Size = new System.Drawing.Size(80, 23);
+            this.numSnapshotRetention.TabIndex = 17;
+            this.numSnapshotRetention.Value = new decimal(new int[] { 30, 0, 0, 0 });
+            //
+            // lblSnapshotRetentionUnit (#250)
+            //
+            this.lblSnapshotRetentionUnit.AutoSize = true;
+            this.lblSnapshotRetentionUnit.Location = new System.Drawing.Point(518, 218);
+            this.lblSnapshotRetentionUnit.Name = "lblSnapshotRetentionUnit";
+            this.lblSnapshotRetentionUnit.Size = new System.Drawing.Size(180, 15);
+            this.lblSnapshotRetentionUnit.Text = "個 (auto のみ。manual は残ります)";
+            //
             // lblBackupUnsaved (未保存マーカー、初期 hidden)
             //
             this.lblBackupUnsaved.AutoSize = true;
@@ -415,6 +462,7 @@ namespace TonePrism.Manager.Controls
             ((System.ComponentModel.ISupportInitialize)(this.numLogRetention)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numBackupInterval)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numBackupRetention)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numSnapshotRetention)).EndInit();
             this.ResumeLayout(false);
         }
 
@@ -433,6 +481,10 @@ namespace TonePrism.Manager.Controls
         private System.Windows.Forms.Label lblBackupRetention;
         private System.Windows.Forms.NumericUpDown numBackupRetention;
         private System.Windows.Forms.Label lblBackupRetentionUnit;
+        private System.Windows.Forms.CheckBox chkSnapshotEnabled;
+        private System.Windows.Forms.Label lblSnapshotRetention;
+        private System.Windows.Forms.NumericUpDown numSnapshotRetention;
+        private System.Windows.Forms.Label lblSnapshotRetentionUnit;
         private System.Windows.Forms.Label lblBackupUnsaved;
         private System.Windows.Forms.Button btnBackupRevert;
         private System.Windows.Forms.Button btnBackupApply;
