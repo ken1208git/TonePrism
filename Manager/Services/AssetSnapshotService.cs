@@ -61,7 +61,20 @@ namespace TonePrism.Manager.Services
 
                 string baseInstallDir = Path.GetDirectoryName(_conn.DbPath);
                 if (!SubFolders.Any(s => Directory.Exists(Path.Combine(baseInstallDir, s))))
-                    return SnapshotResult.Success(null, 0, 0, 0); // games//guide/ が無い install
+                {
+                    // (レビュー#1) games/ と guide/ の両方が見えない。「まだ登録が無い install」と「SMB 一時不達等で
+                    // 一時的に見えない異常」を区別する: 以前に控え (manifest) があるなら後者の可能性が高い → silent に
+                    // せず Warn + Skipped で異常を通知 (本番 install は常に games/ を持つため、このブランチ自体が異常)。
+                    bool hadHistory = false;
+                    try { hadHistory = EnumerateManifests().Any(); } catch { }
+                    if (hadHistory)
+                    {
+                        Logger.Warn("[AssetSnapshot] games/ も guide/ も見つかりません (以前は控えがあるため SMB 不達等の異常の可能性)。今回の控えはスキップします。");
+                        return SnapshotResult.Skipped("アセットフォルダが見つからない (異常の可能性)");
+                    }
+                    Logger.Info("[AssetSnapshot] games/ も guide/ も無いため控えなし (まだ登録の無い install と判断)。");
+                    return SnapshotResult.Success(null, 0, 0, 0);
+                }
 
                 string poolRoot = GetPoolRootDirectory();
                 Directory.CreateDirectory(poolRoot);
@@ -71,6 +84,8 @@ namespace TonePrism.Manager.Services
                 var cache = LoadHashCache();                 // 直近 manifest から relpath→(size,mtime,hash)
                 var entries = new List<string>();
                 var stats = new Stats();
+                // (レビュー#2) 進捗分母は概算。CountFiles は ExcludedFolders (Library 等) を除外して数えるが WalkTree は
+                // 丸ごと走査する (除外なし)。games/ には通常それらは無いので実害ほぼ無く、超過分は下の pct で 100 に clamp。
                 int total = SubFolders.Sum(s => SafeCountFiles(Path.Combine(baseInstallDir, s)));
 
                 foreach (var sub in SubFolders)
@@ -91,7 +106,7 @@ namespace TonePrism.Manager.Services
                 File.Move(tmpManifest, manifestPath);
                 tmpManifest = null;
 
-                ApplyRetentionAndGc(triggerType);
+                ApplyRetentionAndGc(triggerType, stats.NewBytes);
 
                 Logger.Info(string.Format("[AssetSnapshot] 控え完了: {0} ({1} files / 論理 {2:F2}GB / 新規コピー {3:F2}MB)",
                     Path.GetFileName(manifestPath), stats.FileCount, stats.Bytes / 1073741824.0, stats.NewBytes / 1048576.0));
@@ -153,20 +168,6 @@ namespace TonePrism.Manager.Services
             catch (Exception ex) { Logger.Warn("[AssetSnapshot] poolsize キャッシュ書込失敗 (無害): " + ex.Message); }
         }
 
-        /// <summary>pool 内の blob 実体合計 (メタ `.poolsize` と進行中 `.tmp_` は除外、レビュー L4)。バックグラウンドスレッド用。</summary>
-        private long EnumeratePoolBytes()
-        {
-            string pool = GetPoolRootDirectory();
-            if (!Directory.Exists(pool)) return 0;
-            long sum = 0;
-            foreach (var f in Directory.EnumerateFiles(pool, "*", SearchOption.AllDirectories))
-            {
-                string name = Path.GetFileName(f);
-                if (name == PoolSizeFileName || name.Contains(".tmp_")) continue;
-                sum += SafeLen(f);
-            }
-            return sum;
-        }
 
         // ---- 内部 ----
 
@@ -382,7 +383,7 @@ namespace TonePrism.Manager.Services
         /// 控え全体が Failed」と誤報告されるのを防ぐ。(レビュー M3) **GC は auto に限定**: auto は lease で多ホスト排他
         /// されるため並行 GC が起きない。manual manifest は retention 対象外で未参照 blob を生まないので GC 不要、
         /// サイズキャッシュだけ更新する。</summary>
-        private void ApplyRetentionAndGc(string triggerType)
+        private void ApplyRetentionAndGc(string triggerType, long newBytesCopied)
         {
             try
             {
@@ -407,7 +408,10 @@ namespace TonePrism.Manager.Services
                 }
                 else
                 {
-                    WritePoolSizeCache(EnumeratePoolBytes()); // manual: GC せずサイズキャッシュのみ更新
+                    // manual: GC しない (未参照 blob を生まない)。プールは削除されず単調増加するだけなので、
+                    // (レビュー#4) プール全列挙でなく「既存キャッシュ + 今回の新規コピー分」の差分でサイズ更新する
+                    // (SMB で毎回数千 blob を列挙するコストを回避)。初回 (.poolsize 不在) は 0 + 新規 = 実体合計。
+                    WritePoolSizeCache(GetPoolPhysicalBytes() + newBytesCopied);
                 }
             }
             catch (Exception ex) { Logger.Warn("[AssetSnapshot] retention/GC 失敗 (無害、控え自体は成功): " + ex.Message); }

@@ -161,11 +161,24 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
-        public void EmptyGamesAndGuide_Succeeds()
+        public void EmptyGamesAndGuide_NoHistory_Succeeds()
         {
+            // 履歴が無い (まだ登録の無い install) → 静かに Success(0)
             var r = Snap("auto", "20260101_000001");
             Assert.True(r.IsSuccess);
             Assert.Equal(0, r.FileCount);
+        }
+
+        [Fact]
+        public void MissingSources_AfterHistory_ReturnsSkipped()
+        {
+            // (レビュー#1) 以前は控えがあったのに games/ も guide/ も見えない = SMB 不達等の異常。
+            // silent Success でなく Skipped で通知する。
+            WriteGameFile("g1/a.txt", "x");
+            Snap("auto", "20260101_000001");      // manifest 作成
+            Directory.Delete(_games, true);        // games/ 消失 (guide は元々無い)
+            var r = Snap("auto", "20260101_000002");
+            Assert.True(r.IsSkipped);
         }
 
         [Fact]

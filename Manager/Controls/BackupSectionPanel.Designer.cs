@@ -80,7 +80,7 @@ namespace TonePrism.Manager.Controls
             this.lblLastSnapshot.Name = "lblLastSnapshot";
             this.lblLastSnapshot.Size = new System.Drawing.Size(150, 15);
             this.lblLastSnapshot.TabIndex = 3;
-            this.lblLastSnapshot.Text = "最終スナップショット: 未取得";
+            this.lblLastSnapshot.Text = "最終アセット控え: 未取得";
             //
             // btnRefresh
             //
