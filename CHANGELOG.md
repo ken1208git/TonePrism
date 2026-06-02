@@ -1323,8 +1323,13 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 - **スライドショー / タイルグリッドで「ランキング系（人気ランキング・最近プレイ・ランダム）」ソースを許可**（Manager v0.21.0 の #212 改と対。どのソースを許可するかは Manager 側のゲートで決まり、Launcher の描画はソース非依存）。背景画像・タイトルはゲーム自身のものを使うため、ランキング系でも見栄えが保てる。
 - **スライドショーは `max_display_count>0` のときスライド枚数を上限する**（`build_slideshow_section`）。手動は `0` 保存＝全件（従来どおり）、ランキング系は max が有効なので「特集 N 枚（TOP N）」が成立する。生成枚数を container の `slide_count` meta に持たせ、**`store_browse.gd` `_switch_slide` の wrap-around を `section.games.size()` から `slide_count` に変更**（枚数を絞った際に存在しない `Banner_*` へ飛んで空スライドになるのを防止）。バナー画像の遅延ロードは `Banner_*` を null まで走査する `while` ループなので追従済（無改修）。
+#### Changed (フィルター系ソースの並びを「なるべく最新の制作年を頭に」)
+
+- **フィルター系ソース（`genre:` / `players_min:` / `players_max:` / `difficulty:` / `play_time:` / `online` / `controller`）の `ORDER BY` を `display_order ASC, title ASC` → `release_year DESC, title ASC` に変更**（ユーザー要望「名前順に加えてなるべく最新が頭に」）。`games` には作成日時列が無く `release_year`（制作年）が唯一の新しさ指標のため、制作年の新しい順を主キー・同年内は名前順（`title ASC`）とする。`release_year` が NULL のゲームは `DESC` で末尾（＝制作年不明は最後）。
+- **単年フィルター（`recent`＝今年固定 / `release_year:YYYY`＝制作年指定）は対象外**（その年だけを引くので「最新が頭」が無意味）。`manual`（割当順）/ `popular`・`recently_played`（ランキング）/ `random`（シャッフル）も従来の並びを維持。
+- 検証: 同梱 sqlite3 で実 DB（`toneprism.db`）に対し新旧 `ORDER BY` を実行し、新方式が **2025→2024→2023 の年降順＋各年内 title 昇順**で並ぶことを確認（read-only）。
 - 検証: 同梱 Godot 4.6.2 ヘッドレスで `store_section_repository.gd` / `store_banner_builder.gd` / `store_browse.gd` のロード（パースエラーなし）を確認。**※実 DB でのランダム/制作年取得・タイルグリッド/スライドショーの実描画は Manager 実機 UI 確認とあわせて別途必要**（特にタイルグリッド空表示修正・スライド wrap は実機目視）。
-- bump 判断: ユーザー向けソース種別の追加（#291）＋表示回帰修正（#211 起因）＋ランダム許可（#212）。.pck が変わるため patch (v0.10.2 → v0.10.3)。
+- bump 判断: ユーザー向けソース種別の追加（#291）＋表示回帰修正（#211 起因）＋ランキング系許可（#212）＋フィルター並び順変更。.pck が変わるため patch (v0.10.2 → v0.10.3)。
 
 ### [Launcher v0.10.2] - 2026-06-01
 

@@ -61,6 +61,12 @@ func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 	var query: String = ""
 	var bindings: Array = []
 
+	# フィルター系ソース (genre/players_*/difficulty/play_time/online/controller) の並びは
+	# `release_year DESC, title ASC` = 「なるべく最新の制作年を頭に + 同年内は名前順」(ユーザー要望)。
+	# games には作成日時列が無く release_year が唯一の新しさ指標 (年単位なので "なるべく")。release_year=NULL は
+	# DESC で末尾に来る (= 不明年は最後)。manual=割当順 / popular・recently_played=ランキング / random=シャッフル /
+	# 単年フィルター (recent=今年・release_year:YYYY) は「最新が頭」が無意味なので display_order 順を維持。
+
 	if source == "manual":
 		query = """
 			SELECT g.*, ssg.display_text FROM games g
@@ -101,7 +107,7 @@ func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 		query = """
 			SELECT * FROM games
 			WHERE is_visible = 1 AND genre LIKE ?
-			ORDER BY display_order ASC, title ASC
+			ORDER BY release_year DESC, title ASC
 		"""
 		bindings = ["%" + genre_name + "%"]
 	elif source.begins_with("players_min:"):
@@ -109,7 +115,7 @@ func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 		query = """
 			SELECT * FROM games
 			WHERE is_visible = 1 AND min_players <= ? AND max_players >= ?
-			ORDER BY display_order ASC, title ASC
+			ORDER BY release_year DESC, title ASC
 		"""
 		bindings = [n, n]
 	elif source.begins_with("players_max:"):
@@ -117,7 +123,7 @@ func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 		query = """
 			SELECT * FROM games
 			WHERE is_visible = 1 AND max_players <= ?
-			ORDER BY display_order ASC, title ASC
+			ORDER BY release_year DESC, title ASC
 		"""
 		bindings = [n]
 	elif source.begins_with("difficulty:"):
@@ -125,7 +131,7 @@ func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 		query = """
 			SELECT * FROM games
 			WHERE is_visible = 1 AND difficulty = ?
-			ORDER BY display_order ASC, title ASC
+			ORDER BY release_year DESC, title ASC
 		"""
 		bindings = [n]
 	elif source.begins_with("play_time:"):
@@ -133,14 +139,14 @@ func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 		query = """
 			SELECT * FROM games
 			WHERE is_visible = 1 AND play_time = ?
-			ORDER BY display_order ASC, title ASC
+			ORDER BY release_year DESC, title ASC
 		"""
 		bindings = [n]
 	elif source == "online":
 		query = """
 			SELECT * FROM games
 			WHERE is_visible = 1 AND supported_connection > 0
-			ORDER BY display_order ASC, title ASC
+			ORDER BY release_year DESC, title ASC
 		"""
 	elif source == "random":
 		query = """
@@ -152,7 +158,7 @@ func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 		query = """
 			SELECT * FROM games
 			WHERE is_visible = 1 AND controller_support = 1
-			ORDER BY display_order ASC, title ASC
+			ORDER BY release_year DESC, title ASC
 		"""
 	elif source.begins_with("release_year:"):
 		# (#291) 制作年指定: 指定した release_year のゲームを全件 (display_order 順)。新作(recent)が「今年固定」なのに対し
