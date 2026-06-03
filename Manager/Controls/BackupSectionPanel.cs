@@ -142,15 +142,14 @@ namespace TonePrism.Manager.Controls
                 // (#250 / レビュー M2・L2) このバックアップに同梱したアセット控えの結果を **result から直接** 使う
                 // (GetLatestSnapshot + 文字列マッチは多ホスト同秒で別ホストの世代を拾う恐れがあるため廃止)。
                 var snap = result.AssetSnapshot;
-                if (snap != null && snap.IsSuccess && snap.FileCount > 0)
+                // (UX) クリーン成功時に「ゲーム本体もバックアップしました（N ファイル / 実使用 X）」を明示するのは冗長
+                // （「バックアップ＝全部まとめて控える」が当たり前に取られる）。「便りがないのは良い便り」で、**問題があるときだけ**
+                // 出す。部分取得・失敗・異常は黙らず併記して「DB 成功 ≠ ゲーム本体の控えあり」を隠さない（レビュー round2-7 の
+                // 不変条件は維持）。件数・実使用サイズはバックアップタブ（lblLastSnapshot）で常時確認できる。
+                if (snap != null && snap.IsSuccess && snap.IsPartial)
                 {
-                    // 控えは中身を共有プールに集約するので「控え全体の実使用量」を出す (見かけより小さい正直な値)。
-                    long poolBytes = _dbManager.AssetSnapshotService.GetPoolPhysicalBytes();
-                    string poolDisp = poolBytes > 0 ? FormatBytes(poolBytes) : "計測中"; // (round8 A/L1) 0 B 矛盾表示を回避
-                    msg += $"\n\nゲーム本体 (games/guide) もバックアップしました:\n{snap.FileCount} ファイル ／ 全体の実使用: {poolDisp}";
                     // (round8 C1) 深部フォルダの列挙失敗で一部 skip した場合は「部分的な控え」を明示 (完全控えと誤認させない)。
-                    if (snap.IsPartial)
-                        msg += $"\n\n⚠ ただし {snap.SkippedDirCount} 個のフォルダを列挙できずスキップしました（部分的なバックアップの可能性。SMB 一過性 I/O / 権限等）。";
+                    msg += $"\n\n⚠ ゲーム本体 (games/guide) のバックアップで {snap.SkippedDirCount} 個のフォルダを列挙できずスキップしました（部分的なバックアップの可能性。SMB 一過性 I/O / 権限等）。";
                 }
                 else if (snap != null && (snap.IsFailed || snap.IsAnomaly))
                 {
