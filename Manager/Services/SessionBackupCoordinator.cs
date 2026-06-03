@@ -36,10 +36,19 @@ namespace TonePrism.Manager.Services
         private string _sessionAutoDbPath;
         private string _sessionAutoManifestPath;
 
+        // (round5 #1) このセッションで「ゲーム本体 (games/guide) の控え」が未完了か (直近のアセット操作が失敗/キャンセル)。
+        // true の間は後続の DB-only 成功でも緑「✓」を出さず警告を残す (round2 #3 の sticky 警告が「アセット失敗→以後
+        // DB-only 成功」で上書き消失する穴を塞ぐ)。次のアセット操作が成功すると false に戻る (= 回復)。
+        private bool _sessionAssetCaptureFailed;
+
         public SessionBackupCoordinator(BackupService backupService)
         {
             _backupService = backupService;
         }
+
+        /// <summary>(round5 #1) このセッションでゲーム本体の控えが未完了 (直近のアセット操作が失敗/キャンセル) か。
+        /// true の間は DB-only 成功でも緑✓を出さず警告を残す。次のアセット操作成功で false に戻る。単体テスト用に公開。</summary>
+        public bool SessionAssetCaptureFailed { get { lock (_gate) { return _sessionAssetCaptureFailed; } } }
 
         /// <summary>設定の自動バックアップ有効/無効。OFF なら操作単位バックアップを skip（手動は別枠で常に可）。</summary>
         public bool IsEnabled()
@@ -70,11 +79,13 @@ namespace TonePrism.Manager.Services
                 }
                 catch (OperationCanceledException)
                 {
-                    // キャンセルは前回世代を温存（削除しない）。
+                    // キャンセルは前回世代を温存（削除しない）。アセット操作のキャンセル = ゲーム本体は未控え (round5 #1)。
+                    if (includeAssets) _sessionAssetCaptureFailed = true;
                     return BackupResult.Skipped("キャンセル");
                 }
                 catch (Exception ex)
                 {
+                    if (includeAssets) _sessionAssetCaptureFailed = true;
                     Logger.Warn("[SessionBackup] バックアップで予期せぬ例外 (操作自体は成功): " + ex.Message);
                     return BackupResult.Failed(ex.Message);
                 }
@@ -95,6 +106,12 @@ namespace TonePrism.Manager.Services
                     if (newManifestWritten)
                         _sessionAutoManifestPath = result.AssetSnapshot.ManifestPath;
                 }
+                // (round5 #1) このセッションのゲーム本体控え健全性を更新。アセット操作 (includeAssets) で控えが成功して
+                // いなければ「未控え」を記録し、後続の DB-only 成功が緑✓で警告を埋もれさせないようにする。DB-only
+                // (includeAssets=false) は games/ を変えないので、直前のアセット世代の健全性をそのまま引き継ぐ (flag 不変)。
+                if (includeAssets)
+                    _sessionAssetCaptureFailed = !(result != null && result.IsSuccess
+                        && result.AssetSnapshot != null && result.AssetSnapshot.IsSuccess);
                 return result;
             }
         }
@@ -154,13 +171,23 @@ namespace TonePrism.Manager.Services
         {
             var line = DescribeResult(result, assetsRequested);
             if (line == null) return; // Skipped (DB バックアップが無効 / restore-lock) は何もしない
-            if (!line.Value.Ok)
+            string message = line.Value.Message;
+            bool ok = line.Value.Ok;
+            // (round5 #1) このセッションでゲーム本体の控えが未完了 (失敗/キャンセル) のままなら、後続の DB-only 成功でも
+            // 緑「✓」を出さず警告を残す。round2 #3 の sticky 警告が「アセット失敗→以後 DB-only 成功」で緑に上書き消失する
+            // 穴を塞ぐ。これにより未控えの間は毎操作で警告が再表示され、運営が見落とせない。回復は次のアセット操作成功時。
+            if (ok && SessionAssetCaptureFailed)
             {
-                Logger.Warn("[SessionBackup] " + operationLabel + ": " + line.Value.Message
+                ok = false;
+                message = "⚠ ゲーム本体の控えが未完了です（DB は保存済み。ゲーム操作をやり直すか保存先を確認してください）";
+            }
+            if (!ok)
+            {
+                Logger.Warn("[SessionBackup] " + operationLabel + ": " + message
                     + (result.IsFailed ? " / " + result.Message : "")
                     + (result.AssetSnapshot != null && !result.AssetSnapshot.IsSuccess ? " / ゲーム本体: " + result.AssetSnapshot.Message : ""));
             }
-            try { StatusReporter?.Invoke(line.Value.Message, line.Value.Ok); } catch { }
+            try { StatusReporter?.Invoke(message, ok); } catch { }
         }
 
         /// <summary>

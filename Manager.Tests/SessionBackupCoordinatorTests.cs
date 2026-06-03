@@ -172,6 +172,34 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
+        public void AssetFailure_ThenDbOnly_KeepsSessionUnhealthy_RecoversOnAssetSuccess()
+        {
+            // (round5 #1) アセット操作が失敗すると sticky 警告が出るが、続く DB-only 成功が緑✓でそれを上書き消去して
+            // しまう穴を塞ぐ。coordinator がセッションの「ゲーム本体控え未完了」状態を保持し、回復まで緑✓を出さない。
+            string dest = _backup.GetEffectiveDestinationDirectory();
+            Directory.CreateDirectory(dest);
+            string poolBlocker = Path.Combine(dest, "asset_pool");
+            File.WriteAllText(poolBlocker, "blocker"); // CreateSnapshot を失敗させる (DB バックアップ自体は成功)
+            WriteGame("g1/a.txt", "x");
+
+            var r1 = Run(true);
+            Assert.True(r1.IsSuccess);                 // DB は成功
+            Assert.False(r1.AssetSnapshot.IsSuccess);  // ゲーム本体の控えは失敗
+            Assert.True(_coord.SessionAssetCaptureFailed); // セッションは「未控え」
+
+            // DB-only 操作 (asset_pool ブロックは DB バックアップに無関係) は成功するが、ゲーム本体は依然未控え。
+            var r2 = Run(false);
+            Assert.True(r2.IsSuccess);
+            Assert.True(_coord.SessionAssetCaptureFailed); // DB-only では回復しない (= 後続も緑✓にしない根拠)
+
+            // ブロックを外してアセット操作が成功すると回復する。
+            File.Delete(poolBlocker);
+            var r3 = Run(true);
+            Assert.True(r3.AssetSnapshot != null && r3.AssetSnapshot.IsSuccess);
+            Assert.False(_coord.SessionAssetCaptureFailed); // 回復
+        }
+
+        [Fact]
         public void AssetFailureInSession_KeepsPreviousManifest()
         {
             // (round3 High) 同一セッションで ①アセット取得成功 → ②アセット取得失敗 のとき、②が①の控えを消さないこと。
