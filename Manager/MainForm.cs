@@ -29,6 +29,7 @@ namespace TonePrism.Manager
         private UpdateSectionPanel _updateSectionPanel;
         private IntroGuidePanel _introGuidePanel;
         private System.Windows.Forms.TabPage _introTab; // (#253) ハンドル生成後に追加するため field 保持
+        private BackupProgressStrip _backupProgressStrip; // (#299) 下部の非ブロッキングバックアップ進捗ストリップ
 
         public MainForm()
         {
@@ -133,6 +134,29 @@ namespace TonePrism.Manager
                         return; // 終了中断、timer は生かす
                     }
                 }
+            }
+            // (#299) 非ブロッキングバックアップ実行中に閉じる場合は「中止して閉じますか？」確認。閉じる = 進行中
+            // バックアップを中止する、と伝わる文言に。**変更データ自体は保存済み**で、中止しても live は無事
+            // (途中世代が消えるだけ、次回起動の最初の操作で取り直される)。既定ボタンは「いいえ」(誤爆で中断しない)。
+            try
+            {
+                var coord = dbManager?.SessionBackupCoordinator;
+                if (coord != null && coord.IsBackupRunning)
+                {
+                    var dr = MessageBox.Show(this,
+                        "バックアップを中止して閉じますか？\n\n変更データ自体は保存済みです（バックアップだけが中断されます。次回起動時の最初の操作で取り直されます）。",
+                        "バックアップ中", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+                    if (dr != DialogResult.Yes)
+                    {
+                        e.Cancel = true;
+                        return; // 終了中断、timer は生かす
+                    }
+                    coord.CancelCurrentBackup();
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[MainForm] FormClosing バックアップ中確認で例外 (継続して閉じる): " + ex.Message);
             }
             try
             {
@@ -592,6 +616,59 @@ namespace TonePrism.Manager
                     if (InvokeRequired) BeginInvoke(apply); else apply();
                 }
                 catch { /* status 表示は best-effort、失敗しても無害 */ }
+            };
+
+            // (#299) 非ブロッキングバックアップの進捗ストリップを下部に配置し、coordinator のコールバックを UI スレッドへ
+            // marshal する。worker はバックグラウンドスレッドなので ProgressReporter / BackupRunningChanged は別スレッドから
+            // 呼ばれる。**z-order / 見え方は実機目視で要確認**: 素直に Add すると最下端 (status strip の下) に来る。
+            // status strip より上に出したい等あれば実機の見え方を見て z-order を調整する (SendToBack は Fill タブ裏に
+            // 回り込んで不可視になりうるので使わない)。
+            _backupProgressStrip = new BackupProgressStrip();
+            this.Controls.Add(_backupProgressStrip);
+            _backupProgressStrip.CancelRequested += (s, e) =>
+            {
+                try { dbManager?.SessionBackupCoordinator?.CancelCurrentBackup(); } catch { }
+            };
+            _backupProgressStrip.RecaptureRequested += (s, e) =>
+            {
+                // 未バックアップからの 1 クリック復旧 = アセット込みで取り直す (操作単位の enqueue に乗る)。
+                try { dbManager?.SessionBackupCoordinator?.RunAfterOperation(this, assetsChanged: true, "再バックアップ"); } catch { }
+            };
+
+            var backupCoord = dbManager.SessionBackupCoordinator;
+            // 進捗バー + 現在ファイルの更新 (バックグラウンド worker → UI スレッドへ marshal)。
+            backupCoord.ProgressReporter = (p) =>
+            {
+                try
+                {
+                    if (IsDisposed || p == null) return;
+                    Action apply = () =>
+                    {
+                        _backupProgressStrip.ShowRunning();
+                        _backupProgressStrip.UpdateProgress(p.Percentage, string.IsNullOrEmpty(p.Detail) ? p.Message : p.Detail);
+                    };
+                    if (InvokeRequired) BeginInvoke(apply); else apply();
+                }
+                catch { /* 進捗表示は best-effort */ }
+            };
+            // 実行中フラグの変化: 開始→ストリップ表示 / 終了→未バックアップなら警告+「今すぐバックアップ」を残し、健全なら非表示。
+            backupCoord.BackupRunningChanged = (running) =>
+            {
+                try
+                {
+                    if (IsDisposed) return;
+                    Action apply = () =>
+                    {
+                        if (running)
+                            _backupProgressStrip.ShowRunning();
+                        else if (backupCoord.SessionAssetCaptureFailed)
+                            _backupProgressStrip.ShowUnhealthy("⚠ ゲームファイルが未バックアップです（DB は保存済み）");
+                        else
+                            _backupProgressStrip.HideStrip();
+                    };
+                    if (InvokeRequired) BeginInvoke(apply); else apply();
+                }
+                catch { /* best-effort */ }
             };
 
             // 起動時に zombie staging dir (前回 update 失敗の残骸) を cleanup (#108 Phase 4)
