@@ -135,12 +135,6 @@
     <Compile Include="DeveloperForm.Designer.cs">
       <DependentUpon>DeveloperForm.cs</DependentUpon>
     </Compile>
-    <Compile Include="StoreSectionListForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="StoreSectionListForm.Designer.cs">
-      <DependentUpon>StoreSectionListForm.cs</DependentUpon>
-    </Compile>
     <Compile Include="StoreSectionForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -308,9 +302,6 @@
       <AutoGen>True</AutoGen>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
-    <EmbeddedResource Include="StoreSectionListForm.resx">
-      <DependentUpon>StoreSectionListForm.cs</DependentUpon>
-    </EmbeddedResource>
     <EmbeddedResource Include="VersionUpForm.resx">
       <DependentUpon>VersionUpForm.cs</DependentUpon>
     </EmbeddedResource>
