@@ -120,7 +120,8 @@ namespace TonePrism.Manager.Services
         /// 不要、同時編集は SessionConflictHelper が警告)。<paramref name="includeAssets"/>=false の DB-only 操作では
         /// 重い games/guide 走査を skip する。enable gate は coordinator 側 (<see cref="IsAutoBackupEnabled"/>)。
         /// </summary>
-        public BackupResult RunSessionBackup(bool includeAssets, IProgress<ProgressInfo> progress, CancellationToken token)
+        public BackupResult RunSessionBackup(bool includeAssets, IProgress<ProgressInfo> progress, CancellationToken token,
+            string replacedDbPath = null, string replacedManifestPath = null)
         {
             // (round 5 H2) 他 PC が復元中 (File.Replace 中の DB を Online Backup で読むと partial/corrupt) なら延期。
             if (_settingsRepo != null)
@@ -132,10 +133,12 @@ namespace TonePrism.Manager.Services
                 if (!string.IsNullOrEmpty(lockOwner))
                 {
                     Logger.Info("[BackupService] (#295) 他 PC (" + lockOwner + ") が復元中のため自動バックアップを延期");
-                    return BackupResult.Skipped("他 PC (" + lockOwner + ") が復元中のため自動バックアップを延期しました");
+                    return BackupResult.Deferred("他 PC (" + lockOwner + ") が復元中のため今回の変更はまだバックアップされていません（復元完了後にもう一度操作すると控えられます）");
                 }
             }
-            return RunBackupCore(TriggerAuto, progress, token, includeAssets);
+            // (round6 High) replace-in-session でこの直後に coordinator が消す前世代の .db / .manifest を retention の母数
+            // から除外させる (= 直近 N セッション保持が複数操作で崩れない)。manual / 起動時経路は null (= 除外なし)。
+            return RunBackupCore(TriggerAuto, progress, token, includeAssets, replacedDbPath, replacedManifestPath);
         }
 
         /// <summary>
@@ -160,7 +163,8 @@ namespace TonePrism.Manager.Services
             return RunBackupCore(TriggerManual, progress, token);
         }
 
-        private BackupResult RunBackupCore(string triggerType, IProgress<ProgressInfo> progress, CancellationToken token, bool includeAssets = true)
+        private BackupResult RunBackupCore(string triggerType, IProgress<ProgressInfo> progress, CancellationToken token,
+            bool includeAssets = true, string replacedDbPath = null, string replacedManifestPath = null)
         {
             string host = SanitizeHostForFileName(Environment.MachineName);
 
@@ -275,9 +279,9 @@ namespace TonePrism.Manager.Services
                 // (#295) last_backup_at はトリガ gate ではなくなったが、履歴 / 「最終バックアップ」表示用に更新する。
                 _settingsRepo.SetInt64("last_backup_at", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
 
-                // リテンションは成功時のみ適用
+                // リテンションは成功時のみ適用 (round6 High: replace 対象の前世代を母数から除外)
                 progress?.Report(new ProgressInfo(10, "古いバックアップを整理中...", ""));
-                ApplyRetention();
+                ApplyRetention(replacedDbPath);
 
                 // (#250 PR1) DB バックアップ成功確定後に games/ + guide/ を同一 timestamp/triggerType で best-effort 取得。
                 // **失敗・キャンセルしても DB バックアップの成否・last_backup_at は一切壊さない** (last_backup_at 更新は
@@ -292,7 +296,7 @@ namespace TonePrism.Manager.Services
                     // 割り当ててファイル単位で動かす (lblDetail にファイル名が流れる)。DB コピー (0-10%) + retention (10%) は
                     // 一瞬。旧実装は 95-99% に圧縮しており「95% で固まって遅い」ように見える主因だった。内側 0-100 を 10-99 にマップ。
                     var assetProgress = progress != null ? new RangeProgress(progress, 10, 99, "ゲーム本体をバックアップ中...") : null;
-                    assetSnap = _assetSnapshotService.CreateSnapshot(timestamp, triggerType, assetProgress, token);
+                    assetSnap = _assetSnapshotService.CreateSnapshot(timestamp, triggerType, assetProgress, token, replacedManifestPath);
                     if (assetSnap.IsFailed)
                         Logger.Warn("[BackupService] アセット控え取得失敗 (DB バックアップは成功): " + assetSnap.Message);
                 }
@@ -357,7 +361,7 @@ namespace TonePrism.Manager.Services
         /// は不要になった。並行 Manager が同時 retention で同一ファイルを先に消しても、File.Delete の失敗は
         /// 握って continue する (次回も同じ対象なので冪等)。
         /// </summary>
-        private void ApplyRetention()
+        private void ApplyRetention(string excludePath = null)
         {
             int retentionCount = _settingsRepo.GetInt32("backup_retention_count", 30);
             if (retentionCount <= 0) return;
@@ -367,8 +371,15 @@ namespace TonePrism.Manager.Services
                 string autoDir = Path.Combine(GetEffectiveDestinationDirectory(), "auto");
                 if (!Directory.Exists(autoDir)) return;
 
-                var targets = new DirectoryInfo(autoDir)
-                    .GetFiles("auto_*.db")
+                var candidates = new DirectoryInfo(autoDir).GetFiles("auto_*.db").AsEnumerable();
+                // (round6 High) replace-in-session で coordinator がこの直後に消す前世代 (excludePath) を retention の母数から
+                // 除外する。含めると「これから消す 1 件」を数えて本来残すべき過去セッションを 1 件余計に削り、「直近 N
+                // セッション保持」が 1 セッション内の操作回数ぶん崩れる (K 操作で過去 K-1 世代が消失)。除外した世代は
+                // coordinator が確実に消すので二重カウントにはならない。
+                if (!string.IsNullOrEmpty(excludePath))
+                    candidates = candidates.Where(f => !string.Equals(f.FullName, excludePath, StringComparison.OrdinalIgnoreCase));
+
+                var targets = candidates
                     .OrderByDescending(f => f.Name, StringComparer.OrdinalIgnoreCase)
                     .Skip(retentionCount)
                     .ToList();
@@ -513,6 +524,10 @@ namespace TonePrism.Manager.Services
         /// 代入は同一アセンブリの RunBackupCore のみ (internal set)。</summary>
         public Models.SnapshotResult AssetSnapshot { get; internal set; }
 
+        /// <summary>(round6 Medium #3) restore-lock 等で「試行せず延期した」Skipped か。通常の Skipped (キャンセル /
+        /// 無効) は false。true のものはユーザーに「変更はまだ控えられていない」旨を知らせる (完全 silent にしない)。</summary>
+        public bool IsDeferred { get; private set; }
+
         public bool IsSuccess { get { return Kind == ResultKind.SuccessKind; } }
         public bool IsSkipped { get { return Kind == ResultKind.SkippedKind; } }
         public bool IsFailed { get { return Kind == ResultKind.FailedKind; } }
@@ -524,6 +539,11 @@ namespace TonePrism.Manager.Services
         public static BackupResult Skipped(string reason)
         {
             return new BackupResult { Kind = ResultKind.SkippedKind, Message = reason };
+        }
+        /// <summary>(round6 Medium #3) restore-lock 等で延期した Skipped。`IsDeferred=true` でユーザーに通知させる。</summary>
+        public static BackupResult Deferred(string reason)
+        {
+            return new BackupResult { Kind = ResultKind.SkippedKind, Message = reason, IsDeferred = true };
         }
         public static BackupResult Failed(string errorMessage)
         {

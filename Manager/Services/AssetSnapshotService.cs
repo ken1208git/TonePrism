@@ -69,7 +69,8 @@ namespace TonePrism.Manager.Services
 
         /// <summary>games/ + guide/ を 1 世代取得する。DB バックアップ成功直後に同一 timestamp/trigger で best-effort 呼び出し。</summary>
         public SnapshotResult CreateSnapshot(string timestamp, string triggerType,
-            IProgress<ProgressInfo> progress = null, CancellationToken token = default(CancellationToken))
+            IProgress<ProgressInfo> progress = null, CancellationToken token = default(CancellationToken),
+            string replacedManifestPath = null)
         {
             string tmpManifest = null;
             try
@@ -161,7 +162,7 @@ namespace TonePrism.Manager.Services
                 File.Move(FileOperationService.EnsureLongPath(tmpManifest), FileOperationService.EnsureLongPath(manifestPath));
                 tmpManifest = null;
 
-                ApplyRetentionAndGc(triggerType, stats.NewBytes);
+                ApplyRetentionAndGc(triggerType, stats.NewBytes, replacedManifestPath);
 
                 Logger.Info(string.Format("[AssetSnapshot] 控え完了: {0} ({1} files / 論理 {2:F2}GB / 新規コピー {3:F2}MB)",
                     Path.GetFileName(manifestPath), stats.FileCount, stats.Bytes / 1073741824.0, stats.NewBytes / 1048576.0));
@@ -450,7 +451,7 @@ namespace TonePrism.Manager.Services
         /// 控え全体が Failed」と誤報告されるのを防ぐ。(レビュー M3) **GC は auto に限定**: auto は lease で多ホスト排他
         /// されるため並行 GC が起きない。manual manifest は retention 対象外で未参照 blob を生まないので GC 不要、
         /// サイズキャッシュだけ更新する。</summary>
-        private void ApplyRetentionAndGc(string triggerType, long newBytesCopied)
+        private void ApplyRetentionAndGc(string triggerType, long newBytesCopied, string excludeManifestPath = null)
         {
             try
             {
@@ -463,7 +464,17 @@ namespace TonePrism.Manager.Services
                         string autoDir = Path.Combine(GetSnapshotRootDirectory(), "auto");
                         if (Directory.Exists(autoDir))
                         {
-                            var stale = Directory.GetFiles(ForceLong(autoDir), "*" + ManifestExt)
+                            // (round6 High) replace-in-session で coordinator がこの直後に消す前 manifest を母数から除外する
+                            // (DB 側 ApplyRetention と同型。含めると過去世代の manifest を 1 件余計に削り、その manifest だけが
+                            // 参照していた pool blob まで直後の GarbageCollectPool で道連れに消える)。除外世代は coordinator が消す。
+                            // 比較はファイル名で行う: Directory.GetFiles(ForceLong(...)) は `\\?\` prefix 付き path を返す一方、
+                            // excludeManifestPath (CreateSnapshot の戻り) は prefix 無しなので full path 比較だと一致しない。
+                            // manifest 名は auto dir 内で一意 (ResolveUniqueManifest 保証) なのでファイル名比較で過不足なし。
+                            string excludeManifestName = string.IsNullOrEmpty(excludeManifestPath) ? null : Path.GetFileName(excludeManifestPath);
+                            var manifests = Directory.GetFiles(ForceLong(autoDir), "*" + ManifestExt).AsEnumerable();
+                            if (excludeManifestName != null)
+                                manifests = manifests.Where(p => !string.Equals(Path.GetFileName(p), excludeManifestName, StringComparison.OrdinalIgnoreCase));
+                            var stale = manifests
                                 .OrderByDescending(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase).Skip(count).ToList();
                             foreach (var m in stale)
                             {

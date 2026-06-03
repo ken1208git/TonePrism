@@ -111,6 +111,68 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
+        public void Retention_MultiOpSession_KeepsPastSessions()
+        {
+            // (round6 High) 同一セッションで複数操作しても retention が「直近 N セッション」を保つこと。
+            // バグ: ApplyRetention が replace-in-session の前世代削除より前に走り、「これから coordinator が消す前世代」を
+            // 母数に数えて過去セッションを 1 件ずつ余計に削っていた (1 セッション K 操作で過去 K-1 世代が消失)。
+            // 文化祭準備のように 1 起動で多数のゲームを追加する大編集セッションで、約束の retention 世代数が静かに崩れる。
+            _settings.SetInt32("backup_retention_count", 2);
+            // 過去 2 セッション分の .db を「古い日時」で seed (retention は名前降順 = 日時順。内容は読まないのでダミー可)。
+            string autoDir = Path.Combine(Dest, "auto");
+            Directory.CreateDirectory(autoDir);
+            File.WriteAllText(Path.Combine(autoDir, "auto_20260101_000001_OLD.db"), "old1");
+            File.WriteAllText(Path.Combine(autoDir, "auto_20260102_000001_OLD.db"), "old2");
+
+            // 1 セッション (同一 coordinator) で DB-only 操作を 3 回。各回が今日の日時 .db を書き、前回の .db を replace する。
+            WriteGame("g1/a.txt", "x");
+            for (int i = 0; i < 3; i++) Assert.True(Run(false).IsSuccess);
+
+            // retention=2 → 「直近 2 セッション」= 過去最新 (old2) + 現在セッションの最終世代 = 2 件。バグ時は現在 1 件のみ。
+            Assert.Equal(2, AutoDbCount());
+        }
+
+        [Fact]
+        public void AssetRetention_MultiOpSession_KeepsPastManifests()
+        {
+            // (round6 High) アセット側 (manifest) も同型。複数アセット操作セッションで過去 manifest を過剰に消さないこと。
+            // 過剰削除された manifest が参照していた pool blob は GC mark-sweep で道連れに消えるため、復元素材の喪失が重い。
+            _settings.SetInt32("backup_retention_count", 2);
+            string manAutoDir = Path.Combine(Dest, "asset_snapshots", "auto");
+            Directory.CreateDirectory(manAutoDir);
+            File.WriteAllText(Path.Combine(manAutoDir, "20260101_000001_OLD.manifest"), "#meta\n");
+            File.WriteAllText(Path.Combine(manAutoDir, "20260102_000001_OLD.manifest"), "#meta\n");
+
+            WriteGame("g1/a.txt", "x");
+            for (int i = 0; i < 3; i++)
+            {
+                WriteGame("g1/b" + i + ".txt", "y" + i); // 各回 games/ を変えてアセット取得を走らせる
+                Assert.True(Run(true).IsSuccess);
+            }
+            Assert.Equal(2, AutoManifestCount()); // old2 + 現在セッションの最終 manifest = 2。バグ時は 1。
+        }
+
+        [Fact]
+        public void RestoreLockDeferral_SurfacedAsWarning_NotSilent()
+        {
+            // (round6 Medium #3) 他 PC が復元中で session backup が延期されたとき、完全 silent にせず「まだ控えていない」と
+            // 知らせる。旧 StartAutoBackupIfDue は indicator をクリアしていたが、新方式では Skipped が DescribeResult で
+            // null になり何も出ず、復元ウィンドウ中の編集が未控えのまま気づかれない穴があった。
+            long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            _settings.SetString(SettingsKeys.RestoreLockOwner, "OTHER_PC|" + nowMs);
+            WriteGame("g1/a.txt", "x");
+
+            var r = Run(true);
+            Assert.True(r.IsSkipped);   // 延期 (DB バックアップは走っていない)
+            Assert.True(r.IsDeferred);  // 通常の Skipped と区別
+            Assert.Equal(0, AutoDbCount());
+
+            var line = SessionBackupCoordinator.DescribeResult(r, assetsRequested: true);
+            Assert.NotNull(line);          // silent (null) ではない
+            Assert.False(line.Value.Ok);   // 警告
+        }
+
+        [Fact]
         public void Disabled_Skips()
         {
             _settings.SetString(SettingsKeys.BackupAutoEnabled, "false");

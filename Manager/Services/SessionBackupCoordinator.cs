@@ -75,7 +75,9 @@ namespace TonePrism.Manager.Services
                 BackupResult result;
                 try
                 {
-                    result = _backupService.RunSessionBackup(includeAssets, progress, token);
+                    // (round6 High) この直後に DeletePreviousGeneration で消す前世代 (prevDb / prevManifest) を渡し、
+                    // RunBackupCore 内の retention 母数から除外させる (= 直近 N セッション保持が複数操作で崩れない)。
+                    result = _backupService.RunSessionBackup(includeAssets, progress, token, prevDb, prevManifest);
                 }
                 catch (OperationCanceledException)
                 {
@@ -109,8 +111,10 @@ namespace TonePrism.Manager.Services
                 // (round5 #1) このセッションのゲーム本体控え健全性を更新。アセット操作 (includeAssets) で控えが成功して
                 // いなければ「未控え」を記録し、後続の DB-only 成功が緑✓で警告を埋もれさせないようにする。DB-only
                 // (includeAssets=false) は games/ を変えないので、直前のアセット世代の健全性をそのまま引き継ぐ (flag 不変)。
-                if (includeAssets)
-                    _sessionAssetCaptureFailed = !(result != null && result.IsSuccess
+                // (round6 Medium #3) restore-lock 等の延期 (IsSkipped=true) は「試行していない」ので flag を触らない
+                // (誤って「ゲーム本体未控え」警告を後続に出さない。延期自体は IsDeferred 経由で別途通知される)。
+                if (includeAssets && result != null && !result.IsSkipped)
+                    _sessionAssetCaptureFailed = !(result.IsSuccess
                         && result.AssetSnapshot != null && result.AssetSnapshot.IsSuccess);
                 return result;
             }
@@ -201,7 +205,10 @@ namespace TonePrism.Manager.Services
         {
             if (result == null) return null;
             if (result.IsFailed) return ("⚠ バックアップに失敗しました (変更自体は保存済み)", false);
-            if (!result.IsSuccess) return null; // DB バックアップ自体が Skipped
+            // (round6 Medium #3) restore-lock 等で延期した Skipped は完全 silent にせず警告で知らせる
+            // (「変更は保存したがまだ控えていない」= ユーザーが復元完了後に再操作する判断材料になる)。
+            if (result.IsDeferred) return ("⚠ " + result.Message, false);
+            if (!result.IsSuccess) return null; // 通常の Skipped (キャンセル / 無効) は何もしない
             var snap = result.AssetSnapshot;
             if (snap != null && (snap.IsFailed || snap.IsAnomaly))
                 return ("⚠ ゲーム本体のバックアップは取得できませんでした (DB は保存済み)", false);
