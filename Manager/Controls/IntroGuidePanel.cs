@@ -211,6 +211,8 @@ namespace TonePrism.Manager.Controls
                 // half-write が起きうるため、atomic な swap に委ねる (a は b の order、b は a の order を持つ)。
                 _dbManager.SwapIntroSlideOrder(a.SlideId, b.DisplayOrder, b.SlideId, a.DisplayOrder);
                 LoadSlides();
+                // (#295 round3 #2) 並び替えも display_order を書き換える DB 変更操作なので控える (DB のみ)。
+                _dbManager.SessionBackupCoordinator.RunAfterOperation(FindForm(), assetsChanged: false, "スライド並び替え");
                 // 移動後の行を選び直す。
                 var moved = _slides?.FirstOrDefault(s => s.SlideId == slide.SlideId);
                 if (moved != null)

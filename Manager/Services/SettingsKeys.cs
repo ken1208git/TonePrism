@@ -23,9 +23,9 @@ namespace TonePrism.Manager.Services
         // (#295) backup_auto_interval_hours / TryAcquireBackupLease は操作単位トリガ移行で撤去。
         // (#170 followup) 旧 BackupSettingsForm modal は廃止、設定タブ内 grpBackup section に inline 統合
         // (SettingsSectionPanel.LoadBackupSettings + grpBackup の per-control event handler 群:
-        //  TxtBackupDest_Leave / NumBackupInterval_ValueChanged / CmbBackupIntervalUnit_SelectedIndexChanged
-        //  / NumBackupRetention_ValueChanged / ChkBackupAutoEnabled_CheckedChanged)。
+        //  TxtBackupDest_Leave / NumBackupRetention_ValueChanged / ChkBackupAutoEnabled_CheckedChanged)。
         //  round 1 で「保存ボタン廃止 + per-control immediate save」に方針転換、btnBackupSave は実体なし。
+        //  (#295) 時間間隔 UI 撤去で NumBackupInterval_ValueChanged / CmbBackupIntervalUnit_SelectedIndexChanged も撤去。
 
         // ----- Phase 4 (#108) update flow -----
 

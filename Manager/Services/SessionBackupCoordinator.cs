@@ -81,12 +81,18 @@ namespace TonePrism.Manager.Services
 
                 if (result != null && result.IsSuccess)
                 {
-                    // 新しい世代を書けたので、このセッションの前回世代を消す (replace-in-session)。
-                    // 書いてから消す順なので「0 世代の瞬間」は無い。DB-only 操作 (includeAssets=false) は前回 `.db` だけ
-                    // 消し、前回 `.manifest` は温存する（既存アセット世代が新 `.db` と有効ペアになる、R3）。
-                    DeletePreviousGeneration(prevDb, includeAssets ? prevManifest : null);
+                    // 新しい世代を書けたので、このセッションの前回世代を消す (replace-in-session)。書いてから消す順なので
+                    // 「0 世代の瞬間」は無い。
+                    // (round3 High) `.manifest` の削除は「**新 manifest を実際に書けたか**」(= includeAssets かつアセット取得が
+                    // IsSuccess) で判断する。`result.IsSuccess` は DB の成否のみで、includeAssets=true でもアセット取得が
+                    // 失敗/キャンセルだと新 manifest は無い。それなのに前 manifest を消すと、このセッションは「DB はあるが
+                    // ゲーム本体の控えが 1 件も無い」状態になり、①で取れていた控えを②の一過性失敗が消してしまう
+                    // (round2 #1 が可視化で守ろうとした不変条件を実データ側で破る)。削除と _sessionAutoManifestPath 更新を
+                    // 同一述語に揃え、新スナップショット未成功なら前 manifest を温存する。DB-only (includeAssets=false) も同様に温存。
+                    bool newManifestWritten = includeAssets && result.AssetSnapshot != null && result.AssetSnapshot.IsSuccess;
+                    DeletePreviousGeneration(prevDb, newManifestWritten ? prevManifest : null);
                     _sessionAutoDbPath = result.FilePath;
-                    if (includeAssets && result.AssetSnapshot != null && result.AssetSnapshot.IsSuccess)
+                    if (newManifestWritten)
                         _sessionAutoManifestPath = result.AssetSnapshot.ManifestPath;
                 }
                 return result;

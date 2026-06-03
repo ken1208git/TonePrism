@@ -152,5 +152,22 @@ namespace TonePrism.Manager.Tests
             Assert.False(line.Value.Ok);            // 緑「✓」ではなく警告
             Assert.Contains("ゲーム本体", line.Value.Message);
         }
+
+        [Fact]
+        public void AssetFailureInSession_KeepsPreviousManifest()
+        {
+            // (round3 High) 同一セッションで ①アセット取得成功 → ②アセット取得失敗 のとき、②が①の控えを消さないこと。
+            WriteGame("g1/a.txt", "x");
+            var r1 = Run(true);
+            Assert.True(r1.AssetSnapshot != null && r1.AssetSnapshot.IsSuccess);
+            Assert.Equal(1, AutoManifestCount()); // manifest_A
+
+            // 2 回目: games/ を消して CreateSnapshot を SkippedAnomaly にする (履歴あり + sources 消失)。DB は成功。
+            Directory.Delete(_games, true);
+            var r2 = Run(true);
+            Assert.True(r2.IsSuccess);                // DB バックアップは成功
+            Assert.False(r2.AssetSnapshot.IsSuccess); // ゲーム本体の控えは失敗/異常
+            Assert.Equal(1, AutoManifestCount());     // 前 manifest を消さず温存 = まだ 1 件 (旧実装は 0 に消えていた)
+        }
     }
 }

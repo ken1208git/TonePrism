@@ -215,6 +215,8 @@ namespace TonePrism.Manager.Controls
                 // 直したのと同型、store 側の負債解消)。a は b の order、b は a の order を持つ。
                 _dbManager.SwapSectionOrder(sectionA.SectionId, sectionB.DisplayOrder, sectionB.SectionId, sectionA.DisplayOrder);
                 LoadSections();
+                // (#295 round3 #2) 並び替えも display_order を書き換える DB 変更操作なので控える (DB のみ)。
+                _dbManager.SessionBackupCoordinator.RunAfterOperation(this.FindForm(), assetsChanged: false, "ストアセクション並び替え");
 
                 if (newIdx < dgvSections.Rows.Count)
                 {

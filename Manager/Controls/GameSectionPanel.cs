@@ -137,11 +137,12 @@ namespace TonePrism.Manager.Controls
                 if (form.ShowDialog() == DialogResult.OK)
                 {
                     LoadGames();
-                    // (#295) ゲーム追加は games/ を変えるので DB + ゲーム本体を操作単位でバックアップ (replace-in-session)。
-                    _dbManager.SessionBackupCoordinator.RunAfterOperation(this.FindForm(), assetsChanged: true, "ゲーム追加");
                     MessageBox.Show(
                         $"ゲーム「{form.AddedGame.Title}」を追加しました。",
                         "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // (#295 round3 #3) 成果の確認 (MessageBox) を先に見せてから、後追い best-effort でバックアップ
+                    // (版up/削除と順序統一)。ゲーム追加は games/ を変えるので DB + ゲーム本体を控える (replace-in-session)。
+                    _dbManager.SessionBackupCoordinator.RunAfterOperation(this.FindForm(), assetsChanged: true, "ゲーム追加");
                 }
             }
         }
@@ -176,12 +177,12 @@ namespace TonePrism.Manager.Controls
                 if (form.ShowDialog() == DialogResult.OK)
                 {
                     LoadGames();
-                    // (#295) ゲーム本体を変えた編集 (id rename / 版削除 / 外部画像取込) のときだけアセットも控える。
-                    // メタデータのみの編集は DB だけ控え、重い games/ 走査を skip する (form.AssetsChangedOnDisk)。
-                    _dbManager.SessionBackupCoordinator.RunAfterOperation(this.FindForm(), form.AssetsChangedOnDisk, "ゲーム編集");
                     MessageBox.Show(
                         $"ゲーム「{form.EditedGame.Title}」を更新しました。",
                         "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // (#295 round3 #3) 成果の確認を先に (版up/削除と順序統一)。ゲーム本体を変えた編集 (id rename /
+                    // 版削除 / 外部画像取込) のときだけアセットも控える。メタデータのみは DB だけ (form.AssetsChangedOnDisk)。
+                    _dbManager.SessionBackupCoordinator.RunAfterOperation(this.FindForm(), form.AssetsChangedOnDisk, "ゲーム編集");
                 }
                 else if (form.DataChangedOutsideOk)
                 {
