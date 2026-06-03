@@ -32,6 +32,14 @@ namespace TonePrism.Manager.Services
         /// </summary>
         public Action<string, bool> StatusReporter { get; set; }
 
+        /// <summary>(#299) バックアップ進捗を UI (下部ストリップ) へ伝える任意コールバック。MainForm が設定し UI スレッドへ
+        /// marshal する。worker はバックグラウンドスレッドで走るので、これ経由で進捗バー + 現在ファイルを更新する。</summary>
+        public Action<ProgressInfo> ProgressReporter { get; set; }
+
+        /// <summary>(#299) バックアップ実行中フラグの変化を UI へ伝える (true=開始→ストリップ表示 / false=終了→非表示)。
+        /// MainForm が設定し UI スレッドへ marshal する。</summary>
+        public Action<bool> BackupRunningChanged { get; set; }
+
         // replace-in-session 状態: この起動で前回書いた自動世代のパス。null = まだこのセッションで未取得。
         private string _sessionAutoDbPath;
         private string _sessionAutoManifestPath;
@@ -41,6 +49,14 @@ namespace TonePrism.Manager.Services
         // DB-only 成功」で上書き消失する穴を塞ぐ)。次のアセット操作が成功すると false に戻る (= 回復)。
         private bool _sessionAssetCaptureFailed;
 
+        // (#299) 非ブロッキング worker の状態。`_gate` は RunSessionBackup が実行中ずっと保持するため、コアレス判定を
+        // UI スレッドから待たせず行えるよう **別ロック** (`_workerLock`) で管理する。
+        private readonly object _workerLock = new object();
+        private bool _workerRunning;          // バックグラウンド worker が稼働中か
+        private bool _dirty;                  // worker 実行中に新たな変更操作が来た (= 終了後にもう 1 回コアレス実行)
+        private bool _pendingIncludeAssets;   // 次の (コアレス) 実行で includeAssets にすべきか (OR で蓄積)
+        private CancellationTokenSource _cts; // 現在の実行のキャンセル用 (中止ボタン / 閉じる時)
+
         public SessionBackupCoordinator(BackupService backupService)
         {
             _backupService = backupService;
@@ -49,6 +65,49 @@ namespace TonePrism.Manager.Services
         /// <summary>(round5 #1) このセッションでゲーム本体の控えが未完了 (直近のアセット操作が失敗/キャンセル) か。
         /// true の間は DB-only 成功でも緑✓を出さず警告を残す。次のアセット操作成功で false に戻る。単体テスト用に公開。</summary>
         public bool SessionAssetCaptureFailed { get { lock (_gate) { return _sessionAssetCaptureFailed; } } }
+
+        /// <summary>(#299) バックアップ worker が稼働中か。MainForm の FormClosing が「中止して閉じますか？」確認に使う。</summary>
+        public bool IsBackupRunning { get { lock (_workerLock) { return _workerRunning; } } }
+
+        /// <summary>(#299) 進行中のバックアップをキャンセルする (下部ストリップの「中止」/ 閉じる確認の「中止して閉じる」)。
+        /// キャンセルしても操作 (DB commit) は巻き戻らない＝バックアップだけ後回し。round5 で「未バックアップ」警告が残り、
+        /// 次のアセット操作 or 「今すぐバックアップ」で回復する。</summary>
+        public void CancelCurrentBackup()
+        {
+            lock (_workerLock) { try { _cts?.Cancel(); } catch { } }
+        }
+
+        // (#299) コアレスの状態遷移。スレッド無しで単体テストできるよう worker ループから切り出した 2 メソッド。
+        /// <summary>idle なら worker を「稼働中」にして今回走らせる includeAssets を返す (true)。既に稼働中なら dirty を立てて
+        /// コアレス (false)。要求の includeAssets は OR で蓄積する (=「途中で 1 回でもアセット変更が来たら次はアセット込み」)。</summary>
+        internal bool TryStartRun(bool requestIncludeAssets, out bool runIncludeAssets)
+        {
+            lock (_workerLock)
+            {
+                _pendingIncludeAssets |= requestIncludeAssets;
+                if (_workerRunning) { _dirty = true; runIncludeAssets = false; return false; }
+                _workerRunning = true;
+                runIncludeAssets = _pendingIncludeAssets; _pendingIncludeAssets = false;
+                return true;
+            }
+        }
+
+        /// <summary>1 回の実行が終わった worker が呼ぶ。実行中に変更が来ていた (dirty) なら蓄積分でもう 1 回走る (true)、
+        /// 無ければ「稼働中」を下ろして停止 (false)。これで「最後の変更の後に必ず 1 回走る」不変条件を満たす。</summary>
+        internal bool TryContinue(out bool runIncludeAssets)
+        {
+            lock (_workerLock)
+            {
+                if (_dirty)
+                {
+                    _dirty = false;
+                    runIncludeAssets = _pendingIncludeAssets; _pendingIncludeAssets = false;
+                    return true;
+                }
+                _workerRunning = false; runIncludeAssets = false;
+                return false;
+            }
+        }
 
         /// <summary>設定の自動バックアップ有効/無効。OFF なら操作単位バックアップを skip（手動は別枠で常に可）。</summary>
         public bool IsEnabled()
@@ -122,56 +181,74 @@ namespace TonePrism.Manager.Services
 
         /// <summary>
         /// 各コール地点（データ変更操作の成功直後）が呼ぶ UI ヘルパー。**best-effort**（失敗しても操作は取り消さない）。
-        /// <paramref name="assetsChanged"/>=true: 重い games/guide 取得があるので進捗 modal を出す。
-        /// =false: DB だけ（サブ秒）なので modal を出さずバックグラウンドで控える（小編集をもたつかせない）。
-        /// 設定で無効なら何もしない。
+        /// (#299) **非ブロッキング**: モーダルは出さず、バックグラウンド worker にバックアップを enqueue して即 return する
+        /// (操作を続けられる)。進捗は下部ストリップ (<see cref="ProgressReporter"/>) に出る。実行中に来た変更は **コアレス**
+        /// され、現行バックアップ完了後に蓄積分でもう 1 回だけ走る (CAS + replace-in-session で最終世代は必ず正しい)。
+        /// <paramref name="assetsChanged"/>=true: 重い games/guide 取得を含める。=false: DB だけ。
+        /// 設定で無効なら何もしない。<paramref name="owner"/> はモーダル廃止で未使用 (call site 互換のため残置)。
         /// </summary>
         public void RunAfterOperation(IWin32Window owner, bool assetsChanged, string operationLabel)
         {
             if (!IsEnabled()) return;
+            EnqueueBackup(assetsChanged, operationLabel);
+        }
 
-            if (assetsChanged)
+        /// <summary>(#299) バックアップを enqueue。idle なら worker 起動、実行中ならコアレス (TryStartRun)。**never block**。</summary>
+        private void EnqueueBackup(bool includeAssets, string label)
+        {
+            if (!TryStartRun(includeAssets, out bool runIncludeAssets)) return; // 実行中の worker がコアレスで拾う
+            Task.Run(() => WorkerLoop(runIncludeAssets, label));
+        }
+
+        /// <summary>(#299) 単一バックグラウンド worker。dirty が立つ限りコアレスで繰り返し、無くなったら停止。
+        /// RunSessionBackup は never-throw だが念のため worker 全体も握って UI へ飛ばさない。</summary>
+        private void WorkerLoop(bool includeAssets, string label)
+        {
+            try
             {
-                BackupResult result = null;
-                try
+                try { BackupRunningChanged?.Invoke(true); } catch { } // ストリップ表示 (MainForm が UI thread へ marshal)
+                do
                 {
-                    // ProcessingDialog は worker をバックグラウンドスレッドで回す。RunSessionBackup は never-throw なので
-                    // ダイアログが「エラー」ボックス（=操作失敗の誤認）を出すことはない。
-                    using (var dialog = new ProcessingDialog((progress, tkn) =>
-                    {
-                        result = RunSessionBackup(true, progress, tkn);
-                    }))
-                    {
-                        // (#295 round8 後) 旧 "変更を保存中（バックアップ）" は「今セーブ中＝キャンセルすると保存
-                        // されない」と誤読されうる。実際は操作の DB commit + 成功メッセージは既に完了済で、これは
-                        // その後の **控え (バックアップ) 作成** 段。キャンセルしても変更は残る (= 控えだけ後回し)。
-                        // タイトルを「バックアップを作成中」にして「セーブは済み・これは控え作り」を明示する。
-                        dialog.Text = "バックアップを作成中";
-                        dialog.ShowDialog(owner);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn("[SessionBackup] " + operationLabel + " 後のバックアップ UI で例外 (操作自体は成功): " + ex.Message);
-                    return;
-                }
-                ReportResult(result, operationLabel, assetsRequested: true);
-            }
-            else
-            {
-                // DB-only: サブ秒なので UI を出さずバックグラウンドで best-effort。操作はもたつかせない。
-                Task.Run(() =>
-                {
+                    CancellationTokenSource cts;
+                    lock (_workerLock) { cts = _cts = new CancellationTokenSource(); }
+                    BackupResult result;
                     try
                     {
-                        ReportResult(RunSessionBackup(false, null, CancellationToken.None), operationLabel, assetsRequested: false);
+                        var progress = new ActionProgress(p => { try { ProgressReporter?.Invoke(p); } catch { } });
+                        result = RunSessionBackup(includeAssets, progress, cts.Token);
                     }
                     catch (Exception ex)
                     {
-                        Logger.Warn("[SessionBackup] " + operationLabel + " 後の DB バックアップで例外: " + ex.Message);
+                        Logger.Warn("[SessionBackup] " + label + " 後のバックアップで例外: " + ex.Message);
+                        result = BackupResult.Failed(ex.Message);
                     }
-                });
+                    finally
+                    {
+                        lock (_workerLock) { if (_cts == cts) _cts = null; }
+                        try { cts.Dispose(); } catch { }
+                    }
+                    ReportResult(result, label, assetsRequested: includeAssets);
+                }
+                while (TryContinue(out includeAssets));
             }
+            catch (Exception ex)
+            {
+                Logger.Warn("[SessionBackup] worker loop 例外: " + ex.Message);
+                lock (_workerLock) { _workerRunning = false; } // 稼働中フラグが立ったまま固まらないよう保険
+            }
+            finally
+            {
+                try { BackupRunningChanged?.Invoke(false); } catch { } // ストリップ非表示
+            }
+        }
+
+        /// <summary>(#299) Action を IProgress にする薄いアダプタ。worker (バックグラウンド) で生成しても marshal は
+        /// ProgressReporter 実装側 (MainForm) が行うため、ここでは単に呼ぶだけ。</summary>
+        private sealed class ActionProgress : IProgress<ProgressInfo>
+        {
+            private readonly Action<ProgressInfo> _a;
+            public ActionProgress(Action<ProgressInfo> a) { _a = a; }
+            public void Report(ProgressInfo value) { _a(value); }
         }
 
         /// <summary>バックアップ結果をログ + ステータスバー (StatusReporter) に反映する。</summary>

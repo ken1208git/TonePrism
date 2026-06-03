@@ -224,6 +224,41 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
+        public void Coalesce_RequestDuringRun_RunsOnceMoreWithAccumulatedAssets()
+        {
+            // (#299) 実行中に来た変更はコアレスされ、終了後に蓄積分で 1 回だけ走る。スレッド無しで状態遷移を直接検証。
+            // 1 件目: idle → 起動 (DB-only)
+            Assert.True(_coord.TryStartRun(requestIncludeAssets: false, out bool runIA));
+            Assert.False(runIA);                 // 今回は DB-only
+            Assert.True(_coord.IsBackupRunning);
+
+            // 実行中に 2 件 (DB-only + アセット) が来る → どちらもコアレス (新 worker は起動しない＝false)
+            Assert.False(_coord.TryStartRun(false, out _));
+            Assert.False(_coord.TryStartRun(true, out _));
+
+            // 1 回目終了 → dirty なので蓄積分でもう 1 回。アセットが OR 蓄積されているので includeAssets=true。
+            Assert.True(_coord.TryContinue(out bool nextIA));
+            Assert.True(nextIA);
+
+            // 2 回目終了 → dirty なし → 停止。
+            Assert.False(_coord.TryContinue(out _));
+            Assert.False(_coord.IsBackupRunning);
+        }
+
+        [Fact]
+        public void Coalesce_IdleAfterCycle_StartsFresh()
+        {
+            // 1 サイクル回して idle に戻ったら、次の要求でまた起動できる (pending は消費済でリセット)。
+            Assert.True(_coord.TryStartRun(true, out _));
+            Assert.False(_coord.TryContinue(out _));   // dirty なし → 停止
+            Assert.False(_coord.IsBackupRunning);
+
+            Assert.True(_coord.TryStartRun(false, out bool runIA)); // 再起動できる
+            Assert.False(runIA);                                    // 前サイクルのアセット pending は持ち越さない
+            Assert.True(_coord.IsBackupRunning);
+        }
+
+        [Fact]
         public void Disabled_Skips()
         {
             _settings.SetString(SettingsKeys.BackupAutoEnabled, "false");
