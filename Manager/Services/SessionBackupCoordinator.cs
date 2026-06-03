@@ -187,7 +187,7 @@ namespace TonePrism.Manager.Services
             if (ok && SessionAssetCaptureFailed)
             {
                 ok = false;
-                message = "⚠ ゲームファイルの控えが未完了です（DB は保存済み。ゲーム操作をやり直すか保存先を確認してください）";
+                message = "⚠ ゲームファイルのバックアップが未完了です（DB は保存済み。ゲーム操作をやり直すか保存先を確認してください）";
             }
             if (!ok)
             {

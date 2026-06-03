@@ -133,7 +133,7 @@ namespace TonePrism.Manager.Services
                 if (!string.IsNullOrEmpty(lockOwner))
                 {
                     Logger.Info("[BackupService] (#295) 他 PC (" + lockOwner + ") が復元中のため自動バックアップを延期");
-                    return BackupResult.Deferred("他 PC (" + lockOwner + ") が復元中のため今回の変更はまだバックアップされていません（復元完了後にもう一度操作すると控えられます）");
+                    return BackupResult.Deferred("他 PC (" + lockOwner + ") が復元中のため今回の変更はまだバックアップされていません（復元完了後にもう一度操作するとバックアップされます）");
                 }
             }
             // (round6 High) replace-in-session でこの直後に coordinator が消す前世代の .db / .manifest を retention の母数
