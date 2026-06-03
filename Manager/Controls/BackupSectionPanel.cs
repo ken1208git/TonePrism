@@ -403,24 +403,10 @@ namespace TonePrism.Manager.Controls
                 }
             }
 
-            // (追加精査 ⑦) auto を削除した場合、last_backup_at を「残った中で最新の auto の開始時刻」に rewind する。
-            // さもないと「最新の自動バックアップを消して取り直したい」操作で IsAutoBackupDue が間隔未到達と
-            // 誤判定し、次の自動バックアップが skip される。残りが無ければ 0 (= 初回扱い、次回判定で取得される)。
-            // 手動 / 退避 (safety) は last_backup_at に無関係なので何もしない。
-            if (entry.TriggerType == "auto")
-            {
-                // File.Delete 後に再走査するので、いま消した分は除外される。
-                var newLatest = _dbManager.BackupCatalogService.GetLastAuto();
-                long newLastBackupAt = newLatest != null ? newLatest.StartedAt : 0;
-                // (累積監査 round 6 M8) 削除中に別 PC が新しい auto を取得して last_backup_at を前進させていた場合に
-                // 古い値で上書きして二重バックアップを誘発しないよう、rewind になる (= 現在値より小さくなる) ときだけ更新。
-                long currentLastBackupAt = _dbManager.SettingsRepository.GetInt64("last_backup_at", 0);
-                if (newLastBackupAt < currentLastBackupAt)
-                {
-                    _dbManager.SettingsRepository.SetInt64("last_backup_at", newLastBackupAt);
-                }
-            }
-
+            // (#295) 旧実装はここで auto 削除時に last_backup_at を rewind していた (起動時の IsAutoBackupDue が
+            // 「間隔未到達」と誤判定して次の自動バックアップを skip するのを防ぐため)。#295 で起動時の時間トリガを
+            // 廃止し last_backup_at は **もはやトリガ gate ではない** (= 表示は GetLastSuccess のファイル走査由来) ため、
+            // rewind は不要になった (= デッドロジックなので撤去)。
             RefreshDisplay();
         }
 

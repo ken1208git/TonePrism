@@ -143,20 +143,37 @@ namespace TonePrism.Manager.Services
             }
         }
 
-        /// <summary>バックアップ結果をログ + ステータスバー (StatusReporter) に反映する。Skipped は何もしない。</summary>
+        /// <summary>バックアップ結果をログ + ステータスバー (StatusReporter) に反映する。</summary>
         private void ReportResult(BackupResult result, string operationLabel)
         {
-            if (result == null) return;
-            var reporter = StatusReporter;
-            if (result.IsSuccess)
+            var line = DescribeResult(result);
+            if (line == null) return; // Skipped (無効 / キャンセル / restore-lock) は何もしない
+            if (!line.Value.Ok)
             {
-                try { reporter?.Invoke("✓ 変更をバックアップしました", true); } catch { }
+                Logger.Warn("[SessionBackup] " + operationLabel + ": " + line.Value.Message
+                    + (result.IsFailed ? " / " + result.Message : "")
+                    + (result.AssetSnapshot != null && !result.AssetSnapshot.IsSuccess ? " / ゲーム本体: " + result.AssetSnapshot.Message : ""));
             }
-            else if (result.IsFailed)
-            {
-                Logger.Warn("[SessionBackup] " + operationLabel + " 後のバックアップに失敗 (操作自体は成功): " + result.Message);
-                try { reporter?.Invoke("⚠ バックアップに失敗しました (変更自体は保存済み)", false); } catch { }
-            }
+            try { StatusReporter?.Invoke(line.Value.Message, line.Value.Ok); } catch { }
+        }
+
+        /// <summary>
+        /// (round2 #1) バックアップ結果 → ステータス行 (メッセージ, 成功か)。Skipped は null。
+        /// **DB 成功でも、ゲーム本体 (games/guide) の控えが失敗/異常/部分なら緑「✓」ではなく警告を返す**
+        /// (旧 StartAutoBackupIfDue が持っていた可視化を移植。round5 #1 / round8 C1 — SMB 一過性不達等で
+        /// ゲーム本体が控えられていないのに「✓ 完全に控えた」と運営に誤認させない)。単体テスト用に public static。
+        /// </summary>
+        public static (string Message, bool Ok)? DescribeResult(BackupResult result)
+        {
+            if (result == null) return null;
+            if (result.IsFailed) return ("⚠ バックアップに失敗しました (変更自体は保存済み)", false);
+            if (!result.IsSuccess) return null; // Skipped
+            var snap = result.AssetSnapshot;
+            if (snap != null && (snap.IsFailed || snap.IsAnomaly))
+                return ("⚠ ゲーム本体のバックアップは取得できませんでした (DB は保存済み)", false);
+            if (snap != null && snap.IsPartial)
+                return ("⚠ ゲーム本体のバックアップで一部を取得できませんでした (" + snap.SkippedDirCount + " 個スキップ)", false);
+            return ("✓ 変更をバックアップしました", true);
         }
 
         private void DeletePreviousGeneration(string dbPath, string manifestPath)

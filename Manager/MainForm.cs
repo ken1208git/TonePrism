@@ -404,8 +404,8 @@ namespace TonePrism.Manager
             //   - 検出時: `BeginInvoke` で dialog 表示を defer (= MainForm の Show 完了後に dialog が
             //     owner-modal child で開く → taskbar entry あり、他 window click で裏に行ける、natural
             //     WinForms 挙動)
-            //   - **panel.Initialize / LoadGames / StartAutoBackupIfDue / CleanupZombieStagings /
-            //     StartBackgroundUpdateCheckIfDue は全部 `ContinueLoadAfterSessionCheck` に切出し**、
+            //   - **panel.Initialize / LoadGames / CleanupZombieStagings / StartBackgroundUpdateCheckIfDue は
+            //     全部 `ContinueLoadAfterSessionCheck` に切出し**、
             //     conflict 検出時は MainForm_Load 自体は
             //     return して残り init は実行しない (= gate)。
             //   - OK 押下時のみ `ContinueLoadAfterSessionCheck` を chain で起動 → 旧実装の gate 意味論
@@ -580,8 +580,15 @@ namespace TonePrism.Manager
                 try
                 {
                     if (IsDisposed) return;
-                    Action apply = () => UpdateBackupStatus(msg,
-                        ok ? System.Drawing.Color.DarkGreen : System.Drawing.Color.DarkOrange, autoRevert: true);
+                    Action apply = () =>
+                    {
+                        // (round2 #3) 成功は transient (7 秒で消える)、失敗/警告は sticky (autoRevert:false) にして
+                        // 保存先設定ミス等の恒常的失敗を運営が見落とさないようにする (旧 modal 通知の代替)。
+                        UpdateBackupStatus(msg,
+                            ok ? System.Drawing.Color.DarkGreen : System.Drawing.Color.DarkOrange, autoRevert: ok);
+                        // (round2 #4) 操作のたびに新世代を書くので、バックアップタブの履歴 / 最終バックアップ表示も最新化。
+                        _backupSectionPanel?.RefreshDisplay();
+                    };
                     if (InvokeRequired) BeginInvoke(apply); else apply();
                 }
                 catch { /* status 表示は best-effort、失敗しても無害 */ }
@@ -873,7 +880,7 @@ namespace TonePrism.Manager
         /// 極端 overflow は WinForms StatusStrip の chevron に逃げる設計。
         ///
         /// 注: 厳密な pixel 幅判定はしない (= 全角混じり / window resize / DPI scaling で精度差あり)。
-        /// 完全な message は呼出元 (e.g., `StartAutoBackupIfDue` の `Logger.Error`) で別途 log に残るため
+        /// 完全な message は呼出元 (e.g., `SessionBackupCoordinator` の `Logger.Warn`) で別途 log に残るため
         /// UI で truncated でも debug 可能、本 helper は user 視覚的 alarm 用 carry-best-effort と位置付け。
         /// </summary>
         private static string TruncateForStatusBar(string message)

@@ -253,7 +253,7 @@ namespace TonePrism.Manager.Services
                 // 出力が空 / 不完全なら success として記録すると「最終バックアップ」表示や復元候補に中身のない
                 // バックアップが正常として残り、後日それを復元すると空 DB を掴む最悪事故になる。(a) ファイルが
                 // 存在しサイズ > 0、(b) PRAGMA quick_check が "ok"、の両方を満たさなければ例外を投げ、下の
-                // catch で failed 記録 + ファイル削除 + lease 巻き戻しに流す。
+                // catch で failed 記録 + ファイル削除に流す。
                 if (!File.Exists(destinationPath) || new FileInfo(destinationPath).Length == 0)
                 {
                     throw new Exception("バックアップファイルが作成されていない、または空です: " + destinationPath);
@@ -320,7 +320,7 @@ namespace TonePrism.Manager.Services
 
         /// <summary>
         /// (Finding #5) 作成したバックアップ DB を `PRAGMA quick_check` で検証する。"ok" 以外なら例外を投げ、
-        /// caller の catch で failed 記録 + ファイル削除 + lease 巻き戻しに流す (= 壊れた / 不完全なバックアップを
+        /// caller の catch で failed 記録 + ファイル削除に流す (= 壊れた / 不完全なバックアップを
         /// success として残さない)。検証は read のみ。書き込まないが、念のため caller 側で検証後に
         /// -wal/-shm/-journal sibling を再掃除する。quick_check は integrity_check より軽量で、
         /// ページ単位の連結・B-tree 構造の妥当性を確認する (索引の中身までは見ないが、空 / 切り詰め /

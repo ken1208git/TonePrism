@@ -18,10 +18,9 @@ namespace TonePrism.Manager.Services
     internal static class SettingsKeys
     {
         // ----- backup 既存 (settings テーブルに既に存在) -----
-        // SettingsRepository.TryAcquireBackupLease 内で hardcode された "last_backup_at"
-        // および backup 設定系 (`backup_destination_path` / `backup_auto_interval_hours` /
-        // `backup_retention_count`) で使う key。既存実装に合わせて参照しない (本クラスで
-        // ラップしない方が既存コードを書き換える scope creep を防げる)。
+        // backup 設定系 (`backup_destination_path` / `backup_retention_count` / `last_backup_at`) で使う key。
+        // 既存実装に合わせて参照しない (本クラスでラップしない方が既存コードを書き換える scope creep を防げる)。
+        // (#295) backup_auto_interval_hours / TryAcquireBackupLease は操作単位トリガ移行で撤去。
         // (#170 followup) 旧 BackupSettingsForm modal は廃止、設定タブ内 grpBackup section に inline 統合
         // (SettingsSectionPanel.LoadBackupSettings + grpBackup の per-control event handler 群:
         //  TxtBackupDest_Leave / NumBackupInterval_ValueChanged / CmbBackupIntervalUnit_SelectedIndexChanged

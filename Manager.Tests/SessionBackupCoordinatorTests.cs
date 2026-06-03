@@ -131,5 +131,26 @@ namespace TonePrism.Manager.Tests
             var r = Run(true);
             Assert.True(r.IsFailed);
         }
+
+        [Fact]
+        public void AssetFailure_SurfacedAsWarning_NotGreenSuccess()
+        {
+            // (round2 #1) DB は成功でもゲーム本体 (games/guide) の控えが失敗したら「✓」緑ではなく警告にする退行防止。
+            // asset_pool をファイルにして CreateSnapshot を失敗させる (DB バックアップ自体は成功)。
+            string dest = _backup.GetEffectiveDestinationDirectory();
+            Directory.CreateDirectory(dest);
+            File.WriteAllText(Path.Combine(dest, "asset_pool"), "blocker");
+            WriteGame("g1/a.txt", "x");
+
+            var r = Run(true);
+            Assert.True(r.IsSuccess);               // DB バックアップは成功
+            Assert.NotNull(r.AssetSnapshot);
+            Assert.True(r.AssetSnapshot.IsFailed);  // ゲーム本体の控えは失敗
+
+            var line = SessionBackupCoordinator.DescribeResult(r);
+            Assert.NotNull(line);
+            Assert.False(line.Value.Ok);            // 緑「✓」ではなく警告
+            Assert.Contains("ゲーム本体", line.Value.Message);
+        }
     }
 }
