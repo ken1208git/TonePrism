@@ -208,7 +208,16 @@ namespace TonePrism.Manager.Services
             // (round6 Medium #3) restore-lock 等で延期した Skipped は完全 silent にせず警告で知らせる
             // (「変更は保存したがまだ控えていない」= ユーザーが復元完了後に再操作する判断材料になる)。
             if (result.IsDeferred) return ("⚠ " + result.Message, false);
-            if (!result.IsSuccess) return null; // 通常の Skipped (キャンセル / 無効) は何もしない
+            if (!result.IsSuccess)
+            {
+                // (round7 #3) ゲーム本体の控えを **要求した** 操作が DB フェーズ中 (進捗 0-10%) にキャンセルされると
+                // RunBackupCore が OCE を投げ top-level Skipped("キャンセル") になる (round4 が塞いだのは「DB 成功後の
+                // アセット走査キャンセル」で別経路)。完全 silent だと「変更はあるが今セッション未控え」が無表示で閉じうる
+                // ため、1 回警告を出す (replace-in-session で次操作が再控えするが、それまでの可視化として)。round5 flag も
+                // 立つので後続も再警告される。DB-only (assetsRequested=false) の Skipped は従来どおり沈黙 (無効/no-op 想定)。
+                if (assetsRequested) return ("⚠ 変更はまだバックアップされていません（中断されました）", false);
+                return null;
+            }
             var snap = result.AssetSnapshot;
             if (snap != null && (snap.IsFailed || snap.IsAnomaly))
                 return ("⚠ ゲーム本体のバックアップは取得できませんでした (DB は保存済み)", false);

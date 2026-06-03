@@ -153,6 +153,18 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
+        public void TopLevelCancel_AssetOp_SurfacedAsWarning_NotSilent()
+        {
+            // (round7 #3) アセット操作の DB フェーズ中キャンセル (top-level Skipped("キャンセル")) を完全 silent にしない。
+            var cancelled = BackupResult.Skipped("キャンセル");
+            var line = SessionBackupCoordinator.DescribeResult(cancelled, assetsRequested: true);
+            Assert.NotNull(line);
+            Assert.False(line.Value.Ok);   // 警告 (silent でない)
+            // DB-only (assetsRequested=false) の Skipped は従来どおり沈黙。
+            Assert.Null(SessionBackupCoordinator.DescribeResult(cancelled, assetsRequested: false));
+        }
+
+        [Fact]
         public void RestoreLockDeferral_SurfacedAsWarning_NotSilent()
         {
             // (round6 Medium #3) 他 PC が復元中で session backup が延期されたとき、完全 silent にせず「まだ控えていない」と

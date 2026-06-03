@@ -448,9 +448,17 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>(レビュー L2) 全体を try/catch で best-effort 化し、retention/GC の例外で「manifest 書込済なのに
-        /// 控え全体が Failed」と誤報告されるのを防ぐ。(レビュー M3) **GC は auto に限定**: auto は lease で多ホスト排他
-        /// されるため並行 GC が起きない。manual manifest は retention 対象外で未参照 blob を生まないので GC 不要、
-        /// サイズキャッシュだけ更新する。</summary>
+        /// 控え全体が Failed」と誤報告されるのを防ぐ。(レビュー M3) **GC は auto に限定**: manual manifest は retention
+        /// 対象外で未参照 blob を生まないので GC 不要、サイズキャッシュだけ更新する。
+        /// (#295 round7 — stale コメント訂正) 旧 docstring は「auto は **lease で多ホスト排他されるため並行 GC が
+        /// 起きない**」と書いていたが、その lease (`TryAcquireBackupLease`) は #295 で撤去済 (操作単位トリガ移行で
+        /// auto を interval 毎・全ホスト 1 回に律速していた間接的排他が消えた)。現状の多ホスト安全性は **grace period
+        /// (既定 1h) のみ**が緩和: 直近書込 blob を未参照でも残すので、短い ingest 中の他ホスト GC からは守られる。
+        /// ただし **初回フル ingest (~6GB SMB) が grace を超える間に他ホストの GC が走ると、取得中 blob を「未参照かつ
+        /// grace 超」と誤判定して回収しうる窓 (= #250 round8 C2) は閉じていない**。操作単位化 + lease 撤去でこの窓は
+        /// むしろ拡大した (旧: 全ホストで interval 毎 1 回 → 新: 全ホストが毎操作)。C2 は #250 PR2/PR3 へ deferred。
+        /// **被害は限定的**: GC は pool のみ対象で live games/ は触らないため、壊れるのは当該バックアップ世代だけ
+        /// (次回 backup で live から再コピーされ自己回復、live data は無事)。</summary>
         private void ApplyRetentionAndGc(string triggerType, long newBytesCopied, string excludeManifestPath = null)
         {
             try
