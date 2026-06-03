@@ -298,7 +298,7 @@ namespace TonePrism.Manager.Services
                     // (round9 UI) アセット取得が最も重い (初回 ~6GB の SMB 読込) ので、バーの大半 (10-99%) を
                     // 割り当ててファイル単位で動かす (lblDetail にファイル名が流れる)。DB コピー (0-10%) + retention (10%) は
                     // 一瞬。旧実装は 95-99% に圧縮しており「95% で固まって遅い」ように見える主因だった。内側 0-100 を 10-99 にマップ。
-                    var assetProgress = progress != null ? new RangeProgress(progress, 10, 99, "ゲーム本体をバックアップ中...") : null;
+                    var assetProgress = progress != null ? new RangeProgress(progress, 10, 99, "ゲームファイルをバックアップ中...") : null;
                     assetSnap = _assetSnapshotService.CreateSnapshot(timestamp, triggerType, assetProgress, token, replacedManifestPath);
                     if (assetSnap.IsFailed)
                         Logger.Warn("[BackupService] アセット控え取得失敗 (DB バックアップは成功): " + assetSnap.Message);

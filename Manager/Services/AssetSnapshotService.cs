@@ -101,7 +101,7 @@ namespace TonePrism.Manager.Services
                     if (gameCount > 0 || hadHistory)
                     {
                         Logger.Warn("[AssetSnapshot] games/ も guide/ も見つかりません (DB games=" + gameCount + " / 履歴=" + hadHistory + " → SMB 不達等の異常の可能性)。今回の控えはスキップします。");
-                        return SnapshotResult.SkippedAnomaly("ゲーム本体のフォルダが見つかりません (異常の可能性)");
+                        return SnapshotResult.SkippedAnomaly("ゲームファイルのフォルダが見つかりません (異常の可能性)");
                     }
                     Logger.Info("[AssetSnapshot] games/ も guide/ も無く DB にも games 未登録のため控えなし (新規 install と判断)。");
                     return SnapshotResult.Success(null, 0, 0, 0);
@@ -314,7 +314,7 @@ namespace TonePrism.Manager.Services
                 if (total > 0 && progress != null)
                 {
                     int pct = (int)((double)stats.FileCount / total * 100);
-                    progress.Report(new ProgressInfo(pct > 100 ? 100 : pct, "ゲーム本体をバックアップ中...", Path.GetFileName(file)));
+                    progress.Report(new ProgressInfo(pct > 100 ? 100 : pct, "ゲームファイルをバックアップ中...", Path.GetFileName(file)));
                 }
             }
             string[] dirs;
