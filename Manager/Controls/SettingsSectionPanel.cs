@@ -16,8 +16,6 @@ namespace TonePrism.Manager.Controls
         // 「未保存」マーカーが誤点灯するのを防ぐ)。これらの field は「最後に DB に書込んだ値」を tracking。
         private string _lastSavedLogsRoot = "";
         private string _lastSavedBackupDest = "";
-        // (#170 followup round 1) 単位 ComboBox の SelectedIndexChanged は値の換算で
-        // 再帰発火するため、現在の選択を tracking して「実際の unit change か」を区別する。
 
         // (#201, v0.16.0) editing model = commit-on-Apply。control 変更は即 DB 保存せず本 dirty flag を
         // 立てるだけ、per-section「適用」ボタンで CheckBeforeWrite 1 回 + DB flush、「元に戻す」で

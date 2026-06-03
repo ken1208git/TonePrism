@@ -147,10 +147,28 @@ namespace TonePrism.Manager.Tests
             Assert.NotNull(r.AssetSnapshot);
             Assert.True(r.AssetSnapshot.IsFailed);  // ゲーム本体の控えは失敗
 
-            var line = SessionBackupCoordinator.DescribeResult(r);
+            var line = SessionBackupCoordinator.DescribeResult(r, assetsRequested: true);
             Assert.NotNull(line);
             Assert.False(line.Value.Ok);            // 緑「✓」ではなく警告
             Assert.Contains("ゲーム本体", line.Value.Message);
+        }
+
+        [Fact]
+        public void AssetRequestedButSkipped_SurfacedAsWarning()
+        {
+            // (round4 #1) ゲーム本体の控えを要求した操作で、アセット取得が Skipped (ユーザーのキャンセル相当) なら
+            // 緑「✓」にしない。キャンセルを単体で再現しにくいので、同じ「非成功 Skipped」を生む asset 無効化で代理検証。
+            _settings.SetString(SettingsKeys.AssetSnapshotEnabled, "false");
+            WriteGame("g1/a.txt", "x");
+            var r = Run(true);
+            Assert.True(r.IsSuccess);                 // DB バックアップは成功
+            Assert.NotNull(r.AssetSnapshot);
+            Assert.True(r.AssetSnapshot.IsSkipped);   // ゲーム本体は Skipped (非成功)
+            Assert.False(r.AssetSnapshot.IsSuccess);
+
+            var line = SessionBackupCoordinator.DescribeResult(r, assetsRequested: true);
+            Assert.NotNull(line);
+            Assert.False(line.Value.Ok);              // 緑「✓」ではなく警告 (キャンセルで緑✓になる退行の防止)
         }
 
         [Fact]

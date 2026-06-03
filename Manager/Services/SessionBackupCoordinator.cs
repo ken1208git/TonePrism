@@ -130,7 +130,7 @@ namespace TonePrism.Manager.Services
                     Logger.Warn("[SessionBackup] " + operationLabel + " 後のバックアップ UI で例外 (操作自体は成功): " + ex.Message);
                     return;
                 }
-                ReportResult(result, operationLabel);
+                ReportResult(result, operationLabel, assetsRequested: true);
             }
             else
             {
@@ -139,7 +139,7 @@ namespace TonePrism.Manager.Services
                 {
                     try
                     {
-                        ReportResult(RunSessionBackup(false, null, CancellationToken.None), operationLabel);
+                        ReportResult(RunSessionBackup(false, null, CancellationToken.None), operationLabel, assetsRequested: false);
                     }
                     catch (Exception ex)
                     {
@@ -150,10 +150,10 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>バックアップ結果をログ + ステータスバー (StatusReporter) に反映する。</summary>
-        private void ReportResult(BackupResult result, string operationLabel)
+        private void ReportResult(BackupResult result, string operationLabel, bool assetsRequested)
         {
-            var line = DescribeResult(result);
-            if (line == null) return; // Skipped (無効 / キャンセル / restore-lock) は何もしない
+            var line = DescribeResult(result, assetsRequested);
+            if (line == null) return; // Skipped (DB バックアップが無効 / restore-lock) は何もしない
             if (!line.Value.Ok)
             {
                 Logger.Warn("[SessionBackup] " + operationLabel + ": " + line.Value.Message
@@ -164,21 +164,27 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>
-        /// (round2 #1) バックアップ結果 → ステータス行 (メッセージ, 成功か)。Skipped は null。
-        /// **DB 成功でも、ゲーム本体 (games/guide) の控えが失敗/異常/部分なら緑「✓」ではなく警告を返す**
-        /// (旧 StartAutoBackupIfDue が持っていた可視化を移植。round5 #1 / round8 C1 — SMB 一過性不達等で
-        /// ゲーム本体が控えられていないのに「✓ 完全に控えた」と運営に誤認させない)。単体テスト用に public static。
+        /// (round2 #1) バックアップ結果 → ステータス行 (メッセージ, 成功か)。DB バックアップ自体が Skipped なら null。
+        /// **DB 成功でも、ゲーム本体 (games/guide) の控えを要求した操作 (<paramref name="assetsRequested"/>) で控えが
+        /// 成功していなければ緑「✓」ではなく警告を返す** (旧 StartAutoBackupIfDue の可視化を移植。round5 #1 / round8 C1 —
+        /// SMB 一過性不達・**ユーザーのキャンセル**等でゲーム本体が控えられていないのに「✓ 完全に控えた」と誤認させない)。
+        /// 単体テスト用に public static。
         /// </summary>
-        public static (string Message, bool Ok)? DescribeResult(BackupResult result)
+        public static (string Message, bool Ok)? DescribeResult(BackupResult result, bool assetsRequested)
         {
             if (result == null) return null;
             if (result.IsFailed) return ("⚠ バックアップに失敗しました (変更自体は保存済み)", false);
-            if (!result.IsSuccess) return null; // Skipped
+            if (!result.IsSuccess) return null; // DB バックアップ自体が Skipped
             var snap = result.AssetSnapshot;
             if (snap != null && (snap.IsFailed || snap.IsAnomaly))
                 return ("⚠ ゲーム本体のバックアップは取得できませんでした (DB は保存済み)", false);
             if (snap != null && snap.IsPartial)
                 return ("⚠ ゲーム本体のバックアップで一部を取得できませんでした (" + snap.SkippedDirCount + " 個スキップ)", false);
+            // (round4 #1) ゲーム本体の控えを **要求した** 操作なのに控えが成功していない (キャンセル / 無効 / null =
+            // best-effort で取れなかった) なら緑「✓」にしない。`result.IsSuccess` は DB のみの成否で、アセット走査の
+            // キャンセル (CreateSnapshot が OCE を握って Skipped を返す) もここに来るため、緑✓潰しの最後の砦。
+            if (assetsRequested && (snap == null || !snap.IsSuccess))
+                return ("⚠ ゲーム本体のバックアップは完了しませんでした (DB は保存済み)", false);
             return ("✓ 変更をバックアップしました", true);
         }
 
