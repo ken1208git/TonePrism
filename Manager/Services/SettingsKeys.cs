@@ -121,17 +121,8 @@ namespace TonePrism.Manager.Services
         /// </summary>
         public const string BackupAutoEnabled = "backup_auto_enabled";
 
-        // ----- (#170 followup round 1) バックアップ自動間隔の表示単位 -----
-
-        /// <summary>
-        /// 自動バックアップ間隔の表示単位。"hours" or "days"。default "hours"。UI ComboBox で選択、
-        /// **DB に保存される間隔値 (`backup_auto_interval_hours`) は常に時間単位**で BackupService 既存実装と互換、
-        /// 本 key は UI 側の表示ヒントのみで runtime logic には影響しない。
-        /// </summary>
-        public const string BackupAutoIntervalUnit = "backup_auto_interval_unit";
-
-        public const string BackupAutoIntervalUnitHours = "hours";
-        public const string BackupAutoIntervalUnitDays = "days";
+        // (#295) 旧「バックアップ自動間隔の表示単位」key (backup_auto_interval_unit + "hours"/"days") は、
+        // 起動時の時間間隔トリガ廃止 (操作単位トリガ = SessionBackupCoordinator へ移行) に伴い撤去。
 
         // ----- (#250 PR1) アセット控え (games/ + guide/ の共有プール (CAS / SHA-256) バックアップ) -----
 

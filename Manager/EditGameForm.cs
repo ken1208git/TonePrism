@@ -169,6 +169,11 @@ namespace TonePrism.Manager
         /// </summary>
         public bool DataChangedOutsideOk { get; private set; }
 
+        /// <summary>(#295) この編集で games/ 配下のファイルを変えたか (ゲームID rename によるフォルダ移動 /
+        /// 版即時削除によるフォルダ削除 / 外部画像の取り込みコピー)。操作単位バックアップで「ゲーム本体も控えるか」を
+        /// caller が判定するのに読む。メタデータのみの編集なら false = DB だけ控えて重い games/ 走査を skip できる。</summary>
+        public bool AssetsChangedOnDisk { get; private set; }
+
         public EditGameForm(DatabaseManager dbManager, GameInfo game)
         {
             InitializeComponent();
@@ -592,6 +597,7 @@ namespace TonePrism.Manager
         {
             // (#209 review finding 1) DialogResult に依らず親へ再読込を促すフラグ。即時削除は OK を介さず DB 確定する。
             DataChangedOutsideOk = true;
+            AssetsChangedOnDisk = true; // (#295) 版削除は games/{id}/v{} フォルダを消す = ゲーム本体が変わった
             // combo を安全に mutate するため SelectedIndexChanged を一時的に外す (途中発火で削除版へ save するのを防ぐ)。
             cmbVersionList.SelectedIndexChanged -= cmbVersionList_SelectedIndexChanged;
             GameVersion reselect = null;
@@ -1373,6 +1379,7 @@ namespace TonePrism.Manager
                             {
                                 System.IO.Directory.Move(oldFolder, newFolder);
                                 folderRenamed = true;
+                                AssetsChangedOnDisk = true; // (#295) games/ フォルダを移動した = ゲーム本体が変わった
                             }
 
                             progress?.Report(new ProgressInfo(-1, "データベースを更新中...", $"ゲームID: {oldGameId} → {newGameId}"));
@@ -1852,6 +1859,8 @@ namespace TonePrism.Manager
                 }
 
                 EditedGame = game;
+                // (#295) クリア前に「外部画像を games/ へ取り込んだか」を assets 変更フラグへ反映 (id rename / 版削除は別途設定済)。
+                if (_copiedExternalImagePaths.Count > 0) AssetsChangedOnDisk = true;
                 // (round 5 M3) OK commit 確定 → copy 済み画像は正規に DB と紐付いたため、
                 // OnFormClosing での「Cancel 時のオーファン削除」対象から外す。
                 _copiedExternalImagePaths.Clear();

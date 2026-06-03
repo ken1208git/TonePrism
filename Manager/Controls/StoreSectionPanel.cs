@@ -110,6 +110,8 @@ namespace TonePrism.Manager.Controls
                 if (form.ShowDialog() == DialogResult.OK)
                 {
                     LoadSections();
+                    // (#295) ストアセクションは DB のみの変更なので DB だけ控える (重い games/ 走査は skip)。
+                    _dbManager.SessionBackupCoordinator.RunAfterOperation(this.FindForm(), assetsChanged: false, "ストアセクション追加");
                 }
             }
         }
@@ -139,6 +141,8 @@ namespace TonePrism.Manager.Controls
                 if (form.ShowDialog() == DialogResult.OK)
                 {
                     LoadSections();
+                    // (#295) DB のみの変更。DB だけ控える。
+                    _dbManager.SessionBackupCoordinator.RunAfterOperation(this.FindForm(), assetsChanged: false, "ストアセクション編集");
                 }
             }
         }
@@ -166,6 +170,8 @@ namespace TonePrism.Manager.Controls
                 {
                     _dbManager.DeleteSection(section.SectionId);
                     LoadSections();
+                    // (#295) DB のみの変更。DB だけ控える。
+                    _dbManager.SessionBackupCoordinator.RunAfterOperation(this.FindForm(), assetsChanged: false, "ストアセクション削除");
                 }
                 catch (SQLiteException ex)
                 {

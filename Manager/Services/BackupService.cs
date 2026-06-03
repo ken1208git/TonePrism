@@ -57,44 +57,15 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>
-        /// (#170 followup round 3 review L-4) 「自動バックアップが UI 上で有効か」の判定 SoT helper。
-        /// `IsAutoBackupDue` と `RunAutoBackupIfDue` の両方で参照、`"false"` 厳密一致 (case-insensitive) で
-        /// disabled、それ以外 (空 / "true" / unknown) はすべて enabled 扱い。
-        /// 旧実装は両関数で同じ判定 string を重複記述しており、将来 enum 化等で片方更新漏れの drift 路があった。
+        /// 「自動バックアップが UI 上で有効か」の判定 SoT helper。`backup_auto_enabled` が `"false"` 厳密一致
+        /// (case-insensitive) で disabled、それ以外 (空 / "true" / unknown) はすべて enabled 扱い。
+        /// (#295) 旧 IsAutoBackupDue / RunAutoBackupIfDue (起動時の時間間隔トリガ) は撤去。操作単位トリガの
+        /// <see cref="SessionBackupCoordinator"/> がこの enable を gate に使う。
         /// </summary>
-        private bool IsAutoBackupEnabled()
+        public bool IsAutoBackupEnabled()
         {
             string enabledStr = _settingsRepo.GetString(SettingsKeys.BackupAutoEnabled, "true");
             return !string.Equals(enabledStr, "false", StringComparison.OrdinalIgnoreCase);
-        }
-
-        /// <summary>
-        /// 自動バックアップを走らせるべきかチェック（参照のみ、副作用なし）。
-        /// 実際の実行時には RunAutoBackupIfDue を使う（lease 取得を含む）。
-        /// </summary>
-        public bool IsAutoBackupDue()
-        {
-            // (#170 followup round 2 review #1+#2) 自動バックアップ無効化 checkbox。UI 設定タブから OFF
-            // にされていたら due 判定を常に false (= 起動時 trigger 完全 skip、手動バックアップは引き続き可)。
-            // 旧実装は `RunAutoBackupIfDue` 側のみ gate を入れ、IsAutoBackupDue は disable flag を見ていない
-            // 非対称設計だった。それにより MainForm.StartAutoBackupIfDue が「Due だから走らせる」と判断して
-            // 「実行中...」indicator を出した直後、RunAutoBackupIfDue が IsSkipped を返して MainForm の
-            // IsSkipped 分岐は no-op、indicator が「実行中...」のまま永久残留する bug があった。
-            // 本 fix で IsAutoBackupDue 側も同 gate を持たせて「Due だけど skip」の不整合 path を構造閉鎖、
-            // CHANGELOG `## Manager v0.13.0` の「IsAutoBackupDue / RunAutoBackupIfDue 両方 skip」記述とも
-            // 整合させる。判定 string は round 3 L-4 で IsAutoBackupEnabled helper に集約。
-            if (!IsAutoBackupEnabled()) return false;
-            int intervalHours = _settingsRepo.GetInt32("backup_auto_interval_hours", 24);
-            long lastBackupAt = _settingsRepo.GetInt64("last_backup_at", 0);
-            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            // (累積監査 round 6 M5) 時計異常 (未来日時) で last_backup_at が未来値になっていると
-            // due 判定が恒偽になり自動バックアップが永久 skip される。TryAcquireBackupLease 側と
-            // 同じ sanity を入れ、1 日以上未来の値は 0 扱いで「due」と判定して取得を促す。
-            if (lastBackupAt > now + 86400)
-            {
-                lastBackupAt = 0;
-            }
-            return lastBackupAt + (long)intervalHours * 3600 <= now;
         }
 
         /// <summary>
@@ -144,28 +115,14 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>
-        /// 自動バックアップ実行（lease 取得失敗時はスキップ）
+        /// (#295) 操作単位の自動バックアップ実行。<see cref="SessionBackupCoordinator"/> から、データ変更操作の
+        /// 成功直後に呼ばれる。起動時の時間間隔トリガと lease は廃止 (操作単位なので interval / 多ホスト直列化は
+        /// 不要、同時編集は SessionConflictHelper が警告)。<paramref name="includeAssets"/>=false の DB-only 操作では
+        /// 重い games/guide 走査を skip する。enable gate は coordinator 側 (<see cref="IsAutoBackupEnabled"/>)。
         /// </summary>
-        public BackupResult RunAutoBackupIfDue(IProgress<ProgressInfo> progress, CancellationToken token)
+        public BackupResult RunSessionBackup(bool includeAssets, IProgress<ProgressInfo> progress, CancellationToken token)
         {
-            // (#170 followup round 2) 自動バックアップ無効化 checkbox。OFF なら起動時 trigger を skip。
-            // (round 3 L-4) 判定 string は IsAutoBackupEnabled helper に集約。
-            // (round 4 review L-2) 現状の唯一の caller `MainForm.StartAutoBackupIfDue` は事前に
-            // `IsAutoBackupDue` で同 check を通過するため本 path は production code から到達不能 (= dead path)。
-            // 将来 RunAutoBackupIfDue を IsAutoBackupDue 経由なしで直接 caller が増えた時の defensive gate
-            // として残置 + Skipped message も将来 user 視点で見せる用途で維持。
-            if (!IsAutoBackupEnabled())
-            {
-                return BackupResult.Skipped("自動バックアップが無効に設定されています (設定タブから有効化可能)");
-            }
-
-            // (round 5 H2) round 2 H5 で導入した「他 PC が復元中なら write をブロック」する advisory lock の
-            // 横展開漏れ補正。旧実装は MainForm.CheckSessionConflictBeforeWrite (user 操作経路のみ) で
-            // GetActiveRestoreLockOwnerOrNull を check しており、起動時の自動バックアップ path は素通し
-            // だった。PC-A の File.Replace 中に PC-B の Manager が起動 → 自動バックアップが SQLite Online
-            // Backup API で File.Replace 中の DB を読みに行く → 出力 backup が partial / corrupt になり、
-            // 後日それを復元すると最新データ消失する致命的 race があった。auto path にも同 gate を入れて
-            // 構造的に防ぐ。
+            // (round 5 H2) 他 PC が復元中 (File.Replace 中の DB を Online Backup で読むと partial/corrupt) なら延期。
             if (_settingsRepo != null)
             {
                 string lockOwner = _settingsRepo.GetActiveRestoreLockOwnerOrNull(
@@ -174,20 +131,11 @@ namespace TonePrism.Manager.Services
                     SettingsKeys.RestoreLockStaleThresholdMs);
                 if (!string.IsNullOrEmpty(lockOwner))
                 {
-                    Logger.Info("[BackupService] (round 5 H2) 他 PC (" + lockOwner + ") が復元中のため自動バックアップを延期");
+                    Logger.Info("[BackupService] (#295) 他 PC (" + lockOwner + ") が復元中のため自動バックアップを延期");
                     return BackupResult.Skipped("他 PC (" + lockOwner + ") が復元中のため自動バックアップを延期しました");
                 }
             }
-
-            int intervalHours = _settingsRepo.GetInt32("backup_auto_interval_hours", 24);
-            long intervalSeconds = (long)intervalHours * 3600;
-            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-
-            if (!_settingsRepo.TryAcquireBackupLease(intervalSeconds, now, out long previousLastBackupAt))
-            {
-                return BackupResult.Skipped("自動バックアップは既に他のManagerで実行されました（または間隔未到達）");
-            }
-            return RunBackupCore(TriggerAuto, progress, token, leaseAlreadyAcquired: true, leasePreviousValue: previousLastBackupAt);
+            return RunBackupCore(TriggerAuto, progress, token, includeAssets);
         }
 
         /// <summary>
@@ -209,17 +157,17 @@ namespace TonePrism.Manager.Services
                     return BackupResult.Skipped("他 PC (" + lockOwner + ") が復元中のためバックアップを開始できません。完了後に再試行してください");
                 }
             }
-            return RunBackupCore(TriggerManual, progress, token, leaseAlreadyAcquired: false);
+            return RunBackupCore(TriggerManual, progress, token);
         }
 
-        private BackupResult RunBackupCore(string triggerType, IProgress<ProgressInfo> progress, CancellationToken token, bool leaseAlreadyAcquired, long leasePreviousValue = 0)
+        private BackupResult RunBackupCore(string triggerType, IProgress<ProgressInfo> progress, CancellationToken token, bool includeAssets = true)
         {
             string host = SanitizeHostForFileName(Environment.MachineName);
 
             // auto / manual を種類ごとのサブフォルダに分け、ファイル名も `<種類>_<日時>_<host>.db` に統一する
             // (退避 safety_*.db と同じ流儀)。フォルダ位置で種類が、ファイル名 host で実行 PC が確定するため、
             // backup_log を持たずとも BackupCatalogService が履歴を完全に復元でき、auto の世代管理 (retention)
-            // も正しく効く。triggerType は RunAutoBackupIfDue / RunManualBackup から "auto" / "manual" のみが
+            // も正しく効く。triggerType は RunSessionBackup / RunManualBackup から "auto" / "manual" のみが
             // 渡るため、そのままサブフォルダ名 + ファイル名接頭辞として使える。
             string destinationDir = Path.Combine(GetEffectiveDestinationDirectory(), triggerType);
             string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
@@ -324,11 +272,8 @@ namespace TonePrism.Manager.Services
                     fileSize = new FileInfo(destinationPath).Length;
                 }
 
-                // 手動の場合も last_backup_at を更新（自動バックアップが続けて走らないように）。
-                if (!leaseAlreadyAcquired)
-                {
-                    _settingsRepo.SetInt64("last_backup_at", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-                }
+                // (#295) last_backup_at はトリガ gate ではなくなったが、履歴 / 「最終バックアップ」表示用に更新する。
+                _settingsRepo.SetInt64("last_backup_at", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
 
                 // リテンションは成功時のみ適用
                 progress?.Report(new ProgressInfo(10, "古いバックアップを整理中...", ""));
@@ -338,8 +283,10 @@ namespace TonePrism.Manager.Services
                 // **失敗・キャンセルしても DB バックアップの成否・last_backup_at は一切壊さない** (last_backup_at 更新は
                 // この呼び出しより前の SetInt64("last_backup_at", ...) で完了済、AssetSnapshotService は throw しない契約)。
                 // 世代名 timestamp は .db ファイル名と対応する。
+                // (#295) includeAssets=false の DB-only 操作 (ストア/スライド文字編集等) では重い games/guide 走査を
+                // skip し、DB だけ控える。games/guide を変える操作のみ includeAssets=true でアセットも取得する。
                 Models.SnapshotResult assetSnap = null;
-                if (_assetSnapshotService != null)
+                if (includeAssets && _assetSnapshotService != null)
                 {
                     // (round9 UI) アセット取得が最も重い (初回 ~6GB の SMB 読込) ので、バーの大半 (10-99%) を
                     // 割り当ててファイル単位で動かす (lblDetail にファイル名が流れる)。DB コピー (0-10%) + retention (10%) は
@@ -360,7 +307,6 @@ namespace TonePrism.Manager.Services
             {
                 // 中途半端なファイルを削除
                 TryDeleteIfExists(destinationPath);
-                RollbackLeaseOnFailure(leaseAlreadyAcquired, leasePreviousValue);
                 throw;
             }
             catch (Exception ex)
@@ -368,19 +314,10 @@ namespace TonePrism.Manager.Services
                 // (失敗履歴は backup_log 廃止に伴い Logger のみに残す)
                 Logger.Error("[BackupService] バックアップに失敗しました: " + destinationPath, ex);
                 TryDeleteIfExists(destinationPath);
-                RollbackLeaseOnFailure(leaseAlreadyAcquired, leasePreviousValue);
                 return BackupResult.Failed(ex.Message);
             }
         }
 
-        /// <summary>
-        /// (累積監査) auto バックアップが失敗 / キャンセルした場合、lease で前進させた last_backup_at を
-        /// 取得前の値へ巻き戻す。これにより次回 (起動時) の due 判定で再試行される (旧実装は失敗しても
-        /// last_backup_at が now に前進したままで、次の interval まで再試行されなかった)。手動経路
-        /// (leaseAlreadyAcquired=false) は lease を取らないため no-op。自動バックアップの起動は
-        /// MainForm.StartAutoBackupIfDue で「起動時 1 回」のため、巻き戻しても連射 (= 警告 modal の連発) には
-        /// ならない。巻き戻し自体の失敗は握り潰す (最悪でも従来挙動 = 次 interval 待ちに戻るだけ)。
-        /// </summary>
         /// <summary>
         /// (Finding #5) 作成したバックアップ DB を `PRAGMA quick_check` で検証する。"ok" 以外なら例外を投げ、
         /// caller の catch で failed 記録 + ファイル削除 + lease 巻き戻しに流す (= 壊れた / 不完全なバックアップを
@@ -405,20 +342,6 @@ namespace TonePrism.Manager.Services
             if (!string.Equals(result, "ok", StringComparison.OrdinalIgnoreCase))
             {
                 throw new Exception("バックアップ DB の整合性チェック (quick_check) に失敗しました: " + (result ?? "(結果なし)"));
-            }
-        }
-
-        private void RollbackLeaseOnFailure(bool leaseAlreadyAcquired, long leasePreviousValue)
-        {
-            if (!leaseAlreadyAcquired) return;
-            try
-            {
-                _settingsRepo.SetInt64("last_backup_at", leasePreviousValue);
-                Logger.Info("[BackupService] auto バックアップ失敗/キャンセルのため last_backup_at を巻き戻し (次回起動で再試行): " + leasePreviousValue);
-            }
-            catch (Exception rbEx)
-            {
-                Logger.Warn("[BackupService] last_backup_at の巻き戻しに失敗 (次回は通常 interval 待ち): " + rbEx.Message);
             }
         }
 

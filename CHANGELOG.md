@@ -1998,6 +1998,19 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.22.0] - 2026-06-03
+
+#### Changed (#295 — 自動バックアップを「起動時間隔」→「変更時・操作単位 / replace-in-session」に再設計)
+
+- **自動バックアップのトリガを「Manager 起動時の時間間隔」から「データ変更操作の成功直後」に変更。** 旧方式は「変更→閉じる→次の起動までに DB が壊れると、その変更が一度も控えられない」穴があった。新方式はゲーム追加/編集/版up/削除・ストアセクション・イントロスライド等の**操作が成功した直後に**バックアップを取るので、その作業がその場で守られる。
+- **1 Manager 起動 = 1 自動世代（replace-in-session）。** 同一セッション内で次の操作が控えるとき、このセッションが前回書いた自動世代（`.db` + ペア `.manifest`）を消して上書きする。セッション最初の控えは前セッションの世代を消さない。retention（`backup_retention_count`）は「直近 N **セッション**」を残す（旧「直近 N **編集**」の食い潰しを解消）。手動バックアップは従来どおり別枠で温存（不変）。
+- **DB とゲーム本体の非対称性を使う。** DB（~124KB）は毎操作控える（サブ秒、バックグラウンド）。重い games/guide のアセット取得（~6GB の SMB 走査）は **games/guide を実際に変える操作のときだけ**走らせる（ゲーム追加・版up・ゲーム削除・id rename・外部画像取込・スライド画像追加/差替/削除）。メタデータのみの編集（タイトル変更・ストアセクション・スライド本文）は DB だけ控えて重い走査を skip する。各 Form が `AssetsChangedOnDisk` で「ディスクのゲーム本体を触ったか」を正確に返し、不要な走査を避ける。
+- **新規 `Services/SessionBackupCoordinator.cs`**（AGENTS: 新ファイル/責務分離）: セッション状態（この起動の前回 `.db`/`.manifest` パス、メモリ保持）+ enable gate + UI 段取りを持つ。実バイト書き出しは `BackupService` に委譲し WinForms 依存をここに閉じる。`RunAfterOperation(owner, assetsChanged, label)` を各コール地点が 1 行で呼ぶ。アセット変更操作は短い進捗ダイアログ、DB-only 操作はバックグラウンド（モーダル無し、ステータスバーに「✓ 変更をバックアップしました」）。**best-effort**: バックアップ失敗は操作を巻き戻さず（操作コミット後に走る）、例外を投げず `Logger.Warn` + ステータス表示のみ。
+- **`BackupService`**: `RunSessionBackup(includeAssets, …)` を追加（`RunBackupCore` に `includeAssets` ガード）。**撤去**: `IsAutoBackupDue` / `RunAutoBackupIfDue` / `RollbackLeaseOnFailure`、`MainForm.StartAutoBackupIfDue`（起動時トリガ）、`SettingsRepository.TryAcquireBackupLease`（lease は操作単位では不要。同時編集は `SessionConflictHelper` が警告、アセット GC は auto 限定 + grace で多ホスト安全）。`last_backup_at` はトリガ gate ではなくなったが「最終バックアップ」表示用に書き続ける。
+- **設定タブ簡素化**: 時間間隔の UI（`numBackupInterval` / `cmbBackupIntervalUnit` / ラベル）と key（`backup_auto_interval_hours` / `backup_auto_interval_unit`）を撤去。残すのはチェック「**変更があったら自動でバックアップする**」（旧 `backup_auto_enabled` を再定義、"false" 厳密一致のみ無効）＋ 保持世代数 ＋ 保存先。
+- 検証: Manager build 緑（0 警告）/ **テスト 117 件合格**（新規 `SessionBackupCoordinatorTests` 5: replace-in-session で 1 世代 / DB-only は manifest を増やさず前 manifest 温存 / retention は直近 N セッション / 無効で skip / 失敗 never-throw）。**※実機（保存系必須）: ゲーム追加→直後にバックアップ進捗→もう1ゲーム追加で世代が増えず上書き / ストア編集は DB のみ（重い走査なし）/ 設定変更ではバックアップ走らない / Manager 再起動で新セッションは別世代、を本番 SMB で確認すること。**
+- bump 判断: ユーザー向け挙動変更（自動バックアップのタイミング・設定 UI）。破壊的変更なし（既存 DB は interval key を読まなくなるだけ、settings は K/V）。minor (v0.21.0 → v0.22.0)。Launcher/Updater は無関係。
+
 ### [Manager v0.21.0] - 2026-06-02
 
 #### Added (#250 PR1 — アセット控え: games/ + guide/ の共有プール (CAS) バックアップ)

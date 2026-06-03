@@ -23,6 +23,11 @@ namespace TonePrism.Manager
         private string _pendingImageAbsolute;
         private bool _clearImage;
 
+        /// <summary>(#295) この編集で guide/ に新規画像ファイルを書いたか。操作単位バックアップで「ゲーム本体
+        /// (games/guide) も控えるか」を caller が判定するのに読む。本文/表示のみの編集や既存画像の再利用なら
+        /// false = DB だけ控え、重い games/guide 走査を skip できる。</summary>
+        public bool AssetsChangedOnDisk { get; private set; }
+
         private TextBox _txtBody;
         private TextBox _txtImage;
         private PictureBox _preview;
@@ -184,6 +189,7 @@ namespace TonePrism.Manager
                     // その既存ファイル (他スライドが参照しているかもしれない) を誤って消さないよう追跡しない。
                     // 新規にコピーしたときだけ「保存失敗なら消す対象」として控える。
                     newlyImportedRel = createdNewFile ? _slide.ImagePath : null;
+                    if (createdNewFile) AssetsChangedOnDisk = true; // (#295) guide/ に新規画像を書いた = ゲーム本体側が変わった
                 }
                 else if (_clearImage)
                 {

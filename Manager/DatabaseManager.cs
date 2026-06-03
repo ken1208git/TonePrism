@@ -25,6 +25,7 @@ namespace TonePrism.Manager
         private readonly BackupService _backupService;
         private readonly BackupCatalogService _backupCatalogService;
         private readonly AssetSnapshotService _assetSnapshotService;
+        private readonly SessionBackupCoordinator _sessionBackupCoordinator;
         private readonly RestoreService _restoreService;
         private readonly ManagerSessionRepository _sessionRepo;
 
@@ -52,6 +53,8 @@ namespace TonePrism.Manager
             // (循環依存回避)。BackupService は DB バックアップ成功直後に best-effort で CreateSnapshot を呼ぶ。
             _assetSnapshotService = new AssetSnapshotService(_conn, _settingsRepo, _backupService);
             _backupService.AttachSnapshotService(_assetSnapshotService);
+            // (#295) 操作単位 / replace-in-session の自動バックアップ段取り (この起動 = 1 自動世代)。
+            _sessionBackupCoordinator = new SessionBackupCoordinator(_backupService);
             // (H5) advisory restore-lock 取得/解放のため SettingsRepository を注入。
             _restoreService = new RestoreService(_conn, _settingsRepo);
             _sessionRepo = new ManagerSessionRepository(_conn);
@@ -63,6 +66,8 @@ namespace TonePrism.Manager
         public BackupCatalogService BackupCatalogService { get { return _backupCatalogService; } }
         /// <summary>(#250) games/ + guide/ のアセット控え (共有プール CAS / SHA-256 バックアップ)。</summary>
         public AssetSnapshotService AssetSnapshotService { get { return _assetSnapshotService; } }
+        /// <summary>(#295) データ変更操作の成功直後に呼ぶ操作単位バックアップ coordinator (replace-in-session)。</summary>
+        public SessionBackupCoordinator SessionBackupCoordinator { get { return _sessionBackupCoordinator; } }
         public RestoreService RestoreService { get { return _restoreService; } }
         public SettingsRepository SettingsRepository { get { return _settingsRepo; } }
         /// <summary>(#179) Manager session tracking 用 repository。</summary>

@@ -243,6 +243,7 @@
     <Compile Include="PathManager.cs" />
     <Compile Include="Services\AssetSnapshotService.cs" />
     <Compile Include="Services\BackupService.cs" />
+    <Compile Include="Services\SessionBackupCoordinator.cs" />
     <Compile Include="Services\BackupCatalogService.cs" />
     <Compile Include="Services\DeveloperListManager.cs" />
     <Compile Include="Services\FileOperationService.cs" />
