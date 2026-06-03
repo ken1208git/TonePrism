@@ -376,8 +376,13 @@ namespace TonePrism.Manager.Services
                 // 除外する。含めると「これから消す 1 件」を数えて本来残すべき過去セッションを 1 件余計に削り、「直近 N
                 // セッション保持」が 1 セッション内の操作回数ぶん崩れる (K 操作で過去 K-1 世代が消失)。除外した世代は
                 // coordinator が確実に消すので二重カウントにはならない。
-                if (!string.IsNullOrEmpty(excludePath))
-                    candidates = candidates.Where(f => !string.Equals(f.FullName, excludePath, StringComparison.OrdinalIgnoreCase));
+                // (round8 #2) 比較は **ファイル名** で行う (アセット側 ApplyRetentionAndGc と対称)。full-path 完全一致だと、
+                // backup_destination_path が非正規化 (末尾区切り / "." / ".." 混入) の場合に DirectoryInfo.FullName (正規化済)
+                // と excludePath (GetEffectiveDestinationDirectory は raw configured を返す) が一致せず除外が外れ、round6 の
+                // 過剰削除バグが silent 再発しうる。.db 名は auto dir 内で衝突 suffix により一意なのでファイル名比較で過不足なし。
+                string excludeName = string.IsNullOrEmpty(excludePath) ? null : Path.GetFileName(excludePath);
+                if (excludeName != null)
+                    candidates = candidates.Where(f => !string.Equals(f.Name, excludeName, StringComparison.OrdinalIgnoreCase));
 
                 var targets = candidates
                     .OrderByDescending(f => f.Name, StringComparer.OrdinalIgnoreCase)

@@ -133,6 +133,28 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
+        public void Retention_NonNormalizedDest_StillExcludesPrevGeneration()
+        {
+            // (round8 #2) backup_destination_path が非正規化 (末尾 "." 等) でも retention 母数除外が効くこと。
+            // full-path 完全一致だと DirectoryInfo.FullName (正規化済) と excludePath (raw configured 由来) がズレて
+            // 除外が外れ round6 の過剰削除バグが silent 再発する。ファイル名比較なら正規化差に無依存。
+            string dst = Path.Combine(_root, "dst");
+            Directory.CreateDirectory(dst);
+            _settings.SetString("backup_destination_path", dst + Path.DirectorySeparatorChar + "."); // 非正規化 "<dst>\."
+            _settings.SetInt32("backup_retention_count", 2);
+            string autoDir = Path.Combine(dst, "auto");
+            Directory.CreateDirectory(autoDir);
+            File.WriteAllText(Path.Combine(autoDir, "auto_20260101_000001_OLD.db"), "old1");
+            File.WriteAllText(Path.Combine(autoDir, "auto_20260102_000001_OLD.db"), "old2");
+
+            WriteGame("g1/a.txt", "x");
+            for (int i = 0; i < 3; i++) Assert.True(Run(false).IsSuccess);
+
+            // 直近 2 セッション (過去最新 old2 + 現在セッション最終) = 2 件。バグ時は 1 件に崩れる。
+            Assert.Equal(2, Directory.GetFiles(autoDir, "*.db").Length);
+        }
+
+        [Fact]
         public void AssetRetention_MultiOpSession_KeepsPastManifests()
         {
             // (round6 High) アセット側 (manifest) も同型。複数アセット操作セッションで過去 manifest を過剰に消さないこと。

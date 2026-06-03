@@ -25,7 +25,12 @@ namespace TonePrism.Manager
 
         /// <summary>(#295) この編集で guide/ に新規画像ファイルを書いたか。操作単位バックアップで「ゲーム本体
         /// (games/guide) も控えるか」を caller が判定するのに読む。本文/表示のみの編集や既存画像の再利用なら
-        /// false = DB だけ控え、重い games/guide 走査を skip できる。</summary>
+        /// false = DB だけ控え、重い games/guide 走査を skip できる。
+        /// (round8 #3) **将来の縛り**: 本フラグは「guide/ に新規画像を書いた (createdNewFile)」だけを true にする。
+        /// 現状 edit パスは画像クリア/差替でも guide/ の旧画像実体を**物理削除しない**ため、ディスク不変 = false で整合する。
+        /// もし将来この編集経路に orphan 掃除 (クリア/差替時の旧画像 `IntroGuideAssetHelper` 削除等) を足すなら、
+        /// その**削除でも AssetsChangedOnDisk=true** にしないと、guide/ が変わったのに次のアセット操作まで控えに反映されない
+        /// silent drift になる (スライド削除パスの imageRemoved 追跡と対称に保つこと)。</summary>
         public bool AssetsChangedOnDisk { get; private set; }
 
         private TextBox _txtBody;
