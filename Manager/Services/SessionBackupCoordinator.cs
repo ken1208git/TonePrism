@@ -142,7 +142,11 @@ namespace TonePrism.Manager.Services
                         result = RunSessionBackup(true, progress, tkn);
                     }))
                     {
-                        dialog.Text = "変更を保存中（バックアップ）";
+                        // (#295 round8 後) 旧 "変更を保存中（バックアップ）" は「今セーブ中＝キャンセルすると保存
+                        // されない」と誤読されうる。実際は操作の DB commit + 成功メッセージは既に完了済で、これは
+                        // その後の **控え (バックアップ) 作成** 段。キャンセルしても変更は残る (= 控えだけ後回し)。
+                        // タイトルを「バックアップを作成中」にして「セーブは済み・これは控え作り」を明示する。
+                        dialog.Text = "バックアップを作成中";
                         dialog.ShowDialog(owner);
                     }
                 }
