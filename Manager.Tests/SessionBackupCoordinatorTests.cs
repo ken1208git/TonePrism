@@ -263,7 +263,7 @@ namespace TonePrism.Manager.Tests
             var line = SessionBackupCoordinator.DescribeResult(r, assetsRequested: true);
             Assert.NotNull(line);
             Assert.False(line.Value.Ok);            // 緑「✓」ではなく警告
-            Assert.Contains("ゲーム本体", line.Value.Message);
+            Assert.Contains("ゲームファイル", line.Value.Message);
         }
 
         [Fact]

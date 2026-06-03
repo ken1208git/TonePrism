@@ -187,13 +187,13 @@ namespace TonePrism.Manager.Services
             if (ok && SessionAssetCaptureFailed)
             {
                 ok = false;
-                message = "⚠ ゲーム本体の控えが未完了です（DB は保存済み。ゲーム操作をやり直すか保存先を確認してください）";
+                message = "⚠ ゲームファイルの控えが未完了です（DB は保存済み。ゲーム操作をやり直すか保存先を確認してください）";
             }
             if (!ok)
             {
                 Logger.Warn("[SessionBackup] " + operationLabel + ": " + message
                     + (result.IsFailed ? " / " + result.Message : "")
-                    + (result.AssetSnapshot != null && !result.AssetSnapshot.IsSuccess ? " / ゲーム本体: " + result.AssetSnapshot.Message : ""));
+                    + (result.AssetSnapshot != null && !result.AssetSnapshot.IsSuccess ? " / ゲームファイル: " + result.AssetSnapshot.Message : ""));
             }
             try { StatusReporter?.Invoke(message, ok); } catch { }
         }
@@ -224,14 +224,14 @@ namespace TonePrism.Manager.Services
             }
             var snap = result.AssetSnapshot;
             if (snap != null && (snap.IsFailed || snap.IsAnomaly))
-                return ("⚠ ゲーム本体のバックアップは取得できませんでした (DB は保存済み)", false);
+                return ("⚠ ゲームファイルのバックアップは取得できませんでした (DB は保存済み)", false);
             if (snap != null && snap.IsPartial)
-                return ("⚠ ゲーム本体のバックアップで一部を取得できませんでした (" + snap.SkippedDirCount + " 個スキップ)", false);
+                return ("⚠ ゲームファイルのバックアップで一部を取得できませんでした (" + snap.SkippedDirCount + " 個スキップ)", false);
             // (round4 #1) ゲーム本体の控えを **要求した** 操作なのに控えが成功していない (キャンセル / 無効 / null =
             // best-effort で取れなかった) なら緑「✓」にしない。`result.IsSuccess` は DB のみの成否で、アセット走査の
             // キャンセル (CreateSnapshot が OCE を握って Skipped を返す) もここに来るため、緑✓潰しの最後の砦。
             if (assetsRequested && (snap == null || !snap.IsSuccess))
-                return ("⚠ ゲーム本体のバックアップは完了しませんでした (DB は保存済み)", false);
+                return ("⚠ ゲームファイルのバックアップは完了しませんでした (DB は保存済み)", false);
             return ("✓ 変更をバックアップしました", true);
         }
 

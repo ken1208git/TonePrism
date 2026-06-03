@@ -76,11 +76,11 @@ namespace TonePrism.Manager.Controls
                         long poolBytes = _dbManager.AssetSnapshotService.GetPoolPhysicalBytes();
                         // (round8 A/L1) .poolsize 未更新/読込失敗時の 0 は「計測中」に倒す (実使用 0 と未計測を区別)。
                         string poolDisp = poolBytes > 0 ? FormatBytes(poolBytes) : "計測中";
-                        lblLastSnapshot.Text = $"ゲーム本体 {snap.FileCount} ファイル（実使用 {poolDisp}）";
+                        lblLastSnapshot.Text = $"ゲームファイル {snap.FileCount} 個（実使用 {poolDisp}）";
                     }
                     else
                     {
-                        lblLastSnapshot.Text = "ゲーム本体: 未取得";
+                        lblLastSnapshot.Text = "ゲームファイル: 未取得";
                     }
                 }
 
@@ -149,12 +149,12 @@ namespace TonePrism.Manager.Controls
                 if (snap != null && snap.IsSuccess && snap.IsPartial)
                 {
                     // (round8 C1) 深部フォルダの列挙失敗で一部 skip した場合は「部分的な控え」を明示 (完全控えと誤認させない)。
-                    msg += $"\n\n⚠ ゲーム本体 (games/guide) のバックアップで {snap.SkippedDirCount} 個のフォルダを列挙できずスキップしました（部分的なバックアップの可能性。SMB 一過性 I/O / 権限等）。";
+                    msg += $"\n\n⚠ ゲームファイル (games/guide) のバックアップで {snap.SkippedDirCount} 個のフォルダを列挙できずスキップしました（部分的なバックアップの可能性。SMB 一過性 I/O / 権限等）。";
                 }
                 else if (snap != null && (snap.IsFailed || snap.IsAnomaly))
                 {
                     // (レビュー M2) 失敗/異常は黙らず併記 (DB バックアップ自体は成功)。設定で無効・通常スキップは触れない。
-                    msg += $"\n\n⚠ ゲーム本体 (games/guide) のバックアップは取得できませんでした（DB バックアップは成功）。\n{snap.Message}";
+                    msg += $"\n\n⚠ ゲームファイル (games/guide) のバックアップは取得できませんでした（DB バックアップは成功）。\n{snap.Message}";
                 }
                 MessageBox.Show(msg, "バックアップ成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
