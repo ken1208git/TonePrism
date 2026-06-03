@@ -16,9 +16,6 @@ namespace TonePrism.Manager.Controls
         // 「未保存」マーカーが誤点灯するのを防ぐ)。これらの field は「最後に DB に書込んだ値」を tracking。
         private string _lastSavedLogsRoot = "";
         private string _lastSavedBackupDest = "";
-        // (#170 followup round 1) 単位 ComboBox の SelectedIndexChanged は値の換算で
-        // 再帰発火するため、現在の選択を tracking して「実際の unit change か」を区別する。
-        private string _prevIntervalUnit = "時間";
 
         // (#201, v0.16.0) editing model = commit-on-Apply。control 変更は即 DB 保存せず本 dirty flag を
         // 立てるだけ、per-section「適用」ボタンで CheckBeforeWrite 1 回 + DB flush、「元に戻す」で
@@ -255,8 +252,6 @@ namespace TonePrism.Manager.Controls
             // hook 一時 detach
             txtBackupDest.Leave -= TxtBackupDest_Leave;
             chkBackupAutoEnabled.CheckedChanged -= ChkBackupAutoEnabled_CheckedChanged;
-            numBackupInterval.ValueChanged -= NumBackupInterval_ValueChanged;
-            cmbBackupIntervalUnit.SelectedIndexChanged -= CmbBackupIntervalUnit_SelectedIndexChanged;
             numBackupRetention.ValueChanged -= NumBackupRetention_ValueChanged;
             try
             {
@@ -269,27 +264,10 @@ namespace TonePrism.Manager.Controls
                 string enabledStr = repo.GetString(SettingsKeys.BackupAutoEnabled, "true");
                 chkBackupAutoEnabled.Checked = !string.Equals(enabledStr, "false", StringComparison.OrdinalIgnoreCase);
 
-                int hours = repo.GetInt32("backup_auto_interval_hours", 24);
-                string unit = repo.GetString(SettingsKeys.BackupAutoIntervalUnit, SettingsKeys.BackupAutoIntervalUnitHours);
-                // 単位 ComboBox に display unit を設定 (= 「時間」or「日」)
-                string displayUnit = unit == SettingsKeys.BackupAutoIntervalUnitDays ? "日" : "時間";
-                cmbBackupIntervalUnit.SelectedItem = displayUnit;
-                if (cmbBackupIntervalUnit.SelectedIndex < 0) cmbBackupIntervalUnit.SelectedIndex = 0;
-                _prevIntervalUnit = (string)cmbBackupIntervalUnit.SelectedItem;
-                // 単位に応じて Max を変える + displayValue を hours から換算
-                ApplyIntervalUnitBounds(_prevIntervalUnit);
-                int factor = _prevIntervalUnit == "日" ? 24 : 1;
-                int displayValue = Math.Max(1, hours / factor);
-                if (displayValue > numBackupInterval.Maximum) displayValue = (int)numBackupInterval.Maximum;
-                numBackupInterval.Value = displayValue;
-
                 int retention = repo.GetInt32("backup_retention_count", 30);
                 if (retention < numBackupRetention.Minimum) retention = (int)numBackupRetention.Minimum;
                 if (retention > numBackupRetention.Maximum) retention = (int)numBackupRetention.Maximum;
                 numBackupRetention.Value = retention;
-
-                // checkbox に従って interval section の enable/disable
-                ApplyAutoBackupEnabledUi(chkBackupAutoEnabled.Checked);
             }
             catch (Exception ex)
             {
@@ -297,49 +275,16 @@ namespace TonePrism.Manager.Controls
             }
             txtBackupDest.Leave += TxtBackupDest_Leave;
             chkBackupAutoEnabled.CheckedChanged += ChkBackupAutoEnabled_CheckedChanged;
-            numBackupInterval.ValueChanged += NumBackupInterval_ValueChanged;
-            cmbBackupIntervalUnit.SelectedIndexChanged += CmbBackupIntervalUnit_SelectedIndexChanged;
             numBackupRetention.ValueChanged += NumBackupRetention_ValueChanged;
             // (#201) load 完了時点では UI = DB なので未保存なし
             SetBackupSectionDirty(false);
         }
 
-        /// <summary>
-        /// (#170 followup round 2) 自動バックアップ checkbox の状態に応じて interval section の
-        /// control を enable/disable する。OFF 時は user 視点で「設定しても無効化されている」のが明確になる。
-        /// 保存先 / 保持世代数は手動バックアップでも使うため対象外。
-        ///
-        /// (round 3 review L-1) `chkBackupAutoEnabled` は `AutoSize=true` で natural width 取得、明示
-        /// `Size=new Size(200, 19)` 行は Designer から削除 (= AutoSize=true 時は ignored)。
-        /// 経緯コメントは Designer.cs 側ではなく本 .cs 側に保持 (= Designer は VS WinForms Designer の
-        /// regenerate で section コメントが失われる可能性があるため、設計判断は非 Designer ファイルに集約)。
-        /// </summary>
-        private void ApplyAutoBackupEnabledUi(bool enabled)
-        {
-            lblBackupInterval.Enabled = enabled;
-            numBackupInterval.Enabled = enabled;
-            cmbBackupIntervalUnit.Enabled = enabled;
-            lblBackupIntervalUnit.Enabled = enabled;
-        }
-
-        // (#201) checkbox 変更: interval section の enable/disable は UI-internal なので即時反映、
-        // DB 保存は dirty mark のみ (= Apply 時に flush)。
+        // (#201 / #295) 自動バックアップ enable checkbox 変更: DB 保存は dirty mark のみ (Apply 時に flush)。
+        // (#295) 旧: interval section の enable/disable を即時反映していたが、間隔 UI 撤去に伴い不要。
         private void ChkBackupAutoEnabled_CheckedChanged(object sender, EventArgs e)
         {
-            ApplyAutoBackupEnabledUi(chkBackupAutoEnabled.Checked);
             SetBackupSectionDirty(true);
-        }
-
-        /// <summary>
-        /// 単位 (「時間」/「日」) に応じて numBackupInterval の Maximum を切替える。
-        /// 「時間」mode: 1-720 (= 30 日相当)。「日」mode: 1-30。
-        /// </summary>
-        private void ApplyIntervalUnitBounds(string unit)
-        {
-            int max = unit == "日" ? 30 : 720;
-            numBackupInterval.Maximum = max;
-            // current Value が新 Max を超えていたら clamp
-            if (numBackupInterval.Value > max) numBackupInterval.Value = max;
         }
 
         private void btnBackupBrowse_Click(object sender, EventArgs e)
@@ -369,40 +314,15 @@ namespace TonePrism.Manager.Controls
             if (current != _lastSavedBackupDest) SetBackupSectionDirty(true);
         }
 
-        private void NumBackupInterval_ValueChanged(object sender, EventArgs e)
-        {
-            SetBackupSectionDirty(true);
-        }
-
-        // (#201) 単位変更: hours↔display 換算 + Max 切替 は UI-internal なので即時実行 (DB 保存は Apply 時)。
-        private void CmbBackupIntervalUnit_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            string newUnit = cmbBackupIntervalUnit.SelectedItem as string ?? "時間";
-            if (newUnit == _prevIntervalUnit) return;
-            // 換算: 現在 displayed 値 × 旧 factor = effective hours → 新 factor で割って新 display
-            int oldFactor = _prevIntervalUnit == "日" ? 24 : 1;
-            int newFactor = newUnit == "日" ? 24 : 1;
-            int effectiveHours = (int)numBackupInterval.Value * oldFactor;
-            // bounds 更新 (= 単位による Max 変更) — ValueChanged 発火を suppress するため event detach
-            numBackupInterval.ValueChanged -= NumBackupInterval_ValueChanged;
-            ApplyIntervalUnitBounds(newUnit);
-            int newDisplay = Math.Max(1, effectiveHours / newFactor);
-            if (newDisplay > numBackupInterval.Maximum) newDisplay = (int)numBackupInterval.Maximum;
-            numBackupInterval.Value = newDisplay;
-            numBackupInterval.ValueChanged += NumBackupInterval_ValueChanged;
-            _prevIntervalUnit = newUnit;
-            SetBackupSectionDirty(true);
-        }
-
         private void NumBackupRetention_ValueChanged(object sender, EventArgs e)
         {
             SetBackupSectionDirty(true);
         }
 
         /// <summary>
-        /// (#201) バックアップ section の「適用」: CheckBeforeWrite → 5 key を DB flush → dirty clear。
-        /// 戻り値: true = 適用成功 / false = CheckBeforeWrite Cancel or DB 書込失敗 (= dirty 維持)。
-        /// 間隔は `_prevIntervalUnit` の factor で display → hours に換算して保存 (= 換算 logic は旧 immediate-save 実装から移植)。
+        /// (#201) バックアップ section の「適用」: CheckBeforeWrite → 3 key (保存先 / 自動有効 / 保持世代数) を
+        /// DB flush → dirty clear。戻り値: true = 適用成功 / false = CheckBeforeWrite Cancel or DB 書込失敗 (= dirty 維持)。
+        /// (#295) 起動時の時間トリガ廃止に伴い間隔 key (backup_auto_interval_hours / _unit) は撤去。
         /// </summary>
         private bool ApplyBackupSection()
         {
@@ -417,18 +337,11 @@ namespace TonePrism.Manager.Controls
                 string destValue = (txtBackupDest.Text ?? string.Empty).Trim();
                 repo.SetString("backup_destination_path", destValue);
                 repo.SetString(SettingsKeys.BackupAutoEnabled, chkBackupAutoEnabled.Checked ? "true" : "false");
-
-                int factor = _prevIntervalUnit == "日" ? 24 : 1;
-                int hours = (int)numBackupInterval.Value * factor;
-                repo.SetInt32("backup_auto_interval_hours", hours);
-                repo.SetString(SettingsKeys.BackupAutoIntervalUnit,
-                    _prevIntervalUnit == "日" ? SettingsKeys.BackupAutoIntervalUnitDays : SettingsKeys.BackupAutoIntervalUnitHours);
                 repo.SetInt32("backup_retention_count", (int)numBackupRetention.Value);
 
                 _lastSavedBackupDest = destValue;
                 Logger.Info("[SettingsSectionPanel] バックアップ設定を適用 (保存先=" + destValue
                     + " / 自動=" + (chkBackupAutoEnabled.Checked ? "有効" : "無効")
-                    + " / 間隔=" + (int)numBackupInterval.Value + " " + _prevIntervalUnit + " (= " + hours + " 時間)"
                     + " / 世代数=" + (int)numBackupRetention.Value + " 個)");
                 SetBackupSectionDirty(false);
                 return true;

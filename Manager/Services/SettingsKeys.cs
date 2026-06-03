@@ -18,15 +18,14 @@ namespace TonePrism.Manager.Services
     internal static class SettingsKeys
     {
         // ----- backup 既存 (settings テーブルに既に存在) -----
-        // SettingsRepository.TryAcquireBackupLease 内で hardcode された "last_backup_at"
-        // および backup 設定系 (`backup_destination_path` / `backup_auto_interval_hours` /
-        // `backup_retention_count`) で使う key。既存実装に合わせて参照しない (本クラスで
-        // ラップしない方が既存コードを書き換える scope creep を防げる)。
+        // backup 設定系 (`backup_destination_path` / `backup_retention_count` / `last_backup_at`) で使う key。
+        // 既存実装に合わせて参照しない (本クラスでラップしない方が既存コードを書き換える scope creep を防げる)。
+        // (#295) backup_auto_interval_hours / TryAcquireBackupLease は操作単位トリガ移行で撤去。
         // (#170 followup) 旧 BackupSettingsForm modal は廃止、設定タブ内 grpBackup section に inline 統合
         // (SettingsSectionPanel.LoadBackupSettings + grpBackup の per-control event handler 群:
-        //  TxtBackupDest_Leave / NumBackupInterval_ValueChanged / CmbBackupIntervalUnit_SelectedIndexChanged
-        //  / NumBackupRetention_ValueChanged / ChkBackupAutoEnabled_CheckedChanged)。
+        //  TxtBackupDest_Leave / NumBackupRetention_ValueChanged / ChkBackupAutoEnabled_CheckedChanged)。
         //  round 1 で「保存ボタン廃止 + per-control immediate save」に方針転換、btnBackupSave は実体なし。
+        //  (#295) 時間間隔 UI 撤去で NumBackupInterval_ValueChanged / CmbBackupIntervalUnit_SelectedIndexChanged も撤去。
 
         // ----- Phase 4 (#108) update flow -----
 
@@ -121,17 +120,8 @@ namespace TonePrism.Manager.Services
         /// </summary>
         public const string BackupAutoEnabled = "backup_auto_enabled";
 
-        // ----- (#170 followup round 1) バックアップ自動間隔の表示単位 -----
-
-        /// <summary>
-        /// 自動バックアップ間隔の表示単位。"hours" or "days"。default "hours"。UI ComboBox で選択、
-        /// **DB に保存される間隔値 (`backup_auto_interval_hours`) は常に時間単位**で BackupService 既存実装と互換、
-        /// 本 key は UI 側の表示ヒントのみで runtime logic には影響しない。
-        /// </summary>
-        public const string BackupAutoIntervalUnit = "backup_auto_interval_unit";
-
-        public const string BackupAutoIntervalUnitHours = "hours";
-        public const string BackupAutoIntervalUnitDays = "days";
+        // (#295) 旧「バックアップ自動間隔の表示単位」key (backup_auto_interval_unit + "hours"/"days") は、
+        // 起動時の時間間隔トリガ廃止 (操作単位トリガ = SessionBackupCoordinator へ移行) に伴い撤去。
 
         // ----- (#250 PR1) アセット控え (games/ + guide/ の共有プール (CAS / SHA-256) バックアップ) -----
 

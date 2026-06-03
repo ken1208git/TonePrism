@@ -404,8 +404,8 @@ namespace TonePrism.Manager
             //   - 検出時: `BeginInvoke` で dialog 表示を defer (= MainForm の Show 完了後に dialog が
             //     owner-modal child で開く → taskbar entry あり、他 window click で裏に行ける、natural
             //     WinForms 挙動)
-            //   - **panel.Initialize / LoadGames / StartAutoBackupIfDue / CleanupZombieStagings /
-            //     StartBackgroundUpdateCheckIfDue は全部 `ContinueLoadAfterSessionCheck` に切出し**、
+            //   - **panel.Initialize / LoadGames / CleanupZombieStagings / StartBackgroundUpdateCheckIfDue は
+            //     全部 `ContinueLoadAfterSessionCheck` に切出し**、
             //     conflict 検出時は MainForm_Load 自体は
             //     return して残り init は実行しない (= gate)。
             //   - OK 押下時のみ `ContinueLoadAfterSessionCheck` を chain で起動 → 旧実装の gate 意味論
@@ -571,8 +571,28 @@ namespace TonePrism.Manager
             _introGuidePanel.LoadSlides(); // (#253)
             UpdateStatusBar();
 
-            // 起動時に自動バックアップが必要なら走らせる（バックグラウンドで非ブロッキング）
-            StartAutoBackupIfDue();
+            // (#295) 起動時の時間トリガ自動バックアップは廃止。バックアップはデータ変更操作の成功直後に
+            // SessionBackupCoordinator が操作単位で取る (replace-in-session、1 起動 = 1 自動世代)。
+            // 操作単位バックアップの完了/失敗を status bar 右 zone に表示するコールバックを配線。
+            // DB-only 操作はバックグラウンド実行 = 別スレッドから呼ばれるため UI スレッドへ marshal する。
+            dbManager.SessionBackupCoordinator.StatusReporter = (msg, ok) =>
+            {
+                try
+                {
+                    if (IsDisposed) return;
+                    Action apply = () =>
+                    {
+                        // (round2 #3) 成功は transient (7 秒で消える)、失敗/警告は sticky (autoRevert:false) にして
+                        // 保存先設定ミス等の恒常的失敗を運営が見落とさないようにする (旧 modal 通知の代替)。
+                        UpdateBackupStatus(msg,
+                            ok ? System.Drawing.Color.DarkGreen : System.Drawing.Color.DarkOrange, autoRevert: ok);
+                        // (round2 #4) 操作のたびに新世代を書くので、バックアップタブの履歴 / 最終バックアップ表示も最新化。
+                        _backupSectionPanel?.RefreshDisplay();
+                    };
+                    if (InvokeRequired) BeginInvoke(apply); else apply();
+                }
+                catch { /* status 表示は best-effort、失敗しても無害 */ }
+            };
 
             // 起動時に zombie staging dir (前回 update 失敗の残骸) を cleanup (#108 Phase 4)
             CleanupZombieStagings();
@@ -625,9 +645,7 @@ namespace TonePrism.Manager
                 var checker = new Services.UpdateChecker(dbManager.SettingsRepository);
                 // (#108 Phase 4 round 8 L-1) `Task.Run` 除去。`CheckAsync` は HttpClient.GetAsync 経由の
                 // 真の async で UI thread をブロックしないため、`Task.Run` で thread pool 1 つ消費 +
-                // 直ちに async state machine に戻る overhead が無駄だった。直接 await で同等動作 +
-                // thread pool 節約。`StartAutoBackupIfDue` 側は synchronous な `BackupService.RunAutoBackupIfDue`
-                // を呼ぶため `Task.Run` 必要で、対比的に本 path は不要。
+                // 直ちに async state machine に戻る overhead が無駄だった。直接 await で同等動作 + thread pool 節約。
                 Models.UpdateCheckResult result = await checker.CheckAsync(System.Threading.CancellationToken.None);
                 if (result == null || _updateSectionPanel == null) return;
                 _updateSectionPanel.OnCheckCompleted(result);
@@ -659,9 +677,8 @@ namespace TonePrism.Manager
                             // 自動副作用で user 操作直接 trigger ではない、(2) 非破壊的な metadata write
                             // (= 同 tag 上書きでも実害ゼロ、SQLite WAL で atomic)、(3) 直前に通知 dialog を
                             // user が dismiss したばかりで、直後に「他 PC 競合中」popup を出すと UX 二重表示
-                            // で煩雑。BackupService の `last_backup_at` 自動書込が同種 auto path で
-                            // CheckBeforeWrite ではなく TryAcquireBackupLease の独自 fence を採用しているのと
-                            // 同じ判断基準 (= auto path は popup ではなく atomic 性に依存)。本 PR の plan
+                            // で煩雑。background の auto 副作用 path は popup ではなく write の atomic 性に
+                            // 依存する、という判断基準。本 PR の plan
                             // で当初追加候補だったが、background thread + auto side-effect + 非破壊性 という
                             // 3 constraint で意図的に skip と文書化。
                             checker.MarkNotified(result.Latest.TagName);
@@ -744,98 +761,6 @@ namespace TonePrism.Manager
             return true; // (round 4 codex P2 NEW) dialog 表示完了 = success
         }
 
-        /// <summary>
-        /// 自動バックアップが期限到来していればバックグラウンドで実行する。
-        /// UIをブロックせず、ステータスバーで進捗を伝える。
-        /// </summary>
-        private async void StartAutoBackupIfDue()
-        {
-            if (dbManager == null) return;
-
-            try
-            {
-                if (!dbManager.BackupService.IsAutoBackupDue())
-                {
-                    return;
-                }
-
-                // (#170 followup) 右 zone (lblBackupStatus) で transient 表示、左 zone のゲーム数は維持。
-                UpdateBackupStatus("自動バックアップ実行中...", System.Drawing.Color.DarkBlue, autoRevert: false);
-                BackupResult result = await Task.Run(() =>
-                    dbManager.BackupService.RunAutoBackupIfDue(null, CancellationToken.None));
-
-                if (result == null) return;
-
-                if (result.IsSuccess)
-                {
-                    // (レビュー round5 #1) auto は無人の主動線。DB バックアップは成功でも、アセット控えが
-                    // 失敗/異常 (SMB 不達・games/ 欠損等) なら「緑チェック＝アセットも守られた」と誤認させない。
-                    // DB 失敗ほど致命的でない (アセットは best-effort・復元は PR3) ため modal は出さず橙ステータスで明示。
-                    var snap = result.AssetSnapshot;
-                    if (snap != null && (snap.IsFailed || snap.IsAnomaly))
-                    {
-                        UpdateBackupStatus(
-                            $"✓ DB バックアップ完了 ／ ⚠ ゲーム本体のバックアップは取得できませんでした ({snap.Message})",
-                            System.Drawing.Color.DarkOrange, autoRevert: true);
-                        Logger.Warn("[MainForm] 自動バックアップ: DB は成功、アセット控えは取得できませんでした: " + snap.Message);
-                    }
-                    else if (snap != null && snap.IsPartial)
-                    {
-                        // (round8 C1) 取得は成功したが一部フォルダを列挙できず skip = 部分的な控えの可能性。
-                        // 緑チェック (完全控え) と誤認させないため橙で明示する。
-                        UpdateBackupStatus(
-                            $"✓ DB バックアップ完了 ／ ⚠ ゲーム本体のバックアップで一部のフォルダを取得できませんでした ({snap.SkippedDirCount} 個スキップ)",
-                            System.Drawing.Color.DarkOrange, autoRevert: true);
-                        Logger.Warn($"[MainForm] 自動バックアップ: DB は成功、アセット控えは部分的 ({snap.SkippedDirCount} 個のフォルダを列挙できずスキップ)。");
-                    }
-                    else
-                    {
-                        UpdateBackupStatus(
-                            $"✓ 自動バックアップ完了: {System.IO.Path.GetFileName(result.FilePath)}",
-                            System.Drawing.Color.DarkGreen, autoRevert: true);
-                    }
-                    _backupSectionPanel.RefreshDisplay();
-                }
-                else if (result.IsFailed)
-                {
-                    UpdateBackupStatus($"✗ 自動バックアップ失敗: {result.Message}",
-                        System.Drawing.Color.DarkRed, autoRevert: true);
-                    // (累積監査 round 6 #9) 自動バックアップ失敗は 7 秒で消えるステータス表示だけだと、
-                    // 保存先 path の綴り間違い等で毎回静かに失敗していても運営が気づけない (履歴グリッドも
-                    // 「ファイル無し」判定で非表示になる)。バックアップは実データ保護の生命線で、失敗放置は
-                    // 「いざ復元しようとしたら過去ぶんが 1 件も無い」最悪ケースに直結するため、失敗時は
-                    // modal で明示通知して見落としを防ぐ。
-                    try
-                    {
-                        MessageBox.Show(this,
-                            "自動バックアップに失敗しました。\n\n" +
-                            result.Message + "\n\n" +
-                            "保存先フォルダの指定 (設定タブ)・ディスクの空き容量・書き込み権限を確認してください。\n" +
-                            "この状態が続くとバックアップが取得されないため、早めの対処をおすすめします。",
-                            "自動バックアップ失敗", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    }
-                    catch (Exception msgEx)
-                    {
-                        Logger.Warn("[MainForm] 自動バックアップ失敗通知の表示に失敗: " + msgEx.Message);
-                    }
-                }
-                else if (result.IsSkipped)
-                {
-                    // (#170 followup round 2 review #1) 他 PC で実行済 / disable 等で skip された場合、
-                    // 直前の `UpdateBackupStatus("自動バックアップ実行中...", autoRevert: false)` で表示した
-                    // indicator が永久残留する path を閉じる。empty string + autoRevert: true で
-                    // 即時 clear (Timer の 7 秒経過で消える、または重複呼出時に旧 timer が dispose される
-                    // ので問題なし)。
-                    UpdateBackupStatus(string.Empty, System.Drawing.SystemColors.ControlText, autoRevert: true);
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("[MainForm] StartAutoBackupIfDue エラー", ex);
-                UpdateBackupStatus($"✗ 自動バックアップエラー: {ex.Message}",
-                    System.Drawing.Color.DarkRed, autoRevert: true);
-            }
-        }
 
         private void InitializeDatabase()
         {
@@ -955,7 +880,7 @@ namespace TonePrism.Manager
         /// 極端 overflow は WinForms StatusStrip の chevron に逃げる設計。
         ///
         /// 注: 厳密な pixel 幅判定はしない (= 全角混じり / window resize / DPI scaling で精度差あり)。
-        /// 完全な message は呼出元 (e.g., `StartAutoBackupIfDue` の `Logger.Error`) で別途 log に残るため
+        /// 完全な message は呼出元 (e.g., `SessionBackupCoordinator` の `Logger.Warn`) で別途 log に残るため
         /// UI で truncated でも debug 可能、本 helper は user 視覚的 alarm 用 carry-best-effort と位置付け。
         /// </summary>
         private static string TruncateForStatusBar(string message)

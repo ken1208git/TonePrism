@@ -38,8 +38,14 @@ namespace TonePrism.Manager.Services
         /// <summary>(レビュー M1) pool 物理サイズのキャッシュ。UI から pool 全列挙 (SMB で重い) を避けるため、
         /// バックアップ時にバックグラウンドスレッドで算出してここに書き、UI は即時読みする。</summary>
         private const string PoolSizeFileName = ".poolsize";
-        /// <summary>GC で未参照 pool ファイルを消すときの猶予 (直近書込/並行 backup のレース回避)。テストで 0 に上書き可。</summary>
-        internal TimeSpan GcGracePeriod = TimeSpan.FromHours(1);
+        /// <summary>GC で未参照 pool ファイルを消すときの猶予 (直近書込/並行 backup のレース回避)。テストで 0 に上書き可。
+        /// (#295 round7 #2 の対応) 1h→**24h** に延長。多ホストが同一 SMB プールへ並行 backup/GC する際、片方の
+        /// **初回フル ingest (~6GB)** が grace を超える間に他ホストの GC が「取得中だがまだ目録未記載の blob」を
+        /// 未参照と誤判定して回収しうる窓 (= #250 round8 C2) を塞ぐため。書きたて blob を 24h 守れば、現実的な
+        /// ingest 時間 (数十分〜1h 級、24h は超えない) は確実に保護される。コスト: 削除済ゲームの未参照 blob が
+        /// 最大 24h 長く pool に残る (= 一時的な容量増のみ、~6GB 規模では誤差)。24h を超える ingest という非現実的
+        /// ケースだけは残り、それは heartbeat-lease が要る #250 の多ホスト整合領域。</summary>
+        internal TimeSpan GcGracePeriod = TimeSpan.FromHours(24);
 
         public AssetSnapshotService(DatabaseConnection conn, SettingsRepository settingsRepo, BackupService backupService)
         {
@@ -69,7 +75,8 @@ namespace TonePrism.Manager.Services
 
         /// <summary>games/ + guide/ を 1 世代取得する。DB バックアップ成功直後に同一 timestamp/trigger で best-effort 呼び出し。</summary>
         public SnapshotResult CreateSnapshot(string timestamp, string triggerType,
-            IProgress<ProgressInfo> progress = null, CancellationToken token = default(CancellationToken))
+            IProgress<ProgressInfo> progress = null, CancellationToken token = default(CancellationToken),
+            string replacedManifestPath = null)
         {
             string tmpManifest = null;
             try
@@ -94,7 +101,7 @@ namespace TonePrism.Manager.Services
                     if (gameCount > 0 || hadHistory)
                     {
                         Logger.Warn("[AssetSnapshot] games/ も guide/ も見つかりません (DB games=" + gameCount + " / 履歴=" + hadHistory + " → SMB 不達等の異常の可能性)。今回の控えはスキップします。");
-                        return SnapshotResult.SkippedAnomaly("ゲーム本体のフォルダが見つかりません (異常の可能性)");
+                        return SnapshotResult.SkippedAnomaly("ゲームファイルのフォルダが見つかりません (異常の可能性)");
                     }
                     Logger.Info("[AssetSnapshot] games/ も guide/ も無く DB にも games 未登録のため控えなし (新規 install と判断)。");
                     return SnapshotResult.Success(null, 0, 0, 0);
@@ -161,7 +168,7 @@ namespace TonePrism.Manager.Services
                 File.Move(FileOperationService.EnsureLongPath(tmpManifest), FileOperationService.EnsureLongPath(manifestPath));
                 tmpManifest = null;
 
-                ApplyRetentionAndGc(triggerType, stats.NewBytes);
+                ApplyRetentionAndGc(triggerType, stats.NewBytes, replacedManifestPath);
 
                 Logger.Info(string.Format("[AssetSnapshot] 控え完了: {0} ({1} files / 論理 {2:F2}GB / 新規コピー {3:F2}MB)",
                     Path.GetFileName(manifestPath), stats.FileCount, stats.Bytes / 1073741824.0, stats.NewBytes / 1048576.0));
@@ -307,7 +314,7 @@ namespace TonePrism.Manager.Services
                 if (total > 0 && progress != null)
                 {
                     int pct = (int)((double)stats.FileCount / total * 100);
-                    progress.Report(new ProgressInfo(pct > 100 ? 100 : pct, "ゲーム本体をバックアップ中...", Path.GetFileName(file)));
+                    progress.Report(new ProgressInfo(pct > 100 ? 100 : pct, "ゲームファイルをバックアップ中...", Path.GetFileName(file)));
                 }
             }
             string[] dirs;
@@ -323,6 +330,12 @@ namespace TonePrism.Manager.Services
                     Logger.Warn("[AssetSnapshot] reparse point をスキップ: " + subDir);
                     continue;
                 }
+                // (round9 L2) ゲーム削除の retry 退避フォルダ games/{id}.pending-delete-{guid} は、物理削除を諦めた
+                // (pendingGivenUp) 場合に games/ 配下へ残る。これは「削除途中のゴミ」であって控えるべきゲーム本体では
+                // ないため snapshot 対象から除外する (削除したはずのゲーム実体が manifest に復活し、復元時に蘇る混乱を防ぐ)。
+                // 削除が成功した通常経路ではフォルダは RunAfterOperation より前に消えているのでそもそも列挙されない。
+                if (Path.GetFileName(subDir).IndexOf(".pending-delete-", StringComparison.OrdinalIgnoreCase) >= 0)
+                    continue;
                 WalkTree(subDir, relPrefix + "/" + Path.GetFileName(subDir), poolRoot, cache, entries, stats, progress, token, total);
             }
         }
@@ -447,10 +460,20 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>(レビュー L2) 全体を try/catch で best-effort 化し、retention/GC の例外で「manifest 書込済なのに
-        /// 控え全体が Failed」と誤報告されるのを防ぐ。(レビュー M3) **GC は auto に限定**: auto は lease で多ホスト排他
-        /// されるため並行 GC が起きない。manual manifest は retention 対象外で未参照 blob を生まないので GC 不要、
-        /// サイズキャッシュだけ更新する。</summary>
-        private void ApplyRetentionAndGc(string triggerType, long newBytesCopied)
+        /// 控え全体が Failed」と誤報告されるのを防ぐ。(レビュー M3) **GC は auto に限定**: manual manifest は retention
+        /// 対象外で未参照 blob を生まないので GC 不要、サイズキャッシュだけ更新する。
+        /// (#295 round7 — stale コメント訂正) 旧 docstring は「auto は **lease で多ホスト排他されるため並行 GC が
+        /// 起きない**」と書いていたが、その lease (`TryAcquireBackupLease`) は #295 で撤去済 (操作単位トリガ移行で
+        /// auto を interval 毎・全ホスト 1 回に律速していた間接的排他が消えた)。操作単位化 + lease 撤去で多ホスト並行
+        /// GC の窓自体は拡大した (旧: 全ホストで interval 毎 1 回 → 新: 全ホストが毎操作)。**現状の緩和は Gc​GracePeriod
+        /// = 24h** (round7 #2 の対応で 1h から延長): 多ホストが並行 backup/GC する際、片方の **初回フル ingest (~6GB)**
+        /// が走る間に他ホストの GC が「取得中だが目録未記載の blob」を未参照と誤判定して回収しうる窓 (= #250 round8 C2)
+        /// を、書きたて blob を 24h 守ることで塞ぐ (現実的 ingest は数十分〜1h 級で 24h を超えない)。24h を超える非現実的
+        /// ingest だけ残り、それは heartbeat-lease が要る #250 の多ホスト整合領域。なお同 PC 重複起動は Program.cs の
+        /// Named Mutex で物理 block 済、別 PC 同時編集は SessionConflictHelper が警告するので、C2 に至るには警告を無視
+        /// した別 PC 同時編集 + 24h 超 ingest の二重条件が要る。**被害も限定的**: GC は pool のみ対象で live games/ は
+        /// 触らないため、壊れるのは当該バックアップ世代だけ (次回 backup で live から再コピーされ自己回復、live は無事)。</summary>
+        private void ApplyRetentionAndGc(string triggerType, long newBytesCopied, string excludeManifestPath = null)
         {
             try
             {
@@ -463,7 +486,17 @@ namespace TonePrism.Manager.Services
                         string autoDir = Path.Combine(GetSnapshotRootDirectory(), "auto");
                         if (Directory.Exists(autoDir))
                         {
-                            var stale = Directory.GetFiles(ForceLong(autoDir), "*" + ManifestExt)
+                            // (round6 High) replace-in-session で coordinator がこの直後に消す前 manifest を母数から除外する
+                            // (DB 側 ApplyRetention と同型。含めると過去世代の manifest を 1 件余計に削り、その manifest だけが
+                            // 参照していた pool blob まで直後の GarbageCollectPool で道連れに消える)。除外世代は coordinator が消す。
+                            // 比較はファイル名で行う: Directory.GetFiles(ForceLong(...)) は `\\?\` prefix 付き path を返す一方、
+                            // excludeManifestPath (CreateSnapshot の戻り) は prefix 無しなので full path 比較だと一致しない。
+                            // manifest 名は auto dir 内で一意 (ResolveUniqueManifest 保証) なのでファイル名比較で過不足なし。
+                            string excludeManifestName = string.IsNullOrEmpty(excludeManifestPath) ? null : Path.GetFileName(excludeManifestPath);
+                            var manifests = Directory.GetFiles(ForceLong(autoDir), "*" + ManifestExt).AsEnumerable();
+                            if (excludeManifestName != null)
+                                manifests = manifests.Where(p => !string.Equals(Path.GetFileName(p), excludeManifestName, StringComparison.OrdinalIgnoreCase));
+                            var stale = manifests
                                 .OrderByDescending(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase).Skip(count).ToList();
                             foreach (var m in stale)
                             {

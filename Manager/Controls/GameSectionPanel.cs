@@ -140,6 +140,9 @@ namespace TonePrism.Manager.Controls
                     MessageBox.Show(
                         $"ゲーム「{form.AddedGame.Title}」を追加しました。",
                         "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // (#295 round3 #3) 成果の確認 (MessageBox) を先に見せてから、後追い best-effort でバックアップ
+                    // (版up/削除と順序統一)。ゲーム追加は games/ を変えるので DB + ゲーム本体を控える (replace-in-session)。
+                    _dbManager.SessionBackupCoordinator.RunAfterOperation(this.FindForm(), assetsChanged: true, "ゲーム追加");
                 }
             }
         }
@@ -177,12 +180,17 @@ namespace TonePrism.Manager.Controls
                     MessageBox.Show(
                         $"ゲーム「{form.EditedGame.Title}」を更新しました。",
                         "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // (#295 round3 #3) 成果の確認を先に (版up/削除と順序統一)。ゲーム本体を変えた編集 (id rename /
+                    // 版削除 / 外部画像取込) のときだけアセットも控える。メタデータのみは DB だけ (form.AssetsChangedOnDisk)。
+                    _dbManager.SessionBackupCoordinator.RunAfterOperation(this.FindForm(), form.AssetsChangedOnDisk, "ゲーム編集");
                 }
                 else if (form.DataChangedOutsideOk)
                 {
                     // (#209 review finding 1) バージョン即時削除は OK を介さず DB 確定するため、Cancel/×で閉じても
                     // グリッドを再読込する。怠ると active 版付け替え後にメイン画面が削除済み版を出し続ける (stale)。
                     LoadGames();
+                    // (#295) 版即時削除は games/{id}/v{} を消す = ゲーム本体が変わるのでアセットも控える。
+                    _dbManager.SessionBackupCoordinator.RunAfterOperation(this.FindForm(), form.AssetsChangedOnDisk, "バージョン削除");
                 }
             }
         }
@@ -458,6 +466,8 @@ namespace TonePrism.Manager.Controls
                             "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
                         LoadGames();
+                        // (#295) バージョンアップは games/{id}/v{} を作るので DB + ゲーム本体を控える。
+                        _dbManager.SessionBackupCoordinator.RunAfterOperation(this.FindForm(), assetsChanged: true, "バージョンアップ");
                     }
                     else
                     {
@@ -708,6 +718,9 @@ namespace TonePrism.Manager.Controls
                     "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             LoadGames();
+            // (#295) ゲーム削除のバックアップ。フォルダを退避/削除した (gamesRenamed) ときだけ games/ が変わるので
+            // アセットも控える。DB だけ削除 (フォルダ温存) なら DB だけ控えて重い走査を skip。
+            _dbManager.SessionBackupCoordinator.RunAfterOperation(this.FindForm(), assetsChanged: gamesRenamed, "ゲーム削除");
         }
 
         private void btnRefresh_Click(object sender, EventArgs e)

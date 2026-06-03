@@ -78,25 +78,10 @@ namespace TonePrism.Manager.Services
             return SortNewestFirst(list);
         }
 
-        /// <summary>auto のみ走査 (retention 件数判定 / 削除後の last_backup_at 巻き戻し用)。</summary>
-        public List<BackupCatalogEntry> ScanAuto()
-        {
-            var list = new List<BackupCatalogEntry>();
-            string root = _backupService.GetEffectiveDestinationDirectory();
-            ScanFolder(list, Path.Combine(root, "auto"), "auto_*.db", "auto", AutoRegex);
-            return SortNewestFirst(list);
-        }
-
         /// <summary>最終バックアップ表示用。auto / manual / safety を含めた最新 1 件 (無ければ null)。</summary>
         public BackupCatalogEntry GetLastSuccess()
         {
             return ScanAll(includeSafety: true).FirstOrDefault();
-        }
-
-        /// <summary>削除後の last_backup_at 巻き戻し用。最新の auto バックアップ 1 件 (無ければ null)。</summary>
-        public BackupCatalogEntry GetLastAuto()
-        {
-            return ScanAuto().FirstOrDefault();
         }
 
         private static List<BackupCatalogEntry> SortNewestFirst(List<BackupCatalogEntry> list)

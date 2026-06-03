@@ -76,11 +76,11 @@ namespace TonePrism.Manager.Controls
                         long poolBytes = _dbManager.AssetSnapshotService.GetPoolPhysicalBytes();
                         // (round8 A/L1) .poolsize 未更新/読込失敗時の 0 は「計測中」に倒す (実使用 0 と未計測を区別)。
                         string poolDisp = poolBytes > 0 ? FormatBytes(poolBytes) : "計測中";
-                        lblLastSnapshot.Text = $"ゲーム本体 {snap.FileCount} ファイル（実使用 {poolDisp}）";
+                        lblLastSnapshot.Text = $"ゲームファイル {snap.FileCount} 個（実使用 {poolDisp}）";
                     }
                     else
                     {
-                        lblLastSnapshot.Text = "ゲーム本体: 未取得";
+                        lblLastSnapshot.Text = "ゲームファイル: 未取得";
                     }
                 }
 
@@ -142,20 +142,19 @@ namespace TonePrism.Manager.Controls
                 // (#250 / レビュー M2・L2) このバックアップに同梱したアセット控えの結果を **result から直接** 使う
                 // (GetLatestSnapshot + 文字列マッチは多ホスト同秒で別ホストの世代を拾う恐れがあるため廃止)。
                 var snap = result.AssetSnapshot;
-                if (snap != null && snap.IsSuccess && snap.FileCount > 0)
+                // (UX) クリーン成功時に「ゲーム本体もバックアップしました（N ファイル / 実使用 X）」を明示するのは冗長
+                // （「バックアップ＝全部まとめて控える」が当たり前に取られる）。「便りがないのは良い便り」で、**問題があるときだけ**
+                // 出す。部分取得・失敗・異常は黙らず併記して「DB 成功 ≠ ゲーム本体の控えあり」を隠さない（レビュー round2-7 の
+                // 不変条件は維持）。件数・実使用サイズはバックアップタブ（lblLastSnapshot）で常時確認できる。
+                if (snap != null && snap.IsSuccess && snap.IsPartial)
                 {
-                    // 控えは中身を共有プールに集約するので「控え全体の実使用量」を出す (見かけより小さい正直な値)。
-                    long poolBytes = _dbManager.AssetSnapshotService.GetPoolPhysicalBytes();
-                    string poolDisp = poolBytes > 0 ? FormatBytes(poolBytes) : "計測中"; // (round8 A/L1) 0 B 矛盾表示を回避
-                    msg += $"\n\nゲーム本体 (games/guide) もバックアップしました:\n{snap.FileCount} ファイル ／ 全体の実使用: {poolDisp}";
                     // (round8 C1) 深部フォルダの列挙失敗で一部 skip した場合は「部分的な控え」を明示 (完全控えと誤認させない)。
-                    if (snap.IsPartial)
-                        msg += $"\n\n⚠ ただし {snap.SkippedDirCount} 個のフォルダを列挙できずスキップしました（部分的なバックアップの可能性。SMB 一過性 I/O / 権限等）。";
+                    msg += $"\n\n⚠ ゲームファイル (games/guide) のバックアップで {snap.SkippedDirCount} 個のフォルダを列挙できずスキップしました（部分的なバックアップの可能性。SMB 一過性 I/O / 権限等）。";
                 }
                 else if (snap != null && (snap.IsFailed || snap.IsAnomaly))
                 {
                     // (レビュー M2) 失敗/異常は黙らず併記 (DB バックアップ自体は成功)。設定で無効・通常スキップは触れない。
-                    msg += $"\n\n⚠ ゲーム本体 (games/guide) のバックアップは取得できませんでした（DB バックアップは成功）。\n{snap.Message}";
+                    msg += $"\n\n⚠ ゲームファイル (games/guide) のバックアップは取得できませんでした（DB バックアップは成功）。\n{snap.Message}";
                 }
                 MessageBox.Show(msg, "バックアップ成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -403,24 +402,10 @@ namespace TonePrism.Manager.Controls
                 }
             }
 
-            // (追加精査 ⑦) auto を削除した場合、last_backup_at を「残った中で最新の auto の開始時刻」に rewind する。
-            // さもないと「最新の自動バックアップを消して取り直したい」操作で IsAutoBackupDue が間隔未到達と
-            // 誤判定し、次の自動バックアップが skip される。残りが無ければ 0 (= 初回扱い、次回判定で取得される)。
-            // 手動 / 退避 (safety) は last_backup_at に無関係なので何もしない。
-            if (entry.TriggerType == "auto")
-            {
-                // File.Delete 後に再走査するので、いま消した分は除外される。
-                var newLatest = _dbManager.BackupCatalogService.GetLastAuto();
-                long newLastBackupAt = newLatest != null ? newLatest.StartedAt : 0;
-                // (累積監査 round 6 M8) 削除中に別 PC が新しい auto を取得して last_backup_at を前進させていた場合に
-                // 古い値で上書きして二重バックアップを誘発しないよう、rewind になる (= 現在値より小さくなる) ときだけ更新。
-                long currentLastBackupAt = _dbManager.SettingsRepository.GetInt64("last_backup_at", 0);
-                if (newLastBackupAt < currentLastBackupAt)
-                {
-                    _dbManager.SettingsRepository.SetInt64("last_backup_at", newLastBackupAt);
-                }
-            }
-
+            // (#295) 旧実装はここで auto 削除時に last_backup_at を rewind していた (起動時の IsAutoBackupDue が
+            // 「間隔未到達」と誤判定して次の自動バックアップを skip するのを防ぐため)。#295 で起動時の時間トリガを
+            // 廃止し last_backup_at は **もはやトリガ gate ではない** (= 表示は GetLastSuccess のファイル走査由来) ため、
+            // rewind は不要になった (= デッドロジックなので撤去)。
             RefreshDisplay();
         }
 

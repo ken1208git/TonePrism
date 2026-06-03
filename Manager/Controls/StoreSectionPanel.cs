@@ -110,6 +110,8 @@ namespace TonePrism.Manager.Controls
                 if (form.ShowDialog() == DialogResult.OK)
                 {
                     LoadSections();
+                    // (#295) ストアセクションは DB のみの変更なので DB だけ控える (重い games/ 走査は skip)。
+                    _dbManager.SessionBackupCoordinator.RunAfterOperation(this.FindForm(), assetsChanged: false, "ストアセクション追加");
                 }
             }
         }
@@ -139,6 +141,8 @@ namespace TonePrism.Manager.Controls
                 if (form.ShowDialog() == DialogResult.OK)
                 {
                     LoadSections();
+                    // (#295) DB のみの変更。DB だけ控える。
+                    _dbManager.SessionBackupCoordinator.RunAfterOperation(this.FindForm(), assetsChanged: false, "ストアセクション編集");
                 }
             }
         }
@@ -166,6 +170,8 @@ namespace TonePrism.Manager.Controls
                 {
                     _dbManager.DeleteSection(section.SectionId);
                     LoadSections();
+                    // (#295) DB のみの変更。DB だけ控える。
+                    _dbManager.SessionBackupCoordinator.RunAfterOperation(this.FindForm(), assetsChanged: false, "ストアセクション削除");
                 }
                 catch (SQLiteException ex)
                 {
@@ -209,6 +215,8 @@ namespace TonePrism.Manager.Controls
                 // 直したのと同型、store 側の負債解消)。a は b の order、b は a の order を持つ。
                 _dbManager.SwapSectionOrder(sectionA.SectionId, sectionB.DisplayOrder, sectionB.SectionId, sectionA.DisplayOrder);
                 LoadSections();
+                // (#295 round3 #2) 並び替えも display_order を書き換える DB 変更操作なので控える (DB のみ)。
+                _dbManager.SessionBackupCoordinator.RunAfterOperation(this.FindForm(), assetsChanged: false, "ストアセクション並び替え");
 
                 if (newIdx < dgvSections.Rows.Count)
                 {

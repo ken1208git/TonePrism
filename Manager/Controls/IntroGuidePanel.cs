@@ -118,7 +118,12 @@ namespace TonePrism.Manager.Controls
             if (SessionConflictHelper.CheckBeforeWrite(this, "初回説明 スライド追加") == DialogResult.Cancel) return;
             using (var form = new IntroSlideEditForm(_dbManager))
             {
-                if (form.ShowDialog(FindForm()) == DialogResult.OK) LoadSlides();
+                if (form.ShowDialog(FindForm()) == DialogResult.OK)
+                {
+                    LoadSlides();
+                    // (#295) guide/ に新規画像を取り込んだときだけアセットも控える (本文のみは DB だけ)。
+                    _dbManager.SessionBackupCoordinator.RunAfterOperation(FindForm(), form.AssetsChangedOnDisk, "スライド追加");
+                }
             }
         }
 
@@ -134,7 +139,12 @@ namespace TonePrism.Manager.Controls
             if (SessionConflictHelper.CheckBeforeWrite(this, "初回説明 スライド編集") == DialogResult.Cancel) return;
             using (var form = new IntroSlideEditForm(_dbManager, slide))
             {
-                if (form.ShowDialog(FindForm()) == DialogResult.OK) LoadSlides();
+                if (form.ShowDialog(FindForm()) == DialogResult.OK)
+                {
+                    LoadSlides();
+                    // (#295) guide/ に新規画像を取り込んだときだけアセットも控える (本文のみは DB だけ)。
+                    _dbManager.SessionBackupCoordinator.RunAfterOperation(FindForm(), form.AssetsChangedOnDisk, "スライド編集");
+                }
             }
         }
 
@@ -158,6 +168,7 @@ namespace TonePrism.Manager.Controls
                 // 画像実体は「他スライドが同じ画像を参照していない」場合のみ guide/ から削除 (orphan 防止)。
                 // 参照判定は削除直後の **最新 DB** を再取得して行う (in-memory snapshot 依存だと、前回ロード以降に
                 // 他セッションが同一画像を参照するスライドを足していた場合に使用中画像を消しうる、#274 review #6)。
+                bool imageRemoved = false;
                 if (!string.IsNullOrWhiteSpace(slide.ImagePath))
                 {
                     bool referencedByOthers = _dbManager.GetAllIntroSlides()
@@ -165,9 +176,12 @@ namespace TonePrism.Manager.Controls
                     if (!referencedByOthers)
                     {
                         IntroGuideAssetHelper.DeleteImage(PathManager.GuideFolder, slide.ImagePath);
+                        imageRemoved = true;
                     }
                 }
                 LoadSlides();
+                // (#295) guide/ から画像実体を消したときだけアセットも控える (DB だけのスライド削除なら DB だけ)。
+                _dbManager.SessionBackupCoordinator.RunAfterOperation(FindForm(), imageRemoved, "スライド削除");
             }
             catch (Exception ex)
             {
@@ -197,6 +211,8 @@ namespace TonePrism.Manager.Controls
                 // half-write が起きうるため、atomic な swap に委ねる (a は b の order、b は a の order を持つ)。
                 _dbManager.SwapIntroSlideOrder(a.SlideId, b.DisplayOrder, b.SlideId, a.DisplayOrder);
                 LoadSlides();
+                // (#295 round3 #2) 並び替えも display_order を書き換える DB 変更操作なので控える (DB のみ)。
+                _dbManager.SessionBackupCoordinator.RunAfterOperation(FindForm(), assetsChanged: false, "スライド並び替え");
                 // 移動後の行を選び直す。
                 var moved = _slides?.FirstOrDefault(s => s.SlideId == slide.SlideId);
                 if (moved != null)
