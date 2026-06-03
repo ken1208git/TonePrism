@@ -330,6 +330,12 @@ namespace TonePrism.Manager.Services
                     Logger.Warn("[AssetSnapshot] reparse point をスキップ: " + subDir);
                     continue;
                 }
+                // (round9 L2) ゲーム削除の retry 退避フォルダ games/{id}.pending-delete-{guid} は、物理削除を諦めた
+                // (pendingGivenUp) 場合に games/ 配下へ残る。これは「削除途中のゴミ」であって控えるべきゲーム本体では
+                // ないため snapshot 対象から除外する (削除したはずのゲーム実体が manifest に復活し、復元時に蘇る混乱を防ぐ)。
+                // 削除が成功した通常経路ではフォルダは RunAfterOperation より前に消えているのでそもそも列挙されない。
+                if (Path.GetFileName(subDir).IndexOf(".pending-delete-", StringComparison.OrdinalIgnoreCase) >= 0)
+                    continue;
                 WalkTree(subDir, relPrefix + "/" + Path.GetFileName(subDir), poolRoot, cache, entries, stats, progress, token, total);
             }
         }

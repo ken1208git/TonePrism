@@ -276,7 +276,10 @@ namespace TonePrism.Manager.Services
                     fileSize = new FileInfo(destinationPath).Length;
                 }
 
-                // (#295) last_backup_at はトリガ gate ではなくなったが、履歴 / 「最終バックアップ」表示用に更新する。
+                // (#295) last_backup_at はトリガ gate ではなくなった。(round9 L1 コメント訂正) **現状この値を read する
+                // 経路は無い** — 「最終バックアップ」表示は BackupCatalogService.GetLastSuccess のファイル走査由来で、
+                // lease 撤去で due 判定の read も消えた。将来の履歴/外部 DB 参照用に残す dead-but-cheap write (旧コメントの
+                // 「表示用に更新」は実態と乖離していたため訂正)。
                 _settingsRepo.SetInt64("last_backup_at", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
 
                 // リテンションは成功時のみ適用 (round6 High: replace 対象の前世代を母数から除外)

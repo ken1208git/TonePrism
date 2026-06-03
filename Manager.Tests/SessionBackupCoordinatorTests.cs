@@ -207,6 +207,23 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
+        public void AssetSnapshot_ExcludesPendingDeleteFolder()
+        {
+            // (round9 L2) ゲーム削除の retry 退避フォルダ games/{id}.pending-delete-{guid} は、物理削除を諦めて games/ 配下に
+            // 残っても snapshot に取り込まない (削除したはずのゲーム実体が manifest に復活する混乱を防ぐ)。
+            WriteGame("g1/a.txt", "alpha");
+            WriteGame("g1.pending-delete-deadbeefdeadbeef/old.txt", "orphan"); // 削除退避フォルダの残骸
+            Assert.True(Run(true).IsSuccess);
+
+            string manAutoDir = Path.Combine(Dest, "asset_snapshots", "auto");
+            string[] manifests = Directory.GetFiles(manAutoDir, "*.manifest");
+            Assert.Single(manifests);
+            string body = File.ReadAllText(manifests[0]);
+            Assert.Contains("g1/a.txt", body);          // 通常のゲームは控える
+            Assert.DoesNotContain("pending-delete", body); // 退避フォルダは除外
+        }
+
+        [Fact]
         public void Disabled_Skips()
         {
             _settings.SetString(SettingsKeys.BackupAutoEnabled, "false");
