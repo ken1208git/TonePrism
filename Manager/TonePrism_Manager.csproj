@@ -161,9 +161,6 @@
     <Compile Include="Controls\SettingsSectionPanel.Designer.cs">
       <DependentUpon>SettingsSectionPanel.cs</DependentUpon>
     </Compile>
-    <Compile Include="Controls\BackupProgressStrip.cs">
-      <SubType>UserControl</SubType>
-    </Compile>
     <Compile Include="Controls\BackupSectionPanel.cs">
       <SubType>UserControl</SubType>
     </Compile>

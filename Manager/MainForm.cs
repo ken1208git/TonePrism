@@ -29,7 +29,11 @@ namespace TonePrism.Manager
         private UpdateSectionPanel _updateSectionPanel;
         private IntroGuidePanel _introGuidePanel;
         private System.Windows.Forms.TabPage _introTab; // (#253) ハンドル生成後に追加するため field 保持
-        private BackupProgressStrip _backupProgressStrip; // (#299) 下部の非ブロッキングバックアップ進捗ストリップ
+        // (#299) 非ブロッキングバックアップの進捗を既存ステータスバー (statusStrip1) に統合する item 群 (1 段・左詰め)。
+        private System.Windows.Forms.ToolStripProgressBar _tsBackupBar;
+        private System.Windows.Forms.ToolStripStatusLabel _tsBackupLabel;
+        private System.Windows.Forms.ToolStripButton _tsBackupCancel;
+        private System.Windows.Forms.ToolStripButton _tsBackupRecapture;
 
         public MainForm()
         {
@@ -618,40 +622,46 @@ namespace TonePrism.Manager
                 catch { /* status 表示は best-effort、失敗しても無害 */ }
             };
 
-            // (#299) 非ブロッキングバックアップの進捗ストリップを下部に配置し、coordinator のコールバックを UI スレッドへ
-            // marshal する。worker はバックグラウンドスレッドなので ProgressReporter / BackupRunningChanged は別スレッドから
-            // 呼ばれる。**z-order / 見え方は実機目視で要確認**: 素直に Add すると最下端 (status strip の下) に来る。
-            // status strip より上に出したい等あれば実機の見え方を見て z-order を調整する (SendToBack は Fill タブ裏に
-            // 回り込んで不可視になりうるので使わない)。
-            _backupProgressStrip = new BackupProgressStrip();
-            this.Controls.Add(_backupProgressStrip);
-            _backupProgressStrip.CancelRequested += (s, e) =>
+            // (#299) 非ブロッキングバックアップの進捗を **既存の下部ステータスバー (statusStrip1) に統合** する (別バーを
+            // 足して 2 段にせず 1 段)。進捗バー + 現在ファイル + 中止 を lblStatus の右へ **左詰め** で並べ、未バックアップ時は
+            // 警告 + 「今すぐバックアップ」(1 クリック復旧) に切替。右寄せの lblBackupStatus (✓/⚠) は従来どおり右端。worker は
+            // バックグラウンドスレッドなので ProgressReporter / BackupRunningChanged は UI スレッドへ marshal する。
+            _tsBackupBar = new System.Windows.Forms.ToolStripProgressBar
             {
-                try { dbManager?.SessionBackupCoordinator?.CancelCurrentBackup(); } catch { }
+                Name = "_tsBackupBar", Visible = false, Style = System.Windows.Forms.ProgressBarStyle.Continuous, Minimum = 0, Maximum = 100
             };
-            _backupProgressStrip.RecaptureRequested += (s, e) =>
+            _tsBackupBar.Size = new System.Drawing.Size(160, 16);
+            _tsBackupLabel = new System.Windows.Forms.ToolStripStatusLabel
+            {
+                Name = "_tsBackupLabel", Visible = false, AutoSize = true, Overflow = System.Windows.Forms.ToolStripItemOverflow.AsNeeded
+            };
+            _tsBackupCancel = new System.Windows.Forms.ToolStripButton
+            {
+                Name = "_tsBackupCancel", Text = "中止", Visible = false, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text
+            };
+            _tsBackupRecapture = new System.Windows.Forms.ToolStripButton
+            {
+                Name = "_tsBackupRecapture", Text = "今すぐバックアップ", Visible = false, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text
+            };
+            statusStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { _tsBackupBar, _tsBackupLabel, _tsBackupCancel, _tsBackupRecapture });
+            _tsBackupCancel.Click += (s, e) => { try { dbManager?.SessionBackupCoordinator?.CancelCurrentBackup(); } catch { } };
+            _tsBackupRecapture.Click += (s, e) =>
             {
                 // 未バックアップからの 1 クリック復旧 = アセット込みで取り直す (操作単位の enqueue に乗る)。
                 try { dbManager?.SessionBackupCoordinator?.RunAfterOperation(this, assetsChanged: true, "再バックアップ"); } catch { }
             };
 
             var backupCoord = dbManager.SessionBackupCoordinator;
-            // 進捗バー + 現在ファイルの更新 (バックグラウンド worker → UI スレッドへ marshal)。
             backupCoord.ProgressReporter = (p) =>
             {
                 try
                 {
                     if (IsDisposed || p == null) return;
-                    Action apply = () =>
-                    {
-                        _backupProgressStrip.ShowRunning();
-                        _backupProgressStrip.UpdateProgress(p.Percentage, string.IsNullOrEmpty(p.Detail) ? p.Message : p.Detail);
-                    };
+                    Action apply = () => ShowBackupProgress(p.Percentage, string.IsNullOrEmpty(p.Detail) ? p.Message : p.Detail);
                     if (InvokeRequired) BeginInvoke(apply); else apply();
                 }
                 catch { /* 進捗表示は best-effort */ }
             };
-            // 実行中フラグの変化: 開始→ストリップ表示 / 終了→未バックアップなら警告+「今すぐバックアップ」を残し、健全なら非表示。
             backupCoord.BackupRunningChanged = (running) =>
             {
                 try
@@ -659,12 +669,9 @@ namespace TonePrism.Manager
                     if (IsDisposed) return;
                     Action apply = () =>
                     {
-                        if (running)
-                            _backupProgressStrip.ShowRunning();
-                        else if (backupCoord.SessionAssetCaptureFailed)
-                            _backupProgressStrip.ShowUnhealthy("⚠ ゲームファイルが未バックアップです（DB は保存済み）");
-                        else
-                            _backupProgressStrip.HideStrip();
+                        if (running) ShowBackupProgress(0, "バックアップ中...");
+                        else if (backupCoord.SessionAssetCaptureFailed) ShowBackupUnhealthy("⚠ ゲームファイルが未バックアップです（DB は保存済み）");
+                        else HideBackupProgress();
                     };
                     if (InvokeRequired) BeginInvoke(apply); else apply();
                 }
@@ -949,6 +956,40 @@ namespace TonePrism.Manager
                 _backupStatusClearTimer.Tick += BackupStatusClearTimer_Tick;
                 _backupStatusClearTimer.Start();
             }
+        }
+
+        // (#299) 下部ステータスバーに統合したバックアップ進捗 item の表示制御。いずれも UI スレッドで呼ぶこと。
+        /// <summary>実行中: 進捗バー + 現在ファイル + 中止 を表示 (左詰め、lblStatus の右)。</summary>
+        private void ShowBackupProgress(int percent, string text)
+        {
+            int p = percent < 0 ? 0 : (percent > 100 ? 100 : percent);
+            try { _tsBackupBar.Value = p; } catch { /* Maximum 変更レース等は無害 */ }
+            _tsBackupBar.Visible = true;
+            _tsBackupLabel.ForeColor = System.Drawing.SystemColors.ControlText;
+            if (!string.IsNullOrEmpty(text)) _tsBackupLabel.Text = text;
+            _tsBackupLabel.Visible = true;
+            _tsBackupCancel.Visible = true;
+            _tsBackupRecapture.Visible = false;
+        }
+
+        /// <summary>未バックアップ (失敗/中断): 警告 + 「今すぐバックアップ」(1 クリック復旧) を表示。</summary>
+        private void ShowBackupUnhealthy(string message)
+        {
+            _tsBackupBar.Visible = false;
+            _tsBackupLabel.ForeColor = System.Drawing.Color.DarkOrange;
+            _tsBackupLabel.Text = message;
+            _tsBackupLabel.Visible = true;
+            _tsBackupCancel.Visible = false;
+            _tsBackupRecapture.Visible = true;
+        }
+
+        /// <summary>idle かつ健全: バックアップ進捗 item を全て非表示。</summary>
+        private void HideBackupProgress()
+        {
+            _tsBackupBar.Visible = false;
+            _tsBackupLabel.Visible = false;
+            _tsBackupCancel.Visible = false;
+            _tsBackupRecapture.Visible = false;
         }
 
         /// <summary>
