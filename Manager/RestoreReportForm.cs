@@ -296,8 +296,9 @@ namespace TonePrism.Manager
             sb.AppendLine();
             if (_result.BrokenGames.Count > 0 || _result.MissingVersionFolders.Count > 0)
             {
+                string dbWord = _postRestore ? "復元した DB" : "今の DB";
                 sb.AppendLine("  2. 上の「想定パス／想定フォルダ」に当たるゲームフォルダを用意します。");
-                sb.AppendLine("     復元した DB と同じ時点の games フォルダが、別 PC・別ドライブ・");
+                sb.AppendLine("     " + dbWord + "と同じ時点の games フォルダが、別 PC・別ドライブ・");
                 sb.AppendLine("     共有サーバー等に残っていれば、そのフォルダを games/ 配下にコピーして");
                 sb.AppendLine("     ください（フォルダ名＝ゲーム ID／バージョン leaf を一致させる）。");
                 sb.AppendLine();
@@ -305,9 +306,22 @@ namespace TonePrism.Manager
                 sb.AppendLine("     このチェックをもう一度実行できます（Manager の再起動では再チェックされません）。");
                 sb.AppendLine("     「起動できないゲーム」が 0 件になれば整合した状態です。");
                 sb.AppendLine();
-                sb.AppendLine("  4. 当時の games フォルダがもう手に入らない場合は、無理に DB を合わせず、");
-                sb.AppendLine("     上の退避ファイル（safety_*.db）からいまの games に合う DB に");
-                sb.AppendLine("     戻すのが安全です（バックアップ画面の「復元」で safety を選択）。");
+                if (_postRestore)
+                {
+                    // (round: ユーザー指摘) safety_*.db = 復元の直前に退避した DB = 復元前の状態。これを戻すのは
+                    // 「今回の復元を取り消す」操作であって、元の DB に問題があって復元したのなら問題も一緒に戻る。
+                    // 「今の games に合わせるなら safety が確実」とだけ書くのは誤誘導なので、取り消しである旨と注意を明示。
+                    sb.AppendLine("  4. 当時の games フォルダが手に入らない場合は、今回の復元自体を取り消せます。");
+                    sb.AppendLine("     復元の直前の DB が safety_*.db に退避されているので、それを「復元」で戻せば、");
+                    sb.AppendLine("     復元前＝いまの games フォルダと整合した状態に戻ります。");
+                    sb.AppendLine("     ※ただし、元の DB に問題があって今回復元したのなら、戻すとその問題も一緒に");
+                    sb.AppendLine("       戻ります。その場合は上の 2〜3（当時の games を補う）で直すのが本筋です。");
+                }
+                else
+                {
+                    sb.AppendLine("  4. 当時の games フォルダが手に入らない場合は、いまの games フォルダに合う");
+                    sb.AppendLine("     時点のバックアップを、履歴から「復元」する方法もあります。");
+                }
             }
             else
             {
@@ -315,8 +329,17 @@ namespace TonePrism.Manager
                 sb.AppendLine("     必要なフォルダを誤って消さないよう、削除前に中身をご確認ください。");
             }
             sb.AppendLine();
-            sb.AppendLine("  ※ DB をいまのゲームフォルダに合った状態へ戻したいだけなら、退避ファイル");
-            sb.AppendLine("     （safety_*.db）からの再復元が確実です。");
+            if (_postRestore)
+            {
+                sb.AppendLine("  ※ 今回の復元自体を取り消したいだけなら、退避ファイル（safety_*.db）を「復元」で");
+                sb.AppendLine("     戻すのが確実です（復元前＝いまの games フォルダに合った状態に戻ります。ただし、");
+                sb.AppendLine("     元の DB に問題があって復元したのなら、その問題も戻ります）。");
+            }
+            else
+            {
+                sb.AppendLine("  ※ いまの games フォルダに合う状態に戻したいときは、バックアップ履歴から");
+                sb.AppendLine("     合致する時点を「復元」してください。");
+            }
 
             return sb.ToString();
         }

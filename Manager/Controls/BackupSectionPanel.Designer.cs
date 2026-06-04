@@ -24,7 +24,6 @@ namespace TonePrism.Manager.Controls
             this.btnRefresh = new System.Windows.Forms.Button();
             this.grpHistory = new System.Windows.Forms.GroupBox();
             this.gridHistory = new System.Windows.Forms.DataGridView();
-            this.grpControls = new System.Windows.Forms.GroupBox();
             this.btnRestore = new System.Windows.Forms.Button();
             this.btnDelete = new System.Windows.Forms.Button();
             this.btnReconcile = new System.Windows.Forms.Button();
@@ -32,7 +31,6 @@ namespace TonePrism.Manager.Controls
             this.grpActions.SuspendLayout();
             this.grpHistory.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.gridHistory)).BeginInit();
-            this.grpControls.SuspendLayout();
             this.SuspendLayout();
             //
             // grpActions
@@ -103,9 +101,12 @@ namespace TonePrism.Manager.Controls
             | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
             this.grpHistory.Controls.Add(this.gridHistory);
+            this.grpHistory.Controls.Add(this.btnRestore);
+            this.grpHistory.Controls.Add(this.btnDelete);
+            this.grpHistory.Controls.Add(this.btnReconcile);
             this.grpHistory.Location = new System.Drawing.Point(20, 110);
             this.grpHistory.Name = "grpHistory";
-            this.grpHistory.Size = new System.Drawing.Size(1040, 380);
+            this.grpHistory.Size = new System.Drawing.Size(1040, 430);
             this.grpHistory.TabIndex = 1;
             this.grpHistory.TabStop = false;
             this.grpHistory.Text = "バックアップ履歴";
@@ -115,52 +116,38 @@ namespace TonePrism.Manager.Controls
             this.gridHistory.AllowUserToAddRows = false;
             this.gridHistory.AllowUserToDeleteRows = false;
             this.gridHistory.AllowUserToResizeRows = false;
+            this.gridHistory.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) | System.Windows.Forms.AnchorStyles.Left) | System.Windows.Forms.AnchorStyles.Right)));
             this.gridHistory.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-            this.gridHistory.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.gridHistory.Location = new System.Drawing.Point(3, 19);
+            this.gridHistory.Location = new System.Drawing.Point(10, 22);
             this.gridHistory.MultiSelect = false;
             this.gridHistory.Name = "gridHistory";
             this.gridHistory.ReadOnly = true;
             this.gridHistory.RowHeadersVisible = false;
             this.gridHistory.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
-            this.gridHistory.Size = new System.Drawing.Size(1034, 358);
+            this.gridHistory.Size = new System.Drawing.Size(1020, 356);
             this.gridHistory.TabIndex = 0;
-            //
-            // grpControls
-            //
-            this.grpControls.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Bottom
-            | System.Windows.Forms.AnchorStyles.Left)
-            | System.Windows.Forms.AnchorStyles.Right)));
-            this.grpControls.Controls.Add(this.lblDestPath);
-            this.grpControls.Controls.Add(this.btnRestore);
-            this.grpControls.Controls.Add(this.btnDelete);
-            this.grpControls.Controls.Add(this.btnReconcile);
-            this.grpControls.Location = new System.Drawing.Point(20, 500);
-            this.grpControls.Name = "grpControls";
-            this.grpControls.Size = new System.Drawing.Size(1040, 70);
-            this.grpControls.TabIndex = 2;
-            this.grpControls.TabStop = false;
-            this.grpControls.Text = "操作";
             //
             // btnRestore
             //
+            this.btnRestore.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
             this.btnRestore.BackColor = System.Drawing.Color.IndianRed;
             this.btnRestore.Font = new System.Drawing.Font("MS UI Gothic", 9F, System.Drawing.FontStyle.Bold);
             this.btnRestore.ForeColor = System.Drawing.Color.White;
-            this.btnRestore.Location = new System.Drawing.Point(20, 25);
+            this.btnRestore.Location = new System.Drawing.Point(10, 388);
             this.btnRestore.Name = "btnRestore";
             this.btnRestore.Size = new System.Drawing.Size(220, 32);
-            this.btnRestore.TabIndex = 0;
+            this.btnRestore.TabIndex = 1;
             this.btnRestore.Text = "選択したバックアップから復元...";
             this.btnRestore.UseVisualStyleBackColor = false;
             this.btnRestore.Click += new System.EventHandler(this.btnRestore_Click);
             //
             // btnDelete
             //
-            this.btnDelete.Location = new System.Drawing.Point(250, 25);
+            this.btnDelete.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
+            this.btnDelete.Location = new System.Drawing.Point(240, 388);
             this.btnDelete.Name = "btnDelete";
             this.btnDelete.Size = new System.Drawing.Size(140, 32);
-            this.btnDelete.TabIndex = 1;
+            this.btnDelete.TabIndex = 2;
             this.btnDelete.Text = "選択した履歴を削除...";
             this.btnDelete.UseVisualStyleBackColor = true;
             this.btnDelete.Click += new System.EventHandler(this.btnDelete_Click);
@@ -169,22 +156,23 @@ namespace TonePrism.Manager.Controls
             //
             // (#250 PR2) 整合性チェック (DB↔games/guide のズレ検出) を復元せずオンデマンドで再実行する。
             // 復元レポートの手順「修正後に再チェック」を Manager 再起動に頼らず正しく行えるようにするためのボタン。
-            this.btnReconcile.Location = new System.Drawing.Point(400, 25);
+            this.btnReconcile.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
+            this.btnReconcile.Location = new System.Drawing.Point(390, 388);
             this.btnReconcile.Name = "btnReconcile";
             this.btnReconcile.Size = new System.Drawing.Size(150, 32);
-            this.btnReconcile.TabIndex = 2;
+            this.btnReconcile.TabIndex = 3;
             this.btnReconcile.Text = "整合性チェック";
             this.btnReconcile.UseVisualStyleBackColor = true;
             this.btnReconcile.Click += new System.EventHandler(this.btnReconcile_Click);
             //
             // lblDestPath
             //
-            this.lblDestPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) | System.Windows.Forms.AnchorStyles.Right)));
+            this.lblDestPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left) | System.Windows.Forms.AnchorStyles.Right)));
             this.lblDestPath.AutoEllipsis = true;
-            this.lblDestPath.Location = new System.Drawing.Point(570, 32);
+            this.lblDestPath.Location = new System.Drawing.Point(20, 552);
             this.lblDestPath.Name = "lblDestPath";
-            this.lblDestPath.Size = new System.Drawing.Size(360, 18);
-            this.lblDestPath.TabIndex = 3;
+            this.lblDestPath.Size = new System.Drawing.Size(1040, 18);
+            this.lblDestPath.TabIndex = 2;
             this.lblDestPath.Text = "保存先: ";
             //
             // BackupSectionPanel
@@ -193,14 +181,13 @@ namespace TonePrism.Manager.Controls
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.Controls.Add(this.grpActions);
             this.Controls.Add(this.grpHistory);
-            this.Controls.Add(this.grpControls);
+            this.Controls.Add(this.lblDestPath);
             this.Name = "BackupSectionPanel";
             this.Size = new System.Drawing.Size(1080, 590);
             this.grpActions.ResumeLayout(false);
             this.grpActions.PerformLayout();
             this.grpHistory.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)(this.gridHistory)).EndInit();
-            this.grpControls.ResumeLayout(false);
             this.ResumeLayout(false);
         }
 
@@ -213,7 +200,6 @@ namespace TonePrism.Manager.Controls
         private System.Windows.Forms.Button btnRefresh;
         private System.Windows.Forms.GroupBox grpHistory;
         private System.Windows.Forms.DataGridView gridHistory;
-        private System.Windows.Forms.GroupBox grpControls;
         private System.Windows.Forms.Button btnRestore;
         private System.Windows.Forms.Button btnDelete;
         private System.Windows.Forms.Button btnReconcile;
