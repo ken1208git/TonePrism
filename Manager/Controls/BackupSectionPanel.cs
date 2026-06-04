@@ -226,6 +226,37 @@ namespace TonePrism.Manager.Controls
                 return;
             }
 
+            // (#299 review round3 #3) 復元前に復元元の整合性を quick_check し、壊れていれば UI スレッドで案内する。
+            // **open すらできない** (切り詰め / 非 DB) = 本当に使えない破損 → 中止 (override 無し。置換しても使えない)。
+            // **open はできるが quick_check 非 ok** = 不健全 → 復元は「最後の手段」なので「それでも復元しますか？」を確認し、
+            // ユーザーが Yes のときだけ allowIntegrityWarnings=true で続行する (現データは復元前に safety 退避されるので可逆)。
+            bool allowIntegrityWarnings = false;
+            var integrity = Services.RestoreService.CheckIntegrity(resolvedPath);
+            if (!integrity.Openable)
+            {
+                Logger.Warn("[BackupSectionPanel] 復元中止: 復元元が開けない (壊れている可能性): " + resolvedPath);
+                MessageBox.Show(
+                    "このバックアップは壊れていて復元できません（ファイルとして開けませんでした）。\n別の世代を選んでください。現在のデータベースは変更していません。",
+                    "復元できません", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            if (!string.Equals(integrity.QuickCheckResult, "ok", StringComparison.OrdinalIgnoreCase))
+            {
+                string detail = integrity.QuickCheckResult ?? "(結果なし)";
+                if (detail.Length > 300) detail = detail.Substring(0, 300) + " …";
+                var ans = MessageBox.Show(
+                    "このバックアップは整合性チェックに問題があります（壊れている可能性）:\n\n" + detail
+                    + "\n\nそれでも復元しますか？\n（現在のデータは復元前に退避されるので、結果がおかしければ元に戻せます）",
+                    "整合性の警告", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+                if (ans != DialogResult.Yes)
+                {
+                    Logger.Info("[BackupSectionPanel] 復元中止: 整合性警告でユーザーが復元しない選択");
+                    return;
+                }
+                allowIntegrityWarnings = true;
+                Logger.Warn("[BackupSectionPanel] 整合性に問題のあるバックアップをユーザー確認のうえ復元: " + resolvedPath);
+            }
+
             // (#299 review #2) 非ブロッキング化で、操作直後の自動バックアップ worker が走っている最中でも復元を起動できる
             // ようになった。復元は live toneprism.db を File.Replace で置換するため、worker が同じ DB を開いている (DB コピー
             // フェーズ) と File.Replace が衝突しうる。復元は排他操作なので進行中の自動バックアップを先に協調キャンセルする
@@ -250,7 +281,7 @@ namespace TonePrism.Manager.Controls
             {
                 // (レビュー対応 #1) DB 喪失の最悪ケースは専用例外で捕捉して caller に伝える。re-throw して
                 // ProcessingDialog には Abort させる (例外 Message = 具体的な復旧手順がそのまま画面表示される)。
-                try { safetyPath = _dbManager.RestoreService.Restore(resolvedPath, progress, token); }
+                try { safetyPath = _dbManager.RestoreService.Restore(resolvedPath, progress, token, allowIntegrityWarnings); }
                 catch (RestoreDbMissingException dmx) { dbMissing = dmx; throw; }
             }))
             {

@@ -271,6 +271,19 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
+        public void Cancel_WithPendingAssetChange_FlagsUnhealthy()
+        {
+            // (#299 review round3 #6) DB-only 実行中にアセット変更が pending の状態で中止すると、破棄される pending アセット
+            // 変更が「未バックアップ」警告も復旧ボタンも出ないまま落ちる穴を塞ぐ。中止時に pending にアセットが残っていたら
+            // 失敗フラグを立て、次の BackupRunningChanged(false) で警告 +「今すぐバックアップ」を出させる。
+            Assert.True(_coord.TryStartRun(requestIncludeAssets: false, out _)); // DB-only 起動
+            Assert.False(_coord.TryStartRun(true, out _));                       // 実行中にアセット変更 → pending に蓄積
+            Assert.False(_coord.SessionAssetCaptureFailed);                      // まだ未控え警告は立っていない
+            _coord.CancelCurrentBackup();
+            Assert.True(_coord.SessionAssetCaptureFailed);                       // pending アセットを中止 → 未バックアップ警告を立てる (修正前は false のまま)
+        }
+
+        [Fact]
         public void ConcurrentFileVanish_SkipsFile_PartialNotFailed()
         {
             // (#299 review C-1) 非ブロッキング化でバックアップ中もユーザーが games/ を編集できる。走査中のファイルが

@@ -47,7 +47,11 @@ namespace TonePrism.Manager.Services
         // (round5 #1) このセッションで「ゲーム本体 (games/guide) の控え」が未完了か (直近のアセット操作が失敗/キャンセル)。
         // true の間は後続の DB-only 成功でも緑「✓」を出さず警告を残す (round2 #3 の sticky 警告が「アセット失敗→以後
         // DB-only 成功」で上書き消失する穴を塞ぐ)。次のアセット操作が成功すると false に戻る (= 回復)。
-        private bool _sessionAssetCaptureFailed;
+        // (#299 review round3 #1) **volatile**: getter を `_gate` ロックで読むと、`_gate` を ~6GB 走査の間ずっと保持する
+        // RunSessionBackup と競合し、UI スレッド (BackupRunningChanged コールバックで読む) が次 worker の走査完了まで
+        // フリーズする (= 非ブロッキング化が自壊する)。単一 bool で他状態と原子的に読む必要は無いため、書込は `_gate`
+        // 下のまま (volatile 書込)、読みは lock-free な volatile 読みにして UI を `_gate` から切り離す。
+        private volatile bool _sessionAssetCaptureFailed;
 
         // (#299) 非ブロッキング worker の状態。`_gate` は RunSessionBackup が実行中ずっと保持するため、コアレス判定を
         // UI スレッドから待たせず行えるよう **別ロック** (`_workerLock`) で管理する。
@@ -64,7 +68,7 @@ namespace TonePrism.Manager.Services
 
         /// <summary>(round5 #1) このセッションでゲーム本体の控えが未完了 (直近のアセット操作が失敗/キャンセル) か。
         /// true の間は DB-only 成功でも緑✓を出さず警告を残す。次のアセット操作成功で false に戻る。単体テスト用に公開。</summary>
-        public bool SessionAssetCaptureFailed { get { lock (_gate) { return _sessionAssetCaptureFailed; } } }
+        public bool SessionAssetCaptureFailed { get { return _sessionAssetCaptureFailed; } } // (review round3 #1) volatile 読み (lock-free。UI を _gate から切り離す)
 
         /// <summary>(#299) バックアップ worker が稼働中か。MainForm の FormClosing が「中止して閉じますか？」確認に使う。</summary>
         public bool IsBackupRunning { get { lock (_workerLock) { return _workerRunning; } } }
@@ -79,6 +83,11 @@ namespace TonePrism.Manager.Services
                 // (#299 review B-1) 「中止」はコアレス済みの pending 分も含めて止める。dirty を残すと現 iteration の
                 // キャンセル直後に TryContinue が次 iteration を新しい cts で起動し、ストリップが消えず ~6GB 再走査が
                 // 走って「中止」の意図 (SMB 混雑時に今は止めたい等) に反する。新たな変更が来れば次操作で再 trigger される。
+                // (#299 review round3 #6) DB-only 実行中にアセット変更が pending でコアレスされている状態で中止すると、現 run は
+                // includeAssets=false で OCE するため失敗フラグが立たず、破棄される pending アセット変更が「未バックアップ」警告も
+                // 復旧ボタンも出ないまま落ちる。pending にアセットが残っていたら失敗フラグを立て、次の BackupRunningChanged(false)
+                // で「⚠ ゲームファイルが未バックアップ」+「今すぐバックアップ」を出させる (volatile 書込なので _gate 不要)。
+                if (_pendingIncludeAssets) _sessionAssetCaptureFailed = true;
                 _dirty = false;
                 _pendingIncludeAssets = false;
                 try { _cts?.Cancel(); } catch { }
