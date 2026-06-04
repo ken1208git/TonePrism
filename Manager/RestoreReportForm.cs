@@ -142,8 +142,8 @@ namespace TonePrism.Manager
         {
             var sb = new StringBuilder();
 
-            sb.AppendLine("【まず確認】バックアップ／復元の対象は toneprism.db（データベース）だけです。");
-            sb.AppendLine("ゲーム本体の games フォルダは復元されません。そのため、" + (_postRestore ? "いま復元した DB と、" : "現在の DB と、"));
+            sb.AppendLine("【まず確認】バックアップ／復元の対象は toneprism.db（データベース）だけで、");
+            sb.AppendLine("ゲーム本体の games フォルダは含まれません。そのため、" + (_postRestore ? "いま復元した DB と、" : "現在の DB と、"));
             sb.AppendLine("ディスク上の games フォルダの「時点」がズレていると、以下のような食い違いが起きます。");
             sb.AppendLine();
             if (!string.IsNullOrEmpty(_safetyPath))
@@ -258,8 +258,9 @@ namespace TonePrism.Manager
             if (_result.BrokenIntroSlides.Count > 0)
             {
                 sb.AppendLine("■ 初回説明スライドの画像の欠落（" + _result.BrokenIntroSlides.Count + " 件）— 起動への影響なし");
-                sb.AppendLine("  DB が指すスライド画像（guide フォルダ）がディスクに見つかりません。該当スライドが");
-                sb.AppendLine("  画像なしで表示されますが、ゲームの起動には影響しません。");
+                sb.AppendLine("  DB が指すスライド画像（guide フォルダ）がディスクに見つかりません。本文のあるスライドは");
+                sb.AppendLine("  画像なしで表示され、本文のないスライド（画像のみ）はイントロガイドから外れます。");
+                sb.AppendLine("  いずれもゲームの起動には影響しません。");
                 sb.AppendLine();
                 foreach (var bs in _result.BrokenIntroSlides)
                 {
@@ -291,9 +292,15 @@ namespace TonePrism.Manager
             sb.AppendLine();
             sb.AppendLine("【整合した状態に戻す手順】");
             sb.AppendLine();
-            sb.AppendLine("  1. すべての展示 PC で Launcher を閉じてください（ファイルを掴んでいると");
-            sb.AppendLine("     フォルダの差し替えができません）。");
-            sb.AppendLine();
+            // (review round2 #3) 手順1「Launcher を閉じる」はフォルダの差し替え/削除が要る finding (起動不能ゲーム /
+            // 無い版 / 孤児フォルダ) のときだけ出す。画像欠落だけのとき (スライド編集で貼り直す等) は不要で、手順1だけが
+            // 浮くのを避ける。
+            if (_result.BrokenGames.Count > 0 || _result.MissingVersionFolders.Count > 0 || _result.OrphanFolders.Count > 0)
+            {
+                sb.AppendLine("  1. すべての展示 PC で Launcher を閉じてください（ファイルを掴んでいると");
+                sb.AppendLine("     フォルダの差し替えができません）。");
+                sb.AppendLine();
+            }
             if (_result.BrokenGames.Count > 0 || _result.MissingVersionFolders.Count > 0)
             {
                 string dbWord = _postRestore ? "復元した DB" : "今の DB";
