@@ -572,7 +572,15 @@ namespace TonePrism.Manager.Services
                     {
                         foreach (var line in File.ReadLines(FileOperationService.EnsureLongPath(manifest)))
                         {
-                            if (TryParseManifestEntryLine(line, out ManifestEntry e)) referenced.Add(e.Hash);
+                            if (TryParseManifestEntryLine(line, out ManifestEntry e)) { referenced.Add(e.Hash); continue; }
+                            // (review #2) GC は「保護側に倒す」。strict parse に失敗した行でも META でなく先頭フィールドがあれば
+                            // hash 候補として参照集合に入れる。これにより破損行 (size/mtime 欠け/非数値等) で実 hash が落ち、
+                            // まだ参照中の blob を誤 GC するのを防ぐ (旧実装の寛容な参照抽出を GC でのみ維持。restore/cache は strict)。
+                            if (!line.StartsWith(MetaLinePrefix + "\t"))
+                            {
+                                int tab = line.IndexOf('\t');
+                                if (tab > 0) referenced.Add(line.Substring(0, tab));
+                            }
                         }
                     }
                     // (レビュー L2) manifest を 1 件でも読めなければ参照集合が不完全 → 誤って参照中 blob を消しうるので

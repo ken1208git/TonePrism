@@ -38,7 +38,7 @@ namespace TonePrism.Manager.Tests
             _backup = new BackupService(_conn, _settings);
             _snap = new AssetSnapshotService(_conn, _settings, _backup);
             _snap.GcGracePeriod = TimeSpan.Zero;
-            _restore = new AssetRestoreService(_conn, _settings, _backup);
+            _restore = new AssetRestoreService(_conn, _backup);
         }
 
         public void Dispose()

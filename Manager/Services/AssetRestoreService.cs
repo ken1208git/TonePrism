@@ -28,15 +28,15 @@ namespace TonePrism.Manager.Services
     public class AssetRestoreService
     {
         private readonly DatabaseConnection _conn;
-        private readonly SettingsRepository _settingsRepo;
         private readonly BackupService _backupService;
 
         private static readonly string[] SubFolders = { "games", "guide" };
 
-        public AssetRestoreService(DatabaseConnection conn, SettingsRepository settingsRepo, BackupService backupService)
+        // (review #3) restore は設定を gate しない (snapshot が無効でも復元は可) ので SettingsRepository は注入しない
+        // (snapshot ctor との対称性より YAGNI を優先。必要になれば PR3b で足す)。
+        public AssetRestoreService(DatabaseConnection conn, BackupService backupService)
         {
             _conn = conn;
-            _settingsRepo = settingsRepo;
             _backupService = backupService;
         }
 
@@ -234,7 +234,13 @@ namespace TonePrism.Manager.Services
         /// dir は降りない。yield を try/catch の外に出すため列挙は <see cref="SafeGetFiles"/>/<see cref="SafeGetDirs"/> 経由。</summary>
         private static IEnumerable<string> EnumerateLiveFiles(string root)
         {
-            foreach (var f in SafeGetFiles(root)) yield return f;
+            foreach (var f in SafeGetFiles(root))
+            {
+                // (review #1) reparse ファイル (symlink/junction) は snapshot が捕捉しない (WalkTree が skip) ため manifest に
+                // 載らない。restore の余剰削除でもこれを消さない＝reparse 実体は snapshot/restore どちらも「触らない」で対称化。
+                if (IsReparsePoint(f)) continue;
+                yield return f;
+            }
             foreach (var d in SafeGetDirs(root))
             {
                 string name = Path.GetFileName(d);
