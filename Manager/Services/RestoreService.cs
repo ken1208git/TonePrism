@@ -261,7 +261,11 @@ namespace TonePrism.Manager.Services
                     // 復元自体は通す (atomicity は落ちるが safety で担保済み)。
                     try
                     {
-                        File.Replace(tempPath, dbPath, null);
+                        // (#299 review round4 H-1) 非ブロッキング化で、復元前に協調キャンセルしたバックアップ worker が live DB
+                        // ハンドル (Online Backup の read) を解放しきる前に置換へ到達する狭い窓がある (worker の DB コピーはサブ秒で、
+                        // 復元の safety 退避 + temp コピー + ClearAllPools の間に解放される公算が高いが同期保証は無い)。共有違反
+                        // (IOException) は短くリトライして解放を待ってから fallback に落とす。
+                        ReplaceWithSharingRetry(tempPath, dbPath);
                     }
                     catch (IOException replaceEx)
                     {
@@ -471,6 +475,20 @@ namespace TonePrism.Manager.Services
                 tempPathIsLastResort = true;
                 throw;
             }
+        }
+
+        /// <summary>(#299 review round4 H-1) `File.Replace` を共有違反 (IOException) で数回リトライしてから例外を伝播する。
+        /// 非ブロッキング化で復元前に協調キャンセルしたバックアップ worker が live DB ハンドルを解放しきる前に置換へ到達する
+        /// 狭い窓を、短い待機 (最大 ~800ms) で吸収する。最終試行の例外は caller の fallback (Delete+Move) へ伝播させる
+        /// (= 永続的な IOException = 真の SMB/Junction 等は従来どおり fallback に流す。リトライは transient 共有違反のためだけ)。</summary>
+        private static void ReplaceWithSharingRetry(string tempPath, string dbPath)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                try { File.Replace(tempPath, dbPath, null); return; }
+                catch (IOException) { Thread.Sleep(200); } // 共有違反 = worker がまだ DB を解放中の可能性。待って再試行。
+            }
+            File.Replace(tempPath, dbPath, null); // 最終試行: 失敗したら例外を caller の fallback へ
         }
 
         private static void DeleteWithRetry(string path)

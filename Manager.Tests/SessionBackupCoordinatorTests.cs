@@ -304,11 +304,29 @@ namespace TonePrism.Manager.Tests
                 // (#299 review #1) skip は「ファイル」として数え、「フォルダ」(SkippedDirCount) に混ぜない (UI 誤報防止)。
                 Assert.Equal(1, r.AssetSnapshot.SkippedFileCount);
                 Assert.Equal(0, r.AssetSnapshot.SkippedDirCount);
+                // (#299 review round4 M-1) 部分取得は sticky 警告を立てる (次の緑✓に埋もれさせない)。
+                Assert.True(_coord.SessionAssetCaptureFailed);
+                // 後続の DB-only 成功でも未控え警告は残る (回復は完全アセット成功のときだけ)。
+                Assert.True(Run(false).IsSuccess);
+                Assert.True(_coord.SessionAssetCaptureFailed);
             }
             // ロック解除後の再取得は完全 (a.txt + b.txt 両方、partial でない)。
             var r2 = Run(true);
             Assert.True(r2.AssetSnapshot.IsSuccess);
             Assert.False(r2.AssetSnapshot.IsPartial);
+            Assert.False(_coord.SessionAssetCaptureFailed); // (round4 M-1) 完全アセット成功で回復
+        }
+
+        [Fact]
+        public void Cancel_RestoreInitiated_DoesNotFlagUnhealthy()
+        {
+            // (#299 review round4 L-1) 復元起点のキャンセル (flagPendingAssetsUnhealthy:false) は、pending にアセット変更が
+            // あっても「未バックアップ」警告を立てない (これから現データを置換するので spurious)。ユーザーの「中止」ボタン
+            // (既定 true) は従来どおり警告を立てる (Cancel_WithPendingAssetChange_FlagsUnhealthy で担保)。
+            Assert.True(_coord.TryStartRun(requestIncludeAssets: false, out _)); // DB-only 起動
+            Assert.False(_coord.TryStartRun(true, out _));                       // pending にアセット蓄積
+            _coord.CancelCurrentBackup(flagPendingAssetsUnhealthy: false);       // 復元起点の中止
+            Assert.False(_coord.SessionAssetCaptureFailed);                      // 警告を立てない (既定 true なら立つ)
         }
 
         [Fact]

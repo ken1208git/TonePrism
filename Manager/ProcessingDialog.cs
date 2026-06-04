@@ -112,7 +112,10 @@ namespace TonePrism.Manager
             // (#299関連) 進捗バーに数字の % も併記する (定量進捗のときだけ。Marquee=不定のときは出さない)。
             // lblMessage は毎回「直近フェーズ + N%」で再構成する (古い % を strip する必要がない)。
             bool showPct = pbProgress.Style != ProgressBarStyle.Marquee && info.Percentage >= 0 && info.Percentage <= 100;
-            lblMessage.Text = showPct ? (_lastMessage + "  " + info.Percentage + "%") : _lastMessage;
+            // (#299 review round4 L-3) _lastMessage 未到達 (空) のとき先頭スペース付き "  0%" にならないよう結合を分ける。
+            lblMessage.Text = showPct
+                ? (string.IsNullOrEmpty(_lastMessage) ? info.Percentage + "%" : _lastMessage + "  " + info.Percentage + "%")
+                : _lastMessage;
 
             if (!string.IsNullOrEmpty(info.Detail))
             {

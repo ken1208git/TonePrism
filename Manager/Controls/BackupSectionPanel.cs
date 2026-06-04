@@ -269,7 +269,8 @@ namespace TonePrism.Manager.Controls
                 if (runningCoord != null && runningCoord.IsBackupRunning)
                 {
                     Logger.Info("[BackupSectionPanel] 復元前に進行中の自動バックアップを中止します (DB 置換との衝突回避)");
-                    runningCoord.CancelCurrentBackup();
+                    // (round4 L-1) 復元起点のキャンセルは未バックアップ警告を立てない (これから現データを置換するので spurious)。
+                    runningCoord.CancelCurrentBackup(flagPendingAssetsUnhealthy: false);
                 }
             }
             catch (Exception ex) { Logger.Warn("[BackupSectionPanel] 復元前の自動バックアップ中止に失敗 (続行): " + ex.Message); }

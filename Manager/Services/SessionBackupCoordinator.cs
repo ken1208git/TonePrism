@@ -76,7 +76,10 @@ namespace TonePrism.Manager.Services
         /// <summary>(#299) 進行中のバックアップをキャンセルする (下部ストリップの「中止」/ 閉じる確認の「中止して閉じる」)。
         /// キャンセルしても操作 (DB commit) は巻き戻らない＝バックアップだけ後回し。round5 で「未バックアップ」警告が残り、
         /// 次のアセット操作 or 「今すぐバックアップ」で回復する。</summary>
-        public void CancelCurrentBackup()
+        /// <param name="flagPendingAssetsUnhealthy">(round3 #6) 中止時に pending にアセット変更が残っていたら「未バックアップ」
+        /// 警告を立てるか。既定 true (ユーザーの「中止」ボタン / 閉じる確認)。**復元起点のキャンセルは false** にする
+        /// (round4 L-1: これから現データを置換するのに「ゲームファイルが未バックアップ」警告を立てるのは spurious)。</param>
+        public void CancelCurrentBackup(bool flagPendingAssetsUnhealthy = true)
         {
             lock (_workerLock)
             {
@@ -87,7 +90,7 @@ namespace TonePrism.Manager.Services
                 // includeAssets=false で OCE するため失敗フラグが立たず、破棄される pending アセット変更が「未バックアップ」警告も
                 // 復旧ボタンも出ないまま落ちる。pending にアセットが残っていたら失敗フラグを立て、次の BackupRunningChanged(false)
                 // で「⚠ ゲームファイルが未バックアップ」+「今すぐバックアップ」を出させる (volatile 書込なので _gate 不要)。
-                if (_pendingIncludeAssets) _sessionAssetCaptureFailed = true;
+                if (flagPendingAssetsUnhealthy && _pendingIncludeAssets) _sessionAssetCaptureFailed = true;
                 _dirty = false;
                 _pendingIncludeAssets = false;
                 try { _cts?.Cancel(); } catch { }
@@ -189,9 +192,15 @@ namespace TonePrism.Manager.Services
                 // (includeAssets=false) は games/ を変えないので、直前のアセット世代の健全性をそのまま引き継ぐ (flag 不変)。
                 // (round6 Medium #3) restore-lock 等の延期 (IsSkipped=true) は「試行していない」ので flag を触らない
                 // (誤って「ゲーム本体未控え」警告を後続に出さない。延期自体は IsDeferred 経由で別途通知される)。
+                // (round4 M-1) **IsPartial (一部ファイル skip) も「未完了」として sticky 化する**。C-1 の per-file skip で
+                // 部分取得に至る経路 (並行編集での消失・一過性ロック) が大幅に増えたが、IsPartial は Kind=Success なので
+                // これを healthy 扱いにすると「ファイルが欠落した世代」でも警告が立たず、次の DB-only 成功で緑✓に埋もれて
+                // 「完全に控えた」と誤認させる (round3 #2 deferred の『IsPartial 警告が安全網』は警告が 1 回で消えるため弱い)。
+                // 回復は **完全な** アセット成功時 (IsSuccess かつ !IsPartial) に限る。
                 if (includeAssets && result != null && !result.IsSkipped)
                     _sessionAssetCaptureFailed = !(result.IsSuccess
-                        && result.AssetSnapshot != null && result.AssetSnapshot.IsSuccess);
+                        && result.AssetSnapshot != null && result.AssetSnapshot.IsSuccess
+                        && !result.AssetSnapshot.IsPartial);
                 return result;
             }
         }
