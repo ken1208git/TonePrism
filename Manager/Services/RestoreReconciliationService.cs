@@ -268,17 +268,25 @@ namespace TonePrism.Manager.Services
             }
             foreach (var slide in slides)
             {
+                // (review #1) 非表示スライドは対象外。Launcher は is_visible=1 のみ表示する (get_visible_slides)。
+                // 本チェックの目的は「ユーザーに見える breakage」の表面化なので、表示されないスライドの画像欠落は
+                // 出さない (= レポート文言「画像なしで表示されます」とも整合。再表示すれば Manager のスライド編集で
+                // 欠落に気づけるので silent にはならない)。games 側の非アクティブ版とは異なり、非表示は明示的な「出さない」
+                // 指定なので対象外でよい。
+                if (!slide.IsVisible) continue;
                 if (string.IsNullOrWhiteSpace(slide.ImagePath)) continue; // text-only は正常
                 // ImagePath は guide/<file> の相対パス (baseDir 起点)。games の asset と同じ三段解決を流用
                 // (gameFolder=baseDir を渡せば baseDir 相対の File.Exists に帰着する)。
                 if (!ResolvesAsset(slide.ImagePath, baseDir, baseDir))
                 {
+                    // (review #4) ImagePath は forward slash 固定。表示パスの区切り混在 (…\guide/file) を解消する。
+                    string rel = slide.ImagePath.Replace('/', Path.DirectorySeparatorChar);
                     result.BrokenIntroSlides.Add(new BrokenIntroSlide
                     {
                         SlideId = slide.SlideId,
                         DisplayOrder = slide.DisplayOrder,
                         ImagePath = slide.ImagePath,
-                        ExpectedPath = Path.IsPathRooted(slide.ImagePath) ? slide.ImagePath : Path.Combine(baseDir, slide.ImagePath)
+                        ExpectedPath = Path.IsPathRooted(slide.ImagePath) ? slide.ImagePath : Path.Combine(baseDir, rel)
                     });
                 }
             }

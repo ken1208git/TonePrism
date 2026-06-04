@@ -323,10 +323,19 @@ namespace TonePrism.Manager
                     sb.AppendLine("     時点のバックアップを、履歴から「復元」する方法もあります。");
                 }
             }
-            else
+            else if (_result.OrphanFolders.Count > 0)
             {
+                // (review #2) 孤児フォルダがあるときだけ削除案内を出す。画像欠落だけのときに「余分なフォルダを削除」と
+                // 案内するのは無関係なので、else を「孤児がある場合」に限定する。
                 sb.AppendLine("  2. 余分なフォルダは中身を確認のうえ、不要であれば手動で削除してください。");
                 sb.AppendLine("     必要なフォルダを誤って消さないよう、削除前に中身をご確認ください。");
+            }
+            // (review #2) 画像 (サムネ/背景/初回説明スライド) 欠落の直し方を明示する。旧実装は画像のみの finding でも
+            // games フォルダ系の手順 or 孤児削除しか出さず、画像欠落の修正手順が一切無かった。
+            if (_result.BrokenAssets.Count > 0 || _result.BrokenIntroSlides.Count > 0)
+            {
+                sb.AppendLine("  ・画像の欠落（サムネイル／背景／初回説明スライド）は、当時の games/guide フォルダから");
+                sb.AppendLine("    画像ファイルを補うか、ゲーム編集・スライド編集で画像を選び直すと解消できます。");
             }
             sb.AppendLine();
             if (_postRestore)

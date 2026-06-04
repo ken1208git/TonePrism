@@ -70,5 +70,18 @@ namespace TonePrism.Manager.Tests
 
             Assert.Empty(result.BrokenIntroSlides);
         }
+
+        [Fact]
+        public void Analyze_InvisibleSlideMissingImage_NotFlagged()
+        {
+            // (review #1) 非表示スライド (is_visible=0) の画像欠落は対象外 (Launcher は is_visible=1 のみ表示するため
+            // ユーザーに見える breakage ではない)。修正前は GetAll が全件を返し非表示も検出していた。
+            Directory.CreateDirectory(Path.Combine(_root, "guide"));
+            _dbManager.AddIntroSlide(new IntroSlide { DisplayOrder = 0, BodyText = "hidden", ImagePath = "guide/missing.png", IsVisible = false });
+
+            var result = new RestoreReconciliationService(_dbManager).Analyze();
+
+            Assert.Empty(result.BrokenIntroSlides);
+        }
     }
 }

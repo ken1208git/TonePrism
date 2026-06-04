@@ -405,8 +405,13 @@ namespace TonePrism.Manager.Controls
         {
             if (_dbManager == null) return;
             RestoreReconciliationResult reconcile;
+            // (review #3) Analyze() は全ゲーム×全版に Directory/File.Exists を回す同期処理で、本番は games/guide が
+            // SMB 上のため登録数次第で一瞬 UI が固まりうる。最低限 wait カーソルを出す (完全な非同期化は復元直後経路も
+            // 同期なため将来課題、SMB 体感は pre-release で確認)。
+            Cursor prev = Cursor.Current;
             try
             {
+                Cursor.Current = Cursors.WaitCursor;
                 reconcile = new Services.RestoreReconciliationService(_dbManager).Analyze();
             }
             catch (Exception ex)
@@ -415,6 +420,10 @@ namespace TonePrism.Manager.Controls
                 MessageBox.Show("整合性チェックの実行中にエラーが発生しました（詳細はログを確認）",
                     "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
+            }
+            finally
+            {
+                Cursor.Current = prev;
             }
             using (var report = new RestoreReportForm(reconcile, safetyPath: null, postRestore: false))
             {
