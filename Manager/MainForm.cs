@@ -978,6 +978,9 @@ namespace TonePrism.Manager
         private void ShowBackupProgress(int percent, string fileName)
         {
             int p = percent < 0 ? 0 : (percent > 100 ? 100 : percent);
+            // (#299) 複数 item の Visible を 1 つずつ変えると都度再レイアウトされ、ホストした実 Button (中止) が中間位置で
+            // 重複描画されて残像が残る (WinForms ToolStripControlHost の癖)。SuspendLayout で再レイアウトを 1 回にまとめる。
+            statusStrip1.SuspendLayout();
             _tsBackupPhase.ForeColor = System.Drawing.SystemColors.ControlText;
             _tsBackupPhase.Text = "バックアップ中...";   // 固定文言 = 幅不変 → 後続の中止位置が固定
             _tsBackupPhase.Visible = true;
@@ -989,11 +992,13 @@ namespace TonePrism.Manager
             _tsBackupFile.Text = fileName ?? string.Empty; // 可変幅は末尾なので動いても他に影響しない
             _tsBackupFile.Visible = true;
             _tsBackupRecapture.Visible = false;
+            statusStrip1.ResumeLayout();
         }
 
         /// <summary>未バックアップ (失敗/中断): 警告 + 「今すぐバックアップ」(1 クリック復旧) を表示。</summary>
         private void ShowBackupUnhealthy(string message)
         {
+            statusStrip1.SuspendLayout();
             _tsBackupPhase.ForeColor = System.Drawing.Color.DarkOrange;
             _tsBackupPhase.Text = message;
             _tsBackupPhase.Visible = true;
@@ -1002,17 +1007,22 @@ namespace TonePrism.Manager
             _tsBackupPercent.Visible = false;
             _tsBackupFile.Visible = false;
             _tsBackupRecapture.Visible = true;
+            statusStrip1.ResumeLayout();
+            statusStrip1.Invalidate(true); // ホスト Button (中止) の残像を消す
         }
 
         /// <summary>idle かつ健全: バックアップ進捗 item を全て非表示。</summary>
         private void HideBackupProgress()
         {
+            statusStrip1.SuspendLayout();
             _tsBackupPhase.Visible = false;
             _tsBackupCancel.Visible = false;
             _tsBackupBar.Visible = false;
             _tsBackupPercent.Visible = false;
             _tsBackupFile.Visible = false;
             _tsBackupRecapture.Visible = false;
+            statusStrip1.ResumeLayout();
+            statusStrip1.Invalidate(true); // ホスト Button (中止) の残像を消す
         }
 
         /// <summary>
