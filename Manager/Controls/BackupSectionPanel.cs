@@ -149,7 +149,7 @@ namespace TonePrism.Manager.Controls
                 if (snap != null && snap.IsSuccess && snap.IsPartial)
                 {
                     // (round8 C1) 深部フォルダの列挙失敗で一部 skip した場合は「部分的な控え」を明示 (完全控えと誤認させない)。
-                    msg += $"\n\n⚠ ゲームファイル (games/guide) のバックアップで {snap.SkippedDirCount} 個のフォルダを列挙できずスキップしました（部分的なバックアップの可能性。SMB 一過性 I/O / 権限等）。";
+                    msg += $"\n\n⚠ ゲームファイル (games/guide) のバックアップでフォルダ {snap.SkippedDirCount} 個 / ファイル {snap.SkippedFileCount} 個を控えられずスキップしました（部分的なバックアップの可能性。SMB 一過性 I/O / 権限 / 並行編集での消失等）。";
                 }
                 else if (snap != null && (snap.IsFailed || snap.IsAnomaly))
                 {
@@ -225,6 +225,23 @@ namespace TonePrism.Manager.Controls
                 Logger.Info("[BackupSectionPanel] 復元中止 (session conflict check で user がキャンセル)");
                 return;
             }
+
+            // (#299 review #2) 非ブロッキング化で、操作直後の自動バックアップ worker が走っている最中でも復元を起動できる
+            // ようになった。復元は live toneprism.db を File.Replace で置換するため、worker が同じ DB を開いている (DB コピー
+            // フェーズ) と File.Replace が衝突しうる。復元は排他操作なので進行中の自動バックアップを先に協調キャンセルする
+            // (best-effort。復元の safety 退避 + temp コピーの間に worker は cancel token を観測して DB を解放するので、
+            //  File.Replace 時点では衝突しない)。手動バックアップは共有プール CAS + 24h grace で worker と同時実行しても
+            //  安全なため gate しない (SPEC §機能12 参照)。
+            try
+            {
+                var runningCoord = _dbManager.SessionBackupCoordinator;
+                if (runningCoord != null && runningCoord.IsBackupRunning)
+                {
+                    Logger.Info("[BackupSectionPanel] 復元前に進行中の自動バックアップを中止します (DB 置換との衝突回避)");
+                    runningCoord.CancelCurrentBackup();
+                }
+            }
+            catch (Exception ex) { Logger.Warn("[BackupSectionPanel] 復元前の自動バックアップ中止に失敗 (続行): " + ex.Message); }
 
             string safetyPath = null;
             RestoreDbMissingException dbMissing = null;

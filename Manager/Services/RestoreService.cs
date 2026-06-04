@@ -178,6 +178,41 @@ namespace TonePrism.Manager.Services
 
                 token.ThrowIfCancellationRequested();
 
+                // (#299 review #3) live を置換する前に復元元 (tempPath = local コピー) の整合性を quick_check で検証する。
+                // 非ブロッキング化でバックアップ worker が DB コピーフェーズ中にプロセス強制終了 (「中止して閉じる」直後の
+                // abrupt exit 等) すると、検証前の不完全な .db が backup_dest に残り、BackupCatalogService は list 時の
+                // quick_check を省く (= 成功世代と区別不能) ため復元候補に出うる。ここで弾けば、その不完全 .db も SMB 越しの
+                // コピー破損も含めて live DB を保護できる (この時点では File.Replace 前 = live 無傷、safety も退避済)。"ok" を
+                // 得られない場合 (壊れた .db / 非 DB ファイルで open or PRAGMA が throw する場合を含む) は置換せず中止する
+                // ＝「確認できないものを live に被せない」。tempPath は local なので SMB flakiness で誤って弾く懸念は無い。
+                string quickCheck = null;
+                try
+                {
+                    using (var verifyConn = new SQLiteConnection($"Data Source={tempPath};Version=3;"))
+                    {
+                        verifyConn.Open();
+                        using (var cmd = verifyConn.CreateCommand())
+                        {
+                            cmd.CommandText = "PRAGMA quick_check;";
+                            quickCheck = cmd.ExecuteScalar()?.ToString();
+                        }
+                    }
+                }
+                catch (Exception verifyEx)
+                {
+                    quickCheck = null; // open / PRAGMA が throw = 復元元が壊れている (非 DB / 切り詰め等)。下で中止に流す。
+                    Logger.Error("[RestoreService] 復元元の整合性チェックに失敗 (壊れている可能性): " + verifyEx.Message);
+                }
+                if (!string.Equals(quickCheck, "ok", StringComparison.OrdinalIgnoreCase))
+                {
+                    string msg = "復元元のバックアップが壊れているか不完全なため復元を中止しました (整合性チェック: "
+                        + (quickCheck ?? "実行不可") + ")。別の世代を選んで再試行してください。現在のデータベースは変更していません。";
+                    Logger.Error("[RestoreService] " + msg);
+                    throw new InvalidOperationException(msg);
+                }
+
+                token.ThrowIfCancellationRequested();
+
                 // 3. 全 SQLite 接続プールをクリアし、ハンドルを解放
                 progress?.Report(new ProgressInfo(60, "データベース接続を閉じています...", ""));
                 SQLiteConnection.ClearAllPools();

@@ -2001,7 +2001,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ### [Manager v0.23.0] - 2026-06-04
 
 - **(#299) 操作単位バックアップの進捗を「非ブロッキング＋下部ステータスバー統合」に改装**: #295 では games/guide を変える操作の直後にモーダル進捗ダイアログ（「バックアップを作成中」）が出て、~6GB の SMB 走査が終わるまでメインウィンドウが操作不能だった。これを撤去し、**バックアップはバックグラウンド worker で実行・操作はそのまま継続可**に。進捗は既存ステータスバー（statusStrip1）に統合した `[バックアップ中...][中止][進捗バー][N%][ファイル名]` で表示（別バー＝2 段にせず 1 段、左詰め）。
-  - **コアレス**: 実行中に来た変更は dirty フラグ＋includeAssets を OR 蓄積し、現行完了後に蓄積分でもう 1 回だけ走る（単一 worker で直列、CAS＋replace-in-session で最終世代は必ず正しい）。状態遷移を `SessionBackupCoordinator.TryStartRun`/`TryContinue` に切り出してスレッド無しで単体テスト（新規 2 件、計 129）。#295 レビューで保留していた perf/debounce 論点（Medium #1 / M1）をこの非ブロッキング＋コアレスで解消。
+  - **コアレス**: 実行中に来た変更は dirty フラグ＋includeAssets を OR 蓄積し、現行完了後に蓄積分でもう 1 回だけ走る（単一 worker で直列、CAS＋replace-in-session で最終世代は必ず正しい）。状態遷移を `SessionBackupCoordinator.TryStartRun`/`TryContinue` に切り出してスレッド無しで単体テスト（新規コアレス 2 件）。#295 レビューで保留していた perf/debounce 論点（Medium #1 / M1）をこの非ブロッキング＋コアレスで解消。
   - **中止**: ステータスバーの「中止」で進行中バックアップをキャンセル（変更データ自体は保存済み＝バックアップだけ後回し）。**未バックアップ時**は警告＋「**今すぐバックアップ**」ボタンで 1 クリック復旧（対処法を提示）。
   - **閉じる確認**: バックアップ中に × すると「バックアップを中止して閉じますか？」（既定=いいえ）。閉じても live は無事（次回起動の最初の操作で取り直し）。
   - 進捗 UI コールバック `ProgressReporter`/`BackupRunningChanged`/`IsBackupRunning`/`CancelCurrentBackup` を coordinator に追加、MainForm が UI スレッドへ marshal。
@@ -2014,7 +2014,8 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
   - **(D-1) worker 起動失敗で稼働フラグが永久 true → 巻き戻し**: `TryStartRun` が `_workerRunning=true` を立てた後の `Task.Run` が投げると（スレッドプール枯渇等）`WorkerLoop` が走らずフラグが固まり、以降の自動バックアップが無言停止 + `IsBackupRunning` 常時 true で閉じる確認が誤発火。`Task.Run` を try/catch して失敗時にフラグを巻き戻す。
   - **(A-1 / Low) DB フェーズの進捗 Detail がフルパス → ファイル名**: `BackupService` の 0% / 100% 報告が `destinationPath`（フルパス）を Detail に入れ、ストリップのファイル名スロットに長いパスが一瞬出ていた。`Path.GetFileName` でファイル名のみに。
   - **据え置き（記録のみ）**: D-2（`BackupRunningChanged` の worker 跨ぎ表示順レース）は次 worker の進捗報告で自己回復するため未対応。E-1（`ProcessingDialog` の % は全モーダルに波及）は設計どおりで、復元/更新の進捗に不自然な `0%` が出ないかは pre-release 実機確認項目。
-- 検証: Manager build 緑 / **テスト 131 件合格**（コアレス 2 件 + レビュー対応 2 件: B-1「中止が pending を止める」/ C-1「並行消失で世代が落ちず IsPartial」を fail-first で確認）。**※実機（UIは実機で確認）: 非ブロッキングで操作継続・進捗 1 段表示・中止→未バックアップ警告＋今すぐバックアップで復旧・閉じる確認、を目視済（残像/見切れ/枠なしの実機フィードバックは反映済）。本番 SMB での体感・多 PC・並行編集 churn（C-1）は pre-release 全体テストで。**
+- **レビュー round2 対応**: ①(#1) `SkippedFileCount` を `SkippedDirCount` と分離し UI 文言を「フォルダ N 個 / ファイル N 個」に修正（round1 で skip 総数を `skippedDirCount` に合算したため、ファイル消失 skip を「N 個のフォルダ」と誤報する回帰を是正）。②(#4) per-file の try スコープを実 I/O のみに絞る（`entries.Add`/`progress.Report` まで囲むと、それらの例外を「ファイル消失」と誤計上し entries 投入と skip の二重カウントになるため後続は try 外へ）。③(#2) 非ブロッキング化で worker 稼働中も「復元」を起動できるようになったので、復元前に進行中の自動バックアップを協調キャンセル（live DB の `File.Replace` 置換と worker の DB コピーの衝突回避。手動バックアップは共有プール CAS + 24h grace で同時実行安全のため gate せず）。④(#3) 復元は live を置換する**前**に復元元を `PRAGMA quick_check` で検証し、壊れ / 不完全 .db（worker の DB フェーズ中 abrupt exit 残骸を含む。`BackupCatalogService` は list 時 quick_check を省くため復元候補に出うる）を置換前に弾く（live 無傷で中止、SMB 越しのコピー破損一般への防御でもある）。⑤(#6) CHANGELOG のテスト件数の中間値「計 129」を除去。据え置き: #5（D-2 = `BackupRunningChanged` 表示順レース、自己回復のため再確認のうえ未対応）。
+- 検証: Manager build 緑 / **テスト 132 件合格**（コアレス 2 + round1 レビュー 2 [B-1「中止が pending を止める」/ C-1「並行消失で世代が落ちず IsPartial かつ SkippedFileCount で計上」] + round2 レビュー 1 [復元が壊れ / 不完全バックアップを置換前に弾き live 無傷]、いずれも fail-first で確認）。**※実機（UIは実機で確認）: 非ブロッキングで操作継続・進捗 1 段表示・中止→未バックアップ警告＋今すぐバックアップで復旧・閉じる確認、を目視済（残像/見切れ/枠なしの実機フィードバックは反映済）。本番 SMB での体感・多 PC・並行編集 churn（C-1）・worker 稼働中の復元/手動バックアップ同時実行（#2）は pre-release 全体テストで。**
 - bump 判断: ユーザー向け挙動変更（バックアップ進捗 UX の非ブロッキング化）。破壊的変更なし。minor (v0.22.0 → v0.23.0)。レビュー対応は同 PR 内のため version 据え置き（1 PR 1 bump）。Launcher/Updater は無関係。
 
 ### [Manager v0.22.0] - 2026-06-03

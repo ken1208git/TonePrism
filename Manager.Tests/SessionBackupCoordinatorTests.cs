@@ -288,6 +288,9 @@ namespace TonePrism.Manager.Tests
                 Assert.NotNull(r.AssetSnapshot);
                 Assert.True(r.AssetSnapshot.IsSuccess);    // 世代を Failed にしない (修正前は IsFailed)
                 Assert.True(r.AssetSnapshot.IsPartial);    // 1 ファイル skip = 部分取得
+                // (#299 review #1) skip は「ファイル」として数え、「フォルダ」(SkippedDirCount) に混ぜない (UI 誤報防止)。
+                Assert.Equal(1, r.AssetSnapshot.SkippedFileCount);
+                Assert.Equal(0, r.AssetSnapshot.SkippedDirCount);
             }
             // ロック解除後の再取得は完全 (a.txt + b.txt 両方、partial でない)。
             var r2 = Run(true);

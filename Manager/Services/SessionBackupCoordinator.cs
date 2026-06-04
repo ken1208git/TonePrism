@@ -319,7 +319,7 @@ namespace TonePrism.Manager.Services
             if (snap != null && (snap.IsFailed || snap.IsAnomaly))
                 return ("⚠ ゲームファイルのバックアップは取得できませんでした (DB は保存済み)", false);
             if (snap != null && snap.IsPartial)
-                return ("⚠ ゲームファイルのバックアップで一部を取得できませんでした (" + snap.SkippedDirCount + " 個スキップ)", false);
+                return ("⚠ ゲームファイルのバックアップで一部を取得できませんでした (" + (snap.SkippedDirCount + snap.SkippedFileCount) + " 個スキップ)", false);
             // (round4 #1) ゲーム本体の控えを **要求した** 操作なのに控えが成功していない (キャンセル / 無効 / null =
             // best-effort で取れなかった) なら緑「✓」にしない。`result.IsSuccess` は DB のみの成否で、アセット走査の
             // キャンセル (CreateSnapshot が OCE を握って Skipped を返す) もここに来るため、緑✓潰しの最後の砦。
