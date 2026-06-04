@@ -20,18 +20,22 @@ namespace TonePrism.Manager
     {
         private readonly RestoreReconciliationResult _result;
         private readonly string _safetyPath;
+        // (#250 PR2) true = 復元直後の自動チェック / false = バックアップタブの「整合性チェック」ボタンからの手動実行。
+        // 文言を切替える (手動時は「復元完了」等の復元前提の言い回しを避ける)。
+        private readonly bool _postRestore;
         private TextBox _body;
 
-        public RestoreReportForm(RestoreReconciliationResult result, string safetyPath)
+        public RestoreReportForm(RestoreReconciliationResult result, string safetyPath, bool postRestore = true)
         {
             _result = result;
             _safetyPath = safetyPath;
+            _postRestore = postRestore;
             BuildUi();
         }
 
         private void BuildUi()
         {
-            Text = "復元後の整合性チェック";
+            Text = _postRestore ? "復元後の整合性チェック" : "整合性チェック";
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
             MinimizeBox = false;
@@ -51,17 +55,23 @@ namespace TonePrism.Manager
             }
             else if (_result.HasCriticalFindings)
             {
-                headline = "⚠ 復元後、起動できないゲームがあります（対処が必要）";
+                headline = _postRestore
+                    ? "⚠ 復元後、起動できないゲームがあります（対処が必要）"
+                    : "⚠ 起動できないゲームがあります（対処が必要）";
                 headColor = Color.Firebrick;
             }
             else if (_result.HasAnyFindings)
             {
-                headline = "復元は完了しました（軽微なズレあり・起動への影響なし）";
+                headline = _postRestore
+                    ? "復元は完了しました（軽微なズレあり・起動への影響なし）"
+                    : "軽微なズレがあります（起動への影響なし）";
                 headColor = Color.DarkGoldenrod;
             }
             else
             {
-                headline = "✓ 復元完了：DB とゲームフォルダの整合性に問題はありません";
+                headline = _postRestore
+                    ? "✓ 復元完了：DB とゲームフォルダの整合性に問題はありません"
+                    : "✓ DB とゲームフォルダの整合性に問題はありません";
                 headColor = Color.ForestGreen;
             }
 
@@ -132,8 +142,8 @@ namespace TonePrism.Manager
         {
             var sb = new StringBuilder();
 
-            sb.AppendLine("【まず確認】バックアップ／復元の対象は toneprism.db（データベース）だけです。");
-            sb.AppendLine("ゲーム本体の games フォルダは復元されません。そのため、いま復元した DB と、");
+            sb.AppendLine("【まず確認】バックアップ／復元の対象は toneprism.db（データベース）だけで、");
+            sb.AppendLine("ゲーム本体の games フォルダは含まれません。そのため、" + (_postRestore ? "いま復元した DB と、" : "現在の DB と、"));
             sb.AppendLine("ディスク上の games フォルダの「時点」がズレていると、以下のような食い違いが起きます。");
             sb.AppendLine();
             if (!string.IsNullOrEmpty(_safetyPath))
@@ -244,6 +254,22 @@ namespace TonePrism.Manager
                 sb.AppendLine();
             }
 
+            // (2d) イントロガイド (初回説明) スライド画像の欠落 (#250 PR2)
+            if (_result.BrokenIntroSlides.Count > 0)
+            {
+                sb.AppendLine("■ 初回説明スライドの画像の欠落（" + _result.BrokenIntroSlides.Count + " 件）— 起動への影響なし");
+                sb.AppendLine("  DB が指すスライド画像（guide フォルダ）がディスクに見つかりません。本文のあるスライドは");
+                sb.AppendLine("  画像なしで表示され、本文のないスライド（画像のみ）はイントロガイドから外れます。");
+                sb.AppendLine("  いずれもゲームの起動には影響しません。");
+                sb.AppendLine();
+                foreach (var bs in _result.BrokenIntroSlides)
+                {
+                    sb.AppendLine("  ・スライド表示順 " + (bs.DisplayOrder + 1) + "  [slide_id: " + bs.SlideId + "]");
+                    sb.AppendLine("      想定パス: " + bs.ExpectedPath);
+                }
+                sb.AppendLine();
+            }
+
             // (3) 孤児フォルダ
             var orphanGames = _result.OrphanFolders.Where(o => o.Kind == OrphanKind.Game).ToList();
             var orphanVersions = _result.OrphanFolders.Where(o => o.Kind == OrphanKind.Version).ToList();
@@ -266,31 +292,70 @@ namespace TonePrism.Manager
             sb.AppendLine();
             sb.AppendLine("【整合した状態に戻す手順】");
             sb.AppendLine();
-            sb.AppendLine("  1. すべての展示 PC で Launcher を閉じてください（ファイルを掴んでいると");
-            sb.AppendLine("     フォルダの差し替えができません）。");
-            sb.AppendLine();
+            // (review round2 #3) 手順1「Launcher を閉じる」はフォルダの差し替え/削除が要る finding (起動不能ゲーム /
+            // 無い版 / 孤児フォルダ) のときだけ出す。画像欠落だけのとき (スライド編集で貼り直す等) は不要で、手順1だけが
+            // 浮くのを避ける。
+            if (_result.BrokenGames.Count > 0 || _result.MissingVersionFolders.Count > 0 || _result.OrphanFolders.Count > 0)
+            {
+                sb.AppendLine("  1. すべての展示 PC で Launcher を閉じてください（ファイルを掴んでいると");
+                sb.AppendLine("     フォルダの差し替えができません）。");
+                sb.AppendLine();
+            }
             if (_result.BrokenGames.Count > 0 || _result.MissingVersionFolders.Count > 0)
             {
+                string dbWord = _postRestore ? "復元した DB" : "今の DB";
                 sb.AppendLine("  2. 上の「想定パス／想定フォルダ」に当たるゲームフォルダを用意します。");
-                sb.AppendLine("     復元した DB と同じ時点の games フォルダが、別 PC・別ドライブ・");
+                sb.AppendLine("     " + dbWord + "と同じ時点の games フォルダが、別 PC・別ドライブ・");
                 sb.AppendLine("     共有サーバー等に残っていれば、そのフォルダを games/ 配下にコピーして");
                 sb.AppendLine("     ください（フォルダ名＝ゲーム ID／バージョン leaf を一致させる）。");
                 sb.AppendLine();
-                sb.AppendLine("  3. コピー後に Manager を再起動すると、このチェックが再度かかります。");
+                sb.AppendLine("  3. コピーが終わったら、バックアップ画面の「整合性チェック」ボタンを押すと、");
+                sb.AppendLine("     このチェックをもう一度実行できます（Manager の再起動では再チェックされません）。");
                 sb.AppendLine("     「起動できないゲーム」が 0 件になれば整合した状態です。");
                 sb.AppendLine();
-                sb.AppendLine("  4. 当時の games フォルダがもう手に入らない場合は、無理に DB を合わせず、");
-                sb.AppendLine("     上の退避ファイル（safety_*.db）からいまの games に合う DB に");
-                sb.AppendLine("     戻すのが安全です（バックアップ画面の「復元」で safety を選択）。");
+                if (_postRestore)
+                {
+                    // (round: ユーザー指摘) safety_*.db = 復元の直前に退避した DB = 復元前の状態。これを戻すのは
+                    // 「今回の復元を取り消す」操作であって、元の DB に問題があって復元したのなら問題も一緒に戻る。
+                    // 「今の games に合わせるなら safety が確実」とだけ書くのは誤誘導なので、取り消しである旨と注意を明示。
+                    sb.AppendLine("  4. 当時の games フォルダが手に入らない場合は、今回の復元自体を取り消せます。");
+                    sb.AppendLine("     復元の直前の DB が safety_*.db に退避されているので、それを「復元」で戻せば、");
+                    sb.AppendLine("     復元前＝いまの games フォルダと整合した状態に戻ります。");
+                    sb.AppendLine("     ※ただし、元の DB に問題があって今回復元したのなら、戻すとその問題も一緒に");
+                    sb.AppendLine("       戻ります。その場合は上の 2〜3（当時の games を補う）で直すのが本筋です。");
+                }
+                else
+                {
+                    sb.AppendLine("  4. 当時の games フォルダが手に入らない場合は、いまの games フォルダに合う");
+                    sb.AppendLine("     時点のバックアップを、履歴から「復元」する方法もあります。");
+                }
             }
-            else
+            else if (_result.OrphanFolders.Count > 0)
             {
+                // (review #2) 孤児フォルダがあるときだけ削除案内を出す。画像欠落だけのときに「余分なフォルダを削除」と
+                // 案内するのは無関係なので、else を「孤児がある場合」に限定する。
                 sb.AppendLine("  2. 余分なフォルダは中身を確認のうえ、不要であれば手動で削除してください。");
                 sb.AppendLine("     必要なフォルダを誤って消さないよう、削除前に中身をご確認ください。");
             }
+            // (review #2) 画像 (サムネ/背景/初回説明スライド) 欠落の直し方を明示する。旧実装は画像のみの finding でも
+            // games フォルダ系の手順 or 孤児削除しか出さず、画像欠落の修正手順が一切無かった。
+            if (_result.BrokenAssets.Count > 0 || _result.BrokenIntroSlides.Count > 0)
+            {
+                sb.AppendLine("  ・画像の欠落（サムネイル／背景／初回説明スライド）は、当時の games/guide フォルダから");
+                sb.AppendLine("    画像ファイルを補うか、ゲーム編集・スライド編集で画像を選び直すと解消できます。");
+            }
             sb.AppendLine();
-            sb.AppendLine("  ※ DB をいまのゲームフォルダに合った状態へ戻したいだけなら、退避ファイル");
-            sb.AppendLine("     （safety_*.db）からの再復元が確実です。");
+            if (_postRestore)
+            {
+                sb.AppendLine("  ※ 今回の復元自体を取り消したいだけなら、退避ファイル（safety_*.db）を「復元」で");
+                sb.AppendLine("     戻すのが確実です（復元前＝いまの games フォルダに合った状態に戻ります。ただし、");
+                sb.AppendLine("     元の DB に問題があって復元したのなら、その問題も戻ります）。");
+            }
+            else
+            {
+                sb.AppendLine("  ※ いまの games フォルダに合う状態に戻したいときは、バックアップ履歴から");
+                sb.AppendLine("     合致する時点を「復元」してください。");
+            }
 
             return sb.ToString();
         }

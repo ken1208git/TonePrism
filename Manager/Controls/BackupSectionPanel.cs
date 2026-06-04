@@ -396,6 +396,42 @@ namespace TonePrism.Manager.Controls
         }
 
         /// <summary>
+        /// (#250 PR2)「整合性チェック」ボタン: 復元を伴わず、現在の DB ↔ games/guide のズレをオンデマンドで突き合わせ、
+        /// 同じレポート (RestoreReportForm) を出す。整合性チェックは復元直後にしか走らないため、復元レポートの
+        /// 「修正後に再チェック」を Manager 再起動に頼らず正しく行えるようにする。手動なので safetyPath=null /
+        /// postRestore=false で「復元完了」等の復元前提の文言を避ける。
+        /// </summary>
+        private void btnReconcile_Click(object sender, EventArgs e)
+        {
+            if (_dbManager == null) return;
+            RestoreReconciliationResult reconcile;
+            // (review #3) Analyze() は全ゲーム×全版に Directory/File.Exists を回す同期処理で、本番は games/guide が
+            // SMB 上のため登録数次第で一瞬 UI が固まりうる。最低限 wait カーソルを出す (完全な非同期化は復元直後経路も
+            // 同期なため将来課題、SMB 体感は pre-release で確認)。
+            Cursor prev = Cursor.Current;
+            try
+            {
+                Cursor.Current = Cursors.WaitCursor;
+                reconcile = new Services.RestoreReconciliationService(_dbManager).Analyze();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("[BackupSectionPanel] 整合性チェックに失敗", ex);
+                MessageBox.Show("整合性チェックの実行中にエラーが発生しました（詳細はログを確認）",
+                    "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            finally
+            {
+                Cursor.Current = prev;
+            }
+            using (var report = new RestoreReportForm(reconcile, safetyPath: null, postRestore: false))
+            {
+                report.ShowDialog(this.FindForm());
+            }
+        }
+
+        /// <summary>
         /// 「削除」ボタン: 選択行のバックアップファイルを物理削除する (backup_log 廃止後は DB 行なし)。
         /// </summary>
         private void btnDelete_Click(object sender, EventArgs e)
