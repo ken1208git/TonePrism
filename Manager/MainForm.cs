@@ -38,6 +38,7 @@ namespace TonePrism.Manager
         private System.Windows.Forms.Button _btnBackupCancel;
         private System.Windows.Forms.ToolStripControlHost _tsBackupCancel;
         private System.Windows.Forms.ToolStripProgressBar _tsBackupBar;
+        private System.Windows.Forms.ToolStripStatusLabel _tsBackupPercent; // 固定幅 (桁数でファイル名が揺れない)
         private System.Windows.Forms.ToolStripStatusLabel _tsBackupFile;
         private System.Windows.Forms.Button _btnBackupRecapture;
         private System.Windows.Forms.ToolStripControlHost _tsBackupRecapture;
@@ -644,6 +645,11 @@ namespace TonePrism.Manager
                 Name = "_tsBackupBar", Visible = false, Style = System.Windows.Forms.ProgressBarStyle.Continuous, Minimum = 0, Maximum = 100
             };
             _tsBackupBar.Size = new System.Drawing.Size(160, 16);
+            _tsBackupPercent = new System.Windows.Forms.ToolStripStatusLabel
+            {
+                Name = "_tsBackupPercent", Visible = false, AutoSize = false, Width = 40,
+                TextAlign = System.Drawing.ContentAlignment.MiddleRight
+            };
             _tsBackupFile = new System.Windows.Forms.ToolStripStatusLabel
             {
                 Name = "_tsBackupFile", Visible = false, AutoSize = true, Overflow = System.Windows.Forms.ToolStripItemOverflow.AsNeeded
@@ -651,7 +657,7 @@ namespace TonePrism.Manager
             _btnBackupRecapture = new System.Windows.Forms.Button { Text = "今すぐバックアップ", Size = new System.Drawing.Size(120, 20), Margin = new System.Windows.Forms.Padding(0) };
             _tsBackupRecapture = new System.Windows.Forms.ToolStripControlHost(_btnBackupRecapture) { Name = "_tsBackupRecapture", Visible = false };
             // 順番: [phase][中止][進捗バー][ファイル名(末尾・可変)][今すぐバックアップ(未バックアップ時のみ)]。
-            statusStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { _tsBackupPhase, _tsBackupCancel, _tsBackupBar, _tsBackupFile, _tsBackupRecapture });
+            statusStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { _tsBackupPhase, _tsBackupCancel, _tsBackupBar, _tsBackupPercent, _tsBackupFile, _tsBackupRecapture });
             _btnBackupCancel.Click += (s, e) => { try { dbManager?.SessionBackupCoordinator?.CancelCurrentBackup(); } catch { } };
             _btnBackupRecapture.Click += (s, e) =>
             {
@@ -978,6 +984,8 @@ namespace TonePrism.Manager
             _tsBackupCancel.Visible = true;
             try { _tsBackupBar.Value = p; } catch { /* Maximum 変更レース等は無害 */ }
             _tsBackupBar.Visible = true;
+            _tsBackupPercent.Text = p + "%";
+            _tsBackupPercent.Visible = true;
             _tsBackupFile.Text = fileName ?? string.Empty; // 可変幅は末尾なので動いても他に影響しない
             _tsBackupFile.Visible = true;
             _tsBackupRecapture.Visible = false;
@@ -991,6 +999,7 @@ namespace TonePrism.Manager
             _tsBackupPhase.Visible = true;
             _tsBackupCancel.Visible = false;
             _tsBackupBar.Visible = false;
+            _tsBackupPercent.Visible = false;
             _tsBackupFile.Visible = false;
             _tsBackupRecapture.Visible = true;
         }
@@ -1001,6 +1010,7 @@ namespace TonePrism.Manager
             _tsBackupPhase.Visible = false;
             _tsBackupCancel.Visible = false;
             _tsBackupBar.Visible = false;
+            _tsBackupPercent.Visible = false;
             _tsBackupFile.Visible = false;
             _tsBackupRecapture.Visible = false;
         }
