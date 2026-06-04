@@ -244,6 +244,21 @@ namespace TonePrism.Manager
                 sb.AppendLine();
             }
 
+            // (2d) イントロガイド (初回説明) スライド画像の欠落 (#250 PR2)
+            if (_result.BrokenIntroSlides.Count > 0)
+            {
+                sb.AppendLine("■ 初回説明スライドの画像の欠落（" + _result.BrokenIntroSlides.Count + " 件）— 起動への影響なし");
+                sb.AppendLine("  DB が指すスライド画像（guide フォルダ）がディスクに見つかりません。該当スライドが");
+                sb.AppendLine("  画像なしで表示されますが、ゲームの起動には影響しません。");
+                sb.AppendLine();
+                foreach (var bs in _result.BrokenIntroSlides)
+                {
+                    sb.AppendLine("  ・スライド表示順 " + (bs.DisplayOrder + 1) + "  [slide_id: " + bs.SlideId + "]");
+                    sb.AppendLine("      想定パス: " + bs.ExpectedPath);
+                }
+                sb.AppendLine();
+            }
+
             // (3) 孤児フォルダ
             var orphanGames = _result.OrphanFolders.Where(o => o.Kind == OrphanKind.Game).ToList();
             var orphanVersions = _result.OrphanFolders.Where(o => o.Kind == OrphanKind.Version).ToList();

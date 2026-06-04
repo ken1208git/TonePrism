@@ -1998,6 +1998,13 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.24.0] - 2026-06-04
+
+- **(#250 PR2) 復元の整合性チェックを `guide/`（初回説明スライド画像）にも拡張**: 旧 `RestoreReconciliationService` は復元後に **`games/` しか突き合わせず**、別時点の DB を復元すると games/ のズレ（起動できないゲーム／無い版／孤児フォルダ）は検出されるのに、`intro_slides.image_path`（`guide/<file>`）が指す画像の欠落は**無警告（silent）**という非対称があった（Codex PR #274 P1）。「DB だけ復元 → 初回説明スライドが存在しない画像を指す」silent breakage を塞ぐため、intro_slides の画像参照も突き合わせて欠落を検出（新 finding `BrokenIntroSlides`、復元レポートに「初回説明スライドの画像の欠落」セクションを追加）。画像欠落はスライド表示が劣化するだけで起動を妨げないため **warning 扱い**（`HasCriticalFindings` には含めず、games の thumbnail/background と同格。text-only スライド＝ImagePath 空は対象外）。
+- **テスト基盤**: `PathManager` に test seam（`SetBaseDirectoryForTest`/`ResetBaseDirectoryForTest`、internal）を追加し、PathManager 静的に依存していた `RestoreReconciliationService` を実 install を触らず一時 install dir で検証可能に（#239）。**reconciliation の初テスト**を新規追加（guide 画像欠落→`BrokenIntroSlides` 検出＋非 critical / 全存在→非検出、fail-first）。
+- 検証: Manager build 緑 / **テスト 138 件合格**（#250 PR2 新規 2 件）。
+- bump 判断: ユーザー向け挙動の機能追加（復元レポートに guide 欠落検出を追加）。破壊的変更なし。schema 変更なし。minor (v0.23.0 → v0.24.0)。Launcher/Updater は無関係。**#250 はまだ閉じない**（PR3＝DB+アセット一式の復元 2 モードが残るため）。
+
 ### [Manager v0.23.0] - 2026-06-04
 
 - **(#299) 操作単位バックアップの進捗を「非ブロッキング＋下部ステータスバー統合」に改装**: #295 では games/guide を変える操作の直後にモーダル進捗ダイアログ（「バックアップを作成中」）が出て、~6GB の SMB 走査が終わるまでメインウィンドウが操作不能だった。これを撤去し、**バックアップはバックグラウンド worker で実行・操作はそのまま継続可**に。進捗は既存ステータスバー（statusStrip1）に統合した `[バックアップ中...][中止][進捗バー][N%][ファイル名]` で表示（別バー＝2 段にせず 1 段、左詰め）。

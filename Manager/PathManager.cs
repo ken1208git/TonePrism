@@ -25,6 +25,14 @@ namespace TonePrism.Manager
                 return _baseDirectory;
             }
         }
+
+        /// <summary>(#239 テスト用 seam) BaseDirectory を一時 install dir に差し替える。本番経路は使わない
+        /// (FindBaseDirectory が自動解決)。PathManager 静的に依存する RestoreReconciliationService 等を、実 install を
+        /// 触らず一時フォルダで検証するため。テスト終了時に <see cref="ResetBaseDirectoryForTest"/> で戻す。</summary>
+        internal static void SetBaseDirectoryForTest(string baseDir) { _baseDirectory = baseDir; }
+
+        /// <summary>(#239 テスト用 seam) <see cref="SetBaseDirectoryForTest"/> の差し替えを解除し自動解決に戻す。</summary>
+        internal static void ResetBaseDirectoryForTest() { _baseDirectory = null; }
         
         /// <summary>
         /// gamesフォルダのパス

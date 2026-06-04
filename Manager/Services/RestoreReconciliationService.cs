@@ -250,6 +250,39 @@ namespace TonePrism.Manager.Services
                 }
             }
 
+            // (#250 PR2) guide/ = イントロガイド (#253「初回説明」) スライド画像の突き合わせ。
+            // 旧実装は games/ しか突き合わせず、別時点 DB を復元すると games/ のズレは検出されるのに
+            // `intro_slides.image_path` (guide/<file>) が指す画像の欠落は **無警告 (silent)** という非対称があった
+            // (Codex PR #274 P1)。「DB だけ復元 → 初回説明スライドが存在しない画像を指す」silent breakage を塞ぐ。
+            // 画像欠落はスライド表示が劣化するだけで起動を妨げないため warning (critical でない、games の thumbnail/
+            // background と同格)。text-only スライド (ImagePath 空) は画像無しが正常なので対象外。
+            List<IntroSlide> slides;
+            try
+            {
+                slides = _dbManager.GetAllIntroSlides();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[RestoreReconciliation] イントロスライド一覧の取得に失敗: " + ex.Message);
+                slides = new List<IntroSlide>();
+            }
+            foreach (var slide in slides)
+            {
+                if (string.IsNullOrWhiteSpace(slide.ImagePath)) continue; // text-only は正常
+                // ImagePath は guide/<file> の相対パス (baseDir 起点)。games の asset と同じ三段解決を流用
+                // (gameFolder=baseDir を渡せば baseDir 相対の File.Exists に帰着する)。
+                if (!ResolvesAsset(slide.ImagePath, baseDir, baseDir))
+                {
+                    result.BrokenIntroSlides.Add(new BrokenIntroSlide
+                    {
+                        SlideId = slide.SlideId,
+                        DisplayOrder = slide.DisplayOrder,
+                        ImagePath = slide.ImagePath,
+                        ExpectedPath = Path.IsPathRooted(slide.ImagePath) ? slide.ImagePath : Path.Combine(baseDir, slide.ImagePath)
+                    });
+                }
+            }
+
             return result;
         }
 
@@ -303,6 +336,10 @@ namespace TonePrism.Manager.Services
         // (累積監査 round 4 High-7) thumbnail / background の物理欠落。画像なので起動はできるが UI が劣化する warning。
         public List<BrokenAsset> BrokenAssets { get; } = new List<BrokenAsset>();
 
+        // (#250 PR2) intro_slides.image_path (guide/<file>) が指す画像の欠落。スライド表示が劣化する warning
+        // (起動は妨げない)。games の thumbnail/background と同格で、別時点 DB 復元時の guide/ ズレを表面化する。
+        public List<BrokenIntroSlide> BrokenIntroSlides { get; } = new List<BrokenIntroSlide>();
+
         /// <summary>
         /// (追加精査 ③) DB スキーマが未完 (= migration が partial skip された) ことを示す。
         /// 例: v14→v15 で `(game_id, version)` 重複残存により UNIQUE INDEX 作成を skip した場合、
@@ -328,6 +365,7 @@ namespace TonePrism.Manager.Services
         public bool HasAnyFindings =>
             BrokenGames.Count > 0 || MissingVersionFolders.Count > 0 || OrphanFolders.Count > 0
             || BrokenVersions.Count > 0 || BrokenAssets.Count > 0
+            || BrokenIntroSlides.Count > 0
             || SchemaIncomplete;
     }
 
@@ -377,5 +415,18 @@ namespace TonePrism.Manager.Services
         public string Version { get; set; }
         public string AssetKind { get; set; } // "サムネイル" or "背景画像"
         public string ExpectedPath { get; set; }
+    }
+
+    /// <summary>
+    /// (#250 PR2) intro_slides.image_path (guide/&lt;file&gt;) が指す画像の物理欠落。
+    /// 別時点 DB を復元すると DB の slide 行が現存しない guide 画像を指しうる。起動は妨げないが
+    /// イントロガイドの該当スライドが画像なしになるため warning として表面化する。
+    /// </summary>
+    public class BrokenIntroSlide
+    {
+        public int SlideId { get; set; }
+        public int DisplayOrder { get; set; }
+        public string ImagePath { get; set; }    // DB 上の相対パス (guide/<file>)
+        public string ExpectedPath { get; set; } // 解決した絶対パス
     }
 }
