@@ -259,5 +259,60 @@ namespace TonePrism.Manager.Tests
             var r = _restore.RestoreFromManifest(Path.Combine(_root, "nope.manifest"));
             Assert.True(r.IsFailed);
         }
+
+        [Fact]
+        public void Restore_PartialManifest_SuppressesDeletion()
+        {
+            // (review #1) 部分取得 (META の skipped>0) 世代から復元すると、snapshot が取りこぼした live を「余剰」と誤判定して
+            // 消す危険がある。partial manifest では余剰削除を抑止する (live を消さない安全側)。
+            WriteGame("g1/a.txt", "alpha");
+            string manifest = Snap();
+            var lines = File.ReadAllLines(manifest);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (lines[i].StartsWith("META\t"))
+                {
+                    var f = lines[i].Split('\t').ToList();
+                    while (f.Count < 8) f.Add("0");
+                    f[7] = "1"; // skippedFileCount > 0 → partial
+                    lines[i] = string.Join("\t", f);
+                }
+            }
+            File.WriteAllLines(manifest, lines);
+            WriteGame("g1/EXTRA.bin", "junk"); // manifest に無い余剰
+
+            var r = _restore.RestoreFromManifest(manifest);
+            Assert.True(r.IsSuccess);
+            Assert.True(r.DeletionSuppressed);
+            Assert.Equal(0, r.DeletedCount);
+            Assert.True(File.Exists(GameFull("g1/EXTRA.bin"))); // 余剰が残る (修正前は削除されていた)
+        }
+
+        [Fact]
+        public void Restore_CorruptManifestLine_SuppressesDeletion_CountsFailed()
+        {
+            // (review #2) entry の parse 失敗 (破損行) を silent skip すると対応 live が「余剰」判定で消える。破損行は failed
+            // 計上 (IsPartial) し、削除フェーズ全体を抑止する。有効 entry (b.txt) を残して a.txt 行だけ破損 (全破損だと
+            // entries 0 件で空ガードが先に発火するため、部分破損で抑止パスを通す)。
+            WriteGame("g1/a.txt", "alpha");
+            WriteGame("g1/b.txt", "beta");
+            string manifest = Snap();
+            var lines = File.ReadAllLines(manifest);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var f = lines[i].Split('\t');
+                if (f.Length >= 4 && f[0] != "META" && f[3] == "games/g1/a.txt") { f[1] = "NOTANUM"; lines[i] = string.Join("\t", f); }
+            }
+            File.WriteAllLines(manifest, lines);
+            WriteGame("g1/EXTRA.bin", "junk");
+
+            var r = _restore.RestoreFromManifest(manifest);
+            Assert.True(r.FailedCount >= 1);   // 破損行を可視化
+            Assert.True(r.IsPartial);
+            Assert.True(r.DeletionSuppressed);
+            Assert.Equal(0, r.DeletedCount);
+            Assert.True(File.Exists(GameFull("g1/EXTRA.bin"))); // 余剰が消されない
+            Assert.True(File.Exists(GameFull("g1/a.txt")));     // 破損行で wantedRel に無い a.txt も消えない
+        }
     }
 }

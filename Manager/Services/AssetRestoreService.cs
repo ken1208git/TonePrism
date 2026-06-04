@@ -40,7 +40,7 @@ namespace TonePrism.Manager.Services
             _backupService = backupService;
         }
 
-        private string GetPoolRootDirectory() => Path.Combine(_backupService.GetEffectiveDestinationDirectory(), "asset_pool");
+        private string GetPoolRootDirectory() => Path.Combine(_backupService.GetEffectiveDestinationDirectory(), AssetSnapshotService.PoolDirName);
 
         /// <summary>
         /// live の games/+guide/ を <paramref name="manifestPath"/> の内容と完全一致させる。実体は pool から取得。
@@ -66,14 +66,31 @@ namespace TonePrism.Manager.Services
                 token.ThrowIfCancellationRequested();
 
                 // 1. manifest を解析。wantedRel = 残すべき relpath 集合 (case-insensitive)。不正 relpath は拒否してカウント。
+                //    (review #1/#2) **manifest が「完全な desired tree」だと信頼できるときだけ余剰削除する**。部分取得
+                //    (META の skipped>0) / 破損行 (entry の parse 失敗) があると manifest は under-describe しており、
+                //    取りこぼされた/解釈できなかった live を「余剰」と誤判定して消す＝silent データ消失になる。これを
+                //    検出して削除フェーズを抑止する (copy は行い live は消さない安全側)。
                 var entries = new List<AssetSnapshotService.ManifestEntry>();
                 var wantedRel = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 int failed = 0;
+                bool metaPartial = false;
+                int corruptLines = 0;
                 try
                 {
                     foreach (var line in File.ReadLines(FileOperationService.EnsureLongPath(manifestPath)))
                     {
-                        if (!AssetSnapshotService.TryParseManifestEntryLine(line, out AssetSnapshotService.ManifestEntry e)) continue;
+                        if (string.IsNullOrEmpty(line)) continue;
+                        if (line.StartsWith(AssetSnapshotService.MetaLinePrefix + "\t"))
+                        {
+                            if (AssetSnapshotService.IsMetaLinePartial(line)) metaPartial = true; // 部分取得世代
+                            continue;
+                        }
+                        if (!AssetSnapshotService.TryParseManifestEntryLine(line, out AssetSnapshotService.ManifestEntry e))
+                        {
+                            corruptLines++; // entry のはずが parse 失敗 = 破損行。silent skip せず可視化し削除を抑止する。
+                            Logger.Warn("[AssetRestore] manifest の破損行を検出 (この世代の余剰削除を抑止): " + line);
+                            continue;
+                        }
                         if (!IsRelPathSafe(e.RelPath))
                         {
                             failed++;
@@ -88,6 +105,8 @@ namespace TonePrism.Manager.Services
                 {
                     return AssetRestoreResult.Failed("目録の読込に失敗しました: " + ex.Message);
                 }
+                failed += corruptLines; // 破損行を可視化 (IsPartial に反映)
+                bool manifestComplete = corruptLines == 0 && !metaPartial; // 完全と信頼できるときだけ余剰削除する
                 token.ThrowIfCancellationRequested();
 
                 // 2. 空ガード: 有効エントリ 0 件で非空 live を空にしようとしたら中止 (空 manifest 暴発で games/ 全消去を防ぐ)。
@@ -147,35 +166,46 @@ namespace TonePrism.Manager.Services
                 }
 
                 // 4. 余剰削除: manifest に無い live ファイルを消してツリーを完全一致させる。
-                foreach (var sub in SubFolders)
+                //    (review #1/#2) ただし manifest が不完全 (部分取得 or 破損行) のときは抑止＝取りこぼし/未解釈の live を
+                //    「余剰」と誤判定して消すデータ消失を防ぐ。抑止時は copy だけ行い live を消さない (PR3b の rename-retreat
+                //    safety退避で削除を可逆化するまでの安全側既定)。DeletionSuppressed で呼出側/UI に伝える。
+                bool deletionSuppressed = false;
+                if (manifestComplete)
                 {
-                    string subRoot = Path.Combine(baseInstallDir, sub);
-                    if (!Directory.Exists(FileOperationService.EnsureLongPath(subRoot))) continue;
-                    foreach (var liveFile in EnumerateLiveFiles(subRoot))
+                    foreach (var sub in SubFolders)
                     {
-                        token.ThrowIfCancellationRequested();
-                        string rel = sub + "/" + RelativeUnder(subRoot, liveFile);
-                        if (wantedRel.Contains(rel)) continue;
-                        try
+                        string subRoot = Path.Combine(baseInstallDir, sub);
+                        if (!Directory.Exists(FileOperationService.EnsureLongPath(subRoot))) continue;
+                        foreach (var liveFile in EnumerateLiveFiles(subRoot))
                         {
-                            File.Delete(FileOperationService.EnsureLongPath(liveFile));
-                            deleted++;
-                        }
-                        catch (Exception ex)
-                        {
-                            failed++;
-                            Logger.Warn("[AssetRestore] 余剰ファイルの削除に失敗 (skip): " + liveFile + " : " + ex.Message);
+                            token.ThrowIfCancellationRequested();
+                            string rel = sub + "/" + RelativeUnder(subRoot, liveFile);
+                            if (wantedRel.Contains(rel)) continue;
+                            try
+                            {
+                                File.Delete(FileOperationService.EnsureLongPath(liveFile));
+                                deleted++;
+                            }
+                            catch (Exception ex)
+                            {
+                                failed++;
+                                Logger.Warn("[AssetRestore] 余剰ファイルの削除に失敗 (skip): " + liveFile + " : " + ex.Message);
+                            }
                         }
                     }
+                    // 5. 空 dir を best-effort 掃除 (games//guide/ root 自体は残す)。
+                    foreach (var sub in SubFolders)
+                        PruneEmptyDirs(Path.Combine(baseInstallDir, sub));
+                }
+                else
+                {
+                    deletionSuppressed = true;
+                    Logger.Warn("[AssetRestore] manifest が不完全 (部分取得 or 破損行) のため余剰ファイルの削除を抑止しました (live を消さない安全側)。");
                 }
 
-                // 5. 空 dir を best-effort 掃除 (games//guide/ root 自体は残す)。
-                foreach (var sub in SubFolders)
-                    PruneEmptyDirs(Path.Combine(baseInstallDir, sub));
-
-                Logger.Info(string.Format("[AssetRestore] 復元完了: copied={0} skipped={1} deleted={2} failed={3} (manifest={4})",
-                    copied, skipped, deleted, failed, Path.GetFileName(manifestPath)));
-                return AssetRestoreResult.Success(copied, skipped, deleted, failed, missingBlobs);
+                Logger.Info(string.Format("[AssetRestore] 復元完了: copied={0} skipped={1} deleted={2} failed={3} deletionSuppressed={4} (manifest={5})",
+                    copied, skipped, deleted, failed, deletionSuppressed, Path.GetFileName(manifestPath)));
+                return AssetRestoreResult.Success(copied, skipped, deleted, failed, missingBlobs, deletionSuppressed);
             }
             catch (OperationCanceledException)
             {

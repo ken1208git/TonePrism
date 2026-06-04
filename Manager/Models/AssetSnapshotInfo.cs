@@ -104,15 +104,19 @@ namespace TonePrism.Manager.Models
         /// <summary>pool に blob が無く復元できなかった relpath 群 (live は保持＝削除しない)。UI/ログ用。</summary>
         public List<string> MissingBlobRelPaths { get; } = new List<string>();
 
+        /// <summary>(#250 PR3a review #1/#2) manifest が不完全 (部分取得 or 破損行) のため余剰削除を抑止したか。
+        /// true のとき live に manifest 外の余剰が残りうる (= 完全一致でない)。UI で「完全には戻していない」旨を出す材料。</summary>
+        public bool DeletionSuppressed { get; private set; }
+
         public bool IsSuccess => Kind == ResultKind.Success;
         public bool IsSkipped => Kind == ResultKind.Skipped;
         public bool IsFailed => Kind == ResultKind.Failed;
-        /// <summary>完走したが per-file 失敗を含む (= 緑チェックにせず警告すべき)。SnapshotResult.IsPartial と同義。</summary>
-        public bool IsPartial => Kind == ResultKind.Success && FailedCount > 0;
+        /// <summary>完走したが per-file 失敗 or 削除抑止を含む (= 緑チェックにせず警告すべき)。</summary>
+        public bool IsPartial => Kind == ResultKind.Success && (FailedCount > 0 || DeletionSuppressed);
 
-        public static AssetRestoreResult Success(int copied, int skipped, int deleted, int failed, List<string> missingBlobs = null)
+        public static AssetRestoreResult Success(int copied, int skipped, int deleted, int failed, List<string> missingBlobs = null, bool deletionSuppressed = false)
         {
-            var r = new AssetRestoreResult { Kind = ResultKind.Success, CopiedCount = copied, SkippedCount = skipped, DeletedCount = deleted, FailedCount = failed };
+            var r = new AssetRestoreResult { Kind = ResultKind.Success, CopiedCount = copied, SkippedCount = skipped, DeletedCount = deleted, FailedCount = failed, DeletionSuppressed = deletionSuppressed };
             if (missingBlobs != null) r.MissingBlobRelPaths.AddRange(missingBlobs);
             return r;
         }

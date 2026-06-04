@@ -31,7 +31,7 @@ namespace TonePrism.Manager.Services
         private readonly BackupService _backupService;
 
         private static readonly string[] SubFolders = { "games", "guide" };
-        private const string PoolDirName = "asset_pool";
+        internal const string PoolDirName = "asset_pool"; // (#250 PR3a review #4) AssetRestoreService と共用 (pool ルート dir 名 SoT)
         private const string ManifestDirName = "asset_snapshots";
         private const string ManifestExt = ".manifest";
         internal const string MetaLinePrefix = "META"; // (#250 PR3) AssetRestoreService と共用 (manifest 形式 SoT)
@@ -388,6 +388,20 @@ namespace TonePrism.Manager.Services
             return true;
         }
 
+        /// <summary>(#250 PR3a review #1) META 行が「部分取得 (skippedDir/skippedFile > 0)」を示すか。古い 6 フィールド
+        /// META は skipped 情報が無いので false (complete 扱い＝後方互換)。restore が partial 世代からの余剰削除を抑止
+        /// する判定に使う (META 形式の解釈点を WriteManifest と同じ AssetSnapshotService に固定)。</summary>
+        internal static bool IsMetaLinePartial(string metaLine)
+        {
+            if (string.IsNullOrEmpty(metaLine) || !metaLine.StartsWith(MetaLinePrefix + "\t")) return false;
+            var f = metaLine.Split('\t');
+            if (f.Length < 8) return false; // 旧形式 (skipped 列なし)
+            int sd, sf;
+            int.TryParse(f[6], out sd);
+            int.TryParse(f[7], out sf);
+            return (sd + sf) > 0;
+        }
+
         /// <summary>
         /// (レビュー#4) ソースを 1 回だけ読み、SHA-256 を計算しつつ pool の temp に書き、内容ハッシュ名へ rename する。
         /// 既に同一中身が pool にあれば temp を捨てる (重複排除)。新規配置したら true (= NewBytes 計上)。チャンク読みで
@@ -456,8 +470,12 @@ namespace TonePrism.Manager.Services
         private static void WriteManifest(string path, string timestamp, string host, string trigger, Stats stats, List<string> entries)
         {
             var sb = new StringBuilder();
+            // (#250 PR3a review #1) META 行末に skippedDir/skippedFile を追記し「部分取得 (IsPartial)」を永続化する。
+            // restore が partial 世代を復元元にするとき、取りこぼされた live を「余剰」と誤判定して削除しないため
+            // (旧 6 フィールド META は skipped 情報が無く complete 扱い＝後方互換)。
             sb.Append(MetaLinePrefix).Append('\t').Append(timestamp).Append('\t').Append(host).Append('\t')
-              .Append(trigger).Append('\t').Append(stats.FileCount).Append('\t').Append(stats.Bytes).Append('\n');
+              .Append(trigger).Append('\t').Append(stats.FileCount).Append('\t').Append(stats.Bytes).Append('\t')
+              .Append(stats.SkippedDirCount).Append('\t').Append(stats.SkippedFileCount).Append('\n');
             foreach (var e in entries) sb.Append(e).Append('\n');
             File.WriteAllText(FileOperationService.EnsureLongPath(path), sb.ToString(), new UTF8Encoding(false));
         }
