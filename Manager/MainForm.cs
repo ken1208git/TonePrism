@@ -33,15 +33,14 @@ namespace TonePrism.Manager
         // 順番は [phase 固定"バックアップ中..."][中止][進捗バー][ファイル名(可変・最後)]。可変幅のファイル名を末尾に
         // 置くことで、中止ボタンが per-file で高速移動しない (実機フィードバック)。phase 固定文言で中止位置を完全固定。
         private System.Windows.Forms.ToolStripStatusLabel _tsBackupPhase;
-        // 中止 / 今すぐバックアップ は ToolStripButton だとフラット (枠なし) で「ただの文字」に見えるため、実 Button を
-        // ToolStripControlHost でホストして「枠付きボタン」にする (実機フィードバック)。表示制御は host の .Visible で行う。
-        private System.Windows.Forms.Button _btnBackupCancel;
-        private System.Windows.Forms.ToolStripControlHost _tsBackupCancel;
+        // 中止 / 今すぐバックアップ。ToolStripControlHost(実 Button) は StatusStrip のレイアウトを壊して他 item が
+        // 表示されなくなる + 残像が出るため不採用。フラットな ToolStripButton + 専用レンダラー
+        // (BorderedStatusButtonRenderer) で常時枠を描いて「ボタンらしく」見せる。
+        private System.Windows.Forms.ToolStripButton _tsBackupCancel;
         private System.Windows.Forms.ToolStripProgressBar _tsBackupBar;
         private System.Windows.Forms.ToolStripStatusLabel _tsBackupPercent; // 固定幅 (桁数でファイル名が揺れない)
         private System.Windows.Forms.ToolStripStatusLabel _tsBackupFile;
-        private System.Windows.Forms.Button _btnBackupRecapture;
-        private System.Windows.Forms.ToolStripControlHost _tsBackupRecapture;
+        private System.Windows.Forms.ToolStripButton _tsBackupRecapture;
 
         public MainForm()
         {
@@ -638,8 +637,7 @@ namespace TonePrism.Manager
             {
                 Name = "_tsBackupPhase", Visible = false, AutoSize = true
             };
-            _btnBackupCancel = new System.Windows.Forms.Button { Text = "中止", Size = new System.Drawing.Size(48, 20), Margin = new System.Windows.Forms.Padding(0) };
-            _tsBackupCancel = new System.Windows.Forms.ToolStripControlHost(_btnBackupCancel) { Name = "_tsBackupCancel", Visible = false };
+            _tsBackupCancel = new System.Windows.Forms.ToolStripButton { Name = "_tsBackupCancel", Text = "中止", Visible = false, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
             _tsBackupBar = new System.Windows.Forms.ToolStripProgressBar
             {
                 Name = "_tsBackupBar", Visible = false, Style = System.Windows.Forms.ProgressBarStyle.Continuous, Minimum = 0, Maximum = 100
@@ -654,12 +652,12 @@ namespace TonePrism.Manager
             {
                 Name = "_tsBackupFile", Visible = false, AutoSize = true, Overflow = System.Windows.Forms.ToolStripItemOverflow.AsNeeded
             };
-            _btnBackupRecapture = new System.Windows.Forms.Button { Text = "今すぐバックアップ", Size = new System.Drawing.Size(120, 20), Margin = new System.Windows.Forms.Padding(0) };
-            _tsBackupRecapture = new System.Windows.Forms.ToolStripControlHost(_btnBackupRecapture) { Name = "_tsBackupRecapture", Visible = false };
+            _tsBackupRecapture = new System.Windows.Forms.ToolStripButton { Name = "_tsBackupRecapture", Text = "今すぐバックアップ", Visible = false, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
             // 順番: [phase][中止][進捗バー][ファイル名(末尾・可変)][今すぐバックアップ(未バックアップ時のみ)]。
             statusStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { _tsBackupPhase, _tsBackupCancel, _tsBackupBar, _tsBackupPercent, _tsBackupFile, _tsBackupRecapture });
-            _btnBackupCancel.Click += (s, e) => { try { dbManager?.SessionBackupCoordinator?.CancelCurrentBackup(); } catch { } };
-            _btnBackupRecapture.Click += (s, e) =>
+            statusStrip1.Renderer = new BorderedStatusButtonRenderer(); // ToolStripButton に常時枠を描いて「ボタンらしく」見せる
+            _tsBackupCancel.Click += (s, e) => { try { dbManager?.SessionBackupCoordinator?.CancelCurrentBackup(); } catch { } };
+            _tsBackupRecapture.Click += (s, e) =>
             {
                 // 未バックアップからの 1 クリック復旧 = アセット込みで取り直す (操作単位の enqueue に乗る)。
                 try { dbManager?.SessionBackupCoordinator?.RunAfterOperation(this, assetsChanged: true, "再バックアップ"); } catch { }
@@ -1002,7 +1000,6 @@ namespace TonePrism.Manager
             _tsBackupPercent.Visible = false;
             _tsBackupFile.Visible = false;
             _tsBackupRecapture.Visible = true;
-            RepaintStatusStrip(); // ホスト Button (中止) の残像を消す
         }
 
         /// <summary>idle かつ健全: バックアップ進捗 item を全て非表示。</summary>
@@ -1014,15 +1011,22 @@ namespace TonePrism.Manager
             _tsBackupPercent.Visible = false;
             _tsBackupFile.Visible = false;
             _tsBackupRecapture.Visible = false;
-            RepaintStatusStrip(); // ホスト Button (中止) の残像を消す
         }
 
-        /// <summary>(#299) 進捗 item を隠した後にステータスバー全体を再描画して、ホストした実 Button (中止) の残像
-        /// (item を 1 つずつ隠す過程で中間位置に重複描画される) を消す。SuspendLayout は ToolStripItem の別レイアウト
-        /// エンジンを壊す (= バーしか出なくなる) ため使わず、Invalidate(子含む)+Update で即時クリーン再描画する。</summary>
-        private void RepaintStatusStrip()
+        /// <summary>(#299) StatusStrip 上の ToolStripButton (中止 / 今すぐバックアップ) に常時枠を描いて「ボタンらしく」
+        /// 見せる専用レンダラー。実 Button のホスト (ToolStripControlHost) はレイアウト破壊 + 残像を招くため、フラットな
+        /// ToolStripButton + 本レンダラーで枠を出す方式にした (ホストしないので他 item も正常表示され残像も出ない)。</summary>
+        private sealed class BorderedStatusButtonRenderer : System.Windows.Forms.ToolStripProfessionalRenderer
         {
-            try { statusStrip1.Invalidate(true); statusStrip1.Update(); } catch { }
+            protected override void OnRenderButtonBackground(System.Windows.Forms.ToolStripItemRenderEventArgs e)
+            {
+                base.OnRenderButtonBackground(e);
+                if (e.Item is System.Windows.Forms.ToolStripButton && e.Item.Visible)
+                {
+                    var r = new System.Drawing.Rectangle(0, 0, e.Item.Width - 1, e.Item.Height - 1);
+                    e.Graphics.DrawRectangle(System.Drawing.SystemPens.ControlDark, r);
+                }
+            }
         }
 
         /// <summary>
