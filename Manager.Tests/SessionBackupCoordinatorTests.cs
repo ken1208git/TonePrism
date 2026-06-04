@@ -224,6 +224,112 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
+        public void Coalesce_RequestDuringRun_RunsOnceMoreWithAccumulatedAssets()
+        {
+            // (#299) 実行中に来た変更はコアレスされ、終了後に蓄積分で 1 回だけ走る。スレッド無しで状態遷移を直接検証。
+            // 1 件目: idle → 起動 (DB-only)
+            Assert.True(_coord.TryStartRun(requestIncludeAssets: false, out bool runIA));
+            Assert.False(runIA);                 // 今回は DB-only
+            Assert.True(_coord.IsBackupRunning);
+
+            // 実行中に 2 件 (DB-only + アセット) が来る → どちらもコアレス (新 worker は起動しない＝false)
+            Assert.False(_coord.TryStartRun(false, out _));
+            Assert.False(_coord.TryStartRun(true, out _));
+
+            // 1 回目終了 → dirty なので蓄積分でもう 1 回。アセットが OR 蓄積されているので includeAssets=true。
+            Assert.True(_coord.TryContinue(out bool nextIA));
+            Assert.True(nextIA);
+
+            // 2 回目終了 → dirty なし → 停止。
+            Assert.False(_coord.TryContinue(out _));
+            Assert.False(_coord.IsBackupRunning);
+        }
+
+        [Fact]
+        public void Coalesce_IdleAfterCycle_StartsFresh()
+        {
+            // 1 サイクル回して idle に戻ったら、次の要求でまた起動できる (pending は消費済でリセット)。
+            Assert.True(_coord.TryStartRun(true, out _));
+            Assert.False(_coord.TryContinue(out _));   // dirty なし → 停止
+            Assert.False(_coord.IsBackupRunning);
+
+            Assert.True(_coord.TryStartRun(false, out bool runIA)); // 再起動できる
+            Assert.False(runIA);                                    // 前サイクルのアセット pending は持ち越さない
+            Assert.True(_coord.IsBackupRunning);
+        }
+
+        [Fact]
+        public void Cancel_StopsCoalescedPending()
+        {
+            // (#299 review B-1) 「中止」はコアレス済みの pending 分も止める。dirty を残すと現 iteration のキャンセル直後に
+            // TryContinue が次 iteration を新しい cts で起動し、ストリップが消えず ~6GB 再走査が走って「中止」の意図に反する。
+            Assert.True(_coord.TryStartRun(requestIncludeAssets: false, out _));  // worker 起動 (DB-only)
+            Assert.False(_coord.TryStartRun(true, out _));                        // 実行中 → コアレス (dirty=true, pending|=true)
+            _coord.CancelCurrentBackup();                                         // 中止 → dirty / pending をクリア (実 worker 無しなので cts は no-op)
+            Assert.False(_coord.TryContinue(out _));                              // 自動継続しない (修正前は true で次サイクルが走っていた)
+            Assert.False(_coord.IsBackupRunning);
+        }
+
+        [Fact]
+        public void Cancel_WithPendingAssetChange_FlagsUnhealthy()
+        {
+            // (#299 review round3 #6) DB-only 実行中にアセット変更が pending の状態で中止すると、破棄される pending アセット
+            // 変更が「未バックアップ」警告も復旧ボタンも出ないまま落ちる穴を塞ぐ。中止時に pending にアセットが残っていたら
+            // 失敗フラグを立て、次の BackupRunningChanged(false) で警告 +「今すぐバックアップ」を出させる。
+            Assert.True(_coord.TryStartRun(requestIncludeAssets: false, out _)); // DB-only 起動
+            Assert.False(_coord.TryStartRun(true, out _));                       // 実行中にアセット変更 → pending に蓄積
+            Assert.False(_coord.SessionAssetCaptureFailed);                      // まだ未控え警告は立っていない
+            _coord.CancelCurrentBackup();
+            Assert.True(_coord.SessionAssetCaptureFailed);                       // pending アセットを中止 → 未バックアップ警告を立てる (修正前は false のまま)
+        }
+
+        [Fact]
+        public void ConcurrentFileVanish_SkipsFile_PartialNotFailed()
+        {
+            // (#299 review C-1) 非ブロッキング化でバックアップ中もユーザーが games/ を編集できる。走査中のファイルが
+            // 並行操作 (ゲーム削除 / 版up) で消える / 掴まれると HashAndStore の FileStream.Open が例外を投げる。旧実装は
+            // per-file 防御が無く 1 ファイルで世代まるごと Failed (=~6GB 再走査 + 警告) になった。dir 列挙失敗と同じ
+            // best-effort skip で当該ファイルだけ落として世代は IsPartial Success に留める (消えたファイルは次のコアレス
+            // 再走査で削除後ツリーとして整合)。排他オープンで「読めないファイル」を deterministic に再現する。
+            WriteGame("g1/a.txt", "alpha");
+            WriteGame("g1/b.txt", "beta");
+            string locked = Path.Combine(_games, "g1", "b.txt");
+            using (new FileStream(locked, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                var r = Run(true);
+                Assert.True(r.IsSuccess);                  // DB バックアップは成功
+                Assert.NotNull(r.AssetSnapshot);
+                Assert.True(r.AssetSnapshot.IsSuccess);    // 世代を Failed にしない (修正前は IsFailed)
+                Assert.True(r.AssetSnapshot.IsPartial);    // 1 ファイル skip = 部分取得
+                // (#299 review #1) skip は「ファイル」として数え、「フォルダ」(SkippedDirCount) に混ぜない (UI 誤報防止)。
+                Assert.Equal(1, r.AssetSnapshot.SkippedFileCount);
+                Assert.Equal(0, r.AssetSnapshot.SkippedDirCount);
+                // (#299 review round4 M-1) 部分取得は sticky 警告を立てる (次の緑✓に埋もれさせない)。
+                Assert.True(_coord.SessionAssetCaptureFailed);
+                // 後続の DB-only 成功でも未控え警告は残る (回復は完全アセット成功のときだけ)。
+                Assert.True(Run(false).IsSuccess);
+                Assert.True(_coord.SessionAssetCaptureFailed);
+            }
+            // ロック解除後の再取得は完全 (a.txt + b.txt 両方、partial でない)。
+            var r2 = Run(true);
+            Assert.True(r2.AssetSnapshot.IsSuccess);
+            Assert.False(r2.AssetSnapshot.IsPartial);
+            Assert.False(_coord.SessionAssetCaptureFailed); // (round4 M-1) 完全アセット成功で回復
+        }
+
+        [Fact]
+        public void Cancel_RestoreInitiated_DoesNotFlagUnhealthy()
+        {
+            // (#299 review round4 L-1) 復元起点のキャンセル (flagPendingAssetsUnhealthy:false) は、pending にアセット変更が
+            // あっても「未バックアップ」警告を立てない (これから現データを置換するので spurious)。ユーザーの「中止」ボタン
+            // (既定 true) は従来どおり警告を立てる (Cancel_WithPendingAssetChange_FlagsUnhealthy で担保)。
+            Assert.True(_coord.TryStartRun(requestIncludeAssets: false, out _)); // DB-only 起動
+            Assert.False(_coord.TryStartRun(true, out _));                       // pending にアセット蓄積
+            _coord.CancelCurrentBackup(flagPendingAssetsUnhealthy: false);       // 復元起点の中止
+            Assert.False(_coord.SessionAssetCaptureFailed);                      // 警告を立てない (既定 true なら立つ)
+        }
+
+        [Fact]
         public void Disabled_Skips()
         {
             _settings.SetString(SettingsKeys.BackupAutoEnabled, "false");

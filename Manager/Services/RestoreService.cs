@@ -37,7 +37,36 @@ namespace TonePrism.Manager.Services
         /// （Codex P1 指摘 "Disallow cancellation after deleting active DB files" 対応）
         /// </summary>
         /// <returns>退避された安全バックアップのフルパス</returns>
-        public string Restore(string backupFilePath, IProgress<ProgressInfo> progress, CancellationToken token)
+        /// <summary>
+        /// (#299 review round3 #3) 復元元 .db を `PRAGMA quick_check` で検証する。`Openable`=開けたか (= 切り詰め / 非 DB /
+        /// ヘッダ破損なら false)、`QuickCheckResult`="ok" or エラー文字列 (Openable=false のとき null)。UI の事前確認と
+        /// RestoreService の置換前 backstop の双方から呼ぶ (整合性ロジックを 1 箇所に集約)。read のみ・throw しない。
+        /// </summary>
+        public static (bool Openable, string QuickCheckResult) CheckIntegrity(string dbFilePath)
+        {
+            try
+            {
+                using (var conn = new SQLiteConnection($"Data Source={dbFilePath};Version=3;"))
+                {
+                    conn.Open();
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = "PRAGMA quick_check;";
+                        return (true, cmd.ExecuteScalar()?.ToString());
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[RestoreService] 整合性チェックのため開けませんでした (壊れている可能性): " + dbFilePath + " : " + ex.Message);
+                return (false, null);
+            }
+        }
+
+        /// <param name="allowIntegrityWarnings">(round3 #3) true なら「open はできるが quick_check 非 ok」= 不健全な
+        /// バックアップでも復元を続行する (UI が事前にユーザー確認を取った場合のみ true。open すらできない破損は force でも中止)。
+        /// 既定 false = 非 ok は一律中止 (直接呼び出し / コピー破損 backstop 用の安全側)。</param>
+        public string Restore(string backupFilePath, IProgress<ProgressInfo> progress, CancellationToken token, bool allowIntegrityWarnings = false)
         {
             if (!File.Exists(backupFilePath))
                 throw new FileNotFoundException("指定されたバックアップファイルが存在しません", backupFilePath);
@@ -178,6 +207,36 @@ namespace TonePrism.Manager.Services
 
                 token.ThrowIfCancellationRequested();
 
+                // (#299 review #3 / round3) live を置換する前に復元元 (tempPath = local コピー) の整合性を quick_check で検証する。
+                // 非ブロッキング化でバックアップ worker が DB コピーフェーズ中にプロセス強制終了 (「中止して閉じる」直後の
+                // abrupt exit 等) すると、検証前の不完全な .db が backup_dest に残り、BackupCatalogService は list 時の
+                // quick_check を省く (= 成功世代と区別不能) ため復元候補に出うる。ここで弾けば、その不完全 .db も SMB 越しの
+                // コピー破損も含めて live DB を保護できる (この時点では File.Replace 前 = live 無傷、safety も退避済)。
+                // (round3 #3) 復元は「最後の手段」なので段階を分ける: **open すらできない**破損 (切り詰め / 非 DB) は force でも
+                // 中止 (置換しても使えない)。**open はできるが quick_check 非 ok** な「不健全」バックアップは、UI が事前に
+                // ユーザー確認を取った場合 (allowIntegrityWarnings=true) のみ続行する (唯一のバックアップが少し不健全な災害時に
+                // override を残す)。既定 false では非 ok 一律中止 (コピー破損 backstop / 直接呼び出しの安全側)。
+                var integrity = CheckIntegrity(tempPath);
+                if (!integrity.Openable)
+                {
+                    string msg = "復元元のバックアップが開けません (壊れている可能性)。別の世代を選んで再試行してください。現在のデータベースは変更していません。";
+                    Logger.Error("[RestoreService] " + msg);
+                    throw new InvalidOperationException(msg);
+                }
+                if (!string.Equals(integrity.QuickCheckResult, "ok", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!allowIntegrityWarnings)
+                    {
+                        string msg = "復元元のバックアップが整合性チェックに失敗しました (" + (integrity.QuickCheckResult ?? "実行不可")
+                            + ")。別の世代を選んで再試行してください。現在のデータベースは変更していません。";
+                        Logger.Error("[RestoreService] " + msg);
+                        throw new InvalidOperationException(msg);
+                    }
+                    Logger.Warn("[RestoreService] 整合性チェックに問題のあるバックアップをユーザー確認のうえ復元します: " + integrity.QuickCheckResult);
+                }
+
+                token.ThrowIfCancellationRequested();
+
                 // 3. 全 SQLite 接続プールをクリアし、ハンドルを解放
                 progress?.Report(new ProgressInfo(60, "データベース接続を閉じています...", ""));
                 SQLiteConnection.ClearAllPools();
@@ -202,7 +261,11 @@ namespace TonePrism.Manager.Services
                     // 復元自体は通す (atomicity は落ちるが safety で担保済み)。
                     try
                     {
-                        File.Replace(tempPath, dbPath, null);
+                        // (#299 review round4 H-1) 非ブロッキング化で、復元前に協調キャンセルしたバックアップ worker が live DB
+                        // ハンドル (Online Backup の read) を解放しきる前に置換へ到達する狭い窓がある (worker の DB コピーはサブ秒で、
+                        // 復元の safety 退避 + temp コピー + ClearAllPools の間に解放される公算が高いが同期保証は無い)。共有違反
+                        // (IOException) は短くリトライして解放を待ってから fallback に落とす。
+                        ReplaceWithSharingRetry(tempPath, dbPath);
                     }
                     catch (IOException replaceEx)
                     {
@@ -412,6 +475,20 @@ namespace TonePrism.Manager.Services
                 tempPathIsLastResort = true;
                 throw;
             }
+        }
+
+        /// <summary>(#299 review round4 H-1) `File.Replace` を共有違反 (IOException) で数回リトライしてから例外を伝播する。
+        /// 非ブロッキング化で復元前に協調キャンセルしたバックアップ worker が live DB ハンドルを解放しきる前に置換へ到達する
+        /// 狭い窓を、短い待機 (最大 ~800ms) で吸収する。最終試行の例外は caller の fallback (Delete+Move) へ伝播させる
+        /// (= 永続的な IOException = 真の SMB/Junction 等は従来どおり fallback に流す。リトライは transient 共有違反のためだけ)。</summary>
+        private static void ReplaceWithSharingRetry(string tempPath, string dbPath)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                try { File.Replace(tempPath, dbPath, null); return; }
+                catch (IOException) { Thread.Sleep(200); } // 共有違反 = worker がまだ DB を解放中の可能性。待って再試行。
+            }
+            File.Replace(tempPath, dbPath, null); // 最終試行: 失敗したら例外を caller の fallback へ
         }
 
         private static void DeleteWithRetry(string path)

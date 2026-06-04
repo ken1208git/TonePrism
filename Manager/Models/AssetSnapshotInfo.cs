@@ -57,12 +57,17 @@ namespace TonePrism.Manager.Models
         /// <summary>(round8 C1) 列挙できず skip した深部フォルダ数 (IsPartial の根拠)。</summary>
         public int SkippedDirCount { get; private set; }
 
+        /// <summary>(#299 review #1) 並行編集での消失 / ロック等で控えられず skip した個別ファイル数 (IsPartial の根拠)。
+        /// SkippedDirCount (フォルダ列挙失敗) と原因カテゴリが異なるため別フィールドで持ち、UI 文言を実態に合わせる
+        /// (合算して 1 フィールドに詰めると「N 個のフォルダ」と誤報する)。</summary>
+        public int SkippedFileCount { get; private set; }
+
         public bool IsSuccess => Kind == ResultKind.Success;
         public bool IsSkipped => Kind == ResultKind.Skipped;
         public bool IsFailed => Kind == ResultKind.Failed;
 
-        public static SnapshotResult Success(string manifestPath, int fileCount, long logicalBytes, long newBytesCopied, int skippedDirCount = 0)
-            => new SnapshotResult { Kind = ResultKind.Success, ManifestPath = manifestPath, FileCount = fileCount, LogicalBytes = logicalBytes, NewBytesCopied = newBytesCopied, SkippedDirCount = skippedDirCount, IsPartial = skippedDirCount > 0 };
+        public static SnapshotResult Success(string manifestPath, int fileCount, long logicalBytes, long newBytesCopied, int skippedDirCount = 0, int skippedFileCount = 0)
+            => new SnapshotResult { Kind = ResultKind.Success, ManifestPath = manifestPath, FileCount = fileCount, LogicalBytes = logicalBytes, NewBytesCopied = newBytesCopied, SkippedDirCount = skippedDirCount, SkippedFileCount = skippedFileCount, IsPartial = (skippedDirCount + skippedFileCount) > 0 };
 
         public static SnapshotResult Skipped(string reason)
             => new SnapshotResult { Kind = ResultKind.Skipped, Message = reason };

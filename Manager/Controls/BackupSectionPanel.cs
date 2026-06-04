@@ -149,7 +149,7 @@ namespace TonePrism.Manager.Controls
                 if (snap != null && snap.IsSuccess && snap.IsPartial)
                 {
                     // (round8 C1) 深部フォルダの列挙失敗で一部 skip した場合は「部分的な控え」を明示 (完全控えと誤認させない)。
-                    msg += $"\n\n⚠ ゲームファイル (games/guide) のバックアップで {snap.SkippedDirCount} 個のフォルダを列挙できずスキップしました（部分的なバックアップの可能性。SMB 一過性 I/O / 権限等）。";
+                    msg += $"\n\n⚠ ゲームファイル (games/guide) のバックアップでフォルダ {snap.SkippedDirCount} 個 / ファイル {snap.SkippedFileCount} 個を控えられずスキップしました（部分的なバックアップの可能性。SMB 一過性 I/O / 権限 / 並行編集での消失等）。";
                 }
                 else if (snap != null && (snap.IsFailed || snap.IsAnomaly))
                 {
@@ -226,6 +226,55 @@ namespace TonePrism.Manager.Controls
                 return;
             }
 
+            // (#299 review round3 #3) 復元前に復元元の整合性を quick_check し、壊れていれば UI スレッドで案内する。
+            // **open すらできない** (切り詰め / 非 DB) = 本当に使えない破損 → 中止 (override 無し。置換しても使えない)。
+            // **open はできるが quick_check 非 ok** = 不健全 → 復元は「最後の手段」なので「それでも復元しますか？」を確認し、
+            // ユーザーが Yes のときだけ allowIntegrityWarnings=true で続行する (現データは復元前に safety 退避されるので可逆)。
+            bool allowIntegrityWarnings = false;
+            var integrity = Services.RestoreService.CheckIntegrity(resolvedPath);
+            if (!integrity.Openable)
+            {
+                Logger.Warn("[BackupSectionPanel] 復元中止: 復元元が開けない (壊れている可能性): " + resolvedPath);
+                MessageBox.Show(
+                    "このバックアップは壊れていて復元できません（ファイルとして開けませんでした）。\n別の世代を選んでください。現在のデータベースは変更していません。",
+                    "復元できません", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            if (!string.Equals(integrity.QuickCheckResult, "ok", StringComparison.OrdinalIgnoreCase))
+            {
+                string detail = integrity.QuickCheckResult ?? "(結果なし)";
+                if (detail.Length > 300) detail = detail.Substring(0, 300) + " …";
+                var ans = MessageBox.Show(
+                    "このバックアップは整合性チェックに問題があります（壊れている可能性）:\n\n" + detail
+                    + "\n\nそれでも復元しますか？\n（現在のデータは復元前に退避されるので、結果がおかしければ元に戻せます）",
+                    "整合性の警告", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+                if (ans != DialogResult.Yes)
+                {
+                    Logger.Info("[BackupSectionPanel] 復元中止: 整合性警告でユーザーが復元しない選択");
+                    return;
+                }
+                allowIntegrityWarnings = true;
+                Logger.Warn("[BackupSectionPanel] 整合性に問題のあるバックアップをユーザー確認のうえ復元: " + resolvedPath);
+            }
+
+            // (#299 review #2) 非ブロッキング化で、操作直後の自動バックアップ worker が走っている最中でも復元を起動できる
+            // ようになった。復元は live toneprism.db を File.Replace で置換するため、worker が同じ DB を開いている (DB コピー
+            // フェーズ) と File.Replace が衝突しうる。復元は排他操作なので進行中の自動バックアップを先に協調キャンセルする
+            // (best-effort。復元の safety 退避 + temp コピーの間に worker は cancel token を観測して DB を解放するので、
+            //  File.Replace 時点では衝突しない)。手動バックアップは共有プール CAS + 24h grace で worker と同時実行しても
+            //  安全なため gate しない (SPEC §機能12 参照)。
+            try
+            {
+                var runningCoord = _dbManager.SessionBackupCoordinator;
+                if (runningCoord != null && runningCoord.IsBackupRunning)
+                {
+                    Logger.Info("[BackupSectionPanel] 復元前に進行中の自動バックアップを中止します (DB 置換との衝突回避)");
+                    // (round4 L-1) 復元起点のキャンセルは未バックアップ警告を立てない (これから現データを置換するので spurious)。
+                    runningCoord.CancelCurrentBackup(flagPendingAssetsUnhealthy: false);
+                }
+            }
+            catch (Exception ex) { Logger.Warn("[BackupSectionPanel] 復元前の自動バックアップ中止に失敗 (続行): " + ex.Message); }
+
             string safetyPath = null;
             RestoreDbMissingException dbMissing = null;
             DialogResult dr;
@@ -233,7 +282,7 @@ namespace TonePrism.Manager.Controls
             {
                 // (レビュー対応 #1) DB 喪失の最悪ケースは専用例外で捕捉して caller に伝える。re-throw して
                 // ProcessingDialog には Abort させる (例外 Message = 具体的な復旧手順がそのまま画面表示される)。
-                try { safetyPath = _dbManager.RestoreService.Restore(resolvedPath, progress, token); }
+                try { safetyPath = _dbManager.RestoreService.Restore(resolvedPath, progress, token, allowIntegrityWarnings); }
                 catch (RestoreDbMissingException dmx) { dbMissing = dmx; throw; }
             }))
             {

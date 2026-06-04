@@ -10,6 +10,7 @@ namespace TonePrism.Manager
         private Action<IProgress<ProgressInfo>, CancellationToken> _worker;
         private CancellationTokenSource _cts;
         private Task _workerTask;
+        private string _lastMessage = string.Empty; // (#299関連) lblMessage に「フェーズ + N%」を毎回再構成するため、直近メッセージを保持
 
         public ProcessingDialog(Action<IProgress<ProgressInfo>, CancellationToken> worker)
         {
@@ -105,8 +106,16 @@ namespace TonePrism.Manager
 
             if (!string.IsNullOrEmpty(info.Message))
             {
-                lblMessage.Text = info.Message;
+                _lastMessage = info.Message;
             }
+
+            // (#299関連) 進捗バーに数字の % も併記する (定量進捗のときだけ。Marquee=不定のときは出さない)。
+            // lblMessage は毎回「直近フェーズ + N%」で再構成する (古い % を strip する必要がない)。
+            bool showPct = pbProgress.Style != ProgressBarStyle.Marquee && info.Percentage >= 0 && info.Percentage <= 100;
+            // (#299 review round4 L-3) _lastMessage 未到達 (空) のとき先頭スペース付き "  0%" にならないよう結合を分ける。
+            lblMessage.Text = showPct
+                ? (string.IsNullOrEmpty(_lastMessage) ? info.Percentage + "%" : _lastMessage + "  " + info.Percentage + "%")
+                : _lastMessage;
 
             if (!string.IsNullOrEmpty(info.Detail))
             {
