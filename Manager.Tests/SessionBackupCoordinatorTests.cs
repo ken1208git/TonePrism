@@ -259,6 +259,43 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
+        public void Cancel_StopsCoalescedPending()
+        {
+            // (#299 review B-1) 「中止」はコアレス済みの pending 分も止める。dirty を残すと現 iteration のキャンセル直後に
+            // TryContinue が次 iteration を新しい cts で起動し、ストリップが消えず ~6GB 再走査が走って「中止」の意図に反する。
+            Assert.True(_coord.TryStartRun(requestIncludeAssets: false, out _));  // worker 起動 (DB-only)
+            Assert.False(_coord.TryStartRun(true, out _));                        // 実行中 → コアレス (dirty=true, pending|=true)
+            _coord.CancelCurrentBackup();                                         // 中止 → dirty / pending をクリア (実 worker 無しなので cts は no-op)
+            Assert.False(_coord.TryContinue(out _));                              // 自動継続しない (修正前は true で次サイクルが走っていた)
+            Assert.False(_coord.IsBackupRunning);
+        }
+
+        [Fact]
+        public void ConcurrentFileVanish_SkipsFile_PartialNotFailed()
+        {
+            // (#299 review C-1) 非ブロッキング化でバックアップ中もユーザーが games/ を編集できる。走査中のファイルが
+            // 並行操作 (ゲーム削除 / 版up) で消える / 掴まれると HashAndStore の FileStream.Open が例外を投げる。旧実装は
+            // per-file 防御が無く 1 ファイルで世代まるごと Failed (=~6GB 再走査 + 警告) になった。dir 列挙失敗と同じ
+            // best-effort skip で当該ファイルだけ落として世代は IsPartial Success に留める (消えたファイルは次のコアレス
+            // 再走査で削除後ツリーとして整合)。排他オープンで「読めないファイル」を deterministic に再現する。
+            WriteGame("g1/a.txt", "alpha");
+            WriteGame("g1/b.txt", "beta");
+            string locked = Path.Combine(_games, "g1", "b.txt");
+            using (new FileStream(locked, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                var r = Run(true);
+                Assert.True(r.IsSuccess);                  // DB バックアップは成功
+                Assert.NotNull(r.AssetSnapshot);
+                Assert.True(r.AssetSnapshot.IsSuccess);    // 世代を Failed にしない (修正前は IsFailed)
+                Assert.True(r.AssetSnapshot.IsPartial);    // 1 ファイル skip = 部分取得
+            }
+            // ロック解除後の再取得は完全 (a.txt + b.txt 両方、partial でない)。
+            var r2 = Run(true);
+            Assert.True(r2.AssetSnapshot.IsSuccess);
+            Assert.False(r2.AssetSnapshot.IsPartial);
+        }
+
+        [Fact]
         public void Disabled_Skips()
         {
             _settings.SetString(SettingsKeys.BackupAutoEnabled, "false");

@@ -74,7 +74,15 @@ namespace TonePrism.Manager.Services
         /// 次のアセット操作 or 「今すぐバックアップ」で回復する。</summary>
         public void CancelCurrentBackup()
         {
-            lock (_workerLock) { try { _cts?.Cancel(); } catch { } }
+            lock (_workerLock)
+            {
+                // (#299 review B-1) 「中止」はコアレス済みの pending 分も含めて止める。dirty を残すと現 iteration の
+                // キャンセル直後に TryContinue が次 iteration を新しい cts で起動し、ストリップが消えず ~6GB 再走査が
+                // 走って「中止」の意図 (SMB 混雑時に今は止めたい等) に反する。新たな変更が来れば次操作で再 trigger される。
+                _dirty = false;
+                _pendingIncludeAssets = false;
+                try { _cts?.Cancel(); } catch { }
+            }
         }
 
         // (#299) コアレスの状態遷移。スレッド無しで単体テストできるよう worker ループから切り出した 2 メソッド。
@@ -197,7 +205,15 @@ namespace TonePrism.Manager.Services
         private void EnqueueBackup(bool includeAssets, string label)
         {
             if (!TryStartRun(includeAssets, out bool runIncludeAssets)) return; // 実行中の worker がコアレスで拾う
-            Task.Run(() => WorkerLoop(runIncludeAssets, label));
+            try { Task.Run(() => WorkerLoop(runIncludeAssets, label)); }
+            catch (Exception ex)
+            {
+                // (#299 review D-1) TryStartRun が _workerRunning=true を立てた後に Task.Run が投げると (スレッドプール枯渇等)
+                // WorkerLoop が一度も走らずフラグが永久 true で固まる → 以降の自動バックアップが無言で停止 + IsBackupRunning が
+                // 常時 true で FormClosing が毎回「中止して閉じますか？」を誤発火する。稼働中フラグを巻き戻す。
+                lock (_workerLock) { _workerRunning = false; }
+                Logger.Warn("[SessionBackup] worker の起動に失敗 (稼働フラグを巻き戻し): " + ex.Message);
+            }
         }
 
         /// <summary>(#299) 単一バックグラウンド worker。dirty が立つ限りコアレスで繰り返し、無くなったら停止。

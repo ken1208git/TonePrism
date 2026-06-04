@@ -175,10 +175,10 @@ namespace TonePrism.Manager.Services
                 // (round8 C1) 深部フォルダの列挙失敗を best-effort で skip して完走した場合、この世代は部分的な控えの
                 // 可能性がある。個別 Warn は出ているが、件数を集計して「部分取得」を明示し UI にも伝える (緑チェック=
                 // 完全控えと誤認させない)。世代まるごとの異常 (SkippedAnomaly) ほどではないので Success のまま IsPartial で返す。
-                if (stats.SkippedDirCount > 0)
-                    Logger.Warn(string.Format("[AssetSnapshot] ⚠ {0} 個のフォルダを列挙できずスキップしました (SMB 一過性 I/O / 権限等)。この世代は部分的な控えの可能性があります ({1} files)。",
-                        stats.SkippedDirCount, stats.FileCount));
-                return SnapshotResult.Success(manifestPath, stats.FileCount, stats.Bytes, stats.NewBytes, stats.SkippedDirCount);
+                if (stats.SkippedDirCount > 0 || stats.SkippedFileCount > 0)
+                    Logger.Warn(string.Format("[AssetSnapshot] ⚠ フォルダ {0} 個 / ファイル {1} 個を控えられずスキップしました (SMB 一過性 I/O / 権限 / 並行編集での消失等)。この世代は部分的な控えの可能性があります ({2} files)。",
+                        stats.SkippedDirCount, stats.SkippedFileCount, stats.FileCount));
+                return SnapshotResult.Success(manifestPath, stats.FileCount, stats.Bytes, stats.NewBytes, stats.SkippedDirCount + stats.SkippedFileCount);
             }
             catch (OperationCanceledException)
             {
@@ -284,37 +284,52 @@ namespace TonePrism.Manager.Services
             foreach (string file in files)
             {
                 token.ThrowIfCancellationRequested();
-                string safe = FileOperationService.EnsureLongPath(file);
-                // (レビュー L3) ファイルの symlink/junction も辿らない (dir と同扱い、spec 整合)。リンク先を
-                // ハッシュ/コピーすると意図せぬ実体を取り込むため。
-                try { if ((File.GetAttributes(safe) & FileAttributes.ReparsePoint) == FileAttributes.ReparsePoint) { Logger.Warn("[AssetSnapshot] reparse file をスキップ: " + file); continue; } }
-                catch { }
-                string relpath = relPrefix + "/" + Path.GetFileName(file);
-                long size = SafeLen(file);
-                long mtime = File.GetLastWriteTimeUtc(safe).Ticks;
+                try
+                {
+                    string safe = FileOperationService.EnsureLongPath(file);
+                    // (レビュー L3) ファイルの symlink/junction も辿らない (dir と同扱い、spec 整合)。リンク先を
+                    // ハッシュ/コピーすると意図せぬ実体を取り込むため。
+                    try { if ((File.GetAttributes(safe) & FileAttributes.ReparsePoint) == FileAttributes.ReparsePoint) { Logger.Warn("[AssetSnapshot] reparse file をスキップ: " + file); continue; } }
+                    catch { }
+                    string relpath = relPrefix + "/" + Path.GetFileName(file);
+                    long size = SafeLen(file);
+                    long mtime = File.GetLastWriteTimeUtc(safe).Ticks;
 
-                // キャッシュ命中 (relpath+size+mtime 一致) かつ pool に実体があれば再ハッシュ・再読込しない。
-                string hash;
-                CacheEntry c;
-                if (cache.TryGetValue(relpath, out c) && c.Size == size && c.MtimeTicks == mtime
-                    && File.Exists(FileOperationService.EnsureLongPath(PoolPathFor(poolRoot, c.Hash))))
-                {
-                    hash = c.Hash;
-                }
-                else
-                {
-                    // (レビュー#4) ソースを 1 回だけ読み、ハッシュ計算と pool 配置を同時に行う (SMB の二重読込を回避)。
-                    if (HashAndStore(safe, poolRoot, token, out hash)) stats.NewBytes += size;
-                }
+                    // キャッシュ命中 (relpath+size+mtime 一致) かつ pool に実体があれば再ハッシュ・再読込しない。
+                    string hash;
+                    CacheEntry c;
+                    if (cache.TryGetValue(relpath, out c) && c.Size == size && c.MtimeTicks == mtime
+                        && File.Exists(FileOperationService.EnsureLongPath(PoolPathFor(poolRoot, c.Hash))))
+                    {
+                        hash = c.Hash;
+                    }
+                    else
+                    {
+                        // (レビュー#4) ソースを 1 回だけ読み、ハッシュ計算と pool 配置を同時に行う (SMB の二重読込を回避)。
+                        if (HashAndStore(safe, poolRoot, token, out hash)) stats.NewBytes += size;
+                    }
 
-                entries.Add(hash + "\t" + size.ToString(CultureInfo.InvariantCulture) + "\t"
-                    + mtime.ToString(CultureInfo.InvariantCulture) + "\t" + relpath);
-                stats.FileCount++;
-                stats.Bytes += size;
-                if (total > 0 && progress != null)
+                    entries.Add(hash + "\t" + size.ToString(CultureInfo.InvariantCulture) + "\t"
+                        + mtime.ToString(CultureInfo.InvariantCulture) + "\t" + relpath);
+                    stats.FileCount++;
+                    stats.Bytes += size;
+                    if (total > 0 && progress != null)
+                    {
+                        int pct = (int)((double)stats.FileCount / total * 100);
+                        progress.Report(new ProgressInfo(pct > 100 ? 100 : pct, "ゲームファイルをバックアップ中...", Path.GetFileName(file)));
+                    }
+                }
+                catch (OperationCanceledException) { throw; } // キャンセルは best-effort skip にせず伝播させる
+                catch (Exception ex)
                 {
-                    int pct = (int)((double)stats.FileCount / total * 100);
-                    progress.Report(new ProgressInfo(pct > 100 ? 100 : pct, "ゲームファイルをバックアップ中...", Path.GetFileName(file)));
+                    // (#299 review C-1) 非ブロッキング化でバックアップ中もユーザーが games/ を編集できる。走査中のファイルが
+                    // 並行操作 (ゲーム削除 / 版up) で消える / 掴まれると HashAndStore の FileStream.Open が FileNotFound /
+                    // IOException を投げる。旧実装 (モーダル) は並行編集が物理的に不可能だったため per-file 防御が無く、1 ファイル
+                    // で世代まるごと Failed (=~6GB 再走査 + 警告チラつき) になっていた。dir 列挙失敗 (上の GetFiles catch) と同じ
+                    // best-effort 思想で当該ファイルだけ skip し、世代は IsPartial Success に留める。消えたファイルは次のコアレス
+                    // 再走査で削除後ツリーとして整合する (replace-in-session)。
+                    Logger.Warn("[AssetSnapshot] ファイルの控えに失敗 (このファイルをスキップ、並行編集で消えた可能性): " + file + " : " + ex.Message);
+                    stats.SkippedFileCount++;
                 }
             }
             string[] dirs;
@@ -592,6 +607,7 @@ namespace TonePrism.Manager.Services
             public long Bytes;     // 論理合計
             public long NewBytes;  // 今回プールへ新規コピーした分
             public int SkippedDirCount; // (round8 C1) 列挙できず skip した深部フォルダ数 (= 部分取得の根拠)
+            public int SkippedFileCount; // (#299 review C-1) 並行編集での消失 / ロック等で控えられず skip した個別ファイル数 (= 部分取得の根拠)
         }
     }
 }

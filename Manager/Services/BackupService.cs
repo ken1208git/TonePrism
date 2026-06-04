@@ -196,7 +196,7 @@ namespace TonePrism.Manager.Services
 
             try
             {
-                progress?.Report(new ProgressInfo(0, "バックアップ準備中...", destinationPath));
+                progress?.Report(new ProgressInfo(0, "バックアップ準備中...", Path.GetFileName(destinationPath)));
 
                 if (!Directory.Exists(destinationDir))
                 {
@@ -304,7 +304,7 @@ namespace TonePrism.Manager.Services
                         Logger.Warn("[BackupService] アセット控え取得失敗 (DB バックアップは成功): " + assetSnap.Message);
                 }
 
-                progress?.Report(new ProgressInfo(100, "バックアップ完了", destinationPath));
+                progress?.Report(new ProgressInfo(100, "バックアップ完了", Path.GetFileName(destinationPath)));
                 // (レビュー M2) アセット控えの結果を UI へ持ち回る (失敗/異常を成功ダイアログに併記するため)。
                 var result = BackupResult.Success(destinationPath, fileSize);
                 result.AssetSnapshot = assetSnap;

@@ -2008,8 +2008,14 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
   - **実機フィードバック反映**: ①進捗ラベル見切れ→AutoSize ②2 段→1 段（ステータスバー統合）③全部左詰め ④ファイル名(可変幅)を末尾に置き中止ボタンの per-file 高速移動を解消（phase 固定文言「バックアップ中...」で中止位置を完全固定）⑤進捗バーとファイル名の間に固定幅の % 表示 ⑥中止/今すぐバックアップを **ToolStripButton + 専用レンダラー(`BorderedStatusButtonRenderer`)で枠付き表示**（実 Button のホスト `ToolStripControlHost` は StatusStrip のレイアウト破壊で他 item 非表示 + 残像を招くため不採用）。
 - **(#299関連) 共有 ProcessingDialog の進捗に数字の % を併記**: 手動バックアップ・フォルダコピー・復元・アップデート適用・削除など `ProcessingDialog` を使う全モーダル進捗で「フェーズ + N%」を表示（定量進捗のときだけ。Marquee=不定のときは出さない）。
 - **(UX) ユーザー表示の「控え/控える」→「バックアップ」に統一**: 「控える」は馴染みが薄く分かりにくいとのユーザー指摘。ステータス警告・restore-lock 延期メッセージ・`docs/usage/*` の名詞「控え」/動詞「控える」を「バックアップ」へ（コメント・Logger の内部概念は据え置き）。
-- 検証: Manager build 緑 / **テスト 129 件合格**（新規コアレス 2 件: 実行中の変更はコアレスして終了後に蓄積分で 1 回 / idle 復帰後は再起動できる）。**※実機（UIは実機で確認）: 非ブロッキングで操作継続・進捗 1 段表示・中止→未バックアップ警告＋今すぐバックアップで復旧・閉じる確認、を目視済（残像/見切れ/枠なしの実機フィードバックは反映済）。本番 SMB での体感・多 PC は pre-release 全体テストで。**
-- bump 判断: ユーザー向け挙動変更（バックアップ進捗 UX の非ブロッキング化）。破壊的変更なし。minor (v0.22.0 → v0.23.0)。Launcher/Updater は無関係。
+- **レビュー対応（非ブロッキング化で新たに開いた並行性の堅牢化）**: モーダル撤去でバックアップ中もユーザーが `games/` を編集できるようになったため、その副作用を 4 点修正。
+  - **(C-1 / Medium) 走査中のファイル消失で世代まるごと Failed → 当該ファイルだけ best-effort skip**: `AssetSnapshotService.WalkTree` の per-file 経路に try/catch が無く、走査中のファイルが並行操作（ゲーム削除 / 版up）で消える / 掴まれると `HashAndStore` の `FileStream.Open` が例外を投げ、`CreateSnapshot` の catch で**世代まるごと Failed**（=~6GB 再走査 + 「⚠ バックアップ失敗」のチラつき）になっていた。dir 列挙失敗と同じ best-effort 思想で当該ファイルだけ skip（`SkippedFileCount`）し、世代は **IsPartial Success** に留める（消えたファイルは次のコアレス再走査で削除後ツリーとして整合）。キャンセル（OCE）は skip にせず伝播。
+  - **(B-1) 「中止」がコアレス済み pending を止めなかった → 止める**: `CancelCurrentBackup` が現 iteration の `_cts` のみ cancel し、`_dirty` が立っていると `TryContinue` が次 iteration を新 cts で起動してストリップが消えず再走査が走っていた。cancel 時に `_dirty`/`_pendingIncludeAssets` もクリア（「中止＝今は止める」、新変更が来れば次操作で再 trigger）。
+  - **(D-1) worker 起動失敗で稼働フラグが永久 true → 巻き戻し**: `TryStartRun` が `_workerRunning=true` を立てた後の `Task.Run` が投げると（スレッドプール枯渇等）`WorkerLoop` が走らずフラグが固まり、以降の自動バックアップが無言停止 + `IsBackupRunning` 常時 true で閉じる確認が誤発火。`Task.Run` を try/catch して失敗時にフラグを巻き戻す。
+  - **(A-1 / Low) DB フェーズの進捗 Detail がフルパス → ファイル名**: `BackupService` の 0% / 100% 報告が `destinationPath`（フルパス）を Detail に入れ、ストリップのファイル名スロットに長いパスが一瞬出ていた。`Path.GetFileName` でファイル名のみに。
+  - **据え置き（記録のみ）**: D-2（`BackupRunningChanged` の worker 跨ぎ表示順レース）は次 worker の進捗報告で自己回復するため未対応。E-1（`ProcessingDialog` の % は全モーダルに波及）は設計どおりで、復元/更新の進捗に不自然な `0%` が出ないかは pre-release 実機確認項目。
+- 検証: Manager build 緑 / **テスト 131 件合格**（コアレス 2 件 + レビュー対応 2 件: B-1「中止が pending を止める」/ C-1「並行消失で世代が落ちず IsPartial」を fail-first で確認）。**※実機（UIは実機で確認）: 非ブロッキングで操作継続・進捗 1 段表示・中止→未バックアップ警告＋今すぐバックアップで復旧・閉じる確認、を目視済（残像/見切れ/枠なしの実機フィードバックは反映済）。本番 SMB での体感・多 PC・並行編集 churn（C-1）は pre-release 全体テストで。**
+- bump 判断: ユーザー向け挙動変更（バックアップ進捗 UX の非ブロッキング化）。破壊的変更なし。minor (v0.22.0 → v0.23.0)。レビュー対応は同 PR 内のため version 据え置き（1 PR 1 bump）。Launcher/Updater は無関係。
 
 ### [Manager v0.22.0] - 2026-06-03
 
