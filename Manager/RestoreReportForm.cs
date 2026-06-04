@@ -20,18 +20,22 @@ namespace TonePrism.Manager
     {
         private readonly RestoreReconciliationResult _result;
         private readonly string _safetyPath;
+        // (#250 PR2) true = 復元直後の自動チェック / false = バックアップタブの「整合性チェック」ボタンからの手動実行。
+        // 文言を切替える (手動時は「復元完了」等の復元前提の言い回しを避ける)。
+        private readonly bool _postRestore;
         private TextBox _body;
 
-        public RestoreReportForm(RestoreReconciliationResult result, string safetyPath)
+        public RestoreReportForm(RestoreReconciliationResult result, string safetyPath, bool postRestore = true)
         {
             _result = result;
             _safetyPath = safetyPath;
+            _postRestore = postRestore;
             BuildUi();
         }
 
         private void BuildUi()
         {
-            Text = "復元後の整合性チェック";
+            Text = _postRestore ? "復元後の整合性チェック" : "整合性チェック";
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
             MinimizeBox = false;
@@ -51,17 +55,23 @@ namespace TonePrism.Manager
             }
             else if (_result.HasCriticalFindings)
             {
-                headline = "⚠ 復元後、起動できないゲームがあります（対処が必要）";
+                headline = _postRestore
+                    ? "⚠ 復元後、起動できないゲームがあります（対処が必要）"
+                    : "⚠ 起動できないゲームがあります（対処が必要）";
                 headColor = Color.Firebrick;
             }
             else if (_result.HasAnyFindings)
             {
-                headline = "復元は完了しました（軽微なズレあり・起動への影響なし）";
+                headline = _postRestore
+                    ? "復元は完了しました（軽微なズレあり・起動への影響なし）"
+                    : "軽微なズレがあります（起動への影響なし）";
                 headColor = Color.DarkGoldenrod;
             }
             else
             {
-                headline = "✓ 復元完了：DB とゲームフォルダの整合性に問題はありません";
+                headline = _postRestore
+                    ? "✓ 復元完了：DB とゲームフォルダの整合性に問題はありません"
+                    : "✓ DB とゲームフォルダの整合性に問題はありません";
                 headColor = Color.ForestGreen;
             }
 
@@ -133,7 +143,7 @@ namespace TonePrism.Manager
             var sb = new StringBuilder();
 
             sb.AppendLine("【まず確認】バックアップ／復元の対象は toneprism.db（データベース）だけです。");
-            sb.AppendLine("ゲーム本体の games フォルダは復元されません。そのため、いま復元した DB と、");
+            sb.AppendLine("ゲーム本体の games フォルダは復元されません。そのため、" + (_postRestore ? "いま復元した DB と、" : "現在の DB と、"));
             sb.AppendLine("ディスク上の games フォルダの「時点」がズレていると、以下のような食い違いが起きます。");
             sb.AppendLine();
             if (!string.IsNullOrEmpty(_safetyPath))
@@ -291,7 +301,8 @@ namespace TonePrism.Manager
                 sb.AppendLine("     共有サーバー等に残っていれば、そのフォルダを games/ 配下にコピーして");
                 sb.AppendLine("     ください（フォルダ名＝ゲーム ID／バージョン leaf を一致させる）。");
                 sb.AppendLine();
-                sb.AppendLine("  3. コピー後に Manager を再起動すると、このチェックが再度かかります。");
+                sb.AppendLine("  3. コピーが終わったら、バックアップ画面の「整合性チェック」ボタンを押すと、");
+                sb.AppendLine("     このチェックをもう一度実行できます（Manager の再起動では再チェックされません）。");
                 sb.AppendLine("     「起動できないゲーム」が 0 件になれば整合した状態です。");
                 sb.AppendLine();
                 sb.AppendLine("  4. 当時の games フォルダがもう手に入らない場合は、無理に DB を合わせず、");

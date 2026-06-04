@@ -27,6 +27,7 @@ namespace TonePrism.Manager.Controls
             this.grpControls = new System.Windows.Forms.GroupBox();
             this.btnRestore = new System.Windows.Forms.Button();
             this.btnDelete = new System.Windows.Forms.Button();
+            this.btnReconcile = new System.Windows.Forms.Button();
             this.lblDestPath = new System.Windows.Forms.Label();
             this.grpActions.SuspendLayout();
             this.grpHistory.SuspendLayout();
@@ -133,6 +134,7 @@ namespace TonePrism.Manager.Controls
             this.grpControls.Controls.Add(this.lblDestPath);
             this.grpControls.Controls.Add(this.btnRestore);
             this.grpControls.Controls.Add(this.btnDelete);
+            this.grpControls.Controls.Add(this.btnReconcile);
             this.grpControls.Location = new System.Drawing.Point(20, 500);
             this.grpControls.Name = "grpControls";
             this.grpControls.Size = new System.Drawing.Size(1040, 70);
@@ -163,14 +165,26 @@ namespace TonePrism.Manager.Controls
             this.btnDelete.UseVisualStyleBackColor = true;
             this.btnDelete.Click += new System.EventHandler(this.btnDelete_Click);
             //
+            // btnReconcile
+            //
+            // (#250 PR2) 整合性チェック (DB↔games/guide のズレ検出) を復元せずオンデマンドで再実行する。
+            // 復元レポートの手順「修正後に再チェック」を Manager 再起動に頼らず正しく行えるようにするためのボタン。
+            this.btnReconcile.Location = new System.Drawing.Point(400, 25);
+            this.btnReconcile.Name = "btnReconcile";
+            this.btnReconcile.Size = new System.Drawing.Size(150, 32);
+            this.btnReconcile.TabIndex = 2;
+            this.btnReconcile.Text = "整合性チェック";
+            this.btnReconcile.UseVisualStyleBackColor = true;
+            this.btnReconcile.Click += new System.EventHandler(this.btnReconcile_Click);
+            //
             // lblDestPath
             //
             this.lblDestPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) | System.Windows.Forms.AnchorStyles.Right)));
             this.lblDestPath.AutoEllipsis = true;
-            this.lblDestPath.Location = new System.Drawing.Point(400, 32);
+            this.lblDestPath.Location = new System.Drawing.Point(570, 32);
             this.lblDestPath.Name = "lblDestPath";
-            this.lblDestPath.Size = new System.Drawing.Size(530, 18);
-            this.lblDestPath.TabIndex = 2;
+            this.lblDestPath.Size = new System.Drawing.Size(360, 18);
+            this.lblDestPath.TabIndex = 3;
             this.lblDestPath.Text = "保存先: ";
             //
             // BackupSectionPanel
@@ -202,6 +216,7 @@ namespace TonePrism.Manager.Controls
         private System.Windows.Forms.GroupBox grpControls;
         private System.Windows.Forms.Button btnRestore;
         private System.Windows.Forms.Button btnDelete;
+        private System.Windows.Forms.Button btnReconcile;
         private System.Windows.Forms.Label lblDestPath;
     }
 }

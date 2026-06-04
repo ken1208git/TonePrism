@@ -2001,8 +2001,9 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ### [Manager v0.24.0] - 2026-06-04
 
 - **(#250 PR2) 復元の整合性チェックを `guide/`（初回説明スライド画像）にも拡張**: 旧 `RestoreReconciliationService` は復元後に **`games/` しか突き合わせず**、別時点の DB を復元すると games/ のズレ（起動できないゲーム／無い版／孤児フォルダ）は検出されるのに、`intro_slides.image_path`（`guide/<file>`）が指す画像の欠落は**無警告（silent）**という非対称があった（Codex PR #274 P1）。「DB だけ復元 → 初回説明スライドが存在しない画像を指す」silent breakage を塞ぐため、intro_slides の画像参照も突き合わせて欠落を検出（新 finding `BrokenIntroSlides`、復元レポートに「初回説明スライドの画像の欠落」セクションを追加）。画像欠落はスライド表示が劣化するだけで起動を妨げないため **warning 扱い**（`HasCriticalFindings` には含めず、games の thumbnail/background と同格。text-only スライド＝ImagePath 空は対象外）。
+- **整合性チェックを手動再実行できる「整合性チェック」ボタンを追加（バックアップタブ）**: 整合性チェックは **復元直後にしか走らない**（`Analyze()` の呼び出しは `btnRestore_Click` 内の 1 箇所のみ＝通常起動では走らない）。一方、復元レポートの手順は「修正後に **Manager を再起動するとこのチェックが再度かかります**」と案内しており、これは**不正確（再起動では再チェックされない）**だった。バックアップタブに「整合性チェック」ボタンを追加し、復元を伴わず現在の DB ↔ `games/`/`guide/` のズレをオンデマンドで再チェック可能に。あわせて復元レポートの手順③を「**バックアップ画面の『整合性チェック』ボタンで再チェック**（再起動では再チェックされない）」に修正。`RestoreReportForm` を **復元後／手動の 2 モード対応**にし、手動時は「復元完了」等の復元前提の文言を避ける（headline・前置き・手順を切替）。
 - **テスト基盤**: `PathManager` に test seam（`SetBaseDirectoryForTest`/`ResetBaseDirectoryForTest`、internal）を追加し、PathManager 静的に依存していた `RestoreReconciliationService` を実 install を触らず一時 install dir で検証可能に（#239）。**reconciliation の初テスト**を新規追加（guide 画像欠落→`BrokenIntroSlides` 検出＋非 critical / 全存在→非検出、fail-first）。
-- 検証: Manager build 緑 / **テスト 138 件合格**（#250 PR2 新規 2 件）。
+- 検証: Manager build 緑 / **テスト 138 件合格**（#250 PR2 新規 2 件）。**※整合性チェックボタンの実機 UI（ボタン配置・レポート文言の 2 モード切替）は pre-release で目視。**
 - bump 判断: ユーザー向け挙動の機能追加（復元レポートに guide 欠落検出を追加）。破壊的変更なし。schema 変更なし。minor (v0.23.0 → v0.24.0)。Launcher/Updater は無関係。**#250 はまだ閉じない**（PR3＝DB+アセット一式の復元 2 モードが残るため）。
 
 ### [Manager v0.23.0] - 2026-06-04
