@@ -1998,6 +1998,15 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.25.0] - 2026-06-04
+
+- **(#250 PR3a) アセット復元エンジン `AssetRestoreService` を追加**: バックアップは PR1/PR2 で「DB + アセット(games/+guide/)を共有プール(CAS)＋manifest」で取れるが、**復元は DB しか戻せなかった**（「取れるが戻せない」）。本 PR で manifest(relpath→hash) を読み `asset_pool/<hash>` を live の games/+guide/ へ書き戻す**エンジン**を追加（= `AssetSnapshotService.CreateSnapshot` の逆操作）。**まだ UI には未配線**（2モードUI・ペアリング・safety 退避は PR3b）。
+  - **reconcile-in-place**: live が既に一致するファイル(size+mtime)は再コピーせず skip（SMB 再読込回避）、違う/欠落だけ pool から copy、manifest に無い余剰 live は削除し、ツリーを manifest と完全一致させる。**コピーを削除より先**に行い、pool は内容アドレスで不変なので途中中断でも「置換前に live を消さない」。コピー後に mtime を manifest 値に刻む（次回 snapshot の cache hit + 再復元 skip を成立＝`HashAndStore` の配置時刻トリックの逆）。
+  - **安全側設計**: relpath を `games/`/`guide/` 配下に限定（**パストラバーサル拒否**で install dir 外への書込/削除を防止）、空 manifest で非空ツリーを消す暴発を**ガード**（`allowEmpty`）、pool blob 不在は per-file 失敗に集計し**該当 live を保持**（削除しない）、reparse point / `.pending-delete-*` は削除対象外（外部実体・ゲーム削除 retry を壊さない）。best-effort（per-file は throw せず `AssetRestoreResult` に集計、`IsPartial` で警告）。long-path/SMB 安全（`EnsureLongPath`/`ForceLongPath`）。
+  - **フォーマット SoT 一本化**: manifest 行解釈と pool パスを `AssetSnapshotService.TryParseManifestEntryLine`/`PoolPathFor`（internal 化）に集約し、`LoadHashCache`/`GarbageCollectPool`/新 `AssetRestoreService` が共用（書き手 `WriteManifest` と乖離させない）。既存 snapshot テストで回帰担保。
+- 検証: Manager build 緑 / **テスト 151 件合格**（#250 PR3a 新規 12 件 fail-first: RoundTrip / 余剰削除 / 不変skip無再コピー / 削除再生成 / blob欠落は IsPartial かつ live保持 / blob欠落で削除しない / パストラバーサル拒否 / 空manifestガード+allowEmpty / case差を誤削除しない / guide空で games保持 / キャンセル / manifest不在）。既存 snapshot テストも緑（SoT リファクタ無回帰）。
+- bump 判断: 新サービス追加（#250 PR3 の土台）。UI 未配線でユーザー向け挙動は不変だが、独立した機能追加なので minor (v0.24.0 → v0.25.0)。schema 変更なし。**#250 は閉じない**（PR3b/c 残）。Launcher/Updater は無関係。
+
 ### [Manager v0.24.0] - 2026-06-04
 
 - **(#250 PR2) 復元の整合性チェックを `guide/`（初回説明スライド画像）にも拡張**: 旧 `RestoreReconciliationService` は復元後に **`games/` しか突き合わせず**、別時点の DB を復元すると games/ のズレ（起動できないゲーム／無い版／孤児フォルダ）は検出されるのに、`intro_slides.image_path`（`guide/<file>`）が指す画像の欠落は**無警告（silent）**という非対称があった（Codex PR #274 P1）。「DB だけ復元 → 初回説明スライドが存在しない画像を指す」silent breakage を塞ぐため、intro_slides の画像参照も突き合わせて欠落を検出（新 finding `BrokenIntroSlides`、復元レポートに「初回説明スライドの画像の欠落」セクションを追加）。画像欠落はスライド表示が劣化するだけで起動を妨げないため **warning 扱い**（`HasCriticalFindings` には含めず、games の thumbnail/background と同格。text-only スライド＝ImagePath 空は対象外）。

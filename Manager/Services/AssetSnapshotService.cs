@@ -34,7 +34,7 @@ namespace TonePrism.Manager.Services
         private const string PoolDirName = "asset_pool";
         private const string ManifestDirName = "asset_snapshots";
         private const string ManifestExt = ".manifest";
-        private const string MetaLinePrefix = "META";
+        internal const string MetaLinePrefix = "META"; // (#250 PR3) AssetRestoreService と共用 (manifest 形式 SoT)
         /// <summary>(レビュー M1) pool 物理サイズのキャッシュ。UI から pool 全列挙 (SMB で重い) を避けるため、
         /// バックアップ時にバックグラウンドスレッドで算出してここに書き、UI は即時読みする。</summary>
         private const string PoolSizeFileName = ".poolsize";
@@ -257,12 +257,8 @@ namespace TonePrism.Manager.Services
                 if (newest == null) return cache;
                 foreach (var line in File.ReadLines(FileOperationService.EnsureLongPath(newest)))
                 {
-                    if (line.StartsWith(MetaLinePrefix + "\t")) continue;
-                    var f = line.Split(new[] { '\t' }, 4);
-                    if (f.Length < 4) continue;
-                    long size, mt;
-                    if (!long.TryParse(f[1], out size) || !long.TryParse(f[2], out mt)) continue;
-                    cache[f[3]] = new CacheEntry { Hash = f[0], Size = size, MtimeTicks = mt };
+                    if (!TryParseManifestEntryLine(line, out ManifestEntry e)) continue;
+                    cache[e.RelPath] = new CacheEntry { Hash = e.Hash, Size = e.Size, MtimeTicks = e.MtimeTicks };
                 }
             }
             catch (Exception ex) { Logger.Warn("[AssetSnapshot] ハッシュキャッシュ読込失敗 (全ハッシュし直す): " + ex.Message); }
@@ -365,8 +361,32 @@ namespace TonePrism.Manager.Services
         /// 構文不正パスを生成し、SMB 上の列挙が全件失敗 → 空の控えを Success 扱いにする欠陥があった)。</summary>
         private static string ForceLong(string path) => FileOperationService.ForceLongPath(path);
 
-        private static string PoolPathFor(string poolRoot, string hash)
+        /// <summary>(#250 PR3) manifest の 1 エントリ (relpath + hash + size/mtime)。snapshot 書き手と restore 読み手で共用。</summary>
+        internal struct ManifestEntry { public string Hash; public long Size; public long MtimeTicks; public string RelPath; }
+
+        // (#250 PR3) manifest 形式と pool パスの SoT。AssetRestoreService が同一アセンブリから再利用する
+        // (重複定義を避け、書き手 WriteManifest と読み手を 1 箇所に固定。InternalsVisibleTo 済でテストからも可視)。
+        internal static string PoolPathFor(string poolRoot, string hash)
             => Path.Combine(poolRoot, hash.Substring(0, 2), hash);
+
+        /// <summary>(#250 PR3) manifest 1 行 `&lt;hash&gt;\t&lt;size&gt;\t&lt;mtime_ticks&gt;\t&lt;relpath&gt;` を解析する。
+        /// META 行 / 空 / 不正は false。LoadHashCache / GarbageCollectPool / AssetRestoreService が共用する唯一の解釈点
+        /// (タブ4フィールドの順序を 1 箇所に固定し、書き手 WriteManifest と乖離させない)。</summary>
+        internal static bool TryParseManifestEntryLine(string line, out ManifestEntry entry)
+        {
+            entry = default(ManifestEntry);
+            if (string.IsNullOrEmpty(line)) return false;
+            if (line.StartsWith(MetaLinePrefix + "\t")) return false;
+            var f = line.Split(new[] { '\t' }, 4);
+            if (f.Length < 4) return false;
+            long size, mt;
+            if (!long.TryParse(f[1], out size) || !long.TryParse(f[2], out mt)) return false;
+            entry.Hash = f[0];
+            entry.Size = size;
+            entry.MtimeTicks = mt;
+            entry.RelPath = f[3];
+            return true;
+        }
 
         /// <summary>
         /// (レビュー#4) ソースを 1 回だけ読み、SHA-256 を計算しつつ pool の temp に書き、内容ハッシュ名へ rename する。
@@ -552,9 +572,7 @@ namespace TonePrism.Manager.Services
                     {
                         foreach (var line in File.ReadLines(FileOperationService.EnsureLongPath(manifest)))
                         {
-                            if (line.StartsWith(MetaLinePrefix + "\t")) continue;
-                            int tab = line.IndexOf('\t');
-                            if (tab > 0) referenced.Add(line.Substring(0, tab));
+                            if (TryParseManifestEntryLine(line, out ManifestEntry e)) referenced.Add(e.Hash);
                         }
                     }
                     // (レビュー L2) manifest を 1 件でも読めなければ参照集合が不完全 → 誤って参照中 blob を消しうるので

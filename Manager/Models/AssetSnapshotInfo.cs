@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace TonePrism.Manager.Models
 {
@@ -78,5 +79,48 @@ namespace TonePrism.Manager.Models
 
         public static SnapshotResult Failed(string message)
             => new SnapshotResult { Kind = ResultKind.Failed, Message = message };
+    }
+
+    /// <summary>
+    /// (#250 PR3) `AssetRestoreService.RestoreFromManifest` の結果。best-effort のため per-file 失敗は throw せず
+    /// この型で返す。全体失敗 (manifest 不在/読めない・空ガード発動) は <see cref="ResultKind.Failed"/>、
+    /// per-file 失敗を含むが完走したら <see cref="ResultKind.Success"/> + <see cref="IsPartial"/>。
+    /// </summary>
+    public class AssetRestoreResult
+    {
+        public enum ResultKind { Success, Skipped, Failed }
+
+        public ResultKind Kind { get; private set; }
+        /// <summary>pool から live へ新規/更新コピーしたファイル数。</summary>
+        public int CopiedCount { get; private set; }
+        /// <summary>live が既に manifest と一致 (size+mtime) で再コピーを省いたファイル数。</summary>
+        public int SkippedCount { get; private set; }
+        /// <summary>manifest に無い余剰 live ファイルを削除した数。</summary>
+        public int DeletedCount { get; private set; }
+        /// <summary>per-file で失敗した数 (pool blob 不在・I/O・パストラバーサル拒否等)。&gt;0 で IsPartial。</summary>
+        public int FailedCount { get; private set; }
+        /// <summary>Skipped(全体)/Failed の理由。</summary>
+        public string Message { get; private set; }
+        /// <summary>pool に blob が無く復元できなかった relpath 群 (live は保持＝削除しない)。UI/ログ用。</summary>
+        public List<string> MissingBlobRelPaths { get; } = new List<string>();
+
+        public bool IsSuccess => Kind == ResultKind.Success;
+        public bool IsSkipped => Kind == ResultKind.Skipped;
+        public bool IsFailed => Kind == ResultKind.Failed;
+        /// <summary>完走したが per-file 失敗を含む (= 緑チェックにせず警告すべき)。SnapshotResult.IsPartial と同義。</summary>
+        public bool IsPartial => Kind == ResultKind.Success && FailedCount > 0;
+
+        public static AssetRestoreResult Success(int copied, int skipped, int deleted, int failed, List<string> missingBlobs = null)
+        {
+            var r = new AssetRestoreResult { Kind = ResultKind.Success, CopiedCount = copied, SkippedCount = skipped, DeletedCount = deleted, FailedCount = failed };
+            if (missingBlobs != null) r.MissingBlobRelPaths.AddRange(missingBlobs);
+            return r;
+        }
+
+        public static AssetRestoreResult Skipped(string reason)
+            => new AssetRestoreResult { Kind = ResultKind.Skipped, Message = reason };
+
+        public static AssetRestoreResult Failed(string message)
+            => new AssetRestoreResult { Kind = ResultKind.Failed, Message = message };
     }
 }
