@@ -40,7 +40,9 @@ namespace TonePrism.Manager.Controls
             // (Manager v0.21.0) ファイル由来の履歴では開始 / 完了の区別が無いため日時は「作成日時」1 列に統合。
             gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "created", HeaderText = "作成日時", FillWeight = 150, MinimumWidth = 150 });
             gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "pc", HeaderText = "実行PC", FillWeight = 100, MinimumWidth = 90 });
-            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "trigger", HeaderText = "トリガ", FillWeight = 55, MinimumWidth = 50 });
+            // (ユーザー指摘) ヘッダー「トリガ」は列幅が狭く「トリ／ガ」と 2 行折り返しになり、かつ技術用語で分かりにくい。
+            // 値は「自動／手動／退避」＝バックアップの種類なので「種類」に変更 (2 文字で折り返さず、意味も平易)。
+            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "trigger", HeaderText = "種類", FillWeight = 55, MinimumWidth = 56 });
             // (#200) 「状態」列は持たない。backup_log 廃止 (v19) 後は失敗はファイルを残さず履歴に出ない
             // (走査結果は実質すべて成功ファイル) ため状態列は情報量ゼロ。失敗通知は status bar / Logger で覆える。
             // (ユーザー指摘) この列は .db ファイル単体のサイズ (DBのみ、数百KB級)。世代全体 (ゲームファイル込み) と
