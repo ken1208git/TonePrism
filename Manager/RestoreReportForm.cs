@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Linq;
 using System.Text;
 using System.Windows.Forms;
+using TonePrism.Manager.Models;
 using TonePrism.Manager.Services;
 
 namespace TonePrism.Manager
@@ -23,15 +24,24 @@ namespace TonePrism.Manager
         // (#250 PR2) true = 復元直後の自動チェック / false = バックアップタブの「整合性チェック」ボタンからの手動実行。
         // 文言を切替える (手動時は「復元完了」等の復元前提の言い回しを避ける)。
         private readonly bool _postRestore;
+        // (#250 PR3b) DB と一緒にゲームファイル (games/+guide/) を復元したときの結果。null = アセット復元なし
+        // (DBのみ復元 / 手動整合性チェック)。非 null のとき copied/deleted/missing 等のアセット節を追記する。
+        private readonly AssetRestoreResult _assetResult;
         private TextBox _body;
 
-        public RestoreReportForm(RestoreReconciliationResult result, string safetyPath, bool postRestore = true)
+        public RestoreReportForm(RestoreReconciliationResult result, string safetyPath, bool postRestore = true, AssetRestoreResult assetResult = null)
         {
             _result = result;
             _safetyPath = safetyPath;
             _postRestore = postRestore;
+            _assetResult = assetResult;
             BuildUi();
         }
+
+        /// <summary>アセット復元で「対処が必要」級の問題 (全体失敗 or プール実体欠落) があったか。headline を赤に格上げ。</summary>
+        private bool AssetCritical => _assetResult != null && (_assetResult.IsFailed || _assetResult.MissingBlobRelPaths.Count > 0);
+        /// <summary>アセット復元で軽微な不完全 (per-file 失敗 or 削除抑止) があったか (起動への致命傷ではない)。</summary>
+        private bool AssetMinor => _assetResult != null && !AssetCritical && (_assetResult.IsPartial || _assetResult.DeletionSuppressed);
 
         private void BuildUi()
         {
@@ -60,7 +70,15 @@ namespace TonePrism.Manager
                     : "⚠ 起動できないゲームがあります（対処が必要）";
                 headColor = Color.Firebrick;
             }
-            else if (_result.HasAnyFindings)
+            else if (AssetCritical)
+            {
+                // (#250 PR3b) DB の整合性は問題ないが、ゲームファイルの復元で実体欠落 / 全体失敗があった。
+                headline = _assetResult.IsFailed
+                    ? "⚠ ゲームファイルの復元に失敗しました（対処が必要）"
+                    : "⚠ 一部のゲームファイルを復元できませんでした（対処が必要）";
+                headColor = Color.Firebrick;
+            }
+            else if (_result.HasAnyFindings || AssetMinor)
             {
                 headline = _postRestore
                     ? "復元は完了しました（軽微なズレあり・起動への影響なし）"
@@ -142,9 +160,20 @@ namespace TonePrism.Manager
         {
             var sb = new StringBuilder();
 
-            sb.AppendLine("【まず確認】バックアップ／復元の対象は toneprism.db（データベース）だけで、");
-            sb.AppendLine("ゲーム本体の games フォルダは含まれません。そのため、" + (_postRestore ? "いま復元した DB と、" : "現在の DB と、"));
-            sb.AppendLine("ディスク上の games フォルダの「時点」がズレていると、以下のような食い違いが起きます。");
+            if (_assetResult != null && !_assetResult.IsFailed)
+            {
+                // (#250 PR3b) DB とゲームファイルを一緒に復元したケース。「games は含まれない」という DBのみ前提の
+                // 案内は誤りになるので、一緒に戻した旨と「控え欠落で食い違いが残りうる」点に切替える。
+                sb.AppendLine("【まず確認】今回はデータベースに加えて、ゲームファイル（games／guide）も一緒に復元しました。");
+                sb.AppendLine("通常は両者の「時点」が揃いますが、控え（プール）に一部の実体が無かった場合などは");
+                sb.AppendLine("食い違いが残ることがあります。以下にその有無と内訳を示します。");
+            }
+            else
+            {
+                sb.AppendLine("【まず確認】バックアップ／復元の対象は toneprism.db（データベース）だけで、");
+                sb.AppendLine("ゲーム本体の games フォルダは含まれません。そのため、" + (_postRestore ? "いま復元した DB と、" : "現在の DB と、"));
+                sb.AppendLine("ディスク上の games フォルダの「時点」がズレていると、以下のような食い違いが起きます。");
+            }
             sb.AppendLine();
             if (!string.IsNullOrEmpty(_safetyPath))
             {
@@ -154,6 +183,10 @@ namespace TonePrism.Manager
             }
             sb.AppendLine(new string('-', 70));
             sb.AppendLine();
+
+            // (#250 PR3b) アセット復元の結果節 (reconcile の早期 return より前に出すことで、DB 整合は綺麗でも
+            // ゲームファイル側に問題があるケースを必ず表示する)。
+            AppendAssetSection(sb);
 
             if (_result.AnalysisFailed)
             {
@@ -358,6 +391,51 @@ namespace TonePrism.Manager
             }
 
             return sb.ToString();
+        }
+
+        /// <summary>(#250 PR3b) アセット (games/+guide/) 復元の結果を追記する。null のとき何もしない。</summary>
+        private void AppendAssetSection(StringBuilder sb)
+        {
+            if (_assetResult == null) return;
+
+            sb.AppendLine("■ ゲームファイル（games／guide）の復元結果");
+            if (_assetResult.IsFailed)
+            {
+                sb.AppendLine("  ゲームファイルの復元を実行できませんでした:");
+                sb.AppendLine("    " + (_assetResult.Message ?? "(詳細不明)"));
+                sb.AppendLine();
+                sb.AppendLine("  データベースの復元は完了しています。ゲームファイルだけ別の世代でやり直すか、");
+                sb.AppendLine("  当時の games フォルダを手動で補ってください。");
+            }
+            else
+            {
+                sb.AppendLine($"  コピー: {_assetResult.CopiedCount} 件 ／ 変更なし: {_assetResult.SkippedCount} 件 ／ 削除: {_assetResult.DeletedCount} 件");
+                if (_assetResult.FailedCount > 0)
+                    sb.AppendLine($"  復元できなかったファイル: {_assetResult.FailedCount} 件");
+
+                if (_assetResult.MissingBlobRelPaths.Count > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("  控え（プール）に実体が無く復元できなかったファイル（現在のファイルは保持）:");
+                    foreach (var rel in _assetResult.MissingBlobRelPaths.Take(20))
+                        sb.AppendLine("    ・" + rel);
+                    if (_assetResult.MissingBlobRelPaths.Count > 20)
+                        sb.AppendLine($"    …ほか {_assetResult.MissingBlobRelPaths.Count - 20} 件");
+                    sb.AppendLine();
+                    sb.AppendLine("  これらに対応するゲームは起動できない / 表示が欠ける可能性があります。");
+                    sb.AppendLine("  別の世代を「ゲームファイルも一緒に復元」でやり直すと解消することがあります。");
+                }
+
+                if (_assetResult.DeletionSuppressed)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("  ※ 控えの目録が不完全だったため、余分なファイルの削除は行いませんでした");
+                    sb.AppendLine("    （この世代に無いファイルが現在のフォルダに残っている可能性があります）。");
+                }
+            }
+            sb.AppendLine();
+            sb.AppendLine(new string('-', 70));
+            sb.AppendLine();
         }
     }
 }

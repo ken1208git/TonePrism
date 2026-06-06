@@ -209,6 +209,55 @@ namespace TonePrism.Manager.Services
             }
         }
 
+        /// <summary>
+        /// (#250 PR3b) ある DB バックアップ世代とペアになる **アセット manifest** を解決する。DB の `.db` と
+        /// アセット `.manifest` は別ファイルで「同一バックアップ操作」を厳密に紐づける ID を持たないため、**時刻**で
+        /// ペアリングする: <paramref name="dbStartedLocal"/> (= 復元しようとする .db の作成時刻 T) **以下で最大時刻**の
+        /// manifest を選ぶ。
+        ///
+        /// **なぜ「以下で最大」か (replace-in-session 対策)**: DB-only 操作 (replace-in-session) は `.db` をより新しい
+        /// 時刻で書き直すが manifest は書き直さないので、`.db` 時刻が対のアセット manifest より **後** になりうる。
+        /// 「T 以下で最大」なら、その操作の直前フル世代の manifest (= live アセットが一致する世代) を正しく拾う。
+        /// 「T 以上で最小」だと存在しない/別世代を指してしまう。
+        ///
+        /// **host 優先**: 同時刻に複数 PC が控えた tie を分けるため、<paramref name="preferredHost"/> (= .db を作った PC)
+        /// 一致を優先し、無ければ全体最新。tie-break はファイル名降順 (newest-wins と一致)。比較は両者の
+        /// <see cref="AssetSnapshotInfo.StartedAtLocal"/> 同士の **local 比較** (DB 名・manifest 名とも同じ
+        /// yyyyMMdd_HHmmss 由来＝秒粒度・同一壁時計、DST ズレ無し)。
+        ///
+        /// 該当世代が無い (= T 以前の manifest が無い)・SMB 不達等は **null** を返す (DBのみ復元を阻害しない best-effort)。
+        /// </summary>
+        public AssetSnapshotInfo FindSnapshotForBackup(DateTime dbStartedLocal, string preferredHost)
+        {
+            try
+            {
+                var candidates = EnumerateManifests()
+                    .Select(ReadManifestHeader)
+                    // 不正ヘッダ (Timestamp 解釈不能 = StartedAtLocal が MinValue) は時刻信頼不可なので除外。
+                    .Where(m => m != null && m.StartedAtLocal != DateTime.MinValue)
+                    // T 以下 (= .db 時刻以前) の世代だけがペア候補 (replace-in-session で .db>manifest を正しく拾う)。
+                    .Where(m => m.StartedAtLocal <= dbStartedLocal)
+                    // 新しい順 → 同時刻ならファイル名降順 (host 名込みで決定的、newest-wins 規約と一致)。
+                    .OrderByDescending(m => m.StartedAtLocal)
+                    .ThenByDescending(m => Path.GetFileName(m.ManifestPath), StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (candidates.Count == 0) return null;
+
+                // host 一致を優先 (同時刻 tie や近接世代で .db を作った PC の控えを選ぶ)。無ければ全体最新。
+                if (!string.IsNullOrEmpty(preferredHost))
+                {
+                    var hostMatch = candidates.FirstOrDefault(m => string.Equals(m.Host, preferredHost, StringComparison.OrdinalIgnoreCase));
+                    if (hostMatch != null) return hostMatch;
+                }
+                return candidates[0];
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[AssetSnapshot] DB 世代とのアセット manifest ペアリングに失敗 (DBのみ復元へフォールバック): " + ex.Message);
+                return null;
+            }
+        }
+
         /// <summary>アセットプールが実際に使っているディスク量 (= 重複排除後の物理サイズ)。UI 用。
         /// (レビュー M1) pool 全列挙は SMB で重く UI スレッドをフリーズさせうるので、バックアップ時に算出済の
         /// `.poolsize` キャッシュを即時読みする。無ければ 0 (= まだ取得していない)。</summary>
@@ -484,7 +533,7 @@ namespace TonePrism.Manager.Services
             File.WriteAllText(FileOperationService.EnsureLongPath(path), sb.ToString(), new UTF8Encoding(false));
         }
 
-        private IEnumerable<string> EnumerateManifests()
+        internal IEnumerable<string> EnumerateManifests()
         {
             string root = GetSnapshotRootDirectory();
             foreach (var trigger in new[] { "auto", "manual" })
@@ -496,7 +545,7 @@ namespace TonePrism.Manager.Services
             }
         }
 
-        private static AssetSnapshotInfo ReadManifestHeader(string manifestPath)
+        internal static AssetSnapshotInfo ReadManifestHeader(string manifestPath)
         {
             var info = new AssetSnapshotInfo { ManifestPath = manifestPath };
             using (var r = new StreamReader(FileOperationService.EnsureLongPath(manifestPath)))

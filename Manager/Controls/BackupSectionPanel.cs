@@ -205,14 +205,25 @@ namespace TonePrism.Manager.Controls
                 return;
             }
 
-            using (var confirm = new RestoreConfirmForm(entry))
+            // (#250 PR3b) この DB 世代とペアになるアセット控え (manifest) を時刻で解決する。.db と .manifest は別ファイルで
+            // 厳密な紐づけ ID を持たないため「.db 作成時刻 T 以下で最大時刻の manifest」を採る (replace-in-session で
+            // .db>manifest を正しく拾う)。null = アセット控えの無い世代 (旧 safety_*.db 等) → 確認ダイアログで「DBのみ」固定。
+            AssetSnapshotInfo pairedSnap = null;
+            try { pairedSnap = _dbManager.AssetSnapshotService?.FindSnapshotForBackup(entry.StartedAtLocal, entry.PcName); }
+            catch (Exception ex) { Logger.Warn("[BackupSectionPanel] アセット控えのペアリングに失敗 (DBのみ復元へフォールバック): " + ex.Message); }
+
+            bool restoreAssets;
+            using (var confirm = new RestoreConfirmForm(entry, pairedSnap))
             {
                 if (confirm.ShowDialog(this) != DialogResult.Yes)
                 {
                     Logger.Info($"[BackupSectionPanel] 復元キャンセル (確認ダイアログ): source='{resolvedPath}'");
                     return;
                 }
+                restoreAssets = confirm.RestoreAssets;
             }
+            // restoreAssets は控えがある世代でユーザーが ON にしたときのみ true (RestoreConfirmForm が enabled を gate)。
+            string assetManifestPath = (restoreAssets && pairedSnap != null) ? pairedSnap.ManifestPath : null;
 
             // (監査ログ) 確認コード入力を通過した時点で復元意思が確定。以降の経路 (session conflict / cancel /
             // abort / success) を Logger に残して事後追跡できるようにする。旧実装は MessageBox エラー文言が
@@ -277,6 +288,7 @@ namespace TonePrism.Manager.Controls
 
             string safetyPath = null;
             RestoreDbMissingException dbMissing = null;
+            AssetRestoreResult assetResult = null;
             DialogResult dr;
             using (var dialog = new ProcessingDialog((progress, token) =>
             {
@@ -284,6 +296,16 @@ namespace TonePrism.Manager.Controls
                 // ProcessingDialog には Abort させる (例外 Message = 具体的な復旧手順がそのまま画面表示される)。
                 try { safetyPath = _dbManager.RestoreService.Restore(resolvedPath, progress, token, allowIntegrityWarnings); }
                 catch (RestoreDbMissingException dmx) { dbMissing = dmx; throw; }
+
+                // (#250 PR3b) DB 置換が成功した後に、ペアになるアセット控えから games/+guide/ を reconcile-in-place で復元する。
+                // **非キャンセル (CancellationToken.None)**: この時点で DB は既に置換済 = 後戻りできないので、ここで token
+                // cancel を観測すると OperationCanceledException → dr=Cancel → 「DB は変更されていません」と誤報告しかねない。
+                // reconcile は冪等 (再実行で収束) なので、途中キャンセルより完走を優先する。アセット復元は best-effort で
+                // per-file 失敗を throw せず assetResult に集計するため、ここで DB 復元の成功判定を覆さない。
+                if (assetManifestPath != null)
+                {
+                    assetResult = _dbManager.AssetRestoreService.RestoreFromManifest(assetManifestPath, progress, CancellationToken.None);
+                }
             }))
             {
                 dialog.Text = "復元中";
@@ -376,18 +398,44 @@ namespace TonePrism.Manager.Controls
                     $"orphans={reconcile.OrphanFolders.Count}");
             }
 
-            if (reconcile != null && (reconcile.HasAnyFindings || reconcile.AnalysisFailed))
+            // (#250 PR3b 監査ログ) アセット復元を行った場合はその要約も残す (copied/skipped/deleted/failed + 欠落数)。
+            if (assetResult != null)
             {
-                using (var report = new RestoreReportForm(reconcile, safetyPath))
+                if (assetResult.IsFailed)
+                    Logger.Warn($"[BackupSectionPanel] アセット復元 失敗: manifest='{assetManifestPath}', reason={assetResult.Message}");
+                else
+                    Logger.Info(
+                        $"[BackupSectionPanel] アセット復元 完了: manifest='{assetManifestPath}', " +
+                        $"copied={assetResult.CopiedCount}, skipped={assetResult.SkippedCount}, deleted={assetResult.DeletedCount}, " +
+                        $"failed={assetResult.FailedCount}, missing_blobs={assetResult.MissingBlobRelPaths.Count}, deletion_suppressed={assetResult.DeletionSuppressed}");
+            }
+
+            // (#250 PR3b) アセット復元で「対処が必要」級 (全体失敗 / プール実体欠落) or 軽微な不完全 (per-file 失敗 /
+            // 削除抑止) があれば、reconcile がクリーンでもレポートを出して内訳を見せる。
+            bool assetHasIssues = assetResult != null &&
+                (assetResult.IsFailed || assetResult.IsPartial || assetResult.MissingBlobRelPaths.Count > 0);
+
+            if (reconcile != null && (reconcile.HasAnyFindings || reconcile.AnalysisFailed || assetHasIssues))
+            {
+                using (var report = new RestoreReportForm(reconcile, safetyPath, postRestore: true, assetResult: assetResult))
                 {
                     report.ShowDialog(this.FindForm());
                 }
             }
             else
             {
+                // reconcile==null (チェック自体が失敗/skip) でアセット問題があるときの fallback も含め、簡潔通知。
+                string assetLine;
+                if (assetResult == null)
+                    assetLine = "DB とゲームフォルダの整合性に問題はありませんでした。";
+                else if (assetHasIssues)
+                    assetLine = "ゲームファイルの復元に一部問題がありました（詳細はログを確認）。";
+                else
+                    assetLine = $"ゲームファイルも復元しました（コピー {assetResult.CopiedCount} / 変更なし {assetResult.SkippedCount} / 削除 {assetResult.DeletedCount}）。";
+
                 MessageBox.Show(
                     $"復元が完了しました。\n\n復元前のDBは退避されました:\n{safetyPath}\n\n" +
-                    "DB とゲームフォルダの整合性に問題はありませんでした。\nManager のデータを再読み込みします。",
+                    assetLine + "\nManager のデータを再読み込みします。",
                     "復元成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
 

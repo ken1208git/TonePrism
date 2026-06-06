@@ -1998,6 +1998,18 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.26.0] - 2026-06-06
+
+- **(#250 PR3b) アセット復元エンジンを復元 UI へ配線（「ゲームファイルも一緒に復元」）**: PR3a で入れた `AssetRestoreService`（reconcile-in-place）はエンジンのみで UI 未配線だった（「取れるが戻せない」が半分残っていた）。本 PR で復元フローに **DBのみ / DB+ゲームファイル(games/+guide/)** の 2 モードを配線し、別時点の DB を復元したときに games/guide も同じ時点へ戻せるようにした。これで #250 の核心「DB とアセットを一貫した時点に復元」が実機操作で完結する。
+  - **安全方式は reconcile-in-place（ユーザー判断）**: 当初計画の rename-retreat（games/ を退避してから再構成。peak ~2倍ディスク＋6GB の SMB コピー/削除）は本番 SMB の容量・速度都合で**不採用**。変わった分だけ pool から上書き・余剰だけ削除する省容量/SMB効率な in-place を採用。取り消しは別世代を復元し直す（全状態は自動バックアップ済、DB は safety_*.db）。エンジンの安全契約（パストラバーサル拒否／部分・破損 manifest では削除抑止／pool blob 不在は live 保持）で被害を限定。
+  - **`.db`↔`.manifest` 時刻ペアリング（新 `AssetSnapshotService.FindSnapshotForBackup`）**: DB と manifest は別ファイルで厳密な紐づけ ID を持たないため、**T（= 復元する .db の作成時刻）以下で最大時刻の manifest** を対にする。**replace-in-session**（DB-only 操作は .db を新時刻で書き直すが manifest は据え置き）で `.db` 時刻が manifest より後になる事象を、この「T 以下で最大」が正しく直前フル世代へ解決する。host 一致を優先（同秒 tie 分け）、無ければ全体最新、tie-break はファイル名降順。不正ヘッダ（時刻解釈不能）は除外、SMB 不達等は null（= DBのみ復元へフォールバックし阻害しない）。auto+manual 横断。
+  - **`RestoreService` は無改修**: アセット復元は `BackupSectionPanel.btnRestore_Click` のワーカーで **DB 置換成功後**に実行（復元ロックの構造は変えない）。**アセット phase は非キャンセル**（`CancellationToken.None`）＝この時点で DB は置換済で後戻り不可なので、途中キャンセルで「DB は変更されていません」と誤報告するのを避ける（reconcile は冪等で再実行可）。
+  - **確認ダイアログ（`RestoreConfirmForm`）にチェックボックス＋控え情報**: 「ゲームファイルも一緒に復元する」＋対の控えの日時/取得PC/ファイル数を表示。控えのある世代は既定 ON、無い世代（旧 safety_*.db 等）はチェック無効＋「この世代にはゲームファイルの控えがありません」。`public bool RestoreAssets` で呼出側へ伝える。
+  - **復元レポート（`RestoreReportForm`）にアセット節**: optional `AssetRestoreResult`（既存呼出は無改修で compile）。コピー/変更なし/削除の件数、pool 実体欠落（MissingBlob＝起動不能/表示欠けの可能性、別世代でやり直し案内）、削除抑止（控え不完全で余剰が残りうる）を表示。アセット問題があれば reconcile がクリーンでも headline を警告色に格上げしレポートを出す（reconcile==null は MessageBox fallback に件数を併記）。DB+アセットを一緒に戻したときは前置きを「games は含まれない」前提から「一緒に復元した／控え欠落で食い違いが残りうる」へ切替。
+  - **配線**: `DatabaseManager` に `AssetRestoreService`（field＋`new AssetRestoreService(_conn, _backupService)`＋public accessor）を追加。`AssetSnapshotService.EnumerateManifests`/`ReadManifestHeader` を internal 化（ペアリング解決で再利用）。
+- 検証: Manager build 緑 / **テスト 165 件合格**（PR3b 新規 9 件＝ペアリング: T以下で最大 / replace-in-session(db>manifest) / host一致優先 / host無し→全体最新 / T以前なし→null / 空 / auto+manual 横断 / 同秒tie→名前降順 / 不正ヘッダ skip、いずれも fail-first）。**※実機 UI（2モード確認ダイアログ・レポートのアセット節・DB+assets round-trip・本番 SMB 体感）は pre-release で目視（F1〜F6）＝本 PR は #250 の実機 UI 初確認対象。**
+- bump 判断: ユーザー向け機能追加（復元 UI に DB+アセット 2 モードを追加）。破壊的変更なし。schema 変更なし。minor (v0.25.0 → v0.26.0)。Launcher/Updater は無関係。**#250 はこの PR では閉じない**（PR3c [整合性レポートの半自動復元連携] の要否をマージ後に判断＝それを見て #250 を手動クローズ or PR3c 実施）。
+
 ### [Manager v0.25.0] - 2026-06-04
 
 - **(#250 PR3a) アセット復元エンジン `AssetRestoreService` を追加**: バックアップは PR1/PR2 で「DB + アセット(games/+guide/)を共有プール(CAS)＋manifest」で取れるが、**復元は DB しか戻せなかった**（「取れるが戻せない」）。本 PR で manifest(relpath→hash) を読み `asset_pool/<hash>` を live の games/+guide/ へ書き戻す**エンジン**を追加（= `AssetSnapshotService.CreateSnapshot` の逆操作）。**まだ UI には未配線**（2モードUI・ペアリング・safety 退避は PR3b）。
