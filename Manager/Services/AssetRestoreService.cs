@@ -73,7 +73,7 @@ namespace TonePrism.Manager.Services
                 var entries = new List<AssetSnapshotService.ManifestEntry>();
                 var wantedRel = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 int failed = 0;
-                bool metaPartial = false;
+                bool metaTrustsComplete = false; // (review #1) META が 8 フィールドで skipped==0 と明示したときだけ true。
                 int corruptLines = 0;
                 try
                 {
@@ -82,7 +82,9 @@ namespace TonePrism.Manager.Services
                         if (string.IsNullOrEmpty(line)) continue;
                         if (line.StartsWith(AssetSnapshotService.MetaLinePrefix + "\t"))
                         {
-                            if (AssetSnapshotService.IsMetaLinePartial(line)) metaPartial = true; // 部分取得世代
+                            // (review #1) 旧 6 フィールド META (skipped 列なし) は部分取得か判定不能 → complete と断定せず
+                            // 削除抑止に倒す (旧 partial 世代を complete と誤断して live を消す穴を塞ぐ、安全側既定)。
+                            if (AssetSnapshotService.TryReadMetaSkipped(line, out int metaSkipped)) metaTrustsComplete = (metaSkipped == 0);
                             continue;
                         }
                         if (!AssetSnapshotService.TryParseManifestEntryLine(line, out AssetSnapshotService.ManifestEntry e))
@@ -106,7 +108,7 @@ namespace TonePrism.Manager.Services
                     return AssetRestoreResult.Failed("目録の読込に失敗しました: " + ex.Message);
                 }
                 failed += corruptLines; // 破損行を可視化 (IsPartial に反映)
-                bool manifestComplete = corruptLines == 0 && !metaPartial; // 完全と信頼できるときだけ余剰削除する
+                bool manifestComplete = corruptLines == 0 && metaTrustsComplete; // 完全と「明示確認」できるときだけ余剰削除する
                 token.ThrowIfCancellationRequested();
 
                 // 2. 空ガード: 有効エントリ 0 件で非空 live を空にしようとしたら中止 (空 manifest 暴発で games/ 全消去を防ぐ)。
@@ -289,7 +291,7 @@ namespace TonePrism.Manager.Services
         private static string[] SafeGetDirs(string root)
         {
             try { return Directory.GetDirectories(FileOperationService.ForceLongPath(root)).Select(FileOperationService.NormalizePath).ToArray(); }
-            catch { return new string[0]; }
+            catch (Exception ex) { Logger.Warn("[AssetRestore] サブフォルダ列挙に失敗 (skip): " + root + " : " + ex.Message); return new string[0]; } // (review #2) SafeGetFiles と対称にログ
         }
 
         private static bool IsReparsePoint(string dir)

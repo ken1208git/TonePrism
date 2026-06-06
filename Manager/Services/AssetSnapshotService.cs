@@ -379,6 +379,7 @@ namespace TonePrism.Manager.Services
             if (line.StartsWith(MetaLinePrefix + "\t")) return false;
             var f = line.Split(new[] { '\t' }, 4);
             if (f.Length < 4) return false;
+            if (f[0].Length != 64) return false; // (#250 PR3a review #3) hash は SHA-256 hex 64 桁。不正長は破損行扱い (restore の削除抑止に倒し、PoolPathFor の Substring crash も防ぐ)
             long size, mt;
             if (!long.TryParse(f[1], out size) || !long.TryParse(f[2], out mt)) return false;
             entry.Hash = f[0];
@@ -388,18 +389,21 @@ namespace TonePrism.Manager.Services
             return true;
         }
 
-        /// <summary>(#250 PR3a review #1) META 行が「部分取得 (skippedDir/skippedFile > 0)」を示すか。古い 6 フィールド
-        /// META は skipped 情報が無いので false (complete 扱い＝後方互換)。restore が partial 世代からの余剰削除を抑止
-        /// する判定に使う (META 形式の解釈点を WriteManifest と同じ AssetSnapshotService に固定)。</summary>
-        internal static bool IsMetaLinePartial(string metaLine)
+        /// <summary>(#250 PR3a) META 行から skipped 合計を読む。**8 フィールド形式 (skipped 列あり) のときだけ true** +
+        /// skipped 合計を返す。旧 6 フィールド META (skipped 情報なし＝部分取得か判定不能) や非 META 行は false。
+        /// (review #1) restore は「false なら完全性を断定せず余剰削除を抑止」に倒す＝旧世代を complete と誤断して live を
+        /// 消さない安全側既定。META 形式の解釈点を WriteManifest と同じ AssetSnapshotService に固定 (SoT)。</summary>
+        internal static bool TryReadMetaSkipped(string metaLine, out int skippedTotal)
         {
+            skippedTotal = 0;
             if (string.IsNullOrEmpty(metaLine) || !metaLine.StartsWith(MetaLinePrefix + "\t")) return false;
             var f = metaLine.Split('\t');
-            if (f.Length < 8) return false; // 旧形式 (skipped 列なし)
+            if (f.Length < 8) return false; // 旧形式 (skipped 列なし) = 完全性を断定不能
             int sd, sf;
             int.TryParse(f[6], out sd);
             int.TryParse(f[7], out sf);
-            return (sd + sf) > 0;
+            skippedTotal = sd + sf;
+            return true;
         }
 
         /// <summary>

@@ -201,7 +201,7 @@ namespace TonePrism.Manager.Tests
             string dir = Path.Combine(_backup.GetEffectiveDestinationDirectory(), "asset_snapshots", "auto");
             Directory.CreateDirectory(dir);
             string manifest = Path.Combine(dir, "20260101_000000.manifest");
-            File.WriteAllText(manifest, "META\t20260101_000000\tHOST\tauto\t0\t0\n"); // META のみ (0 エントリ)
+            File.WriteAllText(manifest, "META\t20260101_000000\tHOST\tauto\t0\t0\t0\t0\n"); // META のみ (0 エントリ、8 フィールド=complete)
 
             var r = _restore.RestoreFromManifest(manifest);     // 既定: 非空 live をガードで Failed
             Assert.True(r.IsFailed);
@@ -313,6 +313,51 @@ namespace TonePrism.Manager.Tests
             Assert.Equal(0, r.DeletedCount);
             Assert.True(File.Exists(GameFull("g1/EXTRA.bin"))); // 余剰が消されない
             Assert.True(File.Exists(GameFull("g1/a.txt")));     // 破損行で wantedRel に無い a.txt も消えない
+        }
+
+        [Fact]
+        public void Restore_OldFormatMeta_SuppressesDeletion()
+        {
+            // (review #1) PR3a 以前の 6 フィールド META (skipped 情報なし) は部分取得か判定不能 → complete と断定せず削除抑止
+            // (旧 partial 世代を complete と誤断して live を消す穴を塞ぐ、安全側既定)。
+            WriteGame("g1/a.txt", "alpha");
+            string manifest = Snap();
+            var lines = File.ReadAllLines(manifest);
+            for (int i = 0; i < lines.Length; i++)
+                if (lines[i].StartsWith("META\t"))
+                    lines[i] = string.Join("\t", lines[i].Split('\t').Take(6)); // skipped 列を落として旧 6 フィールド形式に
+            File.WriteAllLines(manifest, lines);
+            WriteGame("g1/EXTRA.bin", "junk");
+
+            var r = _restore.RestoreFromManifest(manifest);
+            Assert.True(r.IsSuccess);
+            Assert.True(r.DeletionSuppressed);                  // 旧形式=完全性不明→削除抑止
+            Assert.Equal(0, r.DeletedCount);
+            Assert.True(File.Exists(GameFull("g1/EXTRA.bin"))); // 余剰が残る (修正前は complete 扱いで削除されていた)
+        }
+
+        [Fact]
+        public void Restore_InvalidHashLine_TreatedAsCorrupt_SuppressesDeletion()
+        {
+            // (review #3) hash が SHA-256 64 桁でない行は破損行扱い (PoolPathFor の Substring crash も防ぐ)。削除抑止+failed 計上。
+            // 有効 entry (b.txt) を残し a.txt 行の hash を不正長に (全破損だと空ガードに流れるため部分破損で抑止パスを通す)。
+            WriteGame("g1/a.txt", "alpha");
+            WriteGame("g1/b.txt", "beta");
+            string manifest = Snap();
+            var lines = File.ReadAllLines(manifest);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var f = lines[i].Split('\t');
+                if (f.Length >= 4 && f[0] != "META" && f[3] == "games/g1/a.txt") { f[0] = "X"; lines[i] = string.Join("\t", f); } // 不正 hash
+            }
+            File.WriteAllLines(manifest, lines);
+            WriteGame("g1/EXTRA.bin", "junk");
+
+            var r = _restore.RestoreFromManifest(manifest);
+            Assert.True(r.FailedCount >= 1);
+            Assert.True(r.DeletionSuppressed);
+            Assert.True(File.Exists(GameFull("g1/EXTRA.bin"))); // 余剰が消されない
+            Assert.True(File.Exists(GameFull("g1/a.txt")));
         }
     }
 }
