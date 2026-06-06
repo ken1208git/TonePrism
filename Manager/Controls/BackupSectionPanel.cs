@@ -347,9 +347,12 @@ namespace TonePrism.Manager.Controls
                     bool retreatOk = pre != null && pre.IsSuccess && !pre.IsPartial;
                     if (retreatOk)
                     {
-                        // (review round5 #3) ManifestPath != null のときだけ「実際に控えが書かれた」＝undo で games を戻せる。
-                        // 空 games 退避 (ManifestPath==null) は reconcile は通すが undo は DBのみになる (上の C-2 非対称コメント参照)。
-                        assetRetreatHasControl = pre.ManifestPath != null;
+                        // (review round5 #3 / round6 #1) 「実際に undo で games を戻せる控えが書かれた」かを真実の源にする。
+                        // ManifestPath != null だけでは不十分: games/ が「存在するが空」(fresh install で EnsureDirectoriesExist が
+                        // 作る) と CreateSnapshot は **0 エントリの manifest** を書き ManifestPath != null を返す。この空の控えで
+                        // undo すると RestoreFromManifest の空ガード (非空 live を 0 エントリで全消去する暴発防止) に当たり Failed に
+                        // なる＝undo で games を戻せない。よって **FileCount > 0** も条件に加え、空退避を「undo 可能」と誤案内しない。
+                        assetRetreatHasControl = pre.ManifestPath != null && pre.FileCount > 0;
                         _dbManager.AssetSnapshotService.PruneSafetySnapshots(Services.RestoreService.DefaultSafetyRetentionCount);
                     }
                     else
@@ -523,9 +526,13 @@ namespace TonePrism.Manager.Controls
                 if (assetResult == null)
                     // (review round3 #4) 退避失敗 degrade のときは「整合性に問題なし」を出すと retreatFailedNote
                     // (DBのみ復元した旨) と噛み合わないので、degrade では「DBのみ復元」とだけ言い詳細は note に委ねる。
+                    // (review round6 #4) この else は reconcile==null (整合性チェック自体が失敗/skip) も通る。チェックが
+                    // 走っていないのに「問題はありませんでした」と断定すると silent pass になるため、reconcile==null は断定しない。
                     assetLine = assetRetreatFailed
                         ? "データベースのみ復元しました。"
-                        : "DB とゲームフォルダの整合性に問題はありませんでした。";
+                        : reconcile == null
+                            ? "（整合性チェックは実行されませんでした。詳細はログを確認してください。）"
+                            : "DB とゲームフォルダの整合性に問題はありませんでした。";
                 else if (assetHasIssues)
                     // (review #3) reconcile==null で詳細レポートを出せない fallback。件数を併記して UI からも実態を読めるようにする
                     // (どの relpath が欠落したかの一覧はログに出る)。
