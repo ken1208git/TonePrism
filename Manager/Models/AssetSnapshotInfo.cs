@@ -15,7 +15,7 @@ namespace TonePrism.Manager.Models
         /// <summary>Timestamp をローカル日時に解釈したもの (UI 表示用)。解釈不能時は DateTime.MinValue。</summary>
         public DateTime StartedAtLocal { get; set; }
 
-        /// <summary>"auto" / "manual"。</summary>
+        /// <summary>"auto" / "manual" / "safety"（"safety" は #250 PR3b の復元前退避＝undo 用アセット控え）。</summary>
         public string TriggerType { get; set; }
 
         /// <summary>取得した PC 名 (manifest 名の _host 部、無ければ空)。</summary>

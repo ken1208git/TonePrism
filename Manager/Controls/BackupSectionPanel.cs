@@ -340,7 +340,11 @@ namespace TonePrism.Manager.Controls
                 // (#250 PR3b round3) DB 置換成功後・reconcile 前に、現 games/guide を safety_*.db と同 ts/host のアセット
                 // safety 控えへ退避する (undo 用)。**非キャンセル** (DB 置換済=後戻り不可点以降)。退避が不完全 (退避時刻の
                 // 解析失敗 / 列挙失敗 / 部分取得) なら破壊的 reconcile を行わず DBのみ復元へ degrade。games が空 (新規 install
-                // 相当=ManifestPath null) の Success は「失うものが無い」ので OK (reconcile は削除せずコピーのみ)。
+                // 相当=ManifestPath null) の Success は「失うものが無い」ので退避成立扱いで OK (reconcile は削除せずコピーのみ)。
+                // (review round4 C-2 既知の非対称) 退避時に live games が空の世代は対のアセット safety 控えが作られないため、
+                // 後で safety_*.db を undo 復元しても games は DBのみ復元になり、reconcile で増えた games は live に残る
+                // (= 孤児。整合性チェックで検出可能・データ消失ではない)。新規 install 直後に過去世代を復元してすぐ undo する
+                // 稀ケースに限る。完全対称化 (空でも空 manifest を書く) は CreateSnapshot 改修を伴うため別 issue (S-1 と併せて)。
                 if (assetManifestPath != null)
                 {
                     progress?.Report(new ProgressInfo(0, "復元前に現在のゲームファイルを退避中（やり直し用）..."));

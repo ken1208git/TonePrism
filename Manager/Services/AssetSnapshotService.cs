@@ -284,6 +284,10 @@ namespace TonePrism.Manager.Services
                 string leaf = string.IsNullOrEmpty(host) ? timestamp : timestamp + "_" + host;
                 // leaf 完全一致を最優先。同 ts/host で衝突 suffix (_2 等) が付いた世代も leaf+"_" prefix で拾い、
                 // ファイル名降順 (= 新しい採番) で最新を選ぶ。auto/manual は対象外 (safety フォルダのみ走査)。
+                // (review round4 C-3 既知の制約) **同一秒・同一 host で 2 回連続復元**して safety_<ts>_<host>.db と
+                // safety_<ts>_<host>_2.db が並ぶと、古い方 (suffix 無し) の undo でも常に新しい採番の控えとペアされうる
+                // (ts/host が同一秒で区別不能)。人手では実質発生しない稀ケース。恒久対策は backup 操作 ID を .db/.manifest
+                // 双方に埋めて ID 一致でペアする案 (S-1、ファイル名規約変更ゆえ別 issue・pre-release 後)。
                 var matches = Directory.GetFiles(ForceLong(safetyDir), "*" + ManifestExt)
                     .Where(p =>
                     {
