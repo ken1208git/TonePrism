@@ -167,22 +167,22 @@ namespace TonePrism.Manager
             {
                 // (#250 PR3b review #2) ゲームファイルも復元しようとしたが**全体失敗**したケース。DBのみ前提の「games は
                 // 含まれない」案内も「一緒に揃えた」案内も誤りになるので、専用の前置きにする (詳細は下のアセット節)。
-                sb.AppendLine("【まず確認】ゲームファイル（games／guide）も一緒に復元しようとしましたが、復元できませんでした。");
+                sb.AppendLine("【まず確認】ゲームファイルや初回説明の画像も一緒に復元しようとしましたが、復元できませんでした。");
                 sb.AppendLine("データベースの復元は完了しています。下の「ゲームファイルの復元結果」に失敗の内容と対処を示します。");
             }
             else if (_assetResult != null)
             {
                 // (#250 PR3b) DB とゲームファイルを一緒に復元したケース。「games は含まれない」という DBのみ前提の
                 // 案内は誤りになるので、一緒に戻した旨と「控え欠落で食い違いが残りうる」点に切替える。
-                sb.AppendLine("【まず確認】今回はデータベースに加えて、ゲームファイル（games／guide）も一緒に復元しました。");
+                sb.AppendLine("【まず確認】今回はデータベースに加えて、ゲームファイルや初回説明の画像も一緒に復元しました。");
                 sb.AppendLine("通常は両者の「時点」が揃いますが、控え（プール）に一部の実体が無かった場合などは");
                 sb.AppendLine("食い違いが残ることがあります。以下にその有無と内訳を示します。");
             }
             else
             {
                 sb.AppendLine("【まず確認】バックアップ／復元の対象は toneprism.db（データベース）だけで、");
-                sb.AppendLine("ゲーム本体の games フォルダは含まれません。そのため、" + (_postRestore ? "いま復元した DB と、" : "現在の DB と、"));
-                sb.AppendLine("ディスク上の games フォルダの「時点」がズレていると、以下のような食い違いが起きます。");
+                sb.AppendLine("ゲームのファイルや初回説明の画像は含まれません。そのため、" + (_postRestore ? "いま復元した DB と、" : "現在の DB と、"));
+                sb.AppendLine("ディスク上のゲームファイルの「時点」がズレていると、以下のような食い違いが起きます。");
             }
             sb.AppendLine();
             if (!string.IsNullOrEmpty(_safetyPath))
@@ -384,7 +384,7 @@ namespace TonePrism.Manager
             // games フォルダ系の手順 or 孤児削除しか出さず、画像欠落の修正手順が一切無かった。
             if (_result.BrokenAssets.Count > 0 || _result.BrokenIntroSlides.Count > 0)
             {
-                sb.AppendLine("  ・画像の欠落（サムネイル／背景／初回説明スライド）は、当時の games/guide フォルダから");
+                sb.AppendLine("  ・画像の欠落（サムネイル／背景／初回説明スライド）は、当時のゲームや初回説明の");
                 sb.AppendLine("    画像ファイルを補うか、ゲーム編集・スライド編集で画像を選び直すと解消できます。");
             }
             sb.AppendLine();
@@ -408,7 +408,7 @@ namespace TonePrism.Manager
         {
             if (_assetResult == null) return;
 
-            sb.AppendLine("■ ゲームファイル（games／guide）の復元結果");
+            sb.AppendLine("■ ゲームファイルや初回説明の画像の復元結果");
             if (_assetResult.IsFailed)
             {
                 sb.AppendLine("  ゲームファイルの復元を実行できませんでした:");

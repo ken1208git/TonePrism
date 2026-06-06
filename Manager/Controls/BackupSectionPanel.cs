@@ -149,12 +149,12 @@ namespace TonePrism.Manager.Controls
                 if (snap != null && snap.IsSuccess && snap.IsPartial)
                 {
                     // (round8 C1) 深部フォルダの列挙失敗で一部 skip した場合は「部分的な控え」を明示 (完全控えと誤認させない)。
-                    msg += $"\n\n⚠ ゲームファイル (games/guide) のバックアップでフォルダ {snap.SkippedDirCount} 個 / ファイル {snap.SkippedFileCount} 個を控えられずスキップしました（部分的なバックアップの可能性。SMB 一過性 I/O / 権限 / 並行編集での消失等）。";
+                    msg += $"\n\n⚠ ゲームファイルや初回説明の画像のバックアップでフォルダ {snap.SkippedDirCount} 個 / ファイル {snap.SkippedFileCount} 個を控えられずスキップしました（部分的なバックアップの可能性。SMB 一過性 I/O / 権限 / 並行編集での消失等）。";
                 }
                 else if (snap != null && (snap.IsFailed || snap.IsAnomaly))
                 {
                     // (レビュー M2) 失敗/異常は黙らず併記 (DB バックアップ自体は成功)。設定で無効・通常スキップは触れない。
-                    msg += $"\n\n⚠ ゲームファイル (games/guide) のバックアップは取得できませんでした（DB バックアップは成功）。\n{snap.Message}";
+                    msg += $"\n\n⚠ ゲームファイルや初回説明の画像のバックアップは取得できませんでした（DB バックアップは成功）。\n{snap.Message}";
                 }
                 MessageBox.Show(msg, "バックアップ成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
