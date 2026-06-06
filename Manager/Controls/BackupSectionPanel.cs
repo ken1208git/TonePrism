@@ -313,6 +313,14 @@ namespace TonePrism.Manager.Controls
                 {
                     progress?.Report(new ProgressInfo(0, "復元前に現在の状態を退避中（やり直し用）..."));
                     var pre = _dbManager.BackupService.RunManualBackup(progress, token);
+                    // (review round3 #1) **退避中のユーザーキャンセルは「中止」に倒す（DB を置換しない）**。
+                    // RunManualBackup はアセット取得フェーズ (10-99%・最長の SMB 走査＝最も中止を押しやすい) の
+                    // キャンセルを内部で握って Success(AssetSnapshot=Skipped) を返す (throw しない)。これを下の
+                    // retreatOk=false と同一視して degrade すると、ユーザーが中止したのに DB が置換される＝「退避は
+                    // 破壊前なのでキャンセル＝不変」の設計意図に反する。token を直読みして、ユーザー意思のキャンセルなら
+                    // ここで投げ直し全体 Cancel に倒す (DB 置換前なので安全に巻き戻る)。genuine な退避失敗 (SMB I/O 等、
+                    // 非キャンセル) だけが下の degrade 経路に進む。
+                    token.ThrowIfCancellationRequested();
                     bool retreatOk = pre != null && pre.IsSuccess
                         && pre.AssetSnapshot != null && pre.AssetSnapshot.IsSuccess && !pre.AssetSnapshot.IsPartial;
                     if (retreatOk)
@@ -487,7 +495,11 @@ namespace TonePrism.Manager.Controls
                 // reconcile==null (チェック自体が失敗/skip) でアセット問題があるときの fallback も含め、簡潔通知。
                 string assetLine;
                 if (assetResult == null)
-                    assetLine = "DB とゲームフォルダの整合性に問題はありませんでした。";
+                    // (review round3 #4) 退避失敗 degrade のときは「整合性に問題なし」を出すと retreatFailedNote
+                    // (DBのみ復元した旨) と噛み合わないので、degrade では「DBのみ復元」とだけ言い詳細は note に委ねる。
+                    assetLine = assetRetreatFailed
+                        ? "データベースのみ復元しました。"
+                        : "DB とゲームフォルダの整合性に問題はありませんでした。";
                 else if (assetHasIssues)
                     // (review #3) reconcile==null で詳細レポートを出せない fallback。件数を併記して UI からも実態を読めるようにする
                     // (どの relpath が欠落したかの一覧はログに出る)。
