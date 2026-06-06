@@ -92,7 +92,12 @@ namespace TonePrism.Manager.Controls
             if (col == null) return;
             col.Visible = true;
             col.HeaderText = headerText;
-            col.Width = width;
+            // (NRE 対策) この grid は下で AutoSizeColumnsMode=Fill にするため、列幅は Width でなく FillWeight 比で決まる。
+            // Width(Thickness) を設定すると Fill で無視されるうえ、auto-generated column の transient state で WinForms 内部
+            // (DataGridViewBand.set_Thickness) が NullReferenceException を投げる経路があった (復元後の DatabaseChanged →
+            // 全 panel reload 等で顕在化)。FillWeight に変えて Thickness を一切触らず NRE を構造的に回避する。
+            try { col.FillWeight = width; }
+            catch { /* WinForms 内部の transient 例外は無視。列幅は Fill で再計算され表示に影響しない。 */ }
         }
 
         private StoreSectionInfo GetSelectedSection()

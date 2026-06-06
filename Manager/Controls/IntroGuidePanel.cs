@@ -104,7 +104,11 @@ namespace TonePrism.Manager.Controls
             if (col == null) return;
             col.Visible = true;
             col.HeaderText = header;
-            col.Width = width;
+            // (NRE 対策) auto-generated column の transient state で WinForms 内部 (DataGridViewBand.set_Thickness) が
+            // NullReferenceException を投げる経路がある (StoreSectionPanel と同根、復元後の reload 等で顕在化)。
+            // 握りつぶして起動を止めない (列幅は既定で代替されるだけ)。
+            try { col.Width = width; }
+            catch { /* WinForms 内部の transient 例外は無視。起動を優先する。 */ }
         }
 
         private IntroSlide Selected()
