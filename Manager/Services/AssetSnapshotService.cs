@@ -243,10 +243,18 @@ namespace TonePrism.Manager.Services
                     .ToList();
                 if (candidates.Count == 0) return null;
 
-                // host 一致を優先 (同時刻 tie や近接世代で .db を作った PC の控えを選ぶ)。無ければ全体最新。
+                // (review #1) host 一致は **同時刻 (= 最新候補と同秒) の tie を分ける用途に限定**する。games/+guide/ は SMB 上の
+                // 単一共有ツリー (host 非依存) なので、「時点 T のツリー状態」の最良推定は **時間的に最も近い manifest** であって
+                // host ではない。旧実装は host 一致を候補リスト全体から探したため、別 PC の T 直前 manifest より **同 PC の
+                // 数週間前 manifest** を優先しうる degraded ケースがあった (exact pair 欠落時)。これだと古い世代で reconcile が
+                // 走り、T 以降に増えたファイルを「余剰」削除する方向に効く。そこで host 優先は最新秒グループ内だけに絞り、
+                // 同秒に host 一致が無ければ全体最新 (= 時間的に最も近い) へフォールバックする。
                 if (!string.IsNullOrEmpty(preferredHost))
                 {
-                    var hostMatch = candidates.FirstOrDefault(m => string.Equals(m.Host, preferredHost, StringComparison.OrdinalIgnoreCase));
+                    DateTime newestTime = candidates[0].StartedAtLocal;
+                    var hostMatch = candidates.FirstOrDefault(m =>
+                        m.StartedAtLocal == newestTime &&
+                        string.Equals(m.Host, preferredHost, StringComparison.OrdinalIgnoreCase));
                     if (hostMatch != null) return hostMatch;
                 }
                 return candidates[0];

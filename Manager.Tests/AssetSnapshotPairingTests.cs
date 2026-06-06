@@ -104,6 +104,19 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
+        public void HostMatch_DoesNotBeatTemporallyCloserDifferentHost()
+        {
+            // (review #1) degraded ケース: T 直前は別 host(PC2)、それより古いものが同 host(PC1)。games/ は共有単一ツリー
+            // なので「T の状態」に近いのは時間的に近い PC2。host 一致でも数世代前の PC1 を優先してはいけない
+            // (古い世代で reconcile すると T 以降に増えたファイルを誤削除する)。host 優先は同秒 tie 限定。
+            WriteManifest("auto", "20260101_000001", "PC1");                       // 古い・host 一致
+            string closerDifferentHost = WriteManifest("auto", "20260101_000004", "PC2"); // T に近い・host 不一致
+
+            var r = _snap.FindSnapshotForBackup(Local("20260101_000005"), "PC1");
+            AssertSameManifest(closerDifferentHost, r);
+        }
+
+        [Fact]
         public void NoHostMatch_FallsBackToGlobalLatest()
         {
             WriteManifest("auto", "20260101_000001", "PC2");

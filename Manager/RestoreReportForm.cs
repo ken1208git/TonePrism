@@ -56,18 +56,21 @@ namespace TonePrism.Manager
 
             string headline;
             Color headColor;
+            // (#250 PR3b review #4) DB 側 (AnalysisFailed / DB-critical) が見出しを取るとき、アセット側の重大問題が
+            // 見出しから消えないよう suffix で併記する (本文 AppendAssetSection には元々出るが、見出しの強調が漏れる)。
+            string assetCriticalSuffix = AssetCritical ? "／ゲームファイルの復元にも問題あり" : "";
             if (_result.AnalysisFailed)
             {
                 // (レビュー対応 #2) 整合性チェック自体の失敗は「スキーマで DB が読めない」級の深刻状態
                 // (復元後 migration 失敗等)。orange ではなく critical 同等の赤で「対処が必要」と明示する。
-                headline = "⚠ 整合性チェックを実行できませんでした（対処が必要）";
+                headline = "⚠ 整合性チェックを実行できませんでした（対処が必要）" + assetCriticalSuffix;
                 headColor = Color.Firebrick;
             }
             else if (_result.HasCriticalFindings)
             {
-                headline = _postRestore
+                headline = (_postRestore
                     ? "⚠ 復元後、起動できないゲームがあります（対処が必要）"
-                    : "⚠ 起動できないゲームがあります（対処が必要）";
+                    : "⚠ 起動できないゲームがあります（対処が必要）") + assetCriticalSuffix;
                 headColor = Color.Firebrick;
             }
             else if (AssetCritical)
