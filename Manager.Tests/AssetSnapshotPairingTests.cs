@@ -175,6 +175,32 @@ namespace TonePrism.Manager.Tests
             AssertSameManifest(good, r);
         }
 
+        // (#250 PR3b round3) safety_db の undo 用の完全一致ペアリング。
+        [Fact]
+        public void FindSafetyManifest_ExactMatch()
+        {
+            string m = WriteManifest("safety", "20260101_000005", "PC1");
+            var r = _snap.FindSafetyManifestForBackup("20260101_000005", "PC1");
+            AssertSameManifest(m, r);
+        }
+
+        [Fact]
+        public void FindSafetyManifest_NoMatch_ReturnsNull()
+        {
+            WriteManifest("safety", "20260101_000005", "PC1");
+            Assert.Null(_snap.FindSafetyManifestForBackup("20260101_000009", "PC1")); // 別 timestamp
+            Assert.Null(_snap.FindSafetyManifestForBackup("20260101_000005", "PC2")); // 別 host
+        }
+
+        [Fact]
+        public void FindSafetyManifest_IgnoresAutoAndManual()
+        {
+            // 同 ts/host が auto/manual にあっても safety フォルダ以外は見ない (誤ペア防止)。
+            WriteManifest("auto", "20260101_000005", "PC1");
+            WriteManifest("manual", "20260101_000005", "PC1");
+            Assert.Null(_snap.FindSafetyManifestForBackup("20260101_000005", "PC1"));
+        }
+
         // (#250 PR3b review #1) ペアリング許可は auto/manual のみ。safety/unknown は対の控えを持たないため DBのみ復元に倒す
         // (時刻 fallback で無関係な世代を拾い、undo (safety 復元) でゲームファイルを誤削除する事故を防ぐ gate)。
         [Theory]

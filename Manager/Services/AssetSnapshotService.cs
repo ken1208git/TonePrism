@@ -266,6 +266,71 @@ namespace TonePrism.Manager.Services
             }
         }
 
+        /// <summary>
+        /// (#250 PR3b round3) `safety_*.db`（復元の直前に退避した DB）の **undo 用**に、同 timestamp/host で co-create した
+        /// アセット safety 控えを **完全一致**で引く。auto/manual の「T 以下で最大」ペアリングと違い、safety は復元時に
+        /// その時点専用のペアを必ず一緒に作る (BackupSectionPanel) ので、完全一致で安全に引ける。**時刻 fallback を使わない**
+        /// のは review #1 の趣旨 (safety を近接世代に誤ペアしてゲームファイルを誤削除する穴) を完全に塞ぐため。
+        /// </summary>
+        /// <param name="timestamp">safety_db ファイル名の yyyyMMdd_HHmmss 部。</param>
+        /// <param name="host">safety_db ファイル名の host 部 (SanitizeHostForFileName 済)。</param>
+        public AssetSnapshotInfo FindSafetyManifestForBackup(string timestamp, string host)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(timestamp)) return null;
+                string safetyDir = Path.Combine(GetSnapshotRootDirectory(), "safety");
+                if (!Directory.Exists(safetyDir)) return null;
+                string leaf = string.IsNullOrEmpty(host) ? timestamp : timestamp + "_" + host;
+                // leaf 完全一致を最優先。同 ts/host で衝突 suffix (_2 等) が付いた世代も leaf+"_" prefix で拾い、
+                // ファイル名降順 (= 新しい採番) で最新を選ぶ。auto/manual は対象外 (safety フォルダのみ走査)。
+                var matches = Directory.GetFiles(ForceLong(safetyDir), "*" + ManifestExt)
+                    .Where(p =>
+                    {
+                        string name = Path.GetFileNameWithoutExtension(p);
+                        return string.Equals(name, leaf, StringComparison.OrdinalIgnoreCase)
+                            || name.StartsWith(leaf + "_", StringComparison.OrdinalIgnoreCase);
+                    })
+                    .OrderByDescending(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (matches.Count == 0) return null;
+                return ReadManifestHeader(matches[0]);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[AssetSnapshot] 退避控え (safety) のペアリングに失敗 (DBのみ復元へフォールバック): " + ex.Message);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// (#250 PR3b round3) 復元前退避のアセット safety 控えを最新 <paramref name="count"/> 件残して削除し、GC で
+        /// 未参照 blob を回収する。safety_db 側の retention (RestoreService.ApplySafetyRetention、既定 10 件) と件数を
+        /// 揃えて歩調を合わせる。CreateSnapshot("safety",…) は ApplyRetentionAndGc の対象外 (auto のみ) なので、退避控えの
+        /// 掃除はこの専用メソッドで行う。GC は EnumerateManifests(includeSafety:true) で safety 込みの参照集合を使うため、
+        /// 残った safety 控えの blob は保護され、削除した古い safety 控えだけが参照していた blob が回収される。
+        /// </summary>
+        internal void PruneSafetySnapshots(int count)
+        {
+            try
+            {
+                string safetyDir = Path.Combine(GetSnapshotRootDirectory(), "safety");
+                if (count > 0 && Directory.Exists(safetyDir))
+                {
+                    var stale = Directory.GetFiles(ForceLong(safetyDir), "*" + ManifestExt)
+                        .OrderByDescending(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase)
+                        .Skip(count).ToList();
+                    foreach (var m in stale)
+                    {
+                        try { File.Delete(FileOperationService.EnsureLongPath(m)); Logger.Info("[AssetSnapshot] 古い退避控え(safety manifest)を削除: " + Path.GetFileName(m)); }
+                        catch (Exception ex) { Logger.Warn("[AssetSnapshot] 退避控え削除失敗: " + m + " : " + ex.Message); }
+                    }
+                }
+                GarbageCollectPool(); // safety 込みの参照集合で未参照 blob を回収 (.poolsize も更新)
+            }
+            catch (Exception ex) { Logger.Warn("[AssetSnapshot] 退避控えの retention/GC に失敗 (無害、退避自体は成功): " + ex.Message); }
+        }
+
         /// <summary>アセットプールが実際に使っているディスク量 (= 重複排除後の物理サイズ)。UI 用。
         /// (レビュー M1) pool 全列挙は SMB で重く UI スレッドをフリーズさせうるので、バックアップ時に算出済の
         /// `.poolsize` キャッシュを即時読みする。無ければ 0 (= まだ取得していない)。</summary>
@@ -541,10 +606,15 @@ namespace TonePrism.Manager.Services
             File.WriteAllText(FileOperationService.EnsureLongPath(path), sb.ToString(), new UTF8Encoding(false));
         }
 
-        internal IEnumerable<string> EnumerateManifests()
+        /// <param name="includeSafety">(#250 PR3b round3) true のとき復元前退避の <c>safety</c> 控えも列挙に含める。
+        /// **GC の参照集合作成専用** (safety 控えが参照する blob を「未参照」と誤判定して回収しないため)。**復元の
+        /// ペアリング探索 (FindSnapshotForBackup) や hash キャッシュは false (auto/manual のみ)** を使う＝safety を
+        /// 「T 以下で最大」の時刻 fallback で誤って拾わない (safety は完全一致の FindSafetyManifestForBackup で別途引く)。</param>
+        internal IEnumerable<string> EnumerateManifests(bool includeSafety = false)
         {
             string root = GetSnapshotRootDirectory();
-            foreach (var trigger in new[] { "auto", "manual" })
+            var triggers = includeSafety ? new[] { "auto", "manual", "safety" } : new[] { "auto", "manual" };
+            foreach (var trigger in triggers)
             {
                 string dir = Path.Combine(root, trigger);
                 if (!Directory.Exists(dir)) continue;
@@ -645,7 +715,9 @@ namespace TonePrism.Manager.Services
                 string pool = GetPoolRootDirectory();
                 if (!Directory.Exists(pool)) return;
                 var referenced = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var manifest in EnumerateManifests())
+                // (#250 PR3b round3) **includeSafety: true**＝復元前退避の safety 控えが参照する blob も「使用中」として
+                // 保護する。これが無いと退避控えの実体を GC が回収し、safety_db の undo でゲームファイルを戻せなくなる。
+                foreach (var manifest in EnumerateManifests(includeSafety: true))
                 {
                     try
                     {
