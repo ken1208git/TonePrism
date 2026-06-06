@@ -160,7 +160,14 @@ namespace TonePrism.Manager
         {
             var sb = new StringBuilder();
 
-            if (_assetResult != null && !_assetResult.IsFailed)
+            if (_assetResult != null && _assetResult.IsFailed)
+            {
+                // (#250 PR3b review #2) ゲームファイルも復元しようとしたが**全体失敗**したケース。DBのみ前提の「games は
+                // 含まれない」案内も「一緒に揃えた」案内も誤りになるので、専用の前置きにする (詳細は下のアセット節)。
+                sb.AppendLine("【まず確認】ゲームファイル（games／guide）も一緒に復元しようとしましたが、復元できませんでした。");
+                sb.AppendLine("データベースの復元は完了しています。下の「ゲームファイルの復元結果」に失敗の内容と対処を示します。");
+            }
+            else if (_assetResult != null)
             {
                 // (#250 PR3b) DB とゲームファイルを一緒に復元したケース。「games は含まれない」という DBのみ前提の
                 // 案内は誤りになるので、一緒に戻した旨と「控え欠落で食い違いが残りうる」点に切替える。

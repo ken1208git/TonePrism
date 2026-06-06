@@ -207,10 +207,21 @@ namespace TonePrism.Manager.Controls
 
             // (#250 PR3b) この DB 世代とペアになるアセット控え (manifest) を時刻で解決する。.db と .manifest は別ファイルで
             // 厳密な紐づけ ID を持たないため「.db 作成時刻 T 以下で最大時刻の manifest」を採る (replace-in-session で
-            // .db>manifest を正しく拾う)。null = アセット控えの無い世代 (旧 safety_*.db 等) → 確認ダイアログで「DBのみ」固定。
+            // .db>manifest を正しく拾う)。null = ペア無し → 確認ダイアログで「DBのみ」固定。
+            //
+            // (#250 PR3b review #1) **ペアリング対象は auto/manual バックアップに限定する**。これらは DB バックアップ成功直後に
+            // 同一 timestamp で manifest を co-create するため .db↔.manifest が真に対応する。一方 **safety** (復元の直前に退避した
+            // live DB) と **unknown** (v0.20.0 以前の旧フラット形式) は対の manifest を持たない。これらに「T 以下で最大」の
+            // fallback を適用すると**無関係な別世代の manifest** を拾い、確認ダイアログが既定 ON になってそのまま reconcile すると、
+            // その manifest に無い live ファイルを「余剰」として削除しうる (manifestComplete な世代だと削除フェーズが走る)。とくに
+            // safety_*.db は「直前の復元を取り消す (undo)」経路として多用されるため、undo でゲームファイルを巻き込み削除するのは
+            // 致命的。safety/unknown は常に DBのみ復元 (pairedSnap=null) に倒す。
             AssetSnapshotInfo pairedSnap = null;
-            try { pairedSnap = _dbManager.AssetSnapshotService?.FindSnapshotForBackup(entry.StartedAtLocal, entry.PcName); }
-            catch (Exception ex) { Logger.Warn("[BackupSectionPanel] アセット控えのペアリングに失敗 (DBのみ復元へフォールバック): " + ex.Message); }
+            if (Services.RestorePairingPolicy.IsAssetPairingEligible(entry.TriggerType))
+            {
+                try { pairedSnap = _dbManager.AssetSnapshotService?.FindSnapshotForBackup(entry.StartedAtLocal, entry.PcName); }
+                catch (Exception ex) { Logger.Warn("[BackupSectionPanel] アセット控えのペアリングに失敗 (DBのみ復元へフォールバック): " + ex.Message); }
+            }
 
             bool restoreAssets;
             using (var confirm = new RestoreConfirmForm(entry, pairedSnap))
@@ -304,6 +315,9 @@ namespace TonePrism.Manager.Controls
                 // per-file 失敗を throw せず assetResult に集計するため、ここで DB 復元の成功判定を覆さない。
                 if (assetManifestPath != null)
                 {
+                    // (review #5) DB phase の 100% から進捗が 0 へ戻り、かつアセット phase は中断不可。ここで明示してユーザーの
+                    // 「固まった/中止が効かない」誤解を防ぐ (進捗自体は RestoreFromManifest が relpath 付きで更新する)。
+                    progress?.Report(new ProgressInfo(0, "ゲームファイルを反映中（この処理は中断できません）"));
                     assetResult = _dbManager.AssetRestoreService.RestoreFromManifest(assetManifestPath, progress, CancellationToken.None);
                 }
             }))
@@ -429,7 +443,9 @@ namespace TonePrism.Manager.Controls
                 if (assetResult == null)
                     assetLine = "DB とゲームフォルダの整合性に問題はありませんでした。";
                 else if (assetHasIssues)
-                    assetLine = "ゲームファイルの復元に一部問題がありました（詳細はログを確認）。";
+                    // (review #3) reconcile==null で詳細レポートを出せない fallback。件数を併記して UI からも実態を読めるようにする
+                    // (どの relpath が欠落したかの一覧はログに出る)。
+                    assetLine = $"ゲームファイルの復元で問題がありました（コピー {assetResult.CopiedCount} / 削除 {assetResult.DeletedCount} / 失敗 {assetResult.FailedCount} / 控え欠落 {assetResult.MissingBlobRelPaths.Count}）。詳細はログを確認してください。";
                 else
                     assetLine = $"ゲームファイルも復元しました（コピー {assetResult.CopiedCount} / 変更なし {assetResult.SkippedCount} / 削除 {assetResult.DeletedCount}）。";
 

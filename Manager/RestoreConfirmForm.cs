@@ -21,8 +21,6 @@ namespace TonePrism.Manager
         // (旧 safety_*.db や PR1 以前のバックアップ等)。BackupSectionPanel が時刻ペアリングで解決して渡す。
         private readonly AssetSnapshotInfo _pairedSnapshot;
 
-        public RestoreConfirmForm(BackupCatalogEntry entry) : this(entry, null) { }
-
         /// <summary>(#250 PR3b) アセット控えとのペアを与える ctor。<paramref name="pairedSnapshot"/> が非 null のとき
         /// 「ゲームファイルも一緒に復元する」を選べる (既定 ON)。null のときチェックボックスは無効化する。</summary>
         public RestoreConfirmForm(BackupCatalogEntry entry, AssetSnapshotInfo pairedSnapshot)

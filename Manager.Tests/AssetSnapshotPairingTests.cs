@@ -161,5 +161,20 @@ namespace TonePrism.Manager.Tests
             var r = _snap.FindSnapshotForBackup(Local("20260101_000010"), "PC1");
             AssertSameManifest(good, r);
         }
+
+        // (#250 PR3b review #1) ペアリング許可は auto/manual のみ。safety/unknown は対の控えを持たないため DBのみ復元に倒す
+        // (時刻 fallback で無関係な世代を拾い、undo (safety 復元) でゲームファイルを誤削除する事故を防ぐ gate)。
+        [Theory]
+        [InlineData("auto", true)]
+        [InlineData("manual", true)]
+        [InlineData("AUTO", true)]   // 大文字小文字非依存
+        [InlineData("safety", false)]
+        [InlineData("unknown", false)]
+        [InlineData("", false)]
+        [InlineData(null, false)]
+        public void PairingEligibility_OnlyAutoAndManual(string triggerType, bool expected)
+        {
+            Assert.Equal(expected, RestorePairingPolicy.IsAssetPairingEligible(triggerType));
+        }
     }
 }
