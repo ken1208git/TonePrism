@@ -59,17 +59,18 @@ namespace TonePrism.Manager
                 string host = string.IsNullOrEmpty(_pairedSnapshot.Host) ? "(不明)" : _pairedSnapshot.Host;
                 lblAssetInfo.ForeColor = System.Drawing.Color.DarkRed;
                 lblAssetInfo.Text =
-                    "⚠ ゲームファイルや初回説明の画像も、この時点の内容に戻します。\n" +
+                    "⚠ ゲームの登録情報（データベース）だけでなく、\n" +
+                    "　 ゲームファイル本体や初回説明の画像も、この時点の内容に戻します。\n" +
                     "　 この時点より後に追加・変更したファイルはディスクから削除されます。\n" +
                     $"　 戻す控え: {_pairedSnapshot.StartedAtLocal:yyyy/MM/dd HH:mm:ss} / 取得PC: {host} / {_pairedSnapshot.FileCount} ファイル\n" +
-                    "　 ※ 削除の前に現在の状態を自動でバックアップします（履歴から復元してやり直せます）。";
+                    "　 ※ 削除の前に現在の状態を自動退避するので、履歴から戻してやり直せます。";
             }
             else
             {
                 lblAssetInfo.ForeColor = System.Drawing.Color.DimGray;
                 lblAssetInfo.Text =
-                    "この世代にはゲームファイルや初回説明の画像の控えがありません。データベースのみ復元します\n" +
-                    "（ディスク上のゲームファイルや画像は現在のまま変更しません）。";
+                    "この世代にはゲームファイル本体や初回説明の画像の控えがありません。\n" +
+                    "ゲームの登録情報（データベース）だけを復元します（ディスク上のファイルは現在のまま）。";
             }
         }
 
