@@ -43,7 +43,10 @@ namespace TonePrism.Manager.Controls
             gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "trigger", HeaderText = "トリガ", FillWeight = 55, MinimumWidth = 50 });
             // (#200) 「状態」列は持たない。backup_log 廃止 (v19) 後は失敗はファイルを残さず履歴に出ない
             // (走査結果は実質すべて成功ファイル) ため状態列は情報量ゼロ。失敗通知は status bar / Logger で覆える。
-            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "size", HeaderText = "サイズ", FillWeight = 75, MinimumWidth = 70 });
+            // (ユーザー指摘) この列は .db ファイル単体のサイズ (DBのみ、数百KB級)。世代全体 (ゲームファイル込み) と
+            // 誤解されるのを避けるため「DBサイズ」と明示する。ゲームファイル込みの実使用量は共有プール (CAS) で重複排除
+            // されるため世代別には出せず、下の「最終バックアップ」欄の実使用 (プール全体) で確認する。
+            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "size", HeaderText = "DBサイズ", FillWeight = 80, MinimumWidth = 72 });
             gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "file", HeaderText = "ファイルパス", FillWeight = 320, MinimumWidth = 120 });
         }
 
