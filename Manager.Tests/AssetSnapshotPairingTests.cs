@@ -215,5 +215,22 @@ namespace TonePrism.Manager.Tests
         {
             Assert.Equal(expected, RestorePairingPolicy.IsAssetPairingEligible(triggerType));
         }
+
+        // (review round5 #2) ParseSafetyTimestamp ↔ RestoreService の safety 命名規約の invariant をピン留め。
+        // RestoreService は `safety_{yyyyMMdd_HHmmss}[_host][_衝突suffix].db` を産む (RestoreService.cs)。これと
+        // ズレると退避が silent に DBのみ degrade するため、実フォーマットの抽出を回帰で固定する。
+        [Theory]
+        [InlineData("C:/dest/backups/safety/safety_20260606_143022_PC1.db", "20260606_143022")] // host 付き (通常)
+        [InlineData("safety_20260606_143022_PC1_2.db", "20260606_143022")]                      // 同秒衝突 suffix
+        [InlineData("safety_20260606_143022.db", "20260606_143022")]                            // host 無し
+        [InlineData("safety_20260606_143022_PC-A_B.db", "20260606_143022")]                     // sanitize 済 host (_→-)
+        [InlineData("auto_20260606_143022_PC1.db", null)]                                       // safety 以外は対象外
+        [InlineData("safety_2026_bad.db", null)]                                                // 形式不一致
+        [InlineData("", null)]
+        [InlineData(null, null)]
+        public void ParseSafetyTimestamp_MatchesRestoreServiceNaming(string safetyPath, string expected)
+        {
+            Assert.Equal(expected, RestorePairingPolicy.ParseSafetyTimestamp(safetyPath));
+        }
     }
 }

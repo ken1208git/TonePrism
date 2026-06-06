@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.Text.RegularExpressions;
 
 namespace TonePrism.Manager.Services
 {
@@ -19,6 +21,26 @@ namespace TonePrism.Manager.Services
         {
             return string.Equals(triggerType, "auto", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(triggerType, "manual", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// (#250 PR3b round3) `RestoreService` が作る退避ファイル <c>safety_&lt;yyyyMMdd&gt;_&lt;HHmmss&gt;[_host][_suffix].db</c> の
+        /// ファイル名から <c>yyyyMMdd_HHmmss</c> 部を取り出す。退避時のアセット safety 控えの timestamp に流用し、
+        /// safety_db ↔ アセット safety 控えを同 timestamp でペアにする (undo の完全一致ペアリング用)。形式不一致は null。
+        ///
+        /// (review round5 #2) ここは `RestoreService` の safety 命名規約 (`safety_{yyyyMMdd_HHmmss}[_host]`) と暗黙結合する。
+        /// 規約が変わると null → 退避が silent に DBのみ degrade するため、純ロジックに切り出して回帰テストで invariant を固定する。
+        /// </summary>
+        public static string ParseSafetyTimestamp(string safetyPath)
+        {
+            if (string.IsNullOrEmpty(safetyPath)) return null;
+            string fn = Path.GetFileNameWithoutExtension(safetyPath);
+            const string prefix = "safety_";
+            if (!fn.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
+            string rest = fn.Substring(prefix.Length); // "yyyyMMdd_HHmmss[_host]..."
+            if (rest.Length < 15) return null;
+            string ts = rest.Substring(0, 15);          // "yyyyMMdd_HHmmss"
+            return Regex.IsMatch(ts, @"^\d{8}_\d{6}$") ? ts : null;
         }
     }
 }

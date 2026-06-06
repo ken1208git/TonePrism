@@ -177,23 +177,6 @@ namespace TonePrism.Manager.Controls
         // 旧 btnSettings_Click はここで modal を開く処理 → info dialog 案内 → 完全削除と段階的に縮退、
         // 最終的に動線を一本化 (= 設定はすべて「設定タブ」)。
 
-        /// <summary>
-        /// (#250 PR3b round3) `RestoreService` が作る退避ファイル <c>safety_&lt;yyyyMMdd&gt;_&lt;HHmmss&gt;[_host][_suffix].db</c> の
-        /// ファイル名から <c>yyyyMMdd_HHmmss</c> 部を取り出す。これをアセット safety 控えの timestamp に流用し、
-        /// safety_db ↔ アセット safety 控えを同 timestamp でペアにする (undo の完全一致ペアリング用)。形式不一致は null。
-        /// </summary>
-        private static string ParseSafetyTimestamp(string safetyPath)
-        {
-            if (string.IsNullOrEmpty(safetyPath)) return null;
-            string fn = Path.GetFileNameWithoutExtension(safetyPath);
-            const string prefix = "safety_";
-            if (!fn.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
-            string rest = fn.Substring(prefix.Length); // "yyyyMMdd_HHmmss[_host]..."
-            if (rest.Length < 15) return null;
-            string ts = rest.Substring(0, 15);         // "yyyyMMdd_HHmmss"
-            return System.Text.RegularExpressions.Regex.IsMatch(ts, @"^\d{8}_\d{6}$") ? ts : null;
-        }
-
         private void btnRestore_Click(object sender, EventArgs e)
         {
             if (_dbManager == null) return;
@@ -329,6 +312,10 @@ namespace TonePrism.Manager.Controls
             // 破壊的 reconcile を行わず DBのみ復元へ degrade する (games 無変更=安全)。
             bool assetRetreatAttempted = assetManifestPath != null;
             bool assetRetreatFailed = false;
+            // (review round5 #3) 退避で実際にアセット控え(manifest)が書かれたか。live games が空の世代は
+            // CreateSnapshot が manifest を書かず Success(ManifestPath=null) を返す＝退避は成立扱いだが undo で games は
+            // 戻せない。undo 案内 (undoHint) を「ゲームファイルも戻せる」と過剰約束しないよう、これを真実の源にする。
+            bool assetRetreatHasControl = false;
             DialogResult dr;
             using (var dialog = new ProcessingDialog((progress, token) =>
             {
@@ -348,13 +335,16 @@ namespace TonePrism.Manager.Controls
                 if (assetManifestPath != null)
                 {
                     progress?.Report(new ProgressInfo(0, "復元前に現在のゲームファイルを退避中（やり直し用）..."));
-                    string retreatTs = ParseSafetyTimestamp(safetyPath);
+                    string retreatTs = Services.RestorePairingPolicy.ParseSafetyTimestamp(safetyPath);
                     var pre = retreatTs != null
                         ? _dbManager.AssetSnapshotService.CreateSnapshot(retreatTs, "safety", progress, CancellationToken.None)
                         : null;
                     bool retreatOk = pre != null && pre.IsSuccess && !pre.IsPartial;
                     if (retreatOk)
                     {
+                        // (review round5 #3) ManifestPath != null のときだけ「実際に控えが書かれた」＝undo で games を戻せる。
+                        // 空 games 退避 (ManifestPath==null) は reconcile は通すが undo は DBのみになる (上の C-2 非対称コメント参照)。
+                        assetRetreatHasControl = pre.ManifestPath != null;
                         _dbManager.AssetSnapshotService.PruneSafetySnapshots(Services.RestoreService.DefaultSafetyRetentionCount);
                     }
                     else
@@ -369,6 +359,15 @@ namespace TonePrism.Manager.Controls
                 // (#250 PR3b) アセット復元 (reconcile-in-place)。**非キャンセル (CancellationToken.None)**: DB 置換済の
                 // 後戻り不可点以降で、途中キャンセルの「DB は変更されていません」誤報告を避ける (reconcile は冪等)。
                 // best-effort で per-file 失敗を throw せず assetResult に集計するため DB 復元の成功判定を覆さない。
+                //
+                // (review round5 #1) 退避＋reconcile は `RestoreService.Restore` が advisory restore-lock を解放して return した
+                // **後**＝lock 外で走る (破壊的 games 反映が lock 外)。**自己発火は構造的に起きない**: この phase 中は
+                // ProcessingDialog がモーダルで Manager UI を操作不能＝#295 の操作単位 auto/session バックアップは発火しない
+                // (時間トリガは #295 で撤去済)。**別 PC の同時復元**は (1) btnRestore_Click 冒頭の SessionConflictHelper が
+                // 「別 Manager 稼働中」を警告、(2) DB phase は restore-lock で相互排他、で抑止する。reconcile phase (lock 外) で
+                // 別 PC が restore-lock を取れる窓は残るが、reconcile は pool でなく live のみ書く＝pool 破損には至らず被害は当該
+                // PC の当該世代に限定 (別世代/pool は無事)。multi-PC 同時復元は稀＋pre-release で実機確認 (F6)、厳密化は #250 の
+                // heartbeat-lease 領域 (将来)。
                 if (assetManifestPath != null)
                 {
                     // (review #5) DB phase の 100% から進捗が 0 へ戻り、かつアセット phase は中断不可。ここで明示してユーザーの
@@ -529,9 +528,11 @@ namespace TonePrism.Manager.Controls
                 else
                     assetLine = $"ゲームファイルも復元しました（コピー {assetResult.CopiedCount} / 変更なし {assetResult.SkippedCount} / 削除 {assetResult.DeletedCount}）。";
 
-                // (#250 PR3b round3) ゲームファイルも戻したときは「やり直せる」ことを案内。undo 点は退避された safety_*.db
-                // (= 復元前の DB) で、これを履歴から「復元」すると DB もゲームファイルも復元前へ戻る (ペアのアセット safety 控え経由)。
-                string undoHint = (!assetRetreatFailed && assetRetreatAttempted)
+                // (#250 PR3b round3 / review round5 #3) ゲームファイルも戻したときの「やり直し」案内。undo 点は退避された
+                // safety_*.db (= 復元前の DB) で、これを履歴から「復元」すると DB もゲームファイルも復元前へ戻る (ペアのアセット
+                // safety 控え経由)。**実際にアセット控えが書かれた (assetRetreatHasControl) ときだけ**「ゲームファイルも戻せる」と
+                // 案内する＝空 games 退避 (控え無し) で過剰約束しない。
+                string undoHint = (!assetRetreatFailed && assetRetreatHasControl)
                     ? "\n\nやり直したいときは、退避された safety_*.db を履歴から「復元」すると、データベースもゲームファイルも元に戻せます。"
                     : "";
 
