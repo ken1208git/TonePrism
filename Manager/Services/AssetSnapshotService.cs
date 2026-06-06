@@ -31,10 +31,10 @@ namespace TonePrism.Manager.Services
         private readonly BackupService _backupService;
 
         private static readonly string[] SubFolders = { "games", "guide" };
-        private const string PoolDirName = "asset_pool";
+        internal const string PoolDirName = "asset_pool"; // (#250 PR3a review #4) AssetRestoreService と共用 (pool ルート dir 名 SoT)
         private const string ManifestDirName = "asset_snapshots";
         private const string ManifestExt = ".manifest";
-        private const string MetaLinePrefix = "META";
+        internal const string MetaLinePrefix = "META"; // (#250 PR3) AssetRestoreService と共用 (manifest 形式 SoT)
         /// <summary>(レビュー M1) pool 物理サイズのキャッシュ。UI から pool 全列挙 (SMB で重い) を避けるため、
         /// バックアップ時にバックグラウンドスレッドで算出してここに書き、UI は即時読みする。</summary>
         private const string PoolSizeFileName = ".poolsize";
@@ -257,12 +257,8 @@ namespace TonePrism.Manager.Services
                 if (newest == null) return cache;
                 foreach (var line in File.ReadLines(FileOperationService.EnsureLongPath(newest)))
                 {
-                    if (line.StartsWith(MetaLinePrefix + "\t")) continue;
-                    var f = line.Split(new[] { '\t' }, 4);
-                    if (f.Length < 4) continue;
-                    long size, mt;
-                    if (!long.TryParse(f[1], out size) || !long.TryParse(f[2], out mt)) continue;
-                    cache[f[3]] = new CacheEntry { Hash = f[0], Size = size, MtimeTicks = mt };
+                    if (!TryParseManifestEntryLine(line, out ManifestEntry e)) continue;
+                    cache[e.RelPath] = new CacheEntry { Hash = e.Hash, Size = e.Size, MtimeTicks = e.MtimeTicks };
                 }
             }
             catch (Exception ex) { Logger.Warn("[AssetSnapshot] ハッシュキャッシュ読込失敗 (全ハッシュし直す): " + ex.Message); }
@@ -365,8 +361,50 @@ namespace TonePrism.Manager.Services
         /// 構文不正パスを生成し、SMB 上の列挙が全件失敗 → 空の控えを Success 扱いにする欠陥があった)。</summary>
         private static string ForceLong(string path) => FileOperationService.ForceLongPath(path);
 
-        private static string PoolPathFor(string poolRoot, string hash)
+        /// <summary>(#250 PR3) manifest の 1 エントリ (relpath + hash + size/mtime)。snapshot 書き手と restore 読み手で共用。</summary>
+        internal struct ManifestEntry { public string Hash; public long Size; public long MtimeTicks; public string RelPath; }
+
+        // (#250 PR3) manifest 形式と pool パスの SoT。AssetRestoreService が同一アセンブリから再利用する
+        // (重複定義を避け、書き手 WriteManifest と読み手を 1 箇所に固定。InternalsVisibleTo 済でテストからも可視)。
+        internal static string PoolPathFor(string poolRoot, string hash)
             => Path.Combine(poolRoot, hash.Substring(0, 2), hash);
+
+        /// <summary>(#250 PR3) manifest 1 行 `&lt;hash&gt;\t&lt;size&gt;\t&lt;mtime_ticks&gt;\t&lt;relpath&gt;` を解析する。
+        /// META 行 / 空 / 不正は false。LoadHashCache / GarbageCollectPool / AssetRestoreService が共用する唯一の解釈点
+        /// (タブ4フィールドの順序を 1 箇所に固定し、書き手 WriteManifest と乖離させない)。</summary>
+        internal static bool TryParseManifestEntryLine(string line, out ManifestEntry entry)
+        {
+            entry = default(ManifestEntry);
+            if (string.IsNullOrEmpty(line)) return false;
+            if (line.StartsWith(MetaLinePrefix + "\t")) return false;
+            var f = line.Split(new[] { '\t' }, 4);
+            if (f.Length < 4) return false;
+            if (f[0].Length != 64) return false; // (#250 PR3a review #3) hash は SHA-256 hex 64 桁。不正長は破損行扱い (restore の削除抑止に倒し、PoolPathFor の Substring crash も防ぐ)
+            long size, mt;
+            if (!long.TryParse(f[1], out size) || !long.TryParse(f[2], out mt)) return false;
+            entry.Hash = f[0];
+            entry.Size = size;
+            entry.MtimeTicks = mt;
+            entry.RelPath = f[3];
+            return true;
+        }
+
+        /// <summary>(#250 PR3a) META 行から skipped 合計を読む。**8 フィールド形式 (skipped 列あり) のときだけ true** +
+        /// skipped 合計を返す。旧 6 フィールド META (skipped 情報なし＝部分取得か判定不能) や非 META 行は false。
+        /// (review #1) restore は「false なら完全性を断定せず余剰削除を抑止」に倒す＝旧世代を complete と誤断して live を
+        /// 消さない安全側既定。META 形式の解釈点を WriteManifest と同じ AssetSnapshotService に固定 (SoT)。</summary>
+        internal static bool TryReadMetaSkipped(string metaLine, out int skippedTotal)
+        {
+            skippedTotal = 0;
+            if (string.IsNullOrEmpty(metaLine) || !metaLine.StartsWith(MetaLinePrefix + "\t")) return false;
+            var f = metaLine.Split('\t');
+            if (f.Length < 8) return false; // 旧形式 (skipped 列なし) = 完全性を断定不能
+            int sd, sf;
+            int.TryParse(f[6], out sd);
+            int.TryParse(f[7], out sf);
+            skippedTotal = sd + sf;
+            return true;
+        }
 
         /// <summary>
         /// (レビュー#4) ソースを 1 回だけ読み、SHA-256 を計算しつつ pool の temp に書き、内容ハッシュ名へ rename する。
@@ -436,8 +474,12 @@ namespace TonePrism.Manager.Services
         private static void WriteManifest(string path, string timestamp, string host, string trigger, Stats stats, List<string> entries)
         {
             var sb = new StringBuilder();
+            // (#250 PR3a review #1) META 行末に skippedDir/skippedFile を追記し「部分取得 (IsPartial)」を永続化する。
+            // restore が partial 世代を復元元にするとき、取りこぼされた live を「余剰」と誤判定して削除しないため
+            // (旧 6 フィールド META は skipped 情報が無く complete 扱い＝後方互換)。
             sb.Append(MetaLinePrefix).Append('\t').Append(timestamp).Append('\t').Append(host).Append('\t')
-              .Append(trigger).Append('\t').Append(stats.FileCount).Append('\t').Append(stats.Bytes).Append('\n');
+              .Append(trigger).Append('\t').Append(stats.FileCount).Append('\t').Append(stats.Bytes).Append('\t')
+              .Append(stats.SkippedDirCount).Append('\t').Append(stats.SkippedFileCount).Append('\n');
             foreach (var e in entries) sb.Append(e).Append('\n');
             File.WriteAllText(FileOperationService.EnsureLongPath(path), sb.ToString(), new UTF8Encoding(false));
         }
@@ -552,9 +594,15 @@ namespace TonePrism.Manager.Services
                     {
                         foreach (var line in File.ReadLines(FileOperationService.EnsureLongPath(manifest)))
                         {
-                            if (line.StartsWith(MetaLinePrefix + "\t")) continue;
-                            int tab = line.IndexOf('\t');
-                            if (tab > 0) referenced.Add(line.Substring(0, tab));
+                            if (TryParseManifestEntryLine(line, out ManifestEntry e)) { referenced.Add(e.Hash); continue; }
+                            // (review #2) GC は「保護側に倒す」。strict parse に失敗した行でも META でなく先頭フィールドがあれば
+                            // hash 候補として参照集合に入れる。これにより破損行 (size/mtime 欠け/非数値等) で実 hash が落ち、
+                            // まだ参照中の blob を誤 GC するのを防ぐ (旧実装の寛容な参照抽出を GC でのみ維持。restore/cache は strict)。
+                            if (!line.StartsWith(MetaLinePrefix + "\t"))
+                            {
+                                int tab = line.IndexOf('\t');
+                                if (tab > 0) referenced.Add(line.Substring(0, tab));
+                            }
                         }
                     }
                     // (レビュー L2) manifest を 1 件でも読めなければ参照集合が不完全 → 誤って参照中 blob を消しうるので

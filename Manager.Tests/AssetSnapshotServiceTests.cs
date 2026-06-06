@@ -270,5 +270,35 @@ namespace TonePrism.Manager.Tests
             Assert.Equal(1, ManifestCount("auto"));
             Assert.Equal(2, PoolBlobCount()); // v1 は未参照だが直近配置なので grace で残る (v1 + v2)
         }
+
+        [Fact]
+        public void Gc_CorruptManifestLine_StillProtectsBlob()
+        {
+            // (#250 PR3a review #2) 破損 manifest 行 (size 非数値で strict parse 失敗) でも、先頭フィールドの hash で blob を
+            // 保護する (GC は保護側に倒す。これが無いと破損行で実 hash が落ち、まだ参照中の blob を誤 GC する)。
+            _svc.GcGracePeriod = TimeSpan.Zero; // grace 無効化で「未参照なら即 GC」を決定的に
+            WriteGameFile("g1/a.txt", "alpha");
+            var r1 = Snap("auto", "20260101_000001");
+            Assert.True(r1.IsSuccess);
+            Assert.True(PoolBlobCount() >= 1);
+
+            // manifest1 の a.txt 行の size フィールドを壊す (hash は残す → 旧寛容抽出で保護されるべき)。
+            string manifest1 = r1.ManifestPath;
+            var lines = File.ReadAllLines(manifest1);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var f = lines[i].Split('\t');
+                if (f.Length >= 4 && f[0] != "META" && f[3] == "games/g1/a.txt") { f[1] = "NOTANUMBER"; lines[i] = string.Join("\t", f); }
+            }
+            File.WriteAllLines(manifest1, lines);
+
+            // live a.txt を消し、2 回目 snapshot が blob_a を再参照しないようにする → GC 候補化。
+            File.Delete(Path.Combine(_games, "g1", "a.txt"));
+            WriteGameFile("g1/b.txt", "beta");
+            Assert.True(Snap("auto", "20260101_000002").IsSuccess); // retention+GC が走る (grace 0)
+
+            // blob_a は破損行の hash で保護され GC されない (= blob_a + blob_b で 2 つ残る)。修正前は blob_a が消え 1 つ。
+            Assert.True(PoolBlobCount() >= 2);
+        }
     }
 }
