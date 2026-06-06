@@ -340,45 +340,41 @@ namespace TonePrism.Manager
             // 浮くのを避ける。
             if (_result.BrokenGames.Count > 0 || _result.MissingVersionFolders.Count > 0 || _result.OrphanFolders.Count > 0)
             {
-                sb.AppendLine("  1. すべての展示 PC で Launcher を閉じてください（ファイルを掴んでいると");
-                sb.AppendLine("     フォルダの差し替えができません）。");
+                sb.AppendLine("  1. すべての展示 PC で Launcher（来場者向けの画面）を閉じてください");
+                sb.AppendLine("     （開いているとファイルを掴んでいて、復元やフォルダの差し替えができません）。");
                 sb.AppendLine();
             }
             if (_result.BrokenGames.Count > 0 || _result.MissingVersionFolders.Count > 0)
             {
-                string dbWord = _postRestore ? "復元した DB" : "今の DB";
-                sb.AppendLine("  2. 上の「想定パス／想定フォルダ」に当たるゲームフォルダを用意します。");
-                sb.AppendLine("     " + dbWord + "と同じ時点の games フォルダが、別 PC・別ドライブ・");
-                sb.AppendLine("     共有サーバー等に残っていれば、そのフォルダを games/ 配下にコピーして");
-                sb.AppendLine("     ください（フォルダ名＝ゲーム ID／バージョン leaf を一致させる）。");
-                sb.AppendLine();
-                sb.AppendLine("  3. コピーが終わったら、バックアップ画面の「整合性チェック」ボタンを押すと、");
-                sb.AppendLine("     このチェックをもう一度実行できます（Manager の再起動では再チェックされません）。");
-                sb.AppendLine("     「起動できないゲーム」が 0 件になれば整合した状態です。");
+                // (ユーザー指摘) 部員はふだん Manager (GUI) で操作し、生の games フォルダをエクスプローラーで触る機会は
+                // ほぼ無い。PR3b で「控えのある世代を復元すれば DB+ゲームファイルが一貫してそろう」「safety_*.db で undo」
+                // が GUI で完結するようになったので、**GUI 操作を主・手動フォルダコピーを最終手段**に並べ替える。
+                sb.AppendLine("  2. バックアップ履歴から、ゲームファイルの控えがある世代を選んで「復元」してください。");
+                sb.AppendLine("     登録データとゲームファイルが同じ時点でそろい、起動できないゲームが解消します");
+                sb.AppendLine("     （確認画面に「ゲームファイルや初回説明の画像も…戻します」と出る世代が対象です）。");
                 sb.AppendLine();
                 if (_postRestore)
                 {
-                    // (round: ユーザー指摘) safety_*.db = 復元の直前に退避した DB = 復元前の状態。これを戻すのは
-                    // 「今回の復元を取り消す」操作であって、元の DB に問題があって復元したのなら問題も一緒に戻る。
-                    // 「今の games に合わせるなら safety が確実」とだけ書くのは誤誘導なので、取り消しである旨と注意を明示。
-                    sb.AppendLine("  4. 当時の games フォルダが手に入らない場合は、今回の復元自体を取り消せます。");
-                    sb.AppendLine("     復元の直前の DB が safety_*.db に退避されているので、それを「復元」で戻せば、");
-                    sb.AppendLine("     復元前＝いまの games フォルダと整合した状態に戻ります。");
-                    sb.AppendLine("     ※ただし、元の DB に問題があって今回復元したのなら、戻すとその問題も一緒に");
-                    sb.AppendLine("       戻ります。その場合は上の 2〜3（当時の games を補う）で直すのが本筋です。");
+                    // safety_*.db = 復元の直前に退避した状態。戻すのは「今回の復元を取り消す」操作で、元のデータに問題が
+                    // あって復元したのならその問題も一緒に戻る点を明示 (round2 のユーザー指摘)。
+                    sb.AppendLine("  3. 今回の復元自体を取り消したいだけなら、復元の直前に自動退避された safety_*.db を");
+                    sb.AppendLine("     履歴から「復元」してください。登録データもゲームファイルも復元前の状態に戻ります。");
+                    sb.AppendLine("     ※ただし、元のデータに問題があって今回復元したのなら、戻すとその問題も一緒に戻ります。");
+                    sb.AppendLine("       その場合は手順 2（当時の控えから戻す）が本筋です。");
+                    sb.AppendLine();
                 }
-                else
-                {
-                    sb.AppendLine("  4. 当時の games フォルダが手に入らない場合は、いまの games フォルダに合う");
-                    sb.AppendLine("     時点のバックアップを、履歴から「復元」する方法もあります。");
-                }
+                sb.AppendLine("  ・（最終手段・ふだんは使いません）当時のゲームファイルがどのバックアップにも無く、");
+                sb.AppendLine("    別 PC・別ドライブ・共有サーバー等にしか残っていない場合は、そのフォルダを games/ 配下へ");
+                sb.AppendLine("    手動でコピーし（フォルダ名＝ゲーム ID／バージョン leaf を一致）、バックアップ画面の");
+                sb.AppendLine("    「整合性チェック」で「起動できないゲーム」が 0 件になったか確認します。");
             }
             else if (_result.OrphanFolders.Count > 0)
             {
-                // (review #2) 孤児フォルダがあるときだけ削除案内を出す。画像欠落だけのときに「余分なフォルダを削除」と
-                // 案内するのは無関係なので、else を「孤児がある場合」に限定する。
-                sb.AppendLine("  2. 余分なフォルダは中身を確認のうえ、不要であれば手動で削除してください。");
-                sb.AppendLine("     必要なフォルダを誤って消さないよう、削除前に中身をご確認ください。");
+                // (review #2 / ユーザー指摘) 孤児フォルダは起動に影響しないので「基本そのままで問題なし」を前面に。
+                // 手動削除は容量が気になるときの任意操作 (部員にフォルダ操作を強いない)。
+                sb.AppendLine("  2. 「登録に無い余分なフォルダ」は起動には影響しないので、基本はそのままで問題ありません。");
+                sb.AppendLine("     ディスク容量が気になるときだけ、中身を確認のうえ手動で削除してください");
+                sb.AppendLine("     （必要なフォルダを誤って消さないよう、削除前に中身をご確認ください）。");
             }
             // (review #2) 画像 (サムネ/背景/初回説明スライド) 欠落の直し方を明示する。旧実装は画像のみの finding でも
             // games フォルダ系の手順 or 孤児削除しか出さず、画像欠落の修正手順が一切無かった。
@@ -388,16 +384,17 @@ namespace TonePrism.Manager
                 sb.AppendLine("    画像ファイルを補うか、ゲーム編集・スライド編集で画像を選び直すと解消できます。");
             }
             sb.AppendLine();
-            if (_postRestore)
+            if (!_postRestore)
             {
-                sb.AppendLine("  ※ 今回の復元自体を取り消したいだけなら、退避ファイル（safety_*.db）を「復元」で");
-                sb.AppendLine("     戻すのが確実です（復元前＝いまの games フォルダに合った状態に戻ります。ただし、");
-                sb.AppendLine("     元の DB に問題があって復元したのなら、その問題も戻ります）。");
+                sb.AppendLine("  ※ いまのゲームファイルに合う状態に戻したいときは、バックアップ履歴から合致する時点を");
+                sb.AppendLine("     「復元」してください。");
             }
-            else
+            else if (_result.BrokenGames.Count == 0 && _result.MissingVersionFolders.Count == 0)
             {
-                sb.AppendLine("  ※ いまの games フォルダに合う状態に戻したいときは、バックアップ履歴から");
-                sb.AppendLine("     合致する時点を「復元」してください。");
+                // postRestore で broken/missing が無い (= 上の手順 3 で safety を案内していない) ケースのみ補足。重複回避。
+                sb.AppendLine("  ※ 今回の復元自体を取り消したいだけなら、退避ファイル（safety_*.db）を「復元」すると、");
+                sb.AppendLine("     登録データもゲームファイルも復元前の状態に戻ります（ただし、元のデータに問題があって");
+                sb.AppendLine("     復元したのなら、その問題も戻ります）。");
             }
 
             return sb.ToString();
