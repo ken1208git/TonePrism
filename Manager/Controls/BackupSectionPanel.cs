@@ -223,7 +223,6 @@ namespace TonePrism.Manager.Controls
                 catch (Exception ex) { Logger.Warn("[BackupSectionPanel] アセット控えのペアリングに失敗 (DBのみ復元へフォールバック): " + ex.Message); }
             }
 
-            bool restoreAssets;
             using (var confirm = new RestoreConfirmForm(entry, pairedSnap))
             {
                 if (confirm.ShowDialog(this) != DialogResult.Yes)
@@ -231,10 +230,10 @@ namespace TonePrism.Manager.Controls
                     Logger.Info($"[BackupSectionPanel] 復元キャンセル (確認ダイアログ): source='{resolvedPath}'");
                     return;
                 }
-                restoreAssets = confirm.RestoreAssets;
             }
-            // restoreAssets は控えがある世代でユーザーが ON にしたときのみ true (RestoreConfirmForm が enabled を gate)。
-            string assetManifestPath = (restoreAssets && pairedSnap != null) ? pairedSnap.ManifestPath : null;
+            // (#250 PR3b round2: ユーザー判断) チェックボックスは廃止し「復元＝一貫時点復元」に一本化。控えのある世代
+            // (auto/manual でペアリング成立) なら games/guide も常に戻す。控えが無ければ DBのみ。
+            string assetManifestPath = pairedSnap?.ManifestPath;
 
             // (監査ログ) 確認コード入力を通過した時点で復元意思が確定。以降の経路 (session conflict / cancel /
             // abort / success) を Logger に残して事後追跡できるようにする。旧実装は MessageBox エラー文言が
@@ -300,9 +299,37 @@ namespace TonePrism.Manager.Controls
             string safetyPath = null;
             RestoreDbMissingException dbMissing = null;
             AssetRestoreResult assetResult = null;
+            // (#250 PR3b round2: ユーザー判断) アセット reconcile は games/ を破壊的に書き換える (削除含む) が、DB の
+            // safety_*.db のような退避が無いと undo できない (とくに pool 未登録の手動配置ファイルは復元不能)。そこで
+            // **reconcile 前に現在の状態を丸ごとバックアップ (DB+assets)** して可逆化する。退避は破壊前なのでキャンセル可。
+            // 退避が完全成功しなければ破壊的 reconcile は行わず DBのみ復元へ degrade する (games 無変更=安全)。
+            bool assetRetreatAttempted = assetManifestPath != null;
+            bool assetRetreatFailed = false;
+            string retreatBackupPath = null;
             DialogResult dr;
             using (var dialog = new ProcessingDialog((progress, token) =>
             {
+                if (assetManifestPath != null)
+                {
+                    progress?.Report(new ProgressInfo(0, "復元前に現在の状態を退避中（やり直し用）..."));
+                    var pre = _dbManager.BackupService.RunManualBackup(progress, token);
+                    bool retreatOk = pre != null && pre.IsSuccess
+                        && pre.AssetSnapshot != null && pre.AssetSnapshot.IsSuccess && !pre.AssetSnapshot.IsPartial;
+                    if (retreatOk)
+                    {
+                        retreatBackupPath = pre.FilePath;
+                    }
+                    else
+                    {
+                        // 退避が不完全 = 破壊的 reconcile を可逆化できない。安全側に倒して games を一切触らない
+                        // (DBのみ復元)。assetManifestPath を null にして以降のアセット phase を skip する。
+                        assetRetreatFailed = true;
+                        assetManifestPath = null;
+                        Logger.Warn("[BackupSectionPanel] 復元前の退避が不完全のため、安全のためゲームファイルの復元は行わず DBのみ復元します: "
+                            + (pre == null ? "(結果なし)" : (pre.Message ?? (pre.AssetSnapshot != null ? pre.AssetSnapshot.Message : "(詳細不明)"))));
+                    }
+                }
+
                 // (レビュー対応 #1) DB 喪失の最悪ケースは専用例外で捕捉して caller に伝える。re-throw して
                 // ProcessingDialog には Abort させる (例外 Message = 具体的な復旧手順がそのまま画面表示される)。
                 try { safetyPath = _dbManager.RestoreService.Restore(resolvedPath, progress, token, allowIntegrityWarnings); }
@@ -412,6 +439,15 @@ namespace TonePrism.Manager.Controls
                     $"orphans={reconcile.OrphanFolders.Count}");
             }
 
+            // (#250 PR3b round2 監査ログ) 復元前退避の結果。退避成功なら undo 用バックアップ path、失敗なら DBのみ degrade。
+            if (assetRetreatAttempted)
+            {
+                if (assetRetreatFailed)
+                    Logger.Warn("[BackupSectionPanel] 復元前退避が不完全 → ゲームファイルは復元せず DBのみ復元 (games 無変更)");
+                else
+                    Logger.Info($"[BackupSectionPanel] 復元前退避 完了 (undo 用): retreat_backup='{retreatBackupPath}'");
+            }
+
             // (#250 PR3b 監査ログ) アセット復元を行った場合はその要約も残す (copied/skipped/deleted/failed + 欠落数)。
             if (assetResult != null)
             {
@@ -424,6 +460,12 @@ namespace TonePrism.Manager.Controls
                         $"failed={assetResult.FailedCount}, missing_blobs={assetResult.MissingBlobRelPaths.Count}, deletion_suppressed={assetResult.DeletionSuppressed}");
             }
 
+            // (#250 PR3b round2) 退避失敗で DBのみに degrade したことは安全上必ず明示する (ユーザーは DB+ゲームを期待していた)。
+            string retreatFailedNote = assetRetreatFailed
+                ? "\n\n⚠ ゲームファイルの退避（やり直し用バックアップ）に失敗したため、安全のためゲームファイルは復元していません。"
+                + "\nデータベースのみ復元し、ディスク上のゲームファイルは現在のままです。共有サーバーの状態を確認のうえ、もう一度お試しください。"
+                : "";
+
             // (#250 PR3b) アセット復元で「対処が必要」級 (全体失敗 / プール実体欠落) or 軽微な不完全 (per-file 失敗 /
             // 削除抑止) があれば、reconcile がクリーンでもレポートを出して内訳を見せる。
             bool assetHasIssues = assetResult != null &&
@@ -435,6 +477,10 @@ namespace TonePrism.Manager.Controls
                 {
                     report.ShowDialog(this.FindForm());
                 }
+                // レポートには退避失敗の slot が無いので、degrade したときは別ダイアログで必ず知らせる。
+                if (assetRetreatFailed)
+                    MessageBox.Show(retreatFailedNote.TrimStart(), "ゲームファイルは復元していません",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             else
             {
@@ -449,9 +495,14 @@ namespace TonePrism.Manager.Controls
                 else
                     assetLine = $"ゲームファイルも復元しました（コピー {assetResult.CopiedCount} / 変更なし {assetResult.SkippedCount} / 削除 {assetResult.DeletedCount}）。";
 
+                // (#250 PR3b round2) 退避成功時は「やり直せる」ことを案内 (退避バックアップは履歴の最新手動バックアップ)。
+                string undoHint = (!assetRetreatFailed && retreatBackupPath != null)
+                    ? "\n\nやり直したいときは、復元の直前に自動保存したバックアップ（履歴の最新の手動バックアップ）を復元してください。"
+                    : "";
+
                 MessageBox.Show(
                     $"復元が完了しました。\n\n復元前のDBは退避されました:\n{safetyPath}\n\n" +
-                    assetLine + "\nManager のデータを再読み込みします。",
+                    assetLine + "\nManager のデータを再読み込みします。" + undoHint + retreatFailedNote,
                     "復元成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
 

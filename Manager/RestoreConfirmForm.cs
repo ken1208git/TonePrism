@@ -21,8 +21,9 @@ namespace TonePrism.Manager
         // (旧 safety_*.db や PR1 以前のバックアップ等)。BackupSectionPanel が時刻ペアリングで解決して渡す。
         private readonly AssetSnapshotInfo _pairedSnapshot;
 
-        /// <summary>(#250 PR3b) アセット控えとのペアを与える ctor。<paramref name="pairedSnapshot"/> が非 null のとき
-        /// 「ゲームファイルも一緒に復元する」を選べる (既定 ON)。null のときチェックボックスは無効化する。</summary>
+        /// <summary>(#250 PR3b) アセット控えとのペアを与える ctor。<paramref name="pairedSnapshot"/> が非 null のとき、
+        /// 復元はその時点の games/guide も**一緒に**戻す (= <see cref="RestoreAssets"/> true)。null のときは DB のみ復元。
+        /// </summary>
         public RestoreConfirmForm(BackupCatalogEntry entry, AssetSnapshotInfo pairedSnapshot)
         {
             InitializeComponent();
@@ -30,9 +31,10 @@ namespace TonePrism.Manager
             _pairedSnapshot = pairedSnapshot;
         }
 
-        /// <summary>(#250 PR3b) ユーザーが「ゲームファイルも一緒に復元する」を選んだか。アセット控えが無い世代では
-        /// チェックボックスは無効なので常に false。呼び出し側はこの値が true のときだけ AssetRestoreService を回す。</summary>
-        public bool RestoreAssets => chkRestoreAssets.Enabled && chkRestoreAssets.Checked;
+        /// <summary>(#250 PR3b round2: ユーザー判断) この世代にアセット控えがあれば**常に**ゲームファイルも復元する
+        /// (チェックボックスは廃止し、復元＝一貫時点復元に一本化。代わりに復元前退避で可逆化)。控えが無ければ DB のみ。
+        /// </summary>
+        public bool RestoreAssets => _pairedSnapshot != null;
 
         private void RestoreConfirmForm_Load(object sender, EventArgs e)
         {
@@ -51,24 +53,25 @@ namespace TonePrism.Manager
                     $"フルパス: {resolvedPath}";
             }
 
-            // (#250 PR3b) アセット (games/・guide/) 復元の可否を表示。ペアになる控えがあれば既定 ON、無ければ無効化。
+            // (#250 PR3b round2) チェックボックスは廃止し「復元＝その時点に丸ごと戻す」に一本化 (ユーザー判断)。
+            // 控えがあれば games/guide も戻る＝**この時点より後に追加したゲーム等は削除される**旨を赤字で強く明示する。
+            // 破壊的だが、BackupSectionPanel が reconcile 前に現在の状態を自動退避するので「やり直せる」点も併記。
             if (_pairedSnapshot != null)
             {
-                chkRestoreAssets.Enabled = true;
-                chkRestoreAssets.Checked = true; // 控えがあるなら「DB と一致するゲーム内容に戻す」が既定として安全。
                 string host = string.IsNullOrEmpty(_pairedSnapshot.Host) ? "(不明)" : _pairedSnapshot.Host;
-                lblAssetInfo.ForeColor = System.Drawing.Color.DimGray;
+                lblAssetInfo.ForeColor = System.Drawing.Color.DarkRed;
                 lblAssetInfo.Text =
-                    $"対応するゲームファイルの控え: {_pairedSnapshot.StartedAtLocal:yyyy/MM/dd HH:mm:ss}" +
-                    $" / 取得PC: {host} / {_pairedSnapshot.FileCount} 個のファイル\n" +
-                    "チェックを外すとデータベースだけを復元します (ゲームファイルは現在のまま)。";
+                    "⚠ ゲームファイル (games / guide) もこの時点の内容に戻します。\n" +
+                    "　 この時点より後に追加・変更したゲームファイルはディスクから削除されます。\n" +
+                    $"　 戻すゲームファイルの控え: {_pairedSnapshot.StartedAtLocal:yyyy/MM/dd HH:mm:ss} / 取得PC: {host} / {_pairedSnapshot.FileCount} ファイル\n" +
+                    "　 ※ 削除の前に現在の状態を自動でバックアップします（履歴から復元してやり直せます）。";
             }
             else
             {
-                chkRestoreAssets.Checked = false;
-                chkRestoreAssets.Enabled = false;
                 lblAssetInfo.ForeColor = System.Drawing.Color.DimGray;
-                lblAssetInfo.Text = "この世代にはゲームファイルの控えがありません。データベースのみ復元します。";
+                lblAssetInfo.Text =
+                    "この世代にはゲームファイルの控えがありません。データベースのみ復元します\n" +
+                    "（ディスク上のゲームファイルは現在のまま変更しません）。";
             }
         }
 
