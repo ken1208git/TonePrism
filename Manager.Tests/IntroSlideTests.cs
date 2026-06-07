@@ -53,11 +53,12 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
-        public void FreshDb_ReachesV22_WithIntroSlidesTable()
+        public void FreshDb_ReachesCurrentVersion_WithIntroSlidesTable()
         {
+            // (#297) DB v23 で play_records/surveys/launcher_surveys を DROP。ターゲット版数は固定値でなく
+            // GetTargetDatabaseVersion() を真実の源にして、将来の bump でも壊れないようにする。
             var schema = new SchemaManager(_conn);
-            Assert.Equal(22, schema.GetTargetDatabaseVersion());
-            Assert.Equal(22, schema.GetActualDatabaseVersion());
+            Assert.Equal(schema.GetTargetDatabaseVersion(), schema.GetActualDatabaseVersion());
             // intro_slides が存在し空で読める。
             Assert.Empty(new IntroSlideRepository(_conn).GetAll());
         }

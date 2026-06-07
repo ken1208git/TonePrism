@@ -1307,6 +1307,17 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.11.0] - 2026-06-07
+
+#### Changed (#297 PR1 — play_records 非参照化、JSON 直読み化への布石)
+
+- **DB v23 で `play_records` テーブルが撤去されるため、`store_section_repository.gd` のセクションクエリを非参照化**（Manager v0.27.0 と対。撤去後に旧 SQL を実行すると「no such table」エラーになるのを防ぐ。本番では元々空でデータは無い）。
+  - **`popular`（人気ランキング）**: 旧 `LEFT JOIN play_records ... ORDER BY play_count DESC` を撤去し、`SELECT * FROM games WHERE is_visible=1 ORDER BY display_order ASC, title ASC`（表示ゲームを安定順）に変更。**順位は仮**で、#297 PR2 の in-memory 集計（`responses/play_records/` を直読みする `play_stats_service` 想定）に差し替えて実データ化する。
+  - **`recently_played`（最近プレイ）**: 旧 play_records サブクエリを撤去し `SELECT * FROM games WHERE 1=0`（**0 行**）に変更。`get_store_sections()` が空セクションを表示一覧から落とすため、**データが揃うまで「最近プレイ」セクションは自動的に非表示**になる（UI 非破壊）。PR2 で最新 start_time 上位 N の集計に差し替え。
+- **`database_manager.gd` `CURRENT_DB_VERSION` 22→23**。v23 の DB を「Launcher の対応版より新しい」と誤認して `push_warning` を出すのを防ぐ（v15〜v23 はいずれも Launcher が読まないテーブル/制約変更なので定数追従のみ）。コメントに v23 = play_records/surveys/launcher_surveys DROP の経緯を追記。
+- 検証: 同梱 Godot 4.6 ヘッドレスで `store_section_repository.gd` / `database_manager.gd` のロード（パースエラーなし）を確認。**※実 DB（v23）での popular/recently_played を含むストア表示・push_error 無し・recently_played 空時のセクション非表示・「DB が新しい」警告無しは pre-release で実機目視**（#297 全体の実データ集計は PR2 で実装後に確認）。
+- bump 判断: DB スキーマ追従（v23）+ ストアクエリ変更。`.pck` が変わり Manager v0.27.0 とセットで動く前提のため minor (v0.10.3 → v0.11.0)。**#297 はこの PR では閉じない**（`(#297)` 文末参照。書込+集計=PR2、アンケート UI=PR3）。
+
 ### [Launcher v0.10.3] - 2026-06-01
 
 #### Added (#291 — ストアセクションソース「制作年指定」)
@@ -1997,6 +2008,21 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.27.0] - 2026-06-07
+
+- **(#297 PR1) プレイ記録・アンケートを SQLite から撤去（JSON 直読み化へのピボット・スキーマ側）**: プレイ記録/アンケートの保存方式を「Launcher が JSON drop → Manager が SQLite へ取り込む（drop-folder）」から「**Launcher が JSON を直読みしてメモリ集計**（SQLite を経由しない）」へ転換する #297 の第 1 弾。本 PR は **Manager 側のスキーマ撤去**と SPEC 改定、Launcher の非参照化まで（書込/集計は PR2、アンケート UI は PR3）。本番DB作成前の最後のスキーマ変更として、v23 のクリーンスキーマを確定させる。
+  - **設計判断（なぜ撤去）**: 旧 drop-folder 取り込みは (1) 取り込み時点でデータが固定され**常に最新を表示できない**、(2) `play_records`/`surveys` のスキーマ drift を Manager が抱え続ける、(3) Launcher が読む人気順表示に Manager 起動が必要、という構造的弱点があった。`play_records`/`surveys`/`launcher_surveys` は **定義のみで実装ゼロ**（取り込み INSERT も Launcher 書込も未実装、本番データ未蓄積）だったため、**撤去が最安**の段階で JSON 直読み + メモリ集計へピボットした（常に新鮮・drift 解消・retention をフォルダ単位に単純化）。
+  - **`MigrateV22ToV23` 追加**（`DROP TABLE IF EXISTS surveys / play_records / launcher_surveys`）+ `CurrentDbVersion` 22→23。これら 3 テーブルは `games` を参照する子テーブルだが **CASCADE 波及はなく安全**（親 games を消すわけではない。前例 `MigrateV18ToV19` の backup_log DROP と同型）。migration chain に `if (currentVersion < 23)` ブロックを追加（v22→v23、v22 未満は warn して skip）。
+  - **`CreateTables` から撤去**: `CreatePlayRecordsTable`/`CreateSurveysTable` の呼び出し + launcher_surveys CREATE ブロックを削除（メソッド本体・dead な `GetTableRowCount` も削除）。`ExpectedSchema` から 3 エントリ削除（`VerifySchema` 対象外に）。
+  - **`MigrateV10ToV11` を no-op 化**（`return true` のみ。旧 `FixSurveysSchemaDrift`/`FixPlayRecordsSchemaDrift` を撤去）。chain の連続性維持のため呼び出しは残すが、結局 v23 で DROP されるテーブルの drift 修正は無意味なため本体を空に。
+  - **stale モデル削除**: 参照ゼロだった `Models/Survey.cs` / `Models/PlayRecord.cs`（+ csproj の `<Compile Include>`）を削除。
+  - **潜在ランタイムバグ修正（`GameRepository.UpdateGameId`）**: game_id リネーム時の子テーブル更新が `UPDATE play_records / surveys SET game_id ...` ＋ `UPDATE launcher_surveys SET favorite_game_id ...` を実行していた。v23 で 3 テーブルを DROP すると、これらは**コンパイルでは検出されない**「no such table」ランタイム例外を投げ、**game_id リネームがロールバックして失敗**する。子テーブル配列から `play_records`/`surveys` を除去（残すのは `game_versions`/`developers`/`store_section_games`）し、`launcher_surveys` UPDATE ブロックを削除。回帰テスト `DataLayerRoundTripTests.GameRepository_UpdateGameId_RenamesWithoutTouchingDroppedTables`（fresh v23 DB で rename が例外なく完走＋developers が新 ID へ追従）を追加。`GameSectionPanel` のゲーム削除 CASCADE コメントも撤去済テーブルを除外して更新。
+  - **撤去回帰テスト**: `SchemaMigrationTests.V22ToV23_DropsEventTables`（v22 DB に games + 3 テーブルを空で作り、`InitializeDatabase` 後に `sqlite_master` に 3 テーブル 0 件・`user_version=23`・`integrity_check ok` を assert）。既存 `V19ToV20_...` の `COUNT(*) FROM play_records` assert は撤去（CASCADE 非発生の検証意図は developers/game_versions の COUNT で担保）。`IntroSlideTests` の固定版数 assert（旧 v22）を `GetTargetDatabaseVersion()` 動的化して将来 bump に耐性を持たせた（`FreshDb_ReachesV22_...` → `FreshDb_ReachesCurrentVersion_...` に改名）。
+  - **SPEC 改定**（§6.2/§6.4/§6.5/§7.1〜§7.6.4/機能10-12）: drop-folder 3-state/2-phase 取り込みを JSON 直読み + Launcher メモリ集計へ全面改定、テーブル 3/4/10 を「廃止 — DB v23」表記（番号欠番、game_genres/backup_log 廃止記法を踏襲）、ER 図から play_records/surveys 削除、§7.5.3 を日付フォルダ + JSON スキーマ確定に改定。IPC 用 subfolder（`launcher_sessions`）/ 直下 file（`launcher_logs_root.json`）は存続。`PathManager.LauncherSessionsFolder` の §6.5 参照コメントも追従（旧 3-state pattern 参照を IPC 用 subfolder 表現に更新）。
+- **レビュー対応（同 PR・version 据え置き）**: (#1 Low) **v0 fast-path が 3 テーブルを DROP しないまま v23 を刻む穴を是正**。`currentVersion==0` の retrofit 経路（versioning 導入前 DB 用）は `CurrentDbVersion` を直接 stamp するが `MigrateV22ToV23` を呼ばず、かつ no-op 化した `MigrateV10ToV11` を「drift を直す体」のコメント＋到達不能な false 分岐＋発火しない警告ログ付きで残していた。→ (a) v0 path の `MigrateV10ToV11` 呼び出し＋stale コメント＋dead branch を撤去、(b) `MigrateV22ToV23`（`DROP TABLE IF EXISTS`＝冪等、新規 DB では no-op）を stamp 直前に明示適用し、versioning 導入前から 3 テーブルを物理的に持つ旧 DB でも撤去して真の v23 へ揃える。これで CHANGELOG/SPEC の「既存 DB は `MigrateV22ToV23` で DROP する」を v0 サブセットでも成立させる。回帰テスト `V0FastPath_DropsEventTables_AndReachesV23`（user_version=0＋3 テーブル物理存在 → `InitializeDatabase` 後に DROP・v23 到達・games 保持）を追加。※ `backup_log`（v19 DROP）の v0 path 未適用は #297 とは別件の既存 gap で本 PR scope 外（コメントで明示）。(#2 Low・運用注意) PR1 単独で Bundle release すると「人気」セクションが暫定順（display_order）で出るため、production に届く Bundle は PR2（popular 実集計）とセットにする運用を担保（本番 play_records は元々空で実害は順序のみ）。
+- 検証: Manager build 緑 / **テスト 189 件合格**（撤去回帰 `V22ToV23_DropsEventTables` ＋ `UpdateGameId` 回帰 ＋ v0-path 回帰 `V0FastPath_DropsEventTables_AndReachesV23` を追加）。**※新規 DB および v22 実 DB での v23 到達（3 テーブル不在・integrity ok）は sqlite3.exe で実 DB round-trip 検証済。Manager.exe 実機 + 本番 SMB DB での最終確認は本番DB作成と pre-release で実施**。
+- bump 判断: **DB schema 変更（テーブル DROP）を含むが、撤去対象が実装ゼロ・本番未蓄積のため実データ移行リスクなし**。ユーザー向け破壊的影響なし。minor (v0.26.0 → v0.27.0)。Launcher も同 PR で非参照化（v0.11.0）。**#297 はこの PR では閉じない**（`(#297)` 文末参照。プレイ記録書込+集計=PR2/`Closes #34`、アンケート UI=PR3/`Closes #35` `Closes #297`）。
 
 ### [Manager v0.26.0] - 2026-06-06
 

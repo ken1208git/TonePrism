@@ -598,8 +598,8 @@ namespace TonePrism.Manager.Controls
                 }
             }
 
-            // フェーズ 2: DB 削除 (CASCADE で developers / game_versions / game_genres /
-            //   play_records / surveys / store_section_games も削除される)
+            // フェーズ 2: DB 削除 (CASCADE で developers / game_versions / store_section_games も削除される。
+            //   ※ play_records / surveys は DB v23/#297 で撤去済、game_genres は v18 で撤去済)
             //   失敗時は (1) で退避したフォルダを games/{gameId}/ に戻して全体ロールバック
             //   ロールバック失敗 (権限変更・他プロセスが games/{gameId}/ を再作成した等) は
             //   rollbackError に記録し、後段で正確に通知する (Codex P2 #122)
