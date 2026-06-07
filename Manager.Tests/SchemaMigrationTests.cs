@@ -115,6 +115,43 @@ namespace TonePrism.Manager.Tests
         }
 
         /// <summary>
+        /// (#297 review) versioning 導入前 (user_version=0) で物理的に surveys / play_records / launcher_surveys を
+        /// 持つ旧 DB が、v0 fast-path で 3 テーブルを DROP し真の v23 へ到達することを検証する。v0 path は migration
+        /// chain を通らず CurrentDbVersion を直接 stamp するため、MigrateV22ToV23 を明示適用しないとテーブルを
+        /// 残したまま v23 を名乗る穴があった (本テストでその回帰を固定)。
+        /// </summary>
+        [Fact]
+        public void V0FastPath_DropsEventTables_AndReachesV23()
+        {
+            // v19 形状 (games + 子テーブル) を作ってから user_version=0 へ落とし、撤去対象 3 テーブルを足す。
+            // これで v0 path の各 retrofit (arguments / developers FK / play_time CHECK) を通しつつ
+            // MigrateV22ToV23 の v0 適用を検証する。
+            BuildV19DbWithChildren(_dbPath, playTime: 2);
+            using (var c = new SQLiteConnection($"Data Source={_dbPath};Version=3;"))
+            {
+                c.Open();
+                Exec(c, "CREATE TABLE play_records (id INTEGER PRIMARY KEY AUTOINCREMENT, game_id TEXT, start_time TEXT, end_time TEXT, play_duration INTEGER, player_count INTEGER, FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE)");
+                Exec(c, "CREATE TABLE surveys (id INTEGER PRIMARY KEY AUTOINCREMENT, game_id TEXT, rating INTEGER, comment TEXT, created_at TEXT, FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE)");
+                Exec(c, "CREATE TABLE launcher_surveys (id INTEGER PRIMARY KEY AUTOINCREMENT, rating INTEGER, favorite_game_id TEXT, comment TEXT, created_at TEXT, FOREIGN KEY(favorite_game_id) REFERENCES games(game_id) ON DELETE SET NULL)");
+                Exec(c, "PRAGMA user_version=0"); // versioning 導入前
+            }
+
+            new SchemaManager(new DatabaseConnection(_dbPath)).InitializeDatabase();
+            SQLiteConnection.ClearAllPools();
+
+            using (var c = new SQLiteConnection($"Data Source={_dbPath};Version=3;"))
+            {
+                c.Open();
+                Assert.Equal((long)new SchemaManager(new DatabaseConnection(_dbPath)).GetTargetDatabaseVersion(),
+                    ScalarLong(c, "PRAGMA user_version"));
+                Assert.Equal(0L, ScalarLong(c, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('surveys','play_records','launcher_surveys')"));
+                Assert.Equal("ok", ScalarString(c, "PRAGMA integrity_check"));
+                // 既存データ (games) は保持される。
+                Assert.Equal(1L, ScalarLong(c, "SELECT COUNT(*) FROM games"));
+            }
+        }
+
+        /// <summary>
         /// versioning 前の v19 状態 DB を raw SQL で構築する: `games` は v20 から play_time CHECK を除いた形、
         /// 子テーブルは FK ON DELETE CASCADE。1 game + 2 versions + 1 developer を投入。
         /// </summary>

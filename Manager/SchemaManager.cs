@@ -762,34 +762,31 @@ namespace TonePrism.Manager
                     MigrateV17ToV18(connection, transaction);
                 }
 
-                // versioning 導入前 (user_version=0) から surveys / play_records テーブルが存在する旧 DB は、
-                // CreateTables の CREATE TABLE IF NOT EXISTS が旧スキーマ (surveys: submitted_at/responses、
-                // play_records: play_count/total_play_time) を温存するため、本来 MigrateV10ToV11 が直す drift が
-                // 残ったまま user_version=19 が刻まれていた (一度刻むと再 migration 経路に乗らず永久固定)。
-                // arguments 列 (V13ToV14) / developers FK (V17ToV18) / settings KVS (EnsureSettingsTableIsKvsSchema)
-                // は v0 path で明示 retrofit するのに surveys/play_records だけ抜けていた非対称を解消する。
-                // MigrateV10ToV11 は冪等: 新規 DB (新スキーマ) では no-op で true、旧スキーマ空テーブルは再作成、
-                // データ残存時のみ skip + 警告で false (自動変換不能なため手動退避を促す。VerifySchema が以後も
-                // 列名 drift を警告し続ける)。stamp は他 retrofit と同じく実行する (= 残りのスキーマは v19 で確定済、
-                // surveys/play_records だけ古いまま 19 を名乗るのは元の挙動と同じだが、空テーブルは本 fix で救済される)。
-                if (!MigrateV10ToV11(connection, transaction))
-                {
-                    Logger.Warn("[DatabaseManager] (v0 path) surveys / play_records にデータが残存し drift 修正を skip しました。" +
-                        "tools/sqlite3/sqlite3.exe で旧データを退避のうえ手動で新スキーマへ移行してください。");
-                }
+                // (#297) かつては v0 path で MigrateV10ToV11 を呼び surveys / play_records の drift を直していたが、
+                // #297 (DB v23) で両テーブル + launcher_surveys を撤去したため、その drift 修正は無意味になった
+                // (MigrateV10ToV11 は no-op 化済)。代わりに後段で MigrateV22ToV23 を明示適用して、versioning 導入前
+                // (user_version=0) から物理的に 3 テーブルを持つ旧 DB でもこれらを DROP し、真の v23 へ揃える
+                // (下記 SetDbVersion 直前)。
 
                 // (PR #236 レビュー対応) v0 fast-path も MigrateV19ToV20 (games.play_time に CHECK(1-3)) を明示 retrofit する。
-                // arguments (V13ToV14) / developers FK (V17ToV18) / surveys・play_records (V10ToV11) は v0 path で明示
-                // retrofit するのに play_time CHECK だけ抜けており、versioning 導入前から games テーブルを持つ旧 v0 DB は
-                // CreateTables の CREATE TABLE IF NOT EXISTS が CHECK 無し games を温存するため、CHECK が付かないまま
-                // user_version=20 を刻む非対称 (surveys と同型の drift) が残っていた。新規 DB は CreateTables が CHECK 付きで
-                // 作るため MigrateV19ToV20 の冪等ガードで no-op。範囲外 play_time 残存時は MigrateV10ToV11 と同じく
-                // warn + stamp 継続 (起動を止めない、是正後の再起動で適用)。
+                // arguments (V13ToV14) / developers FK (V17ToV18) は v0 path で明示 retrofit するのに play_time CHECK
+                // だけ抜けており、versioning 導入前から games テーブルを持つ旧 v0 DB は CreateTables の
+                // CREATE TABLE IF NOT EXISTS が CHECK 無し games を温存するため、CHECK が付かないまま user_version=20 を
+                // 刻む非対称 (drift) が残っていた。新規 DB は CreateTables が CHECK 付きで作るため MigrateV19ToV20 の冪等
+                // ガードで no-op。範囲外 play_time 残存時は warn + stamp 継続 (起動を止めない、是正後の再起動で適用)。
                 if (!MigrateV19ToV20(connection, transaction))
                 {
                     Logger.Warn("[DatabaseManager] (v0 path) games.play_time に範囲外 (1-3 以外) の値が残存し CHECK 追加を skip しました。" +
                         "tools/sqlite3/sqlite3.exe で値を 1-3 または NULL に是正してください。");
                 }
+
+                // (#297 review) v0 fast-path も MigrateV22ToV23 を明示適用する。versioning 導入前 (user_version=0) から
+                // play_records / surveys / launcher_surveys を物理的に持つ旧 DB は、CreateTables の
+                // CREATE TABLE IF NOT EXISTS がこれらを温存するため、撤去しないまま v23 を刻む非対称が残る。
+                // DROP TABLE IF EXISTS は冪等なので新規 DB (テーブル不在) では no-op、旧 v0 DB でのみ DROP が効く。
+                // これで CHANGELOG/SPEC の「既存 DB は MigrateV22ToV23 で DROP する」を v0 サブセットでも成立させる。
+                // (※ backup_log [v19 DROP] の v0 path 未適用は #297 とは別件の既存 gap で本 PR scope 外)
+                MigrateV22ToV23(connection, transaction);
 
                 SetDbVersion(connection, CurrentDbVersion, transaction);
                 return;
