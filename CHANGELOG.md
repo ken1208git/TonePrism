@@ -2009,6 +2009,16 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.27.1] - 2026-06-07
+
+- **フォルダ選択ダイアログを開くたびにウィンドウが縮むバグを修正**: ゲーム追加 / バージョンアップの「ゲームフォルダ選択」を開閉するたびに、Manager 本体ウィンドウ（＋ダイアログ）が**少しずつ縮んでいく**不具合があった（拡大率 100% 超の環境、本機は 200% で発生）。本番DB作成でゲームを多数登録する際に作業不能なため修正。
+  - **原因**: フォルダ選択に使っていた WindowsAPICodePack の `CommonOpenFileDialog` は **per-monitor DPI 対応のネイティブ COM ダイアログ**。一方 Manager は DPI awareness 未宣言（unaware）なため、このダイアログを開くたびに WinForms 側ウィンドウが DPI 再スケールされ縮む（画像/実行ファイル選択の標準 `OpenFileDialog` では起きないのは、こちらが per-monitor COM ダイアログでないため）。標準 `OpenFileDialog` はフォルダを選べないので元々この COM ダイアログを使っていた。
+  - **試して不発だった対策**（記録）: (1) `SetThreadDpiAwarenessContext` でスレッドの DPI コンテキストをオーナーに固定 → 縮み止まらず（COM ダイアログが自前でコンテキストを張り直す）。(2) ダイアログ前後で全フォームのサイズを保存・復元 → 止まらず（再スケールが復元後／子コントロールごと一様に縮む）。(3) app.manifest で **System DPI awareness 宣言**（根本対策）→ 全フォームが AutoScale 再計算され**起動時点でメイン画面のレイアウトが崩壊**（実機確認、特に AutoScaleDimensions が `(6,12)` の 4 フォーム）。(4) ダイアログを**別 STA スレッド**で表示 → `CommonOpenFileDialog` がワーカースレッドで `InvalidOperationException`。
+  - **採用した修正**: フォルダ選択を WinForms 標準の **`FolderBrowserDialog`（旧来のツリー型）に変更**（新 `Services/DpiSafeFolderPicker.cs` に集約）。per-monitor COM ダイアログを使わないため awareness ミスマッチ自体が起きず**確実に縮まない**。DPI/レイアウト/manifest には一切触れない surgical な修正。UX がツリー型になる分は、**直近に選んだフォルダを記憶して次回の起点にする**ことで緩和（bulk 登録時に毎回ツリーを頭から辿らず、兄弟フォルダをすぐ選べる）。対象は `AddGameForm`（ゲームフォルダ）/ `VersionUpForm`（バージョンフォルダ）の 2 箇所。
+  - **将来**: モダンなフォルダピッカーの復活は、DPI aware 前提でレイアウトを組み直す **WPF 移行（#245）**で扱う（WPF は本来 DPI aware なのでこのミスマッチが構造的に発生しない）。
+- 検証: build 緑。**実機（拡大率 200%）でフォルダ選択を反復開閉してもウィンドウが縮まないこと・メイン画面レイアウトが正常なこと・直近フォルダ起点で開くことを目視確認**。
+- bump 判断: バグ修正のみ（破壊的変更・schema 変更なし）。patch (v0.27.0 → v0.27.1)。Launcher / Companions は無関係。
+
 ### [Manager v0.27.0] - 2026-06-07
 
 - **(#297 PR1) プレイ記録・アンケートを SQLite から撤去（JSON 直読み化へのピボット・スキーマ側）**: プレイ記録/アンケートの保存方式を「Launcher が JSON drop → Manager が SQLite へ取り込む（drop-folder）」から「**Launcher が JSON を直読みしてメモリ集計**（SQLite を経由しない）」へ転換する #297 の第 1 弾。本 PR は **Manager 側のスキーマ撤去**と SPEC 改定、Launcher の非参照化まで（書込/集計は PR2、アンケート UI は PR3）。本番DB作成前の最後のスキーマ変更として、v23 のクリーンスキーマを確定させる。
