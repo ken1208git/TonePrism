@@ -86,6 +86,42 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
+        public void GameRepository_UpdateGameId_RenamesWithoutTouchingDroppedTables()
+        {
+            // (#297 / DB v23) UpdateGameId の子テーブル更新は play_records / surveys / launcher_surveys を
+            // 参照してはならない。これらは v23 で DROP 済みなので、UPDATE 文が残っていると rename が
+            // 「no such table」で落ちる。fresh v23 DB で rename が例外なく完走し、生き残った子テーブル
+            // (developers) も新 game_id へ追従することで回帰を固定する。
+            var devRepo = new DeveloperRepository(_conn);
+            var gameRepo = new GameRepository(_conn, devRepo);
+
+            var game = new GameInfo
+            {
+                GameId = "old_id",
+                Title = "リネーム前",
+                IsVisible = true,
+                Genre = new List<string>(),
+                Developers = new List<DeveloperInfo>
+                {
+                    new DeveloperInfo { LastName = "山田", FirstName = "太郎", Grade = "3" },
+                },
+            };
+            gameRepo.Add(game);
+
+            // 旧コードは play_records への UPDATE で no such table を投げていた。例外なく完走すること。
+            var ex = Record.Exception(() => gameRepo.UpdateGameId("old_id", "new_id"));
+            Assert.Null(ex);
+
+            Assert.Null(gameRepo.GetById("old_id"));
+            var renamed = gameRepo.GetById("new_id");
+            Assert.NotNull(renamed);
+            Assert.Equal("リネーム前", renamed.Title);
+            // 子テーブル (developers) が新 game_id へ追従している。
+            Assert.Single(renamed.Developers);
+            Assert.Equal("山田", renamed.Developers[0].LastName);
+        }
+
+        [Fact]
         public void StoreSection_SwapDisplayOrder_SwapsAtomically()
         {
             // 並び替えの atomic swap (half-write 解消、store 側) を検証。

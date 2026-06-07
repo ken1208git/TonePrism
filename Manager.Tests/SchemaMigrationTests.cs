@@ -50,7 +50,8 @@ namespace TonePrism.Manager.Tests
                 Assert.Equal(1L, ScalarLong(c, "SELECT COUNT(*) FROM games"));
                 Assert.Equal(2L, ScalarLong(c, "SELECT COUNT(*) FROM game_versions"));
                 Assert.Equal(1L, ScalarLong(c, "SELECT COUNT(*) FROM developers"));
-                Assert.Equal(1L, ScalarLong(c, "SELECT COUNT(*) FROM play_records"));
+                // (#297) play_records は v23 で DROP されるため COUNT 検証は撤去。CASCADE 非発生の検証意図は
+                // game_versions / developers の COUNT で担保される。
                 // FK 整合: foreign_key_check が違反行を返さない
                 using (var cmd = new SQLiteCommand("PRAGMA foreign_key_check", c))
                 using (var r = cmd.ExecuteReader())
@@ -82,8 +83,40 @@ namespace TonePrism.Manager.Tests
         }
 
         /// <summary>
+        /// (#297) v22 状態 DB に surveys / play_records / launcher_surveys を空で作り、InitializeDatabase
+        /// (v22→v23 migration) 後にこれら 3 テーブルが DROP され user_version が現行ターゲットに到達することを検証する。
+        /// スキーマ撤去の自動回帰。
+        /// </summary>
+        [Fact]
+        public void V22ToV23_DropsEventTables()
+        {
+            using (var c = new SQLiteConnection($"Data Source={_dbPath};Version=3;"))
+            {
+                c.Open();
+                // FK 親の games + 撤去対象 3 テーブルを最小構成で作る (v22 相当)。
+                Exec(c, "CREATE TABLE games (game_id TEXT PRIMARY KEY, title TEXT)");
+                Exec(c, "CREATE TABLE play_records (id INTEGER PRIMARY KEY AUTOINCREMENT, game_id TEXT, start_time TEXT, end_time TEXT, play_duration INTEGER, player_count INTEGER, FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE)");
+                Exec(c, "CREATE TABLE surveys (id INTEGER PRIMARY KEY AUTOINCREMENT, game_id TEXT, rating INTEGER, comment TEXT, created_at TEXT, FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE)");
+                Exec(c, "CREATE TABLE launcher_surveys (id INTEGER PRIMARY KEY AUTOINCREMENT, rating INTEGER, favorite_game_id TEXT, comment TEXT, created_at TEXT, FOREIGN KEY(favorite_game_id) REFERENCES games(game_id) ON DELETE SET NULL)");
+                Exec(c, "PRAGMA user_version=22");
+            }
+
+            new SchemaManager(new DatabaseConnection(_dbPath)).InitializeDatabase();
+            SQLiteConnection.ClearAllPools();
+
+            using (var c = new SQLiteConnection($"Data Source={_dbPath};Version=3;"))
+            {
+                c.Open();
+                Assert.Equal((long)new SchemaManager(new DatabaseConnection(_dbPath)).GetTargetDatabaseVersion(),
+                    ScalarLong(c, "PRAGMA user_version"));
+                Assert.Equal(0L, ScalarLong(c, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('surveys','play_records','launcher_surveys')"));
+                Assert.Equal("ok", ScalarString(c, "PRAGMA integrity_check"));
+            }
+        }
+
+        /// <summary>
         /// versioning 前の v19 状態 DB を raw SQL で構築する: `games` は v20 から play_time CHECK を除いた形、
-        /// 子テーブルは FK ON DELETE CASCADE。1 game + 2 versions + 1 developer + 1 play_record を投入。
+        /// 子テーブルは FK ON DELETE CASCADE。1 game + 2 versions + 1 developer を投入。
         /// </summary>
         private static void BuildV19DbWithChildren(string dbPath, int playTime)
         {
@@ -111,16 +144,11 @@ namespace TonePrism.Manager.Tests
                     grade TEXT, version_id INTEGER,
                     FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE,
                     FOREIGN KEY(version_id) REFERENCES game_versions(id) ON DELETE CASCADE)");
-                Exec(c, @"CREATE TABLE play_records (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, game_id TEXT, start_time TEXT, end_time TEXT,
-                    play_duration INTEGER, player_count INTEGER,
-                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE)");
 
                 Exec(c, $"INSERT INTO games (game_id, title, difficulty, play_time, version) VALUES ('g1','Game 1',2,{playTime},'1.1.0')");
                 Exec(c, "INSERT INTO game_versions (game_id, version, executable_path, registered_at) VALUES ('g1','1.0.0','v1.0.0/g.exe','2026-01-01 00:00:00')");
                 Exec(c, "INSERT INTO game_versions (game_id, version, executable_path, registered_at) VALUES ('g1','1.1.0','v1.1.0/g.exe','2026-01-02 00:00:00')");
                 Exec(c, "INSERT INTO developers (game_id, last_name, first_name, grade) VALUES ('g1','山田','太郎','3')");
-                Exec(c, "INSERT INTO play_records (game_id, start_time, end_time, play_duration, player_count) VALUES ('g1','2026-01-01 10:00:00','2026-01-01 10:05:00',300,1)");
 
                 Exec(c, "PRAGMA user_version=19");
             }

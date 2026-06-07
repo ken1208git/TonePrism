@@ -76,12 +76,12 @@ func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 		"""
 		bindings = [section.section_id]
 	elif source == "popular":
+		# (#297 PR1) play_records テーブルは DB v23 で撤去したため JOIN 不可。PR1 は暫定で「表示ゲームを安定順」で返す
+		# (順位は仮)。PR2 で responses/play_records/ の in-memory 集計 (play_stats_service) に差し替えて実データ化する。
 		query = """
-			SELECT g.*, COUNT(pr.id) as play_count FROM games g
-			LEFT JOIN play_records pr ON g.game_id = pr.game_id
-			WHERE g.is_visible = 1
-			GROUP BY g.game_id
-			ORDER BY play_count DESC, g.title ASC
+			SELECT * FROM games
+			WHERE is_visible = 1
+			ORDER BY display_order ASC, title ASC
 		"""
 	elif source == "recent":
 		var current_year = Time.get_date_dict_from_system()["year"]
@@ -92,15 +92,11 @@ func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 		"""
 		bindings = [current_year]
 	elif source == "recently_played":
+		# (#297 PR1) play_records 撤去によりプレイ履歴データが無い → 0 行を返す。get_store_sections は空セクションを
+		# 表示一覧から落とすため、データが揃うまで「最近プレイ」セクションは自動的に非表示になる (UI 非破壊)。
+		# PR2 で responses/ の in-memory 集計 (最新 start_time 上位 N) に差し替えて実データ化する。
 		query = """
-			SELECT g.* FROM games g
-			JOIN (
-				SELECT game_id, MAX(start_time) AS last_played
-				FROM play_records
-				GROUP BY game_id
-			) pr ON g.game_id = pr.game_id
-			WHERE g.is_visible = 1
-			ORDER BY pr.last_played DESC
+			SELECT * FROM games WHERE 1 = 0
 		"""
 	elif source.begins_with("genre:"):
 		var genre_name = source.substr(6)

@@ -331,8 +331,12 @@ namespace TonePrism.Manager.Repositories
                         {
                             try
                             {
-                                // 子テーブルのgame_idを更新 (累積監査 round 4 Low-28/29: game_genres は v18 で DROP した dead table のため除去)
-                                string[] childTables = { "game_versions", "developers", "play_records", "surveys", "store_section_games" };
+                                // 子テーブルのgame_idを更新
+                                // (累積監査 round 4 Low-28/29: game_genres は v18 で DROP した dead table のため除去)
+                                // (#297 / DB v23: play_records / surveys / launcher_surveys は DROP したため除去。
+                                //  これらは responses/ の JSON 直読みへ移行済で SQLite に存在しない＝UPDATE すると
+                                //  「no such table」で rename が落ちるため必ず外す)
+                                string[] childTables = { "game_versions", "developers", "store_section_games" };
                                 foreach (var table in childTables)
                                 {
                                     using (var cmd = new SQLiteCommand($"UPDATE {table} SET game_id = @newId WHERE game_id = @oldId", connection, transaction))
@@ -341,14 +345,6 @@ namespace TonePrism.Manager.Repositories
                                         cmd.Parameters.AddWithValue("@oldId", oldId);
                                         cmd.ExecuteNonQuery();
                                     }
-                                }
-
-                                // launcher_surveys の favorite_game_id を更新
-                                using (var cmd = new SQLiteCommand("UPDATE launcher_surveys SET favorite_game_id = @newId WHERE favorite_game_id = @oldId", connection, transaction))
-                                {
-                                    cmd.Parameters.AddWithValue("@newId", newId);
-                                    cmd.Parameters.AddWithValue("@oldId", oldId);
-                                    cmd.ExecuteNonQuery();
                                 }
 
                                 // メインテーブルの主キーを更新

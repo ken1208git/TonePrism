@@ -33,7 +33,11 @@ namespace TonePrism.Manager
         // v19: backup_log テーブルを DROP。バックアップ履歴を DB から外し backups/ フォルダ走査
         //      (BackupCatalogService) 由来に変更。reconcile / register / drift 対策コードを全廃し、失敗復元が
         //      success 化する欠陥を根治。既存行は破棄されるが物理ファイルは残り初回走査で履歴に復活する。
-        private const int CurrentDbVersion = 22;
+        // v23: play_records / surveys / launcher_surveys テーブルを DROP (#297)。プレイ記録・アンケートを SQLite
+        //      取り込み (drop-folder 2-phase) から JSON 直読み + Launcher in-memory 集計へピボット。これらは取り込み
+        //      INSERT も Launcher 書込も未実装でデータ未蓄積のため撤去コストはほぼゼロ。子テーブル (games 参照) で
+        //      CASCADE 波及なし。既存行は破棄される (元々空)。
+        private const int CurrentDbVersion = 23;
 
         public SchemaManager(DatabaseConnection conn)
         {
@@ -408,27 +412,10 @@ namespace TonePrism.Manager
             // (累積監査 round 4 Low-28/29) game_genres は dead table のため v18 で DROP 済 (MigrateV17ToV18 参照)。
             // 新規 install では作成しない。SoT は `games.genre` のカンマ区切り文字列 (GameRepository が直接 read/write)。
 
-            // play_recordsテーブル作成（MigrateV10ToV11 でも再利用するため helper メソッド化）
-            CreatePlayRecordsTable(connection, transaction);
-
-            // surveysテーブル作成（MigrateV10ToV11 でも再利用するため helper メソッド化）
-            CreateSurveysTable(connection, transaction);
-
-            // launcher_surveysテーブル作成
-            string createLauncherSurveysTable = @"
-                CREATE TABLE IF NOT EXISTS launcher_surveys (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    rating INTEGER CHECK(rating BETWEEN 1 AND 5),
-                    favorite_game_id TEXT,
-                    comment TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(favorite_game_id) REFERENCES games(game_id) ON DELETE SET NULL
-                )";
-
-            using (var command = new SQLiteCommand(createLauncherSurveysTable, connection, transaction))
-            {
-                command.ExecuteNonQuery();
-            }
+            // (#297 / DB v23) play_records / surveys / launcher_surveys テーブルは廃止。プレイ記録・アンケートは
+            // SQLite に取り込まず、Launcher が responses/{play_records|surveys}/YYYY-MM-DD/*.json へ直接書き、
+            // 読み手 (Launcher) が in-memory 集計する方式へピボット (取り込みラグ解消・スキーマ drift 解消・SMB 複数 PC
+            // 同時書込でも competiton しない)。新規 install では作成せず、既存 DB は MigrateV22ToV23 で DROP する。
 
             // settingsテーブル作成
             string createSettingsTable = @"
@@ -1103,6 +1090,21 @@ namespace TonePrism.Manager
                         }
                     }
 
+                    if (currentVersion < 23)
+                    {
+                        // v22 → v23: play_records / surveys / launcher_surveys を DROP (#297、JSON 直読みへピボット)。
+                        // 子テーブル (games 参照) で CASCADE 波及なし＝親や他子に影響しない。前段完了時のみ bump。
+                        if (currentVersion >= 22)
+                        {
+                            MigrateV22ToV23(connection, migTransaction);
+                            currentVersion = 23;
+                        }
+                        else
+                        {
+                            Logger.Warn("[DatabaseManager] 直前の migration が未完のため v22→v23 も skip、user_version は " + currentVersion + " のまま据え置き");
+                        }
+                    }
+
                     // 達成バージョン（CurrentDbVersion ではなく currentVersion）を書き込む。
                     // 全 migration が成功していれば currentVersion == CurrentDbVersion。
                     // 部分的にスキップされた場合は、達成した最大バージョンが書き込まれる。
@@ -1554,118 +1556,13 @@ namespace TonePrism.Manager
         }
 
         /// <summary>
-        /// V10 -> V11: surveys / play_records スキーマ drift 修正
-        /// SPEC v1.5.1 (2026-03-28) で surveys（JSON 形式 → ★評価+コメント）、
-        /// play_records（累計方式 → イベントログ方式）に変更されたが、対応する
-        /// マイグレーションが書かれていなかったため、CREATE TABLE IF NOT EXISTS の
-        /// 仕様により旧スキーマのテーブルが温存されていた。本マイグレーションで修正。
-        ///
-        /// データがあるテーブルは破壊しないため、空テーブルのみ DROP & CREATE する。
-        /// データがある場合は警告ログを出して false を返し、`user_version` を 10 のまま
-        /// 保持することで次回起動時に再試行する（Manager 自体は正常起動を継続）。
+        /// V10 -> V11: かつては surveys / play_records のスキーマ drift（SPEC v1.5.1）を修正していた。
+        /// #297 (DB v23) で両テーブルを撤去したため、本 migration は **no-op**（即 true）。migration chain の
+        /// 連続性のために関数と呼び出しは残す（v10 以前の DB も chain を進めれば最終的に MigrateV22ToV23 で DROP される）。
         /// </summary>
-        /// <returns>全 drift fix が成功（または不要）なら true、データ残存でスキップしたら false</returns>
         private bool MigrateV10ToV11(SQLiteConnection connection, SQLiteTransaction transaction)
         {
-            Logger.Warn("[DatabaseManager] Executing migration V10 -> V11 (Fix surveys/play_records schema drift from SPEC v1.5.1)");
-
-            bool surveysOk = FixSurveysSchemaDrift(connection, transaction);
-            bool playRecordsOk = FixPlayRecordsSchemaDrift(connection, transaction);
-
-            bool allOk = surveysOk && playRecordsOk;
-            if (allOk)
-            {
-                Logger.Info("[DatabaseManager] Migration V10 -> V11 completed.");
-            }
-            else
-            {
-                Logger.Warn("[DatabaseManager] WARNING: Migration V10 -> V11 partially skipped (data exists in legacy-schema tables). user_version stays at 10. Next startup will retry.");
-            }
-            return allOk;
-        }
-
-        /// <summary>
-        /// surveys テーブルが旧 JSON 形式スキーマ（submitted_at / responses 列を持つ）の場合、
-        /// 新スキーマ（rating / comment / created_at）へ修正する。
-        /// データが残存している場合は警告ログを出して false を返す（Manager 起動は継続）。
-        /// （Codex P1 指摘 "Avoid marking DB v11 when drift migration is skipped" +
-        /// "Avoid hard-failing startup on non-empty drift tables" 対応）
-        /// </summary>
-        /// <returns>新スキーマ／drift fix 成功なら true、データ残存でスキップなら false</returns>
-        private bool FixSurveysSchemaDrift(SQLiteConnection connection, SQLiteTransaction transaction)
-        {
-            // 旧スキーマ判定: 'submitted_at' 列が存在するか
-            bool isOldSchema = TableHasColumn(connection, transaction, "surveys", "submitted_at");
-
-            if (!isOldSchema)
-            {
-                Logger.Info("[DatabaseManager] surveys は新スキーマです。マイグレーション不要。");
-                return true;
-            }
-
-            long rowCount = GetTableRowCount(connection, transaction, "surveys");
-            Logger.Warn($"[DatabaseManager] surveys に旧スキーマを検出 (行数: {rowCount})");
-
-            if (rowCount > 0)
-            {
-                // 旧 JSON 形式 → 新 ★評価+コメント形式の自動変換は responses JSON のスキーマが
-                // 不定でリスクが高いため未実装。Manager 起動は継続させ、警告ログで手動対応を促す。
-                // 呼び出し側の MigrateV10ToV11 が false を伝播し、user_version は 10 のまま維持される。
-                // 次回起動時にこの migration が再試行されるため、手動でデータを退避すれば次回 fix される。
-                Logger.Warn(
-                    $"[DatabaseManager] WARNING: surveys に {rowCount} 行のデータが残存。自動マイグレーションをスキップします。" +
-                    "tools/sqlite3/sqlite3.exe で旧データ（responses 列の JSON）を確認・退避してから手動で新スキーマへ移行してください。");
-                return false;
-            }
-
-            using (var cmd = new SQLiteCommand("DROP TABLE surveys", connection, transaction))
-            {
-                cmd.ExecuteNonQuery();
-            }
-            CreateSurveysTable(connection, transaction);
-            Logger.Info("[DatabaseManager] surveys を新スキーマで再作成しました。");
-            return true;
-        }
-
-        /// <summary>
-        /// play_records テーブルが旧累計方式スキーマ（play_count / total_play_time 列を持つ）の場合、
-        /// 新イベントログ方式スキーマ（start_time / end_time / play_duration / player_count）へ修正する。
-        /// データが残存している場合は警告ログを出して false を返す（Manager 起動は継続）。
-        /// （Codex P1 指摘 "Avoid marking DB v11 when drift migration is skipped" +
-        /// "Avoid hard-failing startup on non-empty drift tables" 対応）
-        /// </summary>
-        /// <returns>新スキーマ／drift fix 成功なら true、データ残存でスキップなら false</returns>
-        private bool FixPlayRecordsSchemaDrift(SQLiteConnection connection, SQLiteTransaction transaction)
-        {
-            // 旧スキーマ判定: 'play_count' 列が存在するか
-            bool isOldSchema = TableHasColumn(connection, transaction, "play_records", "play_count");
-
-            if (!isOldSchema)
-            {
-                Logger.Info("[DatabaseManager] play_records は新スキーマです。マイグレーション不要。");
-                return true;
-            }
-
-            long rowCount = GetTableRowCount(connection, transaction, "play_records");
-            Logger.Warn($"[DatabaseManager] play_records に旧スキーマを検出 (行数: {rowCount})");
-
-            if (rowCount > 0)
-            {
-                // 旧累計方式 → 新イベントログ方式の自動変換は元情報が失われているため不可能。
-                // Manager 起動は継続させ、警告ログで手動対応を促す。
-                // 呼び出し側の MigrateV10ToV11 が false を伝播し、user_version は 10 のまま維持される。
-                Logger.Warn(
-                    $"[DatabaseManager] WARNING: play_records に {rowCount} 行のデータが残存。自動マイグレーションをスキップします。" +
-                    "tools/sqlite3/sqlite3.exe で累計値（play_count / total_play_time）を退避してから手動で新スキーマへ移行してください。");
-                return false;
-            }
-
-            using (var cmd = new SQLiteCommand("DROP TABLE play_records", connection, transaction))
-            {
-                cmd.ExecuteNonQuery();
-            }
-            CreatePlayRecordsTable(connection, transaction);
-            Logger.Info("[DatabaseManager] play_records を新スキーマで再作成しました。");
+            // (#297) surveys / play_records は v23 で DROP するため、ここでの drift 修正は不要。
             return true;
         }
 
@@ -2280,46 +2177,8 @@ namespace TonePrism.Manager
             }
         }
 
-        /// <summary>
-        /// surveys テーブル作成（CreateTables / MigrateV10ToV11 共通）
-        /// </summary>
-        private static void CreateSurveysTable(SQLiteConnection connection, SQLiteTransaction transaction)
-        {
-            string sql = @"
-                CREATE TABLE IF NOT EXISTS surveys (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    game_id TEXT,
-                    rating INTEGER CHECK(rating BETWEEN 1 AND 5),
-                    comment TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE
-                )";
-            using (var cmd = new SQLiteCommand(sql, connection, transaction))
-            {
-                cmd.ExecuteNonQuery();
-            }
-        }
-
-        /// <summary>
-        /// play_records テーブル作成（CreateTables / MigrateV10ToV11 共通）
-        /// </summary>
-        private static void CreatePlayRecordsTable(SQLiteConnection connection, SQLiteTransaction transaction)
-        {
-            string sql = @"
-                CREATE TABLE IF NOT EXISTS play_records (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    game_id TEXT,
-                    start_time TEXT,
-                    end_time TEXT,
-                    play_duration INTEGER,
-                    player_count INTEGER,
-                    FOREIGN KEY(game_id) REFERENCES games(game_id) ON DELETE CASCADE
-                )";
-            using (var cmd = new SQLiteCommand(sql, connection, transaction))
-            {
-                cmd.ExecuteNonQuery();
-            }
-        }
+        // (#297 / DB v23) CreateSurveysTable / CreatePlayRecordsTable は撤去。プレイ記録・アンケートは SQLite に
+        // 保存せず Launcher が responses/ へ JSON 直書きする方式へピボット（MigrateV22ToV23 で既存テーブルを DROP）。
 
         /// <summary>
         /// 指定テーブルに指定列が存在するかチェック（PRAGMA table_info 経由）
@@ -2337,16 +2196,7 @@ namespace TonePrism.Manager
             return false;
         }
 
-        /// <summary>
-        /// 指定テーブルの行数を取得（COUNT(*)）
-        /// </summary>
-        private static long GetTableRowCount(SQLiteConnection connection, SQLiteTransaction transaction, string tableName)
-        {
-            using (var cmd = new SQLiteCommand($"SELECT COUNT(*) FROM {tableName}", connection, transaction))
-            {
-                return Convert.ToInt64(cmd.ExecuteScalar());
-            }
-        }
+        // (#297) GetTableRowCount は FixSurveys/PlayRecordsSchemaDrift 専用だったため撤去 (両関数は v23 撤去で削除)。
 
         private void CopyDevelopersToVersion(SQLiteConnection connection, SQLiteTransaction transaction, string gameId, int versionId)
         {
@@ -2413,6 +2263,25 @@ namespace TonePrism.Manager
         }
 
         /// <summary>
+        /// (#297) v22 → v23: プレイ記録・アンケートを SQLite から JSON 直読みへピボットするため、
+        /// `surveys` / `play_records` / `launcher_surveys` テーブルを DROP する。これらは games を参照する子テーブルで
+        /// CASCADE 波及が無く (親・他子に影響しない)、取り込み INSERT も Launcher 書込も未実装でデータ未蓄積のため
+        /// 安全に撤去できる。`DROP TABLE IF EXISTS` で冪等 (v10 以前の旧 DB で既に消えている / 名前違いでも no-op)。
+        /// (前例: backup_log の MigrateV18ToV19)
+        /// </summary>
+        private void MigrateV22ToV23(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            foreach (var table in new[] { "surveys", "play_records", "launcher_surveys" })
+            {
+                using (var cmd = new SQLiteCommand("DROP TABLE IF EXISTS " + table, connection, transaction))
+                {
+                    cmd.ExecuteNonQuery();
+                }
+                Logger.Info("[DatabaseManager] v22 → v23: " + table + " テーブルを削除しました (#297 JSON 直読みへピボット)");
+            }
+        }
+
+        /// <summary>
         /// (#253) intro_slides テーブルを作成 (CreateTables / MigrateV20ToV21 共用 helper)。
         /// スクリーンセーバー → ブラウズ間に表示するイントロガイドのスライド群。画像は `guide/` にファイル別管理し、
         /// DB には相対パス (`image_path`) のみ持つ (games のサムネ/背景と同流儀)。他テーブルへの FK は無い独立テーブル。
@@ -2448,9 +2317,7 @@ namespace TonePrism.Manager
             { "game_versions", new[] { "id", "game_id", "version", "executable_path", "arguments", "description", "title", "genre", "min_players", "max_players", "difficulty", "play_time", "controller_support", "supported_connection", "thumbnail_path", "background_path", "update_note", "registered_at" } },
             { "developers", new[] { "id", "game_id", "last_name", "first_name", "grade", "version_id" } },
             // (累積監査 round 4 Low-28/29) game_genres は v18 で DROP した dead table のため除去 (MigrateV17ToV18 参照)。
-            { "play_records", new[] { "id", "game_id", "start_time", "end_time", "play_duration", "player_count" } },
-            { "surveys", new[] { "id", "game_id", "rating", "comment", "created_at" } },
-            { "launcher_surveys", new[] { "id", "rating", "favorite_game_id", "comment", "created_at" } },
+            // (#297 / DB v23) play_records / surveys / launcher_surveys は DROP したため除去 (MigrateV22ToV23 参照)。
             { "settings", new[] { "key", "value" } },
             { "store_sections", new[] { "section_id", "title", "section_type", "section_source", "display_order", "max_display_count", "is_visible" } },
             { "store_section_games", new[] { "id", "section_id", "game_id", "display_order", "display_text" } },

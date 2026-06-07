@@ -227,10 +227,8 @@
     <Compile Include="Models\IntroSlide.cs" />
     <Compile Include="Models\LauncherSessionInfo.cs" />
     <Compile Include="Models\ManagerSessionInfo.cs" />
-    <Compile Include="Models\PlayRecord.cs" />
     <Compile Include="Models\Settings.cs" />
     <Compile Include="Models\StoreSectionInfo.cs" />
-    <Compile Include="Models\Survey.cs" />
     <Compile Include="Models\ReleaseInfo.cs" />
     <Compile Include="Models\UpdateCheckResult.cs" />
     <Compile Include="GenreList.cs" />

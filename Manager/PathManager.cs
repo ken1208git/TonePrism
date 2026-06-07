@@ -213,8 +213,10 @@ namespace TonePrism.Manager
         /// (#179 PR3b) Launcher session heartbeat 用 drop folder (`&lt;install&gt;/responses/launcher_sessions/`)。
         /// Launcher autoload `SessionHeartbeat` が 1 PC 1 file (`&lt;pc_name&gt;.json`) で heartbeat JSON を
         /// 10 秒周期 atomic write、Manager `LauncherSessionService` が on-demand polling で読込。
-        /// SPEC §3.8.7 仕様化、§6.5 の 3-state folder pattern (pending / imported/ / failed/) の **例外**
-        /// として heartbeat 用専用 sub-folder を明文化。
+        /// SPEC §3.8.7 仕様化、§6.5 の「IPC 用 subfolder」(data drop ではなく Launcher → Manager 状態通知)
+        /// として明文化 (data drop subfolder の play_records/ / surveys/ とは別カテゴリ)。
+        /// ※ 旧 §6.5 の 3-state folder pattern (pending / imported/ / failed/) は #297 で SQLite 取り込み
+        ///    経路ごと廃止されたため、本 heartbeat folder は「取り込み対象外の IPC 用」という位置づけのみ残る。
         ///
         /// Path SoT として両 component が同 relative path (`responses/launcher_sessions/`) を別実装
         /// (Manager C# / Launcher GDScript) で resolve、drift は SPEC §3.8.7 + §6.5 の literal 定義で
