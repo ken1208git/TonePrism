@@ -5,9 +5,12 @@ using System.Windows.Forms;
 namespace TonePrism.Manager.Services
 {
     /// <summary>
-    /// フォルダ選択の共通ヘルパー。WinForms 標準の <see cref="FolderBrowserDialog"/> を使う。
-    /// 加えて<b>直近に選んだフォルダを記憶</b>し、次回はそこを起点に開く (bulk 登録で毎回ツリーを
-    /// 頭から辿らずに済むようにする緩和策)。
+    /// <b>ゲームフォルダ選択用</b>のヘルパー (AddGameForm / VersionUpForm)。WinForms 標準の
+    /// <see cref="FolderBrowserDialog"/> を使い、加えて<b>直近に選んだフォルダを記憶</b>して次回はそこを起点に
+    /// 開く (bulk 登録で毎回ツリーを頭から辿らずに済むようにする緩和策)。
+    /// ※ 設定タブのログ/バックアップ参照先など他のフォルダ選択は文脈 (起点) が異なり記憶共有が不適なため
+    ///   このヘルパーを経由せず <see cref="FolderBrowserDialog"/> を直接使う (DPI 縮みバグはフォルダ選択
+    ///   全般に該当しうるが、本ヘルパーはゲームフォルダ用途に閉じる)。
     ///
     /// <para>背景 (なぜモダンな CommonOpenFileDialog をやめたか): フォルダ選択にはかつて WindowsAPICodePack の
     /// <c>CommonOpenFileDialog</c> (per-monitor DPI 対応のネイティブ COM ダイアログ) を使っていたが、本アプリは
@@ -63,11 +66,27 @@ namespace TonePrism.Manager.Services
                 DialogResult result = owner != null ? dialog.ShowDialog(owner) : dialog.ShowDialog();
                 if (result == DialogResult.OK)
                 {
-                    _lastSelectedFolder = dialog.SelectedPath; // 次回の起点に記憶
-                    return dialog.SelectedPath;
+                    string path = NormalizeTrailingSeparator(dialog.SelectedPath);
+                    _lastSelectedFolder = path; // 次回の起点に記憶
+                    return path;
                 }
                 return null;
             }
+        }
+
+        /// <summary>
+        /// 末尾セパレータを正規化する。<see cref="FolderBrowserDialog.SelectedPath"/> はドライブ直下選択時に
+        /// 末尾 <c>\</c> を含む (例: "D:\")。MainForm の前例 (SPEC §3.6 変更履歴 R4 L-4) に倣い末尾 <c>\</c> /
+        /// <c>/</c> を除去するが、<b>ドライブルート ("D:\") は除去すると drive-relative path ("D:") に化けて別物に
+        /// なるため温存する</b> (長さ &gt; 3 = ドライブルートより長いものだけ trim)。
+        /// </summary>
+        private static string NormalizeTrailingSeparator(string path)
+        {
+            if (string.IsNullOrEmpty(path) || path.Length <= 3)
+            {
+                return path; // "D:\" 等のドライブルート / 空はそのまま (drive-relative 化を避ける)
+            }
+            return path.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
         }
     }
 }
