@@ -25,7 +25,9 @@ namespace TonePrism.Manager.Services
     /// </summary>
     public static class DpiSafeFolderPicker
     {
-        // 直近に選択したフォルダ (プロセス内で記憶)。bulk 登録時に兄弟フォルダをすぐ選べるよう次回の起点に使う。
+        // 直近に選択したフォルダ。プロセス内で記憶し、AddGameForm / VersionUpForm 横断で共有する
+        // (どちらもゲームフォルダ選択で起点が同じ親になりやすいため共有が有益)。bulk 登録時に兄弟フォルダを
+        // すぐ選べるよう次回の起点に使う。
         private static string _lastSelectedFolder;
 
         /// <summary>

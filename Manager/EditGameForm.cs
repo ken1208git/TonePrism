@@ -9,7 +9,6 @@ using System.Windows.Forms;
 using TonePrism.Manager.Controls;
 using TonePrism.Manager.Models;
 using TonePrism.Manager.Services;
-using Microsoft.WindowsAPICodePack.Dialogs;
 
 namespace TonePrism.Manager
 {
