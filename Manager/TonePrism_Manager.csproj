@@ -240,6 +240,7 @@
     <Compile Include="Services\SessionBackupCoordinator.cs" />
     <Compile Include="Services\BackupCatalogService.cs" />
     <Compile Include="Services\DeveloperListManager.cs" />
+    <Compile Include="Services\DpiSafeFolderPicker.cs" />
     <Compile Include="Services\FileOperationService.cs" />
     <Compile Include="Services\FolderDeletionService.cs" />
     <Compile Include="Services\GameFormHelper.cs" />

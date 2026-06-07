@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using TonePrism.Manager.Models;
 using TonePrism.Manager.Services;
-using Microsoft.WindowsAPICodePack.Dialogs;
 
 namespace TonePrism.Manager
 {
@@ -149,26 +148,15 @@ namespace TonePrism.Manager
         /// </summary>
         private void btnSelectGameFolder_Click(object sender, EventArgs e)
         {
-            using (var dialog = new CommonOpenFileDialog())
+            // フォルダ選択は DpiSafeFolderPicker 経由 (CommonOpenFileDialog の DPI 縮みバグ対策。詳細は同クラス)。
+            string folder = DpiSafeFolderPicker.PickFolder(this, "ゲームフォルダを選択してください", txtGameFolder.Text);
+            if (folder != null)
             {
-                dialog.IsFolderPicker = true;
-                dialog.Title = "ゲームフォルダを選択してください";
-                dialog.Multiselect = false;
+                sourceGameFolder = folder;
+                txtGameFolder.Text = sourceGameFolder;
 
-                // 現在のパスが設定されている場合は、そこから開始
-                if (!string.IsNullOrEmpty(txtGameFolder.Text) && Directory.Exists(txtGameFolder.Text))
-                {
-                    dialog.InitialDirectory = txtGameFolder.Text;
-                }
-
-                if (dialog.ShowDialog() == CommonFileDialogResult.Ok)
-                {
-                    sourceGameFolder = dialog.FileName;
-                    txtGameFolder.Text = sourceGameFolder;
-                    
-                    // 自動検出を実行
-                    AutoDetectFiles();
-                }
+                // 自動検出を実行
+                AutoDetectFiles();
             }
         }
 
