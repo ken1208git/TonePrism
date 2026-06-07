@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Linq;
 using System.Text;
 using System.Windows.Forms;
+using TonePrism.Manager.Models;
 using TonePrism.Manager.Services;
 
 namespace TonePrism.Manager
@@ -23,15 +24,24 @@ namespace TonePrism.Manager
         // (#250 PR2) true = 復元直後の自動チェック / false = バックアップタブの「整合性チェック」ボタンからの手動実行。
         // 文言を切替える (手動時は「復元完了」等の復元前提の言い回しを避ける)。
         private readonly bool _postRestore;
+        // (#250 PR3b) DB と一緒にゲームファイル (games/+guide/) を復元したときの結果。null = アセット復元なし
+        // (DBのみ復元 / 手動整合性チェック)。非 null のとき copied/deleted/missing 等のアセット節を追記する。
+        private readonly AssetRestoreResult _assetResult;
         private TextBox _body;
 
-        public RestoreReportForm(RestoreReconciliationResult result, string safetyPath, bool postRestore = true)
+        public RestoreReportForm(RestoreReconciliationResult result, string safetyPath, bool postRestore = true, AssetRestoreResult assetResult = null)
         {
             _result = result;
             _safetyPath = safetyPath;
             _postRestore = postRestore;
+            _assetResult = assetResult;
             BuildUi();
         }
+
+        /// <summary>アセット復元で「対処が必要」級の問題 (全体失敗 or プール実体欠落) があったか。headline を赤に格上げ。</summary>
+        private bool AssetCritical => _assetResult != null && (_assetResult.IsFailed || _assetResult.MissingBlobRelPaths.Count > 0);
+        /// <summary>アセット復元で軽微な不完全 (per-file 失敗 or 削除抑止) があったか (起動への致命傷ではない)。</summary>
+        private bool AssetMinor => _assetResult != null && !AssetCritical && (_assetResult.IsPartial || _assetResult.DeletionSuppressed);
 
         private void BuildUi()
         {
@@ -46,21 +56,32 @@ namespace TonePrism.Manager
 
             string headline;
             Color headColor;
+            // (#250 PR3b review #4) DB 側 (AnalysisFailed / DB-critical) が見出しを取るとき、アセット側の重大問題が
+            // 見出しから消えないよう suffix で併記する (本文 AppendAssetSection には元々出るが、見出しの強調が漏れる)。
+            string assetCriticalSuffix = AssetCritical ? "／ゲームファイルの復元にも問題あり" : "";
             if (_result.AnalysisFailed)
             {
                 // (レビュー対応 #2) 整合性チェック自体の失敗は「スキーマで DB が読めない」級の深刻状態
                 // (復元後 migration 失敗等)。orange ではなく critical 同等の赤で「対処が必要」と明示する。
-                headline = "⚠ 整合性チェックを実行できませんでした（対処が必要）";
+                headline = "⚠ 整合性チェックを実行できませんでした（対処が必要）" + assetCriticalSuffix;
                 headColor = Color.Firebrick;
             }
             else if (_result.HasCriticalFindings)
             {
-                headline = _postRestore
+                headline = (_postRestore
                     ? "⚠ 復元後、起動できないゲームがあります（対処が必要）"
-                    : "⚠ 起動できないゲームがあります（対処が必要）";
+                    : "⚠ 起動できないゲームがあります（対処が必要）") + assetCriticalSuffix;
                 headColor = Color.Firebrick;
             }
-            else if (_result.HasAnyFindings)
+            else if (AssetCritical)
+            {
+                // (#250 PR3b) DB の整合性は問題ないが、ゲームファイルの復元で実体欠落 / 全体失敗があった。
+                headline = _assetResult.IsFailed
+                    ? "⚠ ゲームファイルの復元に失敗しました（対処が必要）"
+                    : "⚠ 一部のゲームファイルを復元できませんでした（対処が必要）";
+                headColor = Color.Firebrick;
+            }
+            else if (_result.HasAnyFindings || AssetMinor)
             {
                 headline = _postRestore
                     ? "復元は完了しました（軽微なズレあり・起動への影響なし）"
@@ -142,9 +163,27 @@ namespace TonePrism.Manager
         {
             var sb = new StringBuilder();
 
-            sb.AppendLine("【まず確認】バックアップ／復元の対象は toneprism.db（データベース）だけで、");
-            sb.AppendLine("ゲーム本体の games フォルダは含まれません。そのため、" + (_postRestore ? "いま復元した DB と、" : "現在の DB と、"));
-            sb.AppendLine("ディスク上の games フォルダの「時点」がズレていると、以下のような食い違いが起きます。");
+            if (_assetResult != null && _assetResult.IsFailed)
+            {
+                // (#250 PR3b review #2) ゲームファイルも復元しようとしたが**全体失敗**したケース。DBのみ前提の「games は
+                // 含まれない」案内も「一緒に揃えた」案内も誤りになるので、専用の前置きにする (詳細は下のアセット節)。
+                sb.AppendLine("【まず確認】ゲームファイル本体など、ディスク上のファイルも一緒に復元しようとしましたが、復元できませんでした。");
+                sb.AppendLine("データベースの復元は完了しています。下の「ゲームファイルの復元結果」に失敗の内容と対処を示します。");
+            }
+            else if (_assetResult != null)
+            {
+                // (#250 PR3b) DB とゲームファイルを一緒に復元したケース。「games は含まれない」という DBのみ前提の
+                // 案内は誤りになるので、一緒に戻した旨と「控え欠落で食い違いが残りうる」点に切替える。
+                sb.AppendLine("【まず確認】今回はゲームの登録情報（データベース）に加えて、ゲームファイル本体など、ディスク上のファイルも一緒に復元しました。");
+                sb.AppendLine("通常は両者の「時点」が揃いますが、控え（プール）に一部の実体が無かった場合などは");
+                sb.AppendLine("食い違いが残ることがあります。以下にその有無と内訳を示します。");
+            }
+            else
+            {
+                sb.AppendLine("【まず確認】バックアップ／復元の対象は toneprism.db（データベース）だけで、");
+                sb.AppendLine("ゲームのファイルや初回説明の画像は含まれません。そのため、" + (_postRestore ? "いま復元した DB と、" : "現在の DB と、"));
+                sb.AppendLine("ディスク上のゲームファイルの「時点」がズレていると、以下のような食い違いが起きます。");
+            }
             sb.AppendLine();
             if (!string.IsNullOrEmpty(_safetyPath))
             {
@@ -154,6 +193,10 @@ namespace TonePrism.Manager
             }
             sb.AppendLine(new string('-', 70));
             sb.AppendLine();
+
+            // (#250 PR3b) アセット復元の結果節 (reconcile の早期 return より前に出すことで、DB 整合は綺麗でも
+            // ゲームファイル側に問題があるケースを必ず表示する)。
+            AppendAssetSection(sb);
 
             if (_result.AnalysisFailed)
             {
@@ -297,67 +340,109 @@ namespace TonePrism.Manager
             // 浮くのを避ける。
             if (_result.BrokenGames.Count > 0 || _result.MissingVersionFolders.Count > 0 || _result.OrphanFolders.Count > 0)
             {
-                sb.AppendLine("  1. すべての展示 PC で Launcher を閉じてください（ファイルを掴んでいると");
-                sb.AppendLine("     フォルダの差し替えができません）。");
+                sb.AppendLine("  1. すべての展示 PC で Launcher（来場者向けの画面）を閉じてください");
+                sb.AppendLine("     （開いているとファイルを掴んでいて、復元やフォルダの差し替えができません）。");
                 sb.AppendLine();
             }
             if (_result.BrokenGames.Count > 0 || _result.MissingVersionFolders.Count > 0)
             {
-                string dbWord = _postRestore ? "復元した DB" : "今の DB";
-                sb.AppendLine("  2. 上の「想定パス／想定フォルダ」に当たるゲームフォルダを用意します。");
-                sb.AppendLine("     " + dbWord + "と同じ時点の games フォルダが、別 PC・別ドライブ・");
-                sb.AppendLine("     共有サーバー等に残っていれば、そのフォルダを games/ 配下にコピーして");
-                sb.AppendLine("     ください（フォルダ名＝ゲーム ID／バージョン leaf を一致させる）。");
-                sb.AppendLine();
-                sb.AppendLine("  3. コピーが終わったら、バックアップ画面の「整合性チェック」ボタンを押すと、");
-                sb.AppendLine("     このチェックをもう一度実行できます（Manager の再起動では再チェックされません）。");
-                sb.AppendLine("     「起動できないゲーム」が 0 件になれば整合した状態です。");
+                // (ユーザー指摘) 部員はふだん Manager (GUI) で操作し、生の games フォルダをエクスプローラーで触る機会は
+                // ほぼ無い。PR3b で「控えのある世代を復元すれば DB+ゲームファイルが一貫してそろう」「safety_*.db で undo」
+                // が GUI で完結するようになったので、**GUI 操作を主・手動フォルダコピーを最終手段**に並べ替える。
+                sb.AppendLine("  2. バックアップ履歴から、ゲームファイルの控えがある世代を選んで「復元」してください。");
+                sb.AppendLine("     登録データとゲームファイルが同じ時点でそろい、起動できないゲームが解消します");
+                sb.AppendLine("     （確認画面に「ゲームファイル本体など…戻します」と出る世代が対象です）。");
                 sb.AppendLine();
                 if (_postRestore)
                 {
-                    // (round: ユーザー指摘) safety_*.db = 復元の直前に退避した DB = 復元前の状態。これを戻すのは
-                    // 「今回の復元を取り消す」操作であって、元の DB に問題があって復元したのなら問題も一緒に戻る。
-                    // 「今の games に合わせるなら safety が確実」とだけ書くのは誤誘導なので、取り消しである旨と注意を明示。
-                    sb.AppendLine("  4. 当時の games フォルダが手に入らない場合は、今回の復元自体を取り消せます。");
-                    sb.AppendLine("     復元の直前の DB が safety_*.db に退避されているので、それを「復元」で戻せば、");
-                    sb.AppendLine("     復元前＝いまの games フォルダと整合した状態に戻ります。");
-                    sb.AppendLine("     ※ただし、元の DB に問題があって今回復元したのなら、戻すとその問題も一緒に");
-                    sb.AppendLine("       戻ります。その場合は上の 2〜3（当時の games を補う）で直すのが本筋です。");
+                    // safety_*.db = 復元の直前に退避した状態。戻すのは「今回の復元を取り消す」操作で、元のデータに問題が
+                    // あって復元したのならその問題も一緒に戻る点を明示 (round2 のユーザー指摘)。
+                    sb.AppendLine("  3. 今回の復元自体を取り消したいだけなら、復元の直前に自動退避された safety_*.db を");
+                    sb.AppendLine("     履歴から「復元」してください。登録データもゲームファイルも復元前の状態に戻ります。");
+                    sb.AppendLine("     ※ただし、元のデータに問題があって今回復元したのなら、戻すとその問題も一緒に戻ります。");
+                    sb.AppendLine("       その場合は手順 2（当時の控えから戻す）が本筋です。");
+                    sb.AppendLine();
                 }
-                else
-                {
-                    sb.AppendLine("  4. 当時の games フォルダが手に入らない場合は、いまの games フォルダに合う");
-                    sb.AppendLine("     時点のバックアップを、履歴から「復元」する方法もあります。");
-                }
+                sb.AppendLine("  ・（最終手段・ふだんは使いません）当時のゲームファイルがどのバックアップにも無く、");
+                sb.AppendLine("    別 PC・別ドライブ・共有サーバー等にしか残っていない場合は、そのフォルダを games/ 配下へ");
+                sb.AppendLine("    手動でコピーし（フォルダ名＝ゲーム ID／バージョン leaf を一致）、バックアップ画面の");
+                sb.AppendLine("    「整合性チェック」で「起動できないゲーム」が 0 件になったか確認します。");
             }
             else if (_result.OrphanFolders.Count > 0)
             {
-                // (review #2) 孤児フォルダがあるときだけ削除案内を出す。画像欠落だけのときに「余分なフォルダを削除」と
-                // 案内するのは無関係なので、else を「孤児がある場合」に限定する。
-                sb.AppendLine("  2. 余分なフォルダは中身を確認のうえ、不要であれば手動で削除してください。");
-                sb.AppendLine("     必要なフォルダを誤って消さないよう、削除前に中身をご確認ください。");
+                // (review #2 / ユーザー指摘) 孤児フォルダは起動に影響しないので「基本そのままで問題なし」を前面に。
+                // 手動削除は容量が気になるときの任意操作 (部員にフォルダ操作を強いない)。
+                sb.AppendLine("  2. 「登録に無い余分なフォルダ」は起動には影響しないので、基本はそのままで問題ありません。");
+                sb.AppendLine("     ディスク容量が気になるときだけ、中身を確認のうえ手動で削除してください");
+                sb.AppendLine("     （必要なフォルダを誤って消さないよう、削除前に中身をご確認ください）。");
             }
             // (review #2) 画像 (サムネ/背景/初回説明スライド) 欠落の直し方を明示する。旧実装は画像のみの finding でも
             // games フォルダ系の手順 or 孤児削除しか出さず、画像欠落の修正手順が一切無かった。
             if (_result.BrokenAssets.Count > 0 || _result.BrokenIntroSlides.Count > 0)
             {
-                sb.AppendLine("  ・画像の欠落（サムネイル／背景／初回説明スライド）は、当時の games/guide フォルダから");
+                sb.AppendLine("  ・画像の欠落（サムネイル／背景／初回説明スライド）は、当時のゲームや初回説明の");
                 sb.AppendLine("    画像ファイルを補うか、ゲーム編集・スライド編集で画像を選び直すと解消できます。");
             }
             sb.AppendLine();
-            if (_postRestore)
+            if (!_postRestore)
             {
-                sb.AppendLine("  ※ 今回の復元自体を取り消したいだけなら、退避ファイル（safety_*.db）を「復元」で");
-                sb.AppendLine("     戻すのが確実です（復元前＝いまの games フォルダに合った状態に戻ります。ただし、");
-                sb.AppendLine("     元の DB に問題があって復元したのなら、その問題も戻ります）。");
+                sb.AppendLine("  ※ いまのゲームファイルに合う状態に戻したいときは、バックアップ履歴から合致する時点を");
+                sb.AppendLine("     「復元」してください。");
             }
-            else
+            else if (_result.BrokenGames.Count == 0 && _result.MissingVersionFolders.Count == 0)
             {
-                sb.AppendLine("  ※ いまの games フォルダに合う状態に戻したいときは、バックアップ履歴から");
-                sb.AppendLine("     合致する時点を「復元」してください。");
+                // postRestore で broken/missing が無い (= 上の手順 3 で safety を案内していない) ケースのみ補足。重複回避。
+                sb.AppendLine("  ※ 今回の復元自体を取り消したいだけなら、退避ファイル（safety_*.db）を「復元」すると、");
+                sb.AppendLine("     登録データもゲームファイルも復元前の状態に戻ります（ただし、元のデータに問題があって");
+                sb.AppendLine("     復元したのなら、その問題も戻ります）。");
             }
 
             return sb.ToString();
+        }
+
+        /// <summary>(#250 PR3b) アセット (games/+guide/) 復元の結果を追記する。null のとき何もしない。</summary>
+        private void AppendAssetSection(StringBuilder sb)
+        {
+            if (_assetResult == null) return;
+
+            sb.AppendLine("■ ゲームファイル本体などの復元結果");
+            if (_assetResult.IsFailed)
+            {
+                sb.AppendLine("  ゲームファイルの復元を実行できませんでした:");
+                sb.AppendLine("    " + (_assetResult.Message ?? "(詳細不明)"));
+                sb.AppendLine();
+                sb.AppendLine("  データベースの復元は完了しています。ゲームファイルだけ別の世代でやり直すか、");
+                sb.AppendLine("  当時の games フォルダを手動で補ってください。");
+            }
+            else
+            {
+                sb.AppendLine($"  コピー: {_assetResult.CopiedCount} 件 ／ 変更なし: {_assetResult.SkippedCount} 件 ／ 削除: {_assetResult.DeletedCount} 件");
+                if (_assetResult.FailedCount > 0)
+                    sb.AppendLine($"  復元できなかったファイル: {_assetResult.FailedCount} 件");
+
+                if (_assetResult.MissingBlobRelPaths.Count > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("  控え（プール）に実体が無く復元できなかったファイル（現在のファイルは保持）:");
+                    foreach (var rel in _assetResult.MissingBlobRelPaths.Take(20))
+                        sb.AppendLine("    ・" + rel);
+                    if (_assetResult.MissingBlobRelPaths.Count > 20)
+                        sb.AppendLine($"    …ほか {_assetResult.MissingBlobRelPaths.Count - 20} 件");
+                    sb.AppendLine();
+                    sb.AppendLine("  これらに対応するゲームは起動できない / 表示が欠ける可能性があります。");
+                    sb.AppendLine("  別の世代を「ゲームファイルも一緒に復元」でやり直すと解消することがあります。");
+                }
+
+                if (_assetResult.DeletionSuppressed)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("  ※ 控えの目録が不完全だったため、余分なファイルの削除は行いませんでした");
+                    sb.AppendLine("    （この世代に無いファイルが現在のフォルダに残っている可能性があります）。");
+                }
+            }
+            sb.AppendLine();
+            sb.AppendLine(new string('-', 70));
+            sb.AppendLine();
         }
     }
 }

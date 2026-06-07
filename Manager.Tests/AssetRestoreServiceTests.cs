@@ -359,5 +359,47 @@ namespace TonePrism.Manager.Tests
             Assert.True(File.Exists(GameFull("g1/EXTRA.bin"))); // 余剰が消されない
             Assert.True(File.Exists(GameFull("g1/a.txt")));
         }
+
+        // (#250 PR3b round3) 復元前退避 (safety アセット控え) 関連。
+
+        [Fact]
+        public void GarbageCollect_ProtectsSafetySnapshotBlobs()
+        {
+            // safety 控えだけが参照する blob を GC が消さないこと (GC が includeSafety:true で参照集合を作る)。
+            WriteGame("g1/keep.txt", "keep");
+            WriteGame("g1/safetyonly.txt", "safety-only-content");
+            var safetyRes = _snap.CreateSnapshot("20260101_000001", "safety", null, default(CancellationToken));
+            Assert.True(safetyRes.IsSuccess, "safety snapshot must succeed: " + safetyRes.Message);
+            string safetyHash = ManifestHashFor(safetyRes.ManifestPath, "games/g1/safetyonly.txt");
+            Assert.True(File.Exists(PoolBlobPath(safetyHash)));
+
+            // safetyonly を消して auto 控え → auto は safetyonly を参照しない。auto 控えが GC を回す
+            // (GcGracePeriod=Zero なので grace では守られず、safety 控えの参照だけが blob を守る)。
+            File.Delete(GameFull("g1/safetyonly.txt"));
+            var autoRes = _snap.CreateSnapshot("20260101_000002", "auto", null, default(CancellationToken));
+            Assert.True(autoRes.IsSuccess);
+
+            Assert.True(File.Exists(PoolBlobPath(safetyHash)), "safety 控えが参照する blob は GC で消えてはいけない");
+        }
+
+        [Fact]
+        public void PruneSafetySnapshots_KeepsNewestN()
+        {
+            WriteGame("g1/a.txt", "alpha");
+            _snap.CreateSnapshot("20260101_000001", "safety", null, default(CancellationToken));
+            _snap.CreateSnapshot("20260101_000002", "safety", null, default(CancellationToken));
+            _snap.CreateSnapshot("20260101_000003", "safety", null, default(CancellationToken));
+            string safetyDir = Path.Combine(_snap.GetSnapshotRootDirectory(), "safety");
+            Assert.Equal(3, Directory.GetFiles(safetyDir, "*.manifest").Length);
+
+            _snap.PruneSafetySnapshots(2);
+
+            var remaining = Directory.GetFiles(safetyDir, "*.manifest")
+                .Select(Path.GetFileNameWithoutExtension).ToList();
+            Assert.Equal(2, remaining.Count);
+            Assert.Contains(remaining, n => n.StartsWith("20260101_000003")); // 新しい順に残る
+            Assert.Contains(remaining, n => n.StartsWith("20260101_000002"));
+            Assert.DoesNotContain(remaining, n => n.StartsWith("20260101_000001"));
+        }
     }
 }

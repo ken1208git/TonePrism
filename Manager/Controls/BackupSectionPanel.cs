@@ -40,10 +40,15 @@ namespace TonePrism.Manager.Controls
             // (Manager v0.21.0) ファイル由来の履歴では開始 / 完了の区別が無いため日時は「作成日時」1 列に統合。
             gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "created", HeaderText = "作成日時", FillWeight = 150, MinimumWidth = 150 });
             gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "pc", HeaderText = "実行PC", FillWeight = 100, MinimumWidth = 90 });
-            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "trigger", HeaderText = "トリガ", FillWeight = 55, MinimumWidth = 50 });
+            // (ユーザー指摘) ヘッダー「トリガ」は列幅が狭く「トリ／ガ」と 2 行折り返しになり、かつ技術用語で分かりにくい。
+            // 値は「自動／手動／退避」＝バックアップの種類なので「種類」に変更 (2 文字で折り返さず、意味も平易)。
+            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "trigger", HeaderText = "種類", FillWeight = 55, MinimumWidth = 56 });
             // (#200) 「状態」列は持たない。backup_log 廃止 (v19) 後は失敗はファイルを残さず履歴に出ない
             // (走査結果は実質すべて成功ファイル) ため状態列は情報量ゼロ。失敗通知は status bar / Logger で覆える。
-            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "size", HeaderText = "サイズ", FillWeight = 75, MinimumWidth = 70 });
+            // (ユーザー指摘) この列は .db ファイル単体のサイズ (DBのみ、数百KB級)。世代全体 (ゲームファイル込み) と
+            // 誤解されるのを避けるため「DBサイズ」と明示する。ゲームファイル込みの実使用量は共有プール (CAS) で重複排除
+            // されるため世代別には出せず、下の「最終バックアップ」欄の実使用 (プール全体) で確認する。
+            gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "size", HeaderText = "DBサイズ", FillWeight = 80, MinimumWidth = 72 });
             gridHistory.Columns.Add(new DataGridViewTextBoxColumn { Name = "file", HeaderText = "ファイルパス", FillWeight = 320, MinimumWidth = 120 });
         }
 
@@ -149,12 +154,12 @@ namespace TonePrism.Manager.Controls
                 if (snap != null && snap.IsSuccess && snap.IsPartial)
                 {
                     // (round8 C1) 深部フォルダの列挙失敗で一部 skip した場合は「部分的な控え」を明示 (完全控えと誤認させない)。
-                    msg += $"\n\n⚠ ゲームファイル (games/guide) のバックアップでフォルダ {snap.SkippedDirCount} 個 / ファイル {snap.SkippedFileCount} 個を控えられずスキップしました（部分的なバックアップの可能性。SMB 一過性 I/O / 権限 / 並行編集での消失等）。";
+                    msg += $"\n\n⚠ ゲームファイルや初回説明の画像のバックアップでフォルダ {snap.SkippedDirCount} 個 / ファイル {snap.SkippedFileCount} 個を控えられずスキップしました（部分的なバックアップの可能性。SMB 一過性 I/O / 権限 / 並行編集での消失等）。";
                 }
                 else if (snap != null && (snap.IsFailed || snap.IsAnomaly))
                 {
                     // (レビュー M2) 失敗/異常は黙らず併記 (DB バックアップ自体は成功)。設定で無効・通常スキップは触れない。
-                    msg += $"\n\n⚠ ゲームファイル (games/guide) のバックアップは取得できませんでした（DB バックアップは成功）。\n{snap.Message}";
+                    msg += $"\n\n⚠ ゲームファイルや初回説明の画像のバックアップは取得できませんでした（DB バックアップは成功）。\n{snap.Message}";
                 }
                 MessageBox.Show(msg, "バックアップ成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -205,7 +210,29 @@ namespace TonePrism.Manager.Controls
                 return;
             }
 
-            using (var confirm = new RestoreConfirmForm(entry))
+            // (#250 PR3b) この DB 世代とペアになるアセット控え (manifest) を解決する。.db と .manifest は別ファイルで厳密な
+            // 紐づけ ID を持たないため、trigger type ごとに解決方法を変える。null = ペア無し → 確認ダイアログで「DBのみ」固定。
+            //
+            // - **auto/manual** (review #1): DB バックアップ成功直後に同一 timestamp で manifest を co-create するため、
+            //   「T 以下で最大時刻」(replace-in-session で .db>manifest を正しく拾う) で解決。誤って近接の別世代を拾わないよう
+            //   FindSnapshotForBackup は auto/manual のみ走査する。
+            // - **safety** (round3): 復元の直前に退避した DB。本 PR では復元時に **その時点専用のアセット safety 控えを必ず
+            //   co-create** する (下のワーカー参照) ので、同 timestamp/host の専用ペアを **完全一致** で引く (FindSafetyManifestForBackup)。
+            //   時刻 fallback を使わない＝review #1 の「safety を近接世代に誤ペアしてゲームファイルを誤削除」穴を構造的に回避。
+            //   これにより safety_db を「復元の取り消し (undo)」したとき、games も当時へ正しく戻る。
+            // - **unknown** (v0.20.0 以前の旧フラット形式): 対の控えを持たないため常に DBのみ復元。
+            AssetSnapshotInfo pairedSnap = null;
+            try
+            {
+                if (Services.RestorePairingPolicy.IsAssetPairingEligible(entry.TriggerType))
+                    pairedSnap = _dbManager.AssetSnapshotService?.FindSnapshotForBackup(entry.StartedAtLocal, entry.PcName);
+                else if (string.Equals(entry.TriggerType, "safety", StringComparison.OrdinalIgnoreCase))
+                    pairedSnap = _dbManager.AssetSnapshotService?.FindSafetyManifestForBackup(
+                        entry.StartedAtLocal.ToString("yyyyMMdd_HHmmss"), entry.PcName);
+            }
+            catch (Exception ex) { Logger.Warn("[BackupSectionPanel] アセット控えのペアリングに失敗 (DBのみ復元へフォールバック): " + ex.Message); }
+
+            using (var confirm = new RestoreConfirmForm(entry, pairedSnap))
             {
                 if (confirm.ShowDialog(this) != DialogResult.Yes)
                 {
@@ -213,6 +240,9 @@ namespace TonePrism.Manager.Controls
                     return;
                 }
             }
+            // (#250 PR3b round2: ユーザー判断) チェックボックスは廃止し「復元＝一貫時点復元」に一本化。控えのある世代
+            // (auto/manual でペアリング成立) なら games/guide も常に戻す。控えが無ければ DBのみ。
+            string assetManifestPath = pairedSnap?.ManifestPath;
 
             // (監査ログ) 確認コード入力を通過した時点で復元意思が確定。以降の経路 (session conflict / cancel /
             // abort / success) を Logger に残して事後追跡できるようにする。旧実装は MessageBox エラー文言が
@@ -277,6 +307,20 @@ namespace TonePrism.Manager.Controls
 
             string safetyPath = null;
             RestoreDbMissingException dbMissing = null;
+            AssetRestoreResult assetResult = null;
+            // (#250 PR3b round3) アセット reconcile は games/ を破壊的に書き換える (削除含む)。DB は RestoreService が
+            // safety_*.db に退避＆自動削除する (DefaultSafetyRetentionCount 件) ので、ここでは **games/guide だけ** を
+            // safety_*.db と同 timestamp/host の「アセット safety 控え」として退避し、二重退避を避けつつ可逆化する。
+            // これで safety_*.db を「復元の取り消し (undo)」したとき、ペアのアセット safety 控えから games も当時へ戻る。
+            // 順序: DB 復元 → (現 games を) アセット退避 → reconcile。退避は DB 置換後・reconcile 前なので「キャンセル＝不変」
+            // の罠 (round3 #1) は構造的に発生せず、退避自体は非キャンセル (DB 置換済の後戻り不可点以降)。退避が不完全なら
+            // 破壊的 reconcile を行わず DBのみ復元へ degrade する (games 無変更=安全)。
+            bool assetRetreatAttempted = assetManifestPath != null;
+            bool assetRetreatFailed = false;
+            // (review round5 #3) 退避で実際にアセット控え(manifest)が書かれたか。live games が空の世代は
+            // CreateSnapshot が manifest を書かず Success(ManifestPath=null) を返す＝退避は成立扱いだが undo で games は
+            // 戻せない。undo 案内 (undoHint) を「ゲームファイルも戻せる」と過剰約束しないよう、これを真実の源にする。
+            bool assetRetreatHasControl = false;
             DialogResult dr;
             using (var dialog = new ProcessingDialog((progress, token) =>
             {
@@ -284,6 +328,61 @@ namespace TonePrism.Manager.Controls
                 // ProcessingDialog には Abort させる (例外 Message = 具体的な復旧手順がそのまま画面表示される)。
                 try { safetyPath = _dbManager.RestoreService.Restore(resolvedPath, progress, token, allowIntegrityWarnings); }
                 catch (RestoreDbMissingException dmx) { dbMissing = dmx; throw; }
+
+                // (#250 PR3b round3) DB 置換成功後・reconcile 前に、現 games/guide を safety_*.db と同 ts/host のアセット
+                // safety 控えへ退避する (undo 用)。**非キャンセル** (DB 置換済=後戻り不可点以降)。退避が不完全 (退避時刻の
+                // 解析失敗 / 列挙失敗 / 部分取得) なら破壊的 reconcile を行わず DBのみ復元へ degrade。games が空 (新規 install
+                // 相当=ManifestPath null) の Success は「失うものが無い」ので退避成立扱いで OK (reconcile は削除せずコピーのみ)。
+                // (review round4 C-2 既知の非対称) 退避時に live games が空の世代は対のアセット safety 控えが作られないため、
+                // 後で safety_*.db を undo 復元しても games は DBのみ復元になり、reconcile で増えた games は live に残る
+                // (= 孤児。整合性チェックで検出可能・データ消失ではない)。新規 install 直後に過去世代を復元してすぐ undo する
+                // 稀ケースに限る。完全対称化 (空でも空 manifest を書く) は CreateSnapshot 改修を伴うため別 issue (S-1 と併せて)。
+                if (assetManifestPath != null)
+                {
+                    progress?.Report(new ProgressInfo(0, "復元前に現在のゲームファイルを退避中（やり直し用）..."));
+                    string retreatTs = Services.RestorePairingPolicy.ParseSafetyTimestamp(safetyPath);
+                    var pre = retreatTs != null
+                        ? _dbManager.AssetSnapshotService.CreateSnapshot(retreatTs, "safety", progress, CancellationToken.None)
+                        : null;
+                    bool retreatOk = pre != null && pre.IsSuccess && !pre.IsPartial;
+                    if (retreatOk)
+                    {
+                        // (review round5 #3 / round6 #1) 「実際に undo で games を戻せる控えが書かれた」かを真実の源にする。
+                        // ManifestPath != null だけでは不十分: games/ が「存在するが空」(fresh install で EnsureDirectoriesExist が
+                        // 作る) と CreateSnapshot は **0 エントリの manifest** を書き ManifestPath != null を返す。この空の控えで
+                        // undo すると RestoreFromManifest の空ガード (非空 live を 0 エントリで全消去する暴発防止) に当たり Failed に
+                        // なる＝undo で games を戻せない。よって **FileCount > 0** も条件に加え、空退避を「undo 可能」と誤案内しない。
+                        assetRetreatHasControl = pre.ManifestPath != null && pre.FileCount > 0;
+                        _dbManager.AssetSnapshotService.PruneSafetySnapshots(Services.RestoreService.DefaultSafetyRetentionCount);
+                    }
+                    else
+                    {
+                        assetRetreatFailed = true;
+                        assetManifestPath = null;
+                        Logger.Warn("[BackupSectionPanel] 復元前のゲームファイル退避が不完全のため、安全のため reconcile を行わず DBのみ復元します: "
+                            + (pre == null ? "(退避時刻の解析に失敗)" : pre.Message));
+                    }
+                }
+
+                // (#250 PR3b) アセット復元 (reconcile-in-place)。**非キャンセル (CancellationToken.None)**: DB 置換済の
+                // 後戻り不可点以降で、途中キャンセルの「DB は変更されていません」誤報告を避ける (reconcile は冪等)。
+                // best-effort で per-file 失敗を throw せず assetResult に集計するため DB 復元の成功判定を覆さない。
+                //
+                // (review round5 #1) 退避＋reconcile は `RestoreService.Restore` が advisory restore-lock を解放して return した
+                // **後**＝lock 外で走る (破壊的 games 反映が lock 外)。**自己発火は構造的に起きない**: この phase 中は
+                // ProcessingDialog がモーダルで Manager UI を操作不能＝#295 の操作単位 auto/session バックアップは発火しない
+                // (時間トリガは #295 で撤去済)。**別 PC の同時復元**は (1) btnRestore_Click 冒頭の SessionConflictHelper が
+                // 「別 Manager 稼働中」を警告、(2) DB phase は restore-lock で相互排他、で抑止する。reconcile phase (lock 外) で
+                // 別 PC が restore-lock を取れる窓は残るが、reconcile は pool でなく live のみ書く＝pool 破損には至らず被害は当該
+                // PC の当該世代に限定 (別世代/pool は無事)。multi-PC 同時復元は稀＋pre-release で実機確認 (F6)、厳密化は #250 の
+                // heartbeat-lease 領域 (将来)。
+                if (assetManifestPath != null)
+                {
+                    // (review #5) DB phase の 100% から進捗が 0 へ戻り、かつアセット phase は中断不可。ここで明示してユーザーの
+                    // 「固まった/中止が効かない」誤解を防ぐ (進捗自体は RestoreFromManifest が relpath 付きで更新する)。
+                    progress?.Report(new ProgressInfo(0, "ゲームファイルを反映中（この処理は中断できません）"));
+                    assetResult = _dbManager.AssetRestoreService.RestoreFromManifest(assetManifestPath, progress, CancellationToken.None);
+                }
             }))
             {
                 dialog.Text = "復元中";
@@ -376,18 +475,82 @@ namespace TonePrism.Manager.Controls
                     $"orphans={reconcile.OrphanFolders.Count}");
             }
 
-            if (reconcile != null && (reconcile.HasAnyFindings || reconcile.AnalysisFailed))
+            // (#250 PR3b round3 監査ログ) 復元前退避 (アセット safety 控え) の結果。成功なら safety_*.db とペアの undo 点が
+            // 揃った、失敗なら DBのみ degrade。
+            if (assetRetreatAttempted)
             {
-                using (var report = new RestoreReportForm(reconcile, safetyPath))
+                if (assetRetreatFailed)
+                    Logger.Warn("[BackupSectionPanel] 復元前のゲームファイル退避が不完全 → ゲームファイルは復元せず DBのみ復元 (games 無変更)");
+                else
+                    Logger.Info($"[BackupSectionPanel] 復元前のゲームファイル退避 完了 (undo 用、safety_*.db とペア): safety='{safetyPath}'");
+            }
+
+            // (#250 PR3b 監査ログ) アセット復元を行った場合はその要約も残す (copied/skipped/deleted/failed + 欠落数)。
+            if (assetResult != null)
+            {
+                if (assetResult.IsFailed)
+                    Logger.Warn($"[BackupSectionPanel] アセット復元 失敗: manifest='{assetManifestPath}', reason={assetResult.Message}");
+                else
+                    Logger.Info(
+                        $"[BackupSectionPanel] アセット復元 完了: manifest='{assetManifestPath}', " +
+                        $"copied={assetResult.CopiedCount}, skipped={assetResult.SkippedCount}, deleted={assetResult.DeletedCount}, " +
+                        $"failed={assetResult.FailedCount}, missing_blobs={assetResult.MissingBlobRelPaths.Count}, deletion_suppressed={assetResult.DeletionSuppressed}");
+            }
+
+            // (#250 PR3b round2) 退避失敗で DBのみに degrade したことは安全上必ず明示する (ユーザーは DB+ゲームを期待していた)。
+            string retreatFailedNote = assetRetreatFailed
+                ? "\n\n⚠ ゲームファイルの退避（やり直し用バックアップ）に失敗したため、安全のためゲームファイルは復元していません。"
+                + "\nデータベースのみ復元し、ディスク上のゲームファイルは現在のままです。共有サーバーの状態を確認のうえ、もう一度お試しください。"
+                : "";
+
+            // (#250 PR3b) アセット復元で「対処が必要」級 (全体失敗 / プール実体欠落) or 軽微な不完全 (per-file 失敗 /
+            // 削除抑止) があれば、reconcile がクリーンでもレポートを出して内訳を見せる。
+            bool assetHasIssues = assetResult != null &&
+                (assetResult.IsFailed || assetResult.IsPartial || assetResult.MissingBlobRelPaths.Count > 0);
+
+            if (reconcile != null && (reconcile.HasAnyFindings || reconcile.AnalysisFailed || assetHasIssues))
+            {
+                using (var report = new RestoreReportForm(reconcile, safetyPath, postRestore: true, assetResult: assetResult))
                 {
                     report.ShowDialog(this.FindForm());
                 }
+                // レポートには退避失敗の slot が無いので、degrade したときは別ダイアログで必ず知らせる。
+                if (assetRetreatFailed)
+                    MessageBox.Show(retreatFailedNote.TrimStart(), "ゲームファイルは復元していません",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             else
             {
+                // reconcile==null (チェック自体が失敗/skip) でアセット問題があるときの fallback も含め、簡潔通知。
+                string assetLine;
+                if (assetResult == null)
+                    // (review round3 #4) 退避失敗 degrade のときは「整合性に問題なし」を出すと retreatFailedNote
+                    // (DBのみ復元した旨) と噛み合わないので、degrade では「DBのみ復元」とだけ言い詳細は note に委ねる。
+                    // (review round6 #4) この else は reconcile==null (整合性チェック自体が失敗/skip) も通る。チェックが
+                    // 走っていないのに「問題はありませんでした」と断定すると silent pass になるため、reconcile==null は断定しない。
+                    assetLine = assetRetreatFailed
+                        ? "データベースのみ復元しました。"
+                        : reconcile == null
+                            ? "（整合性チェックは実行されませんでした。詳細はログを確認してください。）"
+                            : "DB とゲームフォルダの整合性に問題はありませんでした。";
+                else if (assetHasIssues)
+                    // (review #3) reconcile==null で詳細レポートを出せない fallback。件数を併記して UI からも実態を読めるようにする
+                    // (どの relpath が欠落したかの一覧はログに出る)。
+                    assetLine = $"ゲームファイルの復元で問題がありました（コピー {assetResult.CopiedCount} / 削除 {assetResult.DeletedCount} / 失敗 {assetResult.FailedCount} / 控え欠落 {assetResult.MissingBlobRelPaths.Count}）。詳細はログを確認してください。";
+                else
+                    assetLine = $"ゲームファイルも復元しました（コピー {assetResult.CopiedCount} / 変更なし {assetResult.SkippedCount} / 削除 {assetResult.DeletedCount}）。";
+
+                // (#250 PR3b round3 / review round5 #3) ゲームファイルも戻したときの「やり直し」案内。undo 点は退避された
+                // safety_*.db (= 復元前の DB) で、これを履歴から「復元」すると DB もゲームファイルも復元前へ戻る (ペアのアセット
+                // safety 控え経由)。**実際にアセット控えが書かれた (assetRetreatHasControl) ときだけ**「ゲームファイルも戻せる」と
+                // 案内する＝空 games 退避 (控え無し) で過剰約束しない。
+                string undoHint = (!assetRetreatFailed && assetRetreatHasControl)
+                    ? "\n\nやり直したいときは、退避された safety_*.db を履歴から「復元」すると、データベースもゲームファイルも元に戻せます。"
+                    : "";
+
                 MessageBox.Show(
                     $"復元が完了しました。\n\n復元前のDBは退避されました:\n{safetyPath}\n\n" +
-                    "DB とゲームフォルダの整合性に問題はありませんでした。\nManager のデータを再読み込みします。",
+                    assetLine + "\nManager のデータを再読み込みします。" + undoHint + retreatFailedNote,
                     "復元成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
 

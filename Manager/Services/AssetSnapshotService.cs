@@ -209,6 +209,132 @@ namespace TonePrism.Manager.Services
             }
         }
 
+        /// <summary>
+        /// (#250 PR3b) ある DB バックアップ世代とペアになる **アセット manifest** を解決する。DB の `.db` と
+        /// アセット `.manifest` は別ファイルで「同一バックアップ操作」を厳密に紐づける ID を持たないため、**時刻**で
+        /// ペアリングする: <paramref name="dbStartedLocal"/> (= 復元しようとする .db の作成時刻 T) **以下で最大時刻**の
+        /// manifest を選ぶ。
+        ///
+        /// **なぜ「以下で最大」か (replace-in-session 対策)**: DB-only 操作 (replace-in-session) は `.db` をより新しい
+        /// 時刻で書き直すが manifest は書き直さないので、`.db` 時刻が対のアセット manifest より **後** になりうる。
+        /// 「T 以下で最大」なら、その操作の直前フル世代の manifest (= live アセットが一致する世代) を正しく拾う。
+        /// 「T 以上で最小」だと存在しない/別世代を指してしまう。
+        ///
+        /// **host 優先**: 同時刻に複数 PC が控えた tie を分けるため、<paramref name="preferredHost"/> (= .db を作った PC)
+        /// 一致を優先し、無ければ全体最新。tie-break はファイル名降順 (newest-wins と一致)。比較は両者の
+        /// <see cref="AssetSnapshotInfo.StartedAtLocal"/> 同士の **local 比較** (DB 名・manifest 名とも同じ
+        /// yyyyMMdd_HHmmss 由来＝秒粒度・同一壁時計、DST ズレ無し)。
+        ///
+        /// 該当世代が無い (= T 以前の manifest が無い)・SMB 不達等は **null** を返す (DBのみ復元を阻害しない best-effort)。
+        /// </summary>
+        public AssetSnapshotInfo FindSnapshotForBackup(DateTime dbStartedLocal, string preferredHost)
+        {
+            try
+            {
+                var candidates = EnumerateManifests()
+                    .Select(ReadManifestHeader)
+                    // 不正ヘッダ (Timestamp 解釈不能 = StartedAtLocal が MinValue) は時刻信頼不可なので除外。
+                    .Where(m => m != null && m.StartedAtLocal != DateTime.MinValue)
+                    // T 以下 (= .db 時刻以前) の世代だけがペア候補 (replace-in-session で .db>manifest を正しく拾う)。
+                    .Where(m => m.StartedAtLocal <= dbStartedLocal)
+                    // 新しい順 → 同時刻ならファイル名降順 (host 名込みで決定的、newest-wins 規約と一致)。
+                    .OrderByDescending(m => m.StartedAtLocal)
+                    .ThenByDescending(m => Path.GetFileName(m.ManifestPath), StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (candidates.Count == 0) return null;
+
+                // (review #1) host 一致は **同時刻 (= 最新候補と同秒) の tie を分ける用途に限定**する。games/+guide/ は SMB 上の
+                // 単一共有ツリー (host 非依存) なので、「時点 T のツリー状態」の最良推定は **時間的に最も近い manifest** であって
+                // host ではない。旧実装は host 一致を候補リスト全体から探したため、別 PC の T 直前 manifest より **同 PC の
+                // 数週間前 manifest** を優先しうる degraded ケースがあった (exact pair 欠落時)。これだと古い世代で reconcile が
+                // 走り、T 以降に増えたファイルを「余剰」削除する方向に効く。そこで host 優先は最新秒グループ内だけに絞り、
+                // 同秒に host 一致が無ければ全体最新 (= 時間的に最も近い) へフォールバックする。
+                if (!string.IsNullOrEmpty(preferredHost))
+                {
+                    DateTime newestTime = candidates[0].StartedAtLocal;
+                    var hostMatch = candidates.FirstOrDefault(m =>
+                        m.StartedAtLocal == newestTime &&
+                        string.Equals(m.Host, preferredHost, StringComparison.OrdinalIgnoreCase));
+                    if (hostMatch != null) return hostMatch;
+                }
+                return candidates[0];
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[AssetSnapshot] DB 世代とのアセット manifest ペアリングに失敗 (DBのみ復元へフォールバック): " + ex.Message);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// (#250 PR3b round3) `safety_*.db`（復元の直前に退避した DB）の **undo 用**に、同 timestamp/host で co-create した
+        /// アセット safety 控えを **完全一致**で引く。auto/manual の「T 以下で最大」ペアリングと違い、safety は復元時に
+        /// その時点専用のペアを必ず一緒に作る (BackupSectionPanel) ので、完全一致で安全に引ける。**時刻 fallback を使わない**
+        /// のは review #1 の趣旨 (safety を近接世代に誤ペアしてゲームファイルを誤削除する穴) を完全に塞ぐため。
+        /// </summary>
+        /// <param name="timestamp">safety_db ファイル名の yyyyMMdd_HHmmss 部。</param>
+        /// <param name="host">safety_db ファイル名の host 部 (SanitizeHostForFileName 済)。</param>
+        public AssetSnapshotInfo FindSafetyManifestForBackup(string timestamp, string host)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(timestamp)) return null;
+                string safetyDir = Path.Combine(GetSnapshotRootDirectory(), "safety");
+                if (!Directory.Exists(safetyDir)) return null;
+                string leaf = string.IsNullOrEmpty(host) ? timestamp : timestamp + "_" + host;
+                // leaf 完全一致を最優先。同 ts/host で衝突 suffix (_2 等) が付いた世代も leaf+"_" prefix で拾い、
+                // ファイル名降順 (= 新しい採番) で最新を選ぶ。auto/manual は対象外 (safety フォルダのみ走査)。
+                // (review round4 C-3 既知の制約) **同一秒・同一 host で 2 回連続復元**して safety_<ts>_<host>.db と
+                // safety_<ts>_<host>_2.db が並ぶと、古い方 (suffix 無し) の undo でも常に新しい採番の控えとペアされうる
+                // (ts/host が同一秒で区別不能)。人手では実質発生しない稀ケース。恒久対策は backup 操作 ID を .db/.manifest
+                // 双方に埋めて ID 一致でペアする案 (S-1、ファイル名規約変更ゆえ別 issue・pre-release 後)。
+                var matches = Directory.GetFiles(ForceLong(safetyDir), "*" + ManifestExt)
+                    .Where(p =>
+                    {
+                        string name = Path.GetFileNameWithoutExtension(p);
+                        return string.Equals(name, leaf, StringComparison.OrdinalIgnoreCase)
+                            || name.StartsWith(leaf + "_", StringComparison.OrdinalIgnoreCase);
+                    })
+                    .OrderByDescending(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (matches.Count == 0) return null;
+                return ReadManifestHeader(matches[0]);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[AssetSnapshot] 退避控え (safety) のペアリングに失敗 (DBのみ復元へフォールバック): " + ex.Message);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// (#250 PR3b round3) 復元前退避のアセット safety 控えを最新 <paramref name="count"/> 件残して削除し、GC で
+        /// 未参照 blob を回収する。safety_db 側の retention (RestoreService.ApplySafetyRetention、既定 10 件) と件数を
+        /// 揃えて歩調を合わせる。CreateSnapshot("safety",…) は ApplyRetentionAndGc の対象外 (auto のみ) なので、退避控えの
+        /// 掃除はこの専用メソッドで行う。GC は EnumerateManifests(includeSafety:true) で safety 込みの参照集合を使うため、
+        /// 残った safety 控えの blob は保護され、削除した古い safety 控えだけが参照していた blob が回収される。
+        /// </summary>
+        internal void PruneSafetySnapshots(int count)
+        {
+            try
+            {
+                string safetyDir = Path.Combine(GetSnapshotRootDirectory(), "safety");
+                if (count > 0 && Directory.Exists(safetyDir))
+                {
+                    var stale = Directory.GetFiles(ForceLong(safetyDir), "*" + ManifestExt)
+                        .OrderByDescending(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase)
+                        .Skip(count).ToList();
+                    foreach (var m in stale)
+                    {
+                        try { File.Delete(FileOperationService.EnsureLongPath(m)); Logger.Info("[AssetSnapshot] 古い退避控え(safety manifest)を削除: " + Path.GetFileName(m)); }
+                        catch (Exception ex) { Logger.Warn("[AssetSnapshot] 退避控え削除失敗: " + m + " : " + ex.Message); }
+                    }
+                }
+                GarbageCollectPool(); // safety 込みの参照集合で未参照 blob を回収 (.poolsize も更新)
+            }
+            catch (Exception ex) { Logger.Warn("[AssetSnapshot] 退避控えの retention/GC に失敗 (無害、退避自体は成功): " + ex.Message); }
+        }
+
         /// <summary>アセットプールが実際に使っているディスク量 (= 重複排除後の物理サイズ)。UI 用。
         /// (レビュー M1) pool 全列挙は SMB で重く UI スレッドをフリーズさせうるので、バックアップ時に算出済の
         /// `.poolsize` キャッシュを即時読みする。無ければ 0 (= まだ取得していない)。</summary>
@@ -484,10 +610,15 @@ namespace TonePrism.Manager.Services
             File.WriteAllText(FileOperationService.EnsureLongPath(path), sb.ToString(), new UTF8Encoding(false));
         }
 
-        private IEnumerable<string> EnumerateManifests()
+        /// <param name="includeSafety">(#250 PR3b round3) true のとき復元前退避の <c>safety</c> 控えも列挙に含める。
+        /// **GC の参照集合作成専用** (safety 控えが参照する blob を「未参照」と誤判定して回収しないため)。**復元の
+        /// ペアリング探索 (FindSnapshotForBackup) や hash キャッシュは false (auto/manual のみ)** を使う＝safety を
+        /// 「T 以下で最大」の時刻 fallback で誤って拾わない (safety は完全一致の FindSafetyManifestForBackup で別途引く)。</param>
+        internal IEnumerable<string> EnumerateManifests(bool includeSafety = false)
         {
             string root = GetSnapshotRootDirectory();
-            foreach (var trigger in new[] { "auto", "manual" })
+            var triggers = includeSafety ? new[] { "auto", "manual", "safety" } : new[] { "auto", "manual" };
+            foreach (var trigger in triggers)
             {
                 string dir = Path.Combine(root, trigger);
                 if (!Directory.Exists(dir)) continue;
@@ -496,7 +627,7 @@ namespace TonePrism.Manager.Services
             }
         }
 
-        private static AssetSnapshotInfo ReadManifestHeader(string manifestPath)
+        internal static AssetSnapshotInfo ReadManifestHeader(string manifestPath)
         {
             var info = new AssetSnapshotInfo { ManifestPath = manifestPath };
             using (var r = new StreamReader(FileOperationService.EnsureLongPath(manifestPath)))
@@ -588,7 +719,9 @@ namespace TonePrism.Manager.Services
                 string pool = GetPoolRootDirectory();
                 if (!Directory.Exists(pool)) return;
                 var referenced = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var manifest in EnumerateManifests())
+                // (#250 PR3b round3) **includeSafety: true**＝復元前退避の safety 控えが参照する blob も「使用中」として
+                // 保護する。これが無いと退避控えの実体を GC が回収し、safety_db の undo でゲームファイルを戻せなくなる。
+                foreach (var manifest in EnumerateManifests(includeSafety: true))
                 {
                     try
                     {
