@@ -1333,7 +1333,7 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 #### Fixed (#318 — 初回説明スライドの表示調整)
 
-- **本文の改行が 2 行ぶん空いて見える不具合を修正** (`intro_guide.gd` `_make_body_label`)。初回説明の本文は Manager の WinForms TextBox で編集するため改行が **CRLF (`\r\n`)** で保存されるが、Godot の `Label` は `\r` を独立した改行扱いするため `\r\n` が「2 連続改行」に見えていた。`text.replace("\r\n", "\n").replace("\r", "\n")` で正規化し、見た目どおり 1 行ぶんの改行にした。
+- **本文の改行が 2 行ぶん空いて見える不具合を修正** (`intro_slide_repository.gd` の読み込み層)。初回説明の本文は Manager の WinForms TextBox で編集するため改行が **CRLF (`\r\n`)** で保存されるが、Godot の `Label` は `\r` を独立した改行扱いするため `\r\n` が「2 連続改行」に見えていた。`IntroSlideInfo` 構築時に `\r\n`→`\n` 正規化し、見た目どおり 1 行ぶんの改行にした。**当初は描画層 (`intro_guide.gd _make_body_label`) で正規化していたが、ゲーム説明文 (`game_repository.description`) と同じ「読み込み層で一括正規化」方針に揃え、将来 body_text の表示経路が増えても二重改行が再発しないようにした**（レビュー指摘の設計対称性）。
 - **本文のみ（画像なし）スライドの本文幅を 1100 → 1400 に拡大** (`_make_slide_content` の else 分岐)。画面幅 1920 の余白を活かして中央寄せ本文を読みやすくした。画像つきスライドは従来どおり左寄せ・640 幅で据え置き（変更なし）。
 - **ゲーム説明文の改行も同根の CRLF 二重改行を正規化** (`game_repository.gd` `_create_game_info_from_row_dict`)。Manager v0.27.2 の #312 で説明文欄に `AcceptsReturn` を付けて Enter 改行を解禁したため、ゲーム説明にも CRLF が入りうるようになった。説明文は `game_info_display.gd` で素の `Label` に流れる（初回説明と同じ条件）ため、読み込み層で `description` を `\r\n`→`\n` 正規化し、ゲーム閲覧の中核動線で二重改行が出ないようにした（レビュー指摘の #312↔#318 相互作用）。
 - 検証: 同梱 Godot 4.6 ヘッドレスで全スクリプトのコンパイル（`intro_guide.gd` / `game_repository.gd` 含む、autoload 込みの editor import）でエラー無しを確認。**※実機での改行 1 行化（初回説明・ゲーム説明の両方）・本文のみスライドの幅・画像つきスライドの左寄せは pre-release で実機目視**（Launcher UI は build 緑だけでなく起動目視が必要）。
@@ -2059,7 +2059,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 - **ゲーム追加 / 編集 / バージョンアップ / 初回説明スライド編集の各フォームで、入力途中に Enter を押すと保存が走ってしまう事故を防止**。原因は各フォームに `AcceptButton = btnOK` が割り当たっており、リリース年などの**各フィールドで「値を確定しよう」と Enter を押すと保存ボタンが発火**していたこと。4 フォームで `AcceptButton` を**未設定**にし、Enter での自動保存を無効化した（保存は保存ボタンのクリックで明示。`CancelButton`=Esc によるキャンセルは従来どおり残す）。
 - 併せて**複数行入力欄の改行**も確保: 説明文欄 `txtDescription`（追加/編集/版up）・初回説明スライドの本文欄 `_txtBody`（`IntroSlideEditForm`）・更新ノート欄 `txtUpdateNote`（版up）は `Multiline = true` だが `AcceptsReturn` 未設定だと（AcceptButton の有無にかかわらず）Enter で改行されないため、`AcceptsReturn = true` を設定し Enter を**改行**にした。**特に初回説明スライドの本文は #318 で Launcher 側の複数行レンダリングを直しており、入力側（このフォーム）で改行できないと整合しないため同時に対応**（レビュー指摘で発覚した同 PR 内のスコープ漏れ）。
-  - **対象外と判断したもの**: `txtVersionDescription`（編集フォーム）は `ReadOnly = true` の表示専用欄なので入力対象外。`txtArguments`（起動引数、全3フォーム）は `Multiline = true` だが**引数に改行が入ると不正**なため `AcceptsReturn` は付けない（AcceptButton 撤去で Enter は無反応になるが、これは「改行も保存もしない」= 引数欄として安全な挙動）。
+  - **対象外と判断したもの**: `txtVersionDescription`（編集フォーム）は `ReadOnly = true` の表示専用欄なので入力対象外。`txtArguments`（起動引数、全3フォーム）は `Multiline = true` だが**引数に改行が入ると不正**なため `AcceptsReturn` は付けない（AcceptButton 撤去で Enter は無反応になるが、これは「改行も保存もしない」= 引数欄として安全な挙動）。`DeveloperForm`（製作者の追加）は `AcceptButton = btnOK` を持つが、入力欄が姓・名の**単一行のみ**で複数行欄の改行を潰す問題が起きず、2 項目の小ダイアログでは Enter=確定が自然な UX のため**意図的に据え置き**（誤保存リスクの本質は複数行欄を持つフォームに限る）。
 - 検証: build 緑。**実機で各フォーム（リリース年などの各フィールドで Enter を押しても保存されない・複数行欄で Enter が改行になる・保存ボタンで保存できる・Esc でキャンセルできる）を目視**。初回説明スライド本文は複数行入力 → 保存 → Launcher 初回説明で改行表示（#318）まで通しで確認。
 - bump 判断: バグ修正のみ（破壊的変更・schema 変更なし）。patch (v0.27.1 → v0.27.2)。Launcher v0.11.1 と同じ v0.8.1 リリースに同梱。
 

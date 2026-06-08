@@ -53,7 +53,11 @@ func _create_slide_from_row(row: Dictionary) -> IntroSlideInfo:
 
 	slide.slide_id = _db_manager.safe_int(row.get("slide_id"), -1)
 	slide.display_order = _db_manager.safe_int(row.get("display_order"), -1)
-	slide.body_text = str(row.get("body_text", ""))
+	# (#318) Manager の WinForms TextBox は改行を CRLF (\r\n) で保存するが、Godot の Label は \r を
+	# 独立した改行として描画するため CRLF が 2 行ぶんに見える。game_repository.description と同様、
+	# 読み込み層で LF へ正規化しておけば body_text の全表示経路（現状 _make_body_label 経由、将来の
+	# 別経路も）を一括で守れる。
+	slide.body_text = str(row.get("body_text", "")).replace("\r\n", "\n").replace("\r", "\n")
 
 	# image_path は Manager 側で「画像なし → NULL」に正規化される。godot-sqlite は NULL を
 	# Variant null で返すため、str(null) == "<null>" になるのを避けて明示的に空文字へ畳む。
