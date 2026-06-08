@@ -163,6 +163,8 @@ namespace TonePrism.Manager
             this.txtDescription.Location = new System.Drawing.Point(110, 88);
             this.txtDescription.Margin = new System.Windows.Forms.Padding(2);
             this.txtDescription.Multiline = true;
+            // (#312) Enter を「改行」にする。未設定 (false) だと Multiline でも Enter が AcceptButton(保存) を発火する。
+            this.txtDescription.AcceptsReturn = true;
             this.txtDescription.Name = "txtDescription";
             this.txtDescription.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
             this.txtDescription.Size = new System.Drawing.Size(355, 60);

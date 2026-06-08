@@ -474,7 +474,8 @@ func _make_slide_content(slide: IntroSlideInfo) -> Control:
 	elif has_image:
 		center.add_child(_make_image_rect(tex, Vector2(960, 540)))
 	else:
-		center.add_child(_make_body_label(slide.body_text, 1100, HORIZONTAL_ALIGNMENT_CENTER))
+		# (#318) 本文のみは中央寄せ。幅は余白を活かして広め (1100→1400、画面幅 1920)。
+		center.add_child(_make_body_label(slide.body_text, 1400, HORIZONTAL_ALIGNMENT_CENTER))
 
 	return root
 
@@ -491,7 +492,9 @@ func _make_image_rect(tex: Texture2D, min_size: Vector2) -> TextureRect:
 ## 本文 Label を生成（幅・水平揃えを指定、折り返しあり）。
 func _make_body_label(text: String, width: float, halign: int) -> Label:
 	var body := Label.new()
-	body.text = text
+	# (#318) Manager は WinForms TextBox なので改行が CRLF (\r\n) で DB に保存される。Godot の Label は
+	# \r\n を「\r 改行 + \n 改行 = 2 行」として描画してしまうため、表示前に LF へ正規化する（単一改行=1行）。
+	body.text = text.replace("\r\n", "\n").replace("\r", "\n")
 	body.add_theme_font_override("font", _font_regular())
 	body.add_theme_font_size_override("font_size", 32)
 	body.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
