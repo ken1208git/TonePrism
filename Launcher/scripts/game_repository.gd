@@ -110,7 +110,11 @@ func _create_game_info_from_row_dict(row: Dictionary) -> GameInfo:
 
 	game.game_id = str(row.get("game_id", ""))
 	game.title = str(row.get("title", ""))
-	game.description = str(row.get("description", ""))
+	# (#318/#312) Manager の WinForms TextBox は改行を CRLF (\r\n) で保存するが、Godot の Label は \r を
+	# 独立した改行として描画するため CRLF が 2 行ぶんに見える（#318 の初回説明と同根）。#312 で説明文欄に
+	# AcceptsReturn を付けて Enter 改行を解禁したため、ゲーム説明にも CRLF が入りうる。読み込み層で LF へ
+	# 正規化しておけば game_info_display など説明文の全表示経路を一括で守れる。
+	game.description = str(row.get("description", "")).replace("\r\n", "\n").replace("\r", "\n")
 	game.thumbnail_path = str(row.get("thumbnail_path", ""))
 	game.background_path = str(row.get("background_path", ""))
 	game.executable_path = str(row.get("executable_path", ""))

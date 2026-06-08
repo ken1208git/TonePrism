@@ -1335,7 +1335,8 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 - **本文の改行が 2 行ぶん空いて見える不具合を修正** (`intro_guide.gd` `_make_body_label`)。初回説明の本文は Manager の WinForms TextBox で編集するため改行が **CRLF (`\r\n`)** で保存されるが、Godot の `Label` は `\r` を独立した改行扱いするため `\r\n` が「2 連続改行」に見えていた。`text.replace("\r\n", "\n").replace("\r", "\n")` で正規化し、見た目どおり 1 行ぶんの改行にした。
 - **本文のみ（画像なし）スライドの本文幅を 1100 → 1400 に拡大** (`_make_slide_content` の else 分岐)。画面幅 1920 の余白を活かして中央寄せ本文を読みやすくした。画像つきスライドは従来どおり左寄せ・640 幅で据え置き（変更なし）。
-- 検証: 同梱 Godot 4.6 ヘッドレスで `intro_guide.gd` のロード（パースエラーなし）を確認。**※実機での改行 1 行化・本文のみスライドの幅・画像つきスライドの左寄せは pre-release で実機目視**（Launcher UI は build 緑だけでなく起動目視が必要）。
+- **ゲーム説明文の改行も同根の CRLF 二重改行を正規化** (`game_repository.gd` `_create_game_info_from_row_dict`)。Manager v0.27.2 の #312 で説明文欄に `AcceptsReturn` を付けて Enter 改行を解禁したため、ゲーム説明にも CRLF が入りうるようになった。説明文は `game_info_display.gd` で素の `Label` に流れる（初回説明と同じ条件）ため、読み込み層で `description` を `\r\n`→`\n` 正規化し、ゲーム閲覧の中核動線で二重改行が出ないようにした（レビュー指摘の #312↔#318 相互作用）。
+- 検証: 同梱 Godot 4.6 ヘッドレスで全スクリプトのコンパイル（`intro_guide.gd` / `game_repository.gd` 含む、autoload 込みの editor import）でエラー無しを確認。**※実機での改行 1 行化（初回説明・ゲーム説明の両方）・本文のみスライドの幅・画像つきスライドの左寄せは pre-release で実機目視**（Launcher UI は build 緑だけでなく起動目視が必要）。
 - bump 判断: 表示調整のみ（バグ修正 + 余白調整、破壊的変更なし）。patch (v0.11.0 → v0.11.1)。Manager v0.27.2 と同じ v0.8.1 リリースに同梱。
 
 ### [Launcher v0.11.0] - 2026-06-07
@@ -2047,11 +2048,13 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **整合性レポート (`RestoreReportForm`) 冒頭の「まず確認」文言が「バックアップ／復元の対象は DB だけ」と誤って案内していたのを訂正**。#250 以降、通常のバックアップ／復元は toneprism.db に加えて**ゲームファイル本体・初回説明の画像も対象**になっているのに、文言が旧仕様（DB のみ）のまま残っていた。
   - **standalone（手動で整合性チェックを実行したとき）**: 「通常のバックアップ／復元は DB に加えてゲームファイル・初回説明画像も対象。ただし手動でファイルを変更した／古い形式のバックアップを復元した等で DB とディスクの『時点』がズレることはある」という正確な説明に差し替え。
   - **復元直後（`_postRestore` かつ `_assetResult == null`）**: アセットを一緒に復元しなかった旨を案内する。当初は「今回の復元は古い形式のバックアップ（DB のみ）だった」と理由を断定する文言にしたが、`_assetResult == null` は (a) 旧/unknown 形式の DBのみバックアップだけでなく (b) **新形式バックアップだが復元前のゲームファイル退避に失敗して DBのみ復元へ degrade したケース**（`BackupSectionPanel` の `assetRetreatFailed`）も含むため、(b) で「古い形式だった」と断定すると同時に出る degrade 告知ダイアログ（`retreatFailedNote`）と矛盾する。**理由を断定せず「ゲームファイル・初回説明画像は一緒には復元されていない」事実だけ述べる**文言に修正（degrade の具体的理由は呼び出し側の別ダイアログに委ねる）。
+  - 併せて `RestoreReportForm` の**クラス doc コメントも訂正**: 旧仕様「バックアップ/復元は toneprism.db のみが対象」と断言したままだったのを、#250 以降の実態（games/+guide/ も対象。手動変更・旧形式復元・degrade で時点ズレはなお起きうる）に更新（本文だけ直してコメントが旧仕様を温存し、将来逆戻りさせる温床になるのを防ぐ）。
 
 #### Fixed (#312 — フォーム入力中の Enter で誤保存される不具合)
 
 - **ゲーム追加 / 編集 / バージョンアップ / 初回説明スライド編集の各フォームで、入力途中に Enter を押すと保存が走ってしまう事故を防止**。原因は各フォームに `AcceptButton = btnOK` が割り当たっており、リリース年などの**各フィールドで「値を確定しよう」と Enter を押すと保存ボタンが発火**していたこと。4 フォームで `AcceptButton` を**未設定**にし、Enter での自動保存を無効化した（保存は保存ボタンのクリックで明示。`CancelButton`=Esc によるキャンセルは従来どおり残す）。
-- 併せて**複数行入力欄の改行**も確保: 説明文欄 `txtDescription`（追加/編集/版up）と初回説明スライドの本文欄 `_txtBody`（`IntroSlideEditForm`）は `Multiline = true` だが `AcceptsReturn` 未設定だと（AcceptButton の有無にかかわらず）Enter で改行されないため、`AcceptsReturn = true` を設定し Enter を**改行**にした。**特に初回説明スライドの本文は #318 で Launcher 側の複数行レンダリングを直しており、入力側（このフォーム）で改行できないと整合しないため同時に対応**（レビュー指摘で発覚した同 PR 内のスコープ漏れ）。
+- 併せて**複数行入力欄の改行**も確保: 説明文欄 `txtDescription`（追加/編集/版up）・初回説明スライドの本文欄 `_txtBody`（`IntroSlideEditForm`）・更新ノート欄 `txtUpdateNote`（版up）は `Multiline = true` だが `AcceptsReturn` 未設定だと（AcceptButton の有無にかかわらず）Enter で改行されないため、`AcceptsReturn = true` を設定し Enter を**改行**にした。**特に初回説明スライドの本文は #318 で Launcher 側の複数行レンダリングを直しており、入力側（このフォーム）で改行できないと整合しないため同時に対応**（レビュー指摘で発覚した同 PR 内のスコープ漏れ）。
+  - **対象外と判断したもの**: `txtVersionDescription`（編集フォーム）は `ReadOnly = true` の表示専用欄なので入力対象外。`txtArguments`（起動引数、全3フォーム）は `Multiline = true` だが**引数に改行が入ると不正**なため `AcceptsReturn` は付けない（AcceptButton 撤去で Enter は無反応になるが、これは「改行も保存もしない」= 引数欄として安全な挙動）。
 - 検証: build 緑。**実機で各フォーム（リリース年などの各フィールドで Enter を押しても保存されない・複数行欄で Enter が改行になる・保存ボタンで保存できる・Esc でキャンセルできる）を目視**。初回説明スライド本文は複数行入力 → 保存 → Launcher 初回説明で改行表示（#318）まで通しで確認。
 - bump 判断: バグ修正のみ（破壊的変更・schema 変更なし）。patch (v0.27.1 → v0.27.2)。Launcher v0.11.1 と同じ v0.8.1 リリースに同梱。
 

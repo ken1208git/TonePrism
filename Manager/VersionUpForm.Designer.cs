@@ -608,6 +608,9 @@ namespace TonePrism.Manager
             this.txtUpdateNote.Location = new System.Drawing.Point(490, 488);
             this.txtUpdateNote.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
             this.txtUpdateNote.Multiline = true;
+            // (#312) 更新ノートは複数行入力欄。AcceptButton 撤去後に Enter が無反応になるのを防ぎ、説明欄と
+            // 同様に Enter=改行にする（未設定だと Multiline でも改行できない）。
+            this.txtUpdateNote.AcceptsReturn = true;
             this.txtUpdateNote.Name = "txtUpdateNote";
             this.txtUpdateNote.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
             this.txtUpdateNote.Size = new System.Drawing.Size(445, 60);

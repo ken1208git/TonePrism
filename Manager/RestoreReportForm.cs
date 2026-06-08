@@ -11,8 +11,10 @@ namespace TonePrism.Manager
     /// <summary>
     /// DB 復元後の整合性チェック結果と、ズレを解消するための復元手順を表示するダイアログ。
     ///
-    /// バックアップ/復元は toneprism.db のみが対象で games/ フォルダは復元されないため、別時点の DB を
-    /// 復元すると DB と実フォルダがズレうる (RestoreReconciliationService 参照)。本ダイアログはズレの中身を
+    /// (#317) #250 以降、通常のバックアップ/復元は toneprism.db に加えて games/+guide/（ゲームファイル本体・
+    /// 初回説明画像）も対象になっている。ただし手動でのファイル変更、旧形式（DBのみ）バックアップの復元、
+    /// 新形式でも復元前退避失敗による DBのみ degrade（BackupSectionPanel の assetRetreatFailed）などで、
+    /// DB と実フォルダの「時点」がズレうる (RestoreReconciliationService 参照)。本ダイアログはズレの中身を
     /// 「起動できないゲーム / ディスクに無いバージョン / DB に無い余分なフォルダ」に分類して提示し、
     /// 何をすれば整合した状態に戻せるかを番号付き手順で案内する。Designer は使わずコードで UI を組む
     /// (項目数が可変のテキストレポート主体のため)。
