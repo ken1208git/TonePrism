@@ -474,7 +474,8 @@ func _make_slide_content(slide: IntroSlideInfo) -> Control:
 	elif has_image:
 		center.add_child(_make_image_rect(tex, Vector2(960, 540)))
 	else:
-		center.add_child(_make_body_label(slide.body_text, 1100, HORIZONTAL_ALIGNMENT_CENTER))
+		# (#318) 本文のみは中央寄せ。幅は余白を活かして広め (1100→1400、画面幅 1920)。
+		center.add_child(_make_body_label(slide.body_text, 1400, HORIZONTAL_ALIGNMENT_CENTER))
 
 	return root
 
@@ -491,6 +492,10 @@ func _make_image_rect(tex: Texture2D, min_size: Vector2) -> TextureRect:
 ## 本文 Label を生成（幅・水平揃えを指定、折り返しあり）。
 func _make_body_label(text: String, width: float, halign: int) -> Label:
 	var body := Label.new()
+	# (#318) 改行 CRLF→LF 正規化は IntroSlideRepository（読み込み層）で実施済みのため、ここでは素で渡す。
+	# Godot の Label は \r を独立改行として描画し CRLF が 2 行に見えるが、body_text はここに届く時点で
+	# LF 化されている（game.description と同じ read-layer 正規化方針。game_info_display が説明文を素で
+	# 流すのと対称）。
 	body.text = text
 	body.add_theme_font_override("font", _font_regular())
 	body.add_theme_font_size_override("font_size", 32)
@@ -648,6 +653,12 @@ func _go_to_store_when_free() -> void:
 # --- 入力 ---
 
 func _input(event: InputEvent) -> void:
+	# ダイアログ表示中 (get_tree().paused) は入力に反応しない。本シーンは PROCESS_MODE_ALWAYS のため
+	# ポーズ中も _input が走る。このガードが無いと下の _idle_mgr.reset() が走り、reset() 内の
+	# DialogManager.close_current_dialog() が「表示中のダイアログ」(例: Alt+F4 の終了案内) を即閉じてしまう
+	# (ダイアログが一瞬で消える)。store_browse._input と同じ先頭ガード。
+	if get_tree().paused:
+		return
 	# 自分の遷移中、および incoming 遷移 (screensaver → 本シーン) 中は入力を受けない。
 	# 後者を見ないと、遷移中の Esc 等で _go_to_store が再入ガードに弾かれて固まる (指摘1)。
 	if _transitioning or TransitionManager._transitioning:

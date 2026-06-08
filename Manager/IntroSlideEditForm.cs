@@ -65,7 +65,9 @@ namespace TonePrism.Manager
             ClientSize = new Size(468, 470);
 
             Controls.Add(new Label { Text = "本文（スライドに表示する文章。画像のみのスライドなら空でも可）", Location = new Point(12, 10), AutoSize = true });
-            _txtBody = new TextBox { Location = new Point(12, 30), Size = new Size(444, 120), Multiline = true, ScrollBars = ScrollBars.Vertical };
+            // (#312/#318) 本文は複数行前提（#318 で Launcher 側の複数行レンダリングも修正）。Multiline でも
+            // AcceptsReturn 未設定だと Enter が AcceptButton（保存）を発火して改行できないため、ここで改行に切替える。
+            _txtBody = new TextBox { Location = new Point(12, 30), Size = new Size(444, 120), Multiline = true, AcceptsReturn = true, ScrollBars = ScrollBars.Vertical };
             Controls.Add(_txtBody);
 
             Controls.Add(new Label { Text = "画像（任意。選ぶと guide フォルダにコピーされます）", Location = new Point(12, 160), AutoSize = true });
@@ -90,7 +92,8 @@ namespace TonePrism.Manager
             var btnCancel = new Button { Text = "キャンセル", Location = new Point(376, 432), Size = new Size(80, 27), DialogResult = DialogResult.Cancel };
             Controls.Add(btnCancel);
 
-            AcceptButton = btnOk;
+            // (#312) AcceptButton はあえて未設定。本文(_txtBody)で Enter を改行に使うため＆チェックボックス等
+            // 他フィールドでの Enter 誤保存を防ぐため。保存は OK ボタンのクリック(OnOk)で明示。CancelButton(=Esc)は残す。
             CancelButton = btnCancel;
         }
 
