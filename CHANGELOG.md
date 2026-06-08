@@ -1339,6 +1339,11 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 - 検証: 同梱 Godot 4.6 ヘッドレスで全スクリプトのコンパイル（`intro_guide.gd` / `game_repository.gd` 含む、autoload 込みの editor import）でエラー無しを確認。**※実機での改行 1 行化（初回説明・ゲーム説明の両方）・本文のみスライドの幅・画像つきスライドの左寄せは pre-release で実機目視**（Launcher UI は build 緑だけでなく起動目視が必要）。
 - bump 判断: 表示調整のみ（バグ修正 + 余白調整、破壊的変更なし）。patch (v0.11.0 → v0.11.1)。Manager v0.27.2 と同じ v0.8.1 リリースに同梱。
 
+#### Fixed (#320 — 初回説明画面で Alt+F4 の終了案内ダイアログが一瞬で消える)
+
+- **`intro_guide._input` の先頭に `if get_tree().paused: return` ガードを追加**。初回説明画面で Alt+F4 を押すと、終了案内ダイアログ（「この画面からランチャーを終了することはできません…」）が一瞬で消える不具合を修正。原因は (1) `IdleManager.reset()` が `DialogManager.close_current_dialog()` で**表示中のダイアログを無条件に閉じる**、(2) `intro_guide._input` が毎入力で `_idle_mgr.reset()` を呼ぶ、(3) 本シーンが `PROCESS_MODE_ALWAYS` でダイアログのポーズ中も `_input` が走る、の合わせ技。`store_browse._input` には元々あったポーズガード（`if get_tree().paused: return`）が intro_guide だけ抜けていた。
+- 検証: 同梱 Godot 4.6 headless で `intro_guide.gd` のコンパイル確認。**※Alt+F4 で終了案内が表示されたまま留まる（一瞬で消えない）ことは pre-release で実機目視**。
+
 ### [Launcher v0.11.0] - 2026-06-07
 
 #### Changed (#297 PR1 — play_records 非参照化、JSON 直読み化への布石)

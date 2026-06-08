@@ -651,6 +651,12 @@ func _go_to_store_when_free() -> void:
 # --- 入力 ---
 
 func _input(event: InputEvent) -> void:
+	# ダイアログ表示中 (get_tree().paused) は入力に反応しない。本シーンは PROCESS_MODE_ALWAYS のため
+	# ポーズ中も _input が走る。このガードが無いと下の _idle_mgr.reset() が走り、reset() 内の
+	# DialogManager.close_current_dialog() が「表示中のダイアログ」(例: Alt+F4 の終了案内) を即閉じてしまう
+	# (ダイアログが一瞬で消える)。store_browse._input と同じ先頭ガード。
+	if get_tree().paused:
+		return
 	# 自分の遷移中、および incoming 遷移 (screensaver → 本シーン) 中は入力を受けない。
 	# 後者を見ないと、遷移中の Esc 等で _go_to_store が再入ガードに弾かれて固まる (指摘1)。
 	if _transitioning or TransitionManager._transitioning:
