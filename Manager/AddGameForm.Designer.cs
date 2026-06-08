@@ -639,7 +639,9 @@ namespace TonePrism.Manager
             //
             // AddGameForm
             //
-            this.AcceptButton = this.btnOK;
+            // (#312) AcceptButton はあえて未設定。リリース年など各フィールドで Enter による確定をしようとした際に
+            // 保存(btnOK)が誤発火する事故が多発したため、Enter での自動保存を無効化（保存は btnOK のクリックで明示）。
+            // 説明欄の改行は txtDescription.AcceptsReturn=true で確保。CancelButton(=Esc) は残す。
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.AutoScroll = true;
