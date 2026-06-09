@@ -88,7 +88,8 @@ static func _create_game_tile(game: GameInfo) -> Control:
 		var loading_label = _create_loading_label(16)
 		wrapper.get_node("TilePanel").add_child(loading_label)
 	else:
-		# (#316) サムネ未登録 → no-image プレースホルダ（カルーセルと同デザイン）。TilePanel は角丸 16・
+		# (#316) サムネ未登録 → no-image プレースホルダ（カルーセルと見た目を揃えた灰箱。実装はカルーセルの
+		# 白パネル×フェード由来の灰と異なり solid 0.85 グレー）。TilePanel は角丸 16・
 		# clip_children=AND_DRAW なので角丸に切り抜かれる。
 		wrapper.get_node("TilePanel").add_child(NoImagePlaceholder.make(16, 18))
 

@@ -228,7 +228,7 @@ func _build_ui() -> void:
 	_icon_tex.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	icon_clip.add_child(_icon_tex)
 
-	# (#316) no-image はカルーセルと同じ「明るいグレーの箱 + 灰字 NO IMAGE」に統一 (旧: 暗い icon_clip 地 +
+	# (#316) no-image はカルーセルと見た目を揃えた「明るいグレーの箱 + 灰字 NO IMAGE」に統一 (旧: 暗い icon_clip 地 +
 	# 灰字ラベル)。暗い loading 表示との混同を避けるため明るい箱にする。_set_thumbnail で表示/非表示を切替。
 	_icon_placeholder = NoImagePlaceholder.make(ICON_RADIUS, 28)
 	icon_clip.add_child(_icon_placeholder)

@@ -117,9 +117,10 @@ func _build_ui() -> void:
 		# 単体起動 / セッション無し: 空表示
 		_launching_overlay.show_for_game("", LaunchingOverlay.State.PLAYING)
 
-	# (#316) サムネ画像が無い/読込失敗時は no-image プレースホルダを表示 (カルーセル・オーバーレイと同デザイン)。
+	# (#316) サムネ画像が無い/読込失敗時は no-image プレースホルダを表示 (カルーセル・オーバーレイと見た目を揃えた灰箱)。
 	# thumb_clip (CLIP_CHILDREN_ONLY, 角丸 ICON_RADIUS) の子にするので角丸に切り抜かれる。
-	if thumb.texture == null:
+	# _game==null (単体起動/セッション無し) は「空表示」が意図なので箱を出さない (show_for_game("") と整合)。
+	if _game != null and thumb.texture == null:
 		thumb_clip.add_child(NoImagePlaceholder.make(ICON_RADIUS, 28))
 
 
