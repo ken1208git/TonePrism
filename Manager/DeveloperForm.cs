@@ -59,11 +59,24 @@ namespace TonePrism.Manager
                 txtLastName.Text = developer.LastName ?? "";
                 txtFirstName.Text = developer.FirstName ?? "";
                 
-                // 期生の設定（0以上の数値、空欄=不明）
-                if (!string.IsNullOrEmpty(developer.Grade))
+                // 期生の設定（空欄=不明 / "0"=教員 / それ以外=N期生）。(#313) 「不明」「教員」はチェックボックス化。
+                if (string.IsNullOrEmpty(developer.Grade))
+                {
+                    // DB 上 grade が空 = 不明。チェックして numGrade を無効化（仮値は1）。
+                    // 旧実装は空でも numGrade=1 にして保存時 "1" へ coerce し「不明」を失っていた。
+                    numGrade.Value = 1;
+                    chkGradeUnknown.Checked = true;
+                }
+                else if (developer.Grade == "0")
+                {
+                    // "0" = 教員。チェックして numGrade を無効化。
+                    numGrade.Value = 1;
+                    chkGradeTeacher.Checked = true;
+                }
+                else
                 {
                     int gradeValue;
-                    if (int.TryParse(developer.Grade, out gradeValue) && gradeValue >= 0)
+                    if (int.TryParse(developer.Grade, out gradeValue) && gradeValue >= 1)
                     {
                         // (round 5 M6) 旧実装は `numGrade.Value = gradeValue;` 生代入で、numGrade.Maximum (=999999)
                         // を超える DB 値 (例: "9999999") があると ArgumentOutOfRangeException で dialog 自体が
@@ -75,15 +88,6 @@ namespace TonePrism.Manager
                         // 数値に変換できない場合は1をデフォルトにする
                         numGrade.Value = 1;
                     }
-                    // (#313) 値があれば「不明」OFF
-                    chkGradeUnknown.Checked = false;
-                }
-                else
-                {
-                    // (#313) DB 上 grade が空 = 不明。チェックして numGrade を無効化（仮値は1）。
-                    // 旧実装は空でも numGrade=1 にして保存時 "1" へ coerce し「不明」を失っていた。
-                    numGrade.Value = 1;
-                    chkGradeUnknown.Checked = true;
                 }
 
                 this.Text = "製作者情報編集";
@@ -109,8 +113,8 @@ namespace TonePrism.Manager
 
             try
             {
-                // 期生を取得（0以上、0の場合は「教員」、不明チェック時は空欄=不明として保存）
-                string grade = chkGradeUnknown.Checked ? "" : numGrade.Value.ToString();
+                // 期生を取得（不明=空 / 教員="0" / それ以外=numGrade の N期生）
+                string grade = chkGradeUnknown.Checked ? "" : (chkGradeTeacher.Checked ? "0" : numGrade.Value.ToString());
 
                 // DeveloperInfoオブジェクトを作成
                 Developer = new DeveloperInfo
@@ -144,11 +148,24 @@ namespace TonePrism.Manager
         }
 
         /// <summary>
-        /// (#313) 「不明」チェックで期生入力を無効化（空欄=不明として保存）。
+        /// (#313) 「不明」「教員」は排他チェック。どちらかが ON なら期生入力を無効化
+        /// （不明=空 / 教員="0" で保存）。
         /// </summary>
         private void chkGradeUnknown_CheckedChanged(object sender, EventArgs e)
         {
-            numGrade.Enabled = !chkGradeUnknown.Checked;
+            if (chkGradeUnknown.Checked) chkGradeTeacher.Checked = false;
+            UpdateGradeInputEnabled();
+        }
+
+        private void chkGradeTeacher_CheckedChanged(object sender, EventArgs e)
+        {
+            if (chkGradeTeacher.Checked) chkGradeUnknown.Checked = false;
+            UpdateGradeInputEnabled();
+        }
+
+        private void UpdateGradeInputEnabled()
+        {
+            numGrade.Enabled = !(chkGradeUnknown.Checked || chkGradeTeacher.Checked);
         }
 
         /// <summary>

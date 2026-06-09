@@ -2078,7 +2078,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 - **ゲーム追加/編集の「リリース年」と製作者の「期生」を、不明（空欄）のまま登録できるようにした**。DB は両方 nullable だが UI が NumericUpDown で値を強制していたため、「年・期生が分からない古いゲーム」を正しく登録できず非表示にせざるを得なかった（nullable schema に UI を合わせる過剰制約の修正）。
   - **リリース年**: `AddGameForm` / `EditGameForm` の `numReleaseYear` に「不明」チェックボックスを併設。チェック時は入力を無効化し `release_year = null` で保存。`EditGameForm` は読込時に DB が null（または範囲外 clamp）なら自動でチェック。`VersionUpForm` は既存ゲームの値を継承するだけなので変更なし。
-  - **期生**: `DeveloperForm` の `numGrade` に「不明」チェックボックスを併設。チェック時は `grade = ""`（空＝不明）で保存。読込時に grade が空なら自動でチェック（旧実装は空でも 1 に coerce して「不明」を失っていた）。「0=教員」「N=N期生」は従来どおり。
+  - **期生**: `DeveloperForm` で「期生（数値）」に加えて **「教員」「不明」の排他チェックボックス**を併設。教員 ON → `grade = "0"`、不明 ON → `grade = ""`（空＝不明）、どちらも OFF → N期生。チェック時は `numGrade` を無効化（グレーアウト）。読込時に DB の grade が `""`→不明 / `"0"`→教員 を自動判定。旧実装は「0 で教員」を数値直入力させ、かつ空でも 1 に coerce して「不明」を失っていたのを解消（`numGrade` 最小値も 0→1、0=教員 はチェックボックスへ移行）。
 - 検証: build 緑 + 189 テスト合格。**実機で「不明」登録 → 保存 → 再読込 → Launcher 表示が崩れないことを目視（pre-release）**。
 - bump 判断: 過剰制約の修正（破壊的変更・schema 変更なし）。patch (v0.27.2 → v0.27.3)。Launcher v0.11.2 と同じ v0.8.2 に同梱。
 
