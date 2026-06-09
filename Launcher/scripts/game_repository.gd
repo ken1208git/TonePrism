@@ -133,7 +133,7 @@ func _create_game_info_from_row_dict(row: Dictionary) -> GameInfo:
 	game.controller_support = _db_manager.safe_bool(row.get("controller_support"), false)
 	game.is_visible = _db_manager.safe_bool(row.get("is_visible"), true)
 
-	game.genre = _parse_genre(str(row.get("genre", "")))
+	game.genre = _parse_genre("" if row.get("genre") == null else str(row.get("genre")))  # (#327) 真NULL→""("<null>"タグ防止)
 
 	return game
 

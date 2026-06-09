@@ -1353,7 +1353,13 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 - **製作者の期生が空欄（不明）のとき、誤って「(教員)」と表示される不具合を修正** (`game_info_display.gd`)。grade 空文字を `int("")` で 0 に変換し、`GameInfoFormatter.get_grade_string(0)` が「(教員)」を返していた。#313（Manager v0.27.3）で期生を空欄（不明）保存できるようになったため、**空/空白の grade は期生・教員を一切表示しない**（製作者名のみ）ようガードを追加。「0=教員」「N=N期生」は従来どおり。
 - 検証: 同梱 Godot 4.6 headless で `game_info_display.gd` のコンパイル確認。**※実機で空欄期生の製作者が名前のみ表示されることは pre-release で目視**。
-- bump 判断: バグ修正のみ。patch (v0.11.1 → v0.11.2)。Manager v0.27.3 と同じ v0.8.2 に同梱。
+
+#### Fixed (#327 — ジャンル未設定(NULL)で「<null>」タグが出る)
+
+- **ジャンルを設定していない（`games.genre` が NULL）ゲームで、ジャンルタグに文字列「<null>」が表示される不具合を修正** (`game_repository.gd`)。`str(row.get("genre", ""))` が真 NULL で `str(null)="<null>"` を返し `_parse_genre("<null>")` が `["<null>"]` を生成していた（#313 の grade 修正と同根）。読み込み層で genre の NULL を空文字に正規化し、ジャンル未設定はタグなしにした。説明文は表示側ガードで既に救済済み・grade は #313 で修正済みで、本件は genre への横展開。
+- 検証: 同梱 Godot 4.6 headless で `game_repository.gd` のコンパイル確認。**※実機でジャンル未設定ゲームに「<null>」タグが出ないことは pre-release で目視**。
+
+- bump 判断: バグ修正のみ。patch (v0.11.1 → v0.11.2)。Manager v0.27.3 と同じ v0.8.2 に同梱（#313 + #327）。
 
 ### [Launcher v0.11.1] - 2026-06-08
 
