@@ -75,7 +75,7 @@ namespace TonePrism.LauncherAgent
         {
             HashSet<uint> tree = GetProcessTree((uint)rootPid);
             if (tree == null) return false;
-            IntPtr target = FindTopLevelWindow(tree);
+            IntPtr target = FindTopLevelWindow(tree, acceptMinimized: true);  // (#314) 最小化ゲームも復帰対象に
             if (target == IntPtr.Zero) return false;
             return ForceForegroundHwnd(target);
         }
@@ -157,15 +157,15 @@ namespace TonePrism.LauncherAgent
             return SetWindowPos(hwnd, IntPtr.Zero, newX, newY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         }
 
-        private static IntPtr FindTopLevelWindow(HashSet<uint> tree)
+        // acceptMinimized: ForceForeground (focus 経路) は true で最小化窓も対象にする。タイトル無し排他FS窓が
+        // 最小化した瞬間 (GetWindowRect がオフスクリーン小サイズで size 判定を通らない) でも発見でき復帰できる。
+        // PlaceWindowCentered (モニタ寄せ) は false (従来どおり)＝最小化窓を SetWindowPos の移動対象にしない。
+        private static IntPtr FindTopLevelWindow(HashSet<uint> tree, bool acceptMinimized = false)
         {
             IntPtr found = IntPtr.Zero;
             EnumWindows((hwnd, lparam) =>
             {
-                // (#314) focus 経路は acceptMinimized=true。最小化中の窓も対象にしないと、
-                // タイトル無し排他フルスクリーン窓が最小化した瞬間 (GetWindowRect がオフスクリーン小サイズを
-                // 返し size 判定を通らない) に発見できず、ForceForeground が失敗してゲームが復帰しない。
-                if (!IsMeaningfulVisibleWindow(hwnd, acceptMinimized: true)) return true;
+                if (!IsMeaningfulVisibleWindow(hwnd, acceptMinimized)) return true;
                 GetWindowThreadProcessId(hwnd, out uint winPid);
                 if (!tree.Contains(winPid)) return true;
                 found = hwnd;
