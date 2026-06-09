@@ -59,24 +59,28 @@ namespace TonePrism.Manager
                 txtLastName.Text = developer.LastName ?? "";
                 txtFirstName.Text = developer.FirstName ?? "";
                 
-                // 期生の設定（空欄=不明 / "0"=教員 / それ以外=N期生）。(#313) 「不明」「教員」はチェックボックス化。
-                if (string.IsNullOrEmpty(developer.Grade))
+                // 期生の設定（空欄=不明 / 0=教員 / N≥1=N期生）。(#313) 「不明」「教員」はチェックボックス化。
+                // 非正規な teacher 値（"00" / " 0 " 等）も int 解析で 0 と判定して教員へ寄せ、silent に「1期生」へ
+                // 化けるのを防ぐ（手書き SQL / 旧 schema 復元由来の値への防御。本ファイル冒頭の hazard と同種）。
+                string gradeRaw = developer.Grade ?? "";
+                if (string.IsNullOrWhiteSpace(gradeRaw))
                 {
-                    // DB 上 grade が空 = 不明。チェックして numGrade を無効化（仮値は1）。
+                    // 空 = 不明。チェックして numGrade を無効化（仮値は1）。
                     // 旧実装は空でも numGrade=1 にして保存時 "1" へ coerce し「不明」を失っていた。
                     numGrade.Value = 1;
                     chkGradeUnknown.Checked = true;
                 }
-                else if (developer.Grade == "0")
-                {
-                    // "0" = 教員。チェックして numGrade を無効化。
-                    numGrade.Value = 1;
-                    chkGradeTeacher.Checked = true;
-                }
                 else
                 {
                     int gradeValue;
-                    if (int.TryParse(developer.Grade, out gradeValue) && gradeValue >= 1)
+                    bool parsed = int.TryParse(gradeRaw, out gradeValue); // TryParse は前後空白を許容（" 0 "→0）
+                    if (parsed && gradeValue == 0)
+                    {
+                        // 0（"00" / " 0 " 含む） = 教員。チェックして numGrade を無効化。
+                        numGrade.Value = 1;
+                        chkGradeTeacher.Checked = true;
+                    }
+                    else if (parsed && gradeValue >= 1)
                     {
                         // (round 5 M6) 旧実装は `numGrade.Value = gradeValue;` 生代入で、numGrade.Maximum (=999999)
                         // を超える DB 値 (例: "9999999") があると ArgumentOutOfRangeException で dialog 自体が
@@ -85,7 +89,7 @@ namespace TonePrism.Manager
                     }
                     else
                     {
-                        // 数値に変換できない場合は1をデフォルトにする
+                        // 非数値 / 負数等の異常値は1をデフォルトにする
                         numGrade.Value = 1;
                     }
                 }
