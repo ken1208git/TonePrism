@@ -97,16 +97,7 @@ func _ready():
 	# セクション0件 → フォールバック: 全ゲームでカルーセル直接表示
 	if _sections.is_empty():
 		print("[StoreBrowse] セクション0件 → カルーセルにフォールバック")
-		var all_games = _game_repo.get_all_games()
-		_db_manager.close()
-		if all_games.is_empty():
-			ErrorManager.show_error(ErrorCode.DATABASE_NO_GAMES_REGISTERED)
-			return
-		AppState.filtered_games = all_games
-		AppState.initial_game_id = all_games[0].game_id
-		AppState.return_scene = "res://scenes/screensaver.tscn"
-		AppState.section_title = ""
-		TransitionManager.change_scene.call_deferred("res://scenes/game_selection.tscn")
+		_fallback_to_carousel()
 		return
 
 	print("[StoreBrowse] %d 件のセクションを読み込みました" % _sections.size())
@@ -375,11 +366,22 @@ func _build_one_section(i: int) -> void:
 	var tiles: Array[Control] = []
 	_collect_focusable_tiles(container, section.section_type, tiles)
 
+	# (#315) games があるのに type/source/max の組合せでタイルが0描画になるセクションを検出。
+	# drop すると _section_ui の index が _sections とズレてナビ (クロージャが元の i を使う) が壊れるため
+	# drop はしない。代わりに has_content を記録し、全セクションが0タイルなら _on_build_complete で
+	# カルーセルへフォールバックする。原因 config 追跡のため警告ログに type/source/max/games を出す。
+	var has_content := _section_has_content(container, section.section_type)
+	if not has_content:
+		push_warning("[StoreBrowse] ⚠️ セクション '%s' が0タイル描画 (id=%d, type=%d, source=%s, max=%d, games=%d)" %
+			[section.title, section.section_id, section.section_type, section.section_source,
+			section.max_display_count, section.games.size()])
+
 	_section_ui.append({
 		"section": section,
 		"container": container,
 		"tiles": tiles,
-		"type": section.section_type
+		"type": section.section_type,
+		"has_content": has_content
 	})
 
 	# マウスクリック/ホバーのシグナル接続
@@ -424,6 +426,18 @@ func _build_one_section(i: int) -> void:
 func _on_build_complete() -> void:
 	_build_complete = true
 
+	# (#315) 全セクションが0タイル描画 (games はあるのに表示できる中身が無い) なら、空のストア
+	# (「すべてのゲーム」ボタンだけ) にせずカルーセルへフォールバックする。
+	var any_content := false
+	for sec_data in _section_ui:
+		if sec_data.get("has_content", false):
+			any_content = true
+			break
+	if not any_content:
+		print("[StoreBrowse] 表示可能なセクションが0 (全%d件が0タイル) → カルーセルにフォールバック" % _section_ui.size())
+		_fallback_to_carousel()
+		return
+
 	# 「すべてのゲーム」ボタンをセクション末尾に追加
 	_all_games_button = StoreBrowseBuilder.build_all_games_button(_viewport_width)
 	_all_games_button.pressed.connect(_on_all_games_pressed)
@@ -459,9 +473,10 @@ func _on_build_complete() -> void:
 	# 遅延画像読み込みキューを構築
 	_build_image_load_queue()
 
-	# BottomBarの操作ヒント
+	# BottomBarの操作ヒント。(#315) ESC は退出ダイアログ (_on_exit_button_pressed) を開く最上位画面なので
+	# 表記も「退出」に揃える (旧「戻る」は挙動と不一致だった)。直カルーセルの最上位ヒントとも一致。
 	if _bottom_bar:
-		_bottom_bar.set_hints([["Esc", "戻る"], ["Enter", "決定"]])
+		_bottom_bar.set_hints([["Esc", "退出"], ["Enter", "決定"]])
 
 func _exit_tree():
 	# バックグラウンドスレッドをキャンセルして終了を待つ
@@ -660,6 +675,7 @@ func _on_select() -> void:
 	AppState.initial_game_id = focus_game_id
 	AppState.return_scene = "res://scenes/store_browse.tscn"
 	AppState.section_title = section.title
+	AppState.carousel_top_level = false  # (#315) ストア経由 = 通常カルーセル (戻るボタンあり・ESC=戻る)
 
 	TransitionManager.change_scene("res://scenes/game_selection.tscn")
 
@@ -958,9 +974,53 @@ func _scroll_to_section(index: int) -> void:
 
 # --- タイル収集・シグナル接続 ---
 
+## (#315) 表示できるセクションが無いとき (0件 / 全セクション0タイル) に全ゲームのカルーセルへフォールバックする。
+## get_all_games() は repo が is_open()→open() で自動再接続するため、DB を閉じた後 (build 完了時) からでも呼べる。
+func _fallback_to_carousel() -> void:
+	var all_games = _game_repo.get_all_games()
+	_db_manager.close()
+	if all_games.is_empty():
+		ErrorManager.show_error(ErrorCode.DATABASE_NO_GAMES_REGISTERED)
+		return
+	AppState.filtered_games = all_games
+	AppState.initial_game_id = all_games[0].game_id
+	AppState.return_scene = "res://scenes/screensaver.tscn"
+	AppState.section_title = ""
+	# (#315) 空ストアの defense fallback = 最上位カルーセル (戻るボタン無し・ESC=退出ダイアログ)。
+	AppState.carousel_top_level = true
+	TransitionManager.change_scene.call_deferred("res://scenes/game_selection.tscn")
+
+## (#315) セクションのコンテナに実際の表示要素 (タイル/スライド) が1つでもあるか。games フィルタは通って
+## いても type/source/max の組合せでタイル生成が0件になる経路があり (#211 類似)、その「中身の無い
+## セクション」を build 結果そのものから検出する。
+func _section_has_content(container: Control, section_type: int) -> bool:
+	match section_type:
+		1:  # スライドショー: builder が set_meta した生成スライド枚数
+			return int(container.get_meta("slide_count", 0)) > 0
+		2:  # タイルグリッド: GridTile_* の有無
+			for child in container.get_children():
+				if child is Panel and child.name.begins_with("GridTile_"):
+					return true
+			return false
+		_:  # 通常セクション (type 0 含む): ThumbnailRow 内の Tile_* の有無
+			var thumb_row = container.get_node_or_null("ThumbnailRow")
+			if thumb_row:
+				for child in thumb_row.get_children():
+					if child.name.begins_with("Tile_"):
+						return true
+			return false
+
 func _collect_focusable_tiles(container: Control, section_type: int, tiles: Array[Control]) -> void:
 	match section_type:
-		0:  # 通常行: ThumbnailRow 内の Tile_* ラッパー内の TilePanel
+		1:  # スライドショー: BannerClip（窓）が1つのフォーカス対象
+			var clip = container.get_node_or_null("BannerClip")
+			if clip:
+				tiles.append(clip)
+		2:  # タイルグリッド: GridTile_* パネル
+			for child in container.get_children():
+				if child is Panel and child.name.begins_with("GridTile_"):
+					tiles.append(child)
+		_:  # (#315) 通常行 (type 0 含む。_build_one_section の `_` と整合): ThumbnailRow 内の Tile_* → TilePanel
 			var thumb_row = container.get_node_or_null("ThumbnailRow")
 			if thumb_row:
 				for child in thumb_row.get_children():
@@ -970,14 +1030,6 @@ func _collect_focusable_tiles(container: Control, section_type: int, tiles: Arra
 							tiles.append(tile_panel)
 						else:
 							tiles.append(child)
-		1:  # スライドショー: BannerClip（窓）が1つのフォーカス対象
-			var clip = container.get_node_or_null("BannerClip")
-			if clip:
-				tiles.append(clip)
-		2:  # タイルグリッド: GridTile_* パネル
-			for child in container.get_children():
-				if child is Panel and child.name.begins_with("GridTile_"):
-					tiles.append(child)
 
 func _connect_tile_signals(section_index: int, tiles: Array[Control]) -> void:
 	for tile_idx in range(tiles.size()):
@@ -1018,6 +1070,7 @@ func _on_all_games_pressed() -> void:
 	AppState.initial_game_id = all_games[0].game_id
 	AppState.return_scene = "res://scenes/store_browse.tscn"
 	AppState.section_title = "すべてのゲーム"
+	AppState.carousel_top_level = false  # (#315) ストア経由 = 通常カルーセル (戻るボタンあり・ESC=戻る)
 	TransitionManager.change_scene("res://scenes/game_selection.tscn")
 
 func _scroll_to_all_games_button() -> void:

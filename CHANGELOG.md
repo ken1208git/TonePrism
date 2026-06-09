@@ -1347,6 +1347,23 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.11.4] - 2026-06-09
+
+#### Fixed (#315 — 空ストア（0セクション / 全0タイル）で詰む・「すべてのゲーム」ボタンだけになる)
+
+- **ストア入口で事前分岐し、空ストア (0 セクション) なら store_browse を挟まず直接カルーセルへ向かう `StoreEntryRouter` を新設** (`store_entry_router.gd` / `screensaver.gd` / `intro_guide.gd` / `store_section_repository.gd`)。**セクション0件・ゲームありで store_browse に入ると、`_ready` の `_fallback_to_carousel()`→カルーセル遷移が screensaver→store_browse の遷移アニメ中に走り、`change_scene` が再入ガードに飲まれてカルーセルに移れず、early-return 済の空 store_browse（コンテンツ無し・Exit 未構築・idle 未起動）に取り残されて詰んでいた**（`screensaver.gd` #253 と同クラス）。入口 (screensaver / intro_guide) で `has_visible_sections()`（軽量 EXISTS チェック）を見て、0 件なら store_browse を一切経由せず AppState に全ゲームを積んでカルーセルへ直行する。これで「一瞬空の store_browse がちらつくワンクッション」も消える。
+- **直カルーセル (最上位) は戻るボタンを出さず、ESC を「戻る」ではなく「退出ダイアログ」にする** (`app_state.gd` に `carousel_top_level` フラグ追加 / `game_selection.gd`)。空ストア直行カルーセルは戻り先のストアが無いので、(1) TopBar の戻るボタン非表示 (2) ESC/exit_requested を `_on_exit_button_pressed()`（退出しますか？ダイアログ）に回す (3) 操作ヒントを「Esc 退出」に、と store_browse と同じ最上位の退出挙動へ揃えた。あわせて **store_browse の操作ヒントも「Esc 戻る」→「Esc 退出」に修正**（ESC は退出ダイアログを開くのに「戻る」表記で挙動と不一致だった）。これで **「退出」= ESC が退出ダイアログ（store_browse / 直カルーセル）／「戻る」= ESC がストアへ戻る（ストア経由の通常カルーセル）** と表記が実挙動に一致する。フラグは全カルーセル入口 (router / `_fallback_to_carousel`=true、ストア経由の全ゲーム/すべて見る=false) で明示設定し、`AppState.clear()` でも reset するため、直カルーセル→通常カルーセル間で stale にならない。
+- **defense: 遷移アニメ中の `change_scene` を飲まず保持し完了後に実行する last-wins キュー** (`transition_manager.gd`) ＋ **store_browse 側の `_fallback_to_carousel()`**。入口分岐をすり抜ける稀ケース（可視セクションはあるが中身が空/0タイル → store_browse に入ってから fallback）を救う。この経路では遷移中に呼ばれる fallback が従来は飲まれていたため、キューが無いと機能しない（密結合）。入力起因の遷移は呼び出し側が `_transitioning` を見て自前ガード済なので影響しない。
+- **games があるのに type/source/max_display_count の組合せでタイルが0件描画になるセクションへ多層ガードを追加** (`store_browse.gd` / `store_browse_builder.gd`)。`get_store_sections()` は `not section.games.is_empty()` でフィルタ済なのに、store_browse 側でタイル生成が0件になると「すべてのゲーム」ボタンだけの空ストアになっていた。
+  - **全セクションが0タイルならカルーセルへフォールバック**（0件フォールバックと同経路を `_fallback_to_carousel()` に関数化し再利用）。reported の「1セクションが空 → ボタンだけ」を直接救済。
+  - **0タイルセクションを警告ログに出す**（`section_id` / `type` / `source` / `max_display_count` / `games数`）。原因 config を実機で追跡可能にした（#315 は config 流動で再現条件未確定だった）。
+  - **`build_normal_section` の `max_tiles` に下限1を保証**（`maxi(1, …)`）。極小/未確定ビューポート（`viewport_width≈0`）で `max_tiles=0`→`display_count=0` になり games があっても0枚描画になる経路を塞ぎ、フィルタ（games 判定）と描画を揃えた。通常ビューポートでは値不変。
+  - **`_collect_focusable_tiles` に `_` default を追加**（type 0 を `_` に統合）。`_build_one_section` の routing（`_`=通常セクション）と非対称で、未知 section_type のセクションが描画されてもフォーカス不能になる不整合を解消。
+  - セクションの drop は `_section_ui` の index が `_sections` とズレてナビ（クロージャが元の i 参照）を壊すため行わず、global フォールバックで対処。
+- 検証: 同梱 Godot 4.6 headless で import 通過 + `_section_has_content()` の判定（通常/スライド/タイルグリッド/未知 type の full/empty）を `.new()` 単体呼びで実測（full→true・empty→false）。**※実機で (1) 0セクション・ゲームあり → store_browse を挟まず直接カルーセル（ちらつかない・詰まない） (2) ストアのセクション正常描画 (3) 通常の画面遷移（セーバー↔ストア↔カルーセル↔プレイ／スライドあり intro 経由含む）に回帰が無いこと は pre-release で目視**（遷移系は headless では検証不能）。
+
+- bump 判断: バグ修正（空ストア防止の多層ガード）。patch (v0.11.3 → v0.11.4)。Manager 変更なし。v0.8.2 同梱（#315）。
+
 ### [Launcher v0.11.3] - 2026-06-09
 
 #### Changed (#316 — サムネ未登録時の「NO IMAGE」表示を全画面で統一)

@@ -49,6 +49,19 @@ func get_store_sections() -> Array[StoreSectionInfo]:
 
 	return sections
 
+## (#315) 可視な店セクションが1つでも存在するか（軽量チェック）。入口ルーティング (StoreEntryRouter) で
+## 「空ストアなら store_browse を挟まずカルーセル直行」を判断するのに使う。get_store_sections と違い
+## games の有無や developer まではロードしない（中身が空/0タイルのセクションは store_browse 側の
+## fallback が拾う）ため、入口判定の二重ロードを避けられる。
+func has_visible_sections() -> bool:
+	if not _db_manager.is_open():
+		if not _db_manager.open():
+			return false
+	if _db_manager.db.query("SELECT 1 FROM store_sections WHERE is_visible = 1 LIMIT 1"):
+		var result = _db_manager.db.get_query_result()
+		return result != null and result.size() > 0
+	return false
+
 ## セクションソースに応じてゲーム一覧を取得
 func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 	# (#278 ②) DB が閉じていたら開く。store_browse は表示中 DB を閉じておき「すべて見る」

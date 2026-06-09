@@ -49,7 +49,10 @@ static func build_normal_section(section: StoreSectionInfo, viewport_width: floa
 
 	# 画面幅から表示上限を自動計算（タイルサイズ+間隔で割る）
 	var available_width = viewport_width - FEATURED_PADDING * 2
-	var max_tiles = int((available_width + TILE_GAP) / (TILE_SIZE.x + TILE_GAP))
+	# (#315) 極小/未確定ビューポート (viewport_width≈0) だと max_tiles が 0 になり、games があっても
+	# display_count=0 で1枚も描画されない (= フィルタは games あり判定なのに空セクション)。最低1枚を保証して
+	# フィルタ(games 判定)と描画を揃える。通常ビューポートでは値は変わらない。
+	var max_tiles = maxi(1, int((available_width + TILE_GAP) / (TILE_SIZE.x + TILE_GAP)))
 	var effective_max = mini(max_tiles, section.max_display_count) if section.max_display_count > 0 else max_tiles
 	var display_count = mini(section.games.size(), effective_max)
 
