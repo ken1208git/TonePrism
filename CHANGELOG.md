@@ -1365,7 +1365,12 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
   - 既知の差: Manager は .NET CurrentCulture 照合、Launcher は SQLite 既定（コードポイント順）のため、漢字タイトルの細かい順は完全一致しない（かな・英字は概ね一致）。完全一致は別途照合の作り込みが必要。
 - 検証: 同梱 Godot 4.6 headless で `game_repository.gd` のコンパイル確認。**※実機で「すべてのゲーム」が名前順に並ぶことは pre-release で目視**。
 
-- bump 判断: バグ修正 + 並び順統一。patch (v0.11.1 → v0.11.2)。Manager v0.27.3 と同じ v0.8.2 に同梱（#313 + #327 + #328）。
+#### Changed (#329 — ストアの単年/人気仮セクションも名前順に)
+
+- **ストアの `popular`（人気・#297 暫定）/ `recent`（新作）/ `release_year:YYYY`（指定年）セクションの並びを `display_order` → 名前順（title）に変更** (`store_section_repository.gd`)。これらは「単年内は新しさ順が無意味」で全体 `display_order` を借りていたが、#328 の名前順方針に揃えた。これで **`games.display_order` は ORDER から完全に外れ休眠列**に（manual セクションは `store_section_games.display_order` ＝手動順を継続使用、フィルタ系の `release_year DESC` は意図的なので不変）。休眠列の撤去検討は #330、手動並べ替え #86 はクローズ。
+- 検証: 同梱 Godot 4.6 headless で `store_section_repository.gd` のコンパイル確認。
+
+- bump 判断: バグ修正 + 並び順統一。patch (v0.11.1 → v0.11.2)。Manager v0.27.3 と同じ v0.8.2 に同梱（#313 + #327 + #328 + #329）。
 
 ### [Launcher v0.11.1] - 2026-06-08
 

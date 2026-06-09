@@ -65,7 +65,7 @@ func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 	# `release_year DESC, title ASC` = 「なるべく最新の制作年を頭に + 同年内は名前順」(ユーザー要望)。
 	# games には作成日時列が無く release_year が唯一の新しさ指標 (年単位なので "なるべく")。release_year=NULL は
 	# DESC で末尾に来る (= 不明年は最後)。manual=割当順 / popular・recently_played=ランキング / random=シャッフル /
-	# 単年フィルター (recent=今年・release_year:YYYY) は「最新が頭」が無意味なので display_order 順を維持。
+	# 単年フィルター (recent=今年・release_year:YYYY) は「最新が頭」が無意味なので名前順 (title)。(#329, 旧: display_order 順)
 
 	if source == "manual":
 		query = """
@@ -81,14 +81,14 @@ func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 		query = """
 			SELECT * FROM games
 			WHERE is_visible = 1
-			ORDER BY display_order ASC, title ASC
+			ORDER BY title ASC
 		"""
 	elif source == "recent":
 		var current_year = Time.get_date_dict_from_system()["year"]
 		query = """
 			SELECT * FROM games
 			WHERE is_visible = 1 AND release_year = ?
-			ORDER BY display_order ASC, title ASC
+			ORDER BY title ASC
 		"""
 		bindings = [current_year]
 	elif source == "recently_played":
@@ -157,13 +157,13 @@ func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 			ORDER BY release_year DESC, title ASC
 		"""
 	elif source.begins_with("release_year:"):
-		# (#291) 制作年指定: 指定した release_year のゲームを全件 (display_order 順)。新作(recent)が「今年固定」なのに対し
+		# (#291) 制作年指定: 指定した release_year のゲームを全件 (名前順)。新作(recent)が「今年固定」なのに対し
 		# こちらは任意年を指定できる汎用フィルター。max_display_count はグレーアウト=0(全件) で保存される (Manager #211)。
 		var year = int(source.substr(13))
 		query = """
 			SELECT * FROM games
 			WHERE is_visible = 1 AND release_year = ?
-			ORDER BY display_order ASC, title ASC
+			ORDER BY title ASC
 		"""
 		bindings = [year]
 	else:
