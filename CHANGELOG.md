@@ -1361,6 +1361,14 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.11.5] - 2026-06-09
+
+#### Changed (#316 フォローアップ — NO IMAGE 文字サイズの統一)
+
+- **カルーセルの NO IMAGE 文字サイズだけ突出して大きかったのを他箇所に合わせて縮小** (`game_selection.tscn` `NoImageLabel` font_size 30→16)。カルーセルのカードは選択時に ×1.8 拡大されるため、font 30 は実表示で ≈54px（枠の約15%）となり、オーバーレイ/プレイ中（28px・360px枠の約7.8%）やストアのタイル(18/200px≈9%)・スライド(40/~500px≈8%)の「枠に対する割合 ~8%」から突出していた。font 16 で実表示 ≈29px（×1.8）＝オーバーレイの28とほぼ一致し、全箇所が ~8% で揃う。
+- 検証: 同梱 Godot 4.6 headless で `game_selection.tscn` の import 通過。**※実機での見た目（カルーセル NO IMAGE が他と同サイズに見えるか・判読できる濃さか）は pre-release で目視・最終微調整**。
+- bump 判断: 表示調整のみ。patch (v0.11.4 → v0.11.5)。Manager 変更なし。
+
 ### [Launcher v0.11.4] - 2026-06-09
 
 #### Fixed (#315 — 空ストア（0セクション / 全0タイル）で詰む・「すべてのゲーム」ボタンだけになる)
