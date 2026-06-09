@@ -16,7 +16,7 @@ func get_all_games() -> Array[GameInfo]:
 			return []
 
 	var games: Array[GameInfo] = []
-	var query = "SELECT * FROM games WHERE is_visible = 1 ORDER BY display_order ASC, title ASC"
+	var query = "SELECT * FROM games WHERE is_visible = 1 ORDER BY title ASC"  # (#328) すべてのゲームは名前順（display_order でなく title。Manager 一覧と揃える）
 
 	if _db_manager.db.query(query):
 		var result_array = _db_manager.db.get_query_result()

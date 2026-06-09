@@ -1359,7 +1359,13 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 - **ジャンルを設定していない（`games.genre` が NULL）ゲームで、ジャンルタグに文字列「<null>」が表示される不具合を修正** (`game_repository.gd`)。`str(row.get("genre", ""))` が真 NULL で `str(null)="<null>"` を返し `_parse_genre("<null>")` が `["<null>"]` を生成していた（#313 の grade 修正と同根）。読み込み層で genre の NULL を空文字に正規化し、ジャンル未設定はタグなしにした。説明文は表示側ガードで既に救済済み・grade は #313 で修正済みで、本件は genre への横展開。
 - 検証: 同梱 Godot 4.6 headless で `game_repository.gd` のコンパイル確認。**※実機でジャンル未設定ゲームに「<null>」タグが出ないことは pre-release で目視**。
 
-- bump 判断: バグ修正のみ。patch (v0.11.1 → v0.11.2)。Manager v0.27.3 と同じ v0.8.2 に同梱（#313 + #327）。
+#### Changed (#328 — 「すべてのゲーム」を名前順に)
+
+- **「すべてのゲーム」一覧の並びを追加順（display_order）から名前順（title）に変更** (`game_repository.gd` `get_all_games`)。Manager のゲーム一覧（タイトル順）と並びを揃え、来場者が見る順を把握しやすくした。ストアのセクション（新着=制作年順 / ランダム 等）は意図的な並びなので変更なし。`display_order` 列はストアセクション・将来の手動並べ替え (#86) 用に残置（名前順の間「すべてのゲーム」では休眠）。
+  - 既知の差: Manager は .NET CurrentCulture 照合、Launcher は SQLite 既定（コードポイント順）のため、漢字タイトルの細かい順は完全一致しない（かな・英字は概ね一致）。完全一致は別途照合の作り込みが必要。
+- 検証: 同梱 Godot 4.6 headless で `game_repository.gd` のコンパイル確認。**※実機で「すべてのゲーム」が名前順に並ぶことは pre-release で目視**。
+
+- bump 判断: バグ修正 + 並び順統一。patch (v0.11.1 → v0.11.2)。Manager v0.27.3 と同じ v0.8.2 に同梱（#313 + #327 + #328）。
 
 ### [Launcher v0.11.1] - 2026-06-08
 
