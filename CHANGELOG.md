@@ -1354,8 +1354,9 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 - **サムネ/バナー画像が未登録のときの no-image 表示を「明るいグレーの箱 + 灰字『NO IMAGE』」に統一** (新規 `no_image_placeholder.gd`)。従来は場所ごとにバラバラ（カルーセル=明るい箱、オーバーレイ=暗い箱、プレイ中／ストアのサムネ・スライド・パネル=表示なし）だった。共通ヘルパー `NoImagePlaceholder.make(corner_radius, font_size)` を新設し、**オーバーレイ・プレイ中・ストアのサムネ(タイル)・スライド・パネル(グリッド)** に展開。カルーセルは元から明るい箱なので正典として無改修。
   - **loading（暗ヴェール `Color(0.08…)` + 「LOADING」）とは別デザイン**にして、「読込中（暗）」と「画像なし（明）」を視覚的に区別。黒系の no-image は loading と混同するため、あえて明るいグレーにした。loading 側はカルーセル(`game_selection.gd` の `DimBackground`)・ストア(`store_browse_builder.gd` の `_create_loading_label`)とも既に暗ヴェールで統一済みのため無改修。
   - **全画面の背景アート**（カルーセル背後のぼかし／プレイ中・オーバーレイの背景）は装飾レイヤーなので対象外。従来どおり暗い下地 `Color(0.1,0.1,0.1)` にフォールバック（ストアのスライド/パネルは `background_path` を「中身のタイル」として使うので no-image 対象）。
-  - 灰色は単一定数 `BG_COLOR = Color(0.85,0.85,0.85)`（文字 `TEXT_COLOR = Color(0.5,0.5,0.5)`）で全箇所一致。濃さは 1 行で調整可。
-  - **スライドショー下部グラデの二重がけを解消** (`store_banner_builder.gd`)。バナー自身の `GradientOverlay`(0.5) に strong(`0.85`) の `SlideshowGradient` を重ねており最下部が実効 ≒0.92 黒の濃い帯になっていた（実画像では馴染むが、明るい NO IMAGE 箱の上で露呈）。strong の重ねを撤去し、バナー 1 枚の 0.5 グラデ＝**タイルグリッドと同じ濃さ**に統一。未使用化した `shaders/gradient_overlay_strong_material.tres` を削除。
+  - 灰色は単一定数 `BG_COLOR = Color(0.85,0.85,0.85)`（文字 `TEXT_COLOR = Color(0.5,0.5,0.5)`）で**本ヘルパーを使う 4 箇所が一致**（カルーセルは元の .tscn 実装＝白パネル×フェード由来の灰で、視覚的近似・本定数では動かない。真の単一 SoT 化は文化祭後）。濃さは 1 行で調整可。
+  - **NO IMAGE が出る条件は「パスが空、またはファイルが存在しない」**（4箇所＋カルーセル共通。store/carousel は setup 時に `file_exists` で判定するのでファイル不在なら NO IMAGE）。**例外＝ファイルは存在するが `Image.load_from_file` が失敗（破損/0バイト/未対応形式）するケースのみ**、store/カルーセルでは LOADING が永続する既存挙動で本 PR 対象外（**#332**）。playing/overlay は同期ロード＋`texture==null` 判定なので破損でも NO IMAGE になる。
+  - **スライドショー下部グラデの二重がけを解消** (`store_banner_builder.gd`)。バナー自身の `GradientOverlay`(0.5) に strong(`0.85`) の `SlideshowGradient` を重ねており最下部が実効 ≒0.92 黒の濃い帯になっていた（実画像では馴染むが、明るい NO IMAGE 箱の上で露呈）。strong の重ねを撤去し、バナー 1 枚の 0.5 グラデ＝**タイルグリッドと同じ濃さ**に統一。未使用化した `shaders/gradient_overlay_strong_material.tres` を削除。**※実画像スライドで白 `SlideshowTitle` が飛ぶ場合は、全幅 strong 帯ではなくタイトル局所 scrim（タイトル背後だけ濃く）を別途検討**（no-image とのトレードオフ両立案）。
 - 検証: 同梱 Godot 4.6 headless で全スクリプトの import 通過 + `NoImagePlaceholder.make()` が親枠を満たす（200×200・アンカー潰れなし）ことを実測。**実機でも各画面の NO IMAGE 表示・灰色の濃さを目視確認済み（いい感じ）**。**※スライドショーのグラデ変更は実画像スライドの白タイトル可読性も含め pre-release で目視**。
 
 #### Changed (#293 — 説明文なしのプレースホルダを半透明に)
