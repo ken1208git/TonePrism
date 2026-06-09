@@ -79,9 +79,13 @@ func _input(event):
 ## 空スライドのときに intro_guide を挟むと、TransitionManager の遷移中再入ガードにより
 ## intro_guide → store_browse の再遷移が無視され画面が固まりうるため、ここで事前分岐する (#253)。
 func _transition_to_game_selection():
-	var target := "res://scenes/store_browse.tscn"
+	var target: String
 	if _has_visible_intro_slides():
 		target = "res://scenes/intro_guide.tscn"
+	else:
+		# (#315) スライド無し → ストア入口を解決。空ストア (0 セクション) なら store_browse を挟まず
+		# カルーセル直行にして「一瞬空の store_browse がちらつく」のを防ぐ (StoreEntryRouter)。
+		target = StoreEntryRouter.resolve_and_prepare()
 	TransitionManager.change_scene(target)
 
 ## 表示対象スライドが1件以上あるか（遷移先ルーティング用の軽量チェック）

@@ -125,8 +125,9 @@ func _ready():
 	_exit_button = _top_bar.get_exit_button()
 	_top_bar.exit_pressed.connect(_on_exit_button_pressed)
 
-	# 戻るボタン（ブラウズから来たときのみ表示）
-	if not AppState.return_scene.is_empty() and _exit_button:
+	# 戻るボタン（ブラウズから来たときのみ表示）。(#315) 空ストアから直行した最上位カルーセルは
+	# 戻り先のストアが無いので出さない（ESC は退出ダイアログに回す。下の exit_requested 接続参照）。
+	if not AppState.return_scene.is_empty() and not AppState.carousel_top_level and _exit_button:
 		var back_button = preload("res://scenes/components/back_button.tscn").instantiate()
 		_top_bar.get_panel().add_child(back_button)
 		back_button.position = Vector2(40, 80)
@@ -170,7 +171,7 @@ func _ready():
 	_input_handler.selection_moved.connect(_on_selection_moved)
 	_input_handler.free_scroll.connect(_on_free_scroll)
 	_input_handler.play_requested.connect(func(): if _play_button: _play_button.grab_focus())
-	_input_handler.exit_requested.connect(func(): _go_back())
+	_input_handler.exit_requested.connect(func(): _on_exit_requested())
 	_input_handler.focus_to_card_requested.connect(_update_focus_to_current_card)
 	_input_handler.idle_reset_requested.connect(func(): _idle_mgr.reset())
 
@@ -205,7 +206,7 @@ func _ready():
 		_play_button.focus_neighbor_right = _play_button.get_path()
 
 	# カルーセル画面の操作ヒント
-	_bottom_bar.set_hints([["Esc", "戻る"], ["Enter", "決定"]])
+	_bottom_bar.set_hints([["Esc", _esc_hint_label()], ["Enter", "決定"]])
 
 	set_process(true)
 	set_process_input(true)
@@ -298,10 +299,10 @@ func _process(delta):
 		_bottom_bar.get_panel().visible = not _input_handler.using_mouse
 		var desc_focused := _desc_scroll and _desc_scroll.has_focus()
 		if desc_focused and not _desc_hint_active:
-			_bottom_bar.set_hints([["Esc", "戻る"]])
+			_bottom_bar.set_hints([["Esc", _esc_hint_label()]])
 			_desc_hint_active = true
 		elif not desc_focused and _desc_hint_active:
-			_bottom_bar.set_hints([["Esc", "戻る"], ["Enter", "決定"]])
+			_bottom_bar.set_hints([["Esc", _esc_hint_label()], ["Enter", "決定"]])
 			_desc_hint_active = false
 
 func _input(event):
@@ -763,6 +764,19 @@ func _launch_game() -> void:
 		_game_launcher.switch_to_normal_view(_carousel.card_nodes, _info_panel,
 			_top_bar.get_panel(), _static_focus_border, get_tree(),
 			_carousel_container, _bottom_bar.get_panel(), _background_texture)
+
+## (#315) ESC ヒントの文言。ESC の実挙動に合わせる: 最上位カルーセル (空ストアから直行) は ESC=退出
+## ダイアログなので「退出」(store_browse と同じ)、通常 (ストアから来た) は ESC=ストアへ戻るので「戻る」。
+func _esc_hint_label() -> String:
+	return "退出" if AppState.carousel_top_level else "戻る"
+
+## (#315) ESC / exit_requested の宛先。最上位カルーセル (空ストアから直行) は戻り先のストアが無いので、
+## store_browse と同じく退出ダイアログ (退出しますか？) を出す。通常 (ストアから来た) は従来どおり戻る。
+func _on_exit_requested() -> void:
+	if AppState.carousel_top_level:
+		_on_exit_button_pressed()
+	else:
+		_go_back()
 
 func _go_back() -> void:
 	if TransitionManager._transitioning:

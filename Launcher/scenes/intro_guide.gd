@@ -10,8 +10,7 @@ extends Control
 ##
 ## 送り/戻しは「中断メニュー (overlay_menu) 登場」と同じ流儀の横スライド + フェード
 ## (TRANS_QUINT / EASE_OUT)。次へ=新スライドが右から入り旧が左へ抜ける、戻る=その逆。
-
-const STORE_BROWSE_SCENE := "res://scenes/store_browse.tscn"
+## (#315) ストア入口の遷移先は StoreEntryRouter.resolve_and_prepare() で解決する (空ストアは直カルーセル)。
 
 # スライド送りアニメ (overlay_menu の ANIM_OPEN_DUR=0.55 / QUINT・EASE_OUT を踏襲、やや速め)
 const SLIDE_DX := 320.0   # 横スライド量(px)。旧は -dir*SLIDE_DX へ、新は +dir*SLIDE_DX から 0 へ
@@ -636,7 +635,8 @@ func _go_to_store() -> void:
 	if _transitioning or TransitionManager._transitioning:
 		return
 	_transitioning = true
-	TransitionManager.change_scene(STORE_BROWSE_SCENE)
+	# (#315) 空ストア (0 セクション) なら store_browse を挟まずカルーセル直行 (StoreEntryRouter)。
+	TransitionManager.change_scene(StoreEntryRouter.resolve_and_prepare())
 
 ## 直前の遷移 (screensaver → 本シーン) が完了するのを待ってからストアへ。
 ## TransitionManager は遷移中の再入を弾くため、_ready 直後の即時遷移では無視される。
@@ -648,7 +648,8 @@ func _go_to_store_when_free() -> void:
 	# タイマ近似 (0.5s) でなく incoming 遷移フラグの落下を実際に待つ（遷移時間定数への暗黙依存を排除）。
 	while TransitionManager._transitioning:
 		await get_tree().process_frame
-	TransitionManager.change_scene(STORE_BROWSE_SCENE)
+	# (#315) 空ストア (0 セクション) なら store_browse を挟まずカルーセル直行 (StoreEntryRouter)。
+	TransitionManager.change_scene(StoreEntryRouter.resolve_and_prepare())
 
 # --- 入力 ---
 
