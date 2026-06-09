@@ -44,6 +44,7 @@ namespace TonePrism.Manager
             this.clbGenre = new System.Windows.Forms.CheckedListBox();
             this.lblReleaseYear = new System.Windows.Forms.Label();
             this.numReleaseYear = new System.Windows.Forms.NumericUpDown();
+            this.chkReleaseYearUnknown = new System.Windows.Forms.CheckBox();
             this.lblMinPlayers = new System.Windows.Forms.Label();
             this.numMinPlayers = new System.Windows.Forms.NumericUpDown();
             this.lblMaxPlayers = new System.Windows.Forms.Label();
@@ -259,6 +260,17 @@ namespace TonePrism.Manager
             0,
             0,
             0});
+            //
+            // chkReleaseYearUnknown
+            //
+            this.chkReleaseYearUnknown.AutoSize = true;
+            this.chkReleaseYearUnknown.Location = new System.Drawing.Point(210, 363);
+            this.chkReleaseYearUnknown.Name = "chkReleaseYearUnknown";
+            this.chkReleaseYearUnknown.Size = new System.Drawing.Size(53, 16);
+            this.chkReleaseYearUnknown.TabIndex = 15;
+            this.chkReleaseYearUnknown.Text = "不明";
+            this.chkReleaseYearUnknown.UseVisualStyleBackColor = true;
+            this.chkReleaseYearUnknown.CheckedChanged += new System.EventHandler(this.chkReleaseYearUnknown_CheckedChanged);
             //
             // lblMinPlayers
             //
@@ -681,6 +693,7 @@ namespace TonePrism.Manager
             this.Controls.Add(this.lblMaxPlayers);
             this.Controls.Add(this.numMinPlayers);
             this.Controls.Add(this.lblMinPlayers);
+            this.Controls.Add(this.chkReleaseYearUnknown);
             this.Controls.Add(this.numReleaseYear);
             this.Controls.Add(this.lblReleaseYear);
             this.Controls.Add(this.clbGenre);
@@ -732,6 +745,7 @@ namespace TonePrism.Manager
         private System.Windows.Forms.CheckedListBox clbGenre;
         private System.Windows.Forms.Label lblReleaseYear;
         private System.Windows.Forms.NumericUpDown numReleaseYear;
+        private System.Windows.Forms.CheckBox chkReleaseYearUnknown;
         private System.Windows.Forms.Label lblMinPlayers;
         private System.Windows.Forms.NumericUpDown numMinPlayers;
         private System.Windows.Forms.Label lblMaxPlayers;

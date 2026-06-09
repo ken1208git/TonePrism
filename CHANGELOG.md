@@ -1347,6 +1347,14 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.11.2] - 2026-06-09
+
+#### Fixed (#313 — 期生「不明」(空欄) を「教員」と誤表示しない)
+
+- **製作者の期生が空欄（不明）のとき、誤って「(教員)」と表示される不具合を修正** (`game_info_display.gd`)。grade 空文字を `int("")` で 0 に変換し、`GameInfoFormatter.get_grade_string(0)` が「(教員)」を返していた。#313（Manager v0.27.3）で期生を空欄（不明）保存できるようになったため、**空/空白の grade は期生・教員を一切表示しない**（製作者名のみ）ようガードを追加。「0=教員」「N=N期生」は従来どおり。
+- 検証: 同梱 Godot 4.6 headless で `game_info_display.gd` のコンパイル確認。**※実機で空欄期生の製作者が名前のみ表示されることは pre-release で目視**。
+- bump 判断: バグ修正のみ。patch (v0.11.1 → v0.11.2)。Manager v0.27.3 と同じ v0.8.2 に同梱。
+
 ### [Launcher v0.11.1] - 2026-06-08
 
 #### Fixed (#318 — 初回説明スライドの表示調整)
@@ -2063,6 +2071,16 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.27.3] - 2026-06-09
+
+#### Fixed (#313 — リリース年・何期生を「不明」(空欄)で登録可能に)
+
+- **ゲーム追加/編集の「リリース年」と製作者の「期生」を、不明（空欄）のまま登録できるようにした**。DB は両方 nullable だが UI が NumericUpDown で値を強制していたため、「年・期生が分からない古いゲーム」を正しく登録できず非表示にせざるを得なかった（nullable schema に UI を合わせる過剰制約の修正）。
+  - **リリース年**: `AddGameForm` / `EditGameForm` の `numReleaseYear` に「不明」チェックボックスを併設。チェック時は入力を無効化し `release_year = null` で保存。`EditGameForm` は読込時に DB が null（または範囲外 clamp）なら自動でチェック。`VersionUpForm` は既存ゲームの値を継承するだけなので変更なし。
+  - **期生**: `DeveloperForm` の `numGrade` に「不明」チェックボックスを併設。チェック時は `grade = ""`（空＝不明）で保存。読込時に grade が空なら自動でチェック（旧実装は空でも 1 に coerce して「不明」を失っていた）。「0=教員」「N=N期生」は従来どおり。
+- 検証: build 緑 + 189 テスト合格。**実機で「不明」登録 → 保存 → 再読込 → Launcher 表示が崩れないことを目視（pre-release）**。
+- bump 判断: 過剰制約の修正（破壊的変更・schema 変更なし）。patch (v0.27.2 → v0.27.3)。Launcher v0.11.2 と同じ v0.8.2 に同梱。
 
 ### [Manager v0.27.2] - 2026-06-08
 

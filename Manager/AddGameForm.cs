@@ -115,6 +115,14 @@ namespace TonePrism.Manager
         }
 
         /// <summary>
+        /// (#313) 「不明」チェックでリリース年入力を無効化（null 保存）。
+        /// </summary>
+        private void chkReleaseYearUnknown_CheckedChanged(object sender, EventArgs e)
+        {
+            numReleaseYear.Enabled = !chkReleaseYearUnknown.Checked;
+        }
+
+        /// <summary>
         /// 製作者情報のDataGridViewを初期化
         /// </summary>
         private void InitializeDevelopersGrid()
@@ -511,7 +519,7 @@ namespace TonePrism.Manager
                     GameId = gameId,
                     Title = txtTitle.Text.Trim(),
                     Description = string.IsNullOrWhiteSpace(txtDescription.Text) ? null : txtDescription.Text.Trim(),
-                    ReleaseYear = numReleaseYear.Value > 0 ? (int?)numReleaseYear.Value : null,
+                    ReleaseYear = chkReleaseYearUnknown.Checked ? (int?)null : (int?)numReleaseYear.Value, // (#313) 「不明」で null 保存
                     MinPlayers = numMinPlayers.Value > 0 ? (int?)numMinPlayers.Value : null,
                     MaxPlayers = numMaxPlayers.Value > 0 ? (int?)numMaxPlayers.Value : null,
                     Difficulty = cmbDifficulty.SelectedIndex >= 0 ? cmbDifficulty.SelectedIndex + 1 : (int?)null,

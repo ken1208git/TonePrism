@@ -32,13 +32,15 @@ func update_display(game: GameInfo,
 		var seen_devs = []
 		for dev in game.developers:
 			var dev_name = "%s %s" % [dev.last_name, dev.first_name]
-			var grade_val = int(dev.grade) if dev.grade != null else -1
-			var grade_str = GameInfoFormatter.get_grade_string(grade_val)
+			# (#313) grade 空欄 = 不明 → 期生/教員を一切表示しない。grade="" のとき int("")==0 となり
+			# get_grade_string が「(教員)」と誤表示するのを防ぐため、空/空白は grade_str を空にしてガードする。
+			var grade_raw = str(dev.grade).strip_edges() if dev.grade != null else ""
+			var grade_str = GameInfoFormatter.get_grade_string(int(grade_raw)) if grade_raw != "" else ""
 			var unique_key = dev_name + grade_str
 			if unique_key in seen_devs:
 				continue
 			seen_devs.append(unique_key)
-			var creator_text = "%s %s" % [dev_name, grade_str]
+			var creator_text = ("%s %s" % [dev_name, grade_str]) if grade_str != "" else dev_name
 			
 			var bg_panel = PanelContainer.new()
 			var p_style = StyleBoxFlat.new()

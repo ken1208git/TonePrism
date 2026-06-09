@@ -34,6 +34,7 @@ namespace TonePrism.Manager
             this.txtFirstName = new System.Windows.Forms.TextBox();
             this.lblGrade = new System.Windows.Forms.Label();
             this.numGrade = new System.Windows.Forms.NumericUpDown();
+            this.chkGradeUnknown = new System.Windows.Forms.CheckBox();
             this.btnOK = new System.Windows.Forms.Button();
             this.btnCancel = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.numGrade)).BeginInit();
@@ -94,14 +95,25 @@ namespace TonePrism.Manager
             0,
             0});
             this.numGrade.Name = "numGrade";
-            this.numGrade.Size = new System.Drawing.Size(300, 22);
+            this.numGrade.Size = new System.Drawing.Size(140, 22);
             this.numGrade.TabIndex = 5;
             this.numGrade.Value = new decimal(new int[] {
             1,
             0,
             0,
             0});
-            // 
+            //
+            // chkGradeUnknown
+            //
+            this.chkGradeUnknown.AutoSize = true;
+            this.chkGradeUnknown.Location = new System.Drawing.Point(270, 70);
+            this.chkGradeUnknown.Name = "chkGradeUnknown";
+            this.chkGradeUnknown.Size = new System.Drawing.Size(53, 19);
+            this.chkGradeUnknown.TabIndex = 6;
+            this.chkGradeUnknown.Text = "不明";
+            this.chkGradeUnknown.UseVisualStyleBackColor = true;
+            this.chkGradeUnknown.CheckedChanged += new System.EventHandler(this.chkGradeUnknown_CheckedChanged);
+            //
             // btnOK
             // 
             this.btnOK.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
@@ -134,6 +146,7 @@ namespace TonePrism.Manager
             this.ClientSize = new System.Drawing.Size(450, 152);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnOK);
+            this.Controls.Add(this.chkGradeUnknown);
             this.Controls.Add(this.numGrade);
             this.Controls.Add(this.lblGrade);
             this.Controls.Add(this.txtFirstName);
@@ -161,6 +174,7 @@ namespace TonePrism.Manager
         private System.Windows.Forms.TextBox txtFirstName;
         private System.Windows.Forms.Label lblGrade;
         private System.Windows.Forms.NumericUpDown numGrade;
+        private System.Windows.Forms.CheckBox chkGradeUnknown;
         private System.Windows.Forms.Button btnOK;
         private System.Windows.Forms.Button btnCancel;
     }
