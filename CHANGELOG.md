@@ -1361,6 +1361,18 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.11.6] - 2026-06-10
+
+#### Changed (#311 — サービスモードの試遊テストで本物の中断オーバーレイを確認できるように)
+
+- **サービスモード「④ ゲーム動作テスト → ③ 試遊テスト」を、本番と同じ `GameSession` 経由の起動に変更し、HOMEキー / Guideボタンで本物の中断オーバーレイ（再開／別のゲーム／退出）が出るようにした** (`service_mode_overlay.gd` の `_pt_*`)。従来は `_spawn_game_process`（GameSession 非経由）で起動し、HOME/Guide を押すと [`_pt_on_trigger`](Launcher/scripts/service_mode_overlay.gd) が**即 taskkill** していたため、本番で出るはずの中断オーバーレイをサービスモードから一切確認できなかった（#311 のギャップ。特に WOLF RPG 等の排他フルスクリーン #314 の挙動を実機検証する手段が無かった）。
+  - 起動を `GameSession.begin_launch` → `OverlayManager.set_current_game` → `GameSession.start_process` に置換。トリガ（HOME/Guide）は本物の `OverlayManager` が拾ってオーバーレイを出すので、試遊側の直接 kill (`_pt_on_trigger`) と毎フレーム process polling (`_pt_tick`) は撤去。ゲーム終了（手動終了 / オーバーレイの「別のゲーム」「退出」由来の quit）は `GameSession.game_exited` を購読して受け、従来どおり 〇× を記録 → 次へ進む。中止/離脱時の置き去り防止も `taskkill` 直叩きから `GameSession.quit()` に統一。
+  - **browse シード側のガード**: `GameSession` の `playing_confirmed`（→ playing.tscn へ scene 切替）と `game_exited`（→ カルーセル復帰 / スクリーンセーバー遷移）は `game_selection.gd` が購読しており、signal は tree paused でも届く。サービスモード中（`ServiceMode.is_open()`）はこれらを早期 return で無視し、裏の browse シーンが勝手に遷移して壊れるのを防ぐ。退出（スクリーンセーバー）フラグもテスト中は無視。
+  - **pause 整合**: サービスモードは `get_tree().paused = true`（裏の browse シーン凍結）だが、中断オーバーレイ (`overlay_menu`) は `PROCESS_MODE_ALWAYS`（既存設計、ダイアログ等での pause 中も入力/アニメを止めない）なので、paused 下でもボタン操作・glow が効く。`GameSession` も `ALWAYS`、`LauncherAgent.trigger_received` は旧試遊テストの HOME→kill が paused 下で機能していた実績どおり発火する。よって追加の unpause 処理は不要。
+  - スタッフ向け文言（③ のボタン / 説明 / 開始確認モーダル / 試遊画面の案内）を「HOME/Guide で本番と同じ中断メニューが出る・そこから終了すると 〇× へ」と実挙動に合わせて更新。起動テスト②（`_lt_*`）は従来どおり `_spawn_game_process`（GameSession 非経由）のまま。
+- 検証: 同梱 Godot 4.6 headless の editor import が compile エラー無しで通過（stderr 空）。**※実機で (1) 試遊中に HOME/Guide → 本物の中断オーバーレイが出る (2) 「再開」でゲームに戻れる (3) 「別のゲーム」「退出」/ゲーム手動終了で 〇× が出て次へ進む (4) サービスモードの裏で勝手に画面遷移しない (5) 排他フルスクリーン系（WOLF RPG 等）でもオーバーレイが見える、を目視（pre-release）**。focus/window 重なり（service CanvasLayer ↔ オーバーレイ窓 ↔ 〇× モーダル）は実機依存のため要確認。
+- bump 判断: サービスモード試遊テストの挙動変更（破壊的変更・schema 変更なし）。patch (v0.11.5 → v0.11.6)。Manager 変更なし。
+
 ### [Launcher v0.11.5] - 2026-06-09
 
 #### Changed (#316 フォローアップ — NO IMAGE 文字サイズの統一)
