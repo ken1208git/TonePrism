@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.IO;
+using System.Linq;
 using TonePrism.Manager;
 using TonePrism.Manager.Models;
 using TonePrism.Manager.Repositories;
@@ -119,6 +120,42 @@ namespace TonePrism.Manager.Tests
             // 子テーブル (developers) が新 game_id へ追従している。
             Assert.Single(renamed.Developers);
             Assert.Equal("山田", renamed.Developers[0].LastName);
+        }
+
+        [Fact]
+        public void GameRepository_NullReleaseYear_AndBlankOrTeacherGrade_RoundTrip()
+        {
+            // (#313) リリース年 null（不明）と grade ""（不明）/ "0"（教員）/ "50"（50期生）が
+            // round-trip で維持されることを固定。特に grade="" が "0"(教員) に化けない・release_year=null が
+            // 現在年で silent 上書きされないこと（チェックボックス方式の DB 表現）を保証する。
+            var devRepo = new DeveloperRepository(_conn);
+            var gameRepo = new GameRepository(_conn, devRepo);
+
+            var game = new GameInfo
+            {
+                GameId = "nullable_year_grade",
+                Title = "不明値テスト",
+                ReleaseYear = null, // 不明
+                IsVisible = true,
+                Version = "v1.0.0",
+                Genre = new List<string>(),
+                Developers = new List<DeveloperInfo>
+                {
+                    new DeveloperInfo { LastName = "不明", FirstName = "期生", Grade = "" },  // 不明
+                    new DeveloperInfo { LastName = "先生", FirstName = "甲", Grade = "0" },   // 教員
+                    new DeveloperInfo { LastName = "部員", FirstName = "乙", Grade = "50" },  // 50期生
+                },
+            };
+            gameRepo.Add(game);
+
+            var read = gameRepo.GetById("nullable_year_grade");
+            Assert.NotNull(read);
+            Assert.Null(read.ReleaseYear); // 不明 = null が維持（現在年で上書きされない）
+
+            var grades = read.Developers.ToDictionary(d => d.LastName, d => d.Grade);
+            Assert.Equal("", grades["不明"]);   // 空欄=不明 が "0"(教員) に化けない
+            Assert.Equal("0", grades["先生"]);  // 教員
+            Assert.Equal("50", grades["部員"]); // 50期生
         }
 
         [Fact]

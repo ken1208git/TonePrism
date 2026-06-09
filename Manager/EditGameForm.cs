@@ -59,12 +59,9 @@ namespace TonePrism.Manager
         private int _versionDifficultyDisplayedOnLoad;
         private int _versionPlayTimeDisplayedOnLoad;
 
-        // (M1) games.release_year は GameInfo.ReleaseYear が int? 型で null 可能だが、UI 側 numReleaseYear は
-        // NumericUpDown のため null を表現できない。Load 時に null だった場合は DateTime.Now.Year を仮表示する
-        // が、本 flag が true + user が値を触っていない (= 表示値と保存時の値が同一) 場合は null を維持する。
-        // Min/MaxPlayers の null 保護パターンと同じ。
-        private bool _gameReleaseYearWasNullOnLoad;
-        private decimal _gameReleaseYearDisplayedOnLoad;
+        // (#313) games.release_year の「不明」(null) 入力は chkReleaseYearUnknown チェックボックスで明示表現する。
+        // 旧実装は NumericUpDown で null を表せず _gameReleaseYearWasNullOnLoad フラグ + 表示値比較で維持していたが、
+        // 「不明」を能動的に入力する手段が無かった (AddGameForm では null 保存不可) ため、明示チェックボックスへ移行。
 
         // (累積監査 round 4 Low-5) games.min_players / max_players 用の null 保護 snapshot。通常経路は
         // selectedVersion != null で UpdateVersionsAndGame の game ← selectedVersion mirror で正しい値が入るが、
@@ -193,6 +190,14 @@ namespace TonePrism.Manager
             => Services.GameFormHelper.SetClampedNumericValue(nud, value, fieldName, "EditGameForm");
 
         /// <summary>
+        /// (#313) 「不明」チェックでリリース年入力を無効化（null 保存）。
+        /// </summary>
+        private void chkReleaseYearUnknown_CheckedChanged(object sender, EventArgs e)
+        {
+            numReleaseYear.Enabled = !chkReleaseYearUnknown.Checked;
+        }
+
+        /// <summary>
         /// フォームロード時の処理
         /// </summary>
         private void EditGameForm_Load(object sender, EventArgs e)
@@ -224,16 +229,16 @@ namespace TonePrism.Manager
             if (originalGame.ReleaseYear.HasValue)
             {
                 // (M2) DB に範囲外の年 (例: 0 / 9999) があると ArgumentOutOfRangeException で edit 画面が開けなくなる。
-                // clamp 経路に乗せて空欄相当 (= NullOnLoad 扱い) で扱う。
-                _gameReleaseYearWasNullOnLoad = !SetClampedNumericValue(numReleaseYear, originalGame.ReleaseYear.Value, "ReleaseYear");
+                // clamp 経路に乗せる。範囲外で clamp された場合は (#313) 「不明」扱いにする。
+                bool inRange = SetClampedNumericValue(numReleaseYear, originalGame.ReleaseYear.Value, "ReleaseYear");
+                chkReleaseYearUnknown.Checked = !inRange;
             }
             else
             {
-                // (M1) DB 上 null を NumericUpDown で「現在年」と仮表示するが、user が触っていなければ null 維持。
+                // (#313) DB 上 null = 不明。チェックして numReleaseYear を無効化（仮表示は現在年）。
                 numReleaseYear.Value = DateTime.Now.Year;
-                _gameReleaseYearWasNullOnLoad = true;
+                chkReleaseYearUnknown.Checked = true;
             }
-            _gameReleaseYearDisplayedOnLoad = numReleaseYear.Value;
 
             // ジャンルチェックボックスリストを初期化
             clbGenre.Items.Clear();
@@ -1495,11 +1500,8 @@ namespace TonePrism.Manager
                     // 防御経路でも version 文字列を保つ。
                     Version = originalGame.Version,
                     Description = string.IsNullOrWhiteSpace(txtDescription.Text) ? null : txtDescription.Text.Trim(),
-                    // (M1) Load 時に DB 上 null だった + user が表示値を触っていなければ null 維持。
-                    // 旧実装は numReleaseYear.Minimum=1900 で常に > 0 となるため null が現在年で silent 上書きされていた。
-                    ReleaseYear = (_gameReleaseYearWasNullOnLoad && numReleaseYear.Value == _gameReleaseYearDisplayedOnLoad)
-                        ? (int?)null
-                        : (numReleaseYear.Value > 0 ? (int?)numReleaseYear.Value : null),
+                    // (#313) 「不明」チェック時は null 保存。それ以外は numReleaseYear の値。
+                    ReleaseYear = chkReleaseYearUnknown.Checked ? (int?)null : (int?)numReleaseYear.Value,
                     // (累積監査 round 4 Low-5) Load 時に NULL だった + user が触っていなければ NULL 維持。
                     MinPlayers = (_gameMinPlayersWasNullOnLoad && numMinPlayers.Value == _gameMinPlayersDisplayedOnLoad)
                         ? (int?)null

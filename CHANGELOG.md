@@ -1347,6 +1347,31 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.11.2] - 2026-06-09
+
+#### Fixed (#313 — 期生「不明」(空欄) を「教員」と誤表示しない)
+
+- **製作者の期生が空欄（不明）のとき、誤って「(教員)」と表示される不具合を修正** (`game_info_display.gd`)。grade 空文字を `int("")` で 0 に変換し、`GameInfoFormatter.get_grade_string(0)` が「(教員)」を返していた。#313（Manager v0.27.3）で期生を空欄（不明）保存できるようになったため、**空/空白の grade は期生・教員を一切表示しない**（製作者名のみ）ようガードを追加。「0=教員」「N=N期生」は従来どおり。
+- 検証: 同梱 Godot 4.6 headless で `game_info_display.gd` のコンパイル確認。**※実機で空欄期生の製作者が名前のみ表示されることは pre-release で目視**。
+
+#### Fixed (#327 — ジャンル未設定(NULL)で「<null>」タグが出る)
+
+- **ジャンルを設定していない（`games.genre` が NULL）ゲームで、ジャンルタグに文字列「<null>」が表示される不具合を修正** (`game_repository.gd`)。`str(row.get("genre", ""))` が真 NULL で `str(null)="<null>"` を返し `_parse_genre("<null>")` が `["<null>"]` を生成していた（#313 の grade 修正と同根）。読み込み層で genre の NULL を空文字に正規化し、ジャンル未設定はタグなしにした。説明文は表示側ガードで既に救済済み・grade は #313 で修正済みで、本件は genre への横展開。
+- 検証: 同梱 Godot 4.6 headless で `game_repository.gd` のコンパイル確認。**※実機でジャンル未設定ゲームに「<null>」タグが出ないことは pre-release で目視**。
+
+#### Changed (#328 — 「すべてのゲーム」を名前順に)
+
+- **「すべてのゲーム」一覧の並びを追加順（display_order）から名前順（title）に変更** (`game_repository.gd` `get_all_games`)。Manager のゲーム一覧（タイトル順）と並びを揃え、来場者が見る順を把握しやすくした。ストアのセクション（新着=制作年順 / ランダム 等）は意図的な並びなので変更なし。`display_order` 列はストアセクション・将来の手動並べ替え (#86) 用に残置（名前順の間「すべてのゲーム」では休眠）。
+  - 既知の差: Manager は .NET CurrentCulture 照合、Launcher は SQLite 既定（コードポイント順）のため、漢字タイトルの細かい順は完全一致しない（かな・英字は概ね一致）。完全一致は別途照合の作り込みが必要。
+- 検証: 同梱 Godot 4.6 headless で `game_repository.gd` のコンパイル確認。**※実機で「すべてのゲーム」が名前順に並ぶことは pre-release で目視**。
+
+#### Changed (#329 — ストアの単年/人気仮セクションも名前順に)
+
+- **ストアの `popular`（人気・#297 暫定）/ `recent`（新作）/ `release_year:YYYY`（指定年）セクションの並びを `display_order` → 名前順（title）に変更** (`store_section_repository.gd`)。これらは「単年内は新しさ順が無意味」で全体 `display_order` を借りていたが、#328 の名前順方針に揃えた。これで **`games.display_order` は ORDER から完全に外れ休眠列**に（manual セクションは `store_section_games.display_order` ＝手動順を継続使用、フィルタ系の `release_year DESC` は意図的なので不変）。休眠列の撤去検討は #330、手動並べ替え #86 はクローズ。
+- 検証: 同梱 Godot 4.6 headless で `store_section_repository.gd` のコンパイル確認。
+
+- bump 判断: バグ修正 + 並び順統一。patch (v0.11.1 → v0.11.2)。Manager v0.27.3 と同じ v0.8.2 に同梱（#313 + #327 + #328 + #329）。
+
 ### [Launcher v0.11.1] - 2026-06-08
 
 #### Fixed (#318 — 初回説明スライドの表示調整)
@@ -2063,6 +2088,17 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.27.3] - 2026-06-09
+
+#### Fixed (#313 — リリース年・何期生を「不明」(空欄)で登録可能に)
+
+- **ゲーム追加/編集の「リリース年」と製作者の「期生」を、不明（空欄）のまま登録できるようにした**。DB は両方 nullable だが UI が NumericUpDown で値を強制していたため、「年・期生が分からない古いゲーム」を正しく登録できず非表示にせざるを得なかった（nullable schema に UI を合わせる過剰制約の修正）。
+  - **リリース年**: `AddGameForm` / `EditGameForm` の `numReleaseYear` に「不明」チェックボックスを併設。チェック時は入力を無効化し `release_year = null` で保存。`EditGameForm` は読込時に DB が null（または範囲外 clamp）なら自動でチェック。`VersionUpForm` は既存ゲームの値を継承するだけなので変更なし。
+  - **期生**: `DeveloperForm` で「期生（数値）」に加えて **「教員」「不明」の排他チェックボックス**を併設。教員 ON → `grade = "0"`、不明 ON → `grade = ""`（空＝不明）、どちらも OFF → N期生。チェック時は `numGrade` を無効化（グレーアウト）。読込時に DB の grade が `""`→不明 / `"0"`→教員 を自動判定。旧実装は「0 で教員」を数値直入力させ、かつ空でも 1 に coerce して「不明」を失っていたのを解消（`numGrade` 最小値も 0→1、0=教員 はチェックボックスへ移行）。
+  - **製作者名の表示**: 姓または名の一方のみ登録された製作者で、表示名に余分なスペース（`山田 ` / ` 太郎`）が出ていたのを解消（`DeveloperInfo.FullName` / Launcher `developer_info.get_full_name` を両空欄対応に）。`game_info_display` も手組み `"%s %s"` から `get_full_name()` に統一。
+- 検証: build 緑 + 189 テスト合格。**実機で「不明」登録 → 保存 → 再読込 → Launcher 表示が崩れないことを目視（pre-release）**。
+- bump 判断: 過剰制約の修正（破壊的変更・schema 変更なし）。patch (v0.27.2 → v0.27.3)。Launcher v0.11.2 と同じ v0.8.2 に同梱。
 
 ### [Manager v0.27.2] - 2026-06-08
 

@@ -21,8 +21,11 @@ var grade: String = ""
 
 ## フルネームを取得
 func get_full_name() -> String:
+	# (#313) 姓のみ／名のみ登録が許可されたため、空欄側の余分なスペースを出さない。
 	if last_name.is_empty():
 		return first_name
+	if first_name.is_empty():
+		return last_name
 	return last_name + " " + first_name
 
 ## 期生表示を取得（0の場合は「教員」と表示）

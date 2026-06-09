@@ -16,7 +16,7 @@ func get_all_games() -> Array[GameInfo]:
 			return []
 
 	var games: Array[GameInfo] = []
-	var query = "SELECT * FROM games WHERE is_visible = 1 ORDER BY display_order ASC, title ASC"
+	var query = "SELECT * FROM games WHERE is_visible = 1 ORDER BY title ASC"  # (#328) すべてのゲームは名前順（display_order でなく title）。Manager 一覧と概ね揃える（かな/英字は一致、漢字は照合差あり＝CHANGELOG #328 の既知差）
 
 	if _db_manager.db.query(query):
 		var result_array = _db_manager.db.get_query_result()
@@ -98,7 +98,7 @@ func _query_developers(query: String, bindings: Array, game_id: String) -> Array
 					developer.game_id = str(row.get("game_id", ""))
 					developer.last_name = str(row.get("last_name", ""))
 					developer.first_name = str(row.get("first_name", ""))
-					developer.grade = str(row.get("grade", ""))
+					developer.grade = "" if row.get("grade") == null else str(row.get("grade")) # (#313) 真NULL→""正規化("<null>"→int 0→教員 誤表示防止)
 					developers.append(developer)
 	else:
 		push_error("[GameRepository] 製作者情報の取得に失敗しました: " + game_id)
@@ -133,7 +133,7 @@ func _create_game_info_from_row_dict(row: Dictionary) -> GameInfo:
 	game.controller_support = _db_manager.safe_bool(row.get("controller_support"), false)
 	game.is_visible = _db_manager.safe_bool(row.get("is_visible"), true)
 
-	game.genre = _parse_genre(str(row.get("genre", "")))
+	game.genre = _parse_genre("" if row.get("genre") == null else str(row.get("genre")))  # (#327) 真NULL→""("<null>"タグ防止)
 
 	return game
 
