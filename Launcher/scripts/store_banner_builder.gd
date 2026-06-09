@@ -80,20 +80,10 @@ static func build_slideshow_section(section: StoreSectionInfo, viewport_width: f
 	bars.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	container.add_child(bars)
 
-	# 下部グラデーションオーバーレイ（シェーダーは .tres で定義済み）
-	var ss_gradient_height := StoreBrowseBuilder.FEATURED_HEIGHT * 0.35
-	var ss_gradient = Panel.new()
-	ss_gradient.name = "SlideshowGradient"
-	ss_gradient.position = Vector2(0, StoreBrowseBuilder.FEATURED_HEIGHT - ss_gradient_height)
-	ss_gradient.size = Vector2(banner_width, ss_gradient_height)
-	ss_gradient.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ss_gradient.material = preload("res://shaders/gradient_overlay_strong_material.tres")
-	var ss_grad_style = StyleBoxFlat.new()
-	ss_grad_style.bg_color = Color(1, 1, 1, 1)
-	ss_grad_style.corner_radius_bottom_left = 16
-	ss_grad_style.corner_radius_bottom_right = 16
-	ss_gradient.add_theme_stylebox_override("panel", ss_grad_style)
-	clip_panel.add_child(ss_gradient)
+	# (#316) 下部グラデの二重がけを解消。従来はバナー自身の GradientOverlay(0.5) に加えて
+	# strong(0.85) の SlideshowGradient を重ねており、最下部が実効 ≒0.92 黒の濃い帯になっていた
+	# （実画像では馴染むが、明るい NO IMAGE 箱の上で露呈）。strong の重ねを撤去し、バナー 1 枚の
+	# 0.5 グラデ＝タイルグリッドと同じ濃さに統一。SlideshowTitle はこの後 add するので白文字は読める。
 
 	# タイトルオーバーレイ
 	var title_scroll = preload("res://scenes/components/auto_scroll_container.gd").new()
@@ -185,6 +175,10 @@ static func create_banner(game: GameInfo, banner_size: Vector2, custom_text: Str
 	if not bg_path.is_empty():
 		var loading_label = StoreBrowseBuilder._create_loading_label(24)
 		banner.add_child(loading_label)
+	else:
+		# (#316) 背景画像なし → no-image プレースホルダ（カルーセルと見た目を揃えた灰箱）。グラデーション/タイトルより
+		# 前に add するので、それらは後から上に重なる（タイトルは下部の暗グラデ上＝白文字でも読める）。
+		banner.add_child(NoImagePlaceholder.make(16, 40))
 
 	# 下部グラデーションオーバーレイ（シェーダーは .tres で定義済み）
 	var gradient_height := banner_size.y * 0.35

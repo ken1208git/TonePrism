@@ -17,8 +17,10 @@ func update_display(game: GameInfo,
 
 	# --- 説明文 ---
 	var desc_text = game.description
+	var is_desc_placeholder := false
 	if desc_text == null or str(desc_text) == "null" or str(desc_text) == "<null>" or desc_text.strip_edges().is_empty():
 		desc_text = "このゲームには説明文がありません。"
+		is_desc_placeholder = true  # (#293) 説明なしのプレースホルダは半透明で「本物の説明」と区別
 
 	# --- タグ（作者名、年、ジャンル） ---
 	if creator_tags_container:
@@ -174,6 +176,8 @@ func update_display(game: GameInfo,
 		creator_tags_container.get_parent().reset()
 
 	desc_label.text = desc_text
+	# (#293) 説明文が無いときのプレースホルダは半透明にして、実際の説明文と見分けられるようにする。
+	desc_label.modulate.a = 0.45 if is_desc_placeholder else 1.0
 
 ## 値に応じたバッジ背景色をラベルに適用（1=緑, 2=黄, 3=赤）
 func _apply_badge_color(label: Label, value: int) -> void:

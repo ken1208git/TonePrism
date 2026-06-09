@@ -63,7 +63,7 @@ var _clock_label: Label = null
 var _date_label: Label = null    # 時計の下の小さい日付 + 曜日 (例: 2026/05/25 MON)
 var _title_label: Label = null
 var _icon_tex: TextureRect = null
-var _icon_placeholder: Label = null
+var _icon_placeholder: Control = null  # (#316) no-image 共通プレースホルダ (NoImagePlaceholder)
 var _buttons: Array[Button] = []
 var _clock_timer: Timer = null
 var _anim_tween: Tween = null        # 開閉アニメ用 (再トリガ時は kill して作り直す)
@@ -228,14 +228,9 @@ func _build_ui() -> void:
 	_icon_tex.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	icon_clip.add_child(_icon_tex)
 
-	_icon_placeholder = Label.new()
-	_icon_placeholder.text = "NO IMAGE"
-	_icon_placeholder.add_theme_font_override("font", FONT_BOLD)
-	_icon_placeholder.add_theme_font_size_override("font_size", 28)
-	_icon_placeholder.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
-	_icon_placeholder.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_icon_placeholder.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_icon_placeholder.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	# (#316) no-image はカルーセルと見た目を揃えた「明るいグレーの箱 + 灰字 NO IMAGE」に統一 (旧: 暗い icon_clip 地 +
+	# 灰字ラベル)。暗い loading 表示との混同を避けるため明るい箱にする。_set_thumbnail で表示/非表示を切替。
+	_icon_placeholder = NoImagePlaceholder.make(ICON_RADIUS, 28)
 	icon_clip.add_child(_icon_placeholder)
 
 	# ── パネル内のコンテンツ (rail_panel の内側 padding) ──
