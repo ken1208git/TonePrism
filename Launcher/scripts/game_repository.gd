@@ -98,7 +98,7 @@ func _query_developers(query: String, bindings: Array, game_id: String) -> Array
 					developer.game_id = str(row.get("game_id", ""))
 					developer.last_name = str(row.get("last_name", ""))
 					developer.first_name = str(row.get("first_name", ""))
-					developer.grade = str(row.get("grade", ""))
+					developer.grade = "" if row.get("grade") == null else str(row.get("grade")) # (#313) 真NULL→""正規化("<null>"→int 0→教員 誤表示防止)
 					developers.append(developer)
 	else:
 		push_error("[GameRepository] 製作者情報の取得に失敗しました: " + game_id)

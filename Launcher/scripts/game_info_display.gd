@@ -32,10 +32,10 @@ func update_display(game: GameInfo,
 		var seen_devs = []
 		for dev in game.developers:
 			var dev_name = "%s %s" % [dev.last_name, dev.first_name]
-			# (#313) grade 空欄 = 不明 → 期生/教員を一切表示しない。grade="" のとき int("")==0 となり
-			# get_grade_string が「(教員)」と誤表示するのを防ぐため、空/空白は grade_str を空にしてガードする。
+			# (#313) grade 空欄 = 不明 → 期生/教員を一切表示しない。空文字や NULL 由来の "<null>"・非数値文字列を
+			# int() で 0 に化けさせ「(教員)」と誤表示しないよう、整数として妥当なときだけ表示する（"0"=教員 / N=N期生）。
 			var grade_raw = str(dev.grade).strip_edges() if dev.grade != null else ""
-			var grade_str = GameInfoFormatter.get_grade_string(int(grade_raw)) if grade_raw != "" else ""
+			var grade_str = GameInfoFormatter.get_grade_string(int(grade_raw)) if grade_raw.is_valid_int() else ""
 			var unique_key = dev_name + grade_str
 			if unique_key in seen_devs:
 				continue
