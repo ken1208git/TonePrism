@@ -87,6 +87,10 @@ static func _create_game_tile(game: GameInfo) -> Control:
 		# LOADINGラベルを追加
 		var loading_label = _create_loading_label(16)
 		wrapper.get_node("TilePanel").add_child(loading_label)
+	else:
+		# (#316) サムネ未登録 → no-image プレースホルダ（カルーセルと同デザイン）。TilePanel は角丸 16・
+		# clip_children=AND_DRAW なので角丸に切り抜かれる。
+		wrapper.get_node("TilePanel").add_child(NoImagePlaceholder.make(16, 18))
 
 	# タイトル
 	wrapper.get_node("TitleLabel").text = game.title

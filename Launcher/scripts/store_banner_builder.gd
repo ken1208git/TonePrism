@@ -185,6 +185,10 @@ static func create_banner(game: GameInfo, banner_size: Vector2, custom_text: Str
 	if not bg_path.is_empty():
 		var loading_label = StoreBrowseBuilder._create_loading_label(24)
 		banner.add_child(loading_label)
+	else:
+		# (#316) 背景画像なし → no-image プレースホルダ（カルーセルと同デザイン）。グラデーション/タイトルより
+		# 前に add するので、それらは後から上に重なる（タイトルは下部の暗グラデ上＝白文字でも読める）。
+		banner.add_child(NoImagePlaceholder.make(16, 40))
 
 	# 下部グラデーションオーバーレイ（シェーダーは .tres で定義済み）
 	var gradient_height := banner_size.y * 0.35

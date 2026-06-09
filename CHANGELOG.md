@@ -1347,6 +1347,23 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.11.3] - 2026-06-09
+
+#### Changed (#316 — サムネ未登録時の「NO IMAGE」表示を全画面で統一)
+
+- **サムネ/バナー画像が未登録のときの no-image 表示を「明るいグレーの箱 + 灰字『NO IMAGE』」に統一** (新規 `no_image_placeholder.gd`)。従来は場所ごとにバラバラ（カルーセル=明るい箱、オーバーレイ=暗い箱、プレイ中／ストアのサムネ・スライド・パネル=表示なし）だった。共通ヘルパー `NoImagePlaceholder.make(corner_radius, font_size)` を新設し、**オーバーレイ・プレイ中・ストアのサムネ(タイル)・スライド・パネル(グリッド)** に展開。カルーセルは元から明るい箱なので正典として無改修。
+  - **loading（暗ヴェール `Color(0.08…)` + 「LOADING」）とは別デザイン**にして、「読込中（暗）」と「画像なし（明）」を視覚的に区別。黒系の no-image は loading と混同するため、あえて明るいグレーにした。loading 側はカルーセル(`game_selection.gd` の `DimBackground`)・ストア(`store_browse_builder.gd` の `_create_loading_label`)とも既に暗ヴェールで統一済みのため無改修。
+  - **全画面の背景アート**（カルーセル背後のぼかし／プレイ中・オーバーレイの背景）は装飾レイヤーなので対象外。従来どおり暗い下地 `Color(0.1,0.1,0.1)` にフォールバック（ストアのスライド/パネルは `background_path` を「中身のタイル」として使うので no-image 対象）。
+  - 灰色は単一定数 `BG_COLOR = Color(0.85,0.85,0.85)`（文字 `TEXT_COLOR = Color(0.5,0.5,0.5)`）で全箇所一致。濃さは 1 行で調整可。
+- 検証: 同梱 Godot 4.6 headless で全スクリプトの import 通過 + `NoImagePlaceholder.make()` が親枠を満たす（200×200・アンカー潰れなし）ことを実測。**実機でも各画面の NO IMAGE 表示・灰色の濃さを目視確認済み（いい感じ）**。
+
+#### Changed (#293 — 説明文なしのプレースホルダを半透明に)
+
+- **ゲーム説明文が未登録のとき表示する「このゲームには説明文がありません。」を半透明（`modulate.a = 0.45`）にして、実際の説明文と見分けられるようにした** (`game_info_display.gd`)。空/空白/NULL 由来の説明文をプレースホルダ判定し、半透明フラグを立てて適用。
+- 検証: 同梱 Godot 4.6 headless で `game_info_display.gd` の import 通過。**※実機での半透明表示は pre-release で目視**。
+
+- bump 判断: UI 改善（no-image 表示の全画面統一 + 説明プレースホルダの半透明化）。patch (v0.11.2 → v0.11.3)。Manager 変更なし。v0.8.2 同梱（#316 + #293）。
+
 ### [Launcher v0.11.2] - 2026-06-09
 
 #### Fixed (#313 — 期生「不明」(空欄) を「教員」と誤表示しない)

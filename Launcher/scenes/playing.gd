@@ -117,6 +117,11 @@ func _build_ui() -> void:
 		# 単体起動 / セッション無し: 空表示
 		_launching_overlay.show_for_game("", LaunchingOverlay.State.PLAYING)
 
+	# (#316) サムネ画像が無い/読込失敗時は no-image プレースホルダを表示 (カルーセル・オーバーレイと同デザイン)。
+	# thumb_clip (CLIP_CHILDREN_ONLY, 角丸 ICON_RADIUS) の子にするので角丸に切り抜かれる。
+	if thumb.texture == null:
+		thumb_clip.add_child(NoImagePlaceholder.make(ICON_RADIUS, 28))
+
 
 func _load_into(rect: TextureRect, path: String) -> void:
 	if path != "" and FileAccess.file_exists(path):
