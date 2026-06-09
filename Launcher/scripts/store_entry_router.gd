@@ -14,7 +14,6 @@ extends RefCounted
 
 const STORE_BROWSE := "res://scenes/store_browse.tscn"
 const GAME_SELECTION := "res://scenes/game_selection.tscn"
-const SCREENSAVER := "res://scenes/screensaver.tscn"
 
 ## 入口のターゲットシーンを解決して返す。カルーセル直行のときは AppState を準備する。
 static func resolve_and_prepare() -> String:
@@ -38,12 +37,7 @@ static func resolve_and_prepare() -> String:
 		# セクションもゲームも無い → store_browse の no-games エラー表示に委ねる (挙動据え置き)。
 		return STORE_BROWSE
 
-	# セクション0・ゲームあり → カルーセル直行。AppState を「全ゲーム」で準備する
-	# (store_browse._fallback_to_carousel と同じ準備)。
-	AppState.filtered_games = all_games
-	AppState.initial_game_id = all_games[0].game_id
-	AppState.return_scene = SCREENSAVER
-	AppState.section_title = ""
-	# (#315) 戻り先のストアが無い最上位カルーセル。game_selection は戻るボタンを出さず ESC を退出ダイアログにする。
-	AppState.carousel_top_level = true
+	# セクション0・ゲームあり → カルーセル直行。最上位カルーセルとして AppState を準備
+	# (store_browse._fallback_to_carousel と共通の AppState.prepare_top_level_carousel)。
+	AppState.prepare_top_level_carousel(all_games)
 	return GAME_SELECTION

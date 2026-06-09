@@ -54,13 +54,22 @@ func get_store_sections() -> Array[StoreSectionInfo]:
 ## games の有無や developer まではロードしない（中身が空/0タイルのセクションは store_browse 側の
 ## fallback が拾う）ため、入口判定の二重ロードを避けられる。
 func has_visible_sections() -> bool:
+	# (#315) 戻り値は安全側に倒す: **判定できたときだけ「0件=false」**を返し、判定不能 (DB を開けない /
+	# クエリ失敗=一時ロック等) は **true** を返して store_browse の通常経路に委ねる。false を安易に返すと、
+	# 一時ロック1回で「セクションのあるストア」が silent に最上位フラットカルーセル (戻るボタン無し・
+	# ESC=退出) へ化ける窓ができる (router が false を「0件」と解釈し直行するため)。store_browse 経由なら
+	# get_store_sections が push_error でログを残す。さらに store_browse は遷移後に独立してもう一度
+	# get_store_sections を呼ぶので (retry ループではなく時間差の再評価)、その時点でロックが解けていれば
+	# ストアを表示できる。ロックが store_browse の試行まで継続すればフラットカルーセルに落ちる。
 	if not _db_manager.is_open():
 		if not _db_manager.open():
-			return false
+			push_warning("[StoreSectionRepository] has_visible_sections: DB を開けず判定不能 → store_browse に委ねる")
+			return true
 	if _db_manager.db.query("SELECT 1 FROM store_sections WHERE is_visible = 1 LIMIT 1"):
 		var result = _db_manager.db.get_query_result()
 		return result != null and result.size() > 0
-	return false
+	push_warning("[StoreSectionRepository] has_visible_sections: クエリ失敗 (一時ロック?) → 判定不能、store_browse に委ねる")
+	return true
 
 ## セクションソースに応じてゲーム一覧を取得
 func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:

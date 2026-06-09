@@ -29,6 +29,16 @@ var returning_from_game: bool = false
 ## true なら running-view 再現も「ゲーム終了中…」で出して連続させる (false=自然終了は「プレイ中」)。
 var returning_from_quit: bool = false
 
+## (#315) 空ストア時の「最上位カルーセル」用に AppState を準備する。StoreEntryRouter (入口直行) と
+## store_browse._fallback_to_carousel (すり抜け defense) の両方から呼び、最上位カルーセルの作り方を
+## 1 箇所に集約する (戻り先ストア無し・全ゲーム表示・top-level フラグ)。
+func prepare_top_level_carousel(games: Array[GameInfo]) -> void:
+	filtered_games = games
+	initial_game_id = games[0].game_id if not games.is_empty() else ""
+	return_scene = "res://scenes/screensaver.tscn"
+	section_title = ""
+	carousel_top_level = true
+
 ## データをクリアする
 func clear() -> void:
 	filtered_games = []

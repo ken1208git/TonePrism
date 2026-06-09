@@ -4,12 +4,6 @@
 extends CanvasLayer
 
 var _transitioning: bool = false
-# (#315) 遷移アニメ中に要求された次の遷移を保持する (last-wins)。遷移中の change_scene を
-# 「飲んで無視」すると、遷移アニメ中に _ready から自動で別シーンへ移る経路 (store_browse の
-# 空セクション→カルーセル fallback 等) が固まり画面が詰む (#253 と同クラスのバグ)。飲まずに
-# 保持し、現在の遷移完了後に続けて実行する。入力起因の遷移は呼び出し側が _transitioning を見て
-# 自前ガードしているため (例: store_browse の入力処理)、本キューは主に「遷移中に走る自動遷移」を救う。
-var _pending_scene: String = ""
 
 func _ready():
 	layer = 100
@@ -28,8 +22,6 @@ func _collect_canvas_panels(node: Node) -> Array[Control]:
 
 func change_scene(scene_path: String) -> void:
 	if _transitioning:
-		# (#315) 遷移中の要求は飲まず保持。現在の遷移完了後に実行する (下の _pending_scene 処理)。
-		_pending_scene = scene_path
 		return
 	_transitioning = true
 
@@ -87,10 +79,3 @@ func change_scene(scene_path: String) -> void:
 	get_tree().current_scene = new_scene
 
 	_transitioning = false
-
-	# (#315) 遷移中に積まれた次の遷移を実行 (last-wins)。これにより store_browse の空セクション→
-	# カルーセル fallback など「遷移アニメ中に呼ばれた change_scene」が飲まれず確実に実行される。
-	if _pending_scene != "":
-		var next_scene := _pending_scene
-		_pending_scene = ""
-		change_scene(next_scene)

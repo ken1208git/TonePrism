@@ -976,19 +976,21 @@ func _scroll_to_section(index: int) -> void:
 
 ## (#315) 表示できるセクションが無いとき (0件 / 全セクション0タイル) に全ゲームのカルーセルへフォールバックする。
 ## get_all_games() は repo が is_open()→open() で自動再接続するため、DB を閉じた後 (build 完了時) からでも呼べる。
+## 入口 (StoreEntryRouter) で 0 セクションは事前分岐済なので、本経路は「可視セクションはあるが中身が空/0タイル」
+## のすり抜けケース用 defense。incoming 遷移 (screensaver→store_browse) 中に呼ばれると change_scene が
+## 再入ガードに弾かれるため、その完了を待ってから遷移する (intro_guide._go_to_store_when_free と同パターン)。
+## これにより TransitionManager にキューを持たせず (= 通常の入力起点遷移の挙動を変えず) defense を成立させる。
 func _fallback_to_carousel() -> void:
 	var all_games = _game_repo.get_all_games()
 	_db_manager.close()
 	if all_games.is_empty():
 		ErrorManager.show_error(ErrorCode.DATABASE_NO_GAMES_REGISTERED)
 		return
-	AppState.filtered_games = all_games
-	AppState.initial_game_id = all_games[0].game_id
-	AppState.return_scene = "res://scenes/screensaver.tscn"
-	AppState.section_title = ""
-	# (#315) 空ストアの defense fallback = 最上位カルーセル (戻るボタン無し・ESC=退出ダイアログ)。
-	AppState.carousel_top_level = true
-	TransitionManager.change_scene.call_deferred("res://scenes/game_selection.tscn")
+	# (#315) 入口直行 (StoreEntryRouter) と共通の最上位カルーセル準備 (戻り先ストア無し・ESC=退出)。
+	AppState.prepare_top_level_carousel(all_games)
+	while TransitionManager._transitioning:
+		await get_tree().process_frame
+	TransitionManager.change_scene("res://scenes/game_selection.tscn")
 
 ## (#315) セクションのコンテナに実際の表示要素 (タイル/スライド) が1つでもあるか。games フィルタは通って
 ## いても type/source/max の組合せでタイル生成が0件になる経路があり (#211 類似)、その「中身の無い
@@ -1106,20 +1108,6 @@ func _build_image_load_queue() -> void:
 		var container = sec_data["container"] as Control
 
 		match section_type:
-			0:  # 通常行: ThumbnailRow 内の Tile_* ラッパー
-				var thumb_row = container.get_node_or_null("ThumbnailRow")
-				if thumb_row:
-					for child in thumb_row.get_children():
-						if child.name.begins_with("Tile_") and child.has_meta("image_path"):
-							var nid = child.get_instance_id()
-							_node_registry[nid] = child
-							_image_load_queue.append({
-								"node_id": nid,
-								"path": child.get_meta("image_path"),
-								"target": "TilePanel/Thumbnail"
-							})
-							_start_label_breathing(child.get_node_or_null("TilePanel/LoadingLabel"))
-
 			1:  # スライドショー: BannerClip 内の Banner_*
 				var clip = container.get_node_or_null("BannerClip")
 				if clip:
@@ -1150,6 +1138,20 @@ func _build_image_load_queue() -> void:
 							"target": "BackgroundImage"
 						})
 						_start_label_breathing(child.get_node_or_null("LoadingLabel"))
+
+			_:  # (#315) 通常行 (type 0 含む。_build_one_section / _collect_focusable_tiles の `_` と整合): ThumbnailRow 内の Tile_*
+				var thumb_row = container.get_node_or_null("ThumbnailRow")
+				if thumb_row:
+					for child in thumb_row.get_children():
+						if child.name.begins_with("Tile_") and child.has_meta("image_path"):
+							var nid = child.get_instance_id()
+							_node_registry[nid] = child
+							_image_load_queue.append({
+								"node_id": nid,
+								"path": child.get_meta("image_path"),
+								"target": "TilePanel/Thumbnail"
+							})
+							_start_label_breathing(child.get_node_or_null("TilePanel/LoadingLabel"))
 
 	# キューが空でなければバックグラウンドスレッドで画像読み込みを開始
 	if not _image_load_queue.is_empty():
