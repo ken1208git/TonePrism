@@ -25,12 +25,19 @@ namespace TonePrism.Manager
         // 表示 index ではなく SelectedSource (canonical) を見る。
         // 並び順 = ドロップダウンの表示順。canonical ID (Source) とは独立なので、ここを並べ替えても DB 解釈は不変。
         // 「制作年」(ID=12) は release_year つながりで「新作」(ID=2) の隣に置く。
-        private static readonly (string Label, int Source)[] AllSources = new[]
+        // Hidden=true は「新規セクションのソース選択肢には出さないが、既存セクションが既にそのソースで
+        // 保存済みのときだけ combo に出して round-trip 保持する」placeholder ソース。
+        // (#297) 「人気ランキング」(1) /「最近プレイ」(3) は実ランキング (responses 集計) が PR2/v0.9.0 で
+        //   未実装の placeholder (人気=タイトル順を返すだけ=誤解 / 最近プレイ=0行で自動非表示=混乱) のため
+        //   Hidden=true で**新規選択からは隠す**。ただし entry を消さず残すことで、既に popular/recently_played で
+        //   保存済みの既存セクションを開いても手動に coerce されず元の値が保持される (CanonSourceFromString で
+        //   canonical も保つ)。**PR2 で実ランキングを実装したら両者の Hidden を false に戻すこと**（戻し忘れ防止）。
+        private static readonly (string Label, int Source, bool Hidden)[] AllSources = new[]
         {
-            ("手動", 0), ("人気ランキング", 1), ("新作", 2), ("制作年", 12), ("最近プレイ", 3),
-            ("ジャンル指定", 4), ("プレイ人数(以上)", 5), ("プレイ人数(以下)", 6),
-            ("難易度", 7), ("プレイ時間", 8), ("通信プレイ", 9), ("ランダム", 10),
-            ("コントローラー", 11),
+            ("手動", 0, false), ("人気ランキング", 1, true), ("新作", 2, false), ("制作年", 12, false), ("最近プレイ", 3, true),
+            ("ジャンル指定", 4, false), ("プレイ人数(以上)", 5, false), ("プレイ人数(以下)", 6, false),
+            ("難易度", 7, false), ("プレイ時間", 8, false), ("通信プレイ", 9, false), ("ランダム", 10, false),
+            ("コントローラー", 11, false),
         };
         private readonly List<int> _sourceMap = new List<int>();
         private bool _suppressSourceEvent = false;
@@ -307,8 +314,15 @@ namespace TonePrism.Manager
             foreach (var entry in AllSources)
             {
                 if (!TypeAllowsSource(typeIndex, entry.Source)) continue;
+                // (#297) placeholder ソース (Hidden=人気/最近プレイ) は新規選択肢には出さない。ただし既存セクションが
+                // 既にそのソースのとき (desiredSource 一致) だけは出して round-trip 保持し、手動への silent coerce を防ぐ。
+                if (entry.Hidden && entry.Source != desiredSource) continue;
                 if (entry.Source == desiredSource) { selectDisplay = _sourceMap.Count; found = true; }
-                cmbSectionSource.Items.Add(entry.Label);
+                // (#297) round-trip で露出する placeholder ソース (Hidden=人気/最近プレイ) は「（準備中）」を付けて
+                // 通常の有効ソースと見分けられるようにする。これは combo の表示ラベルだけで、保存値は _sourceMap の
+                // canonical ID から GetSourceString が再生成する (ラベル文字列は参照しない) ため round-trip は壊れない。
+                // PR2 で実ランキングを実装し Hidden=false に戻せば suffix も自動で消える。
+                cmbSectionSource.Items.Add(entry.Hidden ? entry.Label + "（準備中）" : entry.Label);
                 _sourceMap.Add(entry.Source);
             }
             cmbSectionSource.SelectedIndex = (cmbSectionSource.Items.Count > 0) ? selectDisplay : -1;
