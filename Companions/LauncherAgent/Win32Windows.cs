@@ -93,12 +93,16 @@ namespace TonePrism.LauncherAgent
             // まま」になることがある。そこで前面化が反映 (recovered) されるまで数回リトライする。各試行で
             // foreground スレッドが変わりうる (ゲーム最小化で別窓が前面化する等) ため AttachThreadInput は
             // 毎回張り直す。1 回目で成功すれば従来どおり 60ms 1 回分で抜ける (失敗時のみリトライぶん延びる)。
-            const int maxAttempts = 4;
+            // maxAttempts は 3 (最大 180ms)。#216 anomaly recovery は focus を 500ms 間隔で再発行する
+            // 外側ループなので、失敗が続く経路では内側リトライを欲張らず外側に委ねる (単一ループスレッドを
+            // 長く塞いで probe / HOME 検知を鈍らせないため)。
+            const int maxAttempts = 3;
             bool recovered = false;
             for (int attempt = 0; attempt < maxAttempts && !recovered; attempt++)
             {
                 IntPtr beforeFg = GetForegroundWindow();
-                if (beforeFg == target) { recovered = true; break; }
+                // (#314) 前面でも最小化中なら復元処理に進ませる (前面かつ iconic を成功扱いで返すと最小化のまま取り残す)。
+                if (beforeFg == target && !IsIconic(target)) { recovered = true; break; }
 
                 uint fgThread = GetWindowThreadProcessId(beforeFg, out _);
                 uint thisThread = GetCurrentThreadId();
@@ -158,7 +162,10 @@ namespace TonePrism.LauncherAgent
             IntPtr found = IntPtr.Zero;
             EnumWindows((hwnd, lparam) =>
             {
-                if (!IsMeaningfulVisibleWindow(hwnd)) return true;
+                // (#314) focus 経路は acceptMinimized=true。最小化中の窓も対象にしないと、
+                // タイトル無し排他フルスクリーン窓が最小化した瞬間 (GetWindowRect がオフスクリーン小サイズを
+                // 返し size 判定を通らない) に発見できず、ForceForeground が失敗してゲームが復帰しない。
+                if (!IsMeaningfulVisibleWindow(hwnd, acceptMinimized: true)) return true;
                 GetWindowThreadProcessId(hwnd, out uint winPid);
                 if (!tree.Contains(winPid)) return true;
                 found = hwnd;
@@ -169,7 +176,9 @@ namespace TonePrism.LauncherAgent
 
         // ============================ 共通 ============================
 
-        private static bool IsMeaningfulVisibleWindow(IntPtr hwnd)
+        // acceptMinimized: focus 経路 (ForceForeground) 用。最小化中の窓も実窓として扱い、復元対象に含める。
+        // probe 経路は false (従来どおり) で、最小化窓を「可視」と誤検知して PLAYING/anomaly を狂わせない。
+        private static bool IsMeaningfulVisibleWindow(IntPtr hwnd, bool acceptMinimized = false)
         {
             if (!IsWindowVisible(hwnd)) return false;
             if (GetWindow(hwnd, GW_OWNER) != IntPtr.Zero) return false; // オーナー持ち (ダイアログ等) 除外
@@ -179,6 +188,10 @@ namespace TonePrism.LauncherAgent
             if (cls.ToString() == "ConsoleWindowClass") return false; // cmd 経由起動の一瞬のコンソール除外
 
             if (GetWindowTextLength(hwnd) > 0) return true;
+
+            // (#314) 最小化窓は GetWindowRect がオフスクリーン小サイズを返し下の size 判定を通らないため、
+            // focus 経路ではここで実窓扱いにして取りこぼさない (タイトル無し排他FS窓の最小化対策)。
+            if (acceptMinimized && IsIconic(hwnd)) return true;
 
             if (GetWindowRect(hwnd, out RECT r))
             {
