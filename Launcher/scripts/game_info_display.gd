@@ -31,7 +31,7 @@ func update_display(game: GameInfo,
 		# 作者バッジ (白背景、黒文字、アイコン有)
 		var seen_devs = []
 		for dev in game.developers:
-			var dev_name = "%s %s" % [dev.last_name, dev.first_name]
+			var dev_name = dev.get_full_name()  # (#313) 姓/名どちらか空欄でも余分なスペースを出さない
 			# (#313) grade 空欄 = 不明 → 期生/教員を一切表示しない。空文字や NULL 由来の "<null>"・非数値文字列を
 			# int() で 0 に化けさせ「(教員)」と誤表示しないよう、整数として妥当なときだけ表示する（"0"=教員 / N=N期生）。
 			var grade_raw = str(dev.grade).strip_edges() if dev.grade != null else ""

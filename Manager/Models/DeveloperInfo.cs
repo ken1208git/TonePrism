@@ -44,7 +44,11 @@ namespace TonePrism.Manager.Models
                 {
                     return FirstName;
                 }
-                return LastName + " " + FirstName; 
+                if (string.IsNullOrEmpty(FirstName))
+                {
+                    return LastName; // (#313) 姓のみ登録時の末尾スペースを出さない
+                }
+                return LastName + " " + FirstName;
             }
         }
 
