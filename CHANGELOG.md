@@ -1241,6 +1241,16 @@ Release.bat の編集は **UTF-8 (no BOM) + CRLF** 厳守 (SPEC §3.7.9.1 参照
 
 SPEC §2.4 で定義される「主要 (Launcher / Manager / Monitor) を補助する独立 exe 群」の **runtime exe** の変更履歴。`Companions/Updater/TonePrism_Updater.exe` (Manager 自身の dir 置換用) + `LauncherAgent` (#30/#101/#216、probe/sensor/focus を統合した Launcher 補助の常駐エージェント、旧 WindowProbe を吸収) の deployment 配置と整合。本 section は **#160 で `## Updater (Companions/Updater)` から rename + 一般化**、`## Release Tooling` (= build / 配布スクリプト) と責務分離 (= 後者は build 時のみ動く scripts、本 section は runtime exe)。SPEC §2.4 / §3.7.4 参照。
 
+### [LauncherAgent v0.2.1] - 2026-06-09
+
+#### Fixed (#314 — 排他フルスクリーン系（WOLF等）で中断オーバーレイの表示/復帰が不安定）
+
+- **強制前面化 `ForceForegroundHwnd` で、対象ウィンドウが最小化されていれば `SW_RESTORE`（復元）を使うように修正**（`Win32Windows.cs`、従来は `SW_SHOW` 固定）。`SW_SHOW` は最小化ウィンドウを元に戻さないため、resume（`GameSession.resume` → `focus` → `ForceForeground`）で最小化されたゲームが前面に戻らず、プレイ中シーンに取り残されていた。
+  - **背景**: WOLF RPG（ウディタ）等の排他フルスクリーンゲームは、HOME 押下でオーバーレイ窓に前面を奪われると**自分から最小化して排他を手放す**（だからオーバーレイ自体は出る）。詰みの実体は「オーバーレイが出ない」ではなく「**続けるで最小化ゲームを復帰できていなかった**」こと。最小化時のみ `SW_RESTORE`、非最小化は従来どおり `SW_SHOW`（最大化を巻き込まないため）。`IsIconic` で判定。`focus`(pid) / `focus_hwnd` 双方がこの関数を通るので 1 箇所で両対応。
+  - **補足（#314 の見え方）**: 「排他フルスクリーン＝原理的にオーバーレイ不可」は **真の排他（古い DirectDraw/DirectX、Windows の Fullscreen Optimizations 対象外）に限る**。モダンエンジン（Godot/Unity/Unreal）や FSO 対象は実体がボーダーレス（DWM 合成）でオーバーレイは出る。WOLF 等の真の排他でも自分から最小化する型は本修正で救える。残課題は「最小化せず入力を握ったままの回」のたまの操作不能（オーバーレイは前面化できているが排他ゲームが入力を握る）で、**HOME 再押下で復帰**できるため強制最小化（要・ゲーム単位フラグ）は過剰として **#337** に保留（guideline #133 で運用吸収）。
+- **`ForceForegroundHwnd` を前面化が反映されるまで数回リトライするよう変更**（最大4回・各60ms、1回目成功で即抜け）。Windows の foreground-lock や、排他FSゲームが最小化する直後の前面遷移レースで 1 回の `SetForegroundWindow` が弾かれ、**HOME でオーバーレイが出ずプレイ中画面だけになる／オーバーレイのフォーカス（グロー）が動かない**ことがあったため。各試行で foreground スレッドを取り直す（ゲーム最小化で別窓が前面化しても追従）。`focus`(pid) / `focus_hwnd`（オーバーレイ表示）双方がこの関数を通るので一括対応。判定は `GetForegroundWindow()` の実結果で行う（`SetForegroundWindow` の戻り値は foreground-lock 下で不正確なため最終判定に使わない）。
+- 検証: VS MSBuild で Release ビルド成功（compile 確認）。**※実機で (1) HOME → オーバーレイメニューが毎回出てフォーカスも動く (2) 「続ける」でゲームに復帰できる ことは pre-release で目視**（前面化レースは確率的なので連続試行で確認）。
+
 ### [LauncherAgent v0.2.0] - 2026-05-26
 
 - **速度計測コマンド `speedtest <run_id> <共有ファイルパス>` を追加** (サービスモードのネットワーク接続テスト用。`run_id` は古い遅延結果の取り違え防止用に Launcher が要求と結果を照合する識別子)。Godot 単体では正確に測れない 2 つを Companion で実施し `{"type":"speedtest","kind":"internet|server","ok":..,"text":".."}` イベントで返す:

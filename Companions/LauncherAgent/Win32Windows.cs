@@ -87,27 +87,44 @@ namespace TonePrism.LauncherAgent
         public static bool ForceForegroundHwnd(IntPtr target)
         {
             if (target == IntPtr.Zero) return false;
-            IntPtr beforeFg = GetForegroundWindow();
-            uint fgThread = GetWindowThreadProcessId(beforeFg, out _);
-            uint thisThread = GetCurrentThreadId();
-            bool attached = false;
-            if (fgThread != 0 && fgThread != thisThread)
+
+            // (#314) Windows の foreground-lock や、排他フルスクリーンゲームが最小化する直後の前面遷移レースで
+            // 1 回の SetForegroundWindow が弾かれ、「フォーカスが動かない / オーバーレイが出ずプレイ中画面の
+            // まま」になることがある。そこで前面化が反映 (recovered) されるまで数回リトライする。各試行で
+            // foreground スレッドが変わりうる (ゲーム最小化で別窓が前面化する等) ため AttachThreadInput は
+            // 毎回張り直す。1 回目で成功すれば従来どおり 60ms 1 回分で抜ける (失敗時のみリトライぶん延びる)。
+            const int maxAttempts = 4;
+            bool recovered = false;
+            for (int attempt = 0; attempt < maxAttempts && !recovered; attempt++)
             {
-                attached = AttachThreadInput(fgThread, thisThread, true);
+                IntPtr beforeFg = GetForegroundWindow();
+                if (beforeFg == target) { recovered = true; break; }
+
+                uint fgThread = GetWindowThreadProcessId(beforeFg, out _);
+                uint thisThread = GetCurrentThreadId();
+                bool attached = false;
+                if (fgThread != 0 && fgThread != thisThread)
+                {
+                    attached = AttachThreadInput(fgThread, thisThread, true);
+                }
+
+                // 最小化されていれば SW_RESTORE で復元する。WOLF RPG (ウディタ) 等の排他フルスクリーンゲームは
+                // HOME でオーバーレイ窓に前面を奪われると自分から最小化するため、SW_SHOW (最小化を解かない) だと
+                // resume でゲームが最小化のまま=プレイ中シーンに取り残される。最大化は巻き込みたくないので
+                // 最小化時のみ SW_RESTORE、それ以外は従来どおり SW_SHOW。
+                ShowWindow(target, IsIconic(target) ? SW_RESTORE : SW_SHOW);
+                BringWindowToTop(target);
+                SetForegroundWindow(target);
+
+                if (attached) AttachThreadInput(fgThread, thisThread, false);
+
+                // 反映待ち (Program の単一ループスレッド上で実行。失敗時のみリトライぶん延びるが、open/resume
+                // 直後で連打される場面ではないので許容)。GetForegroundWindow で実際に前面化できたか確認する
+                // (SetForegroundWindow の戻り値は foreground-lock 下で信頼できないため最終判定には使わない)。
+                Thread.Sleep(60);
+                recovered = GetForegroundWindow() == target;
             }
-
-            ShowWindow(target, SW_SHOW);
-            BringWindowToTop(target);
-            bool ok = SetForegroundWindow(target);
-
-            if (attached) AttachThreadInput(fgThread, thisThread, false);
-
-            // 反映待ち。Program の単一ループスレッド上で実行されるため、この 60ms はメッセージポンプ /
-            // cmd 受信 / gamepad poll / probe を止める (overlay open ごとに 1 回)。HOME/Guide 検知が一瞬鈍るが
-            // 許容範囲 (open 直後で連打される場面ではない)。気になるなら短い sleep×数回の polling に変更可。
-            Thread.Sleep(60);
-            bool recovered = GetForegroundWindow() == target;
-            return ok && recovered;
+            return recovered;
         }
 
         /// <summary>
@@ -257,6 +274,7 @@ namespace TonePrism.LauncherAgent
         [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);  // (#314) 最小化判定
         [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
         [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
         [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
@@ -269,6 +287,7 @@ namespace TonePrism.LauncherAgent
 
         private const uint GW_OWNER = 4;
         private const int SW_SHOW = 5;
+        private const int SW_RESTORE = 9;  // (#314) 最小化ウィンドウの復元 (resume でゲームを前面に戻す)
         // クリック透過 (SetClickThrough) 用
         private const int GWL_EXSTYLE = -20;
         private const int WS_EX_LAYERED = 0x80000;
