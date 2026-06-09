@@ -318,7 +318,11 @@ namespace TonePrism.Manager
                 // 既にそのソースのとき (desiredSource 一致) だけは出して round-trip 保持し、手動への silent coerce を防ぐ。
                 if (entry.Hidden && entry.Source != desiredSource) continue;
                 if (entry.Source == desiredSource) { selectDisplay = _sourceMap.Count; found = true; }
-                cmbSectionSource.Items.Add(entry.Label);
+                // (#297) round-trip で露出する placeholder ソース (Hidden=人気/最近プレイ) は「（準備中）」を付けて
+                // 通常の有効ソースと見分けられるようにする。これは combo の表示ラベルだけで、保存値は _sourceMap の
+                // canonical ID から GetSourceString が再生成する (ラベル文字列は参照しない) ため round-trip は壊れない。
+                // PR2 で実ランキングを実装し Hidden=false に戻せば suffix も自動で消える。
+                cmbSectionSource.Items.Add(entry.Hidden ? entry.Label + "（準備中）" : entry.Label);
                 _sourceMap.Add(entry.Source);
             }
             cmbSectionSource.SelectedIndex = (cmbSectionSource.Items.Count > 0) ? selectDisplay : -1;

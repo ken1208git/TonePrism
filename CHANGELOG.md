@@ -2154,8 +2154,9 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **ストアセクション編集フォームのソースドロップダウンで「人気ランキング」「最近プレイ」を新規選択肢から隠した** (`StoreSectionForm.cs` `AllSources` に `Hidden` フラグ追加)。両ソースは実ランキング（responses の in-memory 集計）が #297 PR2 / v0.9.0 で未実装のため現状プレースホルダ：「人気」は実態がタイトル順なのに「人気」と表示され**来場者に誤解**を与え、「最近プレイ」は0行で**セクション自動非表示**になりスタッフが「追加したのに出ない」と混乱しうる。誤って選べないよう新規選択肢から隠す。
   - **既存セクションは round-trip 保持**：`RebuildSourceCombo` で Hidden ソースも「編集中セクションの現ソースと一致するとき (`entry.Source == desiredSource`) だけ」combo に出すため、既に `popular`/`recently_played` で保存済みの既存セクションを開いても**手動に silent coerce されず元の値が保存される**（`AllSources` から丸ごと消すと開いて保存で `manual` に化けて値が消える＝当初実装の不具合をレビューで是正）。`CanonSourceFromString` で canonical も保持。
   - **#297 PR2 で実ランキングを実装したら `AllSources` の両者の `Hidden` を `false` に戻すこと**（コード内コメント＋#297 に再追加メモを記載）。
-  - docs ドリフト対応: `docs/usage/store.md` の「自動ソースについて」注記を「**人気/最近プレイは現在選べません（準備中）**」の warning に更新（マニュアルにあるのに UI に無い、の混乱防止。実装時に戻す）。
-- 検証: VS MSBuild で Release ビルド成功（compile 確認）。**※実機で Manager のストアセクション編集→(1)新規でソースに「人気」「最近プレイ」が出ない・他ソースは従来どおり選べる (2) 既存の人気/最近プレイセクションを開くと現ソースが保持され手動に化けない（保存して `section_source` が `popular`/`recently_played` のまま）ことは目視**（検証 seed はコピーDBで・marker 限定後始末）。
+  - **round-trip で露出する Hidden ソースに「（準備中）」サフィックス** (レビュー指摘2): 既存 `popular`/`recently_played` セクションを開いたとき combo に出るラベルを「人気ランキング（準備中）」「最近プレイ（準備中）」にし、通常の有効ソースと見分けられるようにした（実態がタイトル順／0行のプレースホルダと一目で分かる）。表示ラベルのみの変更で、保存値は `_sourceMap` の canonical ID から `GetSourceString` が再生成する（ラベル文字列は参照しない）ため round-trip は壊れない。PR2 で `Hidden=false` に戻せば suffix も自動で消える。
+  - docs ドリフト対応 (レビュー指摘1): `docs/usage/store.md` を整合させた。(a) 自動ソース一覧の直後に**早期 warning**（人気/最近プレイは準備中・以下の記述は実装後の姿）を追加し top-to-bottom 読者が working source 説明に達する前に告知。(b) 「厳選枠はこの **4 つだけ**出る」の枚数記述を「実装後は最大 4 つ／**現在は手動・ランダムの 2 つ**」に修正（catch-all 注記では上書きできない具体的個数の矛盾を是正）。(c) 末尾 warning は早期注記を参照する短縮形にして二重管理を回避。
+- 検証: VS MSBuild で Release ビルド成功（compile 確認）。**※実機で Manager のストアセクション編集→(1)新規でソースに「人気」「最近プレイ」が出ない・他ソースは従来どおり選べる (2) 既存の人気/最近プレイセクションを開くと現ソースが「（準備中）」付きで保持され手動に化けない（保存して `section_source` が `popular`/`recently_played` のまま）ことは目視**（検証 seed はコピーDBで・marker 限定後始末）。
 - bump 判断: UI 選択肢の一時調整のみ。patch (v0.27.3 → v0.27.4)。Launcher 変更なし。
 
 ### [Manager v0.27.3] - 2026-06-09
