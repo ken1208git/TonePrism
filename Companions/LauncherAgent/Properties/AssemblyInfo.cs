@@ -15,5 +15,5 @@ using System.Runtime.InteropServices;
 [assembly: Guid("b2d4e6f8-1a3c-4e5d-9f70-2c4a6e8d0b1f")]
 
 // 変更時はここを bump + CHANGELOG `## Companions` セクションに entry 追加。
-[assembly: AssemblyVersion("0.2.0.0")]
-[assembly: AssemblyFileVersion("0.2.0.0")]
+[assembly: AssemblyVersion("0.2.1.0")]
+[assembly: AssemblyFileVersion("0.2.1.0")]

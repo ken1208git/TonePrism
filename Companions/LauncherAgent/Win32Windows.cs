@@ -75,7 +75,7 @@ namespace TonePrism.LauncherAgent
         {
             HashSet<uint> tree = GetProcessTree((uint)rootPid);
             if (tree == null) return false;
-            IntPtr target = FindTopLevelWindow(tree);
+            IntPtr target = FindTopLevelWindow(tree, acceptMinimized: true);  // (#314) 最小化ゲームも復帰対象に
             if (target == IntPtr.Zero) return false;
             return ForceForegroundHwnd(target);
         }
@@ -87,27 +87,48 @@ namespace TonePrism.LauncherAgent
         public static bool ForceForegroundHwnd(IntPtr target)
         {
             if (target == IntPtr.Zero) return false;
-            IntPtr beforeFg = GetForegroundWindow();
-            uint fgThread = GetWindowThreadProcessId(beforeFg, out _);
-            uint thisThread = GetCurrentThreadId();
-            bool attached = false;
-            if (fgThread != 0 && fgThread != thisThread)
+
+            // (#314) Windows の foreground-lock や、排他フルスクリーンゲームが最小化する直後の前面遷移レースで
+            // 1 回の SetForegroundWindow が弾かれ、「フォーカスが動かない / オーバーレイが出ずプレイ中画面の
+            // まま」になることがある。そこで前面化が反映 (recovered) されるまで数回リトライする。各試行で
+            // foreground スレッドが変わりうる (ゲーム最小化で別窓が前面化する等) ため AttachThreadInput は
+            // 毎回張り直す。1 回目で成功すれば従来どおり 60ms 1 回分で抜ける (失敗時のみリトライぶん延びる)。
+            // maxAttempts は 3 (最大 180ms)。#216 anomaly recovery は focus を 500ms 間隔で再発行する
+            // 外側ループなので、失敗が続く経路では内側リトライを欲張らず外側に委ねる (単一ループスレッドを
+            // 長く塞いで probe / HOME 検知を鈍らせないため)。
+            const int maxAttempts = 3;
+            bool recovered = false;
+            for (int attempt = 0; attempt < maxAttempts && !recovered; attempt++)
             {
-                attached = AttachThreadInput(fgThread, thisThread, true);
+                IntPtr beforeFg = GetForegroundWindow();
+                // (#314) 前面でも最小化中なら復元処理に進ませる (前面かつ iconic を成功扱いで返すと最小化のまま取り残す)。
+                if (beforeFg == target && !IsIconic(target)) { recovered = true; break; }
+
+                uint fgThread = GetWindowThreadProcessId(beforeFg, out _);
+                uint thisThread = GetCurrentThreadId();
+                bool attached = false;
+                if (fgThread != 0 && fgThread != thisThread)
+                {
+                    attached = AttachThreadInput(fgThread, thisThread, true);
+                }
+
+                // 最小化されていれば SW_RESTORE で復元する。WOLF RPG (ウディタ) 等の排他フルスクリーンゲームは
+                // HOME でオーバーレイ窓に前面を奪われると自分から最小化するため、SW_SHOW (最小化を解かない) だと
+                // resume でゲームが最小化のまま=プレイ中シーンに取り残される。最大化は巻き込みたくないので
+                // 最小化時のみ SW_RESTORE、それ以外は従来どおり SW_SHOW。
+                ShowWindow(target, IsIconic(target) ? SW_RESTORE : SW_SHOW);
+                BringWindowToTop(target);
+                SetForegroundWindow(target);
+
+                if (attached) AttachThreadInput(fgThread, thisThread, false);
+
+                // 反映待ち (Program の単一ループスレッド上で実行。失敗時のみリトライぶん延びるが、open/resume
+                // 直後で連打される場面ではないので許容)。GetForegroundWindow で実際に前面化できたか確認する
+                // (SetForegroundWindow の戻り値は foreground-lock 下で信頼できないため最終判定には使わない)。
+                Thread.Sleep(60);
+                recovered = GetForegroundWindow() == target;
             }
-
-            ShowWindow(target, SW_SHOW);
-            BringWindowToTop(target);
-            bool ok = SetForegroundWindow(target);
-
-            if (attached) AttachThreadInput(fgThread, thisThread, false);
-
-            // 反映待ち。Program の単一ループスレッド上で実行されるため、この 60ms はメッセージポンプ /
-            // cmd 受信 / gamepad poll / probe を止める (overlay open ごとに 1 回)。HOME/Guide 検知が一瞬鈍るが
-            // 許容範囲 (open 直後で連打される場面ではない)。気になるなら短い sleep×数回の polling に変更可。
-            Thread.Sleep(60);
-            bool recovered = GetForegroundWindow() == target;
-            return ok && recovered;
+            return recovered;
         }
 
         /// <summary>
@@ -136,12 +157,15 @@ namespace TonePrism.LauncherAgent
             return SetWindowPos(hwnd, IntPtr.Zero, newX, newY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         }
 
-        private static IntPtr FindTopLevelWindow(HashSet<uint> tree)
+        // acceptMinimized: ForceForeground (focus 経路) は true で最小化窓も対象にする。タイトル無し排他FS窓が
+        // 最小化した瞬間 (GetWindowRect がオフスクリーン小サイズで size 判定を通らない) でも発見でき復帰できる。
+        // PlaceWindowCentered (モニタ寄せ) は false (従来どおり)＝最小化窓を SetWindowPos の移動対象にしない。
+        private static IntPtr FindTopLevelWindow(HashSet<uint> tree, bool acceptMinimized = false)
         {
             IntPtr found = IntPtr.Zero;
             EnumWindows((hwnd, lparam) =>
             {
-                if (!IsMeaningfulVisibleWindow(hwnd)) return true;
+                if (!IsMeaningfulVisibleWindow(hwnd, acceptMinimized)) return true;
                 GetWindowThreadProcessId(hwnd, out uint winPid);
                 if (!tree.Contains(winPid)) return true;
                 found = hwnd;
@@ -152,7 +176,9 @@ namespace TonePrism.LauncherAgent
 
         // ============================ 共通 ============================
 
-        private static bool IsMeaningfulVisibleWindow(IntPtr hwnd)
+        // acceptMinimized: focus 経路 (ForceForeground) 用。最小化中の窓も実窓として扱い、復元対象に含める。
+        // probe 経路は false (従来どおり) で、最小化窓を「可視」と誤検知して PLAYING/anomaly を狂わせない。
+        private static bool IsMeaningfulVisibleWindow(IntPtr hwnd, bool acceptMinimized = false)
         {
             if (!IsWindowVisible(hwnd)) return false;
             if (GetWindow(hwnd, GW_OWNER) != IntPtr.Zero) return false; // オーナー持ち (ダイアログ等) 除外
@@ -162,6 +188,10 @@ namespace TonePrism.LauncherAgent
             if (cls.ToString() == "ConsoleWindowClass") return false; // cmd 経由起動の一瞬のコンソール除外
 
             if (GetWindowTextLength(hwnd) > 0) return true;
+
+            // (#314) 最小化窓は GetWindowRect がオフスクリーン小サイズを返し下の size 判定を通らないため、
+            // focus 経路ではここで実窓扱いにして取りこぼさない (タイトル無し排他FS窓の最小化対策)。
+            if (acceptMinimized && IsIconic(hwnd)) return true;
 
             if (GetWindowRect(hwnd, out RECT r))
             {
@@ -257,6 +287,7 @@ namespace TonePrism.LauncherAgent
         [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);  // (#314) 最小化判定
         [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
         [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
         [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
@@ -269,6 +300,7 @@ namespace TonePrism.LauncherAgent
 
         private const uint GW_OWNER = 4;
         private const int SW_SHOW = 5;
+        private const int SW_RESTORE = 9;  // (#314) 最小化ウィンドウの復元 (resume でゲームを前面に戻す)
         // クリック透過 (SetClickThrough) 用
         private const int GWL_EXSTYLE = -20;
         private const int WS_EX_LAYERED = 0x80000;
