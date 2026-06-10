@@ -36,6 +36,13 @@ func _input(event: InputEvent) -> void:
 func _process(delta: float) -> void:
 	if not _open:
 		return
+	# (#311) 試遊テスト中 (GameSession 経由でゲームが走っている間) は無操作タイマーを進めない。
+	# 試遊中の入力はゲーム側に行きランチャーには届かないため、そのまま数えると 60 秒を超える試遊を
+	# 「無操作」と誤判定して自動クローズ → close_overlay の _pt_stop がプレイ中のゲームを強制終了してしまう。
+	# サービスモード中に GameSession が走るのは試遊テストだけなので is_running() で一括ガードする。
+	if GameSession.is_running():
+		_idle_sec = 0.0
+		return
 	_idle_sec += delta
 	if _idle_sec >= IDLE_TIMEOUT_SEC:
 		_log("[ServiceMode] 60 秒無操作のため自動的に閉じる")

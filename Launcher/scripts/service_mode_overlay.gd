@@ -287,6 +287,19 @@ func _input(event: InputEvent) -> void:
 	# モーダル表示中は背後のナビ/終了を止め、モーダルのボタンだけに操作を委ねる
 	# (←→/↑↓ でボタン間移動、Enter で決定。Esc は誤操作防止のため無視)。
 	if _modal_open:
+		# (#311) キー/パッド操作なのに GUI フォーカスがモーダル外・消失していたら先頭ボタンへ復帰させる。
+		# ゲーム終了直後 (試遊の 〇× モーダル) は窓フォーカスの遷移で focus owner が失われることがあり、
+		# そのままだと矢印/決定が無反応 = マウスでしか操作できなくなるため。復帰に使った押下はここで
+		# 消費する (フォーカスが見えない状態の Enter がいきなり先頭ボタンを決定してしまう誤操作の防止)。
+		var is_keypad: bool = (event is InputEventKey and event.pressed and not event.echo) \
+			or (event is InputEventJoypadButton and event.pressed) \
+			or (event is InputEventJoypadMotion and absf(event.axis_value) > 0.5)
+		if is_keypad and _modal_btnbox and _modal_btnbox.get_child_count() > 0:
+			var owner := get_viewport().gui_get_focus_owner()
+			if owner == null or not _modal_btnbox.is_ancestor_of(owner):
+				(_modal_btnbox.get_child(0) as Control).grab_focus()
+				get_viewport().set_input_as_handled()
+				return
 		if event.is_action_pressed("ui_cancel"):
 			get_viewport().set_input_as_handled()
 		return
@@ -554,6 +567,14 @@ func _modal_pick(index: int) -> void:
 		_modal_layer.visible = false
 	if cb.is_valid():
 		cb.call(index)
+	# (#311) モーダルを閉じた後のフォーカス復帰。フォーカスを持ったボタンごとモーダルが hidden になると
+	# focus owner が消え、以後のキー/パッド操作が無反応になる (マウスでしか復帰できない)。cb が次の
+	# モーダルを開いた場合 (試遊 〇× の 2 問目等) はそちらが focus を取っているので触らない。
+	if not _modal_open and visible and get_viewport().gui_get_focus_owner() == null:
+		if _in_detail:
+			_refocus_detail()
+		elif _selected_index >= 0 and _selected_index < _menu_buttons.size():
+			_menu_buttons[_selected_index].grab_focus()
 
 
 # ---------------- 選択 / ペイン移動 ----------------
@@ -1316,7 +1337,7 @@ func _set_games_test_desc(mode: String) -> void:
 		"auto":
 			_games_test_desc.text = "各ゲームを自動で起動し、ウィンドウが出るところまで確認してから自動で終了します。起動できるか(OK/NG)だけを一覧で判定。DLL 不足や起動直後のクラッシュなど『そもそも立ち上がらない』問題の検出向けです。"
 		"play":
-			_games_test_desc.text = "選んだゲームを実際に起動して遊んで確認します。遊んでいる最中に HOMEキー / Guideボタンを押すと、本番と同じ中断メニュー（再開／別のゲーム／退出）が出るので、中断オーバーレイが効くかもここで確認できます。ゲームを終了するか中断メニューから終了すると 〇× を記録して次へ進みます。『実際にちゃんと遊べるか』＋『中断メニューが出るか』を見る最終確認向けです。"
+			_games_test_desc.text = "選んだゲームを実際に起動して遊んで確認します。終了は原則、遊んでいる最中に HOMEキー / Guideボタンで本番と同じ中断メニューを出して「退出する」を選びます（試遊中は「続ける／退出する」の 2 択）。ゲームごとに『正しく遊べたか』『中断メニューが動いたか』の 2 つを 〇× で記録して次へ進みます。『実際にちゃんと遊べるか』＋『中断メニューが効くか』を見る最終確認向けです。"
 
 
 ## モード①: 各ゲームの実行ファイル(exe)が存在するか (= パス切れ/ファイル欠落がないか) を起動せずチェック。
@@ -1636,8 +1657,8 @@ func _build_games_playtest() -> void:
 		_add_text("登録ゲームがありません (または DB 読み込みに失敗)。", C_MUTED)
 		return
 
-	_add_text("チェックしたゲームを 1 本ずつ起動して試遊します。遊んでいる最中に HOMEキー / Guideボタンを押すと本番と同じ中断メニューが出ます（中断オーバーレイの確認もここで）。", C_TEXT)
-	_add_text("ゲームを終了するか、中断メニューで「別のゲーム」「退出」を選ぶと、「正しく遊べたか」を 〇× で記録して自動で次のゲームに進みます。", C_TEXT)
+	_add_text("チェックしたゲームを 1 本ずつ起動して試遊します。終了は原則、遊んでいる最中に HOMEキー / Guideボタンで本番と同じ中断メニューを出し、「退出する」を選んでください（中断メニューの動作確認を兼ねるため）。", C_TEXT)
+	_add_text("ゲームが終了するたびに「正しく遊べたか」「中断メニューが動いたか」の 2 つを 〇× で記録して、自動で次のゲームに進みます（結果は「遊 / 中断」の順に表示）。中断メニューが出ない・操作できないときは、ゲーム自体の終了操作で閉じて中断に × を付けてください。", C_TEXT)
 	_add_button("すべてチェック", func(): _pt_set_all(true))
 	_add_button("すべて外す", func(): _pt_set_all(false))
 	_pt_start_btn = _add_button("チェックしたゲームを試遊", _pt_start)
@@ -1704,7 +1725,7 @@ func _pt_start() -> void:
 	if not any:
 		return
 	_show_modal(
-		"チェックしたゲームを順番に試遊します。\n\n遊んでいる最中に HOMEキー（またはコントローラーの Guideボタン）を押すと、本番と同じ中断メニューが出ます（中断オーバーレイの確認用）。\n\nゲームを終了するか、中断メニューから「別のゲーム」「退出」で終了すると、〇× を記録して次へ進みます。\n\n開始しますか？",
+		"チェックしたゲームを順番に試遊します。\n\n【終了のしかた】原則、遊んでいる最中に HOMEキー（またはコントローラーの Guideボタン）で中断メニューを出し、「退出する」でゲームを終了してください（中断メニューが正しく動くかの確認を兼ねます）。\n\n中断メニューが出ない・操作できないときは、ゲーム自体の終了操作で閉じてください。\n\nゲーム終了後に「遊べたか」「中断メニューが動いたか」の 2 つを 〇× で記録して次へ進みます。\n\n開始しますか？",
 		PackedStringArray(["開始する", "キャンセル"]),
 		func(idx):
 			if idx == 0:
@@ -1768,9 +1789,9 @@ func _pt_begin_next() -> void:
 	_set_pt_status(_pt_cur, "試遊中…", C_TEXT)
 
 
-## ゲームが終了 (手動終了 / 中断オーバーレイの「別のゲーム」「退出」由来の quit) → GameSession.game_exited で
-## 呼ばれる。復帰して 〇× プロンプトを表示する。HOME/Guide での中断は OverlayManager が本物の中断メニューを
-## 出すので (#311)、ここでは「ゲームが実際に終了したとき」だけを扱う。
+## ゲームが終了 (手動終了 / 中断オーバーレイの「続ける以外」由来の quit) → GameSession.game_exited で
+## 呼ばれる。復帰して 〇× プロンプト (2 問: 遊べたか → 中断メニューが動いたか) を表示する。HOME/Guide での
+## 中断は OverlayManager が本物の中断メニューを出すので (#311)、ここでは「ゲームが実際に終了したとき」だけを扱う。
 func _pt_on_return() -> void:
 	# game_exited はシーケンス外 (中止後の遅延 kill / 既に 〇× 待ち) でも届きうるので状態で弾く。
 	if not _pt_running or _pt_await:
@@ -1782,15 +1803,27 @@ func _pt_on_return() -> void:
 	# 中央モーダルで 〇× を尋ねる (戻った瞬間にはっきり「答えて」と分かるように)。
 	_show_modal("「%s」は正しく遊べましたか？" % _pt_games[_pt_cur].title,
 		PackedStringArray(["〇 遊べた", "× 問題あり"]),
-		func(idx): _pt_record("〇 遊べた" if idx == 0 else "× 問題あり"),
+		func(idx): _pt_ask_overlay(idx == 0),
 		[C_OK, C_DANGER])
 
 
-## 〇× を記録 → 次のゲームへ (モーダルは選択時に自動で閉じている)。
-func _pt_record(result: String) -> void:
+## (#311) 2 問目: 中断メニュー (オーバーレイ) の動作確認。終了は原則オーバーレイ経由の運用なので毎回尋ねる
+## (出なかった/操作できなかったゲーム = 排他フルスクリーン系の問題児をここで洗い出す)。
+func _pt_ask_overlay(play_ok: bool) -> void:
 	if not _pt_await:
 		return
-	_set_pt_status(_pt_cur, result, C_OK if result.begins_with("〇") else C_DANGER)
+	_show_modal("中断メニューは正しく出て、操作できましたか？\n（HOMEキー / Guideボタン → 「退出する」で終了）",
+		PackedStringArray(["〇 動いた", "× 問題あり"]),
+		func(idx): _pt_record(play_ok, idx == 0),
+		[C_OK, C_DANGER])
+
+
+## 〇× (遊べたか / 中断メニュー) を記録 → 次のゲームへ (モーダルは選択時に自動で閉じている)。
+func _pt_record(play_ok: bool, overlay_ok: bool) -> void:
+	if not _pt_await:
+		return
+	var txt := "遊%s / 中断%s" % ["〇" if play_ok else "×", "〇" if overlay_ok else "×"]
+	_set_pt_status(_pt_cur, txt, C_OK if (play_ok and overlay_ok) else C_DANGER)
 	_pt_await = false
 	_pt_begin_next()
 
@@ -2342,12 +2375,19 @@ func _apply_focus_style_to(b: Button) -> void:
 		b.add_theme_stylebox_override("hover", b.get_theme_stylebox("normal"))
 
 
-## メニュー + 詳細の全ボタンに現在のフォーカス枠スタイルを適用する。
+## メニュー + 詳細 + モーダルの全ボタンに現在のフォーカス枠スタイルを適用する。
+## (#311) モーダルのボタンも対象にする: 従来はモーダルが対象外で、マウス操作中にモーダルを開いてから
+## キー/パッドへ切り替えるとフォーカス枠が透明のまま残り、フォーカスがどこにあるか見えず
+## 「キーボード/コントローラーで操作できない」ように見えていた。
 func _apply_focus_style() -> void:
 	for b in _menu_buttons:
 		_apply_focus_style_to(b)
 	if _detail_content:
 		for c in _detail_content.get_children():
+			if c is Button:
+				_apply_focus_style_to(c)
+	if _modal_btnbox:
+		for c in _modal_btnbox.get_children():
 			if c is Button:
 				_apply_focus_style_to(c)
 
