@@ -60,7 +60,7 @@ const ITEMS := [
 # 「席を離れてスクリーンセーバーへ」ではなく「ゲームを終了して 〇× 記録へ進む」が実態なので、
 # ラベルを実態に合わせる。danger (赤字) も付けない: 赤=「退出 (スクリーンセーバーへ)」の意味で
 # 使っている色なので、意味の違う試遊終了に流用しない (黒字=通常項目)。
-const TEST_EXIT_ITEM := {"id": "exit", "label": "ゲームを終了して記録へ", "sub": "〇× を付けて次のゲームに進む"}
+const TEST_EXIT_ITEM := {"id": "exit", "label": "試遊を終了する", "sub": "ゲームを終了して記録へ"}
 
 var _root: Control = null
 var _bg: TextureRect = null          # 終了中の背景アート (普段は透明=ライブゲームが透ける、終了中だけフェードイン)
@@ -408,7 +408,7 @@ func _make_item(index: int, item: Dictionary) -> Button:
 
 
 ## メニュー項目を作り直す (#311)。test_mode=true (サービスモード試遊) は「別のゲームをあそぶ」を除き、
-## exit を試遊専用の「ゲームを終了して記録へ」(TEST_EXIT_ITEM、黒字) に差し替えた 2 択にする。
+## exit を試遊専用の「試遊を終了する」(TEST_EXIT_ITEM、黒字) に差し替えた 2 択にする。
 ## 番号 (01/02) も詰め直す。「続ける」は本番と同一 (試遊の目的が「本番と同じ中断メニューの確認」のため、
 ## 必要な差分以外は作らない)。
 func _rebuild_items(test_mode: bool) -> void:
@@ -466,7 +466,7 @@ func _activate(id: String) -> void:
 
 ## 表示: 走行中ゲームのタイトル/サムネを反映し、画面全面を覆って最前面化＋フォーカス取得。
 func show_overlay(game_title: String = "", thumb_path: String = "", screen: int = -1) -> void:
-	# (#311) サービスモード試遊セッション中は 2 択 (続ける / ゲームを終了して記録へ) に組み替える。通常プレイは 3 択。
+	# (#311) サービスモード試遊セッション中は 2 択 (続ける / 試遊を終了する) に組み替える。通常プレイは 3 択。
 	# セッション開始時に焼き込まれる GameSession.test_session を参照 (表示のたびに比較し、構成が
 	# 変わるときだけ作り直す)。
 	if GameSession.test_session != _items_test:
