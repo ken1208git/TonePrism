@@ -1755,7 +1755,8 @@ func _pt_begin_next() -> void:
 	# (#311) 本番と同じ GameSession 経由で起動する。これにより HOME/Guide を OverlayManager が拾い、
 	# 本物の中断オーバーレイ (再開 / 別のゲーム / 退出) が出る = サービスモードで実機確認できる。
 	# begin_launch → set_current_game (タイトル/サムネ設定 + トリガ購読) → start_process の順。
-	if not GameSession.begin_launch(g):
+	# test=true: 試遊セッションを test_session として焼き込む (将来のプレイ記録 #297 PR2 が集計から除外する)。
+	if not GameSession.begin_launch(g, true):
 		_set_pt_status(_pt_cur, "× 起動失敗", C_DANGER)
 		_pt_begin_next()
 		return

@@ -28,6 +28,13 @@ const QUIT_FALLBACK_TIMEOUT_MS: int = 10000
 
 var running_pid: int = -1
 var current_game: GameInfo = null
+# (#311/#297) このセッションがサービスモードの試遊テスト由来か。**将来のプレイ記録 (#297 PR2 / #36 ランキング)
+# はこのフラグを見て試遊を集計から除外すること** (試遊が本番プレイとしてカウントされると、母数の小さい
+# 直近N日ランキングが開場前チェック直後に「試遊順」へ汚染される)。終了時に ServiceMode.is_open() で
+# 弾く案は不正確: 試遊中はゲームが前面でランチャー無操作扱い → 60 秒オートクローズでサービスモードが
+# プレイ中に閉じている可能性がある。よってセッション開始 (begin_launch) 時にここへ焼き込む。
+# game_exited 発火 (購読者の処理) までは有効、発火後にリセット。
+var test_session: bool = false
 
 var _is_launching: bool = false
 var _probe_available: bool = false      # Companion が使えるか
@@ -65,11 +72,13 @@ func is_playing() -> bool:
 
 ## 起動シーケンス開始を宣言する (実プロセスはまだ起動しない)。起動演出の「前」に呼ぶことで、
 ## 演出中 (await) も is_running()=true となり、カルーセル更新が modulate を戻して演出を打ち消すのを防ぐ。
-func begin_launch(game: GameInfo) -> bool:
+## test: サービスモードの試遊テスト由来なら true (test_session に焼き込む。詳細は var 宣言コメント参照)。
+func begin_launch(game: GameInfo, test: bool = false) -> bool:
 	if running_pid != -1 or _is_launching:
 		return false
 	_is_launching = true
 	current_game = game
+	test_session = test
 	_exit_to_screensaver = false
 	_quitting = false
 	return true
@@ -88,6 +97,7 @@ func start_process() -> bool:
 		ErrorManager.show_error(ErrorCode.GAME_EXECUTABLE_NOT_FOUND)
 		_is_launching = false
 		current_game = null
+		test_session = false
 		return false
 
 	var args := GamePathResolver.parse_arguments(game.arguments)
@@ -106,6 +116,7 @@ func start_process() -> bool:
 		ErrorManager.show_error(ErrorCode.GAME_EXECUTION_FAILED)
 		_is_launching = false
 		current_game = null
+		test_session = false
 		return false
 
 	print("[GameSession] Process started. PID: %d" % pid)
@@ -248,6 +259,9 @@ func _on_exited() -> void:
 		_anomaly_active = false
 		ErrorManager.hide_error(ErrorCode.GAME_LAUNCHER_FOREGROUND_ANOMALY)
 	game_exited.emit()
+	# emit の後にリセット: game_exited 購読者 (将来のプレイ記録 #297 PR2) がフラグを参照できるようにする
+	# (emit は同期呼び出しなので、この行は全購読者の処理後に実行される)。
+	test_session = false
 
 
 func _confirm_playing(reason: String) -> void:
