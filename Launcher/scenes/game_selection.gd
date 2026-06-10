@@ -650,6 +650,11 @@ func _session_busy() -> bool:
 ## GameSession: PLAYING 確定 → 軽量プレイ中シーンへ切替 (重いカルーセルを解放, #214)。
 ## 背景は両シーンとも 1.05 拡大なので、フェード無しの瞬時切替で継続させる (TransitionManager を使わない)。
 func _on_session_playing() -> void:
+	# (#311) サービスモードの試遊テストも GameSession 経由で起動する (本物の中断オーバーレイを確認するため)。
+	# その間は browse シーンを paused のまま据え置き service overlay が前面なので、playing.tscn への切替は
+	# しない (signal は paused でも届くためここで明示的に無視する)。
+	if ServiceMode.is_open():
+		return
 	if not is_inside_tree():
 		return
 	get_tree().change_scene_to_file("res://scenes/playing.tscn")
@@ -658,6 +663,11 @@ func _on_session_playing() -> void:
 ## GameSession: ゲーム終了。ここに来るのは「PLAYING 前 (起動中) にゲームが落ちた」場合のみ
 ## (PLAYING 後はプレイ中シーンが処理する)。退出先に応じてスクリーンセーバー or 通常表示復帰。
 func _on_session_exited() -> void:
+	# (#311) 試遊テストの GameSession 起動が終了したとき、browse シーンは何もしない (service overlay が
+	# game_exited を受けて 〇× 記録 → 次へ進める)。ここでカルーセル復帰/スクリーンセーバー遷移をすると
+	# サービスモードの裏で勝手に画面が動いて壊れる。退出フラグ (退出メニュー由来) もテスト中は無視。
+	if ServiceMode.is_open():
+		return
 	if GameSession.should_exit_to_screensaver():
 		IdleManager.transition_to_screensaver(get_tree())
 		return

@@ -46,12 +46,21 @@ const QUIT_ZOOM := 1.05        # 終了中 morph の登場ズーム率 (Transiti
 const FONT_BOLD := preload("res://fonts/NotoSansJP-Bold.ttf")
 const FONT_REG := preload("res://fonts/NotoSansJP-Regular.ttf")
 
-# メニュー項目 (今動くものだけ: 続ける / 別のゲームをあそぶ / 退出する)
+# メニュー項目 (今動くものだけ: 続ける / 別のゲームをあそぶ / 退出する)。
+# (#311) サービスモード試遊 (GameSession.test_session) 中は "home" を除いた 2 択に組み替える
+# (_rebuild_items)。試遊はゲーム選択画面に戻る文脈ではない (裏のシーンはサービスモードで paused の
+# まま) ため、選ぶと文脈が壊れる「別のゲームをあそぶ」を出さない。
 const ITEMS := [
 	{"id": "resume", "label": "続ける",           "sub": "ゲームに戻る"},
 	{"id": "home",   "label": "別のゲームをあそぶ", "sub": "ゲームを終了して選択画面に戻る"},
 	{"id": "exit",   "label": "退出する",          "sub": "プレイを終了して席を離れる", "danger": true},
 ]
+
+# (#311) 試遊中の exit 項目の差し替え。発火する signal は本番の「退出する」と同じだが、試遊では
+# 「席を離れてスクリーンセーバーへ」ではなく「ゲームを終了して 〇× 記録へ進む」が実態なので、
+# ラベルを実態に合わせる。danger (赤字) も付けない: 赤=「退出 (スクリーンセーバーへ)」の意味で
+# 使っている色なので、意味の違う試遊終了に流用しない (黒字=通常項目)。
+const TEST_EXIT_ITEM := {"id": "exit", "label": "試遊を終了する", "sub": "ゲームを終了して記録へ"}
 
 var _root: Control = null
 var _bg: TextureRect = null          # 終了中の背景アート (普段は透明=ライブゲームが透ける、終了中だけフェードイン)
@@ -65,6 +74,8 @@ var _title_label: Label = null
 var _icon_tex: TextureRect = null
 var _icon_placeholder: Control = null  # (#316) no-image 共通プレースホルダ (NoImagePlaceholder)
 var _buttons: Array[Button] = []
+var _list_box: VBoxContainer = null  # メニュー項目の入れ物 (#311: 試遊⇔通常で項目を作り直すため保持)
+var _items_test: bool = false        # 現在のボタン構成が試遊 2 択か (show_overlay で test_session と比較)
 var _clock_timer: Timer = null
 var _anim_tween: Tween = null        # 開閉アニメ用 (再トリガ時は kill して作り直す)
 # フォーカスのグロー枠 (launcher の白グローを濃色アレンジ)。ブラウズ画面と同じ「1 枚の可動グロー枠」方式:
@@ -296,15 +307,12 @@ func _build_ui() -> void:
 	_press_sb.bg_color = Color(0, 0, 0, 0.16)
 	_press_sb.set_corner_radius_all(14)
 
-	# 項目リスト
+	# 項目リスト (#311: 試遊⇔通常で項目構成が変わるため、作り直せるよう _rebuild_items に切り出し)
 	var list := VBoxContainer.new()
 	list.add_theme_constant_override("separation", 6)
 	vb.add_child(list)
-	_buttons.clear()
-	for i in range(ITEMS.size()):
-		var btn := _make_item(i, ITEMS[i])
-		list.add_child(btn)
-		_buttons.append(btn)
+	_list_box = list
+	_rebuild_items(false)
 
 	# フッターヒント
 	var spacer := Control.new()
@@ -399,6 +407,33 @@ func _make_item(index: int, item: Dictionary) -> Button:
 	return btn
 
 
+## メニュー項目を作り直す (#311)。test_mode=true (サービスモード試遊) は「別のゲームをあそぶ」を除き、
+## exit を試遊専用の「試遊を終了する」(TEST_EXIT_ITEM、黒字) に差し替えた 2 択にする。
+## 番号 (01/02) も詰め直す。「続ける」は本番と同一 (試遊の目的が「本番と同じ中断メニューの確認」のため、
+## 必要な差分以外は作らない)。
+func _rebuild_items(test_mode: bool) -> void:
+	_items_test = test_mode
+	if _list_box == null:
+		return
+	# 旧ボタンに _focus_target が残ると free 後に追従先を失うだけ (is_instance_valid で防御済み) だが、
+	# 明示的に外しておく (show_overlay 側の grab_focus が新ボタンで張り直す)。
+	_focus_target = null
+	for c in _list_box.get_children():
+		_list_box.remove_child(c)
+		c.queue_free()
+	_buttons.clear()
+	var items: Array = []
+	for item in ITEMS:
+		if test_mode and item["id"] == "home":
+			continue
+		# 試遊中の exit は専用ラベル (TEST_EXIT_ITEM、黒字) に差し替える。
+		items.append(TEST_EXIT_ITEM if (test_mode and item["id"] == "exit") else item)
+	for i in range(items.size()):
+		var btn := _make_item(i, items[i])
+		_list_box.add_child(btn)
+		_buttons.append(btn)
+
+
 ## 入力デバイスに応じてボタンの見た目を切り替え、常に「グロー」か「薄黒塗り」の一方だけにする。
 ## enabled=true (キー/パッド): focus=グロー、hover/pressed=透明 (薄黒塗りを出さない)。
 ## enabled=false (マウス): focus=透明 (クリックでグローを出さない)、hover/pressed=薄黒塗り。
@@ -431,6 +466,11 @@ func _activate(id: String) -> void:
 
 ## 表示: 走行中ゲームのタイトル/サムネを反映し、画面全面を覆って最前面化＋フォーカス取得。
 func show_overlay(game_title: String = "", thumb_path: String = "", screen: int = -1) -> void:
+	# (#311) サービスモード試遊セッション中は 2 択 (続ける / 試遊を終了する) に組み替える。通常プレイは 3 択。
+	# セッション開始時に焼き込まれる GameSession.test_session を参照 (表示のたびに比較し、構成が
+	# 変わるときだけ作り直す)。
+	if GameSession.test_session != _items_test:
+		_rebuild_items(GameSession.test_session)
 	if _title_label:
 		_title_label.text = game_title
 	_set_thumbnail(thumb_path)
