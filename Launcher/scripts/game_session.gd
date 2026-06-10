@@ -34,6 +34,8 @@ var current_game: GameInfo = null
 # 弾く案は不正確: 試遊中はゲームが前面でランチャー無操作扱い → 60 秒オートクローズでサービスモードが
 # プレイ中に閉じている可能性がある。よってセッション開始 (begin_launch) 時にここへ焼き込む。
 # game_exited 発火 (購読者の処理) までは有効、発火後にリセット。
+# ※購読は**同期接続前提** (CONNECT_DEFERRED 不可): deferred で繋ぐとコールバックがリセット後に走り、
+#   常に false しか読めない (レビュー D-2、#297 PR2 着手時の事故防止)。
 var test_session: bool = false
 
 var _is_launching: bool = false
@@ -259,9 +261,14 @@ func _on_exited() -> void:
 		_anomaly_active = false
 		ErrorManager.hide_error(ErrorCode.GAME_LAUNCHER_FOREGROUND_ANOMALY)
 	game_exited.emit()
-	# emit の後にリセット: game_exited 購読者 (将来のプレイ記録 #297 PR2) がフラグを参照できるようにする
-	# (emit は同期呼び出しなので、この行は全購読者の処理後に実行される)。
+	# emit の後にリセット: game_exited 購読者 (シーンの遷移判定 should_exit_to_screensaver / 将来のプレイ記録
+	# #297 PR2 の test_session) がフラグを参照できるようにする (emit は同期呼び出しなので、この行は全購読者の
+	# 処理後に実行される)。購読は同期接続前提 (CONNECT_DEFERRED 不可、test_session の宣言コメント参照)。
 	test_session = false
+	# (#311 レビュー C-2) 退出フラグもセッション終了で必ず畳む。従来は次の begin_launch まで true が残り、
+	# 試遊の最終ゲームを「試遊を終了する」で閉じた後などに不正確な値が居座っていた (begin_launch が毎回
+	# リセットするので実害は無いが latent)。読むのは game_exited の同期購読者だけなのでここで安全に消せる。
+	_exit_to_screensaver = false
 
 
 func _confirm_playing(reason: String) -> void:

@@ -1777,8 +1777,11 @@ func _pt_begin_next() -> void:
 	# 本物の中断オーバーレイ (再開 / 別のゲーム / 退出) が出る = サービスモードで実機確認できる。
 	# begin_launch → set_current_game (タイトル/サムネ設定 + トリガ購読) → start_process の順。
 	# test=true: 試遊セッションを test_session として焼き込む (将来のプレイ記録 #297 PR2 が集計から除外する)。
+	# begin_launch の false は「前のセッションがまだ生きている」(running_pid 残存 / _is_launching) 競合のみで、
+	# ゲーム固有の問題ではない (レビュー D-1)。「起動失敗」と書くとゲームのせいに誤診されるため区別して表示。
+	# 正常な逐次フロー (_on_exited が running_pid を畳んでから 〇× → 次へ) では到達しない。
 	if not GameSession.begin_launch(g, true):
-		_set_pt_status(_pt_cur, "× 起動失敗", C_DANGER)
+		_set_pt_status(_pt_cur, "× セッション競合", C_DANGER)
 		_pt_begin_next()
 		return
 	OverlayManager.set_current_game(g)
