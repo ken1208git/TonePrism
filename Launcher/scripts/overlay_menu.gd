@@ -49,12 +49,18 @@ const FONT_REG := preload("res://fonts/NotoSansJP-Regular.ttf")
 # メニュー項目 (今動くものだけ: 続ける / 別のゲームをあそぶ / 退出する)。
 # (#311) サービスモード試遊 (GameSession.test_session) 中は "home" を除いた 2 択に組み替える
 # (_rebuild_items)。試遊はゲーム選択画面に戻る文脈ではない (裏のシーンはサービスモードで paused の
-# まま) ため、選ぶと文脈が壊れる「別のゲームをあそぶ」を出さない。退出する=試遊を終了して 〇× 記録へ。
+# まま) ため、選ぶと文脈が壊れる「別のゲームをあそぶ」を出さない。
 const ITEMS := [
 	{"id": "resume", "label": "続ける",           "sub": "ゲームに戻る"},
 	{"id": "home",   "label": "別のゲームをあそぶ", "sub": "ゲームを終了して選択画面に戻る"},
 	{"id": "exit",   "label": "退出する",          "sub": "プレイを終了して席を離れる", "danger": true},
 ]
+
+# (#311) 試遊中の exit 項目の差し替え。発火する signal は本番の「退出する」と同じだが、試遊では
+# 「席を離れてスクリーンセーバーへ」ではなく「ゲームを終了して 〇× 記録へ進む」が実態なので、
+# ラベルを実態に合わせる。danger (赤字) も付けない: 赤=「退出 (スクリーンセーバーへ)」の意味で
+# 使っている色なので、意味の違う試遊終了に流用しない (黒字=通常項目)。
+const TEST_EXIT_ITEM := {"id": "exit", "label": "ゲームを終了して記録へ", "sub": "〇× を付けて次のゲームに進む"}
 
 var _root: Control = null
 var _bg: TextureRect = null          # 終了中の背景アート (普段は透明=ライブゲームが透ける、終了中だけフェードイン)
@@ -401,9 +407,10 @@ func _make_item(index: int, item: Dictionary) -> Button:
 	return btn
 
 
-## メニュー項目を作り直す (#311)。test_mode=true (サービスモード試遊) は「別のゲームをあそぶ」を除いた
-## 2 択 (続ける / 退出する)。番号 (01/02) も詰め直す。ボタンの見た目・挙動は本番と同一 (試遊の目的が
-## 「本番と同じ中断メニューの確認」なので、構成以外の差分は作らない)。
+## メニュー項目を作り直す (#311)。test_mode=true (サービスモード試遊) は「別のゲームをあそぶ」を除き、
+## exit を試遊専用の「ゲームを終了して記録へ」(TEST_EXIT_ITEM、黒字) に差し替えた 2 択にする。
+## 番号 (01/02) も詰め直す。「続ける」は本番と同一 (試遊の目的が「本番と同じ中断メニューの確認」のため、
+## 必要な差分以外は作らない)。
 func _rebuild_items(test_mode: bool) -> void:
 	_items_test = test_mode
 	if _list_box == null:
@@ -419,7 +426,8 @@ func _rebuild_items(test_mode: bool) -> void:
 	for item in ITEMS:
 		if test_mode and item["id"] == "home":
 			continue
-		items.append(item)
+		# 試遊中の exit は専用ラベル (TEST_EXIT_ITEM、黒字) に差し替える。
+		items.append(TEST_EXIT_ITEM if (test_mode and item["id"] == "exit") else item)
 	for i in range(items.size()):
 		var btn := _make_item(i, items[i])
 		_list_box.add_child(btn)
@@ -458,7 +466,7 @@ func _activate(id: String) -> void:
 
 ## 表示: 走行中ゲームのタイトル/サムネを反映し、画面全面を覆って最前面化＋フォーカス取得。
 func show_overlay(game_title: String = "", thumb_path: String = "", screen: int = -1) -> void:
-	# (#311) サービスモード試遊セッション中は 2 択 (続ける / 退出する) に組み替える。通常プレイは 3 択。
+	# (#311) サービスモード試遊セッション中は 2 択 (続ける / ゲームを終了して記録へ) に組み替える。通常プレイは 3 択。
 	# セッション開始時に焼き込まれる GameSession.test_session を参照 (表示のたびに比較し、構成が
 	# 変わるときだけ作り直す)。
 	if GameSession.test_session != _items_test:
