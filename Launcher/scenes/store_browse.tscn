@@ -73,5 +73,6 @@ mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_FocusBorder")
 
 [node name="TopBar" parent="." instance=ExtResource("4_top_bar")]
+bar_height = 100.0
 
 [node name="BottomBar" parent="." instance=ExtResource("5_bottom_bar")]

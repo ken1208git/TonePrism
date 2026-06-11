@@ -1382,6 +1382,32 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.11.7] - 2026-06-11
+
+#### Added (#345 — ストア導線の分かりやすさ)
+
+- **スライドショー / タイルグリッドにもセクション見出しを表示**（通常行と同じ `store_section_header`）。従来は厳選枠（slideshow/tile）だけ見出しが無く、ストア → カルーセル遷移時に「これは何のゲームの集まり？」が分かりにくかった。店とカルーセルで同じセクション名が見える連続性を作る。`store_browse.gd` `_build_one_section` で showcase を `VBox[header, banner]` に包む最小実装（既存の `container.get_node("SlideshowPrev")` 等のノード探索 / `_section_ui` / `_switch_slide` を一切壊さない）。カルーセル側の件数表示・パンくず等（#345 ②③④）は follow-up。
+
+#### Changed (top_bar グラデーションの責務整理)
+
+- **`top_bar` の黒グラデーション高さの二重がけを解消**。`top_bar.gd` が `_background.offset_bottom = bar_height` を設定していたが、Background は anchors=full rect（`anchor_bottom=1.0`）で既に Panel を埋めており、二重に効いて gradient が実質 **2×bar_height** に伸びていた（ストアでセクション見出しが黒帯に沈む原因）。Panel 側だけ設定し `bar_height` ＝そのまま gradient 高になるよう修正。各画面が必要な高さを実値で宣言（`store_browse=100`：セクション見出し y=100 直前まで／`game_selection=500`：カルーセルのセクション名ラベルを覆う＝旧 2×250 と同値で**見た目不変**）。共有 `top_bar.tscn` の利用は store_browse / game_selection の 2 つのみで影響範囲確認済み。
+
+#### Fixed (ストア — トラックパッドの高速スクロール)
+
+- **トラックパッドでストアをスクロールすると超高速になる問題を修正**（`store_browse.gd`）。`MOUSE_BUTTON_WHEEL_UP/DOWN` 1 イベントごとに固定 150px を加算していたが、マウスホイール（離散・少数イベント）と違いトラックパッドの高精度スクロールは 1 イベントあたり `event.factor` が小さい値（≈0.1）で高頻度に飛んでくるため、`150 × イベント数` で爆速になっていた。`_wheel_scroll_step` を新設し `150 × factor`（上限 150）で正規化。**通常マウスホイールは `factor=1.0` で 150px/ノッチのまま不変**、factor 未設定（≤0）は 1.0 フォールバック。
+
+#### Fixed (ストア — `max_display_count` がセクション実データに効かない)
+
+- **ランキング系セクション（random 等）で `max_display_count` を N にしても、開いたカルーセルに全件が出る問題を修正**（`store_section_repository.gd` / `store_browse.gd`）。従来 `max` は行 builder の**表示トリミングだけ**に効き、`_on_select` が `get_all_games_for_section` で**再クエリ**するとランダムは `ORDER BY RANDOM()` で全件返していた（「ランダムピックアップ max=8 なのに 27 件出る」）。(1) repo の random query に `max>0` のとき `LIMIT N` を追加して `section.games` 自体を N 件にし、(2) `_on_select` を再クエリ廃止で**行が読み込んだ `section.games` を再利用**するよう変更。これで行・カルーセルが同じ N 件で一致し、副次的に「行で押したタイルが再シャッフルでカルーセルに居ない」既存の不整合も解消。filter 系（genre / 新作 / 手動）は元々 LIMIT 無し＝全件で `section.games` も全件のため**「すべて見る＝全件」は不変**。
+
+#### Changed (初回説明 — 画像レイアウト)
+
+- **初回説明スライドの「画像＋本文」レイアウトで、画像が片寄って見えるのを修正**（`intro_guide.gd` `_make_image_rect`）。画像枠を固定サイズ（820×500）で予約していたため、正方形に近いロゴ等を入れると枠の左右にデッドスペースが残り、本文が右へ押しやられて構図が片寄っていた。テクスチャのアスペクト比で**枠内に収まる実寸**を算出して `custom_minimum_size` にし、ロゴと本文が中央に寄るようにした（画像のみのスライドは余白対称のまま不変）。
+
+- レビュー対応（挙動不変の整理）: `_on_select` の再クエリ廃止で未使用化した `get_all_games_for_section` を削除＋ `_get_games_for_section` の自動再接続コメントを実態に更新／`top_bar.gd` の未使用 `_background` onready 変数を削除／random の `LIMIT` を文字列連結から `?` binding に変更（本ファイルの他クエリと統一）／`_on_select` の防御的 `_db_manager.close()` の意図をコメント明記。random の「すべて見る」は N 件キャップを厳守する仕様（行・カルーセル一致のため）で、本番 1920 単一モニタでは 8 件が行に収まり ViewAll は出ない。
+- 検証: 同梱 Godot 4.6 headless の editor import が compile / parse エラー無しで通過。**※実機で (1) ストアのスライドショー/タイルに見出しが出てグラデに沈まない (2) トラックパッド/マウスホイールのスクロール速度 (3) random セクションが行・カルーセルとも max 件数で一致・genre のすべて見るは全件 (4) 初回説明の画像＋本文が中央に寄る、を目視（pre-release）**。カルーセルのグラデは 500=旧2×250 で不変のはずだが共有コンポーネントを触ったため要確認。
+- bump 判断: ストア導線の見出し追加（小機能）＋表示/スクロール/件数の修正。patch (v0.11.6 → v0.11.7)。Manager 変更なし。
+
 ### [Launcher v0.11.6] - 2026-06-10
 
 #### Changed (#311 — サービスモードの試遊テストで本物の中断オーバーレイを確認できるように)

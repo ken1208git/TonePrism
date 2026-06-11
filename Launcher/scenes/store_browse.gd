@@ -216,6 +216,17 @@ func _process(delta):
 	if _bottom_bar:
 		_bottom_bar.get_panel().visible = not _using_mouse
 
+## ホイール/トラックパッドの 1 イベントあたりのスクロール量(px)。
+## マウスホイールは離散的に少数イベント (factor=1.0) だが、トラックパッドの高精度スクロールは 1 イベント
+## あたり factor が小さい値 (≈0.1) で高頻度に飛んでくる。固定量を足すとイベント数ぶん爆速になるため
+## factor で正規化する (ホイール=150 / トラックパッド≈15)。factor 未設定 (<=0) のデバイスは 1.0 に
+## フォールバック。1 イベントの上限を 150 に張り、稀に大きい factor が来ても暴れないようにする
+## (= 通常ホイールは従来どおり 150/イベントのまま)。
+func _wheel_scroll_step(event: InputEventMouseButton) -> float:
+	var f: float = event.factor if event.factor > 0.0 else 1.0
+	return minf(150.0 * f, 150.0)
+
+
 func _input(event):
 	if get_tree().paused:
 		return
@@ -239,7 +250,7 @@ func _input(event):
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 			if _scroll_tween and _scroll_tween.is_valid(): _scroll_tween.kill()
 			if not _is_smooth_scrolling: _target_scroll_y = _scroll_container.scroll_vertical
-			_target_scroll_y -= 150.0  # スクロール量
+			_target_scroll_y -= _wheel_scroll_step(event)
 			_target_scroll_y = max(0.0, _target_scroll_y)
 			_is_smooth_scrolling = true
 			get_viewport().set_input_as_handled()
@@ -250,8 +261,8 @@ func _input(event):
 			var v_scrollbar = _scroll_container.get_v_scroll_bar()
 			var max_scroll = v_scrollbar.max_value - _scroll_container.size.y
 			if max_scroll < 0: max_scroll = v_scrollbar.max_value
-			
-			_target_scroll_y += 150.0
+
+			_target_scroll_y += _wheel_scroll_step(event)
 			_target_scroll_y = min(_target_scroll_y, max_scroll)
 			_is_smooth_scrolling = true
 			get_viewport().set_input_as_handled()
@@ -360,7 +371,23 @@ func _build_one_section(i: int) -> void:
 		_:  # 通常セクション行
 			container = StoreBrowseBuilder.build_normal_section(section, _viewport_width)
 
-	_content_container.add_child(container)
+	# (#345) スライドショー/タイルは元々セクション見出しを出さない設計だったが、ストア→カルーセル遷移時に
+	# 「これは何の集まり？」が分かりにくい (カルーセル側の section_title ラベルだけでは連続性が弱い)。通常行と
+	# 同じ見出し (store_section_header) を上に足し、店とカルーセルで同じセクション名が見える連続性を作る。
+	# container 変数は内側バナーのまま据え置き、表示ツリーだけ VBox[header, container] で包む = 既存の
+	# container.get_node("SlideshowPrev") 等のノード探索 / _section_ui / _switch_slide を一切壊さない。
+	# ViewAllButton は既定 visible=false のまま (厳選枠の「すべて見る」相当は本体クリック→全件カルーセルで担保済み)。
+	if section.section_type == 1 or section.section_type == 2:
+		var wrap = VBoxContainer.new()
+		wrap.name = "ShowcaseWrap_%d" % section.section_id
+		wrap.add_theme_constant_override("separation", 12)
+		var header = preload("res://scenes/components/store_section_header.tscn").instantiate()
+		header.get_node("SectionTitle").text = section.title
+		wrap.add_child(header)
+		wrap.add_child(container)
+		_content_container.add_child(wrap)
+	else:
+		_content_container.add_child(container)
 
 	# タイル一覧を収集
 	var tiles: Array[Control] = []
@@ -640,8 +667,13 @@ func _on_select() -> void:
 	var data = _section_ui[_current_section]
 	var section: StoreSectionInfo = data["section"]
 
-	# 全ゲーム取得（LIMIT なし）。repo が is_open()→open() で一時再接続するので、取得後すぐ閉じる (#278 ②)。
-	var all_games = _section_repo.get_all_games_for_section(section)
+	# 行を作ったときに repo が読み込んだ section.games をそのまま使う（再クエリしない）。random を再クエリすると
+	# ORDER BY RANDOM() で別の組み合わせ・別件数になり、押したタイルがカルーセルに居ない / max_display_count で
+	# 絞った件数と食い違う（= 「大量に表示される」）ため。section.games は developer 込みで読込済みで DB close 後も
+	# 有効。filter 系 (genre 等) は元々 LIMIT 無しで全件なので挙動は変わらない (= 従来の「すべて見る＝全件」を維持)。
+	var all_games = section.games
+	# 再クエリは廃止したが、build 時に開いた DB がまだ開いていればここで解放しておく（次シーンの DB open と
+	# 競合させない防御。section.games は materialized 済みなので close 後も有効）。
 	_db_manager.close()
 	if all_games.is_empty():
 		return
