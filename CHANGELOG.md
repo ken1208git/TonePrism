@@ -2237,6 +2237,17 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.27.6] - 2026-06-11
+
+#### Changed (ビルド基盤の近代化: SDK-style 化 + dead 依存撤去 #309)
+
+- **Manager の csproj を classic (packages.config) → SDK-style (`Microsoft.NET.Sdk` / PackageReference) に変換**（#245/#258 の WPF・net10 移行の前提となる「器」の刷新。**TFM は net48 のまま据え置き**＝ランタイム変更は別 PR に分離し「書式変更」と「ランタイム変更」を 1 変数ずつ切り分ける）。`UseWindowsForms`+`UseWPF` で WinForms/WPF 相互運用を維持、`GenerateAssemblyInfo=false` で既存 `Properties/AssemblyInfo.cs`（版数・`InternalsVisibleTo`）を温存、`AppendTargetFrameworkToOutputPath=false` で出力を `bin\$(Configuration)\` に固定（Release.ps1 の `bin\Release\` 直参照を維持、net10 flip 後もパス不変で A4 の配布差分を restore/publish 形態のみに絞る）。
+- **dead 依存を撤去（#309）**: `Microsoft.WindowsAPICodePack`(Core/Shell) はフォルダ選択の `FolderBrowserDialog` 化（PR #308）で実コード未使用のため撤去。併せて使用箇所ゼロの `System.Deployment` 参照も削除。bundle 同梱からも外し、SoT である `Release.ps1 $script:BundleManifestFiles`（= `Assert-ExpectedFiles` + manifest 生成を駆動）と `UpdateDownloader.ValidateStagingLegacy` の expected-files を**両経路同期して除去**（drift で Manager UI apply が永久 abort になる二層 fence のため両方）。
+- **Release.ps1 `Build-Manager` を SDK-style restore に対応**: `nuget restore -PackagesDirectory Manager\packages`（packages.config 前提）→ `msbuild /restore`（PackageReference）に一本化。Stub.System.Data.SQLite の native interop 手動抽出（nupkg unzip）も廃止（PackageReference の build targets が `bin\Release\x64|x86\SQLite.Interop.dll` を自動コピーするため不要、実機確認済）。
+  - **followup（本 PR では据え置き）**: 旧 `Resolve-Nuget`（nuget.exe DL）は Manager の restore が唯一の利用箇所だったため現状 dead。Release.ps1 を net10 配布対応で本格改修する **A4** で撤去予定（end-to-end 検証不能な orchestration の untested 改変を本 PR で増やさないため）。
+- 検証: VS MSBuild で Debug/Release ビルド成功、**xUnit 190/190 緑**、`bin\Release` から WindowsAPICodePack 消滅・`SQLite.Interop.dll`(x64/x86) 健在を確認、exe の埋め込み resx マニフェスト名（9 件）が classic と完全一致（起動時 resource ロード不変）を reflection で確認。GUI 実起動は dev exe が `PathManager` 経由でリポジトリ `toneprism.db` を掴むため未実施（resx 名一致で代替、実起動 smoke は A4 の clean publish 時に実施）。
+- bump 判断: ビルド基盤刷新 + dead 依存撤去（#309 close）。挙動非変更だが依存撤去を含むため patch (v0.27.5 → v0.27.6)。Launcher 変更なし。
+
 ### [Manager v0.27.5] - 2026-06-11
 
 #### Changed (アプリ表示名の整理)

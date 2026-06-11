@@ -1449,57 +1449,15 @@ function Build-Manager {
     Write-Step "Manager を msbuild で Release ビルド"
 
     $csproj = Join-Path $ManagerDir 'TonePrism_Manager.csproj'
-    $packagesDir = Join-Path $ManagerDir 'packages'
     $binRelease = Join-Path $ManagerDir 'bin\Release'
 
-    # nuget restore
-    Write-Info "nuget restore"
-    $exitCode = Invoke-ExternalProcess -FilePath $script:ResolvedNuget -Arguments @(
-        'restore', $csproj,
-        '-PackagesDirectory', $packagesDir
-    )
-    if ($exitCode -ne 0) {
-        Fail "nuget restore に失敗しました (exit code: $exitCode)"
-    }
-    Write-Ok "nuget restore 完了"
-
-    # 既知問題: nuget restore (packages.config 形式) は Stub.System.Data.SQLite.Core.NetFramework
-    # の build/net*/x64/ build/net*/x86/ サブディレクトリを展開しない場合がある。
-    # 結果として SQLite.Interop.dll がビルド成果物に含まれず Manager が起動時にクラッシュする。
-    # nupkg を直接 unzip して欠損を埋める防御策。
-    $sqlitePkg = Join-Path $packagesDir 'Stub.System.Data.SQLite.Core.NetFramework.1.0.119.0'
-    $sqliteInteropX64 = Join-Path $sqlitePkg 'build\net46\x64\SQLite.Interop.dll'
-    if (Test-Path $sqlitePkg -PathType Container) {
-        if (-not (Test-Path $sqliteInteropX64)) {
-            Write-Info "Stub.System.Data.SQLite package の x64/x86 native DLL を nupkg から手動抽出"
-            $nupkg = Join-Path $sqlitePkg 'Stub.System.Data.SQLite.Core.NetFramework.1.0.119.0.nupkg'
-            if (-not (Test-Path $nupkg)) {
-                Fail "nupkg が見つかりません: $nupkg"
-            }
-            # .nupkg は zip 形式
-            Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
-            $zip = [System.IO.Compression.ZipFile]::OpenRead($nupkg)
-            try {
-                foreach ($entry in $zip.Entries) {
-                    # x64/x86 配下の SQLite.Interop.dll だけ抽出
-                    if ($entry.FullName -match 'build/net4[5-9]+/x(64|86)/SQLite\.Interop\.dll$') {
-                        $dest = Join-Path $sqlitePkg ($entry.FullName -replace '/', '\')
-                        $destDir = Split-Path $dest -Parent
-                        if (-not (Test-Path $destDir)) {
-                            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-                        }
-                        [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dest, $true)
-                        Write-Info "  抽出: $($entry.FullName)"
-                    }
-                }
-            } finally {
-                $zip.Dispose()
-            }
-            Write-Ok "Native DLL 手動抽出完了"
-        } else {
-            Write-Info "Stub.System.Data.SQLite native DLL 既存"
-        }
-    }
+    # (#309 / SDK-style 化) restore は下の msbuild /restore に一本化 (PackageReference)。
+    # 旧 packages.config 時代の `nuget restore -PackagesDirectory Manager\packages` + Stub.System.Data.SQLite
+    # の native DLL 手動抽出 (nupkg unzip) は廃止:
+    #   - PackageReference restore は global package cache に展開し Manager\packages\ を作らないため
+    #     旧 -PackagesDirectory 前提が成立しない
+    #   - Stub パッケージの build targets が SQLite.Interop.dll を bin\Release\x64|x86 へ自動コピーする
+    #     (PR1 で実機確認済) ため、packages.config 時代の「x64/x86 サブdir 未展開」防御策が不要になった
 
     # bin/Release/ を事前に削除 (前回ビルドの runtime ゴミ
     # = 開発者が Manager を直接起動した時に発生する db / logs / backups 等を
@@ -1509,10 +1467,11 @@ function Build-Manager {
         Remove-Item -Recurse -Force $binRelease
     }
 
-    # msbuild
-    Write-Info "msbuild /p:Configuration=Release"
+    # msbuild (/restore = PackageReference を build 前に解決、nuget.exe 不要)
+    Write-Info "msbuild /restore /p:Configuration=Release"
     $exitCode = Invoke-ExternalProcess -FilePath $script:ResolvedMsBuild -Arguments @(
         $csproj,
+        '/restore',
         '/p:Configuration=Release',
         '/verbosity:minimal',
         '/nologo'
@@ -1823,8 +1782,7 @@ $script:BundleManifestFiles = @(
     'files\Manager\TonePrism_Manager.exe',
     'files\Manager\TonePrism_Manager.exe.config',
     'files\Manager\System.Data.SQLite.dll',
-    'files\Manager\Microsoft.WindowsAPICodePack.dll',
-    'files\Manager\Microsoft.WindowsAPICodePack.Shell.dll',
+    # (#309) Microsoft.WindowsAPICodePack(.Shell).dll は実コード未使用 (フォルダ選択は FolderBrowserDialog 化済) のため撤去。
     'files\Manager\x64\SQLite.Interop.dll',
     'files\Manager\x86\SQLite.Interop.dll',
     # Updater (Phase 3、SPEC §3.7.4): Manager 置換 + 再起動の最小 CLI、Companions/ 配下に配置

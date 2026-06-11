@@ -379,8 +379,9 @@ namespace TonePrism.Manager.Services
                 Path.Combine("files", "Manager", "TonePrism_Manager.exe"),
                 Path.Combine("files", "Manager", "TonePrism_Manager.exe.config"),
                 Path.Combine("files", "Manager", "System.Data.SQLite.dll"),
-                Path.Combine("files", "Manager", "Microsoft.WindowsAPICodePack.dll"),
-                Path.Combine("files", "Manager", "Microsoft.WindowsAPICodePack.Shell.dll"),
+                // (#309) Microsoft.WindowsAPICodePack(.Shell).dll は実コード未使用 (フォルダ選択は FolderBrowserDialog 化済)
+                // のため新 bundle から撤去。manifest 経路 (ValidateStaging) は Release.ps1 $script:BundleManifestFiles 同期で
+                // 自動追従するが、本 legacy fallback も同 names を持つため両経路を一致させる (manifest read 失敗→legacy 降格時の偽 missing 回避)。
                 Path.Combine("files", "Manager", "x64", "SQLite.Interop.dll"),
                 Path.Combine("files", "Manager", "x86", "SQLite.Interop.dll"),
                 Path.Combine("files", "CHANGELOG.md"),
