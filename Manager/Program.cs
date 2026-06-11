@@ -371,7 +371,8 @@ namespace TonePrism.Manager
         {
             try
             {
-                string exeName = Path.GetFileName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+                // (#258 PR4) Assembly.Location は single-file で空 → Environment.ProcessPath (実 exe パス) を使う。
+                string exeName = Path.GetFileName(Environment.ProcessPath ?? "");
                 if (string.IsNullOrEmpty(exeName)) return;
                 using (var key = Registry.CurrentUser.CreateSubKey(
                     @"Software\Microsoft\Internet Explorer\Main\FeatureControl\FEATURE_BROWSER_EMULATION"))

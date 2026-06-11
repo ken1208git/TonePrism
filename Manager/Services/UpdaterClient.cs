@@ -53,7 +53,9 @@ namespace TonePrism.Manager.Services
             string managerExe;
             try
             {
-                managerExe = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                // (#258 PR4) Assembly.Location は single-file publish で空文字を返す (IL3000)。
+                // Environment.ProcessPath は実 exe パス (apphost) を返し single-file/通常の両方で機能する。
+                managerExe = Environment.ProcessPath;
             }
             catch (Exception ex)
             {
