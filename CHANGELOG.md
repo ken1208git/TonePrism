@@ -1400,6 +1400,13 @@ minor bump 判断: SemVer pre-1.0 原則 (= 0.x で breaking change は minor bu
 
 ## Launcher（ランチャー本体）
 
+### [Launcher v0.11.8] - 2026-06-11
+
+#### Changed (アプリ表示名の整理)
+
+- **窓タイトル（Alt+Tab / タスクバーでスタッフが見る名前）を「TonePrism ランチャー」に設定**（`app_manager.gd` `_ready` で `get_window().title` を設定）。従来は project.godot の `config/name`（=「TonePrism_Launcher」、exe 名と同じ技術名）が既定の窓タイトルになっていた。exe / `config/name` は OS 衝突回避の規約どおり据え置き、**見える名前だけ** Manager の「TonePrism マネージャー」（v0.27.5）とトーンを揃えて日本語化（システム名 TonePrism ＋ 役割。Launcher だけが TonePrism 全部ではないので "TonePrism" を名乗りきらない）。全画面キオスク中は非表示、Alt+Tab 時に表示。
+- bump 判断: 表示名の変更（破壊的変更・schema 変更なし）。patch (v0.11.7 → v0.11.8)。Manager v0.27.5（マネージャー表示名）と同 PR。
+
 ### [Launcher v0.11.7] - 2026-06-11
 
 #### Added (#345 — ストア導線の分かりやすさ)
@@ -2229,6 +2236,14 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.27.5] - 2026-06-11
+
+#### Changed (アプリ表示名の整理)
+
+- **メインウィンドウのタイトルを「TonePrism 管理ソフト」→「TonePrism マネージャー」に変更**（`MainForm.Designer.cs` `this.Text`）。Launcher の「TonePrism ランチャー」（v0.11.8）とトーンを揃え、「TonePrism ＋ カタカナ役割名（コンポーネント名と一致：マネージャー／ランチャー）」で一族の表示名を統一。exe / `AssemblyProduct`（=「TonePrism_Manager」）は規約どおり技術名を据え置き、可視名のみ変更。併せて設定タブ「製品名」表示の fallback 文字列も「TonePrism マネージャー」に揃えた（通常は AssemblyProduct を表示するため実発火しないが drift 防止）。
+- **スコープ（意図的な据え置き）**: 本変更は**窓タイトル（＝アプリの"名前"レイヤ）のみ**。アップデート通知ダイアログ等の**本文 prose（例: `MainForm.cs` の「新しい管理ソフトが起動しています」）と `docs/` は平易語「管理ソフト（Manager）」を維持**する。理由は「名前＝タイトルバー / 機能の説明＝prose・docs」の別レイヤで、部員・スタッフ向け説明文は機能を表す平易語のほうが分かりやすいため（SPEC §3.7.3 等でも prose は「管理ソフト」で一貫）。よって **docs 更新は不要**（語彙の意図的な使い分け）。
+- bump 判断: 表示名の変更（破壊的変更・schema 変更なし）。patch (v0.27.4 → v0.27.5)。Launcher v0.11.8（ランチャー表示名）と同 PR。
 
 ### [Manager v0.27.4] - 2026-06-10
 

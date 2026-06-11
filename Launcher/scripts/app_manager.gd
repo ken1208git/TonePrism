@@ -6,6 +6,11 @@ extends Node
 # ・全画面共通の処理
 
 func _ready():
+	# 窓タイトル (Alt+Tab / タスクバーでスタッフが見る名前)。exe / project.godot config/name は OS 衝突回避の
+	# 規約どおり技術名 "TonePrism_Launcher" のままだが、見える名前は Manager の "TonePrism マネージャー" と
+	# トーンを揃え "TonePrism ランチャー" にする (システム名 TonePrism + 役割。Launcher だけが TonePrism 全部
+	# ではないので "TonePrism" を名乗りきらない)。全画面キオスク中は表示されないが Alt+Tab 時に出る。
+	get_window().title = "TonePrism ランチャー"
 	# Alt+F4 / × で即終了せず、終了要求を自前でハンドリングする。
 	get_tree().set_auto_accept_quit(false)
 	print("[AppManager] Auto accept quit disabled. Quit request will be handled manually.")
