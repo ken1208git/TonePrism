@@ -146,7 +146,7 @@ namespace TonePrism.Manager
             this.Controls.Add(this.statusStrip1);
             this.Name = "MainForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-            this.Text = "TonePrism 管理ソフト";
+            this.Text = "TonePrism マネージャー";
             this.Load += new System.EventHandler(this.MainForm_Load);
             this.statusStrip1.ResumeLayout(false);
             this.statusStrip1.PerformLayout();

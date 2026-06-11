@@ -383,7 +383,7 @@ namespace TonePrism.Manager.Controls
                 AssemblyName assemblyName = assembly.GetName();
                 Version version = assemblyName.Version;
 
-                string productName = assembly.GetCustomAttribute<AssemblyProductAttribute>()?.Product ?? "TonePrism 管理ソフト";
+                string productName = assembly.GetCustomAttribute<AssemblyProductAttribute>()?.Product ?? "TonePrism マネージャー";
 
                 string versionStr = $"{version.Major}.{version.Minor}.{version.Build}";
                 if (version.Revision > 0)
