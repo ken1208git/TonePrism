@@ -220,6 +220,15 @@
 
 **注意 (#160 で section 責務分離)**: `Updater` 等の **runtime exe 群** (= SPEC §2.4 Companions 配置) の changelog は本 section ではなく **`## Companions`** (旧 `## Updater (Companions/Updater)`、本 PR で section 名を一般化) に記載する。本 section は build / 配布スクリプトのみ対象。Bundle v0.4.0 以前 (= 本 PR merge 前) の Updater 変更履歴は `## Release Tooling` の過去 entry (= round 1〜8 review 詳細等) に retain、retroactive consolidation は scope creep のため見送り (= PR #159 round 4 「SPEC 1 PR 1 bump 規約」導入時と同 pattern)。
 
+### [Release Tooling v0.1.25] - 2026-06-11
+
+#### Changed (Manager SDK-style 化に伴う restore 近代化 / #245 #258 #309)
+
+- **`Build-Manager` を SDK-style restore に対応**: `nuget restore -PackagesDirectory Manager\packages`（packages.config 前提）→ `msbuild /restore`（PackageReference）に一本化。Stub.System.Data.SQLite の native interop 手動抽出（nupkg unzip）も廃止（PackageReference の build targets が `bin\Release\x64|x86\SQLite.Interop.dll` を自動コピーするため不要、実機確認済）。bundle SoT `$script:BundleManifestFiles` から WindowsAPICodePack DLL 2 件を除去（#309、Manager v0.27.6・`UpdateDownloader.ValidateStagingLegacy` と三経路同期）。
+- **メインフローの `Resolve-Nuget` 呼び出しを撤去**（レビュー Medium）: 唯一の消費者だった Build-Manager の nuget restore が無くなり nuget.exe が未使用化。残すと (a) 通常実行で不要な nuget.exe DL、(b) `-Offline` で未使用ツールのために `Fail`（"NuGet キャッシュが必要"）になる live な失敗経路を温存するため、呼び出しを削除。`Resolve-Nuget` 関数定義は dead だが A4 の net10 配布対応 Release.ps1 改修でまとめて撤去予定。
+- **CI `.github/workflows/manager-tests.yml` を SDK-style 対応**: 削除済み `Manager\packages.config` を restore していた step（+ `Setup NuGet` step）を撤去。両プロジェクトとも PackageReference になり `dotnet test` の暗黙 restore で復元されるため（packages.config 削除と不可分の修正・レビュー Critical）。
+- bump 判断: 配布 / CI スクリプトの変更。patch (v0.1.24 → v0.1.25)。Bundle 反映は次回リリース時。
+
 ### [Release Tooling v0.1.24] - 2026-06-01
 
 #### Changed (#283 — project.godot 同梱廃止 + exe 版数の公開前検証ゲート)
@@ -2243,8 +2252,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 - **Manager の csproj を classic (packages.config) → SDK-style (`Microsoft.NET.Sdk` / PackageReference) に変換**（#245/#258 の WPF・net10 移行の前提となる「器」の刷新。**TFM は net48 のまま据え置き**＝ランタイム変更は別 PR に分離し「書式変更」と「ランタイム変更」を 1 変数ずつ切り分ける）。`UseWindowsForms`+`UseWPF` で WinForms/WPF 相互運用を維持、`GenerateAssemblyInfo=false` で既存 `Properties/AssemblyInfo.cs`（版数・`InternalsVisibleTo`）を温存、`AppendTargetFrameworkToOutputPath=false` で出力を `bin\$(Configuration)\` に固定（Release.ps1 の `bin\Release\` 直参照を維持、net10 flip 後もパス不変で A4 の配布差分を restore/publish 形態のみに絞る）。
 - **dead 依存を撤去（#309）**: `Microsoft.WindowsAPICodePack`(Core/Shell) はフォルダ選択の `FolderBrowserDialog` 化（PR #308）で実コード未使用のため撤去。併せて使用箇所ゼロの `System.Deployment` 参照も削除。bundle 同梱からも外し、SoT である `Release.ps1 $script:BundleManifestFiles`（= `Assert-ExpectedFiles` + manifest 生成を駆動）と `UpdateDownloader.ValidateStagingLegacy` の expected-files を**両経路同期して除去**（drift で Manager UI apply が永久 abort になる二層 fence のため両方）。
-- **Release.ps1 `Build-Manager` を SDK-style restore に対応**: `nuget restore -PackagesDirectory Manager\packages`（packages.config 前提）→ `msbuild /restore`（PackageReference）に一本化。Stub.System.Data.SQLite の native interop 手動抽出（nupkg unzip）も廃止（PackageReference の build targets が `bin\Release\x64|x86\SQLite.Interop.dll` を自動コピーするため不要、実機確認済）。
-  - **followup（本 PR では据え置き）**: 旧 `Resolve-Nuget`（nuget.exe DL）は Manager の restore が唯一の利用箇所だったため現状 dead。Release.ps1 を net10 配布対応で本格改修する **A4** で撤去予定（end-to-end 検証不能な orchestration の untested 改変を本 PR で増やさないため）。
+- **配布 / CI スクリプト側の追従**（`Release.ps1 Build-Manager` の `msbuild /restore` 化・不要 nuget 経路撤去・CI `manager-tests.yml` の packages.config restore step 撤去）は **`## Release Tooling` v0.1.25** に集約（配布スクリプトの「件」・本 component 変更と同 PR）。packages.config 削除と CI 修正は不可分。
 - 検証: VS MSBuild で Debug/Release ビルド成功、**xUnit 190/190 緑**、`bin\Release` から WindowsAPICodePack 消滅・`SQLite.Interop.dll`(x64/x86) 健在を確認、exe の埋め込み resx マニフェスト名（9 件）が classic と完全一致（起動時 resource ロード不変）を reflection で確認。GUI 実起動は dev exe が `PathManager` 経由でリポジトリ `toneprism.db` を掴むため未実施（resx 名一致で代替、実起動 smoke は A4 の clean publish 時に実施）。
 - bump 判断: ビルド基盤刷新 + dead 依存撤去（#309 close）。挙動非変更だが依存撤去を含むため patch (v0.27.5 → v0.27.6)。Launcher 変更なし。
 

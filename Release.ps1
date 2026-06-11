@@ -2075,7 +2075,9 @@ Assert-ChangelogLinkDefs
 Assert-ComponentVersions
 Resolve-Godot
 Resolve-MsBuild
-Resolve-Nuget
+# (#309 / SDK-style 化) Resolve-Nuget 呼び出しを撤去: Manager の packages.config restore が唯一の利用箇所
+# だったため nuget.exe が未使用化。残すと通常実行で不要 DL、-Offline では未使用ツールのために Fail する live な
+# 失敗経路を温存するため呼び出しを削除。Resolve-Nuget 関数定義 (dead) は A4 の net10 配布対応改修でまとめて撤去。
 Set-ExportPresetVersions
 Assert-WorkingTreeClean -Context "export_presets sync 後" -PostSync
 Clear-Staging

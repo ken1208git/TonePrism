@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- (#239) C# テスト基盤 0→1。SDK-style + target net48 にすることで、net10 移行 (#245 Phase 4) 時は
+  <!-- (#239) C# テスト基盤 0→1。SDK-style + target net48 にすることで、net10 移行 (#245/#258) 時は
        TargetFramework を一行差し替えるだけで済む (テストコード・フレームワークはそのまま carry over)。
-       本体 Manager は classic (packages.config) のままで、本テストは SDK-style から ProjectReference する。 -->
+       本体 Manager も #354 で SDK-style (PackageReference) 化済。本テストは ProjectReference で参照する。 -->
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
     <RootNamespace>TonePrism.Manager.Tests</RootNamespace>
