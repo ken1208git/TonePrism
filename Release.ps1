@@ -1458,6 +1458,9 @@ function Build-Manager {
     #     旧 -PackagesDirectory 前提が成立しない
     #   - Stub パッケージの build targets が SQLite.Interop.dll を bin\Release\x64|x86 へ自動コピーする
     #     (PR1 で実機確認済) ため、packages.config 時代の「x64/x86 サブdir 未展開」防御策が不要になった
+    #   - 契約変更 (レビュー Low): 旧 Resolve-Nuget は -Offline 時に「キャッシュ必須」で preflight Fail したが、
+    #     msbuild /restore に Offline ガードは無い。-Offline + global package cache cold だと restore が network を
+    #     試み build 途中で fail する (誤成果物は出ない)。-Offline は global package cache warm 前提。fail-fast 復元は A4 で検討。
 
     # bin/Release/ を事前に削除 (前回ビルドの runtime ゴミ
     # = 開発者が Manager を直接起動した時に発生する db / logs / backups 等を
