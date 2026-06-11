@@ -672,6 +672,8 @@ func _on_select() -> void:
 	# 絞った件数と食い違う（= 「大量に表示される」）ため。section.games は developer 込みで読込済みで DB close 後も
 	# 有効。filter 系 (genre 等) は元々 LIMIT 無しで全件なので挙動は変わらない (= 従来の「すべて見る＝全件」を維持)。
 	var all_games = section.games
+	# 再クエリは廃止したが、build 時に開いた DB がまだ開いていればここで解放しておく（次シーンの DB open と
+	# 競合させない防御。section.games は materialized 済みなので close 後も有効）。
 	_db_manager.close()
 	if all_games.is_empty():
 		return

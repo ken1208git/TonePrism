@@ -7,7 +7,6 @@ signal exit_pressed
 @export var bar_height: float = 120.0
 
 @onready var _panel: Control = $Panel
-@onready var _background: TextureRect = $Panel/Background
 @onready var _clock_label: Label = $Panel/MarginContainer/HBoxContainer/ClockLabel
 @onready var _exit_button: Button = $Panel/MarginContainer/HBoxContainer/ExitButton
 

@@ -73,9 +73,9 @@ func has_visible_sections() -> bool:
 
 ## セクションソースに応じてゲーム一覧を取得
 func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
-	# (#278 ②) DB が閉じていたら開く。store_browse は表示中 DB を閉じておき「すべて見る」
-	# (get_all_games_for_section) で初めて再接続する経路があるため、game_repository / get_store_sections と
-	# 同じ自動再接続ガードを置く（無いと close 後に _db_manager.db=null を叩いて空配列/エラーになる）。
+	# (#278 ②) DB が閉じていたら開く。store_browse は表示後に DB を閉じる経路があり、その後 _get_games_for_section
+	# が呼ばれると close 済みの _db_manager.db=null を叩いて空配列/エラーになるため、game_repository /
+	# get_store_sections と同じ自動再接続ガードを置く。
 	if not _db_manager.is_open():
 		if not _db_manager.open():
 			return []
@@ -170,13 +170,21 @@ func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 		# max_display_count>0 は「N 件だけのランダムピックアップ」を意図しているので LIMIT で絞る。これが無いと
 		# 行は builder が N にトリミングしても、すべて見る/タイルクリックで開くカルーセル (_on_select →
 		# section.games) が全件になり「大量に表示される」。LIMIT を query に入れて section.games 自体を N 件にし、
-		# 行・カルーセルを一致させる。max=0 (上限なし) のときは従来どおり全件。
-		var rand_limit := (" LIMIT " + str(section.max_display_count)) if section.max_display_count > 0 else ""
-		query = """
-			SELECT * FROM games
-			WHERE is_visible = 1
-			ORDER BY RANDOM()
-		""" + rand_limit
+		# 行・カルーセルを一致させる。max=0 (上限なし) のときは従来どおり全件。LIMIT も本ファイルの他クエリに揃え binding 使用。
+		if section.max_display_count > 0:
+			query = """
+				SELECT * FROM games
+				WHERE is_visible = 1
+				ORDER BY RANDOM()
+				LIMIT ?
+			"""
+			bindings = [section.max_display_count]
+		else:
+			query = """
+				SELECT * FROM games
+				WHERE is_visible = 1
+				ORDER BY RANDOM()
+			"""
 	elif source == "controller":
 		query = """
 			SELECT * FROM games
@@ -218,7 +226,3 @@ func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 							if not display_text.is_empty():
 								section.game_display_texts[game.game_id] = display_text
 	return games
-
-## セクションの全ゲームを取得（カルーセル遷移時用）
-func get_all_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
-	return _get_games_for_section(section)
