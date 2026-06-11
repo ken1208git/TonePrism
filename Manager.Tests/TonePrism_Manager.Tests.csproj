@@ -11,6 +11,9 @@
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
     <Platforms>AnyCPU</Platforms>
+    <!-- (#258 PR3, レビュー Low) 本体 Manager (net10.0-windows・Windows 専用) と同じく CA1416 を抑止。
+         テストも Windows 上でのみ実行され Manager の Windows API を呼ぶため、抑止方針を本体と対称に揃える。 -->
+    <NoWarn>CA1416</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
