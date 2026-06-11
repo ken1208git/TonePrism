@@ -18,7 +18,10 @@
     <!-- 出力を bin\$(Configuration)\ に固定 (TFM サブフォルダ抑止)。Release.ps1 が bin\Release\ を直参照。 -->
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <!-- (#258 PR3) 本アプリは Windows 専用 (WinForms/WPF・net10.0-windows、Windows でしか動かない) のため
-         CA1416 (プラットフォーム互換性: 'X' は windows でのみサポート) は恒常ノイズ。一律抑止する。 -->
+         CA1416 (プラットフォーム互換性: 'X' は windows でのみサポート) は恒常ノイズ。一律抑止する。
+         tradeoff (レビュー D-Low): version-specific な警告 (例: windows10.0.22000+ 要求 API) も黙る。学校 PC は
+         Win10/11 で実害小だが、WPF 移行 (#245) で API 表面が変わる際にピンポイント抑止 ([SupportedOSPlatform] /
+         #pragma) への置換を検討。 -->
     <NoWarn>CA1416</NoWarn>
   </PropertyGroup>
 
