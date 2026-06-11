@@ -50,16 +50,14 @@ namespace TonePrism.Manager.Services
                 Services.Logger.Error("[UpdaterClient] Updater.exe が見つかりません: " + updaterExe);
                 return false;
             }
-            string managerExe;
-            try
+            // (#258 PR4) Assembly.Location は single-file publish で空文字を返す (IL3000)。Environment.ProcessPath は
+            // 実 exe パス (apphost) を返し single-file/通常の両方で機能する。理論上 null 可 (取得不能) のため明示チェック:
+            // 空だと Quote → `--restart-exe ""` で Updater が置換後 Manager を再起動できず silent 降格するため fail させる
+            // (旧 .Location 無ガード + ProcessPath は throw しない dead な try/catch を、Program.cs と対称な null チェックに置換。レビュー Low)。
+            string managerExe = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(managerExe))
             {
-                // (#258 PR4) Assembly.Location は single-file publish で空文字を返す (IL3000)。
-                // Environment.ProcessPath は実 exe パス (apphost) を返し single-file/通常の両方で機能する。
-                managerExe = Environment.ProcessPath;
-            }
-            catch (Exception ex)
-            {
-                Services.Logger.Error("[UpdaterClient] Manager.exe path 取得失敗: " + ex.Message);
+                Services.Logger.Error("[UpdaterClient] Manager.exe path が取得できません (Environment.ProcessPath が空)");
                 return false;
             }
 
@@ -361,7 +359,7 @@ namespace TonePrism.Manager.Services
             // 安全に動くよう先に TrimEnd で剥がす。
             // **drive root 例外** (round 6 L-1): `C:\` → `C:` は path semantic が変わる (前者は root、
             // 後者は drive-relative cwd)。通常 dir では同等だが drive root だけは別物。現 caller
-            // (StagingRootForUpdate / ManagerDir / Assembly.Location / UpdaterLogDir) は drive root を
+            // (StagingRootForUpdate / ManagerDir / Environment.ProcessPath / UpdaterLogDir) は drive root を
             // 渡さないため実害なし、将来 caller 追加時に注意。
             s = s.TrimEnd('\\');
             if (string.IsNullOrEmpty(s)) return "\"\"";

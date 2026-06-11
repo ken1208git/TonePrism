@@ -285,6 +285,7 @@ $GitHubRepoSlug = 'ken1208git/TonePrism'
 
 $script:ResolvedGodot       = $null
 $script:ResolvedMsBuild     = $null
+$script:ResolvedDotnet      = $null
 $script:GodotPatchUsed      = $null  # 解決された Godot patch (例: "4.6.2")
 $script:LauncherVersion     = $null
 $script:ManagerVersion      = $null
@@ -700,6 +701,36 @@ function Resolve-Godot {
         Set-Content -Path (Join-Path $templatesDir '.gctone_managed') -Value "Release.ps1 v$Version installed at $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))" -NoNewline
         Write-Ok "Templates 展開完了: $templatesDir"
     }
+}
+
+# ============================================================================
+# dotnet (net10 SDK) 解決: Manager は net10 で dotnet publish するため hard dependency (#258 PR4)
+# ============================================================================
+
+function Resolve-Dotnet {
+    Write-Step "dotnet (net10 SDK) を解決"
+
+    # (#258 PR4 レビュー Medium) Manager は Build-Manager で dotnet publish するため dotnet (net10 SDK) が必須。
+    # Godot / MsBuild と同様に preflight で解決・検証し、未導入なら Build-Launcher (Godot export、数分) より前に fail-fast する。
+    $cmd = Get-Command dotnet -ErrorAction SilentlyContinue
+    if (-not $cmd) {
+        Fail @"
+dotnet が PATH に見つかりません。Manager は net10 で dotnet publish (self-contained single-file) するため
+.NET 10 SDK が必要です。https://dotnet.microsoft.com/download から .NET 10 SDK を導入してください。
+"@
+    }
+    $script:ResolvedDotnet = $cmd.Source
+
+    # net10 SDK の存在を確認 (Manager は net10.0-windows、SDK が無いと publish が NETSDK エラーで失敗)
+    $sdks = & $script:ResolvedDotnet --list-sdks
+    $hasNet10 = $false
+    foreach ($line in $sdks) {
+        if ($line -match '^\s*10\.\d+\.') { $hasNet10 = $true; break }
+    }
+    if (-not $hasNet10) {
+        Fail "net10 SDK が見つかりません (dotnet --list-sdks に 10.x が無い)。Manager の publish に .NET 10 SDK が必要です。"
+    }
+    Write-Ok "dotnet 解決: $script:ResolvedDotnet (net10 SDK あり)"
 }
 
 # ============================================================================
@@ -1427,7 +1458,7 @@ function Build-Manager {
     }
 
     Write-Info "dotnet publish -r win-x64 --self-contained -p:PublishSingleFile=true"
-    $exitCode = Invoke-ExternalProcess -FilePath 'dotnet' -Arguments @(
+    $exitCode = Invoke-ExternalProcess -FilePath $script:ResolvedDotnet -Arguments @(
         'publish', $csproj,
         '-c', 'Release',
         '-r', 'win-x64',
@@ -2035,6 +2066,7 @@ Assert-ChangelogLinkDefs
 Assert-ComponentVersions
 Resolve-Godot
 Resolve-MsBuild
+Resolve-Dotnet
 Set-ExportPresetVersions
 Assert-WorkingTreeClean -Context "export_presets sync 後" -PostSync
 Clear-Staging

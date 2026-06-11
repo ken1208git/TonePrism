@@ -227,6 +227,7 @@
 - **`Build-Manager` を `msbuild /restore` → `dotnet publish`（net10 self-contained single-file）化**（`-r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true`）。staging の Manager が exe 1 個に。dev build（`dotnet build`/`test`）は single-file にせず publish 引数で渡す。Manager のみ dotnet (net10)、Updater / LauncherAgent は msbuild (net48) のまま（移行期 mixed、前提: net10 SDK が PATH）。
 - **`$script:BundleManifestFiles` の Manager 行を exe 1 個に刷新**（`.exe.config` / `System.Data.SQLite.dll` / `x64,x86\SQLite.Interop.dll` は single-file exe 内包のため撤去）。Manager v0.27.9・`UpdateDownloader.ValidateStagingLegacy` と三経路同期。
 - **dead な `Resolve-Nuget` 一式を撤去**（関数定義 / `-NugetExe` param / `$NugetPinnedVersion` 定数 / `$script:ResolvedNuget` / doc 言及）。PR1 で呼び出しは撤去済、Manager の dotnet 移行で nuget.exe が完全に不要化（PR4 で予定通り撤去）。
+- **（レビュー Medium）`Resolve-Dotnet` preflight を追加**（`Resolve-Godot` / `Resolve-MsBuild` と同様 Main 冒頭で解決）。`dotnet` を PATH 解決 + `dotnet --list-sdks` で **net10 SDK 存在を検証**、未導入なら `Build-Launcher`（Godot export、数分）より**前に fail-fast**（旧来 hard build 依存なのに preflight に居なかった穴を是正）。`Build-Manager` は `$script:ResolvedDotnet` を使用。
 - doc（`.SYNOPSIS` / `.PARAMETER`）の Manager ビルド記述を dotnet publish に、必要環境に「.NET 10 SDK」を追記。
 - **PR3+PR4 を束ねてマージ**で main から net10 bundle release が可能になる（PR3 単独では net10 出力が expected-files と drift し `Assert-ExpectedFiles` で fail-fast＝リリース不能だった窓を、本 PR で閉じる）。
 - bump 判断: 配布スクリプト改修。patch (v0.1.26 → v0.1.27)。Bundle 反映は次回リリース時。
@@ -2272,6 +2273,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 - **配布形態を self-contained single-file に**（net10 は OS 同梱でないため、ランタイムを exe に同梱して「解凍 → すぐ動く・オフライン安全・ランタイム導入不要」の現行モデルを維持）。Manager の bundle 構成が **`TonePrism_Manager.exe` 1 個に集約**（旧 `.exe.config` / `System.Data.SQLite.dll` / `x64,x86\SQLite.Interop.dll` は exe 内包、native は初回 `%TEMP%/.net` へ self-extract）。代償は Manager サイズ ~170MB（一度きりの DL、Launcher(Godot) も元々数十MB のため許容）。
 - **`Assembly.GetExecutingAssembly().Location` → `Environment.ProcessPath`**（`UpdaterClient` / `Program`）。single-file で `Location` が空文字を返す問題（IL3000、自己更新の Manager パス空 + IE11 emulation の exe 名空）の解消。single-file / 通常の両方で実 exe パスを返す堅牢化。
+  - （レビュー Low）`UpdaterClient` の `managerExe` に null/空ガードを追加（`Environment.ProcessPath` は理論上 null 可。空だと `--restart-exe ""` で Updater が置換後に Manager を再起動できず silent 降格 → 明示 `Fail` で `Program.cs` と対称化）。`ProcessPath` は throw しない dead な try/catch を明示 null チェックに置換。`Quote` の stale コメント（caller に `Assembly.Location` 記載）も `Environment.ProcessPath` に更新。
 - **expected-files 刷新**: `Release.ps1 $script:BundleManifestFiles` と `UpdateDownloader.ValidateStagingLegacy` の Manager 行を exe 1 個に（drift で apply 永久 abort の二層 fence を同期）。
 - 検証: net10 ビルド 0 警告 0 エラー・**xUnit 199/199 緑**・**single-file 実起動 smoke**（隔離 temp + repo `toneprism.db` のコピー、原本不変）で 169MB 単一 exe 起動 → DB バージョン 23 / 全 8 テーブル整合 OK / **SQLite native (self-extract) ロード**・assembly load エラー 0。実 GitHub 更新確認 / 実更新適用（DL→Updater→再起動）の end-to-end は pre-release 全体検証へ。
 - bump 判断: 配布形態の変更（self-contained single-file）+ single-file 対応コード修正。patch (v0.27.8 → v0.27.9)。Launcher 変更なし。
