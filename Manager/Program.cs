@@ -57,17 +57,10 @@ namespace TonePrism.Manager
             // 自プロセス名を IE11 emulation に登録する (best-effort、失敗してもアプリは起動可能)。
             TrySetIE11EmulationMode();
 
-            // (#108 Phase 4 round 3 L-1) AppDomain global の SecurityProtocol を起動時 1 回設定。
-            // GitHubReleaseChecker / BackupService 等 HttpClient 共有 consumer の SSL/TLS handshake が
-            // 起動順序で behavior 差を持たないように、process 起動直後に Tls12 を含む形に固定。
-            try
-            {
-                System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
-            }
-            catch
-            {
-                // 古い .NET / SecurityProtocol 未定義の極端ケースは ignore (Win10/11 default で OK)
-            }
+            // (#258 PR3) net10 化で旧 ServicePointManager.SecurityProtocol Tls12 設定を撤去。
+            // net10 では ServicePointManager は obsolete (SYSLIB0014) かつ HttpClient の TLS に無効
+            // (TLS は OS / SslStream が自動ネゴシエート) — 旧 net48 では HttpClient handshake に効いたが
+            // net10 では no-op。Win10/11 + net10 は default で Tls12/13 を使うため挙動不変。
 
             // (#179) Named Mutex で同 PC 重複起動を物理 block。
             // - mutex name に install path hash を含めて dev 環境 (= repo) と本番 install (= 学校 LAN

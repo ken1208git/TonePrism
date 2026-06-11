@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -22,6 +23,9 @@ namespace TonePrism.Manager
         /// <summary>
         /// 進捗が定量化できない処理向け。Marquee（流れる）スタイルにする。
         /// </summary>
+        // (#258 PR3) child control 委譲の runtime プロパティ (backing field 無し)。designer シリアライズ対象外
+        // を明示し net10 WinForms の WFO1000 (error 化) を解消。
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool MarqueeMode
         {
             get { return pbProgress.Style == ProgressBarStyle.Marquee; }
@@ -37,6 +41,7 @@ namespace TonePrism.Manager
         /// **注意 (M2)**: setter は UI thread でのみ呼ぶこと。worker thread から実行中に切り替える場合は
         /// 代わりに <see cref="DisableCancelFromWorker"/> を使う (Invoke で UI thread に marshal)。
         /// </summary>
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool AllowCancel
         {
             get { return btnCancel.Visible; }

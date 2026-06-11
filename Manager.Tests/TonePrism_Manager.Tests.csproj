@@ -1,26 +1,24 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- (#239) C# テスト基盤 0→1。SDK-style + target net48 にすることで、net10 移行 (#245/#258) 時は
-       TargetFramework を一行差し替えるだけで済む (テストコード・フレームワークはそのまま carry over)。
-       本体 Manager も #354 で SDK-style (PackageReference) 化済。本テストは ProjectReference で参照する。 -->
+  <!-- (#239) C# テスト基盤。Manager (net10.0-windows, WinForms/WPF) を ProjectReference するため本テストも
+       net10.0-windows。#258 PR3 で Manager と同時に net48 → net10 へ flip (csproj コメント設計どおり TFM 一行差し替え)。
+       SQLite native interop は System.Data.SQLite.Core が runtimes/<rid>/native 経由で出力へコピー。 -->
   <PropertyGroup>
-    <TargetFramework>net48</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <RootNamespace>TonePrism.Manager.Tests</RootNamespace>
     <AssemblyName>TonePrism_Manager.Tests</AssemblyName>
     <IsPackable>false</IsPackable>
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
     <Platforms>AnyCPU</Platforms>
-    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
-    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
-    <!-- Manager と同版の System.Data.SQLite + native interop (Stub が SQLite.Interop.dll を出力へコピー) -->
-    <PackageReference Include="Stub.System.Data.SQLite.Core.NetFramework" Version="1.0.119.0" />
+    <!-- Manager と同じ net10 対応 SQLite (native interop 同梱) -->
+    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.119.0" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,49 +1,32 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- (#245/#258) SDK-style 化。Phase A1 では TFM は net48 のまま据え置き、「SDK化」と「ランタイム変更」を
-       1 変数ずつ分離する。net10 への flip は Phase A3 (#258)。
-       UseWindowsForms + UseWPF: 既存コードは WinForms 主体だが WPF 相互運用 (PresentationFramework 等) も
-       使うため両方有効化。これにより WinForms/WPF assembly は SDK が暗黙参照する (明示 Reference 不要)。 -->
+  <!-- (#258 PR3) net48 → net10 切替。PR1 で SDK-style 化・PR2 で System.Web/JSON を撤去済のため、
+       本 PR はほぼ TFM flip + 依存の net10 対応差し替えのみ。
+       net10 では System.*/Microsoft.CSharp/HttpClient/ZipFile 等は shared framework が in-box 提供するため
+       旧 net48 の <Reference> 群は不要 (DataSetExtensions/Transactions/CustomMarshalers は実使用ゼロを確認済、
+       AsEnumerable は System.Linq 由来で DataSetExtensions ではない)。System.Text.Json も net10 同梱で package 不要。 -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net48</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <RootNamespace>TonePrism.Manager</RootNamespace>
     <AssemblyName>TonePrism_Manager</AssemblyName>
     <UseWindowsForms>true</UseWindowsForms>
     <UseWPF>true</UseWPF>
-    <!-- 既存 Properties/AssemblyInfo.cs (InternalsVisibleTo + 版数) を温存。SDK 自動生成と二重定義になるため抑止。 -->
+    <!-- 既存 Properties/AssemblyInfo.cs (版数 + InternalsVisibleTo) を温存 (SDK 自動生成と二重定義回避)。 -->
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <Deterministic>true</Deterministic>
-    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
-    <!-- 出力を bin\$(Configuration)\ に固定 (SDK 既定の TFM サブフォルダ bin\Release\net48\ を抑止)。
-         Release.ps1 Build-Manager が bin\Release\ を直参照するため互換維持。net10 flip 後もパス不変になり
-         A4 の配布スクリプト差分を restore/publish 形態のみに絞れる。 -->
+    <!-- 出力を bin\$(Configuration)\ に固定 (TFM サブフォルダ抑止)。Release.ps1 が bin\Release\ を直参照。 -->
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <!-- packages.config 時代と同じく BCL 由来の警告を抑えない方針。LangVersion は SDK 既定に従う。 -->
+    <!-- (#258 PR3) 本アプリは Windows 専用 (WinForms/WPF・net10.0-windows、Windows でしか動かない) のため
+         CA1416 (プラットフォーム互換性: 'X' は windows でのみサポート) は恒常ノイズ。一律抑止する。 -->
+    <NoWarn>CA1416</NoWarn>
   </PropertyGroup>
-
-  <!-- Use* フラグが供給しない .NET Framework アセンブリのみ明示参照する。
-       (System.Windows.Forms / System.Drawing / PresentationCore / PresentationFramework /
-        WindowsBase / System.Xaml / WindowsFormsIntegration は UseWindowsForms/UseWPF が供給) -->
-  <ItemGroup>
-    <Reference Include="CustomMarshalers" />
-    <Reference Include="Microsoft.CSharp" />
-    <Reference Include="System.Transactions" />
-    <Reference Include="System.Net.Http" />
-    <Reference Include="System.IO.Compression" />
-    <Reference Include="System.IO.Compression.FileSystem" />
-    <Reference Include="System.Data.DataSetExtensions" />
-  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Markdig" Version="0.37.0" />
-    <!-- (#258) 旧 System.Web.Extensions の JavaScriptSerializer から移行 (net10 に System.Web 系は無い)。
-         netstandard2.0 ターゲットで net48 から利用可。net10 化 (PR3) 後は framework 同梱版に透過解決される。 -->
-    <PackageReference Include="System.Text.Json" Version="8.0.5" />
-    <!-- SQLite (net48): Stub パッケージ単体で managed (lib/net46) + native interop (build targets が
-         SQLite.Interop.dll を出力へコピー) を供給。元 csproj の実 Reference も Stub 由来・テストプロジェクトも
-         Stub のみ。net10 化 (A3) では net10 対応の System.Data.SQLite.Core へ差し替える。 -->
-    <PackageReference Include="Stub.System.Data.SQLite.Core.NetFramework" Version="1.0.119.0" />
+    <!-- SQLite: net48 の Stub.System.Data.SQLite.Core.NetFramework から net10 対応の System.Data.SQLite.Core へ。
+         同 1.0.119.0・同 API (System.Data.SQLite 名前空間)、native interop は runtimes/<rid>/native 経由で出力へ。 -->
+    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.119.0" />
   </ItemGroup>
 
 </Project>

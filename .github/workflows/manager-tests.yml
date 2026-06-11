@@ -23,7 +23,7 @@ jobs:
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "10.0.x"
 
       # 両プロジェクトとも SDK-style PackageReference のため dotnet test の暗黙 restore で復元される
       # (Manager は #354 で packages.config → SDK-style 化、別途 nuget restore は不要)
