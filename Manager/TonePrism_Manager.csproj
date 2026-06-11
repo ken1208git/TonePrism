@@ -29,8 +29,6 @@
     <Reference Include="CustomMarshalers" />
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Transactions" />
-    <Reference Include="System.Web" />
-    <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.IO.Compression.FileSystem" />
@@ -39,6 +37,9 @@
 
   <ItemGroup>
     <PackageReference Include="Markdig" Version="0.37.0" />
+    <!-- (#258) 旧 System.Web.Extensions の JavaScriptSerializer から移行 (net10 に System.Web 系は無い)。
+         netstandard2.0 ターゲットで net48 から利用可。net10 化 (PR3) 後は framework 同梱版に透過解決される。 -->
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
     <!-- SQLite (net48): Stub パッケージ単体で managed (lib/net46) + native interop (build targets が
          SQLite.Interop.dll を出力へコピー) を供給。元 csproj の実 Reference も Stub 由来・テストプロジェクトも
          Stub のみ。net10 化 (A3) では net10 対応の System.Data.SQLite.Core へ差し替える。 -->

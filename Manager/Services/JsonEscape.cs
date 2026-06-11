@@ -11,7 +11,7 @@ namespace TonePrism.Manager.Services
     /// **未対応**:
     /// - U+0000..U+001F 制御文字の `\uXXXX` escape (= 仕様上は JSON で必要)
     /// - surrogate pair / `/` (= 任意 escape)
-    /// 上記が必要な surface (例: user-typed free-form text) では `System.Web.Script.Serialization.JavaScriptSerializer`
+    /// 上記が必要な surface (例: user-typed free-form text) では `System.Text.Json` (`Services.JsonCompat`)
     /// 等の proper serializer を使うこと。
     ///
     /// **重複定義防止**: R4 review M-1 で `Program.cs` + `LauncherLogsRootBridge.cs` の 2 callsite に

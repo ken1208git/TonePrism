@@ -1080,8 +1080,7 @@ namespace TonePrism.Manager
             try
             {
                 string json = System.IO.File.ReadAllText(sentinelPath, System.Text.Encoding.UTF8);
-                var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
-                var dto = ser.Deserialize<UpdateCompletedSentinel>(json);
+                var dto = Services.JsonCompat.Deserialize<UpdateCompletedSentinel>(json);
                 if (dto != null) { newVersion = dto.NewVersion; completedAtRaw = dto.CompletedAt; }
             }
             catch (Exception ex)
@@ -1153,8 +1152,7 @@ namespace TonePrism.Manager
             try
             {
                 string json = System.IO.File.ReadAllText(sentinelPath, System.Text.Encoding.UTF8);
-                var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
-                var dto = ser.Deserialize<LogsRootMigratedSentinel>(json);
+                var dto = Services.JsonCompat.Deserialize<LogsRootMigratedSentinel>(json);
                 if (dto != null) migratedFrom = dto.MigratedFrom;
             }
             catch (Exception ex)
@@ -1213,11 +1211,11 @@ namespace TonePrism.Manager
         /// <summary>
         /// `<install>/.logs_root_migrated` sentinel ファイルの JSON deserialize 用 DTO (#201, v0.15.0)。
         /// writer 側は `Program.WriteLogsRootMigrationSentinel`、wire format は **真の camelCase**
-        /// (`migratedFrom` / `migratedAt`)、`JavaScriptSerializer` の case-insensitive deserialize で
-        /// PascalCase property と互換受理 (UpdateCompletedSentinel と同 pattern)。
+        /// (`migratedFrom` / `migratedAt`)、`Services.JsonCompat.Deserialize` (System.Text.Json,
+        /// case-insensitive) で PascalCase property と互換受理 (UpdateCompletedSentinel と同 pattern)。
         /// 注: 旧 R1 docstring で「camelCase」と称しつつ実態が snake_case (`migrated_from`) だった drift を
-        /// R2 review Critical #1 で解消、JavaScriptSerializer は underscore stripping を行わないため
-        /// snake_case 採用は silent dialog 不発火を招くことが判明。
+        /// R2 review Critical #1 で解消。System.Text.Json も JavaScriptSerializer 同様 underscore stripping を
+        /// 行わないため、snake_case 採用は silent dialog 不発火を招く (camelCase 維持が必須)。
         /// </summary>
         private sealed class LogsRootMigratedSentinel
         {
@@ -1230,12 +1228,11 @@ namespace TonePrism.Manager
         /// <summary>
         /// `<install>/.update_completed` sentinel ファイルの JSON deserialize 用 DTO。
         ///
-        /// **Serializer 切替時の注意** (round 2 review fix Low-2): 本 class は PascalCase property を
-        /// 持ち、JSON wire format は camelCase (writer 側 `UpdateSectionPanel.RunUpdateWorker` の anonymous
-        /// type が camelCase で書出し)。現状の `System.Web.Script.Serialization.JavaScriptSerializer` は
-        /// case-insensitive deserialize で互換性が成立しているが、将来 `System.Text.Json` 等の case-sensitive
-        /// default serializer へ切替える場合、wire 名 mapping を別途設定する必要がある (例: `JsonPropertyName`
-        /// attribute)。切替時は wire format との対応を再検証すること。
+        /// **wire format 注意** (round 2 review fix Low-2): 本 class は PascalCase property を持ち、JSON
+        /// wire format は camelCase (writer 側 `UpdateSectionPanel.RunUpdateWorker` の anonymous type が
+        /// camelCase で書出し)。deserialize は `Services.JsonCompat.Deserialize<T>` 経由で **case-insensitive**
+        /// (#258 で JavaScriptSerializer → System.Text.Json へ移行時、`PropertyNameCaseInsensitive=true` で旧挙動を
+        /// 保存) のため camelCase wire ↔ PascalCase DTO 互換が継続する。wire 名を変える場合は要再検証。
         /// </summary>
         private sealed class UpdateCompletedSentinel
         {

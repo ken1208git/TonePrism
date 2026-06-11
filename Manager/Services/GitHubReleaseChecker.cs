@@ -8,7 +8,6 @@ using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Web.Script.Serialization;
 using TonePrism.Manager.Models;
 
 namespace TonePrism.Manager.Services
@@ -132,8 +131,8 @@ namespace TonePrism.Manager.Services
             if (string.IsNullOrEmpty(json)) throw new GitHubReleaseException("空のレスポンスを受信しました");
             try
             {
-                var ser = new JavaScriptSerializer();
-                var dict = ser.Deserialize<Dictionary<string, object>>(json);
+                var dict = JsonCompat.DeserializeToObjectTree(json) as Dictionary<string, object>;
+                if (dict == null) throw new GitHubReleaseException("レスポンスが JSON オブジェクトではありません");
                 return BuildFromDict(dict);
             }
             catch (GitHubReleaseException)
@@ -152,8 +151,8 @@ namespace TonePrism.Manager.Services
             if (string.IsNullOrEmpty(json)) throw new GitHubReleaseException("空のレスポンスを受信しました");
             try
             {
-                var ser = new JavaScriptSerializer();
-                var arr = ser.Deserialize<object[]>(json);
+                var arr = JsonCompat.DeserializeToObjectTree(json) as object[];
+                if (arr == null) throw new GitHubReleaseException("レスポンスが JSON 配列ではありません");
                 var list = new List<ReleaseInfo>(arr.Length);
                 foreach (var item in arr)
                 {

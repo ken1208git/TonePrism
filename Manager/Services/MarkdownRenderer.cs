@@ -35,9 +35,9 @@ namespace TonePrism.Manager.Services
             catch (Exception ex)
             {
                 // 想定外の例外で UI を巻き添えにしない、preformatted で生 markdown 表示にフォールバック
-                return "<pre>" + System.Web.HttpUtility.HtmlEncode(markdown) +
+                return "<pre>" + System.Net.WebUtility.HtmlEncode(markdown) +
                        "</pre><p style='color:#c00'>Markdown 変換でエラー: " +
-                       System.Web.HttpUtility.HtmlEncode(ex.Message) + "</p>";
+                       System.Net.WebUtility.HtmlEncode(ex.Message) + "</p>";
             }
         }
 
@@ -85,14 +85,14 @@ namespace TonePrism.Manager.Services
             var sb = new StringBuilder();
             if (!string.IsNullOrEmpty(topHeading))
             {
-                sb.Append("<h1>").Append(System.Web.HttpUtility.HtmlEncode(topHeading)).Append("</h1>");
+                sb.Append("<h1>").Append(System.Net.WebUtility.HtmlEncode(topHeading)).Append("</h1>");
             }
             for (int i = 0; i < releases.Count; i++)
             {
                 var r = releases[i];
                 string title = r.TagName ?? "(unknown)";
                 string date = r.PublishedAt.HasValue ? r.PublishedAt.Value.ToString("yyyy-MM-dd") : "";
-                sb.Append("<h2>Bundle ").Append(System.Web.HttpUtility.HtmlEncode(title));
+                sb.Append("<h2>Bundle ").Append(System.Net.WebUtility.HtmlEncode(title));
                 if (!string.IsNullOrEmpty(date))
                 {
                     sb.Append(" <span style='color:#888;font-weight:normal;font-size:.85em;'>(")
