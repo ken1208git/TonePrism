@@ -4,7 +4,6 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Web.Script.Serialization;
 using TonePrism.Manager.Models;
 using TonePrism.Manager.Repositories;
 
@@ -362,8 +361,7 @@ namespace TonePrism.Manager.Services
             {
                 string json = _settings.GetString(SettingsKeys.UpdateCheckCachedJson, null);
                 if (string.IsNullOrEmpty(json)) return null;
-                var ser = new JavaScriptSerializer();
-                var dto = ser.Deserialize<CacheDto>(json);
+                var dto = JsonCompat.Deserialize<CacheDto>(json);
                 if (dto == null) return null;
                 return new UpdateCheckResult
                 {
@@ -441,8 +439,15 @@ namespace TonePrism.Manager.Services
                                 : null,
                         }).ToList(),
                 };
-                var ser = new JavaScriptSerializer { MaxJsonLength = 1024 * 1024 };
-                string json = ser.Serialize(dto);
+                string json = JsonCompat.Serialize(dto);
+                // 旧 JavaScriptSerializer の MaxJsonLength=1MB guard を再現: 過大 cache (累積 release notes +
+                // 画像 embed 等) は書込まない (System.Text.Json は size 上限が無いため明示 check)。超過時は cache 不更新
+                // (次回起動 hydrate なし) で alive、旧 throw → catch → Warn と同等の挙動。
+                if (json.Length > 1024 * 1024)
+                {
+                    Logger.Warn("[UpdateChecker] SaveCache skip: serialized cache が 1MB 超 (" + json.Length + " 文字) のため書込まない");
+                    return;
+                }
                 _settings.SetString(SettingsKeys.UpdateCheckCachedJson, json);
             }
             catch (Exception ex)

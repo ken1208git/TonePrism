@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Web.Script.Serialization;
 using TonePrism.Manager.Models;
 
 namespace TonePrism.Manager.Services
@@ -172,8 +171,7 @@ namespace TonePrism.Manager.Services
             try
             {
                 string text = File.ReadAllText(path);
-                var serializer = new JavaScriptSerializer();
-                var dict = serializer.Deserialize<Dictionary<string, object>>(text);
+                var dict = JsonCompat.DeserializeToObjectTree(text) as Dictionary<string, object>;
                 if (dict == null) return null;
 
                 // (round 2 M-3) primary path: last_heartbeat_at_unix_ms を long.TryParse 成功で確定。

@@ -2247,6 +2247,20 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.27.7] - 2026-06-11
+
+#### Changed (#258 — JavaScriptSerializer → System.Text.Json 移行 + System.Web 一族撤去)
+
+- **JSON serializer を `JavaScriptSerializer`（System.Web.Extensions、net10 に存在しない）→ `System.Text.Json` に移行**。新規 `Services/JsonCompat.cs` を**挙動保存アダプター**として挟み、各 call site の周辺コードを無改変に保つ:
+  - `Deserialize<T>`: `PropertyNameCaseInsensitive=true` で旧 case-insensitive 挙動を再現（camelCase wire ↔ PascalCase DTO 互換。sentinel `UpdateCompletedSentinel` / `LogsRootMigratedSentinel`、update cache `CacheDto` が依存）。
+  - `DeserializeToObjectTree`: 旧 `DeserializeObject` / `Deserialize<Dictionary<string,object>>` の動的型（object→`Dictionary<string,object>`、array→`object[]`、string/bool/long/double/null）を再現 → `GitHubReleaseChecker` の nested assets 走査・`UpdateDownloader` の manifest 読取・`LauncherSessionService` の session JSON 解析を**無改変**で維持（`AsLong` の `is long`/`is int` 両対応を利用）。
+  - `Serialize`: compact 出力で wire format 不変（匿名型 camelCase / DTO PascalCase をそのまま）。`UpdateChecker` cache の `MaxJsonLength=1MB` guard は明示 length check で再現。
+- **`HttpUtility.HtmlEncode`（System.Web）→ `System.Net.WebUtility.HtmlEncode` に置換**（`UpdateSectionPanel` / `MarkdownRenderer`、drop-in）。これで `System.Web` の最後の利用も消滅。
+- **csproj: `System.Web` / `System.Web.Extensions` 参照を撤去、`System.Text.Json` 8.0.5 PackageReference を追加**（netstandard2.0 で net48 から利用可、net10 化後は framework 同梱版に透過解決）。System.Web 一族の net10 ブロッカーを解消。
+- **テスト追加（重要）**: 移行前これらの JSON 経路には test が無く「190 緑」が網にならなかったため、`JsonCompatTests`（converter 型 / case-insensitive / round-trip 5件）+ `GitHubReleaseCheckerTests`（nested assets 走査 / array / throw 4件）を追加（**199 緑**）。`LauncherSessionService` の session 解析は既存 `LauncherStaleDetectionTests` が既に網羅。
+- 検証: Debug/Release ビルド成功・**xUnit 199/199 緑**・`bin\Release` に System.Text.Json + 依存（System.Text.Encodings.Web 等）同梱・exe.config に `System.Runtime.CompilerServices.Unsafe` の binding redirect 自動生成を確認。**実起動 smoke**（隔離 temp + repo `toneprism.db` のコピー + `.update_completed` sentinel 投入、原本不変）で `JsonCompat.Deserialize` が exe プロセスで成功（ログに `update_completed dialog 表示: Bundle v9.9.9`・assembly load エラー 0）= System.Text.Json の net48 ロード + binding redirect を runtime で実証。
+- bump 判断: 内部 serializer 移行（挙動非変更）+ dead dep（System.Web 系）撤去。patch (v0.27.6 → v0.27.7)。Launcher 変更なし。
+
 ### [Manager v0.27.6] - 2026-06-11
 
 #### Changed (ビルド基盤の近代化: SDK-style 化 + dead 依存撤去 #309)

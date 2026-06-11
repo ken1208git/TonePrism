@@ -265,14 +265,14 @@ namespace TonePrism.Manager.Controls
                     {
                         string bodyHtml = MarkdownRenderer.MarkdownToHtml(localBody);
                         webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument(
-                            "<h1>" + System.Web.HttpUtility.HtmlEncode(localHeading) + "</h1>" + bodyHtml);
+                            "<h1>" + System.Net.WebUtility.HtmlEncode(localHeading) + "</h1>" + bodyHtml);
                     }
                     else if (result.Latest != null && !string.IsNullOrEmpty(result.Latest.Body))
                     {
                         string bodyHtml = MarkdownRenderer.MarkdownToHtml(result.Latest.Body);
                         string heading = "現在実行中: " + (result.Latest.TagName ?? "");
                         webReleaseNotes.DocumentText = MarkdownRenderer.WrapAsDocument(
-                            "<h1>" + System.Web.HttpUtility.HtmlEncode(heading) + "</h1>" + bodyHtml);
+                            "<h1>" + System.Net.WebUtility.HtmlEncode(heading) + "</h1>" + bodyHtml);
                     }
                     else
                     {
@@ -804,8 +804,7 @@ namespace TonePrism.Manager.Controls
                 try
                 {
                     string sentinelPath = System.IO.Path.Combine(PathManager.BaseDirectory, ".update_completed");
-                    var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
-                    string json = ser.Serialize(new
+                    string json = Services.JsonCompat.Serialize(new
                     {
                         completedAt = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture),
                         newVersion = targetVersion.ToString(3),

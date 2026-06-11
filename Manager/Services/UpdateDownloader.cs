@@ -425,8 +425,7 @@ namespace TonePrism.Manager.Services
             try
             {
                 string json = File.ReadAllText(manifestPath, System.Text.Encoding.UTF8);
-                var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
-                var dict = ser.DeserializeObject(json) as System.Collections.Generic.IDictionary<string, object>;
+                var dict = JsonCompat.DeserializeToObjectTree(json) as System.Collections.Generic.IDictionary<string, object>;
                 if (dict == null) return null;
                 var manifest = new BundleManifest();
                 object bv;
