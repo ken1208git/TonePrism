@@ -440,9 +440,11 @@ namespace TonePrism.Manager.Services
                         }).ToList(),
                 };
                 string json = JsonCompat.Serialize(dto);
-                // 旧 JavaScriptSerializer の MaxJsonLength=1MB guard を再現: 過大 cache (累積 release notes +
-                // 画像 embed 等) は書込まない (System.Text.Json は size 上限が無いため明示 check)。超過時は cache 不更新
-                // (次回起動 hydrate なし) で alive、旧 throw → catch → Warn と同等の挙動。
+                // 旧 JavaScriptSerializer の MaxJsonLength=1MB guard と **同等目的** (過大 cache の抑止): 過大 cache
+                // (累積 release notes + 画像 embed 等) は書込まない。System.Text.Json は size 上限が無いため serialize
+                // 後の length で明示 check する。**厳密な閾値一致ではない** — 既定 encoder が非 ASCII を \uXXXX escape する
+                // ため日本語 release notes は旧より serialized length が膨らみ僅かに早くトリップしうるが、実 notes は数 KB で
+                // 1MB に遠く、超過時も cache skip (次回 hydrate なし) で alive のため実害なし (旧 throw→catch→Warn と同 posture)。
                 if (json.Length > 1024 * 1024)
                 {
                     Logger.Warn("[UpdateChecker] SaveCache skip: serialized cache が 1MB 超 (" + json.Length + " 文字) のため書込まない");
