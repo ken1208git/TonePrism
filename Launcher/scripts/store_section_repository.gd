@@ -167,11 +167,16 @@ func _get_games_for_section(section: StoreSectionInfo) -> Array[GameInfo]:
 			ORDER BY release_year DESC, title ASC
 		"""
 	elif source == "random":
+		# max_display_count>0 は「N 件だけのランダムピックアップ」を意図しているので LIMIT で絞る。これが無いと
+		# 行は builder が N にトリミングしても、すべて見る/タイルクリックで開くカルーセル (_on_select →
+		# section.games) が全件になり「大量に表示される」。LIMIT を query に入れて section.games 自体を N 件にし、
+		# 行・カルーセルを一致させる。max=0 (上限なし) のときは従来どおり全件。
+		var rand_limit := (" LIMIT " + str(section.max_display_count)) if section.max_display_count > 0 else ""
 		query = """
 			SELECT * FROM games
 			WHERE is_visible = 1
 			ORDER BY RANDOM()
-		"""
+		""" + rand_limit
 	elif source == "controller":
 		query = """
 			SELECT * FROM games

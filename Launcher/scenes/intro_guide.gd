@@ -478,10 +478,19 @@ func _make_slide_content(slide: IntroSlideInfo) -> Control:
 
 	return root
 
-## 画像 TextureRect を生成（アスペクト維持・中央寄せ）。
-func _make_image_rect(tex: Texture2D, min_size: Vector2) -> TextureRect:
+## 画像 TextureRect を生成。box は「画像を収める最大枠」で、テクスチャのアスペクト比で box 内に収まる
+## **実寸**を算出し、それを custom_minimum_size にする＝枠の中に「画像の無い余白」を残さない。
+## 旧実装は box をそのまま min size にしていたため、正方形ロゴを横長枠 (820×500) に入れると枠左右に
+## デッドスペースが残り、横並び (画像＋本文) で本文が右へ押しやられて構図が片寄って見えた。実寸フィットに
+## することでロゴと本文が中央に寄り、画像のみのときも余白対称のまま (CenterContainer 中央寄せ) を維持する。
+func _make_image_rect(tex: Texture2D, box: Vector2) -> TextureRect:
 	var image_rect := TextureRect.new()
-	image_rect.custom_minimum_size = min_size
+	var ts := tex.get_size()
+	var fitted := box
+	if ts.x > 0.0 and ts.y > 0.0:
+		var s := minf(box.x / ts.x, box.y / ts.y)
+		fitted = Vector2(ts.x * s, ts.y * s)
+	image_rect.custom_minimum_size = fitted
 	image_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	image_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	image_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE

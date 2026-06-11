@@ -601,7 +601,7 @@ text = "ゲームの説明文がここに入ります。"
 autowrap_mode = 2
 
 [node name="TopBar" parent="." instance=ExtResource("6_top_bar")]
-bar_height = 250.0
+bar_height = 500.0
 
 [node name="BottomBar" parent="." instance=ExtResource("7_bottom_bar")]
 
