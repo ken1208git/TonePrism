@@ -1,8 +1,8 @@
 name: Manager Tests
 
 # (#239) Manager のデータ層テスト (スキーマ移行 F-1 / 保存 round-trip) を PR・main push のたびに自動実行。
-# テスト基盤は SDK-style net48 + xUnit。本体 Manager は classic (packages.config) なので、SDK の
-# PackageReference 復元 (dotnet) と packages.config 復元 (nuget) の両方を行ってから dotnet test する。
+# テスト基盤・本体 Manager とも SDK-style net48 + PackageReference (Manager は #354 で classic packages.config →
+# SDK-style 化)。dotnet test の暗黙 restore が両プロジェクトの PackageReference を推移復元する (別途 nuget restore 不要)。
 # net48 + System.Data.SQLite native interop のため Windows runner を使う。
 
 # (レビュー #1/#2) paths フィルタは付けない。将来この job を branch protection の required status check に
@@ -25,13 +25,7 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Setup NuGet
-        uses: NuGet/setup-nuget@v2
-
-      # 本体 Manager の packages.config を復元 (dotnet は packages.config を復元しないため nuget で)
-      - name: Restore Manager (packages.config)
-        run: nuget restore Manager\packages.config -PackagesDirectory Manager\packages
-
-      # テストプロジェクトの PackageReference 復元 + Manager の build + テスト実行
+      # 両プロジェクトとも SDK-style PackageReference のため dotnet test の暗黙 restore で復元される
+      # (Manager は #354 で packages.config → SDK-style 化、別途 nuget restore は不要)
       - name: Run Manager tests
         run: dotnet test Manager.Tests\TonePrism_Manager.Tests.csproj -c Debug --nologo --verbosity minimal

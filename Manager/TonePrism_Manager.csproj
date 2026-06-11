@@ -1,331 +1,48 @@
-<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- (#245/#258) SDK-style 化。Phase A1 では TFM は net48 のまま据え置き、「SDK化」と「ランタイム変更」を
+       1 変数ずつ分離する。net10 への flip は Phase A3 (#258)。
+       UseWindowsForms + UseWPF: 既存コードは WinForms 主体だが WPF 相互運用 (PresentationFramework 等) も
+       使うため両方有効化。これにより WinForms/WPF assembly は SDK が暗黙参照する (明示 Reference 不要)。 -->
   <PropertyGroup>
-    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
-    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProjectGuid>{EA046367-F4B6-4EE0-80EC-6F87D82FE4EF}</ProjectGuid>
     <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
     <RootNamespace>TonePrism.Manager</RootNamespace>
     <AssemblyName>TonePrism_Manager</AssemblyName>
-    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
-    <FileAlignment>512</FileAlignment>
-    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
+    <!-- 既存 Properties/AssemblyInfo.cs (InternalsVisibleTo + 版数) を温存。SDK 自動生成と二重定義になるため抑止。 -->
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <Deterministic>true</Deterministic>
-    <NuGetPackageImportStamp>
-    </NuGetPackageImportStamp>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <!-- 出力を bin\$(Configuration)\ に固定 (SDK 既定の TFM サブフォルダ bin\Release\net48\ を抑止)。
+         Release.ps1 Build-Manager が bin\Release\ を直参照するため互換維持。net10 flip 後もパス不変になり
+         A4 の配布スクリプト差分を restore/publish 形態のみに絞れる。 -->
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <!-- packages.config 時代と同じく BCL 由来の警告を抑えない方針。LangVersion は SDK 既定に従う。 -->
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-    <PlatformTarget>AnyCPU</PlatformTarget>
-    <DebugSymbols>true</DebugSymbols>
-    <DebugType>full</DebugType>
-    <Optimize>false</Optimize>
-    <OutputPath>bin\Debug\</OutputPath>
-    <DefineConstants>DEBUG;TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <PlatformTarget>AnyCPU</PlatformTarget>
-    <DebugType>pdbonly</DebugType>
-    <Optimize>true</Optimize>
-    <OutputPath>bin\Release\</OutputPath>
-    <DefineConstants>TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-  </PropertyGroup>
+
+  <!-- Use* フラグが供給しない .NET Framework アセンブリのみ明示参照する。
+       (System.Windows.Forms / System.Drawing / PresentationCore / PresentationFramework /
+        WindowsBase / System.Xaml / WindowsFormsIntegration は UseWindowsForms/UseWPF が供給) -->
   <ItemGroup>
     <Reference Include="CustomMarshalers" />
-    <Reference Include="Markdig">
-      <HintPath>packages\Markdig.0.37.0\lib\net462\Markdig.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-    <Reference Include="System.Buffers">
-      <HintPath>packages\System.Buffers.4.5.1\lib\net461\System.Buffers.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-    <Reference Include="System.Memory">
-      <HintPath>packages\System.Memory.4.5.5\lib\net461\System.Memory.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-    <Reference Include="System.Numerics.Vectors">
-      <HintPath>packages\System.Numerics.Vectors.4.5.0\lib\net46\System.Numerics.Vectors.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-    <Reference Include="System.Runtime.CompilerServices.Unsafe">
-      <HintPath>packages\System.Runtime.CompilerServices.Unsafe.4.5.3\lib\net461\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-    <Reference Include="Microsoft.WindowsAPICodePack, Version=1.1.5.0, Culture=neutral, PublicKeyToken=8985beaab7ea3f04, processorArchitecture=MSIL">
-      <HintPath>packages\Microsoft-WindowsAPICodePack-Core.1.1.5\lib\net48\Microsoft.WindowsAPICodePack.dll</HintPath>
-    </Reference>
-    <Reference Include="Microsoft.WindowsAPICodePack.Shell, Version=1.1.5.0, Culture=neutral, PublicKeyToken=8985beaab7ea3f04, processorArchitecture=MSIL">
-      <HintPath>packages\Microsoft-WindowsAPICodePack-Shell.1.1.5\lib\net48\Microsoft.WindowsAPICodePack.Shell.dll</HintPath>
-    </Reference>
-    <Reference Include="PresentationCore" />
-    <Reference Include="PresentationFramework" />
-    <Reference Include="System" />
-    <Reference Include="System.Core" />
-    <Reference Include="System.Data.SQLite, Version=1.0.119.0, Culture=neutral, PublicKeyToken=db937bc2d44ff139, processorArchitecture=MSIL">
-      <HintPath>packages\Stub.System.Data.SQLite.Core.NetFramework.1.0.119.0\lib\net46\System.Data.SQLite.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
+    <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Transactions" />
     <Reference Include="System.Web" />
     <Reference Include="System.Web.Extensions" />
-    <Reference Include="System.Xaml" />
-    <Reference Include="System.Xml.Linq" />
-    <Reference Include="System.Data.DataSetExtensions" />
-    <Reference Include="Microsoft.CSharp" />
-    <Reference Include="System.Data" />
-    <Reference Include="System.Deployment" />
-    <Reference Include="System.Drawing" />
+    <Reference Include="System.Net.Http" />
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.IO.Compression.FileSystem" />
-    <Reference Include="System.Net.Http" />
-    <Reference Include="System.Windows.Forms" />
-    <Reference Include="System.Xml" />
-    <Reference Include="WindowsBase" />
-    <Reference Include="WindowsFormsIntegration" />
+    <Reference Include="System.Data.DataSetExtensions" />
   </ItemGroup>
+
   <ItemGroup>
-    <Compile Include="Models\GameVersion.cs" />
-    <Compile Include="VersionUpForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="VersionUpForm.Designer.cs">
-      <DependentUpon>VersionUpForm.cs</DependentUpon>
-    </Compile>
-    <Compile Include="AddGameForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="AddGameForm.Designer.cs">
-      <DependentUpon>AddGameForm.cs</DependentUpon>
-    </Compile>
-    <Compile Include="ResetDatabaseConfirmForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="UnsavedSettingsDialog.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="ResetDatabaseConfirmForm.Designer.cs">
-      <DependentUpon>ResetDatabaseConfirmForm.cs</DependentUpon>
-    </Compile>
-    <Compile Include="DeleteGameConfirmForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="DeleteGameConfirmForm.Designer.cs">
-      <DependentUpon>DeleteGameConfirmForm.cs</DependentUpon>
-    </Compile>
-    <Compile Include="FolderDeletionFailureDialog.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="FolderDeletionFailureDialog.Designer.cs">
-      <DependentUpon>FolderDeletionFailureDialog.cs</DependentUpon>
-    </Compile>
-    <Compile Include="EditGameForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="EditGameForm.Designer.cs">
-      <DependentUpon>EditGameForm.cs</DependentUpon>
-    </Compile>
-    <Compile Include="DeveloperForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="DeveloperForm.Designer.cs">
-      <DependentUpon>DeveloperForm.cs</DependentUpon>
-    </Compile>
-    <Compile Include="StoreSectionForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="IntroSlideEditForm.cs" />
-    <Compile Include="StoreSectionForm.Designer.cs">
-      <DependentUpon>StoreSectionForm.cs</DependentUpon>
-    </Compile>
-    <Compile Include="Controls\GameSectionPanel.cs">
-      <SubType>UserControl</SubType>
-    </Compile>
-    <Compile Include="Controls\GameSectionPanel.Designer.cs">
-      <DependentUpon>GameSectionPanel.cs</DependentUpon>
-    </Compile>
-    <Compile Include="Controls\StoreSectionPanel.cs">
-      <SubType>UserControl</SubType>
-    </Compile>
-    <Compile Include="Controls\IntroGuidePanel.cs" />
-    <Compile Include="Controls\StoreSectionPanel.Designer.cs">
-      <DependentUpon>StoreSectionPanel.cs</DependentUpon>
-    </Compile>
-    <Compile Include="Controls\SettingsSectionPanel.cs">
-      <SubType>UserControl</SubType>
-    </Compile>
-    <Compile Include="Controls\SettingsSectionPanel.Designer.cs">
-      <DependentUpon>SettingsSectionPanel.cs</DependentUpon>
-    </Compile>
-    <Compile Include="Controls\BackupSectionPanel.cs">
-      <SubType>UserControl</SubType>
-    </Compile>
-    <Compile Include="Controls\BackupSectionPanel.Designer.cs">
-      <DependentUpon>BackupSectionPanel.cs</DependentUpon>
-    </Compile>
-    <Compile Include="Controls\LogSectionPanel.cs">
-      <SubType>UserControl</SubType>
-    </Compile>
-    <Compile Include="Controls\LogSectionPanel.Designer.cs">
-      <DependentUpon>LogSectionPanel.cs</DependentUpon>
-    </Compile>
-    <Compile Include="Controls\UpdateSectionPanel.cs">
-      <SubType>UserControl</SubType>
-    </Compile>
-    <Compile Include="Controls\UpdateSectionPanel.Designer.cs">
-      <DependentUpon>UpdateSectionPanel.cs</DependentUpon>
-    </Compile>
-    <Compile Include="Controls\SemverInputControl.cs">
-      <SubType>UserControl</SubType>
-    </Compile>
-    <Compile Include="Controls\SemverInputControl.Designer.cs">
-      <DependentUpon>SemverInputControl.cs</DependentUpon>
-    </Compile>
-    <Compile Include="RestoreConfirmForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="RestoreConfirmForm.Designer.cs">
-      <DependentUpon>RestoreConfirmForm.cs</DependentUpon>
-    </Compile>
-    <Compile Include="RestoreReportForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="ImageNameConflictDialog.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="DatabaseConnection.cs" />
-    <Compile Include="DatabaseManager.cs" />
-    <Compile Include="SchemaManager.cs" />
-    <Compile Include="Repositories\DeveloperRepository.cs" />
-    <Compile Include="Repositories\GameRepository.cs" />
-    <Compile Include="Repositories\IntroSlideRepository.cs" />
-    <Compile Include="Repositories\ManagerSessionRepository.cs" />
-    <Compile Include="Repositories\SettingsRepository.cs" />
-    <Compile Include="Repositories\StoreSectionRepository.cs" />
-    <Compile Include="Repositories\VersionRepository.cs" />
-    <Compile Include="MainForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="MainForm.Designer.cs">
-      <DependentUpon>MainForm.cs</DependentUpon>
-    </Compile>
-    <Compile Include="ProcessingDialog.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="ProcessingDialog.Designer.cs">
-      <DependentUpon>ProcessingDialog.cs</DependentUpon>
-    </Compile>
-    <Compile Include="ProgressInfo.cs" />
-    <Compile Include="Models\BackupCatalogEntry.cs" />
-    <Compile Include="Models\AssetSnapshotInfo.cs" />
-    <Compile Include="Models\DeveloperInfo.cs" />
-    <Compile Include="Models\GameInfo.cs" />
-    <Compile Include="Models\IntroSlide.cs" />
-    <Compile Include="Models\LauncherSessionInfo.cs" />
-    <Compile Include="Models\ManagerSessionInfo.cs" />
-    <Compile Include="Models\Settings.cs" />
-    <Compile Include="Models\StoreSectionInfo.cs" />
-    <Compile Include="Models\ReleaseInfo.cs" />
-    <Compile Include="Models\UpdateCheckResult.cs" />
-    <Compile Include="GenreList.cs" />
-    <Compile Include="PathManager.cs" />
-    <Compile Include="Services\AssetSnapshotService.cs" />
-    <Compile Include="Services\AssetRestoreService.cs" />
-    <Compile Include="Services\RestorePairingPolicy.cs" />
-    <Compile Include="Services\BackupService.cs" />
-    <Compile Include="Services\SessionBackupCoordinator.cs" />
-    <Compile Include="Services\BackupCatalogService.cs" />
-    <Compile Include="Services\DeveloperListManager.cs" />
-    <Compile Include="Services\DpiSafeFolderPicker.cs" />
-    <Compile Include="Services\FileOperationService.cs" />
-    <Compile Include="Services\FolderDeletionService.cs" />
-    <Compile Include="Services\GameFormHelper.cs" />
-    <Compile Include="Services\GameVersionDeletionService.cs" />
-    <Compile Include="Services\IntroGuideAssetHelper.cs" />
-    <Compile Include="Services\ImagePreviewHelper.cs" />
-    <Compile Include="Services\JsonEscape.cs" />
-    <Compile Include="Services\LauncherLogsRootBridge.cs" />
-    <Compile Include="Services\LauncherSessionService.cs" />
-    <Compile Include="Services\Logger.cs" />
-    <Compile Include="Services\LogLineFormat.cs" />
-    <Compile Include="Services\ManagerSessionService.cs" />
-    <Compile Include="Services\PathConversionHelper.cs" />
-    <Compile Include="Services\SessionConflictDialog.cs" />
-    <Compile Include="Services\SessionConflictHelper.cs" />
-    <Compile Include="Services\SessionConflictPolicy.cs" />
-    <Compile Include="Services\ChangelogParser.cs" />
-    <Compile Include="Services\DirReplacer.cs" />
-    <Compile Include="Services\FileReplacer.cs" />
-    <Compile Include="Services\GitHubReleaseChecker.cs" />
-    <Compile Include="Services\MarkdownRenderer.cs" />
-    <Compile Include="Services\ProcessTerminator.cs" />
-    <Compile Include="Services\RestoreService.cs" />
-    <Compile Include="Services\RestoreReconciliationService.cs" />
-    <Compile Include="Services\SettingsKeys.cs" />
-    <Compile Include="Services\UpdateChecker.cs" />
-    <Compile Include="Services\UpdateDownloader.cs" />
-    <Compile Include="Services\UpdaterClient.cs" />
-    <Compile Include="Services\UpdaterLogAbsorber.cs" />
-    <Compile Include="Services\VersionInventory.cs" />
-    <Compile Include="Program.cs" />
-    <Compile Include="Properties\AssemblyInfo.cs" />
-    <EmbeddedResource Include="AddGameForm.resx">
-      <DependentUpon>AddGameForm.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="ResetDatabaseConfirmForm.resx">
-      <DependentUpon>ResetDatabaseConfirmForm.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="DeleteGameConfirmForm.resx">
-      <DependentUpon>DeleteGameConfirmForm.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="FolderDeletionFailureDialog.resx">
-      <DependentUpon>FolderDeletionFailureDialog.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="EditGameForm.resx">
-      <DependentUpon>EditGameForm.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="DeveloperForm.resx">
-      <DependentUpon>DeveloperForm.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="MainForm.resx">
-      <DependentUpon>MainForm.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Properties\Resources.resx">
-      <Generator>ResXFileCodeGenerator</Generator>
-      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
-      <SubType>Designer</SubType>
-    </EmbeddedResource>
-    <Compile Include="Properties\Resources.Designer.cs">
-      <AutoGen>True</AutoGen>
-      <DependentUpon>Resources.resx</DependentUpon>
-    </Compile>
-    <EmbeddedResource Include="VersionUpForm.resx">
-      <DependentUpon>VersionUpForm.cs</DependentUpon>
-    </EmbeddedResource>
-    <None Include="packages.config" />
-    <None Include="Properties\Settings.settings">
-      <Generator>SettingsSingleFileGenerator</Generator>
-      <LastGenOutput>Settings.Designer.cs</LastGenOutput>
-    </None>
-    <Compile Include="Properties\Settings.Designer.cs">
-      <AutoGen>True</AutoGen>
-      <DependentUpon>Settings.settings</DependentUpon>
-      <DesignTimeSharedInput>True</DesignTimeSharedInput>
-    </Compile>
+    <PackageReference Include="Markdig" Version="0.37.0" />
+    <!-- SQLite (net48): Stub パッケージ単体で managed (lib/net46) + native interop (build targets が
+         SQLite.Interop.dll を出力へコピー) を供給。元 csproj の実 Reference も Stub 由来・テストプロジェクトも
+         Stub のみ。net10 化 (A3) では net10 対応の System.Data.SQLite.Core へ差し替える。 -->
+    <PackageReference Include="Stub.System.Data.SQLite.Core.NetFramework" Version="1.0.119.0" />
   </ItemGroup>
-  <ItemGroup>
-    <None Include="App.config" />
-  </ItemGroup>
-  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <Import Project="packages\Stub.System.Data.SQLite.Core.NetFramework.1.0.119.0\build\net46\Stub.System.Data.SQLite.Core.NetFramework.targets" Condition="Exists('packages\Stub.System.Data.SQLite.Core.NetFramework.1.0.119.0\build\net46\Stub.System.Data.SQLite.Core.NetFramework.targets')" />
-  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
-    <PropertyGroup>
-      <ErrorText>このプロジェクトは、このコンピューター上にない NuGet パッケージを参照しています。それらのパッケージをダウンロードするには、[NuGet パッケージの復元] を使用します。詳細については、http://go.microsoft.com/fwlink/?LinkID=322105 を参照してください。見つからないファイルは {0} です。</ErrorText>
-    </PropertyGroup>
-    <Error Condition="!Exists('packages\Stub.System.Data.SQLite.Core.NetFramework.1.0.119.0\build\net46\Stub.System.Data.SQLite.Core.NetFramework.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\Stub.System.Data.SQLite.Core.NetFramework.1.0.119.0\build\net46\Stub.System.Data.SQLite.Core.NetFramework.targets'))" />
-  </Target>
+
 </Project>
