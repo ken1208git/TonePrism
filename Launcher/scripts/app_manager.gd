@@ -7,7 +7,7 @@ extends Node
 
 func _ready():
 	# 窓タイトル (Alt+Tab / タスクバーでスタッフが見る名前)。exe / project.godot config/name は OS 衝突回避の
-	# 規約どおり技術名 "TonePrism_Launcher" のままだが、見える名前は Manager の "TonePrism 管理ソフト" と
+	# 規約どおり技術名 "TonePrism_Launcher" のままだが、見える名前は Manager の "TonePrism マネージャー" と
 	# トーンを揃え "TonePrism ランチャー" にする (システム名 TonePrism + 役割。Launcher だけが TonePrism 全部
 	# ではないので "TonePrism" を名乗りきらない)。全画面キオスク中は表示されないが Alt+Tab 時に出る。
 	get_window().title = "TonePrism ランチャー"

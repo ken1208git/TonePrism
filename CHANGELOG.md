@@ -2242,6 +2242,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 #### Changed (アプリ表示名の整理)
 
 - **メインウィンドウのタイトルを「TonePrism 管理ソフト」→「TonePrism マネージャー」に変更**（`MainForm.Designer.cs` `this.Text`）。Launcher の「TonePrism ランチャー」（v0.11.8）とトーンを揃え、「TonePrism ＋ カタカナ役割名（コンポーネント名と一致：マネージャー／ランチャー）」で一族の表示名を統一。exe / `AssemblyProduct`（=「TonePrism_Manager」）は規約どおり技術名を据え置き、可視名のみ変更。併せて設定タブ「製品名」表示の fallback 文字列も「TonePrism マネージャー」に揃えた（通常は AssemblyProduct を表示するため実発火しないが drift 防止）。
+- **スコープ（意図的な据え置き）**: 本変更は**窓タイトル（＝アプリの"名前"レイヤ）のみ**。アップデート通知ダイアログ等の**本文 prose（例: `MainForm.cs` の「新しい管理ソフトが起動しています」）と `docs/` は平易語「管理ソフト（Manager）」を維持**する。理由は「名前＝タイトルバー / 機能の説明＝prose・docs」の別レイヤで、部員・スタッフ向け説明文は機能を表す平易語のほうが分かりやすいため（SPEC §3.7.3 等でも prose は「管理ソフト」で一貫）。よって **docs 更新は不要**（語彙の意図的な使い分け）。
 - bump 判断: 表示名の変更（破壊的変更・schema 変更なし）。patch (v0.27.4 → v0.27.5)。Launcher v0.11.8（ランチャー表示名）と同 PR。
 
 ### [Manager v0.27.4] - 2026-06-10
