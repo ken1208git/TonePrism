@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Threading;
 using TonePrism.Manager.Services;
 
 namespace TonePrism.Manager.Shell
@@ -22,6 +24,18 @@ namespace TonePrism.Manager.Shell
         private bool _loading;
         private DatabaseManager Db => ShellWindow.SharedDb;
 
+        // (レビュー #6) 数値設定のデバウンス書込: スピナー連打を 1 回にまとめて SMB 越し DB 往復を減らす。
+        // 同キーの直近値だけ保持し、500ms 静止 / 欄離脱 / ナビ離脱で 1 回 flush する (即時反映=保存ボタン無し
+        // ・未保存状態なしは維持。デバウンス窓内の強制 kill だけが最後の 1 変更を失うが、設定編集中の kill は稀)。
+        private readonly Dictionary<string, (int value, string label)> _pendingInts
+            = new Dictionary<string, (int value, string label)>();
+        private DispatcherTimer _intDebounce;
+
+        // (レビュー #1) パスの直近保存値を追跡し、値が変化した時だけ書込＋セッション競合チェックを行う
+        // (旧 SettingsSectionPanel の dirty 追跡相当)。no-op flush で SessionConflictDialog が誤発火するのを防ぐ
+        // ＝複数 PC 共有で設定タブを開いて離れるだけで競合ダイアログが出る退行を回避。
+        private readonly Dictionary<string, string> _lastSavedPaths = new Dictionary<string, string>();
+
         public SettingsPage()
         {
             InitializeComponent();
@@ -30,18 +44,18 @@ namespace TonePrism.Manager.Shell
             // (WinForms ループ上の WPF 窓 + NavigationView で WPF の wheel routing に届かないため)。
             Loaded += (_, _) => LoadSettings();
 
-            // (#362) 数値は ValueChanged で即反映 (spin / Enter 確定時)。LostFocus はナビ項目クリックでの
-            // 離脱時に発火しないことがあり保存漏れになるため、値変化そのものを契機にする。
+            // (#362 / レビュー #6) 数値は ValueChanged を「デバウンス」して反映 (spin 連打を 1 回の書込にまとめ
+            // SMB 往復を減らす)。欄離脱 (LostFocus) / ナビ離脱 (Unloaded) で即 flush するので未保存状態は残らない。
             LogRetentionBox.ValueChanged += (s, e) =>
             {
-                if (!_loading) ApplyInt(SettingsKeys.LogRetentionDays, (int)Math.Round(LogRetentionBox.Value ?? 0), "ログ設定の適用");
+                if (!_loading) QueueInt(SettingsKeys.LogRetentionDays, (int)Math.Round(LogRetentionBox.Value ?? 0), "ログ設定の適用");
             };
             BackupRetentionBox.ValueChanged += (s, e) =>
             {
-                if (!_loading) ApplyInt("backup_retention_count", (int)Math.Round(BackupRetentionBox.Value ?? 0), "バックアップ設定の適用");
+                if (!_loading) QueueInt("backup_retention_count", (int)Math.Round(BackupRetentionBox.Value ?? 0), "バックアップ設定の適用");
             };
-            // (#362) ナビ離脱時にパスの未コミット直接入力を反映する保険 (prompt は出さない)。
-            Unloaded += (_, _) => FlushPaths();
+            // (#362) ナビ離脱時に未フラッシュの数値 + パスの未コミット直接入力を確実に書く保険 (prompt は出さない)。
+            Unloaded += (_, _) => { FlushPendingInts(); FlushPaths(); };
         }
 
         private void LoadSettings()
@@ -56,6 +70,9 @@ namespace TonePrism.Manager.Shell
                 BackupPathBox.Text = (repo.GetString("backup_destination_path", "") ?? "").Trim();
                 BackupAutoToggle.IsChecked = !string.Equals(repo.GetString(SettingsKeys.BackupAutoEnabled, "true"), "false", StringComparison.OrdinalIgnoreCase);
                 BackupRetentionBox.Value = Clamp(repo.GetInt32("backup_retention_count", 30), 1, 999);
+                // (レビュー #1) パスの直近保存値を記録 (以後この値と異なる時だけ書込/競合チェック)。
+                _lastSavedPaths[SettingsKeys.LogsRootPath] = LogPathBox.Text;
+                _lastSavedPaths["backup_destination_path"] = BackupPathBox.Text;
                 LoadVersionInfo();
             }
             catch (Exception ex) { Logger.Warn("[SettingsPage] 設定読込失敗: " + ex.Message); }
@@ -80,8 +97,9 @@ namespace TonePrism.Manager.Shell
             if (Browse(LogPathBox)) ApplyPath(LogPathBox, LogPathMsg, SettingsKeys.LogsRootPath, "ログ設定の適用", isLog: true);
         }
 
-        private void LogRetention_LostFocus(object sender, RoutedEventArgs e)
-            => ApplyInt(SettingsKeys.LogRetentionDays, (int)Math.Round(LogRetentionBox.Value ?? 0), "ログ設定の適用");
+        // (レビュー #6/#7) 欄離脱時は保留中の数値を即 flush (デバウンス満了を待たない)。旧 ValueChanged+LostFocus
+        // 二重書込も解消 (LostFocus は flush 専任に)。
+        private void LogRetention_LostFocus(object sender, RoutedEventArgs e) => FlushPendingInts();
 
         // ---- バックアップ ----
         private void BackupPath_LostFocus(object sender, RoutedEventArgs e)
@@ -100,8 +118,7 @@ namespace TonePrism.Manager.Shell
             catch (Exception ex) { Logger.Warn("[SettingsPage] 自動バックアップ保存失敗: " + ex.Message); }
         }
 
-        private void BackupRetention_LostFocus(object sender, RoutedEventArgs e)
-            => ApplyInt("backup_retention_count", (int)Math.Round(BackupRetentionBox.Value ?? 0), "バックアップ設定の適用");
+        private void BackupRetention_LostFocus(object sender, RoutedEventArgs e) => FlushPendingInts();
 
         // ---- 共通 ----
         private bool Browse(Wpf.Ui.Controls.TextBox box)
@@ -128,6 +145,30 @@ namespace TonePrism.Manager.Shell
             if (!AllowWrite(label)) return;
             try { Db.SettingsRepository.SetInt32(key, value); }
             catch (Exception ex) { Logger.Warn("[SettingsPage] 数値設定保存失敗 (" + key + "): " + ex.Message); }
+        }
+
+        // (レビュー #6) 数値書込をデバウンス。同キーの直近値だけ保持し、500ms 静止後に 1 回だけ書く。
+        private void QueueInt(string key, int value, string label)
+        {
+            _pendingInts[key] = (value, label);
+            if (_intDebounce == null)
+            {
+                _intDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+                _intDebounce.Tick += (s, e) => FlushPendingInts();
+            }
+            _intDebounce.Stop();
+            _intDebounce.Start();
+        }
+
+        // 保留中の数値書込を即時 flush する (デバウンス満了 / 欄離脱 / ナビ離脱)。
+        private void FlushPendingInts()
+        {
+            _intDebounce?.Stop();
+            if (_pendingInts.Count == 0) return;
+            var snapshot = new List<KeyValuePair<string, (int value, string label)>>(_pendingInts);
+            _pendingInts.Clear();
+            foreach (var kv in snapshot)
+                ApplyInt(kv.Key, kv.Value.value, kv.Value.label);
         }
 
         // (#362) ナビ離脱時にパスの直接入力を prompt なしで反映する保険。MissingLocal は prompt 不可のため skip。
@@ -172,11 +213,16 @@ namespace TonePrism.Manager.Shell
                     break; // 反映は通す (バックアップ先は共有サーバの一時ダウンを許容)
             }
 
+            // (レビュー #1) 値が直近保存値と同じなら書込もセッション競合チェックもしない (no-op flush 抑止)。
+            if (_lastSavedPaths.TryGetValue(key, out string prevSaved) && string.Equals(prevSaved, val, StringComparison.Ordinal))
+                return;
+
             if (!AllowWrite(label)) return;
             try
             {
                 Db.SettingsRepository.SetString(key, val);
                 if (isLog) LauncherLogsRootBridge.WriteCurrentLogsRoot(val);
+                _lastSavedPaths[key] = val; // 保存成功 → 直近値を更新
                 Logger.Info("[SettingsPage] " + label + ": " + (val.Length == 0 ? "(デフォルト)" : val));
             }
             catch (Exception ex) { ShowMsg(msg, "保存に失敗しました: " + ex.Message, ErrorBrush); }
