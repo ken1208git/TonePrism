@@ -575,7 +575,8 @@ namespace TonePrism.Manager
                 var wpfHost = new System.Windows.Forms.Integration.ElementHost
                 {
                     Dock = System.Windows.Forms.DockStyle.Fill,
-                    Child = new Shell.SpikeControl()
+                    // (#245 PR5) シェルが DB 接続パネル (ゲーム等) をホストできるよう dbManager を渡す。
+                    Child = new Shell.SpikeControl { Db = dbManager }
                 };
                 _wpfSpikeTab.Controls.Add(wpfHost);
                 tabControl1.TabPages.Add(_wpfSpikeTab);

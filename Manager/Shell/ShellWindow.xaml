@@ -32,7 +32,7 @@
             x:Name="RootNavigation"
             Grid.Row="1">
             <ui:NavigationView.MenuItems>
-                <ui:NavigationViewItem Content="ゲーム" TargetPageType="{x:Type local:PreviewPage}">
+                <ui:NavigationViewItem Content="ゲーム" TargetPageType="{x:Type local:GameHostPage}">
                     <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Games24" /></ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
                 <ui:NavigationViewItem Content="ストア" TargetPageType="{x:Type local:PreviewPage}">

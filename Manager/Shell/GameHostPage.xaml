@@ -1,0 +1,13 @@
+<Page
+    x:Class="TonePrism.Manager.Shell.GameHostPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:wfi="clr-namespace:System.Windows.Forms.Integration;assembly=WindowsFormsIntegration"
+    Background="#FF202020">
+
+    <!-- (#245 PR5) 既存の WinForms ゲーム管理パネル (GameSectionPanel) を WindowsFormsHost でシェルにホスト。
+         DB 接続パネルの本配線の形。表示 (LoadGames) は read-only なので fresh インスタンスで開発 DB に無害だが、
+         このプレビューでは編集・保存はしないこと (二重インスタンスで MainForm 側表示と desync しうるため)。
+         単一インスタンス化は次の startup 移管で。背景は WindowsFormsHost の airspace 対策で不透明。 -->
+    <wfi:WindowsFormsHost x:Name="Host" />
+</Page>

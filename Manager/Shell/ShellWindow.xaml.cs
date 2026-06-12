@@ -10,6 +10,11 @@ namespace TonePrism.Manager.Shell
     /// </summary>
     public partial class ShellWindow : FluentWindow
     {
+        // (#245 PR5) ホストする DB 接続パネル (ゲーム/ストア等) に渡す dbManager。NavigationView の Page は
+        // parameterless ctor で生成されるため、ページ側がここから取得する。暫定 static 共有 (startup 移管で
+        // シェルが dbManager を正式所有したら整理する)。
+        internal static DatabaseManager SharedDb;
+
         public ShellWindow()
         {
             InitializeComponent();

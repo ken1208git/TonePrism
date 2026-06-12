@@ -13,6 +13,9 @@ namespace TonePrism.Manager.Shell
     {
         private int _count;
 
+        // (#245 PR5) シェルプレビューに渡す DatabaseManager (MainForm が設定)。DB 接続パネルのホスト用。
+        public DatabaseManager Db { get; set; }
+
         public SpikeControl()
         {
             InitializeComponent();
@@ -27,6 +30,8 @@ namespace TonePrism.Manager.Shell
         // (#245 PR5) Win11 設定アプリ風シェルのプレビュー窓を開く (throwaway)。
         private void ShellPreviewButton_Click(object sender, RoutedEventArgs e)
         {
+            // (#245 PR5) シェルが DB パネルをホストできるよう dbManager を共有してから開く。
+            ShellWindow.SharedDb = Db;
             new ShellWindow().Show();
         }
     }
