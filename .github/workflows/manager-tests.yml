@@ -1,9 +1,9 @@
 name: Manager Tests
 
 # (#239) Manager のデータ層テスト (スキーマ移行 F-1 / 保存 round-trip) を PR・main push のたびに自動実行。
-# テスト基盤・本体 Manager とも SDK-style net48 + PackageReference (Manager は #354 で classic packages.config →
-# SDK-style 化)。dotnet test の暗黙 restore が両プロジェクトの PackageReference を推移復元する (別途 nuget restore 不要)。
-# net48 + System.Data.SQLite native interop のため Windows runner を使う。
+# テスト基盤・本体 Manager とも SDK-style net10.0-windows + PackageReference (#258 PR3 で net48 → net10 へ flip)。
+# dotnet test の暗黙 restore が両プロジェクトの PackageReference を推移復元する (別途 nuget restore 不要)。
+# WinForms/WPF (net10.0-windows) + System.Data.SQLite native interop のため Windows runner を使う。
 
 # (レビュー #1/#2) paths フィルタは付けない。将来この job を branch protection の required status check に
 # する場合、Manager 配下を触らない PR では job が起動せず、required check が永久 "Expected/Pending" のまま
@@ -23,7 +23,7 @@ jobs:
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "10.0.x"
 
       # 両プロジェクトとも SDK-style PackageReference のため dotnet test の暗黙 restore で復元される
       # (Manager は #354 で packages.config → SDK-style 化、別途 nuget restore は不要)

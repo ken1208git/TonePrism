@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
@@ -98,6 +99,9 @@ namespace TonePrism.Manager.Controls
         /// すると malformed DB 値が user 操作なしに v0.0.0 に化けて DB に書き戻る silent corruption が
         /// 発生する。
         /// </summary>
+        // (#258 PR3) child control 委譲の runtime プロパティ (backing field 無し)。designer シリアライズ対象外を
+        // 明示し net10 WinForms の WFO1000 (error 化) を解消。
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public string VersionString
         {
             get
@@ -248,18 +252,21 @@ namespace TonePrism.Manager.Controls
             return ok;
         }
 
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int Major
         {
             get { return (int)numMajor.Value; }
             set { numMajor.Value = Clamp(value, numMajor.Minimum, numMajor.Maximum); }
         }
 
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int Minor
         {
             get { return (int)numMinor.Value; }
             set { numMinor.Value = Clamp(value, numMinor.Minimum, numMinor.Maximum); }
         }
 
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int Patch
         {
             get { return (int)numPatch.Value; }
@@ -275,6 +282,7 @@ namespace TonePrism.Manager.Controls
         /// 本 PR 内で setter を使う caller は無いが、将来の caller が footgun を踏まないよう明示。
         /// 防御 setter にしたい場合は `TrySetSuffix(value, out error)` パターンへの API 追加を検討。
         /// </summary>
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public string Suffix
         {
             get { return (txtSuffix.Text ?? "").Trim(); }

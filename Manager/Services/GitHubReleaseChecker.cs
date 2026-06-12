@@ -44,9 +44,9 @@ namespace TonePrism.Manager.Services
 
         private static HttpClient CreateClient()
         {
-            // (#108 Phase 4 round 3 L-1) SecurityProtocol 設定は AppDomain global で他 HttpClient consumer
-            // (BackupService 等) の動作と隠れ結合するため Program.cs の起動時 1 回設定に移動。本 method
-            // は HttpClient instance 作成のみに専念。
+            // (#258 PR3) 旧 SecurityProtocol(Tls12) 設定は net10 化で撤去済 (ServicePointManager は net10 で
+            // obsolete かつ HttpClient/SocketsHttpHandler に無効＝no-op、TLS は OS が自動ネゴシエート)。
+            // 本 method は HttpClient instance 作成のみに専念。
 
             var client = new HttpClient
             {

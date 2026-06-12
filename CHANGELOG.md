@@ -220,6 +220,14 @@
 
 **注意 (#160 で section 責務分離)**: `Updater` 等の **runtime exe 群** (= SPEC §2.4 Companions 配置) の changelog は本 section ではなく **`## Companions`** (旧 `## Updater (Companions/Updater)`、本 PR で section 名を一般化) に記載する。本 section は build / 配布スクリプトのみ対象。Bundle v0.4.0 以前 (= 本 PR merge 前) の Updater 変更履歴は `## Release Tooling` の過去 entry (= round 1〜8 review 詳細等) に retain、retroactive consolidation は scope creep のため見送り (= PR #159 round 4 「SPEC 1 PR 1 bump 規約」導入時と同 pattern)。
 
+### [Release Tooling v0.1.26] - 2026-06-11
+
+#### Changed (#258 PR3 — CI を net10 対応)
+
+- **CI `.github/workflows/manager-tests.yml` の `setup-dotnet` を `8.0.x` → `10.0.x` に** (Manager/Manager.Tests が net10.0-windows へ flip、`dotnet test` が net10 SDK を要求)。詳細は Manager v0.27.8 参照。
+- **注**: bundle build (`Release.ps1`) の net10 配布対応 (self-contained publish / expected-files 刷新) は **PR4** で別途。本 PR の CI 変更はテスト経路 (`dotnet test`) のみ。
+- bump 判断: CI スクリプト変更。patch (v0.1.25 → v0.1.26)。Bundle 反映は次回リリース時。
+
 ### [Release Tooling v0.1.25] - 2026-06-11
 
 #### Changed (Manager SDK-style 化に伴う restore 近代化 / #245 #258 #309)
@@ -2246,6 +2254,23 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 ---
 
 ## Manager（管理ソフト）
+
+### [Manager v0.27.8] - 2026-06-11
+
+#### Changed (#258 PR3 — net48 → net10 切替)
+
+- **Manager / Manager.Tests の TargetFramework を `net48` → `net10.0-windows` に flip**。PR1 (SDK-style 化) / PR2 (System.Web・JSON 撤去) で地ならし済のため本 PR はほぼ機械的:
+  - 旧 net48 framework `<Reference>` 群 (CustomMarshalers / System.Transactions / System.Net.Http / System.IO.Compression(.FileSystem) / System.Data.DataSetExtensions / Microsoft.CSharp) を**全撤去** (net10 は shared framework が in-box 提供。DataSetExtensions/Transactions/CustomMarshalers は実使用ゼロを確認、`AsEnumerable` は System.Linq 由来で DataSetExtensions ではない)。
+  - SQLite を `Stub.System.Data.SQLite.Core.NetFramework` → net10 対応の `System.Data.SQLite.Core` 1.0.119.0 へ差し替え (native interop は `runtimes/<rid>/native/SQLite.Interop.dll` で同梱)。
+  - `System.Text.Json` PackageReference を撤去 (net10 同梱)。
+- **空・未使用の `Properties/Settings.settings` + `Settings.Designer.cs` を削除** (`<Settings/>` 空・`Properties.Settings`/`Settings.Default` 参照ゼロを確認) → `System.Configuration.ConfigurationManager` 依存を回避。net48 専用の `App.config` (`<startup><supportedRuntime>` のみ) も削除。
+- **net10 WinForms SDK の新エラー/警告に対応**:
+  - **WFO1000 (error 化)**: custom control の runtime 専用プロパティ (`SemverInputControl` の VersionString/Major/Minor/Patch/Suffix、`ProcessingDialog` の MarqueeMode/AllowCancel — いずれも child control 委譲で backing field 無し) に `[DesignerSerializationVisibility(Hidden)]` を付与 (designer シリアライズ対象外を明示)。
+  - **SYSLIB0014**: `Program.Main` の `ServicePointManager.SecurityProtocol = Tls12` を撤去 (net10 では obsolete かつ HttpClient に無効＝no-op。Win10/11 + net10 は default で Tls12/13)。
+  - **CA1416**: Windows 専用アプリ (net10.0-windows) のため csproj `<NoWarn>CA1416</NoWarn>` で一律抑止。
+- 検証: **net10 ビルド成功 (0 警告 0 エラー)**・**xUnit 199/199 緑 (.NETCoreApp v10.0)**・**実起動 smoke** (隔離 temp + repo `toneprism.db` コピー、原本不変) で net10 apphost exe 起動 → DB バージョン 23 / 全 8 テーブル整合 OK / session 登録・**SQLite native interop が runtimes/win-x64 経由で runtime ロード**・assembly load エラー 0 を確認。
+- **⚠️ 配布 (Release.ps1 / bundle) は PR4 で対応**: net10 出力は `.dll` + apphost `.exe` + `runtimes/<rid>/native/` (旧 `x64/x86/` flat 構造でない) + `.exe.config` 非生成のため、現 `$script:BundleManifestFiles` (`TonePrism_Manager.exe.config` / `x64,x86/SQLite.Interop.dll` を期待) と drift する。**本 PR では Release.ps1 を触らず** (CI `dotnet test` 経路のみ追従)、self-contained publish + expected-files 刷新は **PR4** で実施 (それまで Manager の bundle release は `Assert-ExpectedFiles` で fail-fast)。SPEC の Companions ランタイム / 配布記述の同期も PR4 / Companions 移行 (PR4.x) で。
+- bump 判断: ランタイム移行 (net48→net10)。挙動は smoke + 199 緑で不変確認。patch (v0.27.7 → v0.27.8)。Launcher 変更なし。
 
 ### [Manager v0.27.7] - 2026-06-11
 
