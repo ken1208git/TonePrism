@@ -46,6 +46,14 @@ namespace TonePrism.Manager
         public MainForm()
         {
             InitializeComponent();
+
+            // (#245 PR5 startup移管 step1) 移管中、MainForm は「裏方オーケストレータ」で可視 main は
+            // ShellWindow(WPF)。起動時のフラッシュを避けるため Opacity=0 で不可視のまま Load を走らせ
+            // (Opacity は描画のみ・Load は通常どおり発火)、全 init 完了後に ShowShellAsMain でシェルを
+            // 表示して MainForm を Hide する。シェル表示に失敗した場合 / DB 未初期化で UI を見せたい場合は
+            // Opacity=1 に戻して旧 WinForms UI を表示する (graceful fallback)。
+            this.Opacity = 0;
+
             dbManager = new DatabaseManager();
 
             _gameSectionPanel = new GameSectionPanel { Dock = DockStyle.Fill };
@@ -416,6 +424,9 @@ namespace TonePrism.Manager
                 // form を user 手動 × で閉じるまで no-op、FormClosed で _sessionService=null なので
                 // Shutdown も skip される clean path)。
                 // (#170 followup) DB 未初期化は左 zone 占有 (= ゲーム数取得不可、データベース状態を伝える)
+                // (#245 PR5 startup移管 step1) この path はシェルを出さず MainForm を UI として見せるため、
+                // ctor で 0 にした Opacity を戻して可視化する (シェルは ContinueLoadAfterSessionCheck 末尾でのみ表示)。
+                this.Opacity = 1;
                 lblStatus.Text = "データベース未初期化";
                 return;
             }
@@ -713,6 +724,44 @@ namespace TonePrism.Manager
             // 起動時にバックグラウンドで GitHub Releases API を叩いてアップデート check (#108 Phase 4)
             // cache TTL 内なら HTTP を叩かない、起動を遅延させない fire-and-forget pattern
             StartBackgroundUpdateCheckIfDue();
+
+            // (#245 PR5 startup移管 step1) 全 init 完了後、WPF シェルを可視 main として表示し MainForm を裏方化する。
+            ShowShellAsMain();
+        }
+
+        /// <summary>
+        /// (#245 PR5 startup移管 step1) WPF シェル(ShellWindow)を可視 main として表示し、MainForm を Hide して
+        /// 裏方オーケストレータに徹する。MainForm 側の DB/セッション/パネル/バックアップ配線はそのまま生きており
+        /// (実績ある起動シーケンスを無改変で温存)、シェルを閉じると MainForm も閉じてメッセージループを終了する。
+        /// シェル生成/表示に失敗した場合は Opacity を戻して旧 WinForms UI を表示し、起動を継続する
+        /// (#245 Phase 3 の graceful degradation 要件と整合)。
+        ///
+        /// 現段階の制約 (後続 step で解消): シェルの各ホストページは fresh パネル (= MainForm の実パネルとの
+        /// 二重インスタンス) のまま。実パネルの単一インスタンス化 (再parent)・未保存ガード/ストア更新/GameCount/
+        /// バックアップ進捗のステータスバー移植は別 step。
+        /// </summary>
+        private void ShowShellAsMain()
+        {
+            try
+            {
+                Shell.ShellWindow.SharedDb = dbManager;
+                var shell = new Shell.ShellWindow();
+                // シェルを閉じたら MainForm も閉じて Application.Run を終了させる (= プロセス exit)。
+                shell.Closed += (s, e) =>
+                {
+                    try { if (!IsDisposed) Close(); }
+                    catch (Exception ex) { Logger.Warn("[MainForm] シェル close 後の MainForm.Close 失敗: " + ex.Message); }
+                };
+                shell.Show();
+                Hide(); // Load 完了済なので Hide で安全に裏方化 (= MainForm の窓・タスクバーボタンを消す)
+                Logger.Info("[MainForm] (#245 PR5) WPF シェルを可視 main として表示、MainForm を裏方化");
+            }
+            catch (Exception ex)
+            {
+                // シェル表示失敗 = 旧 WinForms UI で起動継続 (graceful degradation)。Opacity を戻して MainForm を可視化。
+                Logger.Error("[MainForm] (#245 PR5) WPF シェル表示に失敗、旧 WinForms UI にフォールバック", ex);
+                this.Opacity = 1;
+            }
         }
 
         /// <summary>
