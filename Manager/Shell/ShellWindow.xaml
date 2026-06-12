@@ -35,13 +35,13 @@
                 <ui:NavigationViewItem Content="ゲーム" TargetPageType="{x:Type local:GameHostPage}">
                     <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Games24" /></ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
-                <ui:NavigationViewItem Content="ストア" TargetPageType="{x:Type local:PreviewPage}">
+                <ui:NavigationViewItem Content="ストア" TargetPageType="{x:Type local:StoreHostPage}">
                     <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Grid24" /></ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
-                <ui:NavigationViewItem Content="初回説明" TargetPageType="{x:Type local:PreviewPage}">
+                <ui:NavigationViewItem Content="初回説明" TargetPageType="{x:Type local:IntroHostPage}">
                     <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Info24" /></ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
-                <ui:NavigationViewItem Content="バックアップ" TargetPageType="{x:Type local:PreviewPage}">
+                <ui:NavigationViewItem Content="バックアップ" TargetPageType="{x:Type local:BackupHostPage}">
                     <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Save24" /></ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
                 <ui:NavigationViewItem Content="ログ" TargetPageType="{x:Type local:LogHostPage}">
@@ -49,7 +49,7 @@
                 </ui:NavigationViewItem>
             </ui:NavigationView.MenuItems>
             <ui:NavigationView.FooterMenuItems>
-                <ui:NavigationViewItem Content="アップデート" TargetPageType="{x:Type local:PreviewPage}">
+                <ui:NavigationViewItem Content="アップデート" TargetPageType="{x:Type local:UpdateHostPage}">
                     <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="ArrowSync24" /></ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
                 <ui:NavigationViewItem Content="設定" TargetPageType="{x:Type local:PreviewPage}">
