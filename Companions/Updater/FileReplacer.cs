@@ -10,9 +10,11 @@ namespace TonePrism.Updater
     /// 元 dir に展開、成功なら .bak 削除、失敗なら .bak から復元する atomic 戦略。
     ///
     /// なぜ dir 単位 atomic か:
-    ///   - Manager 関連は `TonePrism_Manager.exe` + 多数の DLL (System.Data.SQLite + native interop SQLite.Interop.dll
-    ///     等) で構成されていて、個別ファイル単位の置換だと「.exe は新、DLL は旧」の半分置換状態で起動して
-    ///     ロード失敗する path がある
+    ///   - Manager は self-contained single-file の `TonePrism_Manager.exe` 1 個 (net10 移行 #258 PR4)。
+    ///     旧 net48 は exe + 多数の DLL (System.Data.SQLite + native interop SQLite.Interop.dll 等) で構成され、
+    ///     個別ファイル単位の置換だと「.exe は新、DLL は旧」の半分置換状態で起動してロード失敗する path があった。
+    ///     single-file の今は構成 1 ファイルだが、dir 単位 atomic は将来 multi-file 化への耐性と失敗時の
+    ///     シンプルさ (下記) で引き続き有効
     ///   - dir rename は Windows API レベルで atomic (NTFS の MFT エントリ更新 1 回)、部分失敗が起こりにくい
     ///   - 失敗時 .bak から rename 戻すだけで元の状態に戻る、シンプル
     ///

@@ -226,10 +226,11 @@
 
 - **`Build-Manager` を `msbuild /restore` → `dotnet publish`（net10 self-contained single-file）化**（`-r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true`）。staging の Manager が exe 1 個に。dev build（`dotnet build`/`test`）は single-file にせず publish 引数で渡す。Manager のみ dotnet (net10)、Updater / LauncherAgent は msbuild (net48) のまま（移行期 mixed、前提: net10 SDK が PATH）。
 - **`$script:BundleManifestFiles` の Manager 行を exe 1 個に刷新**（`.exe.config` / `System.Data.SQLite.dll` / `x64,x86\SQLite.Interop.dll` は single-file exe 内包のため撤去）。Manager v0.27.9・`UpdateDownloader.ValidateStagingLegacy` と三経路同期。
-- **dead な `Resolve-Nuget` 一式を撤去**（関数定義 / `-NugetExe` param / `$NugetPinnedVersion` 定数 / `$script:ResolvedNuget` / doc 言及）。PR1 で呼び出しは撤去済、Manager の dotnet 移行で nuget.exe が完全に不要化（PR4 で予定通り撤去）。
+- **dead な `Resolve-Nuget` 一式を撤去**（関数定義 / `-NugetExe` param / `$NugetPinnedVersion` 定数 / `$script:ResolvedNuget`）。PR1 で呼び出しは撤去済、Manager の dotnet 移行で nuget.exe が完全に不要化（PR4 で予定通り撤去）。なお `Godot / msbuild / nuget` を subprocess stdout の codepage 分類例として列挙する箇所や DL キャッシュ温存メッセージは、nuget=外部ツール一般の言及として**意図的に残置**（dotnet restore も global package cache を使うため事実として正しい）。
 - **（レビュー Medium）`Resolve-Dotnet` preflight を追加**（`Resolve-Godot` / `Resolve-MsBuild` と同様 Main 冒頭で解決）。`dotnet` を PATH 解決 + `dotnet --list-sdks` で **net10 SDK 存在を検証**、未導入なら `Build-Launcher`（Godot export、数分）より**前に fail-fast**（旧来 hard build 依存なのに preflight に居なかった穴を是正）。`Build-Manager` は `$script:ResolvedDotnet` を使用。
 - doc（`.SYNOPSIS` / `.PARAMETER`）の Manager ビルド記述を dotnet publish に、必要環境に「.NET 10 SDK」を追記。
 - **PR3+PR4 を束ねてマージ**で main から net10 bundle release が可能になる（PR3 単独では net10 出力が expected-files と drift し `Assert-ExpectedFiles` で fail-fast＝リリース不能だった窓を、本 PR で閉じる）。
+- **（レビュー round2 Low）残存 stale 記述の sweep**: `Build-Updater` ヘッダコメントが「Build-Manager の **nuget restore** / native DLL 抽出は不要」と dotnet publish 化で消滅した挙動を説明していた stale を修正。`Resolve-Dotnet` の net10 SDK 判定を「`10.x` 固定」→「**major ≥ 10**」に緩和（11+ SDK でも roll-forward で net10.0 publish 可。pin 運用でも将来 SDK 更新時の誤 fail を回避）+ fail メッセージに検出 SDK 一覧を併記（切り分け容易化）。あわせて Companions/Updater `FileReplacer` の dir-atomic 根拠コメントを single-file 後の実態（exe 1 個）に同期（Updater は net48 無改修・version 据え置き、本移行で陳腐化したコメントのみ）。
 - bump 判断: 配布スクリプト改修。patch (v0.1.26 → v0.1.27)。Bundle 反映は次回リリース時。
 
 ### [Release Tooling v0.1.26] - 2026-06-11

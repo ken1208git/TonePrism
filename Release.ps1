@@ -721,14 +721,21 @@ dotnet が PATH に見つかりません。Manager は net10 で dotnet publish 
     }
     $script:ResolvedDotnet = $cmd.Source
 
-    # net10 SDK の存在を確認 (Manager は net10.0-windows、SDK が無いと publish が NETSDK エラーで失敗)
+    # net10.0-windows を publish できる SDK があるか確認 (SDK が無いと NETSDK エラーで失敗)。
+    # SDK major >= 10 を許容: より新しい SDK (11+) でも roll-forward で net10.0 を target/publish 可能なため、
+    # 厳密に "10.x" 固定にすると将来 SDK 更新時に preflight が誤 fail する (#258 PR4 レビュー Low)。
     $sdks = & $script:ResolvedDotnet --list-sdks
     $hasNet10 = $false
     foreach ($line in $sdks) {
-        if ($line -match '^\s*10\.\d+\.') { $hasNet10 = $true; break }
+        if ($line -match '^\s*(\d+)\.\d+\.' -and [int]$Matches[1] -ge 10) { $hasNet10 = $true; break }
     }
     if (-not $hasNet10) {
-        Fail "net10 SDK が見つかりません (dotnet --list-sdks に 10.x が無い)。Manager の publish に .NET 10 SDK が必要です。"
+        Fail @"
+net10.0 を publish できる SDK が見つかりません (.NET 10 以上が必要、Manager は net10.0-windows)。
+検出された SDK 一覧:
+$($sdks -join "`n")
+https://dotnet.microsoft.com/download から .NET 10 SDK を導入してください。
+"@
     }
     Write-Ok "dotnet 解決: $script:ResolvedDotnet (net10 SDK あり)"
 }
@@ -1505,8 +1512,8 @@ function Build-Manager {
 # Phase 5.5: Companions/Updater を msbuild で Release ビルド (#108 Phase 3)
 # ============================================================================
 # SPEC §3.7.4: Manager 置換 + 再起動の最小 CLI。.NET Framework 4.8 で SQLite / WindowsAPICodePack
-# 等の外部依存を持たない単純な Console app なので、Build-Manager の nuget restore / native DLL
-# 抽出は不要。msbuild 直叩きでよい。
+# 等の外部依存を持たない単純な Console app なので、Build-Manager の dotnet publish (net10
+# self-contained single-file) のような重い publish 不要。net48 を msbuild 直叩きでよい。
 function Build-Updater {
     Write-Step "Updater を msbuild で Release ビルド"
 
