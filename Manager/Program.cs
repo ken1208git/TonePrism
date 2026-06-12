@@ -93,6 +93,15 @@ namespace TonePrism.Manager
                     // パスの確認（デバッグ用）
                     PathManager.VerifyPaths();
 
+                    // (#245 Phase 0/DPI) WinForms↔WPF 共存のため DPI awareness を起動時に明示固定する。
+                    // Manager の WinForms フォームは DPI 非対応前提のレイアウト (app.manifest で DPI aware 化すると
+                    // 全フォーム崩壊する — Services/DpiSafeFolderPicker.cs 参照)。一方 WPF は初回ロード時にプロセスを
+                    // DPI aware へ切り替えようとするため、明示固定しないと WinForms 窓が素ピクセル=小窓化する
+                    // (高拡大率で顕著)。DpiUnaware で固定すれば WPF の切替が no-op になり、WinForms は従来どおり
+                    // 正しく bitmap-scale され、WPF も同様に scale される (高 DPI でやや soft だが正サイズ・一貫)。
+                    // ※移行が進み WinForms フォームが WPF に置き換わったら PerMonitorV2 へ上げて crisp 化する (将来)。
+                    // 最初の window 生成前に呼ぶ必要があるため EnableVisualStyles より前に置く。
+                    Application.SetHighDpiMode(HighDpiMode.DpiUnaware);
                     Application.EnableVisualStyles();
                     Application.SetCompatibleTextRenderingDefault(false);
                     Application.Run(new MainForm());
