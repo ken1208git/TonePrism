@@ -4,7 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:local="clr-namespace:TonePrism.Manager.Shell"
-    Title="TonePrism マネージャー (WPF プレビュー)"
+    Title="TonePrism マネージャー"
     Width="1040" Height="680"
     MinWidth="820" MinHeight="520"
     WindowStartupLocation="CenterScreen"
@@ -20,9 +20,9 @@
         <TaskbarItemInfo x:Name="Taskbar" />
     </ui:FluentWindow.TaskbarItemInfo>
 
-    <!-- (#245 PR5) Win11 設定アプリ風シェルのプレビュー。FluentWindow=Mica 背景・ダーク、
-         NavigationView=左サイドバー。本配線では各ページに既存 WinForms パネルを WindowsFormsHost でホストする。
-         throwaway: 見た目確認用。OK なら本シェルへ発展、ダメなら撤去。 -->
+    <!-- (#245 PR5) Win11 設定アプリ風の本シェル (可視メイン窓)。FluentWindow=ダーク、NavigationView=左サイドバー。
+         各ページは既存 WinForms セクションパネルを WindowsFormsHost で単一インスタンスホストする (設定のみ WPF
+         ネイティブ)。Mica 背景は中身が WPF 化するまで封印 (WindowBackdropType=None・不透明 Background)。 -->
 
     <Grid>
         <Grid.RowDefinitions>

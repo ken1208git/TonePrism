@@ -1038,7 +1038,9 @@ namespace TonePrism.Manager
             // (e.g., 自動 backup 失敗 path) で Logger.Error として別途残るため UI で truncated でも debug 可能。
             lblBackupStatus.Text = TruncateForStatusBar(message);
             lblBackupStatus.ForeColor = color;
-            _shell?.SetBackupStatus(message, autoRevert); // (#245 step4) シェルのバーにも反映 (成功=transient/失敗=sticky)
+            // (#245 step4 / レビュー #5) シェルのバーにも反映。シェルの第2引数は「成功か」なので、autoRevert
+            // (自動消去するか・本来 ok と直交) ではなく色 (緑=成功) を真実源にする。現状 autoRevert==ok だが疎結合化。
+            _shell?.SetBackupStatus(message, color == System.Drawing.Color.DarkGreen);
 
             // 既存 timer を破棄してから新規 (= 連続呼出時に古い timer が古い message を消すのを防ぐ)
             if (_backupStatusClearTimer != null)

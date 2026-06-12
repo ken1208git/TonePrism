@@ -161,8 +161,15 @@ namespace TonePrism.Manager.Shell
                     catch (Exception ex) { ShowMsg(msg, "フォルダを作成できませんでした: " + ex.Message, ErrorBrush); return; }
                     break;
                 case SettingsPathKind.Unreachable:
+                    if (isLog)
+                    {
+                        // (レビュー #4) ログ保存先が到達不能だと Logger が書けず静かにログを失う。バックアップ先と違い
+                        // 「後で書く」が無いので保存しない (到達可能なパスを促す)。Unreachable 緩和は BU 先専用。
+                        ShowMsg(msg, "現在アクセスできません。ログ保存先には到達可能なパスを指定してください。", ErrorBrush);
+                        return;
+                    }
                     ShowMsg(msg, "現在アクセスできません (設定は保存します)。", WarnBrush);
-                    break; // 反映は通す
+                    break; // 反映は通す (バックアップ先は共有サーバの一時ダウンを許容)
             }
 
             if (!AllowWrite(label)) return;

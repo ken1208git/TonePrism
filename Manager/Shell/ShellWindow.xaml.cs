@@ -8,10 +8,10 @@ using Wpf.Ui.Controls;
 namespace TonePrism.Manager.Shell
 {
     /// <summary>
-    /// (#245 PR5) Win11 設定アプリ風シェルのプレビュー窓 (throwaway)。FluentWindow(Mica/ダーク) +
-    /// NavigationView(左サイドバー) の見た目を実機確認するためのもの。本配線では各 NavigationView ページに
-    /// 既存 WinForms セクションパネルを WindowsFormsHost でホストし、これが Manager の本シェルになる。
-    /// 見た目 OK なら本シェルへ発展、ダメなら撤去。
+    /// (#245 PR5) Manager の本シェル (可視メイン窓)。Win11 設定アプリ風の FluentWindow(ダーク) +
+    /// NavigationView(左サイドバー)。各 NavigationView ページが既存 WinForms セクションパネルを
+    /// WindowsFormsHost で単一インスタンスホストする (設定のみ WPF ネイティブ)。MainForm は隠し裏方
+    /// オーケストレータとして message loop を駆動し、シェル生成失敗時は旧 WinForms UI へ graceful fallback。
     /// </summary>
     public partial class ShellWindow : FluentWindow
     {
@@ -36,7 +36,10 @@ namespace TonePrism.Manager.Shell
             Instance = this;
             // (#245 PR5 step4) 起動時は最初の実セクション (ゲーム) に着地する (旧: 飾りの PreviewPage)。
             Loaded += (_, _) => RootNavigation.Navigate(typeof(GameHostPage));
-            // シェルが閉じたら静的ハンドルを掃除し、破棄済み窓を掴み続けないようにする。
+            // シェルが閉じたら Instance を掃除し、破棄済み窓を掴み続けないようにする (ProcessingDialog /
+            // SplashScreenHost の stale なタスクバー参照を防ぐ)。SharedDb / HostForm は意図的に残す:
+            // シェル close → MainForm.Close → 即プロセス exit で掃除不要、かつ close 中の host ページ
+            // Unloaded が HostForm を参照するため、ここで null 化すると teardown 順序次第で NRE になる。
             Closed += (_, _) => { if (Instance == this) Instance = null; };
         }
 
