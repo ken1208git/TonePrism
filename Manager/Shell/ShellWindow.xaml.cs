@@ -15,6 +15,12 @@ namespace TonePrism.Manager.Shell
         // シェルが dbManager を正式所有したら整理する)。
         internal static DatabaseManager SharedDb;
 
+        // (#245 PR5 startup移管 step2) 実パネルを単一インスタンスでホストするための MainForm 参照。
+        // host ページが MainForm の内部アクセサ (例: GameSectionPanel) から実パネルを取得して
+        // WindowsFormsHost に attach する (fresh 生成廃止)。暫定 static 共有 (SharedDb と同様、
+        // orchestration の正式移管時に整理)。
+        internal static MainForm HostForm;
+
         public ShellWindow()
         {
             InitializeComponent();

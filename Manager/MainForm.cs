@@ -745,6 +745,7 @@ namespace TonePrism.Manager
             try
             {
                 Shell.ShellWindow.SharedDb = dbManager;
+                Shell.ShellWindow.HostForm = this; // (#245 PR5 step2) host ページが実パネルを取得するための参照
                 var shell = new Shell.ShellWindow();
                 // シェルを閉じたら MainForm も閉じて Application.Run を終了させる (= プロセス exit)。
                 shell.Closed += (s, e) =>
@@ -763,6 +764,10 @@ namespace TonePrism.Manager
                 this.Opacity = 1;
             }
         }
+
+        // (#245 PR5 startup移管 step2) シェルの host ページが実パネルを単一インスタンスで取得するための内部アクセサ。
+        // MainForm が生成・初期化・イベント配線済みのインスタンスをそのまま返す (fresh 生成廃止で二重インスタンス解消)。
+        internal Controls.GameSectionPanel GameSectionPanel => _gameSectionPanel;
 
         /// <summary>
         /// 過去 run の失敗 / cancel で残った staging dir を起動時に best-effort 削除する (#108 Phase 4)。
