@@ -737,6 +737,10 @@ $($sdks -join "`n")
 https://dotnet.microsoft.com/download から .NET 10 SDK を導入してください。
 "@
     }
+    # limitation (#258 PR4 レビュー): 本 preflight は SDK 存在のみ検証。self-contained publish は net10 の
+    # ランタイムパック (Microsoft.WindowsDesktop.App.Runtime.win-x64 10.x) を NuGet restore する必要があり、
+    # その restore 可否 (SDK 11 のみ + cache cold + offline 等) は Build-Manager の publish で初めて判明する
+    # (loud fail なので silent ではないが、Build-Launcher の後になる)。SDK 存在 = publish 成功保証ではない。
     Write-Ok "dotnet 解決: $script:ResolvedDotnet (net10 SDK あり)"
 }
 
@@ -1435,6 +1439,37 @@ function Assert-ExportedLauncherVersion {
     Write-Ok "exe FileVersion = $fileVersion (SoT $script:LauncherVersion と一致)"
 }
 
+function Assert-PublishedManagerVersion {
+    # (#258 PR4) net10 single-file 化で Manager exe の Win32 FileVersion は dotnet publish
+    # (apphost / singlefilehost の version リソース stamp) 由来になった。net48 時代は exe = コンパイル済
+    # アセンブリで FileVersion = AssemblyFileVersion が常に一致したため検証不要だったが、net10 では SDK の
+    # stamp が csproj 設定 (GenerateAssemblyInfo=false / Version プロパティ有無) や将来の SDK 挙動変化で
+    # SoT から drift しうる。Manager UI は reflection で版数を読むため UI 表示自体は無事だが、Explorer
+    # プロパティ / リリース時版数ゲートが嘘版数になる #283 級リスク。Launcher の Assert-ExportedLauncherVersion
+    # と対称に、staged exe の FileVersion を SoT (AssemblyInfo AssemblyVersion = $script:ManagerVersion) と
+    # 突き合わせ、zip/publish より前に hard fail する。Build-Manager の後に呼ぶこと。
+    # 注: 現状の net10 SDK では stamp は正しく 0.27.9.0 を焼く (PR4 で実測確認済) が、本ゲートは「今正しい」を
+    # 「以後も機械強制」に格上げする defense-in-depth (stamp 経路が将来壊れても誤版数 publish を防ぐ)。
+    Write-Step "Manager exe の版数を検証 (SoT 一致)"
+    $exe = Join-Path (Join-Path $FilesDir 'Manager') 'TonePrism_Manager.exe'
+    if (-not (Test-Path $exe)) {
+        Fail "検証対象の exe が見つかりません: $exe (Build-Manager の後に呼ぶこと)"
+    }
+    $fileVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe).FileVersion
+    $parsed = $null
+    if (-not [version]::TryParse($fileVersion, [ref]$parsed)) {
+        Fail "Manager exe の FileVersion を parse できません ('$fileVersion'、path=$exe)。AssemblyInfo.cs の AssemblyFileVersion / csproj の版数 stamp を確認。"
+    }
+    # exe は 4 part (X.Y.Z.0)、SoT は 3 part (X.Y.Z)。Major.Minor.Build で比較。
+    $exe3 = "$($parsed.Major).$($parsed.Minor).$($parsed.Build)"
+    if ($exe3 -ne $script:ManagerVersion) {
+        Fail ("Manager exe の FileVersion ($fileVersion → $exe3) が SoT ($script:ManagerVersion) と不一致。" +
+            "dotnet publish の版数 stamp が未反映の疑い (AssemblyInfo.cs AssemblyFileVersion / csproj Version プロパティ)。" +
+            "Manager は prod でこの exe (Explorer プロパティ) と reflection 版数の一致を期待するため、誤版数の publish を防ぐべく中止。")
+    }
+    Write-Ok "Manager exe FileVersion = $fileVersion (SoT $script:ManagerVersion と一致)"
+}
+
 # ============================================================================
 # Phase 5: Build Manager
 # ============================================================================
@@ -2080,6 +2115,7 @@ Clear-Staging
 Build-Launcher
 Assert-ExportedLauncherVersion
 Build-Manager
+Assert-PublishedManagerVersion
 Build-Updater
 Build-LauncherAgent
 Copy-Templates
