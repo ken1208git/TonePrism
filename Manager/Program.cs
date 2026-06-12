@@ -117,6 +117,10 @@ namespace TonePrism.Manager
                         new Wpf.Ui.Markup.ThemesDictionary { Theme = Wpf.Ui.Appearance.ApplicationTheme.Dark });
                     wpfApp.Resources.MergedDictionaries.Add(new Wpf.Ui.Markup.ControlsDictionary());
 
+                    // (#246) 起動スプラッシュを専用 UI スレッドで表示 (DB init/migration 等の無反応区間を埋める)。
+                    // fail-open: 障害は内部で握り潰され起動を止めない。シェル表示時 (ShowShellAsMain) に閉じる。
+                    Shell.SplashScreenHost.Show();
+
                     Application.Run(new MainForm());
                 }
                 catch (DirectoryNotFoundException ex)
@@ -141,6 +145,8 @@ namespace TonePrism.Manager
                 }
                 finally
                 {
+                    // (#246) 起動失敗・exit 経路の保険 (通常は ShowShellAsMain で閉じ済み・冪等)。
+                    Shell.SplashScreenHost.Close();
                     Logger.Shutdown();
                     // (#179 round 1 L-1) initiallyOwned: true で取得した Mutex は ReleaseMutex で
                     // 明示 release してから Dispose する。`using` の Dispose 単独では kernel 上「abandoned

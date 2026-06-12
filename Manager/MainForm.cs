@@ -383,6 +383,9 @@ namespace TonePrism.Manager
             //   永久に失われることはない (= CleanupOldLogs の「全起動 path 必達」設計とは要件が異なる、
             //   absorb は idempotent + deferred OK の弱い保証で十分)。
 
+            // (#246) DB init/migration はここから (大きめ DB / SMB / migration 走行時に無反応になりうる)。
+            Shell.SplashScreenHost.SetStatus("データベースを準備しています…");
+
             bool dbReady = false;
 
             if (!dbManager.DatabaseExists())
@@ -428,6 +431,7 @@ namespace TonePrism.Manager
                 // (#245 PR5 startup移管 step1) この path はシェルを出さず MainForm を UI として見せるため、
                 // ctor で 0 にした Opacity を戻して可視化する (シェルは ContinueLoadAfterSessionCheck 末尾でのみ表示)。
                 this.Opacity = 1;
+                Shell.SplashScreenHost.Close(); // (#246) シェルを出さず MainForm を見せる path → スプラッシュを閉じる
                 lblStatus.Text = "データベース未初期化";
                 return;
             }
@@ -562,6 +566,9 @@ namespace TonePrism.Manager
         /// </summary>
         private void ContinueLoadAfterSessionCheck()
         {
+            // (#246) パネル初期化・pending 取り込み等 (SMB 越しで遅延しうる) に入る。
+            Shell.SplashScreenHost.SetStatus("画面を準備しています…");
+
             // DB確認後にパネルを初期化（DB存在前のアクセスを防止）
             _gameSectionPanel.Initialize(dbManager);
             _storeSectionPanel.Initialize(dbManager);
@@ -744,7 +751,14 @@ namespace TonePrism.Manager
                     catch (Exception ex) { Logger.Warn("[MainForm] シェル close 後の MainForm.Close 失敗: " + ex.Message); }
                 };
                 shell.Show();
+                Shell.SplashScreenHost.Close(); // (#246) スプラッシュを閉じる
                 Hide(); // Load 完了済なので Hide で安全に裏方化 (= MainForm の窓・タスクバーボタンを消す)
+                // (#246) 別スレッドのスプラッシュがフォアグラウンドを握っている + MainForm.Hide() でフォアグラウンドが
+                // 逃げるため、shell.Show() だけではシェルが前面に来ない。同プロセスがフォアグラウンドを保持している
+                // ので Activate で前面化でき、Topmost の一瞬トグルで z-order 最前面を確実化する。
+                shell.Activate();
+                shell.Topmost = true;
+                shell.Topmost = false;
                 Logger.Info("[MainForm] (#245 PR5) WPF シェルを可視 main として表示、MainForm を裏方化");
                 UpdateStatusBar(); // (#245 PR5 step4) 初期ステータス (DB状態 + ゲーム数) をシェルに反映
             }
@@ -753,6 +767,7 @@ namespace TonePrism.Manager
                 // シェル表示失敗 = 旧 WinForms UI で起動継続 (graceful degradation)。Opacity を戻して MainForm を可視化。
                 Logger.Error("[MainForm] (#245 PR5) WPF シェル表示に失敗、旧 WinForms UI にフォールバック", ex);
                 this.Opacity = 1;
+                Shell.SplashScreenHost.Close(); // (#246) フォールバック表示時もスプラッシュを閉じる
             }
         }
 
