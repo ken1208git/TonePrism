@@ -2304,6 +2304,20 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.28.0] - 2026-06-13
+
+#### Added / Changed (#245 PR5 — WinForms → WPF シェル移行)
+
+- **可視メイン窓を WPF シェル（`FluentWindow` + `NavigationView`、WPF-UI 4.3・Win11 設定アプリ風ダーク）に移行**。`MainForm` は隠し裏方オーケストレータ化（`Opacity=0` → `Hide()`、message loop 所有権は WinForms 維持＝実績ある起動シーケンスを無改変温存）。シェル生成 / Show 失敗時は `Opacity=1` で旧 WinForms UI へ graceful fallback（Show 後の前面化 / ステータス反映の失敗はフォールバックさせずログのみ＝Hide 後の死蔵 Opacity を回避）。
+- **既存 WinForms セクションパネルを `WindowsFormsHost` で単一インスタンスホスト**（`ShellHostBinder` の Loaded attach / Unloaded detach で host 破棄による共有パネル Dispose を回避。fresh 生成廃止＝二重 DB アクセス無し）。
+- **設定を初の WPF ネイティブ画面に＋即時反映（#362）**: 純粋ヘルパー `SettingsPathPolicy`（空 / 相対 / 不正 / Ok / ローカル不在 / 到達不能 を分類・`Directory.Exists` 注入でテスト可）、パス / 数値 / トグルの即時反映、バージョン情報＋DBリセット、#201 未保存ガード撤去。数値は**デバウンス書込**（スピナー連打を 1 回に）、パスは **last-saved 追跡で変更時のみ書込**（no-op flush によるセッション競合ダイアログ誤発火を防止）。ログ保存先の到達不能は保存拒否（Logger が書けず失うため、共有サーバ想定のバックアップ先の緩和とは非対称）。
+- **全進捗オペレーション（復元 / バックアップ / 更新 / アセット処理）をシェルのタスクバー進捗（緑バー）に集約**（`ProcessingDialog.ReportProgress` → `TaskbarItemInfo`、個別配線ゼロ。定量=Normal+% / Marquee=Indeterminate / 完了・中止・失敗=None、cosmetic 失敗は握り潰し worker に例外非伝播。シェル不在の fallback 時はダイアログ自身に taskbar ボタンを出す）。
+- **起動スプラッシュを追加（#246）**: 専用 STA スレッド + 独立 Dispatcher で起動 init ブロック中も再描画継続、fail-open（障害で起動を止めない）、非トップモストで起動モーダルは前面、全 exit 経路で Close。別スレッドにフォアグラウンドを取られシェルが前面に来ない事象は `Activate` + `Topmost` 一瞬トグルで解消。
+- **Fluent ネイティブのステータスバー**（左=DB接続状態 / 右=バックアップ feedback）。シェルのペイン / コンテンツ背景を窓と同色（#FF202020）に統一。
+- **基盤**: WPF-UI 導入、Phase 0 共存スパイク撤去、`TonePrism.slnx`（VS の net10 NuGet 復元エラー対策、SPEC §2.4 / v1.10.64）、`DpiUnaware` 明示固定（WinForms↔WPF 共存の小窓化解消）。Mica すりガラスはホスト WinForms が airspace 衝突で透けるため、中身が WPF ネイティブ化するまで封印（`WindowBackdropType=None` + 不透明背景）。
+- **未着手（後続 PR）**: ゲーム登録画面の WPF ネイティブ化（#242 god-file 分割 + #324 ウィザード）、MainForm 撤去（エンドゲーム）、ホストパネルの WPF ネイティブ化（黒文字 on ダーク等の過渡的見た目）。フォロー: #365（復元の統合プログレスバー）/ #366（テーマ切替）/ #292 🔴高#1（ゲーム追加フォルダ選択フリーズ）。
+- bump 判断: WPF シェルへの UI 機能追加（破壊的変更 / DB スキーマ変更なし＝v23 据置）。**minor（v0.27.9 → v0.28.0）**。Launcher 変更なし。
+
 ### [Manager v0.27.9] - 2026-06-11
 
 #### Changed (#258 PR4 — net10 配布: self-contained single-file)
