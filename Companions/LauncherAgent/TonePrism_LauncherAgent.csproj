@@ -19,9 +19,10 @@
     <!-- 出力を bin\$(Configuration)\ に固定 (TFM サブフォルダ抑止)。Release.ps1 が bin\Release\ を直参照。 -->
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <!-- (#258 PR4.x) サービスモードのネット速度テスト (Program.cs Internet() / #287) が HttpWebRequest +
-         ServicePointManager を使う。net10 では obsolete (SYSLIB0014) だが shim として動作し (接続数上限は
-         SocketsHttpHandler 既定で unlimited = 並列DLも維持)、機械的な net10 移行で速度テストのロジックを
-         書き換えるのは behavioral リスク。HttpClient 化は別 issue とし、ここでは警告のみ抑止する。 -->
+         ServicePointManager を使う。net10 では obsolete (SYSLIB0014) だが shim として動作する見込み (接続数上限は
+         SocketsHttpHandler 既定で実質制限なし = 並列DLは維持されるはず。net10 実機での速度テスト挙動 — mbps 妥当性・
+         403/timeout 誤検出無し — は #287 で実測確認すること)。機械的な net10 移行で速度テストのロジックを書き換えるのは
+         behavioral リスクのため、HttpClient 化は将来別 issue とし、ここでは警告のみ抑止する。 -->
     <NoWarn>SYSLIB0014</NoWarn>
   </PropertyGroup>
 

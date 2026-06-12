@@ -1732,6 +1732,33 @@ function Build-LauncherAgent {
     }
 }
 
+function Assert-LauncherAgentSingleFile {
+    # (#258 PR4.x レビュー) LauncherAgent も Manager と同一の self-contained single-file publish
+    # (PublishSingleFile + IncludeNativeLibrariesForSelfExtract) を使うため、Assert-ManagerSingleFile と
+    # 対称に「LauncherAgent = exe 1 個」を機械強制する。Assert-ExpectedFiles は manifest 記載ファイルの
+    # presence のみ検証で余剰を見ない (manifest forward-compat の設計上そうなっている) ため、SDK の挙動変化で
+    # sidecar (createdump.exe / loose native dll / *.json 等) が publish 出力に混ざり manifest 非記載のまま
+    # zip 同梱される silent drift を upload 前に fail-fast する。Build-LauncherAgent の後に呼ぶこと (staging の
+    # Companions\LauncherAgent dir = 出荷物そのもの。pdb は Build-LauncherAgent のコピーで除外済)。
+    Write-Step "LauncherAgent が single-file (exe 1 個) であることを検証"
+    $laDir = Join-Path $FilesDir 'Companions\LauncherAgent'
+    if (-not (Test-Path $laDir)) {
+        Fail "検証対象の LauncherAgent staging dir が見つかりません: $laDir (Build-LauncherAgent の後に呼ぶこと)"
+    }
+    $files = @(Get-ChildItem $laDir -Recurse -File)
+    $unexpected = @($files | Where-Object { $_.Name -ne 'TonePrism_LauncherAgent.exe' })
+    if ($unexpected.Count -gt 0) {
+        $names = ($unexpected | ForEach-Object { $_.FullName.Substring($laDir.Length + 1) }) -join ', '
+        Fail @"
+LauncherAgent staging に想定外のファイルがあります (single-file = TonePrism_LauncherAgent.exe 1 個のはず): $names
+single-file 不変条件が崩れています。csproj の PublishSingleFile / IncludeNativeLibrariesForSelfExtract、
+または SDK の挙動変化で sidecar が吐かれていないか確認してください。
+expected-files (manifest) は presence のみ検証で余剰を検出しないため、ここで fail-fast します。
+"@
+    }
+    Write-Ok "LauncherAgent staging = TonePrism_LauncherAgent.exe 1 個 (single-file 不変条件 OK)"
+}
+
 # ============================================================================
 # Phase 6: Install.bat / INSTALL_README.txt + Launcher.bat / Manager.bat 同梱
 # ============================================================================
@@ -2157,6 +2184,7 @@ Assert-PublishedManagerVersion
 Assert-ManagerSingleFile
 Build-Updater
 Build-LauncherAgent
+Assert-LauncherAgentSingleFile
 Copy-Templates
 New-BundleManifest        # (#175 Phase 4.1) bundle/bundle_manifest.json 生成、Assert より前
 Assert-ExpectedFiles
