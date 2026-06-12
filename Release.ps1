@@ -9,9 +9,8 @@
         - Bundle version は zip タグに使う（例: v0.1.0）
         - GitHub Releases の本文は CHANGELOG.md の該当 Bundle セクションから自動抽出
         - Godot エディタとエクスポートテンプレートは tools/godot/ + %APPDATA%/Godot/export_templates/ に自動ダウンロード（バージョンピン留め + SHA256 検証 + キャッシュ + 3 回 retry）
-        - Manager のビルドは Visual Studio 同梱の MSBuild (Roslyn) + 自動ダウンロード nuget.exe を使用
-          - Manager コードが C# 7+ (ValueTuple / string interpolation 等) を使うため、Roslyn を含む MSBuild 14+ が必須
-          - Windows 同梱の .NET Framework MSBuild 4 は csc が古すぎて使えない（VS Build Tools のインストールが必要、~1-2 GB）
+        - Manager のビルドは dotnet publish (net10 SDK、self-contained single-file) を使用 (#258 PR4)
+          - Updater / LauncherAgent は VS 同梱 MSBuild で net48 build (移行期の mixed、依存ゼロ)
         - release/v<version>/files/ に staging
         - Compress-Archive で release/TonePrism_v<version>.zip 生成
         - zip 完成後、Y/N 確認プロンプト → Y なら gh release create でアップロード、N なら zip だけ残して終了
@@ -25,8 +24,8 @@
 
     依存ツールのバージョン管理方針:
         - Godot: project.godot の config/features から major.minor を読み取り、$GodotPatchTable で patch をピン留め
-        - nuget: $NugetPinnedVersion でピン留め
-        - MSBuild: Visual Studio 2019+ または VS Build Tools を要求（C# 7+ サポートのため）
+        - .NET: Manager = net10 SDK (dotnet publish)、Updater / LauncherAgent = net48 (MSBuild)
+        - MSBuild: Visual Studio 2019+ または VS Build Tools を要求（net48 Companions ビルドのため）
         - 各ツールのバージョン上げは Release.ps1 冒頭定数を手動で書き換え + PR
 
     必要な環境:
@@ -34,7 +33,7 @@
         - Visual Studio 2019+ または Visual Studio Build Tools (https://aka.ms/vs/17/release/vs_BuildTools.exe、~1-2GB)
           - 「.NET デスクトップビルドツール」ワークロードを選択
         - gh CLI (アップロード時、`gh auth login` 済み)
-        - インターネット接続 (初回 Godot + nuget DL のため、~1.2 GB)
+        - .NET 10 SDK (dotnet、Manager の publish 用) + インターネット接続 (初回 Godot + .NET ランタイムパック DL のため)
         - 開発者は別途 Godot 4.6 をインストールして開発（Release.ps1 は CLI export のみ自動化）
 
 .PARAMETER Version
@@ -47,9 +46,6 @@
 
 .PARAMETER MsBuildExe
     MSBuild 実行ファイルのパス。空なら自動検出 (vswhere → PATH の順、VS or Build Tools が必要)。
-
-.PARAMETER NugetExe
-    NuGet 実行ファイルのパス。指定された場合は自動ダウンロードを skip。
 
 .PARAMETER GodotPatch
     Godot patch version を強制指定 (例: "4.6.2")。
@@ -83,7 +79,6 @@ param(
     [string]$Version = "",
     [string]$GodotExe = "",
     [string]$MsBuildExe = "",
-    [string]$NugetExe = "",
     [string]$GodotPatch = "",
     [switch]$SkipUpload,
     [switch]$DryRun,
@@ -256,9 +251,6 @@ $GodotPatchTable = @{
     }
 }
 
-# NuGet pinned version (Microsoft 配信、breaking 履歴あるので pin 必須)
-$NugetPinnedVersion = '6.10.0'
-
 # ============================================================================
 # パス定義
 # ============================================================================
@@ -293,7 +285,7 @@ $GitHubRepoSlug = 'ken1208git/TonePrism'
 
 $script:ResolvedGodot       = $null
 $script:ResolvedMsBuild     = $null
-$script:ResolvedNuget       = $null
+$script:ResolvedDotnet      = $null
 $script:GodotPatchUsed      = $null  # 解決された Godot patch (例: "4.6.2")
 $script:LauncherVersion     = $null
 $script:ManagerVersion      = $null
@@ -712,6 +704,47 @@ function Resolve-Godot {
 }
 
 # ============================================================================
+# dotnet (net10 SDK) 解決: Manager は net10 で dotnet publish するため hard dependency (#258 PR4)
+# ============================================================================
+
+function Resolve-Dotnet {
+    Write-Step "dotnet (net10 SDK) を解決"
+
+    # (#258 PR4 レビュー Medium) Manager は Build-Manager で dotnet publish するため dotnet (net10 SDK) が必須。
+    # Godot / MsBuild と同様に preflight で解決・検証し、未導入なら Build-Launcher (Godot export、数分) より前に fail-fast する。
+    $cmd = Get-Command dotnet -ErrorAction SilentlyContinue
+    if (-not $cmd) {
+        Fail @"
+dotnet が PATH に見つかりません。Manager は net10 で dotnet publish (self-contained single-file) するため
+.NET 10 SDK が必要です。https://dotnet.microsoft.com/download から .NET 10 SDK を導入してください。
+"@
+    }
+    $script:ResolvedDotnet = $cmd.Source
+
+    # net10.0-windows を publish できる SDK があるか確認 (SDK が無いと NETSDK エラーで失敗)。
+    # SDK major >= 10 を許容: より新しい SDK (11+) でも roll-forward で net10.0 を target/publish 可能なため、
+    # 厳密に "10.x" 固定にすると将来 SDK 更新時に preflight が誤 fail する (#258 PR4 レビュー Low)。
+    $sdks = & $script:ResolvedDotnet --list-sdks
+    $hasNet10 = $false
+    foreach ($line in $sdks) {
+        if ($line -match '^\s*(\d+)\.\d+\.' -and [int]$Matches[1] -ge 10) { $hasNet10 = $true; break }
+    }
+    if (-not $hasNet10) {
+        Fail @"
+net10.0 を publish できる SDK が見つかりません (.NET 10 以上が必要、Manager は net10.0-windows)。
+検出された SDK 一覧:
+$($sdks -join "`n")
+https://dotnet.microsoft.com/download から .NET 10 SDK を導入してください。
+"@
+    }
+    # limitation (#258 PR4 レビュー): 本 preflight は SDK 存在のみ検証。self-contained publish は net10 の
+    # ランタイムパック (Microsoft.WindowsDesktop.App.Runtime.win-x64 10.x) を NuGet restore する必要があり、
+    # その restore 可否 (SDK 11 のみ + cache cold + offline 等) は Build-Manager の publish で初めて判明する
+    # (loud fail なので silent ではないが、Build-Launcher の後になる)。SDK 存在 = publish 成功保証ではない。
+    Write-Ok "dotnet 解決: $script:ResolvedDotnet (net10 SDK あり)"
+}
+
+# ============================================================================
 # MSBuild 解決: Windows 同梱の .NET Framework MSBuild を使う
 # ============================================================================
 
@@ -803,43 +836,8 @@ Visual Studio Build Tools のインストールが必要です。
 "@
 }
 
-# ============================================================================
-# NuGet 解決: tools/nuget.exe にピン留めバージョンをキャッシュ
-# ============================================================================
-
-function Resolve-Nuget {
-    Write-Step "NuGet を解決"
-
-    if ($NugetExe -ne "") {
-        if (-not (Test-Path $NugetExe)) {
-            Fail "指定された NuGet が見つかりません: $NugetExe"
-        }
-        $script:ResolvedNuget = $NugetExe
-        Write-Ok "NuGet (手動指定): $NugetExe"
-        return
-    }
-
-    $localNuget = Join-Path $ToolsDir "nuget-$NugetPinnedVersion.exe"
-    if (Test-Path $localNuget) {
-        $script:ResolvedNuget = $localNuget
-        Write-Ok "NuGet キャッシュ命中: $localNuget"
-        return
-    }
-
-    if ($Offline) {
-        Fail "Offline モード時は NuGet キャッシュが必要です: $localNuget"
-    }
-
-    if (-not (Test-Path $ToolsDir)) {
-        New-Item -ItemType Directory -Path $ToolsDir | Out-Null
-    }
-    # NuGet も SHA256 検証したいが、Microsoft が SHA256SUMS を提供していないため skip
-    $url = "https://dist.nuget.org/win-x86-commandline/v$NugetPinnedVersion/nuget.exe"
-    Write-Info "NuGet を DL (ピン留め: v$NugetPinnedVersion)"
-    Invoke-DownloadWithRetry -Url $url -OutFile $localNuget
-    $script:ResolvedNuget = $localNuget
-    Write-Ok "NuGet DL 完了: $localNuget"
-}
+# (#258 PR4) NuGet 解決関数は撤去。Manager が net10 で dotnet publish に移行し nuget.exe を一切使わなくなった
+# (Updater / LauncherAgent は依存ゼロの msbuild 直叩き、Manager の PackageReference は dotnet が暗黙 restore)。
 
 # ============================================================================
 # git working tree が clean か検証 (Codex P1 #137 への対応)
@@ -1441,60 +1439,125 @@ function Assert-ExportedLauncherVersion {
     Write-Ok "exe FileVersion = $fileVersion (SoT $script:LauncherVersion と一致)"
 }
 
+function Assert-PublishedManagerVersion {
+    # (#258 PR4) net10 single-file 化で Manager exe の Win32 FileVersion は dotnet publish
+    # (apphost / singlefilehost の version リソース stamp) 由来になった。net48 時代は exe = コンパイル済
+    # アセンブリで FileVersion = AssemblyFileVersion が常に一致したため検証不要だったが、net10 では SDK の
+    # stamp が csproj 設定 (GenerateAssemblyInfo=false / Version プロパティ有無) や将来の SDK 挙動変化で
+    # SoT から drift しうる。Manager UI は reflection で版数を読むため UI 表示自体は無事だが、Explorer
+    # プロパティ / リリース時版数ゲートが嘘版数になる #283 級リスク。Launcher の Assert-ExportedLauncherVersion
+    # と対称に、staged exe の FileVersion を SoT と突き合わせ、zip/publish より前に hard fail する。
+    # Build-Manager の後に呼ぶこと。
+    # 注 (レビュー B-1): 比較は厳密には「exe の Win32 FileVersion (apphost が managed DLL からコピー＝**AssemblyFileVersion**
+    # 由来)」↔「$script:ManagerVersion (Assert-ManagerVersion が **AssemblyVersion** 属性を読んだ値＝SoT)」。AssemblyInfo.cs が
+    # 両属性を同値に保つ前提で一致し、両者が drift した場合も検出できる有用な不変条件になる。AssemblyFileVersion ≠
+    # AssemblyVersion を意図的に運用するなら本 gate は誤 fail するので、その時は比較対象を AssemblyFileVersion に寄せること。
+    # 注: 現状の net10 SDK では stamp は正しく 0.27.9.0 を焼く (PR4 で実測確認済) が、本ゲートは「今正しい」を
+    # 「以後も機械強制」に格上げする defense-in-depth (stamp 経路が将来壊れても誤版数 publish を防ぐ)。
+    Write-Step "Manager exe の版数を検証 (SoT 一致)"
+    $exe = Join-Path (Join-Path $FilesDir 'Manager') 'TonePrism_Manager.exe'
+    if (-not (Test-Path $exe)) {
+        Fail "検証対象の exe が見つかりません: $exe (Build-Manager の後に呼ぶこと)"
+    }
+    $fileVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe).FileVersion
+    $parsed = $null
+    if (-not [version]::TryParse($fileVersion, [ref]$parsed)) {
+        Fail "Manager exe の FileVersion を parse できません ('$fileVersion'、path=$exe)。AssemblyInfo.cs の AssemblyFileVersion / csproj の版数 stamp を確認。"
+    }
+    # exe は 4 part (X.Y.Z.0)、SoT は 3 part (X.Y.Z)。Major.Minor.Build で比較。
+    $exe3 = "$($parsed.Major).$($parsed.Minor).$($parsed.Build)"
+    if ($exe3 -ne $script:ManagerVersion) {
+        Fail ("Manager exe の FileVersion ($fileVersion → $exe3) が SoT ($script:ManagerVersion) と不一致。" +
+            "dotnet publish の版数 stamp が未反映の疑い (AssemblyInfo.cs AssemblyFileVersion / csproj Version プロパティ)。" +
+            "Manager は prod でこの exe (Explorer プロパティ) と reflection 版数の一致を期待するため、誤版数の publish を防ぐべく中止。")
+    }
+    Write-Ok "Manager exe FileVersion = $fileVersion (SoT $script:ManagerVersion と一致)"
+}
+
+function Assert-ManagerSingleFile {
+    # (#258 PR4 レビュー D-1) single-file 配布の核心不変条件「Manager = exe 1 個」を機械強制する。
+    # Assert-ExpectedFiles は manifest 記載ファイルの **presence のみ** 検証し余剰を見ない (manifest forward-compat の
+    # 設計上、他コンポーネントの余剰ファイルは許容せねばならない＝余剰検出を入れると旧 Manager が新 zip を reject する
+    # 後方互換問題が再燃する) ため、Manager 固有のこの不変条件は専用にここで守る。将来 SDK / System.Data.SQLite.Core の
+    # 挙動変化で sidecar (loose native dll / createdump.exe / *.json 等) が publish 出力に混ざり、manifest 非記載のまま
+    # zip 同梱される silent drift を upload 前に fail-fast する。Build-Manager の後に呼ぶこと (staging の Manager dir =
+    # 出荷物そのもの。pdb は Build-Manager のコピーで除外済なので exe 1 個が期待値)。
+    Write-Step "Manager が single-file (exe 1 個) であることを検証"
+    $managerDir = Join-Path $FilesDir 'Manager'
+    if (-not (Test-Path $managerDir)) {
+        Fail "検証対象の Manager staging dir が見つかりません: $managerDir (Build-Manager の後に呼ぶこと)"
+    }
+    $files = @(Get-ChildItem $managerDir -Recurse -File)
+    $unexpected = @($files | Where-Object { $_.Name -ne 'TonePrism_Manager.exe' })
+    if ($unexpected.Count -gt 0) {
+        $names = ($unexpected | ForEach-Object { $_.FullName.Substring($managerDir.Length + 1) }) -join ', '
+        Fail @"
+Manager staging に想定外のファイルがあります (single-file = TonePrism_Manager.exe 1 個のはず): $names
+single-file 不変条件が崩れています。csproj の PublishSingleFile / IncludeNativeLibrariesForSelfExtract、
+または System.Data.SQLite.Core / SDK の挙動変化で sidecar が吐かれていないか確認してください。
+expected-files (manifest) は presence のみ検証で余剰を検出しないため、ここで fail-fast します。
+"@
+    }
+    Write-Ok "Manager staging = TonePrism_Manager.exe 1 個 (single-file 不変条件 OK)"
+}
+
 # ============================================================================
 # Phase 5: Build Manager
 # ============================================================================
 
 function Build-Manager {
-    Write-Step "Manager を msbuild で Release ビルド"
+    Write-Step "Manager を dotnet publish で Release ビルド (net10 self-contained single-file)"
 
     $csproj = Join-Path $ManagerDir 'TonePrism_Manager.csproj'
     $binRelease = Join-Path $ManagerDir 'bin\Release'
+    $publishDir = Join-Path $binRelease 'publish'
 
-    # (#309 / SDK-style 化) restore は下の msbuild /restore に一本化 (PackageReference)。
-    # 旧 packages.config 時代の `nuget restore -PackagesDirectory Manager\packages` + Stub.System.Data.SQLite
-    # の native DLL 手動抽出 (nupkg unzip) は廃止:
-    #   - PackageReference restore は global package cache に展開し Manager\packages\ を作らないため
-    #     旧 -PackagesDirectory 前提が成立しない
-    #   - Stub パッケージの build targets が SQLite.Interop.dll を bin\Release\x64|x86 へ自動コピーする
-    #     (PR1 で実機確認済) ため、packages.config 時代の「x64/x86 サブdir 未展開」防御策が不要になった
-    #   - 契約変更 (レビュー Low): 旧 Resolve-Nuget は -Offline 時に「キャッシュ必須」で preflight Fail したが、
-    #     msbuild /restore に Offline ガードは無い。-Offline + global package cache cold だと restore が network を
-    #     試み build 途中で fail する (誤成果物は出ない)。-Offline は global package cache warm 前提。fail-fast 復元は A4 で検討。
+    # (#258 PR4) net10 化に伴い msbuild /restore (framework-dependent build) → dotnet publish (self-contained
+    # single-file) へ。net10 は OS 同梱でないため、ランタイムを exe に同梱して「解凍 → すぐ動く・オフライン安全・
+    # ランタイム導入不要」の現行配布モデルを維持する。
+    #   - -r win-x64 --self-contained true : net10 ランタイム同梱 (各 PC に .NET 導入不要)
+    #   - PublishSingleFile=true            : 単一 exe (TonePrism_Manager.exe 1 個)。.exe.config / System.Data.SQLite.dll /
+    #                                        x64,x86 の SQLite.Interop.dll は全て exe に内包 (bundle の Manager 構成が exe 1 個に簡素化)
+    #   - IncludeNativeLibrariesForSelfExtract=true : native (SQLite.Interop.dll) も同梱、初回起動で %TEMP%/.net へ
+    #                                        self-extract して load (PR4 で実機 smoke 確認済: DB round-trip 成立)
+    # ※ dev build (dotnet build / test) は single-file にしない (csproj に PublishSingleFile を入れず publish 引数で渡す)。
+    # ※ Manager のみ dotnet (net10)、Updater / LauncherAgent は msbuild (net48) のまま (移行期の mixed)。前提: dotnet (net10 SDK) が PATH。
 
-    # bin/Release/ を事前に削除 (前回ビルドの runtime ゴミ
-    # = 開発者が Manager を直接起動した時に発生する db / logs / backups 等を
-    # release zip に紛れ込ませないため)
+    # bin/Release/ を事前に削除 (前回ビルドの runtime ゴミ = 開発者が Manager を直接起動した時に発生する
+    # db / logs / backups 等を release zip に紛れ込ませないため)
     if (Test-Path $binRelease) {
         Write-Info "bin/Release/ を削除して clean build"
         Remove-Item -Recurse -Force $binRelease
     }
 
-    # msbuild (/restore = PackageReference を build 前に解決、nuget.exe 不要)
-    Write-Info "msbuild /restore /p:Configuration=Release"
-    $exitCode = Invoke-ExternalProcess -FilePath $script:ResolvedMsBuild -Arguments @(
-        $csproj,
-        '/restore',
-        '/p:Configuration=Release',
-        '/verbosity:minimal',
-        '/nologo'
+    Write-Info "dotnet publish -r win-x64 --self-contained -p:PublishSingleFile=true"
+    $exitCode = Invoke-ExternalProcess -FilePath $script:ResolvedDotnet -Arguments @(
+        'publish', $csproj,
+        '-c', 'Release',
+        '-r', 'win-x64',
+        '--self-contained', 'true',
+        '-p:PublishSingleFile=true',
+        '-p:IncludeNativeLibrariesForSelfExtract=true',
+        '-o', $publishDir,
+        '--nologo',
+        '-v', 'minimal'
     )
     if ($exitCode -ne 0) {
-        Fail "msbuild に失敗しました (exit code: $exitCode)"
+        Fail "dotnet publish に失敗しました (exit code: $exitCode)"
     }
-    Write-Ok "msbuild 完了"
+    Write-Ok "dotnet publish 完了"
 
-    # bin/Release/ から staging へコピー（*.pdb 除外）
+    # publish 出力 (exe 1 個 + .pdb) から staging へコピー (*.pdb 除外)
     $outDir = Join-Path $FilesDir 'Manager'
     New-Item -ItemType Directory -Path $outDir | Out-Null
-    if (-not (Test-Path $binRelease)) {
-        Fail "Manager ビルド出力が見つかりません: $binRelease"
+    if (-not (Test-Path $publishDir)) {
+        Fail "Manager publish 出力が見つかりません: $publishDir"
     }
 
-    Get-ChildItem $binRelease -Recurse | Where-Object {
+    Get-ChildItem $publishDir -Recurse | Where-Object {
         -not $_.PSIsContainer -and $_.Extension -ne '.pdb'
     } | ForEach-Object {
-        $rel = $_.FullName.Substring($binRelease.Length + 1)
+        $rel = $_.FullName.Substring($publishDir.Length + 1)
         $dest = Join-Path $outDir $rel
         $destDir = Split-Path $dest -Parent
         if (-not (Test-Path $destDir)) {
@@ -1515,8 +1578,8 @@ function Build-Manager {
 # Phase 5.5: Companions/Updater を msbuild で Release ビルド (#108 Phase 3)
 # ============================================================================
 # SPEC §3.7.4: Manager 置換 + 再起動の最小 CLI。.NET Framework 4.8 で SQLite / WindowsAPICodePack
-# 等の外部依存を持たない単純な Console app なので、Build-Manager の nuget restore / native DLL
-# 抽出は不要。msbuild 直叩きでよい。
+# 等の外部依存を持たない単純な Console app なので、Build-Manager の dotnet publish (net10
+# self-contained single-file) のような重い publish 不要。net48 を msbuild 直叩きでよい。
 function Build-Updater {
     Write-Step "Updater を msbuild で Release ビルド"
 
@@ -1782,12 +1845,10 @@ $script:BundleManifestFiles = @(
     'Manager.bat',
     # bundle/files/ 配下 = インストール後の <親>\TonePrism\ に展開される payload
     'files\Launcher\TonePrism_Launcher.exe',    # #283: Manager UI VersionInventory が FileVersionInfo で版数を読む対象 (project.godot 同梱は廃止)
+    # (#258 PR4) net10 self-contained single-file 化で Manager は exe 1 個に集約。
+    # 旧 net48 構成の TonePrism_Manager.exe.config / System.Data.SQLite.dll / x64,x86\SQLite.Interop.dll は
+    # 全て single-file exe に内包される (.exe.config 非生成・native は self-extract) ため expected-files から撤去。
     'files\Manager\TonePrism_Manager.exe',
-    'files\Manager\TonePrism_Manager.exe.config',
-    'files\Manager\System.Data.SQLite.dll',
-    # (#309) Microsoft.WindowsAPICodePack(.Shell).dll は実コード未使用 (フォルダ選択は FolderBrowserDialog 化済) のため撤去。
-    'files\Manager\x64\SQLite.Interop.dll',
-    'files\Manager\x86\SQLite.Interop.dll',
     # Updater (Phase 3、SPEC §3.7.4): Manager 置換 + 再起動の最小 CLI、Companions/ 配下に配置
     'files\Companions\Updater\TonePrism_Updater.exe',
     'files\Companions\Updater\TonePrism_Updater.exe.config',
@@ -2078,15 +2139,15 @@ Assert-ChangelogLinkDefs
 Assert-ComponentVersions
 Resolve-Godot
 Resolve-MsBuild
-# (#309 / SDK-style 化) Resolve-Nuget 呼び出しを撤去: Manager の packages.config restore が唯一の利用箇所
-# だったため nuget.exe が未使用化。残すと通常実行で不要 DL、-Offline では未使用ツールのために Fail する live な
-# 失敗経路を温存するため呼び出しを削除。Resolve-Nuget 関数定義 (dead) は A4 の net10 配布対応改修でまとめて撤去。
+Resolve-Dotnet
 Set-ExportPresetVersions
 Assert-WorkingTreeClean -Context "export_presets sync 後" -PostSync
 Clear-Staging
 Build-Launcher
 Assert-ExportedLauncherVersion
 Build-Manager
+Assert-PublishedManagerVersion
+Assert-ManagerSingleFile
 Build-Updater
 Build-LauncherAgent
 Copy-Templates

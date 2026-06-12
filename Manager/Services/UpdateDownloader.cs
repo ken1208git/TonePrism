@@ -377,15 +377,11 @@ namespace TonePrism.Manager.Services
                 Path.Combine("files", "Launcher", "TonePrism_Launcher.exe"),
                 Path.Combine("files", "Launcher", "version.gd"),
                 Path.Combine("files", "Manager", "TonePrism_Manager.exe"),
-                Path.Combine("files", "Manager", "TonePrism_Manager.exe.config"),
-                Path.Combine("files", "Manager", "System.Data.SQLite.dll"),
-                // (#309) Microsoft.WindowsAPICodePack(.Shell).dll は実コード未使用 (フォルダ選択は FolderBrowserDialog 化済)
-                // のため新 bundle から撤去。本 legacy list は manifest 不在かつ `bundle/` dir も無い v0.3.0 旧構造 zip 専用の
-                // fallback で、新構造 (manifest 有) bundle は決してここに来ない (manifest read/parse 失敗や `bundle/` のみ存在は
-                // broken-release sentinel に倒れ legacy へ降格しない。本ファイル上部 ValidateStaging 参照)。よって本撤去は
-                // manifest 経路 ($script:BundleManifestFiles) との名前一致を保つ無害な同期 (旧 v0.3.0 zip は物理的に本 DLL を含むため偽 missing も起きない)。
-                Path.Combine("files", "Manager", "x64", "SQLite.Interop.dll"),
-                Path.Combine("files", "Manager", "x86", "SQLite.Interop.dll"),
+                // (#258 PR4) net10 self-contained single-file 化で Manager は exe 1 個に集約 (旧 .exe.config /
+                // System.Data.SQLite.dll / x64,x86\SQLite.Interop.dll は exe に内包)。manifest 経路 ($script:BundleManifestFiles)
+                // と同じく Manager 行を exe 1 個に揃える。本 legacy list は manifest 不在の旧構造 zip 専用 fallback で
+                // 新 bundle は manifest 経路を通る (read/parse 失敗は broken-release sentinel に倒れ legacy へ降格しない、
+                // 本ファイル上部 ValidateStaging 参照) ため、両経路の名前一致を保つ無害な同期。
                 Path.Combine("files", "CHANGELOG.md"),
                 Path.Combine("files", "Companions", "Updater", "TonePrism_Updater.exe"),
                 Path.Combine("files", "Companions", "Updater", "TonePrism_Updater.exe.config"),
