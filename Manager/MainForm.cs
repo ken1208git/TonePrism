@@ -29,6 +29,7 @@ namespace TonePrism.Manager
         private UpdateSectionPanel _updateSectionPanel;
         private IntroGuidePanel _introGuidePanel;
         private System.Windows.Forms.TabPage _introTab; // (#253) ハンドル生成後に追加するため field 保持
+        private System.Windows.Forms.TabPage _wpfSpikeTab; // (#245 Phase 0) WPF 共存スパイク用タブ (throwaway)
         // (#299) 非ブロッキングバックアップの進捗を既存ステータスバー (statusStrip1) に統合する item 群 (1 段・左詰め)。
         // 順番は [phase 固定"バックアップ中..."][中止][進捗バー][ファイル名(可変・最後)]。可変幅のファイル名を末尾に
         // 置くことで、中止ボタンが per-file で高速移動しない (実機フィードバック)。phase 固定文言で中止位置を完全固定。
@@ -564,6 +565,21 @@ namespace TonePrism.Manager
                 tabControl1.TabPages.Insert(introStoreIdx >= 0 ? introStoreIdx + 1 : tabControl1.TabPages.Count, _introTab);
             }
             _introGuidePanel.Initialize(dbManager);
+
+            // (#245 Phase 0) WPF 共存スパイク用タブ。#253 と同じ理由 (ctor での TabPages 追加は silent fail) で
+            // ハンドル生成後のここで追加。ElementHost で WPF UserControl をホストし、net10 Manager 内で
+            // WinForms↔WPF 共存が成立することを実機で確認する throwaway。確認後 or PR5 (WPF シェル) 着手時に撤去。
+            if (_wpfSpikeTab == null)
+            {
+                _wpfSpikeTab = new System.Windows.Forms.TabPage("WPF 実験") { UseVisualStyleBackColor = true };
+                var wpfHost = new System.Windows.Forms.Integration.ElementHost
+                {
+                    Dock = System.Windows.Forms.DockStyle.Fill,
+                    Child = new Wpf.SpikeControl()
+                };
+                _wpfSpikeTab.Controls.Add(wpfHost);
+                tabControl1.TabPages.Add(_wpfSpikeTab);
+            }
 
             // Updater log の post-hoc filtered absorb (= SPEC §3.6 Companions ログ管理規約)。
             // 直前のアップデートサイクル中に Updater が書き出した log のうち Warn/Error + 主要 milestone

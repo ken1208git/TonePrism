@@ -1,0 +1,16 @@
+<UserControl x:Class="TonePrism.Manager.Wpf.SpikeControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- (#245 Phase 0) WPF 共存スパイク。net10 Manager (WinForms + UseWPF) で WPF UserControl が
+         コンパイル・描画・操作できることを確認するための検証用 throwaway。PR5 の WPF シェル着手前の de-risk。 -->
+    <Border Padding="24" Background="#FFFFFF">
+        <StackPanel VerticalAlignment="Top" HorizontalAlignment="Left">
+            <TextBlock Text="WPF 共存スパイク (Phase 0)" FontSize="22" FontWeight="Bold" Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" Margin="0,0,0,20" Foreground="#555555" MaxWidth="520"
+                       Text="この画面が WPF で描画され、下のボタンで数字が増えれば、net10 Manager 内で WinForms と WPF が共存できている証明です（PR5 の WPF シェル化に進めます）。"/>
+            <Button x:Name="CountButton" Content="クリックして数える" Padding="18,10" FontSize="14"
+                    HorizontalAlignment="Left" Click="CountButton_Click"/>
+            <TextBlock x:Name="CountLabel" Text="クリック回数: 0" FontSize="18" Margin="0,16,0,0"/>
+        </StackPanel>
+    </Border>
+</UserControl>
