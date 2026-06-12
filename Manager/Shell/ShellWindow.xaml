@@ -20,6 +20,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <ui:TitleBar Grid.Row="0" Title="TonePrism マネージャー">
@@ -57,5 +58,29 @@
                 </ui:NavigationViewItem>
             </ui:NavigationView.FooterMenuItems>
         </ui:NavigationView>
+
+        <!-- (#245 PR5 step4) Fluent ネイティブのステータスバー。左=DB接続状態(全体)、右=バックアップ feedback
+             (進捗/✓/⚠/中止/今すぐ、全体に関係)。値は MainForm が集めて SetStatusText / ShowBackupProgress 等で
+             流し込む。ホストではなく WPF ネイティブなので airspace/黒文字なし。 -->
+        <Border Grid.Row="2" Background="#FF2B2B2B" BorderBrush="#22FFFFFF" BorderThickness="0,1,0,0" Padding="16,5">
+            <Grid>
+                <!-- 左: DB接続状態 (全体に関係) -->
+                <TextBlock x:Name="StatusText" Foreground="#DDFFFFFF" FontSize="12"
+                           VerticalAlignment="Center" HorizontalAlignment="Left" Text="データベース: —" />
+                <!-- 右: バックアップ feedback (idle 時は非表示) -->
+                <StackPanel x:Name="BackupPanel" Orientation="Horizontal" HorizontalAlignment="Right"
+                            VerticalAlignment="Center" Visibility="Collapsed">
+                    <!-- (#364 議論) indeterminate = liveness 表示 (回ってれば生存・止まればフリーズ)。進捗% は
+                         BackupText が担当するので determinate にすると役割が被る。ぐるぐるは「生きてる」専用。 -->
+                    <ui:ProgressRing x:Name="BackupRing" IsIndeterminate="True" Width="18" Height="18"
+                                     Margin="0,0,8,0" VerticalAlignment="Center" Visibility="Collapsed" />
+                    <TextBlock x:Name="BackupText" FontSize="12" VerticalAlignment="Center" Foreground="#DDFFFFFF" />
+                    <ui:Button x:Name="BackupCancelButton" Content="中止" Margin="10,0,0,0" Padding="10,2"
+                               FontSize="11" Visibility="Collapsed" Click="BackupCancelButton_Click" />
+                    <ui:Button x:Name="BackupRecaptureButton" Content="今すぐバックアップ" Margin="10,0,0,0" Padding="10,2"
+                               FontSize="11" Visibility="Collapsed" Click="BackupRecaptureButton_Click" />
+                </StackPanel>
+            </Grid>
+        </Border>
     </Grid>
 </ui:FluentWindow>

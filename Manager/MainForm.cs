@@ -16,6 +16,8 @@ namespace TonePrism.Manager
     public partial class MainForm : Form
     {
         private DatabaseManager dbManager;
+        // (#245 PR5 step4) 可視 main のシェル参照。ステータス更新 (DB状態/ゲーム数/バックアップ) を流し込むため保持。
+        private Shell.ShellWindow _shell;
         private ManagerSessionService _sessionService;
         // (#179 PR3b) Launcher LAN-wide session 検出機構。`manager_sessions` table と非対称の
         // JSON drop folder 方式 (= SPEC §3.8.7)、polling-only で DB write ゼロ。
@@ -747,6 +749,7 @@ namespace TonePrism.Manager
                 Shell.ShellWindow.SharedDb = dbManager;
                 Shell.ShellWindow.HostForm = this; // (#245 PR5 step2) host ページが実パネルを取得するための参照
                 var shell = new Shell.ShellWindow();
+                _shell = shell; // (#245 PR5 step4) ステータス更新の流し込み先として保持
                 // シェルを閉じたら MainForm も閉じて Application.Run を終了させる (= プロセス exit)。
                 shell.Closed += (s, e) =>
                 {
@@ -756,6 +759,7 @@ namespace TonePrism.Manager
                 shell.Show();
                 Hide(); // Load 完了済なので Hide で安全に裏方化 (= MainForm の窓・タスクバーボタンを消す)
                 Logger.Info("[MainForm] (#245 PR5) WPF シェルを可視 main として表示、MainForm を裏方化");
+                UpdateStatusBar(); // (#245 PR5 step4) 初期ステータス (DB状態 + ゲーム数) をシェルに反映
             }
             catch (Exception ex)
             {
@@ -1005,7 +1009,9 @@ namespace TonePrism.Manager
             if (dbManager == null) return;
             string dbStatus = dbManager.DatabaseExists() ? "接続済み" : "未接続";
             string gameInfo = $"ゲーム数: {_gameSectionPanel.GameCount}件";
-            lblStatus.Text = $"データベース: {dbStatus} | {gameInfo}";
+            string text = $"データベース: {dbStatus} | {gameInfo}";
+            lblStatus.Text = text;
+            _shell?.SetStatusText(text); // (#245 PR5 step4) シェルのステータスバーにも反映
         }
 
         /// <summary>
@@ -1029,6 +1035,7 @@ namespace TonePrism.Manager
             // (e.g., 自動 backup 失敗 path) で Logger.Error として別途残るため UI で truncated でも debug 可能。
             lblBackupStatus.Text = TruncateForStatusBar(message);
             lblBackupStatus.ForeColor = color;
+            _shell?.SetBackupStatus(message, autoRevert); // (#245 step4) シェルのバーにも反映 (成功=transient/失敗=sticky)
 
             // 既存 timer を破棄してから新規 (= 連続呼出時に古い timer が古い message を消すのを防ぐ)
             if (_backupStatusClearTimer != null)
@@ -1063,6 +1070,7 @@ namespace TonePrism.Manager
             _tsBackupFile.Text = fileName ?? string.Empty; // 可変幅は末尾なので動いても他に影響しない
             _tsBackupFile.Visible = true;
             _tsBackupRecapture.Visible = false;
+            _shell?.ShowBackupProgress(p, fileName); // (#245 step4) シェルのバーにも反映
         }
 
         /// <summary>未バックアップ (失敗/中断): 警告 + 「今すぐバックアップ」(1 クリック復旧) を表示。</summary>
@@ -1076,6 +1084,7 @@ namespace TonePrism.Manager
             _tsBackupPercent.Visible = false;
             _tsBackupFile.Visible = false;
             _tsBackupRecapture.Visible = true;
+            _shell?.ShowBackupUnhealthy(message); // (#245 step4) シェルのバーにも反映
         }
 
         /// <summary>idle かつ健全: バックアップ進捗 item を全て非表示。</summary>
@@ -1087,6 +1096,19 @@ namespace TonePrism.Manager
             _tsBackupPercent.Visible = false;
             _tsBackupFile.Visible = false;
             _tsBackupRecapture.Visible = false;
+            _shell?.HideBackupProgress(); // (#245 step4) シェルのバーにも反映
+        }
+
+        // (#245 PR5 step4) シェルのバックアップバーのボタン (中止 / 今すぐバックアップ) から呼ばれる。
+        // coordinator 操作は従来どおり MainForm が owner として行う (= 旧 statusStrip ボタンと同じ実体)。
+        internal void CancelSessionBackup()
+        {
+            try { dbManager?.SessionBackupCoordinator?.CancelCurrentBackup(); } catch { }
+        }
+
+        internal void RecaptureBackupNow()
+        {
+            try { dbManager?.SessionBackupCoordinator?.RunAfterOperation(this, assetsChanged: true, "再バックアップ"); } catch { }
         }
 
         /// <summary>(#299) StatusStrip 上の ToolStripButton (中止 / 今すぐバックアップ) に常時枠を描いて「ボタンらしく」
