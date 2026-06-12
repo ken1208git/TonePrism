@@ -1,6 +1,7 @@
 using System;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Shell;
 using System.Windows.Threading;
 using Wpf.Ui.Controls;
 
@@ -25,11 +26,18 @@ namespace TonePrism.Manager.Shell
         // orchestration の正式移管時に整理)。
         internal static MainForm HostForm;
 
+        // (#245 PR5) Windows タスクバー進捗の駆動用に、現行シェルを ProcessingDialog から参照するための
+        // 静的ハンドル (SharedDb / HostForm と同じ暫定 static 共有パターン)。1 シェル/プロセスなので単一で足りる。
+        internal static ShellWindow Instance;
+
         public ShellWindow()
         {
             InitializeComponent();
+            Instance = this;
             // (#245 PR5 step4) 起動時は最初の実セクション (ゲーム) に着地する (旧: 飾りの PreviewPage)。
             Loaded += (_, _) => RootNavigation.Navigate(typeof(GameHostPage));
+            // シェルが閉じたら静的ハンドルを掃除し、破棄済み窓を掴み続けないようにする。
+            Closed += (_, _) => { if (Instance == this) Instance = null; };
         }
 
         // (#362) WinForms メッセージループ上の WPF 窓 + NavigationView では、マウスホイール/二本指スクロールが
@@ -82,6 +90,42 @@ namespace TonePrism.Manager.Shell
         {
             if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(new Action(() => SetStatusText(text))); return; }
             StatusText.Text = text ?? string.Empty;
+        }
+
+        // ===== (#245 PR5) Windows タスクバーアイコンの進捗 (緑バー) =====
+        // ProcessingDialog (全進捗オペレーションの関所) が ReportProgress からここを叩く。復元/バックアップ/
+        // 更新/アセット処理が横断的にタスクバーへ乗る。表示は cosmetic なので、ここでの失敗は握り潰して
+        // 進捗オペレーション本体 (worker) には絶対に例外を伝播させない。
+
+        /// <summary>タスクバー進捗を更新する。indeterminate=不定 (Marquee 相当) / それ以外は 0-100% を緑バーで表示。</summary>
+        internal void SetTaskbarProgress(int percentage, bool indeterminate)
+        {
+            try
+            {
+                if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(new Action(() => SetTaskbarProgress(percentage, indeterminate))); return; }
+                if (Taskbar == null) return;
+                if (indeterminate)
+                {
+                    Taskbar.ProgressState = TaskbarItemProgressState.Indeterminate;
+                }
+                else if (percentage >= 0 && percentage <= 100)
+                {
+                    Taskbar.ProgressState = TaskbarItemProgressState.Normal;
+                    Taskbar.ProgressValue = percentage / 100.0;
+                }
+            }
+            catch { /* cosmetic: タスクバー表示の失敗は無視 */ }
+        }
+
+        /// <summary>タスクバー進捗を消す (オペレーション完了/中止/失敗時)。</summary>
+        internal void ClearTaskbarProgress()
+        {
+            try
+            {
+                if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(new Action(ClearTaskbarProgress)); return; }
+                if (Taskbar != null) Taskbar.ProgressState = TaskbarItemProgressState.None;
+            }
+            catch { /* cosmetic */ }
         }
 
         // ===== (#245 PR5 step4 v2) バックアップ feedback (進捗/✓/⚠/中止/今すぐ) =====

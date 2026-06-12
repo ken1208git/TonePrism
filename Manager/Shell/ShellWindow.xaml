@@ -13,6 +13,13 @@
     FontFamily="Segoe UI Variable Text"
     ExtendsContentIntoTitleBar="True">
 
+    <!-- (#245 PR5) Windows タスクバーアイコンの進捗 (緑バー)。全進捗オペレーション (復元/バックアップ/更新/
+         アセット処理) の関所 ProcessingDialog.ReportProgress から SetTaskbarProgress 経由で駆動する。
+         シェルが可視メイン窓 = タスクバーボタンの所有者なのでここに付ける (旧 WinForms MainForm は隠し)。 -->
+    <ui:FluentWindow.TaskbarItemInfo>
+        <TaskbarItemInfo x:Name="Taskbar" />
+    </ui:FluentWindow.TaskbarItemInfo>
+
     <!-- (#245 PR5) Win11 設定アプリ風シェルのプレビュー。FluentWindow=Mica 背景・ダーク、
          NavigationView=左サイドバー。本配線では各ページに既存 WinForms パネルを WindowsFormsHost でホストする。
          throwaway: 見た目確認用。OK なら本シェルへ発展、ダメなら撤去。 -->
