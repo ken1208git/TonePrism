@@ -10,7 +10,7 @@
         - GitHub Releases の本文は CHANGELOG.md の該当 Bundle セクションから自動抽出
         - Godot エディタとエクスポートテンプレートは tools/godot/ + %APPDATA%/Godot/export_templates/ に自動ダウンロード（バージョンピン留め + SHA256 検証 + キャッシュ + 3 回 retry）
         - Manager のビルドは dotnet publish (net10 SDK、self-contained single-file) を使用 (#258 PR4)
-          - Updater / LauncherAgent は VS 同梱 MSBuild で net48 build (移行期の mixed、依存ゼロ)
+          - LauncherAgent は dotnet publish で net10 build (#258 PR4.x、配布形態を Manager と揃える)、Updater は VS 同梱 MSBuild で net48 build (番人・不変)
         - release/v<version>/files/ に staging
         - Compress-Archive で release/TonePrism_v<version>.zip 生成
         - zip 完成後、Y/N 確認プロンプト → Y なら gh release create でアップロード、N なら zip だけ残して終了
@@ -24,7 +24,7 @@
 
     依存ツールのバージョン管理方針:
         - Godot: project.godot の config/features から major.minor を読み取り、$GodotPatchTable で patch をピン留め
-        - .NET: Manager = net10 SDK (dotnet publish)、Updater / LauncherAgent = net48 (MSBuild)
+        - .NET: Manager / LauncherAgent = net10 SDK (dotnet publish)、Updater = net48 (MSBuild、番人)
         - MSBuild: Visual Studio 2019+ または VS Build Tools を要求（net48 Companions ビルドのため）
         - 各ツールのバージョン上げは Release.ps1 冒頭定数を手動で書き換え + PR
 
@@ -289,6 +289,7 @@ $script:ResolvedDotnet      = $null
 $script:GodotPatchUsed      = $null  # 解決された Godot patch (例: "4.6.2")
 $script:LauncherVersion     = $null
 $script:ManagerVersion      = $null
+$script:LauncherAgentVersion = $null
 $script:DeleteExistingRelease = $false
 
 # ============================================================================
@@ -837,7 +838,7 @@ Visual Studio Build Tools のインストールが必要です。
 }
 
 # (#258 PR4) NuGet 解決関数は撤去。Manager が net10 で dotnet publish に移行し nuget.exe を一切使わなくなった
-# (Updater / LauncherAgent は依存ゼロの msbuild 直叩き、Manager の PackageReference は dotnet が暗黙 restore)。
+# (Updater は依存ゼロの msbuild 直叩き、Manager / LauncherAgent の publish は dotnet が暗黙 restore)。
 
 # ============================================================================
 # git working tree が clean か検証 (Codex P1 #137 への対応)
@@ -1259,12 +1260,27 @@ function Assert-ManagerVersion {
     return $m.Groups[1].Value
 }
 
+function Assert-LauncherAgentVersion {
+    $assemblyInfo = Join-Path $RepoRoot 'Companions\LauncherAgent\Properties\AssemblyInfo.cs'
+    if (-not (Test-Path $assemblyInfo)) {
+        Fail "LauncherAgent AssemblyInfo.cs が見つかりません: $assemblyInfo"
+    }
+    $content = Get-Content $assemblyInfo -Raw
+    $m = [regex]::Match($content, 'AssemblyVersion\("(\d+\.\d+\.\d+)\.\d+"\)')
+    if (-not $m.Success) {
+        Fail "LauncherAgent AssemblyInfo.cs から AssemblyVersion を読み取れませんでした"
+    }
+    return $m.Groups[1].Value
+}
+
 function Assert-ComponentVersions {
     Write-Step "コンポーネント version を読み取り"
     $script:LauncherVersion = Assert-LauncherVersion
     $script:ManagerVersion = Assert-ManagerVersion
-    Write-Ok "Launcher: v$script:LauncherVersion"
-    Write-Ok "Manager:  v$script:ManagerVersion"
+    $script:LauncherAgentVersion = Assert-LauncherAgentVersion
+    Write-Ok "Launcher:      v$script:LauncherVersion"
+    Write-Ok "Manager:       v$script:ManagerVersion"
+    Write-Ok "LauncherAgent: v$script:LauncherAgentVersion"
 }
 
 # ============================================================================
@@ -1521,7 +1537,7 @@ function Build-Manager {
     #   - IncludeNativeLibrariesForSelfExtract=true : native (SQLite.Interop.dll) も同梱、初回起動で %TEMP%/.net へ
     #                                        self-extract して load (PR4 で実機 smoke 確認済: DB round-trip 成立)
     # ※ dev build (dotnet build / test) は single-file にしない (csproj に PublishSingleFile を入れず publish 引数で渡す)。
-    # ※ Manager のみ dotnet (net10)、Updater / LauncherAgent は msbuild (net48) のまま (移行期の mixed)。前提: dotnet (net10 SDK) が PATH。
+    # ※ Manager / LauncherAgent は dotnet (net10)、Updater は msbuild (net48) のまま (番人)。前提: dotnet (net10 SDK) が PATH。
 
     # bin/Release/ を事前に削除 (前回ビルドの runtime ゴミ = 開発者が Manager を直接起動した時に発生する
     # db / logs / backups 等を release zip に紛れ込ませないため)
@@ -1662,13 +1678,18 @@ function Build-Updater {
 }
 
 function Build-LauncherAgent {
-    Write-Step "LauncherAgent を msbuild で Release ビルド"
+    Write-Step "LauncherAgent を dotnet publish で Release ビルド (net10 self-contained single-file)"
 
-    # Build-Updater と同じ思想 (clean build → 成果物 / 特定 exe 名 check → staging copy)。
-    # LauncherAgent は Launcher 補助の常駐エージェント (probe/sensor/focus 統合、旧 WindowProbe、SPEC §2.4 / #101 / #216 / #30)。
+    # (#258 PR4.x) net48 msbuild → net10 dotnet publish (self-contained single-file)。配布形態を Manager と
+    # 揃える (net10 ランタイム同梱・解凍即起動・ランタイム導入不要)。LauncherAgent は Launcher 補助の常駐
+    # エージェント (probe/sensor/focus 統合、旧 WindowProbe、SPEC §2.4 / #101 / #216 / #30)。依存ゼロ・app native
+    # lib 無し (純 Win32 P/Invoke = OS DLL) のため Manager の SQLite native 同梱は無いが、PublishSingleFile +
+    # IncludeNativeLibrariesForSelfExtract で net10 ランタイム native も含め exe 1 個に集約する。
+    # ※ Updater は net48 msbuild のまま (番人・自己更新の最後の砦)。前提: dotnet (net10 SDK) が PATH (Resolve-Dotnet 済)。
     $companionDir = Join-Path $RepoRoot 'Companions\LauncherAgent'
     $csproj = Join-Path $companionDir 'TonePrism_LauncherAgent.csproj'
     $binRelease = Join-Path $companionDir 'bin\Release'
+    $publishDir = Join-Path $binRelease 'publish'
 
     if (-not (Test-Path $csproj)) {
         Fail "TonePrism_LauncherAgent.csproj が見つかりません: $csproj"
@@ -1679,36 +1700,38 @@ function Build-LauncherAgent {
         Remove-Item -Recurse -Force $binRelease
     }
 
-    Write-Info "msbuild /p:Configuration=Release"
-    $exitCode = Invoke-ExternalProcess -FilePath $script:ResolvedMsBuild -Arguments @(
-        $csproj,
-        '/p:Configuration=Release',
-        '/verbosity:minimal',
-        '/nologo'
+    Write-Info "dotnet publish -r win-x64 --self-contained -p:PublishSingleFile=true"
+    $exitCode = Invoke-ExternalProcess -FilePath $script:ResolvedDotnet -Arguments @(
+        'publish', $csproj,
+        '-c', 'Release',
+        '-r', 'win-x64',
+        '--self-contained', 'true',
+        '-p:PublishSingleFile=true',
+        '-p:IncludeNativeLibrariesForSelfExtract=true',
+        '-o', $publishDir,
+        '--nologo',
+        '-v', 'minimal'
     )
     if ($exitCode -ne 0) {
-        Fail "LauncherAgent の msbuild に失敗しました (exit code: $exitCode)"
+        Fail "LauncherAgent の dotnet publish に失敗しました (exit code: $exitCode)"
     }
-    Write-Ok "msbuild 完了"
+    Write-Ok "dotnet publish 完了"
 
-    if (-not (Test-Path $binRelease)) {
-        Fail "LauncherAgent ビルド出力が見つかりません: $binRelease"
+    if (-not (Test-Path $publishDir)) {
+        Fail "LauncherAgent publish 出力が見つかりません: $publishDir"
     }
-    $exeCount = (Get-ChildItem $binRelease -Recurse -File -Filter '*.exe' -ErrorAction SilentlyContinue | Measure-Object).Count
-    if ($exeCount -lt 1) {
-        Fail "LauncherAgent ビルド出力に .exe が見つかりません ($binRelease 内): msbuild は exit 0 だが成果物が生成されていない可能性"
-    }
-    $expectedExe = Join-Path $binRelease 'TonePrism_LauncherAgent.exe'
+    $expectedExe = Join-Path $publishDir 'TonePrism_LauncherAgent.exe'
     if (-not (Test-Path $expectedExe)) {
-        Fail "LauncherAgent ビルド出力に TonePrism_LauncherAgent.exe が見つかりません: csproj の AssemblyName が変更された可能性 (期待 path: $expectedExe)"
+        Fail "LauncherAgent publish 出力に TonePrism_LauncherAgent.exe が見つかりません: csproj の AssemblyName が変更された可能性 (期待 path: $expectedExe)"
     }
     $outDir = Join-Path $FilesDir 'Companions\LauncherAgent'
     New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
-    Get-ChildItem $binRelease -Recurse | Where-Object {
+    # publish 出力 (exe 1 個 + .pdb) から staging へコピー (*.pdb 除外)
+    Get-ChildItem $publishDir -Recurse | Where-Object {
         -not $_.PSIsContainer -and $_.Extension -ne '.pdb'
     } | ForEach-Object {
-        $rel = $_.FullName.Substring($binRelease.Length + 1)
+        $rel = $_.FullName.Substring($publishDir.Length + 1)
         $dest = Join-Path $outDir $rel
         $destDir = Split-Path $dest -Parent
         if (-not (Test-Path $destDir)) {
@@ -1723,6 +1746,64 @@ function Build-LauncherAgent {
         $rel = $_.FullName.Substring($outDir.Length + 1)
         Write-Host "        $rel ($($_.Length) bytes)" -ForegroundColor DarkGray
     }
+}
+
+function Assert-PublishedLauncherAgentVersion {
+    # (#258 PR4.x レビュー) net10 single-file 化で LauncherAgent exe の Win32 FileVersion も Manager と同様
+    # dotnet publish の apphost stamp (AssemblyFileVersion 由来) になった。net48 時代はコンパイル済アセンブリで
+    # 自明に SoT 一致だったため検証不要だったが、net10 では stamp 経路が将来の SDK 挙動変化で drift しうる
+    # (#283 と同根)。LauncherAgent は現状 Manager 版数タブ未掲載 (#310) だが、stale stamp の実害 =「誤版数を
+    # 焼いた exe を zip 同梱」は表示の有無と無関係に起きるため、Assert-PublishedManagerVersion と対称に
+    # defense-in-depth で exe FileVersion ↔ SoT を upload 前に hard fail させる (SPEC §3.7.8: 判定軸は stamp
+    # パイプラインの有無で、表示有無ではない)。Build-LauncherAgent の後に呼ぶこと。
+    # 注 (Assert-PublishedManagerVersion と対称): 比較は exe の FileVersion (=AssemblyFileVersion 由来) ↔
+    # $script:LauncherAgentVersion (=Assert-LauncherAgentVersion が AssemblyVersion 属性を読んだ値=SoT)。
+    # AssemblyInfo.cs が両属性を同値に保つ前提で一致し、両者 drift も検出できる。意図的に AssemblyFileVersion ≠
+    # AssemblyVersion にする運用なら本 gate は誤 fail するので、その時は比較対象を AssemblyFileVersion に寄せること。
+    Write-Step "LauncherAgent exe の版数を検証 (SoT 一致)"
+    $exe = Join-Path (Join-Path $FilesDir 'Companions\LauncherAgent') 'TonePrism_LauncherAgent.exe'
+    if (-not (Test-Path $exe)) {
+        Fail "検証対象の exe が見つかりません: $exe (Build-LauncherAgent の後に呼ぶこと)"
+    }
+    $fileVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe).FileVersion
+    $parsed = $null
+    if (-not [version]::TryParse($fileVersion, [ref]$parsed)) {
+        Fail "LauncherAgent exe の FileVersion を parse できません ('$fileVersion'、path=$exe)。AssemblyInfo.cs の AssemblyFileVersion を確認。"
+    }
+    # exe は 4 part (X.Y.Z.0)、SoT は 3 part (X.Y.Z)。Major.Minor.Build で比較。
+    $exe3 = "$($parsed.Major).$($parsed.Minor).$($parsed.Build)"
+    if ($exe3 -ne $script:LauncherAgentVersion) {
+        Fail ("LauncherAgent exe の FileVersion ($fileVersion → $exe3) が SoT ($script:LauncherAgentVersion) と不一致。" +
+            "dotnet publish の版数 stamp が未反映の疑い (AssemblyInfo.cs AssemblyFileVersion)。誤版数の publish を防ぐべく中止。")
+    }
+    Write-Ok "LauncherAgent exe FileVersion = $fileVersion (SoT $script:LauncherAgentVersion と一致)"
+}
+
+function Assert-LauncherAgentSingleFile {
+    # (#258 PR4.x レビュー) LauncherAgent も Manager と同一の self-contained single-file publish
+    # (PublishSingleFile + IncludeNativeLibrariesForSelfExtract) を使うため、Assert-ManagerSingleFile と
+    # 対称に「LauncherAgent = exe 1 個」を機械強制する。Assert-ExpectedFiles は manifest 記載ファイルの
+    # presence のみ検証で余剰を見ない (manifest forward-compat の設計上そうなっている) ため、SDK の挙動変化で
+    # sidecar (createdump.exe / loose native dll / *.json 等) が publish 出力に混ざり manifest 非記載のまま
+    # zip 同梱される silent drift を upload 前に fail-fast する。Build-LauncherAgent の後に呼ぶこと (staging の
+    # Companions\LauncherAgent dir = 出荷物そのもの。pdb は Build-LauncherAgent のコピーで除外済)。
+    Write-Step "LauncherAgent が single-file (exe 1 個) であることを検証"
+    $laDir = Join-Path $FilesDir 'Companions\LauncherAgent'
+    if (-not (Test-Path $laDir)) {
+        Fail "検証対象の LauncherAgent staging dir が見つかりません: $laDir (Build-LauncherAgent の後に呼ぶこと)"
+    }
+    $files = @(Get-ChildItem $laDir -Recurse -File)
+    $unexpected = @($files | Where-Object { $_.Name -ne 'TonePrism_LauncherAgent.exe' })
+    if ($unexpected.Count -gt 0) {
+        $names = ($unexpected | ForEach-Object { $_.FullName.Substring($laDir.Length + 1) }) -join ', '
+        Fail @"
+LauncherAgent staging に想定外のファイルがあります (single-file = TonePrism_LauncherAgent.exe 1 個のはず): $names
+single-file 不変条件が崩れています。csproj の PublishSingleFile / IncludeNativeLibrariesForSelfExtract、
+または SDK の挙動変化で sidecar が吐かれていないか確認してください。
+expected-files (manifest) は presence のみ検証で余剰を検出しないため、ここで fail-fast します。
+"@
+    }
+    Write-Ok "LauncherAgent staging = TonePrism_LauncherAgent.exe 1 個 (single-file 不変条件 OK)"
 }
 
 # ============================================================================
@@ -1853,8 +1934,8 @@ $script:BundleManifestFiles = @(
     'files\Companions\Updater\TonePrism_Updater.exe',
     'files\Companions\Updater\TonePrism_Updater.exe.config',
     # LauncherAgent (#101 / #216 / #30、SPEC §2.4): Launcher 補助の常駐エージェント (probe/sensor/focus 統合、旧 WindowProbe)
+    # (#258 PR4.x) net10 self-contained single-file 化で exe 1 個に集約 (旧 .exe.config は net10 で非生成のため撤去)。
     'files\Companions\LauncherAgent\TonePrism_LauncherAgent.exe',
-    'files\Companions\LauncherAgent\TonePrism_LauncherAgent.exe.config',
     # CHANGELOG.md (Phase 4 #108、SPEC §3.7.7): Manager UI が installed Bundle version 抽出に使う SoT、
     # `<install>/CHANGELOG.md` 直下配置で `Launcher/` `Manager/` 等と同階層 (project-wide な SoT semantic)
     'files\CHANGELOG.md'
@@ -2150,6 +2231,8 @@ Assert-PublishedManagerVersion
 Assert-ManagerSingleFile
 Build-Updater
 Build-LauncherAgent
+Assert-PublishedLauncherAgentVersion
+Assert-LauncherAgentSingleFile
 Copy-Templates
 New-BundleManifest        # (#175 Phase 4.1) bundle/bundle_manifest.json 生成、Assert より前
 Assert-ExpectedFiles

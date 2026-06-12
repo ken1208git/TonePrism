@@ -1,53 +1,37 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- TonePrism_LauncherAgent (#30 / #101 / #216): Launcher 系の Win32 機能を集約した常駐エージェント。
-     probe(窓状態監視) + sensor(HOME/Guide 検知) + focus(強制前面化) を 1 プロセスに統合し、
-     双方向 localhost UDP で Launcher と通信する。旧 WindowProbe を置換・廃止。 -->
-<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- TonePrism_LauncherAgent (#30 / #101 / #216): Launcher 系 Win32 機能を集約した常駐エージェント。
+       probe(窓状態監視) + sensor(HOME/Guide 検知) + focus(強制前面化) を 1 プロセスに統合し、
+       双方向 localhost UDP で Launcher と通信する (旧 WindowProbe を置換)。SPEC §2.4。
+
+       (#258 PR4.x) net48 → net10 + self-contained single-file 化。依存ゼロ (System/System.Core は
+       net10 in-box)、WinForms/WPF 不使用の純 Win32 P/Invoke + UDP socket のため net10.0 (非 -windows =
+       WindowsDesktop ランタイム不要の小さい base runtime)。配布形態を Manager と揃える (net10 ランタイム
+       を exe に同梱 = 解凍即起動・ランタイム導入不要)。dev build は single-file にしない (publish 引数で渡す)。 -->
   <PropertyGroup>
-    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
-    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProjectGuid>{B2D4E6F8-1A3C-4E5D-9F70-2C4A6E8D0B1F}</ProjectGuid>
     <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>TonePrism.LauncherAgent</RootNamespace>
     <AssemblyName>TonePrism_LauncherAgent</AssemblyName>
-    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
-    <FileAlignment>512</FileAlignment>
-    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <!-- 既存 Properties/AssemblyInfo.cs (版数) を温存 (SDK 自動生成と二重定義回避)。 -->
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <Deterministic>true</Deterministic>
+    <!-- (#258 PR4.x レビュー) dev の dotnet build 出力を bin\Release\ / bin\Debug\ 直下にフラット化する
+         (TFM サブフォルダ bin\Release\net10.0\ を抑止)。**load-bearing**: Launcher (Godot) の dev 起動 fallback が
+         `Companions/LauncherAgent/bin/{Release,Debug}/TonePrism_LauncherAgent.exe` を直に探すため
+         (launcher_agent.gd `_EXE_CANDIDATES`)、本フラグを外すと出力が net10.0 サブフォルダに移り dev 起動が
+         無言で壊れる。※リリースの Build-LauncherAgent は `dotnet publish -o bin\Release\publish` を使うので
+         成果物 path は本フラグと独立 (publish subdir から staging へコピー)。 -->
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <!-- (#258 PR4.x) サービスモードのネット速度テスト (Program.cs Internet() / #287) が HttpWebRequest +
+         ServicePointManager を使う。net10 では obsolete (SYSLIB0014) だが shim として動作する見込み。ただし
+         net48 と挙動が変わる点あり (レビュー): (a) `ReadWriteTimeout` が **no-op** = ストリーム読み込み中の stall が
+         8s で中断されず、低速/切断時に最大 ~10s 余計にハングしうる (req.Timeout は GetResponse 用で別経路)、
+         (b) `DefaultConnectionLimit=64` も実質 no-op (SocketsHttpHandler 既定で接続数は実質制限なし = 並列DLは維持)。
+         net10 実機での速度テスト挙動 (mbps 妥当性・403/timeout 誤検出無し・低速時にハングせず終了) は #287 で実測確認。
+         機械的な net10 移行で速度テストのロジックを書き換えるのは behavioral リスクのため、HttpClient 化
+         (読み込みタイムアウトを CancellationToken/HttpClient.Timeout で再導入) は #360 とし、ここでは警告のみ抑止する。 -->
+    <NoWarn>SYSLIB0014</NoWarn>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-    <PlatformTarget>AnyCPU</PlatformTarget>
-    <DebugSymbols>true</DebugSymbols>
-    <DebugType>full</DebugType>
-    <Optimize>false</Optimize>
-    <OutputPath>bin\Debug\</OutputPath>
-    <DefineConstants>DEBUG;TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <PlatformTarget>AnyCPU</PlatformTarget>
-    <DebugType>pdbonly</DebugType>
-    <Optimize>true</Optimize>
-    <OutputPath>bin\Release\</OutputPath>
-    <DefineConstants>TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-  </PropertyGroup>
-  <ItemGroup>
-    <Reference Include="System" />
-    <Reference Include="System.Core" />
-  </ItemGroup>
-  <ItemGroup>
-    <Compile Include="Program.cs" />
-    <Compile Include="Win32Windows.cs" />
-    <Compile Include="InputSensor.cs" />
-    <Compile Include="Logger.cs" />
-    <Compile Include="Properties\AssemblyInfo.cs" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="App.config" />
-  </ItemGroup>
-  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+
 </Project>

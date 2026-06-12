@@ -13,6 +13,24 @@
 
 リリース zip 全体に付与する独立バージョン。GitHub Releases の本文として `Release.ps1` がこのセクションを抜き出して使う。エンドユーザー（来場スタッフ / 顧問の先生 / 部員）向けの **summary** を書く。技術詳細は `## Launcher` / `## Manager` / `## Release Tooling` 等の別セクションを参照。詳細仕様は [SPECIFICATION.md §3.7.7](SPECIFICATION.md) を参照。
 
+### [Bundle v0.9.0] - 2026-06-12
+
+**管理ソフトの内部基盤を最新化**したリリースです。管理ソフト（Manager）と Launcher 補助エージェント（LauncherAgent）を **.NET 10** に移行し、配布を **1 ファイルにまとめた形式**（必要なものを exe に内包・解凍してすぐ起動・追加インストール不要）に切り替えました。**画面の見た目・操作は変わりません**（来場スタッフ・部員の使い方はそのまま）。あわせてアプリの表示名を「ランチャー」「マネージャー」に統一しました。
+
+主な変更:
+- **管理ソフト(Manager)を .NET 10 + 単一ファイル配布に刷新**: これまで複数ファイルだった Manager フォルダが `TonePrism_Manager.exe` 1 個になりました（中に必要なものを全部内包）。動作・画面は従来どおり。
+- **LauncherAgent も同様に .NET 10 + 単一ファイル化**: ゲーム中の中断メニュー（HOME メニュー）を支える常駐プログラムも同じ形式に統一。
+- **アプリ表示名の統一**: 「ランチャー」「マネージャー」表記に揃えました（#351）。
+
+**アップデート方法**: Manager の「アップデート」タブから適用。**DB スキーマの変更はありません**（v23 のまま・データはそのまま）。Manager / LauncherAgent はファイルをまとめた分サイズが大きくなっています（ダウンロードに少し時間がかかる場合があります）。
+
+- Launcher: v0.11.7 → v0.11.8（表示名統一 #351）
+- Manager: v0.27.4 → v0.27.9（.NET 10 + 単一ファイル配布 #258 ／ 表示名統一 #351）
+- LauncherAgent: v0.2.1 → v0.3.0（.NET 10 + 単一ファイル配布 #258 PR4.x）
+- Updater: v0.2.1（変更なし・自己更新の番人として .NET 4.8 据え置き）
+
+**Notes**: 内部基盤の刷新（.NET 10 化・配布形態変更）という大きな土台変更のため Bundle minor bump（v0.8.3 → v0.9.0）。DB スキーマ変更なし（v23 据え置き）。配布は win-x64 専用＝**32bit Windows は非対応**になりました（本番 PC は全て 64bit のため影響なし）。
+
 ### [Bundle v0.8.3] - 2026-06-11
 
 **ストア画面の仕上げ**をまとめたリリースです。v0.8.2（6/10）以降、本番カタログの準備中に見つかった表示・操作の引っかかりを解消しました（新機能はなく、見やすさ・操作感の改善が中心です）。
@@ -1312,6 +1330,22 @@ Release.bat の編集は **UTF-8 (no BOM) + CRLF** 厳守 (SPEC §3.7.9.1 参照
 ## Companions（runtime exe 群）
 
 SPEC §2.4 で定義される「主要 (Launcher / Manager / Monitor) を補助する独立 exe 群」の **runtime exe** の変更履歴。`Companions/Updater/TonePrism_Updater.exe` (Manager 自身の dir 置換用) + `LauncherAgent` (#30/#101/#216、probe/sensor/focus を統合した Launcher 補助の常駐エージェント、旧 WindowProbe を吸収) の deployment 配置と整合。本 section は **#160 で `## Updater (Companions/Updater)` から rename + 一般化**、`## Release Tooling` (= build / 配布スクリプト) と責務分離 (= 後者は build 時のみ動く scripts、本 section は runtime exe)。SPEC §2.4 / §3.7.4 参照。
+
+### [LauncherAgent v0.3.0] - 2026-06-12
+
+#### Changed (#258 PR4.x — net48 → net10 + self-contained single-file)
+
+- **net48 → net10 移行 + SDK-style 化**: classic csproj（`<Reference>` のみ）→ SDK-style（`net10.0`・非 -windows）。依存ゼロ・WinForms/WPF 不使用の純 Win32 P/Invoke + UDP socket のため `net10.0` base runtime で十分（WindowsDesktop ランタイム不要＝Manager の ~176MB より小さい **~73MB**）。`AppDomain.CurrentDomain.BaseDirectory`（single-file で well-defined）・Sockets・P/Invoke は全て net10 in-box で **コード無改変**（`ConfigurationManager`/`Registry`/`System.Drawing` 等の net48-ism は grep 0 件）。
+- **配布 = self-contained single-file**: `Release.ps1 Build-LauncherAgent` を `msbuild` → `dotnet publish -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true` に変更（配布形態を Manager と揃える）。出力 = `TonePrism_LauncherAgent.exe` 1 個、旧 `.exe.config` は net10 で非生成のため expected-files（`$script:BundleManifestFiles`）から撤去。`ValidateStagingLegacy` には元々 LauncherAgent を載せない方針（SPEC §3.7.8）のため touch 不要。
+- **App.config 削除**（`ConfigurationManager` 不使用）。Release.ps1 の `.NOTES` / ビルド手順コメントを「LauncherAgent = net10 dotnet publish、Updater = net48 msbuild（番人）」に更新。
+- **`SYSLIB0014` 抑止 + net10 shim 挙動差の明記**: サービスモードのネット速度テスト（`Internet()` / #287）が `HttpWebRequest` + `ServicePointManager` を使う。net10 では obsolete だが shim として動作。ただし **net48 と挙動が変わる点**あり（レビュー）: `ReadWriteTimeout` が **no-op**（ストリーム読み込み中の stall が 8s で中断されず、低速/切断時に最大 ~10s 余計にハングしうる）、`DefaultConnectionLimit=64` も実質 no-op（SocketsHttpHandler 既定で接続数は実質制限なし＝並列 DL は維持）。機械的移行で速度テストのロジック書き換えは behavioral リスクのため `<NoWarn>SYSLIB0014</NoWarn>` で抑止し、**HttpClient 化（読み込みタイムアウトを CancellationToken で再導入）は #360 で追跡**。実機での「低速/切断時にハングせず終了」確認は #287/#360。
+- **single-file 不変条件ガード**: Manager の `Assert-ManagerSingleFile` と対称に **`Assert-LauncherAgentSingleFile`** を追加（同一 publish フラグを使うため、staging の `Companions/LauncherAgent/` が `TonePrism_LauncherAgent.exe` 1 個であることを `Build-LauncherAgent` 直後に machine-enforce。`Assert-ExpectedFiles` は presence のみ検証で sidecar 余剰を見ないため、`createdump.exe` 等の silent 混入を upload 前に fail-fast）。
+- **版数公開前ゲート**: Manager の `Assert-PublishedManagerVersion` と対称に **`Assert-PublishedLauncherAgentVersion`** を追加（レビュー指摘）。net10 apphost stamp 由来の exe FileVersion ↔ SoT（AssemblyInfo）を `Build-LauncherAgent` 直後に hard fail。**§3.7.8 のゲート判定軸を「表示 ∧ stamp」→「stamp パイプラインの有無」に修正**: 当初「LauncherAgent は版数タブ未掲載（#310）＝対象外」としたが、stale stamp の実害＝「誤版数を焼いた exe を zip 同梱」は**表示の有無と無関係**に起きるため撤回し、stamp 経由（net10 apphost）の LauncherAgent も Manager と対称にゲート。`Assert-ComponentVersions` に LauncherAgent SoT 読取を追加。
+- **（レビュー）`AppendTargetFrameworkToOutputPath=false` のコメント精緻化**: 本フラグは dev `dotnet build` 出力を `bin/{Release,Debug}/` 直下にフラット化し、Launcher の dev 起動 fallback（`launcher_agent.gd` `_EXE_CANDIDATES` が `bin/Release`・`bin/Debug` を直探索）を成立させる **load-bearing** な設定。旧コメントの「Release.ps1 が bin\Release\ を直参照」は誤帰属（リリースは `dotnet publish -o bin\Release\publish` を使う）で、消すと dev 起動が無言で壊れる温床だったため実態に修正。
+- bump: net10 移行という土台変更のため minor（v0.2.1 → v0.3.0）。Bundle 反映は v0.9.0。
+- 検証: net10 single-file publish 実測（`TonePrism_LauncherAgent.exe` 1 個・73MB・FileVersion **0.3.0.0**＝SoT 一致）。`Release.ps1 -DryRun` で Bundle v0.9.0 を全ビルド + 全ゲート緑（`Assert-LauncherAgentSingleFile` 含む）。常駐 probe/sensor/focus + UDP handshake + HOME overlay の実起動 smoke と net10 self-extract 経路は **pre-release / 部活で実機初確認**（コード読みでは確定不能）。
+
+**Note**: LauncherAgent は Manager「アップデート」タブの版数**表示**は未実装（#310 で追加予定）だが、exe 版数の**公開前ゲートは表示有無と独立に追加済**（上記・§3.7.8 改定）。#310 で表示を足す際は VersionInventory に LauncherAgent 行を追加する。
 
 ### [LauncherAgent v0.2.1] - 2026-06-09
 
@@ -4766,6 +4800,7 @@ Release.ps1 の $FooterSentinel 定数も同期更新すること。
 
 <!-- GCTONEPRISM-CHANGELOG-FOOTER-BEGIN-V1 -->
 
+[Bundle v0.9.0]: https://github.com/ken1208git/TonePrism/releases/tag/v0.9.0
 [Bundle v0.8.3]: https://github.com/ken1208git/TonePrism/releases/tag/v0.8.3
 [Bundle v0.8.2]: https://github.com/ken1208git/TonePrism/releases/tag/v0.8.2
 [Bundle v0.8.1]: https://github.com/ken1208git/TonePrism/releases/tag/v0.8.1
