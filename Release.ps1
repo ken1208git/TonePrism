@@ -1756,6 +1756,10 @@ function Assert-PublishedLauncherAgentVersion {
     # 焼いた exe を zip 同梱」は表示の有無と無関係に起きるため、Assert-PublishedManagerVersion と対称に
     # defense-in-depth で exe FileVersion ↔ SoT を upload 前に hard fail させる (SPEC §3.7.8: 判定軸は stamp
     # パイプラインの有無で、表示有無ではない)。Build-LauncherAgent の後に呼ぶこと。
+    # 注 (Assert-PublishedManagerVersion と対称): 比較は exe の FileVersion (=AssemblyFileVersion 由来) ↔
+    # $script:LauncherAgentVersion (=Assert-LauncherAgentVersion が AssemblyVersion 属性を読んだ値=SoT)。
+    # AssemblyInfo.cs が両属性を同値に保つ前提で一致し、両者 drift も検出できる。意図的に AssemblyFileVersion ≠
+    # AssemblyVersion にする運用なら本 gate は誤 fail するので、その時は比較対象を AssemblyFileVersion に寄せること。
     Write-Step "LauncherAgent exe の版数を検証 (SoT 一致)"
     $exe = Join-Path (Join-Path $FilesDir 'Companions\LauncherAgent') 'TonePrism_LauncherAgent.exe'
     if (-not (Test-Path $exe)) {

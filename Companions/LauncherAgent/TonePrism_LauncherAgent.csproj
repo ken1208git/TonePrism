@@ -24,10 +24,13 @@
          成果物 path は本フラグと独立 (publish subdir から staging へコピー)。 -->
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <!-- (#258 PR4.x) サービスモードのネット速度テスト (Program.cs Internet() / #287) が HttpWebRequest +
-         ServicePointManager を使う。net10 では obsolete (SYSLIB0014) だが shim として動作する見込み (接続数上限は
-         SocketsHttpHandler 既定で実質制限なし = 並列DLは維持されるはず。net10 実機での速度テスト挙動 — mbps 妥当性・
-         403/timeout 誤検出無し — は #287 で実測確認すること)。機械的な net10 移行で速度テストのロジックを書き換えるのは
-         behavioral リスクのため、HttpClient 化は将来別 issue とし、ここでは警告のみ抑止する。 -->
+         ServicePointManager を使う。net10 では obsolete (SYSLIB0014) だが shim として動作する見込み。ただし
+         net48 と挙動が変わる点あり (レビュー): (a) `ReadWriteTimeout` が **no-op** = ストリーム読み込み中の stall が
+         8s で中断されず、低速/切断時に最大 ~10s 余計にハングしうる (req.Timeout は GetResponse 用で別経路)、
+         (b) `DefaultConnectionLimit=64` も実質 no-op (SocketsHttpHandler 既定で接続数は実質制限なし = 並列DLは維持)。
+         net10 実機での速度テスト挙動 (mbps 妥当性・403/timeout 誤検出無し・低速時にハングせず終了) は #287 で実測確認。
+         機械的な net10 移行で速度テストのロジックを書き換えるのは behavioral リスクのため、HttpClient 化
+         (読み込みタイムアウトを CancellationToken/HttpClient.Timeout で再導入) は #360 とし、ここでは警告のみ抑止する。 -->
     <NoWarn>SYSLIB0014</NoWarn>
   </PropertyGroup>
 
