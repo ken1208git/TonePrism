@@ -37,9 +37,12 @@
             </ui:TitleBar.Icon>
         </ui:TitleBar>
 
+        <!-- (#245 PR5) ペイン・コンテンツ背景を窓と同色 (#FF202020) に統一。WPF-UI 既定だと
+             コンテンツ領域が別シェードになり左ペインとズレるため明示。 -->
         <ui:NavigationView
             x:Name="RootNavigation"
-            Grid.Row="1">
+            Grid.Row="1"
+            Background="#FF202020">
             <ui:NavigationView.MenuItems>
                 <ui:NavigationViewItem Content="ゲーム" TargetPageType="{x:Type local:GameHostPage}">
                     <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Games24" /></ui:NavigationViewItem.Icon>

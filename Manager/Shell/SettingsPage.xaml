@@ -2,7 +2,8 @@
     x:Class="TonePrism.Manager.Shell.SettingsPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Background="#FF202020">
 
     <!-- (#362 step B1) 初の WPF ネイティブ画面。設定を「適用ボタン」から即時反映へ (#201 ガード撤去)。
          反映: トグル=即 / 数値=離脱時 / パス=離脱・参照選択時に検証して反映。
