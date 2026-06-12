@@ -1,4 +1,4 @@
-<UserControl x:Class="TonePrism.Manager.Wpf.SpikeControl"
+<UserControl x:Class="TonePrism.Manager.Shell.SpikeControl"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!-- (#245 Phase 0) WPF 共存スパイク。net10 Manager (WinForms + UseWPF) で WPF UserControl が
@@ -11,6 +11,13 @@
             <Button x:Name="CountButton" Content="クリックして数える" Padding="18,10" FontSize="14"
                     HorizontalAlignment="Left" Click="CountButton_Click"/>
             <TextBlock x:Name="CountLabel" Text="クリック回数: 0" FontSize="18" Margin="0,16,0,0"/>
+
+            <Separator Margin="0,28,0,20"/>
+            <TextBlock Text="PR5 額縁プレビュー" FontSize="16" FontWeight="Bold" Margin="0,0,0,4"/>
+            <TextBlock Text="下のボタンで Win11 設定アプリ風のシェル窓 (Mica/ダーク/サイドバー) を開きます。"
+                       TextWrapping="Wrap" Foreground="#555555" Margin="0,0,0,12" MaxWidth="520"/>
+            <Button x:Name="ShellPreviewButton" Content="Win11 シェルをプレビュー" Padding="18,10" FontSize="14"
+                    HorizontalAlignment="Left" Click="ShellPreviewButton_Click"/>
         </StackPanel>
     </Border>
 </UserControl>

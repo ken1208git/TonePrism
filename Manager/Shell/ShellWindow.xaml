@@ -1,0 +1,60 @@
+<ui:FluentWindow
+    x:Class="TonePrism.Manager.Shell.ShellWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:local="clr-namespace:TonePrism.Manager.Shell"
+    Title="TonePrism マネージャー (WPF プレビュー)"
+    Width="1040" Height="680"
+    MinWidth="820" MinHeight="520"
+    WindowStartupLocation="CenterScreen"
+    WindowBackdropType="Mica"
+    ExtendsContentIntoTitleBar="True">
+
+    <!-- (#245 PR5) Win11 設定アプリ風シェルのプレビュー。FluentWindow=Mica 背景・ダーク、
+         NavigationView=左サイドバー。本配線では各ページに既存 WinForms パネルを WindowsFormsHost でホストする。
+         throwaway: 見た目確認用。OK なら本シェルへ発展、ダメなら撤去。 -->
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="TonePrism マネージャー">
+            <ui:TitleBar.Icon>
+                <ui:SymbolIcon Symbol="Apps24" />
+            </ui:TitleBar.Icon>
+        </ui:TitleBar>
+
+        <ui:NavigationView
+            x:Name="RootNavigation"
+            Grid.Row="1">
+            <ui:NavigationView.MenuItems>
+                <ui:NavigationViewItem Content="ゲーム" TargetPageType="{x:Type local:PreviewPage}">
+                    <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Games24" /></ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="ストア" TargetPageType="{x:Type local:PreviewPage}">
+                    <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Grid24" /></ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="初回説明" TargetPageType="{x:Type local:PreviewPage}">
+                    <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Info24" /></ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="バックアップ" TargetPageType="{x:Type local:PreviewPage}">
+                    <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Save24" /></ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="ログ" TargetPageType="{x:Type local:PreviewPage}">
+                    <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Document24" /></ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+            </ui:NavigationView.MenuItems>
+            <ui:NavigationView.FooterMenuItems>
+                <ui:NavigationViewItem Content="アップデート" TargetPageType="{x:Type local:PreviewPage}">
+                    <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="ArrowSync24" /></ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="設定" TargetPageType="{x:Type local:PreviewPage}">
+                    <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Settings24" /></ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+            </ui:NavigationView.FooterMenuItems>
+        </ui:NavigationView>
+    </Grid>
+</ui:FluentWindow>

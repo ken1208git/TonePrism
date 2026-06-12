@@ -575,7 +575,7 @@ namespace TonePrism.Manager
                 var wpfHost = new System.Windows.Forms.Integration.ElementHost
                 {
                     Dock = System.Windows.Forms.DockStyle.Fill,
-                    Child = new Wpf.SpikeControl()
+                    Child = new Shell.SpikeControl()
                 };
                 _wpfSpikeTab.Controls.Add(wpfHost);
                 tabControl1.TabPages.Add(_wpfSpikeTab);

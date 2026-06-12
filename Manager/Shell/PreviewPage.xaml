@@ -1,0 +1,42 @@
+<Page
+    x:Class="TonePrism.Manager.Shell.PreviewPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+
+    <!-- (#245 PR5) シェルプレビューの content 領域 placeholder。本配線ではここに既存 WinForms パネルを
+         WindowsFormsHost でホストする。今は Win11 Fluent の見た目 (カード/トグル等) を見せるための仮中身。 -->
+    <ScrollViewer Padding="36,28,36,28">
+        <StackPanel>
+            <TextBlock Text="WPF シェル プレビュー" FontSize="28" FontWeight="Bold" />
+            <TextBlock Margin="0,6,0,24" TextWrapping="Wrap" Opacity="0.7"
+                Text="PR5 の額縁プレビューです。Mica 背景・ダークテーマ・左サイドバー (NavigationView) が Win11 設定アプリ風になっていれば成功。本配線では各項目に既存の WinForms 画面をホストします。" />
+
+            <ui:CardControl Margin="0,0,0,12" Icon="{ui:SymbolIcon Color24}">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <TextBlock Text="ダークモード" FontWeight="SemiBold" />
+                        <TextBlock Text="システム設定に追従させる予定 (今は Dark 固定で表示確認)" Opacity="0.6" FontSize="12" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <ui:ToggleSwitch IsChecked="True" />
+            </ui:CardControl>
+
+            <ui:CardControl Margin="0,0,0,12" Icon="{ui:SymbolIcon Games24}">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <TextBlock Text="ゲーム登録 (例)" FontWeight="SemiBold" />
+                        <TextBlock Text="本配線後、ここに既存のゲーム管理画面が入る → 後で WPF 化" Opacity="0.6" FontSize="12" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <ui:Button Content="開く" Icon="{ui:SymbolIcon Open24}" />
+            </ui:CardControl>
+
+            <ui:Card Padding="20">
+                <StackPanel>
+                    <TextBlock Text="この箱・トグル・ボタンが Win11 設定アプリ風に見えていれば WPF-UI 採用は成功です。" TextWrapping="Wrap" />
+                </StackPanel>
+            </ui:Card>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

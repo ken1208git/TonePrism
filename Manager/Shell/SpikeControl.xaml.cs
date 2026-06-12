@@ -1,7 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 
-namespace TonePrism.Manager.Wpf
+namespace TonePrism.Manager.Shell
 {
     /// <summary>
     /// (#245 Phase 0) WPF 共存スパイク。net10 Manager (WinForms primary + UseWPF) で WPF UserControl が
@@ -22,6 +22,12 @@ namespace TonePrism.Manager.Wpf
         {
             _count++;
             CountLabel.Text = $"クリック回数: {_count}";
+        }
+
+        // (#245 PR5) Win11 設定アプリ風シェルのプレビュー窓を開く (throwaway)。
+        private void ShellPreviewButton_Click(object sender, RoutedEventArgs e)
+        {
+            new ShellWindow().Show();
         }
     }
 }

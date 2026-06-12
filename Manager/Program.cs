@@ -104,6 +104,19 @@ namespace TonePrism.Manager
                     Application.SetHighDpiMode(HighDpiMode.DpiUnaware);
                     Application.EnableVisualStyles();
                     Application.SetCompatibleTextRenderingDefault(false);
+
+                    // (#245 PR5) WPF-UI のテーマ/リソースを app 全体で有効にするため WPF Application を確立する。
+                    // App.xaml が無い (WinForms primary) ので C# で ThemesDictionary/ControlsDictionary を merge。
+                    // WinForms 側が message loop を駆動するため WPF の Application.Run は呼ばない
+                    // (ShutdownMode=OnExplicitShutdown で WPF window を閉じてもプロセスが落ちないようにする)。
+                    var wpfApp = new System.Windows.Application
+                    {
+                        ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown
+                    };
+                    wpfApp.Resources.MergedDictionaries.Add(
+                        new Wpf.Ui.Markup.ThemesDictionary { Theme = Wpf.Ui.Appearance.ApplicationTheme.Dark });
+                    wpfApp.Resources.MergedDictionaries.Add(new Wpf.Ui.Markup.ControlsDictionary());
+
                     Application.Run(new MainForm());
                 }
                 catch (DirectoryNotFoundException ex)
