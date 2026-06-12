@@ -27,8 +27,8 @@ namespace TonePrism.Manager.Shell
         // (レビュー #6) 数値設定のデバウンス書込: スピナー連打を 1 回にまとめて SMB 越し DB 往復を減らす。
         // 同キーの直近値だけ保持し、500ms 静止 / 欄離脱 / ナビ離脱で 1 回 flush する (即時反映=保存ボタン無し
         // ・未保存状態なしは維持。デバウンス窓内の強制 kill だけが最後の 1 変更を失うが、設定編集中の kill は稀)。
-        private readonly Dictionary<string, (int value, string label)> _pendingInts
-            = new Dictionary<string, (int value, string label)>();
+        // (round4 #1) 競合チェックは flush 全体で 1 度 (固定 label) なので per-key label は不要 → key→value のみ保持。
+        private readonly Dictionary<string, int> _pendingInts = new Dictionary<string, int>();
         private DispatcherTimer _intDebounce;
 
         // (レビュー #1) パスの直近保存値を追跡し、値が変化した時だけ書込＋セッション競合チェックを行う
@@ -48,11 +48,11 @@ namespace TonePrism.Manager.Shell
             // SMB 往復を減らす)。欄離脱 (LostFocus) / ナビ離脱 (Unloaded) で即 flush するので未保存状態は残らない。
             LogRetentionBox.ValueChanged += (s, e) =>
             {
-                if (!_loading) QueueInt(SettingsKeys.LogRetentionDays, (int)Math.Round(LogRetentionBox.Value ?? 0), "ログ設定の適用");
+                if (!_loading) QueueInt(SettingsKeys.LogRetentionDays, (int)Math.Round(LogRetentionBox.Value ?? 0));
             };
             BackupRetentionBox.ValueChanged += (s, e) =>
             {
-                if (!_loading) QueueInt("backup_retention_count", (int)Math.Round(BackupRetentionBox.Value ?? 0), "バックアップ設定の適用");
+                if (!_loading) QueueInt("backup_retention_count", (int)Math.Round(BackupRetentionBox.Value ?? 0));
             };
             // (#362) ナビ離脱時に未フラッシュの数値 + パスの未コミット直接入力を確実に書く保険 (prompt は出さない)。
             Unloaded += (_, _) => { FlushPendingInts(); FlushPaths(); };
@@ -140,9 +140,9 @@ namespace TonePrism.Manager.Shell
         }
 
         // (レビュー #6) 数値書込をデバウンス。同キーの直近値だけ保持し、500ms 静止後に flush で一括書込する。
-        private void QueueInt(string key, int value, string label)
+        private void QueueInt(string key, int value)
         {
-            _pendingInts[key] = (value, label);
+            _pendingInts[key] = value;
             if (_intDebounce == null)
             {
                 _intDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
@@ -154,17 +154,19 @@ namespace TonePrism.Manager.Shell
 
         // 保留中の数値書込を即時 flush する (デバウンス満了 / 欄離脱 / ナビ離脱)。
         // (レビュー #6) セッション競合チェックは flush 全体で 1 度だけ (複数 retention を同時に変更して離脱した際に
-        // SessionConflictDialog が 2 連続で出るのを防ぐ)。数値は実変更時のみ queue されるので no-op flush は無い。
+        // SessionConflictDialog が 2 連続で出るのを防ぐ)。(round4 #2) 数値は実変更時のみ queue されるので no-op flush は
+        // 基本無い (例外: 同一操作で保存値へ revert した時だけ最終値=保存値で flush される)。パスのような last-saved
+        // ガードは付けない＝flush トリガが ValueChanged 限定で頻度が低く、競合 × revert の二重稀ケースに限るため。
         private void FlushPendingInts()
         {
             _intDebounce?.Stop();
             if (_pendingInts.Count == 0 || _loading || Db == null) { _pendingInts.Clear(); return; }
-            var snapshot = new List<KeyValuePair<string, (int value, string label)>>(_pendingInts);
+            var snapshot = new List<KeyValuePair<string, int>>(_pendingInts);
             _pendingInts.Clear();
             if (!AllowWrite("設定の適用")) return;
             foreach (var kv in snapshot)
             {
-                try { Db.SettingsRepository.SetInt32(kv.Key, kv.Value.value); }
+                try { Db.SettingsRepository.SetInt32(kv.Key, kv.Value); }
                 catch (Exception ex) { Logger.Warn("[SettingsPage] 数値設定保存失敗 (" + kv.Key + "): " + ex.Message); }
             }
         }
