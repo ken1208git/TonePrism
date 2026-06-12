@@ -289,6 +289,7 @@ $script:ResolvedDotnet      = $null
 $script:GodotPatchUsed      = $null  # 解決された Godot patch (例: "4.6.2")
 $script:LauncherVersion     = $null
 $script:ManagerVersion      = $null
+$script:LauncherAgentVersion = $null
 $script:DeleteExistingRelease = $false
 
 # ============================================================================
@@ -1259,12 +1260,27 @@ function Assert-ManagerVersion {
     return $m.Groups[1].Value
 }
 
+function Assert-LauncherAgentVersion {
+    $assemblyInfo = Join-Path $RepoRoot 'Companions\LauncherAgent\Properties\AssemblyInfo.cs'
+    if (-not (Test-Path $assemblyInfo)) {
+        Fail "LauncherAgent AssemblyInfo.cs が見つかりません: $assemblyInfo"
+    }
+    $content = Get-Content $assemblyInfo -Raw
+    $m = [regex]::Match($content, 'AssemblyVersion\("(\d+\.\d+\.\d+)\.\d+"\)')
+    if (-not $m.Success) {
+        Fail "LauncherAgent AssemblyInfo.cs から AssemblyVersion を読み取れませんでした"
+    }
+    return $m.Groups[1].Value
+}
+
 function Assert-ComponentVersions {
     Write-Step "コンポーネント version を読み取り"
     $script:LauncherVersion = Assert-LauncherVersion
     $script:ManagerVersion = Assert-ManagerVersion
-    Write-Ok "Launcher: v$script:LauncherVersion"
-    Write-Ok "Manager:  v$script:ManagerVersion"
+    $script:LauncherAgentVersion = Assert-LauncherAgentVersion
+    Write-Ok "Launcher:      v$script:LauncherVersion"
+    Write-Ok "Manager:       v$script:ManagerVersion"
+    Write-Ok "LauncherAgent: v$script:LauncherAgentVersion"
 }
 
 # ============================================================================
@@ -1732,6 +1748,33 @@ function Build-LauncherAgent {
     }
 }
 
+function Assert-PublishedLauncherAgentVersion {
+    # (#258 PR4.x レビュー) net10 single-file 化で LauncherAgent exe の Win32 FileVersion も Manager と同様
+    # dotnet publish の apphost stamp (AssemblyFileVersion 由来) になった。net48 時代はコンパイル済アセンブリで
+    # 自明に SoT 一致だったため検証不要だったが、net10 では stamp 経路が将来の SDK 挙動変化で drift しうる
+    # (#283 と同根)。LauncherAgent は現状 Manager 版数タブ未掲載 (#310) だが、stale stamp の実害 =「誤版数を
+    # 焼いた exe を zip 同梱」は表示の有無と無関係に起きるため、Assert-PublishedManagerVersion と対称に
+    # defense-in-depth で exe FileVersion ↔ SoT を upload 前に hard fail させる (SPEC §3.7.8: 判定軸は stamp
+    # パイプラインの有無で、表示有無ではない)。Build-LauncherAgent の後に呼ぶこと。
+    Write-Step "LauncherAgent exe の版数を検証 (SoT 一致)"
+    $exe = Join-Path (Join-Path $FilesDir 'Companions\LauncherAgent') 'TonePrism_LauncherAgent.exe'
+    if (-not (Test-Path $exe)) {
+        Fail "検証対象の exe が見つかりません: $exe (Build-LauncherAgent の後に呼ぶこと)"
+    }
+    $fileVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe).FileVersion
+    $parsed = $null
+    if (-not [version]::TryParse($fileVersion, [ref]$parsed)) {
+        Fail "LauncherAgent exe の FileVersion を parse できません ('$fileVersion'、path=$exe)。AssemblyInfo.cs の AssemblyFileVersion を確認。"
+    }
+    # exe は 4 part (X.Y.Z.0)、SoT は 3 part (X.Y.Z)。Major.Minor.Build で比較。
+    $exe3 = "$($parsed.Major).$($parsed.Minor).$($parsed.Build)"
+    if ($exe3 -ne $script:LauncherAgentVersion) {
+        Fail ("LauncherAgent exe の FileVersion ($fileVersion → $exe3) が SoT ($script:LauncherAgentVersion) と不一致。" +
+            "dotnet publish の版数 stamp が未反映の疑い (AssemblyInfo.cs AssemblyFileVersion)。誤版数の publish を防ぐべく中止。")
+    }
+    Write-Ok "LauncherAgent exe FileVersion = $fileVersion (SoT $script:LauncherAgentVersion と一致)"
+}
+
 function Assert-LauncherAgentSingleFile {
     # (#258 PR4.x レビュー) LauncherAgent も Manager と同一の self-contained single-file publish
     # (PublishSingleFile + IncludeNativeLibrariesForSelfExtract) を使うため、Assert-ManagerSingleFile と
@@ -2184,6 +2227,7 @@ Assert-PublishedManagerVersion
 Assert-ManagerSingleFile
 Build-Updater
 Build-LauncherAgent
+Assert-PublishedLauncherAgentVersion
 Assert-LauncherAgentSingleFile
 Copy-Templates
 New-BundleManifest        # (#175 Phase 4.1) bundle/bundle_manifest.json 生成、Assert より前
