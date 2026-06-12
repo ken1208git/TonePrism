@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -55,6 +56,7 @@ namespace TonePrism.Manager.Shell
                 BackupPathBox.Text = (repo.GetString("backup_destination_path", "") ?? "").Trim();
                 BackupAutoToggle.IsChecked = !string.Equals(repo.GetString(SettingsKeys.BackupAutoEnabled, "true"), "false", StringComparison.OrdinalIgnoreCase);
                 BackupRetentionBox.Value = Clamp(repo.GetInt32("backup_retention_count", 30), 1, 999);
+                LoadVersionInfo();
             }
             catch (Exception ex) { Logger.Warn("[SettingsPage] 設定読込失敗: " + ex.Message); }
             finally { _loading = false; }
@@ -181,5 +183,41 @@ namespace TonePrism.Manager.Shell
         }
 
         private void HideMsg(TextBlock msg) => msg.Visibility = Visibility.Collapsed;
+
+        // ---- (B2) バージョン情報 / DB リセット ----
+        private void LoadVersionInfo()
+        {
+            try
+            {
+                var asm = Assembly.GetExecutingAssembly();
+                Version v = asm.GetName().Version;
+                string product = asm.GetCustomAttribute<AssemblyProductAttribute>()?.Product ?? "TonePrism マネージャー";
+                string ver = v == null ? "?" : (v.Major + "." + v.Minor + "." + v.Build + (v.Revision > 0 ? "." + v.Revision : ""));
+                string copyright = asm.GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright ?? "";
+                int actual = Db?.GetActualDatabaseVersion() ?? -1;
+                int target = Db?.GetTargetDatabaseVersion() ?? -1;
+                VersionInfoText.Text =
+                    "製品名: " + product + "\n" +
+                    "バージョン: " + ver + "\n" +
+                    "データベース構造: v" + actual + " (ターゲット: v" + target + ")\n" +
+                    copyright + "\n" +
+                    "ライセンス: MIT License";
+            }
+            catch (Exception ex)
+            {
+                VersionInfoText.Text = "バージョン情報の取得に失敗しました。";
+                Logger.Warn("[SettingsPage] バージョン情報取得失敗: " + ex.Message);
+            }
+        }
+
+        private void ResetDb_Click(object sender, RoutedEventArgs e)
+        {
+            // DB リセット本体は既存 WinForms SettingsSectionPanel に集約 (確認/進捗ダイアログ + ResetDatabase +
+            // DatabaseReset イベントで MainForm が各パネルを再読込)。WPF 側は呼出後に設定表示を default へ同期。
+            var panel = ShellWindow.HostForm?.SettingsSectionPanel;
+            if (panel == null) return;
+            panel.ResetDatabaseWithConfirm();
+            LoadSettings();
+        }
     }
 }

@@ -764,6 +764,7 @@ namespace TonePrism.Manager
         internal Controls.UpdateSectionPanel UpdateSectionPanel => _updateSectionPanel;
         internal Controls.IntroGuidePanel IntroGuidePanel => _introGuidePanel;
         internal Controls.LogSectionPanel LogSectionPanel => _logSectionPanel;
+        internal Controls.SettingsSectionPanel SettingsSectionPanel => _settingsSectionPanel; // (#362 B2) WPF 設定ページの DBリセット委譲先
 
         /// <summary>
         /// 過去 run の失敗 / cancel で残った staging dir を起動時に best-effort 削除する (#108 Phase 4)。

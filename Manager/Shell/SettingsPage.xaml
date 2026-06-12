@@ -109,6 +109,30 @@
                                   LostFocus="BackupRetention_LostFocus" />
                 </Grid>
             </Border>
+
+            <!-- ===== 情報・メンテナンス ===== -->
+            <TextBlock Text="情報・メンテナンス" FontWeight="SemiBold" Margin="2,18,0,8" />
+            <!-- バージョン情報 (読取専用・先頭=上だけ丸) -->
+            <Border Style="{StaticResource GroupItem}" CornerRadius="8,8,0,0" Margin="0,0,0,3">
+                <StackPanel>
+                    <TextBlock Text="バージョン情報" FontWeight="SemiBold" />
+                    <TextBlock x:Name="VersionInfoText" Opacity="0.75" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap" LineHeight="18" />
+                </StackPanel>
+            </Border>
+            <!-- データベースのリセット (末尾=下だけ丸) -->
+            <Border Style="{StaticResource GroupItem}" CornerRadius="0,0,8,8" Margin="0,0,0,18">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0">
+                        <TextBlock Text="データベースのリセット" FontWeight="SemiBold" />
+                        <TextBlock Text="登録したゲーム・開発者・ストア等を全て削除し、まっさらな状態に戻します (元に戻せません)。" Opacity="0.6" FontSize="12" Margin="0,2,0,0" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ui:Button x:Name="ResetDbButton" Grid.Column="1" Content="リセット" VerticalAlignment="Center" Appearance="Danger" Click="ResetDb_Click" />
+                </Grid>
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </Page>
