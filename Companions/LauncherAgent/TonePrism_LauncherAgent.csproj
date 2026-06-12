@@ -16,7 +16,12 @@
     <!-- 既存 Properties/AssemblyInfo.cs (版数) を温存 (SDK 自動生成と二重定義回避)。 -->
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <Deterministic>true</Deterministic>
-    <!-- 出力を bin\$(Configuration)\ に固定 (TFM サブフォルダ抑止)。Release.ps1 が bin\Release\ を直参照。 -->
+    <!-- (#258 PR4.x レビュー) dev の dotnet build 出力を bin\Release\ / bin\Debug\ 直下にフラット化する
+         (TFM サブフォルダ bin\Release\net10.0\ を抑止)。**load-bearing**: Launcher (Godot) の dev 起動 fallback が
+         `Companions/LauncherAgent/bin/{Release,Debug}/TonePrism_LauncherAgent.exe` を直に探すため
+         (launcher_agent.gd `_EXE_CANDIDATES`)、本フラグを外すと出力が net10.0 サブフォルダに移り dev 起動が
+         無言で壊れる。※リリースの Build-LauncherAgent は `dotnet publish -o bin\Release\publish` を使うので
+         成果物 path は本フラグと独立 (publish subdir から staging へコピー)。 -->
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <!-- (#258 PR4.x) サービスモードのネット速度テスト (Program.cs Internet() / #287) が HttpWebRequest +
          ServicePointManager を使う。net10 では obsolete (SYSLIB0014) だが shim として動作する見込み (接続数上限は
