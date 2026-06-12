@@ -18,9 +18,10 @@ namespace TonePrism.Manager
             InitializeComponent();
             _worker = worker;
             _cts = new CancellationTokenSource();
-            // (#245 PR5) 進捗はシェルのタスクバーボタン (緑バー) に集約するため、このモーダル自身は
-            // タスクバーに別ボタンを出さない (二重ボタン回避)。窓内の pbProgress は従来どおり表示。
-            this.ShowInTaskbar = false;
+            // (#245 PR5 / レビュー #6) 進捗はシェルのタスクバーボタン (緑バー) に集約するためモーダル自身は
+            // タスクバーに別ボタンを出さない (二重ボタン回避)。ただしシェル不在の graceful fallback 経路では
+            // 集約先が無いので、このダイアログ自身にタスクバーボタンを出して進捗の存在だけは示す。
+            this.ShowInTaskbar = Shell.ShellWindow.Instance == null;
         }
 
         /// <summary>

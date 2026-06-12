@@ -753,18 +753,29 @@ namespace TonePrism.Manager
                 shell.Show();
                 Shell.SplashScreenHost.Close(); // (#246) スプラッシュを閉じる
                 Hide(); // Load 完了済なので Hide で安全に裏方化 (= MainForm の窓・タスクバーボタンを消す)
-                // (#246) 別スレッドのスプラッシュがフォアグラウンドを握っている + MainForm.Hide() でフォアグラウンドが
-                // 逃げるため、shell.Show() だけではシェルが前面に来ない。同プロセスがフォアグラウンドを保持している
-                // ので Activate で前面化でき、Topmost の一瞬トグルで z-order 最前面を確実化する。
-                shell.Activate();
-                shell.Topmost = true;
-                shell.Topmost = false;
+                // (#246 / レビュー #4) ここから先 (前面化・ステータス反映) は **シェル表示済み** なので、失敗しても
+                // フォールバックせずログのみにする。理由: Hide() 後は外側 catch の Opacity=1 では可視化できず
+                // (Visible=false のまま) フォールバックが死蔵になる + シェルは既に出ているのでフォールバック不要。
+                // 外側 catch は「シェル生成 / Show 失敗 (= MainForm 未 Hide)」専用に限定する。
+                try
+                {
+                    // 別スレッドのスプラッシュがフォアグラウンドを握る + Hide() でフォアグラウンドが逃げるため、
+                    // shell.Show() だけでは前面に来ない。Activate + Topmost 一瞬トグルで z-order 最前面を確実化。
+                    shell.Activate();
+                    shell.Topmost = true;
+                    shell.Topmost = false;
+                    UpdateStatusBar(); // (#245 PR5 step4) 初期ステータス (DB状態 + ゲーム数) をシェルに反映
+                }
+                catch (Exception postEx)
+                {
+                    Logger.Warn("[MainForm] (#245 PR5) シェル表示後の前面化/ステータス反映に失敗 (シェルは表示済み): " + postEx.Message);
+                }
                 Logger.Info("[MainForm] (#245 PR5) WPF シェルを可視 main として表示、MainForm を裏方化");
-                UpdateStatusBar(); // (#245 PR5 step4) 初期ステータス (DB状態 + ゲーム数) をシェルに反映
             }
             catch (Exception ex)
             {
-                // シェル表示失敗 = 旧 WinForms UI で起動継続 (graceful degradation)。Opacity を戻して MainForm を可視化。
+                // シェル生成 / Show 失敗 = 旧 WinForms UI で起動継続 (graceful degradation)。ここは MainForm 未 Hide
+                // なので Opacity=1 で可視化できる。
                 Logger.Error("[MainForm] (#245 PR5) WPF シェル表示に失敗、旧 WinForms UI にフォールバック", ex);
                 this.Opacity = 1;
                 Shell.SplashScreenHost.Close(); // (#246) フォールバック表示時もスプラッシュを閉じる
