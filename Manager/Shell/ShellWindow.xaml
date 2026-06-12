@@ -8,7 +8,8 @@
     Width="1040" Height="680"
     MinWidth="820" MinHeight="520"
     WindowStartupLocation="CenterScreen"
-    WindowBackdropType="Mica"
+    WindowBackdropType="None"
+    Background="#FF202020"
     ExtendsContentIntoTitleBar="True">
 
     <!-- (#245 PR5) Win11 設定アプリ風シェルのプレビュー。FluentWindow=Mica 背景・ダーク、
@@ -43,7 +44,7 @@
                 <ui:NavigationViewItem Content="バックアップ" TargetPageType="{x:Type local:PreviewPage}">
                     <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Save24" /></ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
-                <ui:NavigationViewItem Content="ログ" TargetPageType="{x:Type local:PreviewPage}">
+                <ui:NavigationViewItem Content="ログ" TargetPageType="{x:Type local:LogHostPage}">
                     <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Document24" /></ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
             </ui:NavigationView.MenuItems>
