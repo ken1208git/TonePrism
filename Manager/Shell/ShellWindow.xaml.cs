@@ -28,8 +28,8 @@ namespace TonePrism.Manager.Shell
         public ShellWindow()
         {
             InitializeComponent();
-            // 起動時に最初のページへナビゲートして content 領域を埋める。
-            Loaded += (_, _) => RootNavigation.Navigate(typeof(PreviewPage));
+            // (#245 PR5 step4) 起動時は最初の実セクション (ゲーム) に着地する (旧: 飾りの PreviewPage)。
+            Loaded += (_, _) => RootNavigation.Navigate(typeof(GameHostPage));
         }
 
         /// <summary>
