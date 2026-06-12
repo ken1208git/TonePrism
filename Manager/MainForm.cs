@@ -540,12 +540,11 @@ namespace TonePrism.Manager
                         // deferred action 内例外は Application.ThreadException 経由で UI thread crash
                         // 経路を踏むため、Logger.Error で握り潰す (FormClosed handler の Shutdown catch と
                         // 同方針、PR #189 round 3 reviewer Low 指摘)。
-                        // (#245 PR5 / レビュー #1) Opacity=0 + 専用スレッドのスプラッシュ導入後は、握り潰すと
-                        // 「不可視窓 + スプラッシュ固まり」のサイレントハングになる (SessionConflictDialog.Show
-                        // 失敗等)。スプラッシュを閉じ MainForm を可視化してからログにする。
+                        // (#245 PR5 / レビュー #1/round4 #3) Opacity=0 + 専用スレッドのスプラッシュ導入後は、握り潰すと
+                        // 「不可視窓 + スプラッシュ固まり」のサイレントハングになる (SessionConflictDialog.Show 失敗等)。
+                        // pre-shell init 失敗と同じく degraded-but-visible へ復元し、通知も揃える (フィードバックの一貫性)。
                         Logger.Error("[MainForm] Startup dialog deferred action で例外", ex);
-                        try { Shell.SplashScreenHost.Close(); } catch { }
-                        try { this.Opacity = 1; if (!Visible) Show(); } catch { }
+                        FallbackToVisibleMainForm("起動処理中にエラーが発生しました。\n\n" + ex.Message + "\n\n旧画面で続行します。");
                     }
                 }));
                 // (#186 round 3) gate 維持のため、conflict 検出時は MainForm_Load 自体ここで return。
@@ -558,6 +557,23 @@ namespace TonePrism.Manager
                 Logger.Info($"[MainForm] (#278) 起動時に Launcher 稼働中だが別 Manager は無いため競合ダイアログを省略 (Launcher {launcherSessionsAtStartup.Count} 件)");
             // 残り init を直接呼出 (= 旧実装と同じ sync 起動 path、user 視点で挙動不変)。(レビュー #1) fallback ラッパ経由。
             ContinueLoadWithFallback();
+        }
+
+        /// <summary>
+        /// (#245 PR5 / レビュー round4 #3/#4) 起動失敗時に degraded-but-visible へ復元する共通フォールバック。
+        /// スプラッシュを閉じ MainForm を可視化し、crashMessage 指定時はクラッシュダイアログを出す
+        /// (pre-shell init / セッションダイアログ失敗 = 通知あり / シェル生成失敗 = null で静かに旧 UI へ degrade)。
+        /// 各手順は個別 try で包み本ヘルパー自体は throw しない (= ShowShellAsMain の catch から再 throw されない)。
+        /// </summary>
+        private void FallbackToVisibleMainForm(string crashMessage)
+        {
+            try { Shell.SplashScreenHost.Close(); } catch { }
+            try { this.Opacity = 1; if (!Visible) Show(); } catch { }
+            if (!string.IsNullOrEmpty(crashMessage))
+            {
+                try { MessageBox.Show(this, crashMessage, "起動エラー", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+                catch { /* fallback ダイアログ自体の失敗は無視 */ }
+            }
         }
 
         /// <summary>
@@ -576,15 +592,7 @@ namespace TonePrism.Manager
             catch (Exception ex)
             {
                 Logger.Error("[MainForm] (#245 PR5 / レビュー #1) 起動 init に失敗、旧 WinForms UI へフォールバック", ex);
-                try { Shell.SplashScreenHost.Close(); } catch { }
-                try { this.Opacity = 1; if (!Visible) Show(); } catch { }
-                try
-                {
-                    MessageBox.Show(this,
-                        "起動処理中にエラーが発生しました。\n\n" + ex.Message + "\n\n旧画面で続行します。",
-                        "起動エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-                catch { /* fallback ダイアログ自体の失敗は無視 */ }
+                FallbackToVisibleMainForm("起動処理中にエラーが発生しました。\n\n" + ex.Message + "\n\n旧画面で続行します。");
             }
         }
 
@@ -808,10 +816,9 @@ namespace TonePrism.Manager
             catch (Exception ex)
             {
                 // シェル生成 / Show 失敗 = 旧 WinForms UI で起動継続 (graceful degradation)。ここは MainForm 未 Hide
-                // なので Opacity=1 で可視化できる。
+                // なので可視化できる。シェル失敗は「旧 UI へ静かに degrade」なのでクラッシュダイアログは出さない (null)。
                 Logger.Error("[MainForm] (#245 PR5) WPF シェル表示に失敗、旧 WinForms UI にフォールバック", ex);
-                this.Opacity = 1;
-                Shell.SplashScreenHost.Close(); // (#246) フォールバック表示時もスプラッシュを閉じる
+                FallbackToVisibleMainForm(null);
             }
         }
 
