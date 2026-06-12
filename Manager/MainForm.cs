@@ -532,15 +532,20 @@ namespace TonePrism.Manager
                         }
                         Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で OK 選択、起動を続行");
                         // (#186 round 3) OK path: 残り init を chain で起動 (= gate を通過した時点で
-                        // 初めて panel init / backup / update check 等が走る)。
-                        ContinueLoadAfterSessionCheck();
+                        // 初めて panel init / backup / update check 等が走る)。(レビュー #1) fallback ラッパ経由。
+                        ContinueLoadWithFallback();
                     }
                     catch (Exception ex)
                     {
                         // deferred action 内例外は Application.ThreadException 経由で UI thread crash
                         // 経路を踏むため、Logger.Error で握り潰す (FormClosed handler の Shutdown catch と
                         // 同方針、PR #189 round 3 reviewer Low 指摘)。
+                        // (#245 PR5 / レビュー #1) Opacity=0 + 専用スレッドのスプラッシュ導入後は、握り潰すと
+                        // 「不可視窓 + スプラッシュ固まり」のサイレントハングになる (SessionConflictDialog.Show
+                        // 失敗等)。スプラッシュを閉じ MainForm を可視化してからログにする。
                         Logger.Error("[MainForm] Startup dialog deferred action で例外", ex);
+                        try { Shell.SplashScreenHost.Close(); } catch { }
+                        try { this.Opacity = 1; if (!Visible) Show(); } catch { }
                     }
                 }));
                 // (#186 round 3) gate 維持のため、conflict 検出時は MainForm_Load 自体ここで return。
@@ -551,8 +556,36 @@ namespace TonePrism.Manager
             // (#278 ①) ここに来るのは「別 Manager 無し」= 競合なし or Launcher 単独稼働。どちらも起動を妨げない。
             if (launcherSessionsAtStartup.Count > 0)
                 Logger.Info($"[MainForm] (#278) 起動時に Launcher 稼働中だが別 Manager は無いため競合ダイアログを省略 (Launcher {launcherSessionsAtStartup.Count} 件)");
-            // 残り init を直接呼出 (= 旧実装と同じ sync 起動 path、user 視点で挙動不変)。
-            ContinueLoadAfterSessionCheck();
+            // 残り init を直接呼出 (= 旧実装と同じ sync 起動 path、user 視点で挙動不変)。(レビュー #1) fallback ラッパ経由。
+            ContinueLoadWithFallback();
+        }
+
+        /// <summary>
+        /// (#245 PR5 / レビュー #1) <see cref="ContinueLoadAfterSessionCheck"/> を呼び、pre-shell init 区間の
+        /// 例外を graceful fallback で受ける。`Opacity=0` + fail-open スプラッシュ導入後、ここで例外が握り潰されると
+        /// 「不可視窓 + スプラッシュ固まり」のサイレントハングになるため、両呼出元 (競合 OK / 競合なし) から本ラッパを
+        /// 通し、失敗時はスプラッシュを閉じ MainForm を可視化してクラッシュを見せる (旧 degraded-but-visible 挙動を復元)。
+        /// シェル生成/Show 失敗は <see cref="ShowShellAsMain"/> 内 catch が自己処理するため本 catch には来ない。
+        /// </summary>
+        private void ContinueLoadWithFallback()
+        {
+            try
+            {
+                ContinueLoadAfterSessionCheck();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("[MainForm] (#245 PR5 / レビュー #1) 起動 init に失敗、旧 WinForms UI へフォールバック", ex);
+                try { Shell.SplashScreenHost.Close(); } catch { }
+                try { this.Opacity = 1; if (!Visible) Show(); } catch { }
+                try
+                {
+                    MessageBox.Show(this,
+                        "起動処理中にエラーが発生しました。\n\n" + ex.Message + "\n\n旧画面で続行します。",
+                        "起動エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                catch { /* fallback ダイアログ自体の失敗は無視 */ }
+            }
         }
 
         /// <summary>
