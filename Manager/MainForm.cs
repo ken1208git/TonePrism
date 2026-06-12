@@ -733,6 +733,10 @@ namespace TonePrism.Manager
                 Shell.ShellWindow.HostForm = this; // (#245 PR5 step2) host ページが実パネルを取得するための参照
                 var shell = new Shell.ShellWindow();
                 _shell = shell; // (#245 PR5 step4) ステータス更新の流し込み先として保持
+                // (#362) WinForms メッセージループ上で WPF 窓を出すと、キーボード入力 (NumberBox への直接入力・
+                // Tab 移動等) が WinForms 側で処理されて WPF 側に届かない。ElementHost の keyboard interop を
+                // 有効化して WPF 窓のキー入力を正しくルーティングする。
+                System.Windows.Forms.Integration.ElementHost.EnableModelessKeyboardInterop(shell);
                 // シェルを閉じたら MainForm も閉じて Application.Run を終了させる (= プロセス exit)。
                 shell.Closed += (s, e) =>
                 {

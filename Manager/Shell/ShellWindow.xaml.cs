@@ -32,6 +32,48 @@ namespace TonePrism.Manager.Shell
             Loaded += (_, _) => RootNavigation.Navigate(typeof(GameHostPage));
         }
 
+        // (#362) WinForms メッセージループ上の WPF 窓 + NavigationView では、マウスホイール/二本指スクロールが
+        // WPF の ScrollViewer に届かず効かない (キーボードは EnableModelessKeyboardInterop で解決済だが
+        // ホイールは別問題)。窓の HWND で WM_MOUSEWHEEL を直接拾い、現在ページの ScrollViewer (PageScroll) を
+        // 明示スクロールする。WinForms ホストページにはホイールが WinForms 側に行くため本 hook は no-op。
+        protected override void OnSourceInitialized(EventArgs e)
+        {
+            base.OnSourceInitialized(e);
+            var src = (System.Windows.Interop.HwndSource)System.Windows.PresentationSource.FromVisual(this);
+            src?.AddHook(WndProc);
+        }
+
+        private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            const int WM_MOUSEWHEEL = 0x020A;
+            if (msg == WM_MOUSEWHEEL)
+            {
+                int delta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+                var sv = FindScrollable(this);
+                if (sv != null)
+                {
+                    sv.ScrollToVerticalOffset(sv.VerticalOffset - delta);
+                    handled = true;
+                }
+            }
+            return IntPtr.Zero;
+        }
+
+        // 実際にスクロール可能 (ScrollableHeight>0) な ScrollViewer を visual tree から探す。無ければ null (no-op)。
+        // 注: ページ自前の ScrollViewer は NavigationView 下で高さ非拘束になり scrollable=0 のことがある。
+        // 実スクローラ (NavigationView の content ScrollViewer 等) を ScrollableHeight で特定する。
+        private static System.Windows.Controls.ScrollViewer FindScrollable(System.Windows.DependencyObject root)
+        {
+            if (root is System.Windows.Controls.ScrollViewer sv && sv.ScrollableHeight > 0) return sv;
+            int n = VisualTreeHelper.GetChildrenCount(root);
+            for (int i = 0; i < n; i++)
+            {
+                var r = FindScrollable(VisualTreeHelper.GetChild(root, i));
+                if (r != null) return r;
+            }
+            return null;
+        }
+
         /// <summary>
         /// (#245 PR5 step4) 左ゾーンのステータス文字列 (DB状態 + ゲーム数) を更新する。MainForm が
         /// UpdateStatusBar から呼ぶ。WPF UI thread 以外から呼ばれても安全なよう Dispatcher で marshal する。

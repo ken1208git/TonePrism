@@ -10,6 +10,7 @@
     WindowStartupLocation="CenterScreen"
     WindowBackdropType="None"
     Background="#FF202020"
+    FontFamily="Segoe UI Variable Text"
     ExtendsContentIntoTitleBar="True">
 
     <!-- (#245 PR5) Win11 設定アプリ風シェルのプレビュー。FluentWindow=Mica 背景・ダーク、
@@ -53,7 +54,7 @@
                 <ui:NavigationViewItem Content="アップデート" TargetPageType="{x:Type local:UpdateHostPage}">
                     <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="ArrowSync24" /></ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
-                <ui:NavigationViewItem Content="設定" TargetPageType="{x:Type local:PreviewPage}">
+                <ui:NavigationViewItem Content="設定" TargetPageType="{x:Type local:SettingsPage}">
                     <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Settings24" /></ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
             </ui:NavigationView.FooterMenuItems>

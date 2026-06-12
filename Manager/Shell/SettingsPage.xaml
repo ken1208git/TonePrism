@@ -1,0 +1,114 @@
+<Page
+    x:Class="TonePrism.Manager.Shell.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+
+    <!-- (#362 step B1) 初の WPF ネイティブ画面。設定を「適用ボタン」から即時反映へ (#201 ガード撤去)。
+         反映: トグル=即 / 数値=離脱時 / パス=離脱・参照選択時に検証して反映。
+         レイアウト: Win11 設定アプリ風に、同セクションの項目を「角丸なしで薄い隙間を空けて並べる」
+         (外周だけ角丸・継ぎ目は四角・隙間で断面に見せる) 形。 -->
+
+    <Page.Resources>
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#F0F0F0" />
+        </Style>
+        <!-- グループ内の各行カード。CornerRadius は行ごとに上書き (先頭=上だけ丸 / 末尾=下だけ丸 / 中=四角)。 -->
+        <Style x:Key="GroupItem" TargetType="Border">
+            <Setter Property="Background" Value="#FF2B2B2B" />
+            <Setter Property="Padding" Value="18,14" />
+        </Style>
+    </Page.Resources>
+
+    <!-- (#362) ホスト環境でホイール/二本指スクロールが効かない対策で PreviewMouseWheel を code-behind で拾う。 -->
+    <ScrollViewer x:Name="PageScroll" Padding="36,28,36,28" VerticalScrollBarVisibility="Auto">
+        <StackPanel MaxWidth="1100">
+            <TextBlock Text="設定" FontSize="28" FontWeight="Bold" Margin="0,0,0,16" />
+
+            <!-- ===== ログ ===== -->
+            <TextBlock Text="ログ" FontWeight="SemiBold" Margin="2,4,0,8" />
+            <!-- 保存先フォルダ (先頭=上だけ丸) -->
+            <Border Style="{StaticResource GroupItem}" CornerRadius="8,8,0,0" Margin="0,0,0,3">
+                <StackPanel>
+                    <TextBlock Text="保存先フォルダ" FontWeight="SemiBold" />
+                    <TextBlock Text="空欄でデフォルト (DB ファイルの隣の logs/)。" Opacity="0.6" FontSize="12" Margin="0,2,0,8" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ui:TextBox x:Name="LogPathBox" Grid.Column="0" LostFocus="LogPath_LostFocus" />
+                        <ui:Button x:Name="LogBrowse" Grid.Column="1" Content="参照" Margin="8,0,0,0" Click="LogBrowse_Click" />
+                    </Grid>
+                    <TextBlock x:Name="LogPathMsg" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
+                </StackPanel>
+            </Border>
+            <!-- 保存日数 (末尾=下だけ丸) -->
+            <Border Style="{StaticResource GroupItem}" CornerRadius="0,0,8,8" Margin="0,0,0,18">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0">
+                        <TextBlock Text="ログの保存日数" FontWeight="SemiBold" />
+                        <TextBlock Text="この日数より古いログは次回起動時に削除されます。" Opacity="0.6" FontSize="12" Margin="0,2,0,0" />
+                    </StackPanel>
+                    <ui:NumberBox x:Name="LogRetentionBox" Grid.Column="1" Width="150" VerticalAlignment="Center"
+                                  Minimum="1" Maximum="3650" SpinButtonPlacementMode="Inline" ClearButtonEnabled="False"
+                                  LostFocus="LogRetention_LostFocus" />
+                </Grid>
+            </Border>
+
+            <!-- ===== バックアップ ===== -->
+            <TextBlock Text="バックアップ" FontWeight="SemiBold" Margin="2,18,0,8" />
+            <!-- 自動バックアップ (先頭=上だけ丸) -->
+            <Border Style="{StaticResource GroupItem}" CornerRadius="8,8,0,0" Margin="0,0,0,3">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0">
+                        <TextBlock Text="自動バックアップ" FontWeight="SemiBold" />
+                        <TextBlock Text="データ変更操作のたびに自動でバックアップします。" Opacity="0.6" FontSize="12" Margin="0,2,0,0" />
+                    </StackPanel>
+                    <ui:ToggleSwitch x:Name="BackupAutoToggle" Grid.Column="1" VerticalAlignment="Center"
+                                     Checked="BackupAuto_Changed" Unchecked="BackupAuto_Changed" />
+                </Grid>
+            </Border>
+            <!-- バックアップ保存先 (中=四角) -->
+            <Border Style="{StaticResource GroupItem}" CornerRadius="0" Margin="0,0,0,3">
+                <StackPanel>
+                    <TextBlock Text="バックアップ保存先フォルダ" FontWeight="SemiBold" />
+                    <TextBlock Text="共有フォルダ (ファイルサーバ) を指定できます。" Opacity="0.6" FontSize="12" Margin="0,2,0,8" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ui:TextBox x:Name="BackupPathBox" Grid.Column="0" LostFocus="BackupPath_LostFocus" />
+                        <ui:Button x:Name="BackupBrowse" Grid.Column="1" Content="参照" Margin="8,0,0,0" Click="BackupBrowse_Click" />
+                    </Grid>
+                    <TextBlock x:Name="BackupPathMsg" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
+                </StackPanel>
+            </Border>
+            <!-- 保持世代数 (末尾=下だけ丸) -->
+            <Border Style="{StaticResource GroupItem}" CornerRadius="0,0,8,8" Margin="0,0,0,18">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0">
+                        <TextBlock Text="バックアップの保持世代数" FontWeight="SemiBold" />
+                        <TextBlock Text="この個数を超える古い世代は次回バックアップ時に削除されます。" Opacity="0.6" FontSize="12" Margin="0,2,0,0" />
+                    </StackPanel>
+                    <ui:NumberBox x:Name="BackupRetentionBox" Grid.Column="1" Width="150" VerticalAlignment="Center"
+                                  Minimum="1" Maximum="999" SpinButtonPlacementMode="Inline" ClearButtonEnabled="False"
+                                  LostFocus="BackupRetention_LostFocus" />
+                </Grid>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>
