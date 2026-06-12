@@ -1446,8 +1446,12 @@ function Assert-PublishedManagerVersion {
     # stamp が csproj 設定 (GenerateAssemblyInfo=false / Version プロパティ有無) や将来の SDK 挙動変化で
     # SoT から drift しうる。Manager UI は reflection で版数を読むため UI 表示自体は無事だが、Explorer
     # プロパティ / リリース時版数ゲートが嘘版数になる #283 級リスク。Launcher の Assert-ExportedLauncherVersion
-    # と対称に、staged exe の FileVersion を SoT (AssemblyInfo AssemblyVersion = $script:ManagerVersion) と
-    # 突き合わせ、zip/publish より前に hard fail する。Build-Manager の後に呼ぶこと。
+    # と対称に、staged exe の FileVersion を SoT と突き合わせ、zip/publish より前に hard fail する。
+    # Build-Manager の後に呼ぶこと。
+    # 注 (レビュー B-1): 比較は厳密には「exe の Win32 FileVersion (apphost が managed DLL からコピー＝**AssemblyFileVersion**
+    # 由来)」↔「$script:ManagerVersion (Assert-ManagerVersion が **AssemblyVersion** 属性を読んだ値＝SoT)」。AssemblyInfo.cs が
+    # 両属性を同値に保つ前提で一致し、両者が drift した場合も検出できる有用な不変条件になる。AssemblyFileVersion ≠
+    # AssemblyVersion を意図的に運用するなら本 gate は誤 fail するので、その時は比較対象を AssemblyFileVersion に寄せること。
     # 注: 現状の net10 SDK では stamp は正しく 0.27.9.0 を焼く (PR4 で実測確認済) が、本ゲートは「今正しい」を
     # 「以後も機械強制」に格上げする defense-in-depth (stamp 経路が将来壊れても誤版数 publish を防ぐ)。
     Write-Step "Manager exe の版数を検証 (SoT 一致)"
@@ -1468,6 +1472,33 @@ function Assert-PublishedManagerVersion {
             "Manager は prod でこの exe (Explorer プロパティ) と reflection 版数の一致を期待するため、誤版数の publish を防ぐべく中止。")
     }
     Write-Ok "Manager exe FileVersion = $fileVersion (SoT $script:ManagerVersion と一致)"
+}
+
+function Assert-ManagerSingleFile {
+    # (#258 PR4 レビュー D-1) single-file 配布の核心不変条件「Manager = exe 1 個」を機械強制する。
+    # Assert-ExpectedFiles は manifest 記載ファイルの **presence のみ** 検証し余剰を見ない (manifest forward-compat の
+    # 設計上、他コンポーネントの余剰ファイルは許容せねばならない＝余剰検出を入れると旧 Manager が新 zip を reject する
+    # 後方互換問題が再燃する) ため、Manager 固有のこの不変条件は専用にここで守る。将来 SDK / System.Data.SQLite.Core の
+    # 挙動変化で sidecar (loose native dll / createdump.exe / *.json 等) が publish 出力に混ざり、manifest 非記載のまま
+    # zip 同梱される silent drift を upload 前に fail-fast する。Build-Manager の後に呼ぶこと (staging の Manager dir =
+    # 出荷物そのもの。pdb は Build-Manager のコピーで除外済なので exe 1 個が期待値)。
+    Write-Step "Manager が single-file (exe 1 個) であることを検証"
+    $managerDir = Join-Path $FilesDir 'Manager'
+    if (-not (Test-Path $managerDir)) {
+        Fail "検証対象の Manager staging dir が見つかりません: $managerDir (Build-Manager の後に呼ぶこと)"
+    }
+    $files = @(Get-ChildItem $managerDir -Recurse -File)
+    $unexpected = @($files | Where-Object { $_.Name -ne 'TonePrism_Manager.exe' })
+    if ($unexpected.Count -gt 0) {
+        $names = ($unexpected | ForEach-Object { $_.FullName.Substring($managerDir.Length + 1) }) -join ', '
+        Fail @"
+Manager staging に想定外のファイルがあります (single-file = TonePrism_Manager.exe 1 個のはず): $names
+single-file 不変条件が崩れています。csproj の PublishSingleFile / IncludeNativeLibrariesForSelfExtract、
+または System.Data.SQLite.Core / SDK の挙動変化で sidecar が吐かれていないか確認してください。
+expected-files (manifest) は presence のみ検証で余剰を検出しないため、ここで fail-fast します。
+"@
+    }
+    Write-Ok "Manager staging = TonePrism_Manager.exe 1 個 (single-file 不変条件 OK)"
 }
 
 # ============================================================================
@@ -2116,6 +2147,7 @@ Build-Launcher
 Assert-ExportedLauncherVersion
 Build-Manager
 Assert-PublishedManagerVersion
+Assert-ManagerSingleFile
 Build-Updater
 Build-LauncherAgent
 Copy-Templates
