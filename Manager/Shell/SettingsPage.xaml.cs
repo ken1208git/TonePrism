@@ -139,15 +139,7 @@ namespace TonePrism.Manager.Shell
             return false;
         }
 
-        private void ApplyInt(string key, int value, string label)
-        {
-            if (_loading || Db == null) return;
-            if (!AllowWrite(label)) return;
-            try { Db.SettingsRepository.SetInt32(key, value); }
-            catch (Exception ex) { Logger.Warn("[SettingsPage] 数値設定保存失敗 (" + key + "): " + ex.Message); }
-        }
-
-        // (レビュー #6) 数値書込をデバウンス。同キーの直近値だけ保持し、500ms 静止後に 1 回だけ書く。
+        // (レビュー #6) 数値書込をデバウンス。同キーの直近値だけ保持し、500ms 静止後に flush で一括書込する。
         private void QueueInt(string key, int value, string label)
         {
             _pendingInts[key] = (value, label);
@@ -161,14 +153,20 @@ namespace TonePrism.Manager.Shell
         }
 
         // 保留中の数値書込を即時 flush する (デバウンス満了 / 欄離脱 / ナビ離脱)。
+        // (レビュー #6) セッション競合チェックは flush 全体で 1 度だけ (複数 retention を同時に変更して離脱した際に
+        // SessionConflictDialog が 2 連続で出るのを防ぐ)。数値は実変更時のみ queue されるので no-op flush は無い。
         private void FlushPendingInts()
         {
             _intDebounce?.Stop();
-            if (_pendingInts.Count == 0) return;
+            if (_pendingInts.Count == 0 || _loading || Db == null) { _pendingInts.Clear(); return; }
             var snapshot = new List<KeyValuePair<string, (int value, string label)>>(_pendingInts);
             _pendingInts.Clear();
+            if (!AllowWrite("設定の適用")) return;
             foreach (var kv in snapshot)
-                ApplyInt(kv.Key, kv.Value.value, kv.Value.label);
+            {
+                try { Db.SettingsRepository.SetInt32(kv.Key, kv.Value.value); }
+                catch (Exception ex) { Logger.Warn("[SettingsPage] 数値設定保存失敗 (" + kv.Key + "): " + ex.Message); }
+            }
         }
 
         // (#362) ナビ離脱時にパスの直接入力を prompt なしで反映する保険。MissingLocal は prompt 不可のため skip。
