@@ -320,7 +320,7 @@ namespace TonePrism.Manager
             catch (Exception loadEx)
             {
                 Logger.Error("[MainForm] (#245 PR5 / レビュー Finding 1) 起動 init 前半で例外、旧 WinForms UI へフォールバック", loadEx);
-                FallbackToVisibleMainForm("起動処理中にエラーが発生しました。\n\n" + loadEx.Message + "\n\n旧画面で続行します。");
+                FallbackToVisibleMainForm("起動処理中にエラーが発生しました。\n\n" + loadEx.Message + "\n\n一部の機能が使えない場合があります。問題が続く場合はアプリを再起動してください。");
             }
         }
 
@@ -558,7 +558,7 @@ namespace TonePrism.Manager
                         // 「不可視窓 + スプラッシュ固まり」のサイレントハングになる (SessionConflictDialog.Show 失敗等)。
                         // pre-shell init 失敗と同じく degraded-but-visible へ復元し、通知も揃える (フィードバックの一貫性)。
                         Logger.Error("[MainForm] Startup dialog deferred action で例外", ex);
-                        FallbackToVisibleMainForm("起動処理中にエラーが発生しました。\n\n" + ex.Message + "\n\n旧画面で続行します。");
+                        FallbackToVisibleMainForm("起動処理中にエラーが発生しました。\n\n" + ex.Message + "\n\n一部の機能が使えない場合があります。問題が続く場合はアプリを再起動してください。");
                     }
                 }));
                 // (#186 round 3) gate 維持のため、conflict 検出時は MainForm_Load 自体ここで return。
@@ -606,7 +606,7 @@ namespace TonePrism.Manager
             catch (Exception ex)
             {
                 Logger.Error("[MainForm] (#245 PR5 / レビュー #1) 起動 init に失敗、旧 WinForms UI へフォールバック", ex);
-                FallbackToVisibleMainForm("起動処理中にエラーが発生しました。\n\n" + ex.Message + "\n\n旧画面で続行します。");
+                FallbackToVisibleMainForm("起動処理中にエラーが発生しました。\n\n" + ex.Message + "\n\n一部の機能が使えない場合があります。問題が続く場合はアプリを再起動してください。");
             }
         }
 
