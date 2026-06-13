@@ -30,6 +30,7 @@
     <!-- SQLite: net48 の Stub.System.Data.SQLite.Core.NetFramework から net10 対応の System.Data.SQLite.Core へ。
          同 1.0.119.0・同 API (System.Data.SQLite 名前空間)、native interop は runtimes/<rid>/native 経由で出力へ。 -->
     <PackageReference Include="System.Data.SQLite.Core" Version="1.0.119.0" />
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>
 
 </Project>

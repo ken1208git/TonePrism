@@ -1,0 +1,11 @@
+<Page
+    x:Class="TonePrism.Manager.Shell.LogHostPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:wfi="clr-namespace:System.Windows.Forms.Integration;assembly=WindowsFormsIntegration">
+
+    <!-- (#245 PR5) 実証: 既存の WinForms セクションパネル (read-only のログビューア) を WindowsFormsHost で
+         WPF シェルにホストする。「額縁=WPF(ダーク) / 中身=既存 WinForms(クラシック)」という本配線の形を実データで確認。
+         ログパネルは DB 非依存・read-only なので fresh インスタンスで安全 (開発 DB に無影響)。 -->
+    <wfi:WindowsFormsHost x:Name="Host" />
+</Page>

@@ -16,6 +16,8 @@ namespace TonePrism.Manager
     public partial class MainForm : Form
     {
         private DatabaseManager dbManager;
+        // (#245 PR5 step4) 可視 main のシェル参照。ステータス更新 (DB状態/ゲーム数/バックアップ) を流し込むため保持。
+        private Shell.ShellWindow _shell;
         private ManagerSessionService _sessionService;
         // (#179 PR3b) Launcher LAN-wide session 検出機構。`manager_sessions` table と非対称の
         // JSON drop folder 方式 (= SPEC §3.8.7)、polling-only で DB write ゼロ。
@@ -45,6 +47,14 @@ namespace TonePrism.Manager
         public MainForm()
         {
             InitializeComponent();
+
+            // (#245 PR5 startup移管 step1) 移管中、MainForm は「裏方オーケストレータ」で可視 main は
+            // ShellWindow(WPF)。起動時のフラッシュを避けるため Opacity=0 で不可視のまま Load を走らせ
+            // (Opacity は描画のみ・Load は通常どおり発火)、全 init 完了後に ShowShellAsMain でシェルを
+            // 表示して MainForm を Hide する。シェル表示に失敗した場合 / DB 未初期化で UI を見せたい場合は
+            // Opacity=1 に戻して旧 WinForms UI を表示する (graceful fallback)。
+            this.Opacity = 0;
+
             dbManager = new DatabaseManager();
 
             _gameSectionPanel = new GameSectionPanel { Dock = DockStyle.Fill };
@@ -302,6 +312,20 @@ namespace TonePrism.Manager
 
         private void MainForm_Load(object sender, EventArgs e)
         {
+            // (#245 PR5 / レビュー round5 Finding 1) 起動 init の前半 (DB migration / session init / 早期モーダル) も
+            // fallback で受ける。ContinueLoadWithFallback はセッションゲート後しか守らず、前半で例外が出ると
+            // Opacity=0 + 専用スレッドスプラッシュ下で「不可視窓 + スプラッシュ固まり」のサイレントハングになる
+            // 退行があった (round3 で後半だけ守った取りこぼし)。Load 全体を包んで degraded-but-visible へ復元する。
+            try { LoadCore(); }
+            catch (Exception loadEx)
+            {
+                Logger.Error("[MainForm] (#245 PR5 / レビュー Finding 1) 起動 init 前半で例外、旧 WinForms UI へフォールバック", loadEx);
+                FallbackToVisibleMainForm("起動処理中にエラーが発生しました。\n\n" + loadEx.Message + "\n\n一部の機能が使えない場合があります。問題が続く場合はアプリを再起動してください。");
+            }
+        }
+
+        private void LoadCore()
+        {
             // (#168 brand rename ハード切替 guard) 旧版 (GCTonePrism) install を検出した場合、
             // user が誤って新 zip を旧 install dir に展開した想定。`prism.db` (旧 DB filename) が
             // 残置されているが `toneprism.db` (新 DB filename) は存在しない、というのが旧版痕跡の
@@ -373,6 +397,9 @@ namespace TonePrism.Manager
             //   永久に失われることはない (= CleanupOldLogs の「全起動 path 必達」設計とは要件が異なる、
             //   absorb は idempotent + deferred OK の弱い保証で十分)。
 
+            // (#246) DB init/migration はここから (大きめ DB / SMB / migration 走行時に無反応になりうる)。
+            Shell.SplashScreenHost.SetStatus("データベースを準備しています…");
+
             bool dbReady = false;
 
             if (!dbManager.DatabaseExists())
@@ -415,6 +442,10 @@ namespace TonePrism.Manager
                 // form を user 手動 × で閉じるまで no-op、FormClosed で _sessionService=null なので
                 // Shutdown も skip される clean path)。
                 // (#170 followup) DB 未初期化は左 zone 占有 (= ゲーム数取得不可、データベース状態を伝える)
+                // (#245 PR5 startup移管 step1) この path はシェルを出さず MainForm を UI として見せるため、
+                // ctor で 0 にした Opacity を戻して可視化する (シェルは ContinueLoadAfterSessionCheck 末尾でのみ表示)。
+                this.Opacity = 1;
+                Shell.SplashScreenHost.Close(); // (#246) シェルを出さず MainForm を見せる path → スプラッシュを閉じる
                 lblStatus.Text = "データベース未初期化";
                 return;
             }
@@ -515,15 +546,19 @@ namespace TonePrism.Manager
                         }
                         Logger.Info("[MainForm] user が SessionConflictDialog (Startup) で OK 選択、起動を続行");
                         // (#186 round 3) OK path: 残り init を chain で起動 (= gate を通過した時点で
-                        // 初めて panel init / backup / update check 等が走る)。
-                        ContinueLoadAfterSessionCheck();
+                        // 初めて panel init / backup / update check 等が走る)。(レビュー #1) fallback ラッパ経由。
+                        ContinueLoadWithFallback();
                     }
                     catch (Exception ex)
                     {
                         // deferred action 内例外は Application.ThreadException 経由で UI thread crash
                         // 経路を踏むため、Logger.Error で握り潰す (FormClosed handler の Shutdown catch と
                         // 同方針、PR #189 round 3 reviewer Low 指摘)。
+                        // (#245 PR5 / レビュー #1/round4 #3) Opacity=0 + 専用スレッドのスプラッシュ導入後は、握り潰すと
+                        // 「不可視窓 + スプラッシュ固まり」のサイレントハングになる (SessionConflictDialog.Show 失敗等)。
+                        // pre-shell init 失敗と同じく degraded-but-visible へ復元し、通知も揃える (フィードバックの一貫性)。
                         Logger.Error("[MainForm] Startup dialog deferred action で例外", ex);
+                        FallbackToVisibleMainForm("起動処理中にエラーが発生しました。\n\n" + ex.Message + "\n\n一部の機能が使えない場合があります。問題が続く場合はアプリを再起動してください。");
                     }
                 }));
                 // (#186 round 3) gate 維持のため、conflict 検出時は MainForm_Load 自体ここで return。
@@ -534,8 +569,45 @@ namespace TonePrism.Manager
             // (#278 ①) ここに来るのは「別 Manager 無し」= 競合なし or Launcher 単独稼働。どちらも起動を妨げない。
             if (launcherSessionsAtStartup.Count > 0)
                 Logger.Info($"[MainForm] (#278) 起動時に Launcher 稼働中だが別 Manager は無いため競合ダイアログを省略 (Launcher {launcherSessionsAtStartup.Count} 件)");
-            // 残り init を直接呼出 (= 旧実装と同じ sync 起動 path、user 視点で挙動不変)。
-            ContinueLoadAfterSessionCheck();
+            // 残り init を直接呼出 (= 旧実装と同じ sync 起動 path、user 視点で挙動不変)。(レビュー #1) fallback ラッパ経由。
+            ContinueLoadWithFallback();
+        }
+
+        /// <summary>
+        /// (#245 PR5 / レビュー round4 #3/#4) 起動失敗時に degraded-but-visible へ復元する共通フォールバック。
+        /// スプラッシュを閉じ MainForm を可視化し、crashMessage 指定時はクラッシュダイアログを出す
+        /// (pre-shell init / セッションダイアログ失敗 = 通知あり / シェル生成失敗 = null で静かに旧 UI へ degrade)。
+        /// 各手順は個別 try で包み本ヘルパー自体は throw しない (= ShowShellAsMain の catch から再 throw されない)。
+        /// </summary>
+        private void FallbackToVisibleMainForm(string crashMessage)
+        {
+            try { Shell.SplashScreenHost.Close(); } catch { }
+            try { this.Opacity = 1; if (!Visible) Show(); } catch { }
+            if (!string.IsNullOrEmpty(crashMessage))
+            {
+                try { MessageBox.Show(this, crashMessage, "起動エラー", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+                catch { /* fallback ダイアログ自体の失敗は無視 */ }
+            }
+        }
+
+        /// <summary>
+        /// (#245 PR5 / レビュー #1) <see cref="ContinueLoadAfterSessionCheck"/> を呼び、pre-shell init 区間の
+        /// 例外を graceful fallback で受ける。`Opacity=0` + fail-open スプラッシュ導入後、ここで例外が握り潰されると
+        /// 「不可視窓 + スプラッシュ固まり」のサイレントハングになるため、両呼出元 (競合 OK / 競合なし) から本ラッパを
+        /// 通し、失敗時はスプラッシュを閉じ MainForm を可視化してクラッシュを見せる (旧 degraded-but-visible 挙動を復元)。
+        /// シェル生成/Show 失敗は <see cref="ShowShellAsMain"/> 内 catch が自己処理するため本 catch には来ない。
+        /// </summary>
+        private void ContinueLoadWithFallback()
+        {
+            try
+            {
+                ContinueLoadAfterSessionCheck();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("[MainForm] (#245 PR5 / レビュー #1) 起動 init に失敗、旧 WinForms UI へフォールバック", ex);
+                FallbackToVisibleMainForm("起動処理中にエラーが発生しました。\n\n" + ex.Message + "\n\n一部の機能が使えない場合があります。問題が続く場合はアプリを再起動してください。");
+            }
         }
 
         /// <summary>
@@ -549,6 +621,9 @@ namespace TonePrism.Manager
         /// </summary>
         private void ContinueLoadAfterSessionCheck()
         {
+            // (#246) パネル初期化・pending 取り込み等 (SMB 越しで遅延しうる) に入る。
+            Shell.SplashScreenHost.SetStatus("画面を準備しています…");
+
             // DB確認後にパネルを初期化（DB存在前のアクセスを防止）
             _gameSectionPanel.Initialize(dbManager);
             _storeSectionPanel.Initialize(dbManager);
@@ -696,7 +771,80 @@ namespace TonePrism.Manager
             // 起動時にバックグラウンドで GitHub Releases API を叩いてアップデート check (#108 Phase 4)
             // cache TTL 内なら HTTP を叩かない、起動を遅延させない fire-and-forget pattern
             StartBackgroundUpdateCheckIfDue();
+
+            // (#245 PR5 startup移管 step1) 全 init 完了後、WPF シェルを可視 main として表示し MainForm を裏方化する。
+            ShowShellAsMain();
         }
+
+        /// <summary>
+        /// (#245 PR5 startup移管 step1) WPF シェル(ShellWindow)を可視 main として表示し、MainForm を Hide して
+        /// 裏方オーケストレータに徹する。MainForm 側の DB/セッション/パネル/バックアップ配線はそのまま生きており
+        /// (実績ある起動シーケンスを無改変で温存)、シェルを閉じると MainForm も閉じてメッセージループを終了する。
+        /// シェル生成/表示に失敗した場合は Opacity を戻して旧 WinForms UI を表示し、起動を継続する
+        /// (#245 Phase 3 の graceful degradation 要件と整合)。
+        ///
+        /// 現段階の制約 (後続 step で解消): シェルの各ホストページは fresh パネル (= MainForm の実パネルとの
+        /// 二重インスタンス) のまま。実パネルの単一インスタンス化 (再parent)・未保存ガード/ストア更新/GameCount/
+        /// バックアップ進捗のステータスバー移植は別 step。
+        /// </summary>
+        private void ShowShellAsMain()
+        {
+            try
+            {
+                Shell.ShellWindow.SharedDb = dbManager;
+                Shell.ShellWindow.HostForm = this; // (#245 PR5 step2) host ページが実パネルを取得するための参照
+                var shell = new Shell.ShellWindow();
+                _shell = shell; // (#245 PR5 step4) ステータス更新の流し込み先として保持
+                // (#362) WinForms メッセージループ上で WPF 窓を出すと、キーボード入力 (NumberBox への直接入力・
+                // Tab 移動等) が WinForms 側で処理されて WPF 側に届かない。ElementHost の keyboard interop を
+                // 有効化して WPF 窓のキー入力を正しくルーティングする。
+                System.Windows.Forms.Integration.ElementHost.EnableModelessKeyboardInterop(shell);
+                // シェルを閉じたら MainForm も閉じて Application.Run を終了させる (= プロセス exit)。
+                shell.Closed += (s, e) =>
+                {
+                    try { if (!IsDisposed) Close(); }
+                    catch (Exception ex) { Logger.Warn("[MainForm] シェル close 後の MainForm.Close 失敗: " + ex.Message); }
+                };
+                shell.Show();
+                Shell.SplashScreenHost.Close(); // (#246) スプラッシュを閉じる
+                Hide(); // Load 完了済なので Hide で安全に裏方化 (= MainForm の窓・タスクバーボタンを消す)
+                // (#246 / レビュー #4) ここから先 (前面化・ステータス反映) は **シェル表示済み** なので、失敗しても
+                // フォールバックせずログのみにする。理由: Hide() 後は外側 catch の Opacity=1 では可視化できず
+                // (Visible=false のまま) フォールバックが死蔵になる + シェルは既に出ているのでフォールバック不要。
+                // 外側 catch は「シェル生成 / Show 失敗 (= MainForm 未 Hide)」専用に限定する。
+                try
+                {
+                    // 別スレッドのスプラッシュがフォアグラウンドを握る + Hide() でフォアグラウンドが逃げるため、
+                    // shell.Show() だけでは前面に来ない。Activate + Topmost 一瞬トグルで z-order 最前面を確実化。
+                    shell.Activate();
+                    shell.Topmost = true;
+                    shell.Topmost = false;
+                    UpdateStatusBar(); // (#245 PR5 step4) 初期ステータス (DB状態 + ゲーム数) をシェルに反映
+                }
+                catch (Exception postEx)
+                {
+                    Logger.Warn("[MainForm] (#245 PR5) シェル表示後の前面化/ステータス反映に失敗 (シェルは表示済み): " + postEx.Message);
+                }
+                Logger.Info("[MainForm] (#245 PR5) WPF シェルを可視 main として表示、MainForm を裏方化");
+            }
+            catch (Exception ex)
+            {
+                // シェル生成 / Show 失敗 = 旧 WinForms UI で起動継続 (graceful degradation)。ここは MainForm 未 Hide
+                // なので可視化できる。シェル失敗は「旧 UI へ静かに degrade」なのでクラッシュダイアログは出さない (null)。
+                Logger.Error("[MainForm] (#245 PR5) WPF シェル表示に失敗、旧 WinForms UI にフォールバック", ex);
+                FallbackToVisibleMainForm(null);
+            }
+        }
+
+        // (#245 PR5 startup移管 step2) シェルの host ページが実パネルを単一インスタンスで取得するための内部アクセサ。
+        // MainForm が生成・初期化・イベント配線済みのインスタンスをそのまま返す (fresh 生成廃止で二重インスタンス解消)。
+        internal Controls.GameSectionPanel GameSectionPanel => _gameSectionPanel;
+        internal Controls.StoreSectionPanel StoreSectionPanel => _storeSectionPanel;
+        internal Controls.BackupSectionPanel BackupSectionPanel => _backupSectionPanel;
+        internal Controls.UpdateSectionPanel UpdateSectionPanel => _updateSectionPanel;
+        internal Controls.IntroGuidePanel IntroGuidePanel => _introGuidePanel;
+        internal Controls.LogSectionPanel LogSectionPanel => _logSectionPanel;
+        internal Controls.SettingsSectionPanel SettingsSectionPanel => _settingsSectionPanel; // (#362 B2) WPF 設定ページの DBリセット委譲先
 
         /// <summary>
         /// 過去 run の失敗 / cancel で残った staging dir を起動時に best-effort 削除する (#108 Phase 4)。
@@ -929,7 +1077,9 @@ namespace TonePrism.Manager
             if (dbManager == null) return;
             string dbStatus = dbManager.DatabaseExists() ? "接続済み" : "未接続";
             string gameInfo = $"ゲーム数: {_gameSectionPanel.GameCount}件";
-            lblStatus.Text = $"データベース: {dbStatus} | {gameInfo}";
+            string text = $"データベース: {dbStatus} | {gameInfo}";
+            lblStatus.Text = text;
+            _shell?.SetStatusText(text); // (#245 PR5 step4) シェルのステータスバーにも反映
         }
 
         /// <summary>
@@ -953,6 +1103,9 @@ namespace TonePrism.Manager
             // (e.g., 自動 backup 失敗 path) で Logger.Error として別途残るため UI で truncated でも debug 可能。
             lblBackupStatus.Text = TruncateForStatusBar(message);
             lblBackupStatus.ForeColor = color;
+            // (#245 step4 / レビュー #5) シェルのバーにも反映。シェルの第2引数は「成功か」なので、autoRevert
+            // (自動消去するか・本来 ok と直交) ではなく色 (緑=成功) を真実源にする。現状 autoRevert==ok だが疎結合化。
+            _shell?.SetBackupStatus(message, color == System.Drawing.Color.DarkGreen);
 
             // 既存 timer を破棄してから新規 (= 連続呼出時に古い timer が古い message を消すのを防ぐ)
             if (_backupStatusClearTimer != null)
@@ -987,6 +1140,7 @@ namespace TonePrism.Manager
             _tsBackupFile.Text = fileName ?? string.Empty; // 可変幅は末尾なので動いても他に影響しない
             _tsBackupFile.Visible = true;
             _tsBackupRecapture.Visible = false;
+            _shell?.ShowBackupProgress(p, fileName); // (#245 step4) シェルのバーにも反映
         }
 
         /// <summary>未バックアップ (失敗/中断): 警告 + 「今すぐバックアップ」(1 クリック復旧) を表示。</summary>
@@ -1000,6 +1154,7 @@ namespace TonePrism.Manager
             _tsBackupPercent.Visible = false;
             _tsBackupFile.Visible = false;
             _tsBackupRecapture.Visible = true;
+            _shell?.ShowBackupUnhealthy(message); // (#245 step4) シェルのバーにも反映
         }
 
         /// <summary>idle かつ健全: バックアップ進捗 item を全て非表示。</summary>
@@ -1011,6 +1166,19 @@ namespace TonePrism.Manager
             _tsBackupPercent.Visible = false;
             _tsBackupFile.Visible = false;
             _tsBackupRecapture.Visible = false;
+            _shell?.HideBackupProgress(); // (#245 step4) シェルのバーにも反映
+        }
+
+        // (#245 PR5 step4) シェルのバックアップバーのボタン (中止 / 今すぐバックアップ) から呼ばれる。
+        // coordinator 操作は従来どおり MainForm が owner として行う (= 旧 statusStrip ボタンと同じ実体)。
+        internal void CancelSessionBackup()
+        {
+            try { dbManager?.SessionBackupCoordinator?.CancelCurrentBackup(); } catch { }
+        }
+
+        internal void RecaptureBackupNow()
+        {
+            try { dbManager?.SessionBackupCoordinator?.RunAfterOperation(this, assetsChanged: true, "再バックアップ"); } catch { }
         }
 
         /// <summary>(#299) StatusStrip 上の ToolStripButton (中止 / 今すぐバックアップ) に常時枠を描いて「ボタンらしく」

@@ -1,0 +1,30 @@
+<Window
+    x:Class="TonePrism.Manager.Shell.SplashWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    WindowStyle="None"
+    ResizeMode="NoResize"
+    AllowsTransparency="True"
+    Background="Transparent"
+    ShowInTaskbar="False"
+    Topmost="False"
+    WindowStartupLocation="CenterScreen"
+    SizeToContent="WidthAndHeight">
+
+    <!-- (#246) 起動スプラッシュ。専用 UI スレッドで表示し、メインスレッドの起動 init 中も再描画が
+         止まらない (SplashScreenHost 参照)。WPF-UI 等のテーマリソースには依存せず明示色のみ
+         (別スレッドからの Application.Resources lookup を避けるため)。静的ロゴ + ステータス + 不定バー。 -->
+    <Border Width="460" Background="#FF202020" CornerRadius="12"
+            BorderBrush="#33FFFFFF" BorderThickness="1" Padding="34,30">
+        <StackPanel>
+            <TextBlock Text="TonePrism マネージャー" Foreground="#F0F0F0"
+                       FontSize="23" FontWeight="SemiBold" FontFamily="Segoe UI Variable Text" />
+            <TextBlock x:Name="VersionText" Foreground="#8C8C8C" FontSize="12"
+                       FontFamily="Segoe UI Variable Text" Margin="0,5,0,0" />
+            <ProgressBar IsIndeterminate="True" Height="4" Margin="0,24,0,16"
+                         Background="#22FFFFFF" Foreground="#4CC2FF" BorderThickness="0" />
+            <TextBlock x:Name="StatusText" Text="起動しています…" Foreground="#C8C8C8"
+                       FontSize="13" FontFamily="Segoe UI Variable Text" />
+        </StackPanel>
+    </Border>
+</Window>

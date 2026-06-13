@@ -419,7 +419,13 @@ namespace TonePrism.Manager.Controls
             }
         }
 
-        private void btnResetDatabase_Click(object sender, EventArgs e)
+        private void btnResetDatabase_Click(object sender, EventArgs e) => ResetDatabaseWithConfirm();
+
+        // (#362 B2) WPF 設定ページの「リセット」ボタンからも呼べるよう本体を抽出 (旧 btnResetDatabase_Click)。
+        // ダイアログ owner / 設定再読込先は本パネル (this) のまま (hidden MainForm 配下だがダイアログは前面に出る)。
+        // 完了で DatabaseReset を発火し MainForm が各パネルを再読込する。WPF 設定ページ側は呼出後に自前で
+        // LoadSettings して表示を default に同期する。
+        internal void ResetDatabaseWithConfirm()
         {
             // (#201 R2 review Low-2) DB リセットは completion 後に LoadLogSettings / LoadBackupSettings で
             // 設定 section を新 DB 値に再ロードするため、未保存編集があると無確認で破棄される。tab 切替 /

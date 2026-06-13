@@ -18,6 +18,10 @@ namespace TonePrism.Manager
             InitializeComponent();
             _worker = worker;
             _cts = new CancellationTokenSource();
+            // (#245 PR5 / レビュー #6) 進捗はシェルのタスクバーボタン (緑バー) に集約するためモーダル自身は
+            // タスクバーに別ボタンを出さない (二重ボタン回避)。ただしシェル不在の graceful fallback 経路では
+            // 集約先が無いので、このダイアログ自身にタスクバーボタンを出して進捗の存在だけは示す。
+            this.ShowInTaskbar = Shell.ShellWindow.Instance == null;
         }
 
         /// <summary>
@@ -74,7 +78,10 @@ namespace TonePrism.Manager
         private async void ProcessingDialog_Shown(object sender, EventArgs e)
         {
             var progress = new Progress<ProgressInfo>(ReportProgress);
-            
+
+            // (#245 PR5) タスクバー進捗を開始時に点灯 (Marquee=不定 / 定量=0%)。終了時は finally で必ず消す。
+            UpdateTaskbarProgress(0);
+
             try
             {
                 _workerTask = Task.Run(() => _worker(progress, _cts.Token));
@@ -92,6 +99,7 @@ namespace TonePrism.Manager
             }
             finally
             {
+                ClearTaskbarProgress();
                 this.Close();
             }
         }
@@ -126,6 +134,27 @@ namespace TonePrism.Manager
             {
                 lblDetail.Text = info.Detail;
             }
+
+            // (#245 PR5) 窓内バーと同じ値をシェルのタスクバー進捗にも反映する。
+            UpdateTaskbarProgress(info.Percentage);
+        }
+
+        // (#245 PR5) タスクバー進捗 (シェルの TaskbarItemInfo) への中継。Marquee=不定として渡す。
+        // シェル不在 (純 WinForms 起動経路など) では Instance==null で no-op。cosmetic なので失敗は握り潰す。
+        private void UpdateTaskbarProgress(int percentage)
+        {
+            try
+            {
+                bool marquee = pbProgress.Style == ProgressBarStyle.Marquee;
+                Shell.ShellWindow.Instance?.SetTaskbarProgress(percentage, marquee);
+            }
+            catch { /* cosmetic */ }
+        }
+
+        private static void ClearTaskbarProgress()
+        {
+            try { Shell.ShellWindow.Instance?.ClearTaskbarProgress(); }
+            catch { /* cosmetic */ }
         }
 
         private void btnCancel_Click(object sender, EventArgs e)

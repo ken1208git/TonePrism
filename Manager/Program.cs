@@ -93,8 +93,34 @@ namespace TonePrism.Manager
                     // パスの確認（デバッグ用）
                     PathManager.VerifyPaths();
 
+                    // (#245 Phase 0/DPI) WinForms↔WPF 共存のため DPI awareness を起動時に明示固定する。
+                    // Manager の WinForms フォームは DPI 非対応前提のレイアウト (app.manifest で DPI aware 化すると
+                    // 全フォーム崩壊する — Services/DpiSafeFolderPicker.cs 参照)。一方 WPF は初回ロード時にプロセスを
+                    // DPI aware へ切り替えようとするため、明示固定しないと WinForms 窓が素ピクセル=小窓化する
+                    // (高拡大率で顕著)。DpiUnaware で固定すれば WPF の切替が no-op になり、WinForms は従来どおり
+                    // 正しく bitmap-scale され、WPF も同様に scale される (高 DPI でやや soft だが正サイズ・一貫)。
+                    // ※移行が進み WinForms フォームが WPF に置き換わったら PerMonitorV2 へ上げて crisp 化する (将来)。
+                    // 最初の window 生成前に呼ぶ必要があるため EnableVisualStyles より前に置く。
+                    Application.SetHighDpiMode(HighDpiMode.DpiUnaware);
                     Application.EnableVisualStyles();
                     Application.SetCompatibleTextRenderingDefault(false);
+
+                    // (#245 PR5) WPF-UI のテーマ/リソースを app 全体で有効にするため WPF Application を確立する。
+                    // App.xaml が無い (WinForms primary) ので C# で ThemesDictionary/ControlsDictionary を merge。
+                    // WinForms 側が message loop を駆動するため WPF の Application.Run は呼ばない
+                    // (ShutdownMode=OnExplicitShutdown で WPF window を閉じてもプロセスが落ちないようにする)。
+                    var wpfApp = new System.Windows.Application
+                    {
+                        ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown
+                    };
+                    wpfApp.Resources.MergedDictionaries.Add(
+                        new Wpf.Ui.Markup.ThemesDictionary { Theme = Wpf.Ui.Appearance.ApplicationTheme.Dark });
+                    wpfApp.Resources.MergedDictionaries.Add(new Wpf.Ui.Markup.ControlsDictionary());
+
+                    // (#246) 起動スプラッシュを専用 UI スレッドで表示 (DB init/migration 等の無反応区間を埋める)。
+                    // fail-open: 障害は内部で握り潰され起動を止めない。シェル表示時 (ShowShellAsMain) に閉じる。
+                    Shell.SplashScreenHost.Show();
+
                     Application.Run(new MainForm());
                 }
                 catch (DirectoryNotFoundException ex)
@@ -119,6 +145,8 @@ namespace TonePrism.Manager
                 }
                 finally
                 {
+                    // (#246) 起動失敗・exit 経路の保険 (通常は ShowShellAsMain で閉じ済み・冪等)。
+                    Shell.SplashScreenHost.Close();
                     Logger.Shutdown();
                     // (#179 round 1 L-1) initiallyOwned: true で取得した Mutex は ReleaseMutex で
                     // 明示 release してから Dispose する。`using` の Dispose 単独では kernel 上「abandoned

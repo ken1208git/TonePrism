@@ -1,0 +1,97 @@
+<ui:FluentWindow
+    x:Class="TonePrism.Manager.Shell.ShellWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:local="clr-namespace:TonePrism.Manager.Shell"
+    Title="TonePrism マネージャー"
+    Width="1040" Height="680"
+    MinWidth="820" MinHeight="520"
+    WindowStartupLocation="CenterScreen"
+    WindowBackdropType="None"
+    Background="#FF202020"
+    FontFamily="Segoe UI Variable Text"
+    ExtendsContentIntoTitleBar="True">
+
+    <!-- (#245 PR5) Windows タスクバーアイコンの進捗 (緑バー)。全進捗オペレーション (復元/バックアップ/更新/
+         アセット処理) の関所 ProcessingDialog.ReportProgress から SetTaskbarProgress 経由で駆動する。
+         シェルが可視メイン窓 = タスクバーボタンの所有者なのでここに付ける (旧 WinForms MainForm は隠し)。 -->
+    <ui:FluentWindow.TaskbarItemInfo>
+        <TaskbarItemInfo x:Name="Taskbar" />
+    </ui:FluentWindow.TaskbarItemInfo>
+
+    <!-- (#245 PR5) Win11 設定アプリ風の本シェル (可視メイン窓)。FluentWindow=ダーク、NavigationView=左サイドバー。
+         各ページは既存 WinForms セクションパネルを WindowsFormsHost で単一インスタンスホストする (設定のみ WPF
+         ネイティブ)。Mica 背景は中身が WPF 化するまで封印 (WindowBackdropType=None・不透明 Background)。 -->
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="TonePrism マネージャー">
+            <ui:TitleBar.Icon>
+                <ui:SymbolIcon Symbol="Apps24" />
+            </ui:TitleBar.Icon>
+        </ui:TitleBar>
+
+        <!-- (#245 PR5) ペイン・コンテンツ背景を窓と同色 (#FF202020) に統一。WPF-UI 既定だと
+             コンテンツ領域が別シェードになり左ペインとズレるため明示。 -->
+        <ui:NavigationView
+            x:Name="RootNavigation"
+            Grid.Row="1"
+            Background="#FF202020">
+            <ui:NavigationView.MenuItems>
+                <ui:NavigationViewItem Content="ゲーム" TargetPageType="{x:Type local:GameHostPage}">
+                    <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Games24" /></ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="ストア" TargetPageType="{x:Type local:StoreHostPage}">
+                    <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Grid24" /></ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="初回説明" TargetPageType="{x:Type local:IntroHostPage}">
+                    <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Info24" /></ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="バックアップ" TargetPageType="{x:Type local:BackupHostPage}">
+                    <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Save24" /></ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="ログ" TargetPageType="{x:Type local:LogHostPage}">
+                    <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Document24" /></ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+            </ui:NavigationView.MenuItems>
+            <ui:NavigationView.FooterMenuItems>
+                <ui:NavigationViewItem Content="アップデート" TargetPageType="{x:Type local:UpdateHostPage}">
+                    <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="ArrowSync24" /></ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="設定" TargetPageType="{x:Type local:SettingsPage}">
+                    <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Settings24" /></ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+            </ui:NavigationView.FooterMenuItems>
+        </ui:NavigationView>
+
+        <!-- (#245 PR5 step4) Fluent ネイティブのステータスバー。左=DB接続状態(全体)、右=バックアップ feedback
+             (進捗/✓/⚠/中止/今すぐ、全体に関係)。値は MainForm が集めて SetStatusText / ShowBackupProgress 等で
+             流し込む。ホストではなく WPF ネイティブなので airspace/黒文字なし。 -->
+        <Border Grid.Row="2" Background="#FF2B2B2B" BorderBrush="#22FFFFFF" BorderThickness="0,1,0,0" Padding="16,5">
+            <Grid>
+                <!-- 左: DB接続状態 (全体に関係) -->
+                <TextBlock x:Name="StatusText" Foreground="#DDFFFFFF" FontSize="12"
+                           VerticalAlignment="Center" HorizontalAlignment="Left" Text="データベース: —" />
+                <!-- 右: バックアップ feedback (idle 時は非表示) -->
+                <StackPanel x:Name="BackupPanel" Orientation="Horizontal" HorizontalAlignment="Right"
+                            VerticalAlignment="Center" Visibility="Collapsed">
+                    <!-- (#364 議論) indeterminate = liveness 表示 (回ってれば生存・止まればフリーズ)。進捗% は
+                         BackupText が担当するので determinate にすると役割が被る。ぐるぐるは「生きてる」専用。 -->
+                    <ui:ProgressRing x:Name="BackupRing" IsIndeterminate="True" Width="18" Height="18"
+                                     Margin="0,0,8,0" VerticalAlignment="Center" Visibility="Collapsed" />
+                    <TextBlock x:Name="BackupText" FontSize="12" VerticalAlignment="Center" Foreground="#DDFFFFFF" />
+                    <ui:Button x:Name="BackupCancelButton" Content="中止" Margin="10,0,0,0" Padding="10,2"
+                               FontSize="11" Visibility="Collapsed" Click="BackupCancelButton_Click" />
+                    <ui:Button x:Name="BackupRecaptureButton" Content="今すぐバックアップ" Margin="10,0,0,0" Padding="10,2"
+                               FontSize="11" Visibility="Collapsed" Click="BackupRecaptureButton_Click" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</ui:FluentWindow>

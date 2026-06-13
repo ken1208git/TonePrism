@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/Companions/" />
+  <Folder Name="/Companions/LauncherAgent/">
+    <Project Path="Companions/LauncherAgent/TonePrism_LauncherAgent.csproj" />
+  </Folder>
+  <Folder Name="/Manager.Tests/">
+    <Project Path="Manager.Tests/TonePrism_Manager.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Manager/">
+    <Project Path="Manager/TonePrism_Manager.csproj" />
+  </Folder>
+</Solution>

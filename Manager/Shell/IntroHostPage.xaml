@@ -1,0 +1,10 @@
+<Page
+    x:Class="TonePrism.Manager.Shell.IntroHostPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:wfi="clr-namespace:System.Windows.Forms.Integration;assembly=WindowsFormsIntegration"
+    Background="#FF202020">
+
+    <!-- (#245 PR5 step2) MainForm の実 IntroGuidePanel を WindowsFormsHost で単一インスタンスでホスト。 -->
+    <wfi:WindowsFormsHost x:Name="Host" />
+</Page>
