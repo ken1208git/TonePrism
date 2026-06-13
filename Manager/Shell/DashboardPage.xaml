@@ -162,12 +162,6 @@
                     <ItemsControl x:Name="FindingsList" Visibility="Collapsed"
                                   ItemTemplate="{StaticResource FindingTemplate}" />
 
-                    <!-- 空状態 -->
-                    <Border x:Name="EmptyText" Background="#FF243024" BorderBrush="#1A8FCF8F" BorderThickness="1"
-                            CornerRadius="8" Padding="16,14" Visibility="Collapsed">
-                        <TextBlock Text="✓ 気になる項目はありません" FontSize="13" Foreground="#BFE5BF" />
-                    </Border>
-
                     <!-- 参考 (Info: 画像未設定・孤児フォルダ等。主リストを埋めないよう折り畳み) -->
                     <Expander x:Name="InfoExpander" Header="参考" Margin="0,14,0,0"
                               Foreground="#C8C8C8" Visibility="Collapsed">

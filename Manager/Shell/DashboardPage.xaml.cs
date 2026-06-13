@@ -165,8 +165,6 @@ namespace TonePrism.Manager.Shell
             FindingsList.Visibility = anyMain ? Visibility.Visible : Visibility.Collapsed;
             FindingsHeader.Visibility = anyMain ? Visibility.Visible : Visibility.Collapsed;
             FindingsHeader.Text = "気になる項目（" + mainList.Count + "）";
-            // 取得失敗時は「✓ 気になる項目はありません」の緑箱を出さない (未チェックを all-clear に見せない)。盾が代わりに警告。
-            EmptyText.Visibility = (!anyMain && !s.Failed) ? Visibility.Visible : Visibility.Collapsed;
 
             // 参考 (Info) 折り畳み。
             InfoExpander.Visibility = infoList.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -229,7 +227,7 @@ namespace TonePrism.Manager.Shell
 
             TilesPanel.Visibility = Visibility.Visible;
 
-            SubtitleText.Text = "最終更新 " + DateTime.Now.ToString("HH:mm:ss") + "・自動更新中";
+            SubtitleText.Text = "最終更新 " + DateTime.Now.ToString("HH:mm:ss");
         }
 
         // × = 非表示にして恒久的に黙らせる (settings 永続)。書込は SMB I/O を含むので背景で。
