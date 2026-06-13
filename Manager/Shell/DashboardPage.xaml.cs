@@ -227,7 +227,7 @@ namespace TonePrism.Manager.Shell
 
             TilesPanel.Visibility = Visibility.Visible;
 
-            SubtitleText.Text = "最終更新 " + DateTime.Now.ToString("HH:mm:ss") + "・自動更新中";
+            SubtitleText.Text = "最終更新 " + DateTime.Now.ToString("HH:mm:ss");
         }
 
         // × = 非表示にして恒久的に黙らせる (settings 永続)。書込は SMB I/O を含むので背景で。
