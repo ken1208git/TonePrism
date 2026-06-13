@@ -45,6 +45,11 @@ namespace TonePrism.Manager
         /// **重要**: DB 本体の接続だけでなく backup / restore / 整合性チェック等、`Data Source=` を組み立てる
         /// すべての箇所で本メソッドを通すこと。1 箇所でも生パスを渡すと、UNC 直起動時にその経路だけ open に失敗し
         /// 「起動はするがバックアップ/復元だけ落ちる」等の部分破綻になる (PR #374 review #1)。
+        ///
+        /// 本ヘルパーは `Program.cs` の起動時ログ設定読み出し（**Logger 初期化前**）からも呼ばれるため、Logger 等に
+        /// 依存しない純粋関数に保つ。未対応入力（extended-length `\\?\` 等）でも例外/ログを足さず raw を返す設計＝
+        /// 呼び出し側の既存 try-catch に degrade を委ねる（PR #374 review #1 の「`\\?\` で明示ログ/例外」提案は、
+        /// この pre-Logger 制約と「PathManager は `\\?\` を生成しない」前提により見送り）。
         /// </summary>
         internal static string ToSqliteDataSource(string path)
         {

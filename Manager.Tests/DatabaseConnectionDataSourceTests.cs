@@ -30,8 +30,9 @@ namespace TonePrism.Manager.Tests
             => Assert.Null(DatabaseConnection.ToSqliteDataSource(null));
 
         [Fact]
-        public void ForwardSlashUnc_IsIdempotent()
-            // 既に / のものは二重変換しない (\\ 始まりでないため無変換)。
+        public void ForwardSlashUnc_IsUnchanged()
+            // 既に / 形式のものは無変換 (\\ 始まりでないため)。UNC 変換の出力も // 始まりなので、
+            // 二重適用 f(f(x))=f(x) の冪等性もこのケースで間接的に担保される (review #3 で名前を実態に整合)。
             => Assert.Equal("//srv/share/toneprism.db",
                 DatabaseConnection.ToSqliteDataSource("//srv/share/toneprism.db"));
 
