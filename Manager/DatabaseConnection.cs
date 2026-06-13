@@ -28,7 +28,17 @@ namespace TonePrism.Manager
             this.dbPath = dbPath;
             // SMB ネットワーク共有上での運用安全性のため journal_mode=DELETE を使用 (#103)
             // Busy Timeout はライブラリ側にもフォールバックとして指定する
-            connectionString = $"Data Source={dbPath};Version=3;Busy Timeout=10000;";
+            //
+            // (UNC fix) System.Data.SQLite の native (3.46.1) は Data Source が生 UNC (\\server\share\...) だと
+            // open に失敗する ("unable to open database file")。forward slash (//server/share/...) なら通る
+            // (実測ハーネスで \\=NG / //=OK を確認。sqlite3.exe は別ビルドで \\ も通る)。UNC 直起動 (ネットワーク
+            // 場所から exe を起動) でも DB を開けるよう、UNC のときだけ \ を / に変換する。SQLite は Windows で /
+            // を受け付けるため安全。マップドライブ (Z:\) / ローカル (C:\) は \\ 始まりでないので無変換＝既存挙動ゼロ
+            // 変化 (本番はマップドライブ運用で元々この経路を踏まない)。
+            string dataSource = dbPath != null && dbPath.StartsWith(@"\\")
+                ? dbPath.Replace('\\', '/')
+                : dbPath;
+            connectionString = $"Data Source={dataSource};Version=3;Busy Timeout=10000;";
         }
 
         public bool DatabaseExists()

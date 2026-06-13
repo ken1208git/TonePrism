@@ -2304,6 +2304,14 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.29.1] - 2026-06-13
+
+#### Fixed — UNC 直起動時に DB を開けない不具合
+
+- **生 UNC パス (`\\server\share\...`) から Manager を起動すると `toneprism.db` が開けず起動失敗していたのを修正**（`SQLiteException: unable to open database file`、`MainForm_Load`→`TablesExist`→`connection.Open()`）。原因は **System.Data.SQLite の native (SQLite 3.46.1) が `Data Source` の生 UNC (`\\`) を弾く**こと（再現ハーネスで実測: `\\…`=NG / `//…`=OK / `FullUri=file:////…`=OK / `\\?\UNC\…`=NG。`sqlite3.exe` は別ビルドで `\\` も通る）。`DatabaseConnection` で **UNC のときだけ `\` → `/` に変換**して接続文字列を組む（SQLite は Windows で `/` を受理）。マップドライブ (`Z:\`) / ローカル (`C:\`) は `\\` 始まりでないので**無変換＝既存挙動ゼロ変化**。
+- 背景: 本番はファイルサーバをマップドライブ（`Z:` 等）で運用しており元々この経路を踏まない（学校環境で動作確認済）。家の SMB テストで UNC 直起動して発覚した堅牢性バグ。SMB / 共有権限 / ファイル属性 / WAL は全て無実と切り分け済（`sqlite3.exe` は同 UNC を read-write で開けた）。
+- bump 判断: bugfix のみ（破壊的変更 / DB スキーマ変更なし＝v23 据置）。**patch（v0.29.0 → v0.29.1）**。Launcher 変更なし。
+
 ### [Manager v0.29.0] - 2026-06-13
 
 #### Added — ダッシュボード（準備完了度 + 要対応チェックリスト、`feature/manager-dashboard`）
