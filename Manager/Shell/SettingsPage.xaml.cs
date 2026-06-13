@@ -153,10 +153,13 @@ namespace TonePrism.Manager.Shell
         }
 
         // 保留中の数値書込を即時 flush する (デバウンス満了 / 欄離脱 / ナビ離脱)。
-        // (レビュー #6) セッション競合チェックは flush 全体で 1 度だけ (複数 retention を同時に変更して離脱した際に
-        // SessionConflictDialog が 2 連続で出るのを防ぐ)。(round4 #2) 数値は実変更時のみ queue されるので no-op flush は
-        // 基本無い (例外: 同一操作で保存値へ revert した時だけ最終値=保存値で flush される)。パスのような last-saved
-        // ガードは付けない＝flush トリガが ValueChanged 限定で頻度が低く、競合 × revert の二重稀ケースに限るため。
+        // (レビュー #6) セッション競合チェックは **数値 flush 全体で 1 度だけ** (両 retention を同時に変更して離脱しても
+        // SessionConflictDialog が 2 連続で出ないように集約)。(round5 Finding 3) ただしこれは数値 flush 限定。Unloaded では
+        // 別途 FlushPaths が各パスを (_lastSavedPaths ガードで変更時のみ) チェックするため、数値+両パスを同時編集して競合下で
+        // 離脱する稀ケースは最大 3 ダイアログになりうる (各々が実変更に対応・spurious ではないので許容)。
+        // (round4 #2) 数値は実変更時のみ queue されるので no-op flush は基本無い (例外: 同一操作で保存値へ revert した時
+        // だけ最終値=保存値で flush される)。パスのような last-saved ガードは付けない＝flush トリガが ValueChanged 限定で
+        // 頻度が低く、競合 × revert の二重稀ケースに限るため。
         private void FlushPendingInts()
         {
             _intDebounce?.Stop();
