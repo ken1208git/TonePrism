@@ -2304,6 +2304,20 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.29.0] - 2026-06-13
+
+#### Added — ダッシュボード（準備完了度 + 要対応チェックリスト、`feature/manager-dashboard`）
+
+- **新ページ `DashboardPage`（WPF ネイティブ）+ `DashboardService`** をナビ先頭 / 起動着地に追加。セキュリティソフトの設定 UI 風「要対応チェックリスト」（左）+ 概況タイル（右: 登録コンテンツ / バックアップ、列幅 Auto＝中身ぴったり）+ 総合ステータス盾 + LAN ランチャー稼働バッジ。
+- **要対応 findings は `RestoreReconciliationService.Analyze()`（現 DB↔games フォルダ突き合わせ）を流用**: 起動不能 exe（Critical）/ 画像欠落・版フォルダ欠落・スライド画像欠落（Recommended）/ 孤児フォルダ（Info）/ スキーマ未完（Critical）。加えて **画像未設定（サムネ/背景が未割当のゲーム）を Info で検出**（recon の「設定済みだが欠落」とは別軸、games を直接走査）。すべて部員に分かるプレーン日本語。総合ステータス盾は Critical（起動不能 / スキーマ未完）だけ赤化し、画像系の任意項目は緑のまま＝対応を迫らない（盾下に「確認をおすすめ X 件・参考 Y 件」を分けて表示）。
+- **× で finding を恒久非表示 → settings K/V（`dashboard_dismissed_findings`）に永続**（finding Id 単位。新規 key のみ＝**schema migration 不要 / `CurrentDbVersion` 据置 v23**）。「非表示にした項目」折り畳みから「戻す」で復帰可。
+- **LAN-wide ランチャー稼働検出を流用**: 編集前競合チェックと同一の `LauncherSessionService`（`responses/launcher_sessions/*.json` heartbeat、stale 除外済）を `MainForm.LauncherSessionService` アクセサ経由で共有。別PC のキオスクも「稼働中（N 台）」+ PC 名ツールチップで表示（read-only ファイルスキャンで背景スレッド安全）。
+- **自動更新（near-real-time）の二段構え**: 軽いランチャーバッジは 1 秒、重い全体スキャン（recon + backups + 件数）は 20 秒。ページ表示中のみ / 実行中の tick は skip（self-throttle）/ 取得は `Task.Run` で背景実行（SMB I/O を含むため UI を固めない）。
+- **開発者向けの生ログ（WARN/ERROR）はダッシュボードに出さない**方針（部員に意味不明なため。生ログは『ログ』タブが SoT）。
+- WPF 知見: `ItemsControl` の `DataTemplate` 内 TextBlock には `Page.Resources` の暗黙スタイルが届かず WPF 既定の黒文字に落ちるため、テンプレ内テキストは明示 `Foreground` 必須。
+- フォロー: **#371（finding → 該当ゲーム編集画面への deep-link、ゲーム編集 WPF 化後＝#242 / #324 依存）**。
+- bump 判断: Manager への機能追加（破壊的変更 / DB スキーマ変更なし＝v23 据置）。**minor（v0.28.0 → v0.29.0）**。Launcher 変更なし。
+
 ### [Manager v0.28.0] - 2026-06-13
 
 #### Added / Changed (#245 PR5 — WinForms → WPF シェル移行)

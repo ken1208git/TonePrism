@@ -23,6 +23,13 @@ namespace TonePrism.Manager
         // JSON drop folder 方式 (= SPEC §3.8.7)、polling-only で DB write ゼロ。
         private LauncherSessionService _launcherSessionService;
 
+        /// <summary>
+        /// (ダッシュボード) LAN-wide ランチャー稼働検出。シェルの DashboardPage が背景スレッドから
+        /// DetectActiveLauncherSessions を呼ぶ (read-only ファイルスキャンでスレッド安全・UI 非依存)。
+        /// 未初期化時は null か空 list で fail-soft。編集前競合チェックと同一インスタンスを共有する。
+        /// </summary>
+        internal LauncherSessionService LauncherSessionService => _launcherSessionService;
+
         private GameSectionPanel _gameSectionPanel;
         private StoreSectionPanel _storeSectionPanel;
         private SettingsSectionPanel _settingsSectionPanel;
