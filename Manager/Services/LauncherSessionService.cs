@@ -32,8 +32,10 @@ namespace TonePrism.Manager.Services
     /// - DetectActiveLauncherSessions の SMB エラー全般: 空 list 返却 + `Logger.Warn`
     /// - 個別 file の JSON parse 失敗: skip + `Logger.Warn`、他 file の検出は継続
     ///
-    /// **thread safety**: UI thread (= 起動時 check + 編集前 check) からのみ呼ばれる前提、内部状態は
-    /// `_initialized` flag のみで毎回 fresh scan (= polling 結果の cache なし)。
+    /// **thread safety**: 共有可変状態は `_initialized` flag (bool) のみで、`DetectActiveLauncherSessions` は毎回
+    /// fresh scan (= polling 結果の cache なし) ＝**並行 read 安全**。当初は UI thread 専用だったが、ダッシュボードが
+    /// 背景スレッド (`Task.Run`) から周期的に呼ぶ (= UI thread の編集前 check と同時実行されうる)。今後ここに
+    /// 非スレッドセーフな cache 等を足す場合は同期が要る点に注意。
     ///
     /// **同 PC = Manager 起動 PC 上の Launcher も検出に含める** (SPEC §3.8.7.6): 自 PC 検出を冗長と
     /// 見なさず dialog 表示、file lock 競合は同 PC でも発生するため安全側設計。

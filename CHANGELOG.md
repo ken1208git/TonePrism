@@ -2314,6 +2314,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **LAN-wide ランチャー稼働検出を流用**: 編集前競合チェックと同一の `LauncherSessionService`（`responses/launcher_sessions/*.json` heartbeat、stale 除外済）を `MainForm.LauncherSessionService` アクセサ経由で共有。別PC のキオスクも「稼働中（N 台）」+ PC 名ツールチップで表示（read-only ファイルスキャンで背景スレッド安全）。
 - **自動更新（near-real-time）の二段構え**: 軽いランチャーバッジは 1 秒、重い全体スキャン（recon + backups + 件数）は 20 秒。ページ表示中のみ / 実行中の tick は skip（self-throttle）/ 取得は `Task.Run` で背景実行（SMB I/O を含むため UI を固めない）。
 - **開発者向けの生ログ（WARN/ERROR）はダッシュボードに出さない**方針（部員に意味不明なため。生ログは『ログ』タブが SoT）。
+- **チェック失敗を all-clear に見せない**: recon（`RestoreReconciliationService.Analyze()`）が `AnalysisFailed`（`GetAllGames` 失敗等で例外を投げず立つ）を返したら緑「準備は整っています」を出さず警告表示（PR #372 レビュー対応）。
 - WPF 知見: `ItemsControl` の `DataTemplate` 内 TextBlock には `Page.Resources` の暗黙スタイルが届かず WPF 既定の黒文字に落ちるため、テンプレ内テキストは明示 `Foreground` 必須。
 - フォロー: **#371（finding → 該当ゲーム編集画面への deep-link、ゲーム編集 WPF 化後＝#242 / #324 依存）**。
 - bump 判断: Manager への機能追加（破壊的変更 / DB スキーマ変更なし＝v23 据置）。**minor（v0.28.0 → v0.29.0）**。Launcher 変更なし。

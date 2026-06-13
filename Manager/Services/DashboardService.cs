@@ -22,10 +22,11 @@ namespace TonePrism.Manager.Services
     }
 
     /// <summary>
-    /// (ダッシュボード) Manager の概況 + 要対応チェックリストのスナップショット。**Monitor (#91) の稼働監視とは別系統**で、
-    /// 構成 / データの **pull スナップショット**に徹する＝「準備は整ってるか・直すべき不備は無いか」を一目で示す。
-    /// 唯一 <see cref="LauncherSessionCount"/> だけ稼働状態だが、これは継続監視ではなく取得時点の one-shot 確認。
-    /// 各 field は取得失敗時に既定値 / null。
+    /// (ダッシュボード) Manager の概況 + 要対応チェックリストのスナップショット。構成 / データの **pull スナップショット**で
+    /// 「準備は整ってるか・直すべき不備は無いか」を一目で示す。`Gather` 自体は取得時点の one-shot だが、`DashboardPage` が
+    /// near-real-time で再取得する（<see cref="LauncherSessionCount"/> バッジ=1 秒 / 重い全体=20 秒）。
+    /// **Monitor (#91) とは別系統**: Monitor は push 型の継続稼働監視 + 通知 / 自動再起動を担うのに対し、本ダッシュボードは
+    /// pull 型で「今ちゃんと動いてるか」の watchdog ではなく「準備が整ってるか」を示すに留める。各 field は取得失敗時に既定値 / null。
     /// </summary>
     public sealed class DashboardSnapshot
     {
@@ -120,6 +121,14 @@ namespace TonePrism.Manager.Services
             try
             {
                 var recon = new RestoreReconciliationService(db).Analyze();
+                // Analyze は GetAllGames 失敗等で**例外を投げず** AnalysisFailed=true + 空 findings を返す
+                // (RestoreReconciliationService.cs)。これを拾わないと「チェックは失敗したのに 0 件＝all-clear」
+                // という最悪の誤表示になる (チェックリストの存在意義は問題の表面化)。snap.Failed に反映する。
+                if (recon.AnalysisFailed)
+                {
+                    snap.Failed = true;
+                    Logger.Warn("[DashboardService] 登録不備チェックが完了できませんでした: " + recon.AnalysisError);
+                }
                 AddReconFindings(findings, recon);
             }
             catch (Exception ex)

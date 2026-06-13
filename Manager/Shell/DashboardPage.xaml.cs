@@ -151,16 +151,28 @@ namespace TonePrism.Manager.Shell
             FindingsList.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
             FindingsHeader.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
             FindingsHeader.Text = "気になる項目（" + ordered.Count + "）";
-            EmptyText.Visibility = any ? Visibility.Collapsed : Visibility.Visible;
+            // 取得失敗時は「✓ 気になる項目はありません」の緑箱を出さない (未チェックを all-clear に見せない)。盾が代わりに警告。
+            EmptyText.Visibility = (!any && !s.Failed) ? Visibility.Visible : Visibility.Collapsed;
 
-            // 総合ステータス盾: 赤くなるのは「本当に壊れてる」critical だけ。画像欠落等は緑のまま=迫らない。
+            // 総合ステータス盾。赤化は「本当に壊れてる」critical だけ。画像欠落等は緑のまま=迫らない。
+            // ただし取得失敗 (recon の AnalysisFailed 等) のときは緑「準備OK」と言い切らず警告にする
+            // (チェックリストの存在意義は問題の表面化なので、失敗を all-clear に見せない)。
             if (critical > 0)
             {
                 StatusIcon.Text = "⚠";
                 StatusIcon.Foreground = WarnFg;
                 StatusIconBg.Background = WarnBg;
                 StatusTitle.Text = critical + "件の対応が必要です";
-                StatusSubtitle.Text = "起動できないゲームやデータベースの問題があります";
+                StatusSubtitle.Text = "起動できないゲームやデータベースの問題があります"
+                    + (s.Failed ? "（※一部の情報は取得できませんでした）" : "");
+            }
+            else if (s.Failed)
+            {
+                StatusIcon.Text = "⚠";
+                StatusIcon.Foreground = WarnFg;
+                StatusIconBg.Background = WarnBg;
+                StatusTitle.Text = "一部を確認できませんでした";
+                StatusSubtitle.Text = "情報の取得に失敗しました。「更新」で再試行するか、ログをご確認ください。";
             }
             else
             {
@@ -168,8 +180,7 @@ namespace TonePrism.Manager.Shell
                 StatusIcon.Foreground = OkFg;
                 StatusIconBg.Background = OkBg;
                 StatusTitle.Text = "準備は整っています";
-                // 確認推奨 (recommended) と 参考 (info=画像未設定など) を分けて、軽い参考の束が「要対応」に
-                // 見えないようにする。
+                // 確認推奨 (recommended) と 参考 (info=画像未設定など) を分けて、軽い参考の束が「要対応」に見えないように。
                 var parts = new List<string>();
                 if (recommended > 0) parts.Add("確認をおすすめ " + recommended + " 件");
                 if (info > 0) parts.Add("参考 " + info + " 件");
@@ -177,8 +188,6 @@ namespace TonePrism.Manager.Shell
                     ? string.Join("・", parts) + "（任意・× で非表示にできます）"
                     : "起動を妨げる問題は見つかりませんでした";
             }
-            if (s.Failed)
-                StatusSubtitle.Text = "※一部の情報を取得できませんでした（詳細はログ）。" + StatusSubtitle.Text;
 
             // 非表示にした項目 (折り畳み)。
             DismissedList.ItemsSource = dismissed;
