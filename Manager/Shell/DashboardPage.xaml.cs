@@ -35,12 +35,14 @@ namespace TonePrism.Manager.Shell
         private bool _loadedThisShow;
 
         // 自動更新 (near-real-time)。ページ表示中だけ回し、Unloaded / 非表示で止める。二段構え:
-        //  - 軽い「ランチャー稼働バッジ」= 1 秒ごと (responses/launcher_sessions/ の小さな heartbeat スキャンのみ)。
-        //  - 重い全体 Gather (recon 全資産スキャン + backups 走査 + 件数) = 20 秒ごと (= 1 秒 ×20)。
-        // findings/件数はめったに変わらず重いので 20 秒、稼働状況は即応したいので 1 秒、と粒度を分ける。
+        //  - 軽い「ランチャー稼働バッジ」= 3 秒ごと (responses/launcher_sessions/ の小さな heartbeat スキャンのみ)。
+        //  - 重い全体 Gather (recon 全資産スキャン + backups 走査 + 件数) = 約 21 秒ごと (= 3 秒 ×7)。
+        // findings/件数はめったに変わらず重いので ~20 秒、稼働状況は即応したいので 3 秒、と粒度を分ける。
+        // 稼働バッジを 1→3 秒に緩めたのは PR #372 review #2: heartbeat 自体が 10 秒間隔なので 1 秒は過剰で、
+        // 3 秒でも体感ほぼ同じ (起動検出が ≤3 秒、閉じ検出は 60 秒 stale 律速で不変) かつ SMB 負荷 1/3。
         // 各経路とも実行中なら skip (self-throttle) し、SMB が遅くても積み上がらない。
-        private static readonly TimeSpan LauncherTickInterval = TimeSpan.FromSeconds(1);
-        private const int FullRefreshEveryNTicks = 20; // 1 秒 ×20 = 20 秒で重い全体スキャン
+        private static readonly TimeSpan LauncherTickInterval = TimeSpan.FromSeconds(3);
+        private const int FullRefreshEveryNTicks = 7; // 3 秒 ×7 ≈ 21 秒で重い全体スキャン
         private readonly DispatcherTimer _autoRefreshTimer;
         private int _tickCount;
         private bool _launcherBusy;
@@ -105,7 +107,7 @@ namespace TonePrism.Manager.Shell
             }
         }
 
-        // 軽量: ランチャー稼働だけ取り直してバッジ更新 (1 秒間隔)。全体更新中 / 前回スキャン未完なら skip。
+        // 軽量: ランチャー稼働だけ取り直してバッジ更新 (3 秒間隔)。全体更新中 / 前回スキャン未完なら skip。
         private async Task RefreshLauncherBadgeAsync()
         {
             if (_loading || _launcherBusy) return;
@@ -121,7 +123,7 @@ namespace TonePrism.Manager.Shell
         }
 
         // ランチャー稼働バッジ (LAN 全体・stale 除外済)。0 台なら灰で中立 (全キオスク停止は正常もありうる)。
-        // 稼働中は緑 + ツールチップに PC 名。全体 Populate と 1 秒間隔更新の両方が呼ぶ共通 setter。
+        // 稼働中は緑 + ツールチップに PC 名。全体 Populate と 3 秒間隔更新の両方が呼ぶ共通 setter。
         private void SetLauncherBadge(int count, List<string> pcNames)
         {
             bool up = count > 0;
@@ -202,7 +204,7 @@ namespace TonePrism.Manager.Shell
             DismissedExpander.Visibility = dismissed.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             DismissedExpander.Header = "非表示にした項目（" + dismissed.Count + "）";
 
-            // ランチャー稼働バッジ (1 秒間隔の軽量更新と共有する setter)。
+            // ランチャー稼働バッジ (3 秒間隔の軽量更新と共有する setter)。
             SetLauncherBadge(s.LauncherSessionCount, s.LauncherPcNames);
 
             // ===== 概況タイル (右・独立: 登録コンテンツ + バックアップ) =====

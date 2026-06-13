@@ -30,7 +30,7 @@ namespace TonePrism.Manager.Services
     /// <summary>
     /// (ダッシュボード) Manager の概況 + 要対応チェックリストのスナップショット。構成 / データの **pull スナップショット**で
     /// 「準備は整ってるか・直すべき不備は無いか」を一目で示す。`Gather` 自体は取得時点の one-shot だが、`DashboardPage` が
-    /// near-real-time で再取得する（<see cref="LauncherSessionCount"/> バッジ=1 秒 / 重い全体=20 秒）。
+    /// near-real-time で再取得する（<see cref="LauncherSessionCount"/> バッジ=3 秒 / 重い全体=約20 秒）。
     /// **Monitor (#91) とは別系統**: Monitor は push 型の継続稼働監視 + 通知 / 自動再起動を担うのに対し、本ダッシュボードは
     /// pull 型で「今ちゃんと動いてるか」の watchdog ではなく「準備が整ってるか」を示すに留める。各 field は取得失敗時に既定値 / null。
     /// </summary>
@@ -61,7 +61,7 @@ namespace TonePrism.Manager.Services
     }
 
     /// <summary>
-    /// (ダッシュボード) LAN-wide ランチャー稼働の軽量スナップショット。1 秒間隔のバッジ更新で重い全体 Gather を
+    /// (ダッシュボード) LAN-wide ランチャー稼働の軽量スナップショット。3 秒間隔のバッジ更新で重い全体 Gather を
     /// 回さずこれだけ取るために分離。
     /// </summary>
     public sealed class LauncherStatus
@@ -106,7 +106,7 @@ namespace TonePrism.Manager.Services
                     snap.LastBackupTrigger = last.TriggerType;
                 }
 
-                // LAN 全体で稼働中のランチャーを検出 (= 別PCのキオスク含む)。バッジの 1 秒間隔更新と同じ
+                // LAN 全体で稼働中のランチャーを検出 (= 別PCのキオスク含む)。バッジの 3 秒間隔更新と同じ
                 // DetectLauncher を共有して結果を一致させる。
                 var launcher = DetectLauncher(launcherSessions);
                 snap.LauncherSessionCount = launcher.Count;
@@ -170,7 +170,7 @@ namespace TonePrism.Manager.Services
         /// <summary>
         /// LAN 全体で稼働中のランチャーを検出 (= 別PCのキオスク含む)。編集前競合チェックと同じ
         /// LauncherSessionService (responses/launcher_sessions/*.json の heartbeat、stale 除外済) を流用。
-        /// read-only ファイルスキャンで背景スレッド安全・内部 fail-soft。バッジ専用の軽量経路 (1 秒間隔) と
+        /// read-only ファイルスキャンで背景スレッド安全・内部 fail-soft。バッジ専用の軽量経路 (3 秒間隔) と
         /// 全体 Gather の両方から呼ぶ。
         /// </summary>
         public static LauncherStatus DetectLauncher(LauncherSessionService launcherSessions)

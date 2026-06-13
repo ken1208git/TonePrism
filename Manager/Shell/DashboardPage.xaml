@@ -8,7 +8,7 @@
     <!-- (ダッシュボード) セキュリティソフト風の「要対応チェックリスト」(左) + 概況タイル (右)。
          チェックリスト = RestoreReconciliationService.Analyze() の登録不備 (部員に分かるプレーン日本語) を集約し、
          × で恒久非表示 (settings 永続) にできる。盾は本当に壊れてる系 (起動不能/スキーマ未完) だけ赤くなり、
-         画像欠落などの任意項目は緑のまま=対応を迫らない。ヘッダに LAN 全体のランチャー稼働バッジ (1 秒更新)。
+         画像欠落などの任意項目は緑のまま=対応を迫らない。ヘッダに LAN 全体のランチャー稼働バッジ (3 秒更新)。
          生ログ (WARN/ERROR) は部員に意味不明なため出さない (『ログ』タブが SoT)。
          注意: ItemsControl の DataTemplate 内 TextBlock には Page.Resources の暗黙スタイルが届かず WPF 既定の
          黒文字に落ちるため、テンプレ内テキストは必ず明示 Foreground を付ける。取得は SMB I/O を含むので Task.Run。 -->
@@ -100,7 +100,7 @@
                                Text="登録の不備を一覧します" />
                 </StackPanel>
                 <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal">
-                    <!-- LAN 全体のランチャー稼働（1 秒間隔で自動更新）。色は code-behind で稼働=緑/停止=灰。 -->
+                    <!-- LAN 全体のランチャー稼働（3 秒間隔で自動更新）。色は code-behind で稼働=緑/停止=灰。 -->
                     <Border x:Name="LauncherBadge" Background="#FF2B2B2B" BorderBrush="#1AFFFFFF" BorderThickness="1"
                             CornerRadius="14" Padding="11,5" Margin="0,0,10,0" VerticalAlignment="Center">
                         <StackPanel Orientation="Horizontal">
