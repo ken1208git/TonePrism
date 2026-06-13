@@ -193,9 +193,13 @@ namespace TonePrism.Manager.Services
             return st;
         }
 
-        // RestoreReconciliationResult を finding 群へ変換する。重大度の線引きは Analyze の HasCriticalFindings と
-        // 同じ思想: 起動不能 (exe 解決不可) と スキーマ未完 だけ Critical (= 盾を赤く)、画像欠落・版フォルダ欠落・
-        // スライド画像欠落は Recommended (任意・× で黙らせられる)、孤児フォルダは Info (参考)。
+        // RestoreReconciliationResult を finding 群へ変換する。重大度の線引きは「来場者が"今"プレイする物をブロックするか」:
+        //   Critical = アクティブ版の起動不能 (BrokenGames) と DB スキーマ未完 (= 表示中のゲーム / DB が壊れてる)。
+        //   Recommended = 非アクティブ版の不備 (別バージョン不備=BrokenVersions / 版フォルダ欠落)・画像欠落・スライド画像欠落
+        //     (= 表示中の版は無事で、版切替時か見栄えにしか影響しない)。
+        //   Info = 孤児フォルダ (DB に無い余分なフォルダ＝掃除対象)。
+        // 注: recon の HasCriticalFindings は BrokenVersions も critical 扱いだが、ダッシュボードは「今ブロックするか」基準
+        // なので非アクティブ版は Recommended に下げ、版フォルダ欠落と severity を揃える (PR #372 review)。
         private static void AddReconFindings(List<DashboardFinding> list, RestoreReconciliationResult r)
         {
             if (r == null) return;
@@ -213,14 +217,15 @@ namespace TonePrism.Manager.Services
                 });
             }
 
-            // 🔴 非アクティブ版の exe 欠落 (その版に切替えた瞬間に起動不能)。
+            // 🟡 非アクティブ版の exe 欠落。切替時しか影響しない (表示中の版は無事) ので Recommended、版フォルダ欠落と
+            //    severity を揃える (review)。アクティブ版が壊れてるケースは上の BrokenGames=Critical で必ず出る。
             foreach (var v in r.BrokenVersions)
             {
                 list.Add(new DashboardFinding
                 {
                     Id = "ver-exe:" + v.GameId + ":" + v.Version,
-                    Severity = FindingSeverity.Critical,
-                    Category = "起動不能(版)",
+                    Severity = FindingSeverity.Recommended,
+                    Category = "別バージョン不備",
                     Title = v.Title + "（v" + v.Version + "）— 実行ファイルが見つかりません",
                     Detail = "期待: " + v.ExpectedExecutable
                 });
