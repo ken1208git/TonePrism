@@ -27,18 +27,34 @@ namespace TonePrism.Manager
         {
             this.dbPath = dbPath;
             // SMB ネットワーク共有上での運用安全性のため journal_mode=DELETE を使用 (#103)
-            // Busy Timeout はライブラリ側にもフォールバックとして指定する
-            //
-            // (UNC fix) System.Data.SQLite の native (3.46.1) は Data Source が生 UNC (\\server\share\...) だと
-            // open に失敗する ("unable to open database file")。forward slash (//server/share/...) なら通る
-            // (実測ハーネスで \\=NG / //=OK を確認。sqlite3.exe は別ビルドで \\ も通る)。UNC 直起動 (ネットワーク
-            // 場所から exe を起動) でも DB を開けるよう、UNC のときだけ \ を / に変換する。SQLite は Windows で /
-            // を受け付けるため安全。マップドライブ (Z:\) / ローカル (C:\) は \\ 始まりでないので無変換＝既存挙動ゼロ
-            // 変化 (本番はマップドライブ運用で元々この経路を踏まない)。
-            string dataSource = dbPath != null && dbPath.StartsWith(@"\\")
-                ? dbPath.Replace('\\', '/')
-                : dbPath;
-            connectionString = $"Data Source={dataSource};Version=3;Busy Timeout=10000;";
+            // Busy Timeout はライブラリ側にもフォールバックとして指定する。
+            // Data Source は ToSqliteDataSource で UNC 正規化 (\→/) する (理由は同メソッド docstring)。
+            connectionString = $"Data Source={ToSqliteDataSource(dbPath)};Version=3;Busy Timeout=10000;";
+        }
+
+        /// <summary>
+        /// (UNC fix #373 / PR #374) SQLite の `Data Source=` に渡すパスを正規化する。System.Data.SQLite の native
+        /// (3.46.1) は生 UNC (`\\server\share\...`) を open できない ("unable to open database file") が、forward
+        /// slash (`//server/share/...`) なら通る (実測ハーネスで `\\`=NG / `//`=OK を確認。sqlite3.exe は別ビルドで
+        /// `\\` も通る)。UNC 直起動 (ネットワーク場所から exe を起動) でも開けるよう、UNC のときだけ `\` を `/` に
+        /// 変換する (SQLite は Windows で `/` を受け付けるため安全)。マップドライブ (`Z:\`) / ローカル (`C:\`) は
+        /// `\\` 始まりでないので無変換＝既存挙動ゼロ変化 (本番はマップドライブ運用で元々この経路を踏まない)。
+        /// extended-length prefix (`\\?\`) は native が別扱いで変換後 (`//?/`) の挙動が未実証のため対象外
+        /// (`PathManager` はこれを生成しない)。
+        ///
+        /// **重要**: DB 本体の接続だけでなく backup / restore / 整合性チェック等、`Data Source=` を組み立てる
+        /// すべての箇所で本メソッドを通すこと。1 箇所でも生パスを渡すと、UNC 直起動時にその経路だけ open に失敗し
+        /// 「起動はするがバックアップ/復元だけ落ちる」等の部分破綻になる (PR #374 review #1)。
+        /// </summary>
+        internal static string ToSqliteDataSource(string path)
+        {
+            if (path != null
+                && path.StartsWith(@"\\", StringComparison.Ordinal)
+                && !path.StartsWith(@"\\?\", StringComparison.Ordinal))
+            {
+                return path.Replace('\\', '/');
+            }
+            return path;
         }
 
         public bool DatabaseExists()

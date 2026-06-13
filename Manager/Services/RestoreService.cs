@@ -46,7 +46,7 @@ namespace TonePrism.Manager.Services
         {
             try
             {
-                using (var conn = new SQLiteConnection($"Data Source={dbFilePath};Version=3;"))
+                using (var conn = new SQLiteConnection($"Data Source={DatabaseConnection.ToSqliteDataSource(dbFilePath)};Version=3;"))
                 {
                     conn.Open();
                     using (var cmd = conn.CreateCommand())
@@ -184,7 +184,7 @@ namespace TonePrism.Manager.Services
                     using (var sourceConn = new SQLiteConnection(_conn.ConnectionString))
                     {
                         _conn.OpenConnectionWithJournalMode(sourceConn);
-                        using (var destConn = new SQLiteConnection($"Data Source={safetyPath};Version=3;"))
+                        using (var destConn = new SQLiteConnection($"Data Source={DatabaseConnection.ToSqliteDataSource(safetyPath)};Version=3;"))
                         {
                             destConn.Open();
                             sourceConn.BackupDatabase(destConn, "main", "main", -1, null, 0);
