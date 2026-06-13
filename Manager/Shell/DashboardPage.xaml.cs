@@ -193,7 +193,7 @@ namespace TonePrism.Manager.Shell
                 if (recommended > 0) parts.Add("確認をおすすめ " + recommended + " 件");
                 if (info > 0) parts.Add("参考 " + info + " 件");
                 StatusSubtitle.Text = parts.Count > 0
-                    ? string.Join("・", parts) + "（任意・× で非表示にできます）"
+                    ? string.Join("・", parts) + "（任意）"
                     : "起動を妨げる問題は見つかりませんでした";
             }
 

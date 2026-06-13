@@ -19,6 +19,12 @@ namespace TonePrism.Manager.Services
         public string Category { get; set; }
         public string Title { get; set; }
         public string Detail { get; set; }
+
+        /// <summary>
+        /// Critical（起動不能 / スキーマ未完）は × で黙らせられない＝必ず表示。盾の存在意義（本当に壊れてる物の
+        /// 表面化）を、誤クリックや恣意的な × で無効化させないための防御（PR #372 review #1）。
+        /// </summary>
+        public bool CanDismiss => Severity != FindingSeverity.Critical;
     }
 
     /// <summary>
@@ -152,7 +158,9 @@ namespace TonePrism.Manager.Services
             HashSet<string> dismissed = LoadDismissed(db);
             foreach (var f in findings)
             {
-                if (dismissed.Contains(f.Id)) snap.DismissedFindings.Add(f);
+                // Critical (CanDismiss=false) は × されても必ず active に残す。万一 settings に Critical の Id が
+                // 残っていても黙らせない＝盾の偽グリーンを構造的に防ぐ (review #1)。
+                if (f.CanDismiss && dismissed.Contains(f.Id)) snap.DismissedFindings.Add(f);
                 else snap.ActiveFindings.Add(f);
             }
 
@@ -304,7 +312,7 @@ namespace TonePrism.Manager.Services
                     Severity = FindingSeverity.Info,
                     Category = "画像未設定",
                     Title = title + " — " + string.Join("・", missing) + "が未設定です",
-                    Detail = "意図的なら × で非表示にできます。"
+                    Detail = ""
                 });
             }
         }
