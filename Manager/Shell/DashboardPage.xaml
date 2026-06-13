@@ -51,6 +51,40 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+
+        <!-- finding 1 行のテンプレート (主リスト=FindingsList と 参考=InfoList で共有)。× = Dismiss_Click。 -->
+        <DataTemplate x:Key="FindingTemplate">
+            <Border Background="#FF2B2B2B" BorderBrush="#1AFFFFFF" BorderThickness="1"
+                    CornerRadius="8" Padding="14,11" Margin="0,0,0,8">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Ellipse Grid.Column="0" Style="{StaticResource SeverityDot}" />
+                    <StackPanel Grid.Column="1">
+                        <Grid Margin="0,0,0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Background="#33FFFFFF" CornerRadius="4"
+                                    Padding="6,1" Margin="0,1,8,0" VerticalAlignment="Top">
+                                <TextBlock Text="{Binding Category}" FontSize="10.5" Foreground="#E4E4E4" />
+                            </Border>
+                            <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="13.5"
+                                       FontWeight="SemiBold" Foreground="#ECECEC"
+                                       TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                        <TextBlock Text="{Binding Detail}" FontSize="11.5" Foreground="#9AA0A6" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ui:Button Grid.Column="2" Content="✕" Appearance="Transparent" Click="Dismiss_Click"
+                               ToolTip="非表示にする（もう表示しません）"
+                               FontSize="13" Padding="9,2" VerticalAlignment="Top" Cursor="Hand" />
+                </Grid>
+            </Border>
+        </DataTemplate>
     </Page.Resources>
 
     <ScrollViewer x:Name="PageScroll" Padding="36,28,36,28" VerticalScrollBarVisibility="Auto">
@@ -122,49 +156,22 @@
                     <TextBlock x:Name="FindingsHeader" Text="気になる項目" FontSize="13" FontWeight="SemiBold"
                                Foreground="#C0C4C8" Margin="2,0,0,8" Visibility="Collapsed" />
 
-                    <!-- 要対応リスト -->
-                    <ItemsControl x:Name="FindingsList" Visibility="Collapsed">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Background="#FF2B2B2B" BorderBrush="#1AFFFFFF" BorderThickness="1"
-                                        CornerRadius="8" Padding="14,11" Margin="0,0,0,8">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <Ellipse Grid.Column="0" Style="{StaticResource SeverityDot}" />
-                                        <StackPanel Grid.Column="1">
-                                            <Grid Margin="0,0,0,2">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="*" />
-                                                </Grid.ColumnDefinitions>
-                                                <Border Grid.Column="0" Background="#33FFFFFF" CornerRadius="4"
-                                                        Padding="6,1" Margin="0,1,8,0" VerticalAlignment="Top">
-                                                    <TextBlock Text="{Binding Category}" FontSize="10.5" Foreground="#E4E4E4" />
-                                                </Border>
-                                                <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="13.5"
-                                                           FontWeight="SemiBold" Foreground="#ECECEC"
-                                                           TextWrapping="Wrap" VerticalAlignment="Center" />
-                                            </Grid>
-                                            <TextBlock Text="{Binding Detail}" FontSize="11.5" Foreground="#9AA0A6" TextWrapping="Wrap" />
-                                        </StackPanel>
-                                        <ui:Button Grid.Column="2" Content="✕" Appearance="Transparent" Click="Dismiss_Click"
-                                                   ToolTip="非表示にする（もう表示しません）"
-                                                   FontSize="13" Padding="9,2" VerticalAlignment="Top" Cursor="Hand" />
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                    <!-- 要対応リスト (Critical + Recommended)。Info は下の「参考」へ分離。 -->
+                    <ItemsControl x:Name="FindingsList" Visibility="Collapsed"
+                                  ItemTemplate="{StaticResource FindingTemplate}" />
 
                     <!-- 空状態 -->
                     <Border x:Name="EmptyText" Background="#FF243024" BorderBrush="#1A8FCF8F" BorderThickness="1"
                             CornerRadius="8" Padding="16,14" Visibility="Collapsed">
                         <TextBlock Text="✓ 気になる項目はありません" FontSize="13" Foreground="#BFE5BF" />
                     </Border>
+
+                    <!-- 参考 (Info: 画像未設定・孤児フォルダ等。主リストを埋めないよう折り畳み) -->
+                    <Expander x:Name="InfoExpander" Header="参考" Margin="0,14,0,0"
+                              Foreground="#C8C8C8" Visibility="Collapsed">
+                        <ItemsControl x:Name="InfoList" Margin="0,8,0,0"
+                                      ItemTemplate="{StaticResource FindingTemplate}" />
+                    </Expander>
 
                     <!-- 非表示にした項目 (折り畳み) -->
                     <Expander x:Name="DismissedExpander" Header="非表示にした項目" Margin="0,14,0,0"

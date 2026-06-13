@@ -138,21 +138,29 @@ namespace TonePrism.Manager.Shell
             var active = s.ActiveFindings ?? new List<DashboardFinding>();
             var dismissed = s.DismissedFindings ?? new List<DashboardFinding>();
 
-            // ===== 要対応リスト (左) =====
-            // 重大度順 (Critical→Recommended→Info)。各重大度内は収集順 (= 不備が先、ログが後)。
-            var ordered = active.OrderBy(f => (int)f.Severity).ToList();
-            FindingsList.ItemsSource = ordered;
-
             int critical = active.Count(f => f.Severity == FindingSeverity.Critical);
             int recommended = active.Count(f => f.Severity == FindingSeverity.Recommended);
             int info = active.Count(f => f.Severity == FindingSeverity.Info);
 
-            bool any = ordered.Count > 0;
-            FindingsList.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
-            FindingsHeader.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
-            FindingsHeader.Text = "気になる項目（" + ordered.Count + "）";
+            // ===== 要対応リスト (左) =====
+            // 主リストは Critical + Recommended (対応する価値がある)。Info (画像未設定・孤児フォルダ等) は
+            // 主リストを埋めないよう「参考」折り畳みへ分離。主リスト内は重大度順 (Critical→Recommended)。
+            var mainList = active.Where(f => f.Severity != FindingSeverity.Info)
+                                 .OrderBy(f => (int)f.Severity).ToList();
+            var infoList = active.Where(f => f.Severity == FindingSeverity.Info).ToList();
+            FindingsList.ItemsSource = mainList;
+            InfoList.ItemsSource = infoList;
+
+            bool anyMain = mainList.Count > 0;
+            FindingsList.Visibility = anyMain ? Visibility.Visible : Visibility.Collapsed;
+            FindingsHeader.Visibility = anyMain ? Visibility.Visible : Visibility.Collapsed;
+            FindingsHeader.Text = "気になる項目（" + mainList.Count + "）";
             // 取得失敗時は「✓ 気になる項目はありません」の緑箱を出さない (未チェックを all-clear に見せない)。盾が代わりに警告。
-            EmptyText.Visibility = (!any && !s.Failed) ? Visibility.Visible : Visibility.Collapsed;
+            EmptyText.Visibility = (!anyMain && !s.Failed) ? Visibility.Visible : Visibility.Collapsed;
+
+            // 参考 (Info) 折り畳み。
+            InfoExpander.Visibility = infoList.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            InfoExpander.Header = "参考（" + infoList.Count + "）";
 
             // 総合ステータス盾。赤化は「本当に壊れてる」critical だけ。画像欠落等は緑のまま=迫らない。
             // ただし取得失敗 (recon の AnalysisFailed 等) のときは緑「準備OK」と言い切らず警告にする
