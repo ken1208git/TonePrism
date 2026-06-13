@@ -13,6 +13,16 @@
     FontFamily="Segoe UI Variable Text"
     ExtendsContentIntoTitleBar="True">
 
+    <!-- (seam フラット化) WPF-UI NavigationView は content 領域を別 surface (角丸 8,0,0,0 + 1px 縁
+         NavigationViewContentGridBorderBrush + 別 bg = Win11 設定アプリ風 "コンテンツカード") で描くため、
+         ペインとの境目に微小 seam が出る。縁と bg を窓と同色 (#FF202020) に上書きして 1 枚の面に見せる
+         (CornerRadius/FrameMargin は色が揃えば notch/gap が背景に溶けて不可視。テンプレ書換え不要)。
+         中身が全部 WPF ネイティブ化したら、この上書きを外して Fluent カードに戻す手もある。 -->
+    <ui:FluentWindow.Resources>
+        <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="#FF202020" />
+        <SolidColorBrush x:Key="NavigationViewContentBackground" Color="#FF202020" />
+    </ui:FluentWindow.Resources>
+
     <!-- (#245 PR5) Windows タスクバーアイコンの進捗 (緑バー)。全進捗オペレーション (復元/バックアップ/更新/
          アセット処理) の関所 ProcessingDialog.ReportProgress から SetTaskbarProgress 経由で駆動する。
          シェルが可視メイン窓 = タスクバーボタンの所有者なのでここに付ける (旧 WinForms MainForm は隠し)。 -->
@@ -44,6 +54,9 @@
             Grid.Row="1"
             Background="#FF202020">
             <ui:NavigationView.MenuItems>
+                <ui:NavigationViewItem Content="ダッシュボード" TargetPageType="{x:Type local:DashboardPage}">
+                    <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Home24" /></ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
                 <ui:NavigationViewItem Content="ゲーム" TargetPageType="{x:Type local:GameHostPage}">
                     <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Games24" /></ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>

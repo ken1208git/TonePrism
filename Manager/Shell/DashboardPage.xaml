@@ -1,0 +1,245 @@
+<Page
+    x:Class="TonePrism.Manager.Shell.DashboardPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Background="#FF202020">
+
+    <!-- (ダッシュボード) セキュリティソフト風の「要対応チェックリスト」(左) + 概況タイル (右)。
+         チェックリスト = RestoreReconciliationService.Analyze() の登録不備 (部員に分かるプレーン日本語) を集約し、
+         × で恒久非表示 (settings 永続) にできる。盾は本当に壊れてる系 (起動不能/スキーマ未完) だけ赤くなり、
+         画像欠落などの任意項目は緑のまま=対応を迫らない。ヘッダに LAN 全体のランチャー稼働バッジ (3 秒更新)。
+         生ログ (WARN/ERROR) は部員に意味不明なため出さない (『ログ』タブが SoT)。
+         注意: ItemsControl の DataTemplate 内 TextBlock には Page.Resources の暗黙スタイルが届かず WPF 既定の
+         黒文字に落ちるため、テンプレ内テキストは必ず明示 Foreground を付ける。取得は SMB I/O を含むので Task.Run。 -->
+
+    <Page.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#ECECEC" />
+        </Style>
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="#FF2B2B2B" />
+            <Setter Property="BorderBrush" Value="#1AFFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="18,15" />
+        </Style>
+        <Style x:Key="CardHeader" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#ECECEC" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+        <Style x:Key="MetricLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#9AA0A6" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Margin" Value="0,1,0,0" />
+        </Style>
+        <!-- 重大度ドット (赤=起動不能/琥珀=要確認/灰=参考)。DataTrigger で finding.Severity に追従。 -->
+        <Style x:Key="SeverityDot" TargetType="Ellipse">
+            <Setter Property="Width" Value="9" />
+            <Setter Property="Height" Value="9" />
+            <Setter Property="Margin" Value="0,6,12,0" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+            <Setter Property="Fill" Value="#8A8A8A" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Severity}" Value="Critical">
+                    <Setter Property="Fill" Value="#E0574F" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Severity}" Value="Recommended">
+                    <Setter Property="Fill" Value="#E0A03E" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- finding 1 行のテンプレート (主リスト=FindingsList と 参考=InfoList で共有)。× = Dismiss_Click。 -->
+        <DataTemplate x:Key="FindingTemplate">
+            <Border Background="#FF2B2B2B" BorderBrush="#1AFFFFFF" BorderThickness="1"
+                    CornerRadius="8" Padding="14,11" Margin="0,0,0,8">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Ellipse Grid.Column="0" Style="{StaticResource SeverityDot}" />
+                    <StackPanel Grid.Column="1">
+                        <Grid Margin="0,0,0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Background="#33FFFFFF" CornerRadius="4"
+                                    Padding="6,1" Margin="0,1,8,0" VerticalAlignment="Top">
+                                <TextBlock Text="{Binding Category}" FontSize="10.5" Foreground="#E4E4E4" />
+                            </Border>
+                            <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="13.5"
+                                       FontWeight="SemiBold" Foreground="#ECECEC"
+                                       TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                        <TextBlock Text="{Binding Detail}" FontSize="11.5" Foreground="#9AA0A6" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ui:Button Grid.Column="2" Content="✕" Appearance="Transparent" Click="Dismiss_Click"
+                               ToolTip="非表示にする"
+                               Visibility="{Binding CanDismiss, Converter={StaticResource BoolToVis}}"
+                               FontSize="13" Padding="9,2" VerticalAlignment="Top" Cursor="Hand" />
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </Page.Resources>
+
+    <ScrollViewer x:Name="PageScroll" Padding="36,28,36,28" VerticalScrollBarVisibility="Auto">
+        <StackPanel MaxWidth="1120">
+
+            <!-- ヘッダ (全幅) -->
+            <Grid Margin="0,0,0,18">
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="ダッシュボード" FontSize="28" FontWeight="Bold" Foreground="#F4F4F4" />
+                    <TextBlock x:Name="SubtitleText" Foreground="#9AA0A6" FontSize="12" Margin="0,2,0,0"
+                               Text="登録の不備を一覧します" />
+                </StackPanel>
+                <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal">
+                    <!-- LAN 全体のランチャー稼働（3 秒間隔で自動更新）。色は code-behind で稼働=緑/停止=灰。 -->
+                    <Border x:Name="LauncherBadge" Background="#FF2B2B2B" BorderBrush="#1AFFFFFF" BorderThickness="1"
+                            CornerRadius="14" Padding="11,5" Margin="0,0,10,0" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="LauncherDot" Width="9" Height="9" Fill="#8A8A8A"
+                                     VerticalAlignment="Center" Margin="0,0,7,0" />
+                            <TextBlock x:Name="LauncherStatusText" Text="ランチャー —" FontSize="12"
+                                       Foreground="#D8D8D8" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+                    <ui:Button x:Name="RefreshButton" Content="更新" VerticalAlignment="Center" Click="Refresh_Click" />
+                </StackPanel>
+            </Grid>
+
+            <!-- 2カラム: 左=チェックリスト / 右=概況タイル -->
+            <Grid>
+                <!-- 右タイル列は Auto = 中身ぴったり幅。最広は日付行 (yyyy-MM-dd HH:mm、常に固定幅) なので
+                     ジッタも出ない。左のチェックリストが残り全幅を取る。 -->
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- ===== 左: 盾 + チェックリスト ===== -->
+                <StackPanel Grid.Column="0" Margin="0,0,18,0">
+
+                    <!-- 総合ステータス (盾) -->
+                    <Border x:Name="StatusBanner" Background="#FF2B2B2B" BorderBrush="#1AFFFFFF" BorderThickness="1"
+                            CornerRadius="10" Padding="18,16" Margin="0,0,0,16">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="StatusIconBg" Grid.Column="0" Width="44" Height="44" CornerRadius="22"
+                                    Background="#2E4A2E" Margin="0,0,16,0" VerticalAlignment="Center">
+                                <TextBlock x:Name="StatusIcon" Text="…" FontSize="22" Foreground="#9FD79F"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock x:Name="StatusTitle" Text="確認しています…" FontSize="17"
+                                           FontWeight="SemiBold" Foreground="#ECECEC" />
+                                <TextBlock x:Name="StatusSubtitle" Text="" FontSize="12" Foreground="#A8ADB3"
+                                           Margin="0,2,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- 読み込み中 -->
+                    <StackPanel x:Name="LoadingPanel" Orientation="Horizontal" Margin="0,8,0,16" HorizontalAlignment="Center">
+                        <ui:ProgressRing IsIndeterminate="True" Width="22" Height="22" Margin="0,0,10,0" VerticalAlignment="Center" />
+                        <TextBlock Text="チェック中…" VerticalAlignment="Center" Foreground="#B0B0B0" />
+                    </StackPanel>
+
+                    <!-- 気になる項目の見出し -->
+                    <TextBlock x:Name="FindingsHeader" Text="気になる項目" FontSize="13" FontWeight="SemiBold"
+                               Foreground="#C0C4C8" Margin="2,0,0,8" Visibility="Collapsed" />
+
+                    <!-- 要対応リスト (Critical + Recommended)。Info は下の「参考」へ分離。 -->
+                    <ItemsControl x:Name="FindingsList" Visibility="Collapsed"
+                                  ItemTemplate="{StaticResource FindingTemplate}" />
+
+                    <!-- 空状態 -->
+                    <Border x:Name="EmptyText" Background="#FF243024" BorderBrush="#1A8FCF8F" BorderThickness="1"
+                            CornerRadius="8" Padding="16,14" Visibility="Collapsed">
+                        <TextBlock Text="✓ 気になる項目はありません" FontSize="13" Foreground="#BFE5BF" />
+                    </Border>
+
+                    <!-- 参考 (Info: 画像未設定・孤児フォルダ等。主リストを埋めないよう折り畳み) -->
+                    <Expander x:Name="InfoExpander" Header="参考" Margin="0,14,0,0"
+                              Foreground="#C8C8C8" Visibility="Collapsed">
+                        <ItemsControl x:Name="InfoList" Margin="0,8,0,0"
+                                      ItemTemplate="{StaticResource FindingTemplate}" />
+                    </Expander>
+
+                    <!-- 非表示にした項目 (折り畳み) -->
+                    <Expander x:Name="DismissedExpander" Header="非表示にした項目" Margin="0,14,0,0"
+                              Foreground="#C8C8C8" Visibility="Collapsed">
+                        <ItemsControl x:Name="DismissedList" Margin="0,8,0,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="#FF262626" BorderBrush="#14FFFFFF" BorderThickness="1"
+                                            CornerRadius="6" Padding="12,8" Margin="0,0,0,6">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Title}" FontSize="12.5" Foreground="#C8C8C8" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding Category}" FontSize="10.5" Foreground="#808080" />
+                                            </StackPanel>
+                                            <ui:Button Grid.Column="1" Content="戻す" Appearance="Secondary" Click="Restore_Click"
+                                                       FontSize="11" Padding="10,3" VerticalAlignment="Center" Cursor="Hand" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Expander>
+                </StackPanel>
+
+                <!-- ===== 右: 概況タイル (登録コンテンツ + バックアップのみ) ===== -->
+                <StackPanel x:Name="TilesPanel" Grid.Column="1" Visibility="Collapsed">
+
+                    <!-- 登録コンテンツ -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource CardHeader}" Text="登録コンテンツ" />
+                            <StackPanel Margin="0,0,0,10">
+                                <TextBlock x:Name="GamesValue" FontSize="22" FontWeight="SemiBold" Foreground="#F0F0F0" Text="—" />
+                                <TextBlock Style="{StaticResource MetricLabel}" Text="ゲーム（公開中 / 合計）" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,0,10">
+                                <TextBlock x:Name="SectionsValue" FontSize="15" Foreground="#ECECEC" Text="—" />
+                                <TextBlock Style="{StaticResource MetricLabel}" Text="ストアセクション" />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock x:Name="SlidesValue" FontSize="15" Foreground="#ECECEC" Text="—" />
+                                <TextBlock Style="{StaticResource MetricLabel}" Text="初回説明スライド" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- バックアップ -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource CardHeader}" Text="バックアップ" />
+                            <StackPanel Margin="0,0,0,10">
+                                <TextBlock x:Name="LastBackupValue" FontSize="14" FontWeight="SemiBold" Foreground="#ECECEC" Text="—" TextWrapping="Wrap" />
+                                <TextBlock Style="{StaticResource MetricLabel}" Text="最終バックアップ" />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock x:Name="BackupSummaryValue" FontSize="14" Foreground="#ECECEC" Text="—" />
+                                <TextBlock Style="{StaticResource MetricLabel}" Text="世代数 / 合計サイズ" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

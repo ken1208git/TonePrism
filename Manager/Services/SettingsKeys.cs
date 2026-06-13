@@ -150,5 +150,14 @@ namespace TonePrism.Manager.Services
         /// 5 分 = 300_000 ms。通常の restore は 1 分以内で完了する想定なので、5 分超過は確実に異常 (crash 等)。
         /// </summary>
         public const long RestoreLockStaleThresholdMs = 5L * 60 * 1000;
+
+        // ----- (ダッシュボード) 要対応チェックリストで × した finding -----
+
+        /// <summary>
+        /// (ダッシュボード) チェックリストで「×（非表示）」にした finding の ID を改行区切りで保持する。
+        /// 値は SetString の AddWithValue param 経由で書くため任意文字可 (本クラス冒頭の literal 制約は key 名のみ)。
+        /// 新規 key = settings への行追加に過ぎず schema migration / CurrentDbVersion bump は不要。
+        /// </summary>
+        public const string DashboardDismissedFindings = "dashboard_dismissed_findings";
     }
 }

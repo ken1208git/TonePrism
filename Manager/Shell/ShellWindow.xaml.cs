@@ -34,8 +34,8 @@ namespace TonePrism.Manager.Shell
         {
             InitializeComponent();
             Instance = this;
-            // (#245 PR5 step4) 起動時は最初の実セクション (ゲーム) に着地する (旧: 飾りの PreviewPage)。
-            Loaded += (_, _) => RootNavigation.Navigate(typeof(GameHostPage));
+            // (ダッシュボード) 起動着地はダッシュボード (準備完了度の一目把握)。データは背景取得で固めない。
+            Loaded += (_, _) => RootNavigation.Navigate(typeof(DashboardPage));
             // シェルが閉じたら Instance を掃除し、破棄済み窓を掴み続けないようにする (ProcessingDialog /
             // SplashScreenHost の stale なタスクバー参照を防ぐ)。SharedDb / HostForm は意図的に残す:
             // シェル close → MainForm.Close → 即プロセス exit で掃除不要、かつ close 中の host ページ

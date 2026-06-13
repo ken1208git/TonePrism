@@ -1,0 +1,287 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Threading;
+using TonePrism.Manager.Services;
+
+namespace TonePrism.Manager.Shell
+{
+    /// <summary>
+    /// (ダッシュボード) セキュリティソフト風の「要対応チェックリスト」(左) + 概況タイル (右)。
+    /// <see cref="DashboardService"/> が集めた登録不備 (RestoreReconciliationService 流用) を部員に分かる
+    /// プレーン日本語で 1 リストに出し、× で恒久的に非表示 (settings 永続) にできる。総合ステータス
+    /// (盾) は起動不能/スキーマ未完だけで赤くなり、画像欠落などの任意項目は緑のまま=対応を迫らない。
+    /// 取得は SMB I/O を含むので Task.Run で背景実行する。生ログは部員に意味不明なため出さない (『ログ』タブが SoT)。
+    /// </summary>
+    public partial class DashboardPage : Page
+    {
+        // 総合ステータス盾の配色 (緑=準備OK / 赤=Critical / 琥珀=取得失敗)。文字は明色。
+        private static readonly Brush OkBg = new SolidColorBrush(Color.FromRgb(0x2E, 0x4A, 0x2E));
+        private static readonly Brush OkFg = new SolidColorBrush(Color.FromRgb(0x9F, 0xD7, 0x9F));
+        private static readonly Brush WarnBg = new SolidColorBrush(Color.FromRgb(0x4A, 0x3C, 0x1E));
+        private static readonly Brush WarnFg = new SolidColorBrush(Color.FromRgb(0xE0, 0xB9, 0x68));
+        // Critical 用 (赤)。「取得失敗」の琥珀 (Warn) と階層を色で区別し、リストの赤ドット (#E0574F) と整合させる (review #3)。
+        private static readonly Brush CritBg = new SolidColorBrush(Color.FromRgb(0x4A, 0x2A, 0x28));
+        private static readonly Brush CritFg = new SolidColorBrush(Color.FromRgb(0xE0, 0x8A, 0x80));
+
+        // ランチャー稼働バッジ (緑=稼働中 / 灰=停止中)。
+        private static readonly Brush RunningBrush = new SolidColorBrush(Color.FromRgb(0x6C, 0xCB, 0x5A));
+        private static readonly Brush IdleBrush = new SolidColorBrush(Color.FromRgb(0x9A, 0x9A, 0x9A));
+
+        private bool _loading;
+        // この「表示」中に既に初回ロード + タイマー開始済か。NavigationView は初期レイアウト中に Loaded を複数回
+        // 投げることがあるため 1 表示 1 回に絞る。Unloaded で reset するので、別ページから戻れば再取得 + タイマー再開。
+        private bool _loadedThisShow;
+
+        // 自動更新 (near-real-time)。ページ表示中だけ回し、Unloaded / 非表示で止める。二段構え:
+        //  - 軽い「ランチャー稼働バッジ」= 3 秒ごと (responses/launcher_sessions/ の小さな heartbeat スキャンのみ)。
+        //  - 重い全体 Gather (recon 全資産スキャン + backups 走査 + 件数) = 約 21 秒ごと (= 3 秒 ×7)。
+        // findings/件数はめったに変わらず重いので ~20 秒、稼働状況は即応したいので 3 秒、と粒度を分ける。
+        // 稼働バッジを 1→3 秒に緩めたのは PR #372 review #2: heartbeat 自体が 10 秒間隔なので 1 秒は過剰で、
+        // 3 秒でも体感ほぼ同じ (起動検出が ≤3 秒、閉じ検出は 60 秒 stale 律速で不変) かつ SMB 負荷 1/3。
+        // 各経路とも実行中なら skip (self-throttle) し、SMB が遅くても積み上がらない。
+        private static readonly TimeSpan LauncherTickInterval = TimeSpan.FromSeconds(3);
+        private const int FullRefreshEveryNTicks = 7; // 3 秒 ×7 ≈ 21 秒で重い全体スキャン
+        private readonly DispatcherTimer _autoRefreshTimer;
+        private int _tickCount;
+        private bool _launcherBusy;
+        // dismiss/restore が自動更新 (load) の最中に来たとき、その load 終了後にもう一度 load する予約フラグ (review #5)。
+        private bool _reloadRequested;
+
+        private DatabaseManager Db => ShellWindow.SharedDb;
+
+        public DashboardPage()
+        {
+            InitializeComponent();
+            _autoRefreshTimer = new DispatcherTimer { Interval = LauncherTickInterval };
+            _autoRefreshTimer.Tick += async (_, _) =>
+            {
+                if (!IsVisible) return;
+                _tickCount++;
+                if (_tickCount % FullRefreshEveryNTicks == 0)
+                    _ = LoadAsync(silent: true);       // 重い全体更新 (badge も Populate 経由で更新される)
+                else
+                    await RefreshLauncherBadgeAsync();  // 軽量: ランチャーバッジだけ
+            };
+            Loaded += async (_, _) =>
+            {
+                if (_loadedThisShow) return;
+                _loadedThisShow = true;
+                _tickCount = 0;
+                _autoRefreshTimer.Start();
+                await LoadAsync();
+            };
+            Unloaded += (_, _) => { _loadedThisShow = false; _autoRefreshTimer.Stop(); };
+        }
+
+        private void Refresh_Click(object sender, RoutedEventArgs e) => _ = LoadAsync();
+
+        // silent=true: 自動更新 tick 用。スピナー / ボタン無効化を出さず、結果だけ in-place 反映する (チラつき防止)。
+        private async Task LoadAsync(bool silent = false)
+        {
+            if (_loading) return;
+            _loading = true;
+            try
+            {
+                if (!silent)
+                {
+                    RefreshButton.IsEnabled = false;
+                    LoadingPanel.Visibility = Visibility.Visible;
+                }
+
+                DatabaseManager db = Db;
+                // LAN-wide ランチャー検出用サービスは MainForm (編集前競合チェックと同一インスタンス) から借りる。
+                // 取得は UI スレッドで参照だけし、実スキャン (SMB I/O) は Task.Run 内で走らせる。
+                var launcherSvc = ShellWindow.HostForm?.LauncherSessionService;
+                DashboardSnapshot snap = await Task.Run(() => DashboardService.Gather(db, launcherSvc));
+                Populate(snap);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("[DashboardPage] 読み込み失敗: " + ex.Message);
+            }
+            finally
+            {
+                if (!silent) RefreshButton.IsEnabled = true;
+                LoadingPanel.Visibility = Visibility.Collapsed;
+                _loading = false;
+            }
+
+            // load 進行中に dismiss/restore が来ていたら、最新状態でもう一度 (×した項目が次の自動更新まで残るのを防ぐ、review #5)。
+            if (_reloadRequested) { _reloadRequested = false; await LoadAsync(silent); }
+        }
+
+        // 軽量: ランチャー稼働だけ取り直してバッジ更新 (3 秒間隔)。全体更新中 / 前回スキャン未完なら skip。
+        private async Task RefreshLauncherBadgeAsync()
+        {
+            if (_loading || _launcherBusy) return;
+            _launcherBusy = true;
+            try
+            {
+                var svc = ShellWindow.HostForm?.LauncherSessionService;
+                LauncherStatus ls = await Task.Run(() => DashboardService.DetectLauncher(svc));
+                SetLauncherBadge(ls.Count, ls.PcNames);
+            }
+            catch (Exception ex) { Logger.Warn("[DashboardPage] ランチャーバッジ更新失敗: " + ex.Message); }
+            finally { _launcherBusy = false; }
+        }
+
+        // ランチャー稼働バッジ (LAN 全体・stale 除外済)。0 台なら灰で中立 (全キオスク停止は正常もありうる)。
+        // 稼働中は緑 + ツールチップに PC 名。全体 Populate と 3 秒間隔更新の両方が呼ぶ共通 setter。
+        private void SetLauncherBadge(int count, List<string> pcNames)
+        {
+            bool up = count > 0;
+            LauncherDot.Fill = up ? RunningBrush : IdleBrush;
+            LauncherStatusText.Foreground = up ? RunningBrush : IdleBrush;
+            LauncherStatusText.Text = up ? ("ランチャー稼働中（" + count + "台）") : "ランチャー停止中";
+            LauncherBadge.ToolTip = (up && pcNames != null && pcNames.Count > 0)
+                ? "稼働中のPC: " + string.Join("、", pcNames)
+                : null;
+        }
+
+        private void Populate(DashboardSnapshot s)
+        {
+            var active = s.ActiveFindings ?? new List<DashboardFinding>();
+            var dismissed = s.DismissedFindings ?? new List<DashboardFinding>();
+
+            int critical = active.Count(f => f.Severity == FindingSeverity.Critical);
+            int recommended = active.Count(f => f.Severity == FindingSeverity.Recommended);
+            int info = active.Count(f => f.Severity == FindingSeverity.Info);
+
+            // ===== 要対応リスト (左) =====
+            // 主リストは Critical + Recommended (対応する価値がある)。Info (画像未設定・孤児フォルダ等) は
+            // 主リストを埋めないよう「参考」折り畳みへ分離。主リスト内は重大度順 (Critical→Recommended)。
+            var mainList = active.Where(f => f.Severity != FindingSeverity.Info)
+                                 .OrderBy(f => (int)f.Severity).ToList();
+            var infoList = active.Where(f => f.Severity == FindingSeverity.Info).ToList();
+            FindingsList.ItemsSource = mainList;
+            InfoList.ItemsSource = infoList;
+
+            bool anyMain = mainList.Count > 0;
+            FindingsList.Visibility = anyMain ? Visibility.Visible : Visibility.Collapsed;
+            FindingsHeader.Visibility = anyMain ? Visibility.Visible : Visibility.Collapsed;
+            FindingsHeader.Text = "気になる項目（" + mainList.Count + "）";
+            // 取得失敗時は「✓ 気になる項目はありません」の緑箱を出さない (未チェックを all-clear に見せない)。盾が代わりに警告。
+            EmptyText.Visibility = (!anyMain && !s.Failed) ? Visibility.Visible : Visibility.Collapsed;
+
+            // 参考 (Info) 折り畳み。
+            InfoExpander.Visibility = infoList.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            InfoExpander.Header = "参考（" + infoList.Count + "）";
+
+            // 総合ステータス盾の 3 状態: 赤=critical (アクティブ版起動不能/スキーマ未完) / 琥珀=取得失敗 / 緑=OK。
+            // 取得失敗 (recon の AnalysisFailed 等) は緑「準備OK」と言い切らず琥珀の警告にする
+            // (チェックリストの存在意義は問題の表面化なので、失敗を all-clear に見せない)。
+            if (critical > 0)
+            {
+                StatusIcon.Text = "⚠";
+                StatusIcon.Foreground = CritFg;
+                StatusIconBg.Background = CritBg;
+                StatusTitle.Text = critical + "件の対応が必要です";
+                StatusSubtitle.Text = "起動できないゲームやデータベースの問題があります"
+                    + (s.Failed ? "（※一部の情報は取得できませんでした）" : "");
+            }
+            else if (s.Failed)
+            {
+                StatusIcon.Text = "⚠";
+                StatusIcon.Foreground = WarnFg;
+                StatusIconBg.Background = WarnBg;
+                StatusTitle.Text = "一部を確認できませんでした";
+                StatusSubtitle.Text = "情報の取得に失敗しました。「更新」で再試行するか、ログをご確認ください。";
+            }
+            else
+            {
+                StatusIcon.Text = "✓";
+                StatusIcon.Foreground = OkFg;
+                StatusIconBg.Background = OkBg;
+                StatusTitle.Text = "準備は整っています";
+                // 確認推奨 (recommended) と 参考 (info=画像未設定など) を分けて、軽い参考の束が「要対応」に見えないように。
+                var parts = new List<string>();
+                if (recommended > 0) parts.Add("確認をおすすめ " + recommended + " 件");
+                if (info > 0) parts.Add("参考 " + info + " 件");
+                StatusSubtitle.Text = parts.Count > 0
+                    ? string.Join("・", parts) + "（任意）"
+                    : "起動を妨げる問題は見つかりませんでした";
+            }
+
+            // 非表示にした項目 (折り畳み)。
+            DismissedList.ItemsSource = dismissed;
+            DismissedExpander.Visibility = dismissed.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            DismissedExpander.Header = "非表示にした項目（" + dismissed.Count + "）";
+
+            // ランチャー稼働バッジ (3 秒間隔の軽量更新と共有する setter)。
+            SetLauncherBadge(s.LauncherSessionCount, s.LauncherPcNames);
+
+            // ===== 概況タイル (右・独立: 登録コンテンツ + バックアップ) =====
+            GamesValue.Text = s.VisibleGameCount + " / " + s.GameCount + " 件";
+            SectionsValue.Text = s.StoreSectionCount + " 個";
+            SlidesValue.Text = s.IntroSlideCount + " 枚";
+
+            // 日時と (経過・トリガ) を明示改行で 2 行に分け、タイルを細くしても "避）" だけ折返す不格好を避ける。
+            LastBackupValue.Text = s.LastBackupAt.HasValue
+                ? s.LastBackupAt.Value.ToString("yyyy-MM-dd HH:mm")
+                  + "\n（" + FormatAge(s.LastBackupAt.Value) + "・" + FormatTrigger(s.LastBackupTrigger) + "）"
+                : "まだありません";
+            BackupSummaryValue.Text = s.BackupCount + " 世代 / " + FormatBytes(s.BackupTotalBytes);
+
+            TilesPanel.Visibility = Visibility.Visible;
+
+            SubtitleText.Text = "最終更新 " + DateTime.Now.ToString("HH:mm:ss") + "・自動更新中";
+        }
+
+        // × = 非表示にして恒久的に黙らせる (settings 永続)。書込は SMB I/O を含むので背景で。
+        private async void Dismiss_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is DashboardFinding f && !string.IsNullOrEmpty(f.Id))
+            {
+                DatabaseManager db = Db;
+                await Task.Run(() => DashboardService.Dismiss(db, f.Id));
+                // 自動更新の load 進行中なら「終わったらもう一度」を予約、そうでなければ即再描画 (review #5)。
+                if (_loading) _reloadRequested = true;
+                else await LoadAsync();
+            }
+        }
+
+        // 「戻す」= 非表示を解除して再びチェック対象に戻す。
+        private async void Restore_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is DashboardFinding f && !string.IsNullOrEmpty(f.Id))
+            {
+                DatabaseManager db = Db;
+                await Task.Run(() => DashboardService.Restore(db, f.Id));
+                if (_loading) _reloadRequested = true;
+                else await LoadAsync();
+            }
+        }
+
+        private static string FormatTrigger(string t)
+        {
+            switch (t)
+            {
+                case "auto": return "自動";
+                case "manual": return "手動";
+                case "safety": return "退避";
+                default: return "不明";
+            }
+        }
+
+        private static string FormatAge(DateTime when)
+        {
+            TimeSpan d = DateTime.Now - when;
+            if (d.TotalMinutes < 1) return "たった今";
+            if (d.TotalMinutes < 60) return (int)d.TotalMinutes + "分前";
+            if (d.TotalHours < 24) return (int)d.TotalHours + "時間前";
+            return (int)d.TotalDays + "日前";
+        }
+
+        private static string FormatBytes(long bytes)
+        {
+            if (bytes <= 0) return "0 MB";
+            double mb = bytes / (1024.0 * 1024.0);
+            return mb < 1024 ? (mb.ToString("0.#") + " MB") : ((mb / 1024.0).ToString("0.##") + " GB");
+        }
+    }
+}
