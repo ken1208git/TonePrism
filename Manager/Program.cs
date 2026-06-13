@@ -198,7 +198,7 @@ namespace TonePrism.Manager
                     return (logsRootPath, retentionDays);
 
                 // migration の可能性があるため Read Only=True を外す (= 同 1 接続で read + write 両方やる)
-                using (var conn = new System.Data.SQLite.SQLiteConnection("Data Source=" + dbPath + ";Version=3;"))
+                using (var conn = new System.Data.SQLite.SQLiteConnection("Data Source=" + DatabaseConnection.ToSqliteDataSource(dbPath) + ";Version=3;"))
                 {
                     conn.Open();
 
