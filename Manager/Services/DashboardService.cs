@@ -240,7 +240,7 @@ namespace TonePrism.Manager.Services
                     Severity = FindingSeverity.Critical,
                     Category = "データベース",
                     Title = "データベースの更新が未完です",
-                    Detail = "v" + r.ActualSchemaVersion + " → v" + r.ExpectedSchemaVersion + "（再起動で再適用されます）"
+                    Detail = "v" + r.ActualSchemaVersion + " → v" + r.ExpectedSchemaVersion + "（再起動で再試行されます。直らない場合はログをご確認ください）"
                 });
             }
 
@@ -338,7 +338,10 @@ namespace TonePrism.Manager.Services
             return set;
         }
 
-        /// <summary>× した finding を非表示リストに追加して永続化 (背景スレッドから呼ぶ)。</summary>
+        /// <summary>× した finding を非表示リストに追加して永続化 (背景スレッドから呼ぶ)。
+        /// 解決済 finding の Id は prune しない＝settings 文字列は単調増加するが、表示は Gather の
+        /// 「現存 finding ∩ dismissed」交差で常に正しく (orphan Id は無害)、文化祭規模では蓄積は軽微なので
+        /// 意図的に GC 無し (review #4。prune は recon の一時 AnalysisFailed=空 と相性が悪く誤 un-dismiss の恐れ)。</summary>
         public static void Dismiss(DatabaseManager db, string id)
         {
             if (db == null || string.IsNullOrEmpty(id)) return;

@@ -19,11 +19,14 @@ namespace TonePrism.Manager.Shell
     /// </summary>
     public partial class DashboardPage : Page
     {
-        // 総合ステータス盾の配色 (緑=準備OK / 琥珀=要対応)。文字は明色。
+        // 総合ステータス盾の配色 (緑=準備OK / 赤=Critical / 琥珀=取得失敗)。文字は明色。
         private static readonly Brush OkBg = new SolidColorBrush(Color.FromRgb(0x2E, 0x4A, 0x2E));
         private static readonly Brush OkFg = new SolidColorBrush(Color.FromRgb(0x9F, 0xD7, 0x9F));
         private static readonly Brush WarnBg = new SolidColorBrush(Color.FromRgb(0x4A, 0x3C, 0x1E));
         private static readonly Brush WarnFg = new SolidColorBrush(Color.FromRgb(0xE0, 0xB9, 0x68));
+        // Critical 用 (赤)。「取得失敗」の琥珀 (Warn) と階層を色で区別し、リストの赤ドット (#E0574F) と整合させる (review #3)。
+        private static readonly Brush CritBg = new SolidColorBrush(Color.FromRgb(0x4A, 0x2A, 0x28));
+        private static readonly Brush CritFg = new SolidColorBrush(Color.FromRgb(0xE0, 0x8A, 0x80));
 
         // ランチャー稼働バッジ (緑=稼働中 / 灰=停止中)。
         private static readonly Brush RunningBrush = new SolidColorBrush(Color.FromRgb(0x6C, 0xCB, 0x5A));
@@ -46,6 +49,8 @@ namespace TonePrism.Manager.Shell
         private readonly DispatcherTimer _autoRefreshTimer;
         private int _tickCount;
         private bool _launcherBusy;
+        // dismiss/restore が自動更新 (load) の最中に来たとき、その load 終了後にもう一度 load する予約フラグ (review #5)。
+        private bool _reloadRequested;
 
         private DatabaseManager Db => ShellWindow.SharedDb;
 
@@ -105,6 +110,9 @@ namespace TonePrism.Manager.Shell
                 LoadingPanel.Visibility = Visibility.Collapsed;
                 _loading = false;
             }
+
+            // load 進行中に dismiss/restore が来ていたら、最新状態でもう一度 (×した項目が次の自動更新まで残るのを防ぐ、review #5)。
+            if (_reloadRequested) { _reloadRequested = false; await LoadAsync(silent); }
         }
 
         // 軽量: ランチャー稼働だけ取り直してバッジ更新 (3 秒間隔)。全体更新中 / 前回スキャン未完なら skip。
@@ -164,14 +172,14 @@ namespace TonePrism.Manager.Shell
             InfoExpander.Visibility = infoList.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             InfoExpander.Header = "参考（" + infoList.Count + "）";
 
-            // 総合ステータス盾。赤化は「本当に壊れてる」critical だけ。画像欠落等は緑のまま=迫らない。
-            // ただし取得失敗 (recon の AnalysisFailed 等) のときは緑「準備OK」と言い切らず警告にする
+            // 総合ステータス盾の 3 状態: 赤=critical (アクティブ版起動不能/スキーマ未完) / 琥珀=取得失敗 / 緑=OK。
+            // 取得失敗 (recon の AnalysisFailed 等) は緑「準備OK」と言い切らず琥珀の警告にする
             // (チェックリストの存在意義は問題の表面化なので、失敗を all-clear に見せない)。
             if (critical > 0)
             {
                 StatusIcon.Text = "⚠";
-                StatusIcon.Foreground = WarnFg;
-                StatusIconBg.Background = WarnBg;
+                StatusIcon.Foreground = CritFg;
+                StatusIconBg.Background = CritBg;
                 StatusTitle.Text = critical + "件の対応が必要です";
                 StatusSubtitle.Text = "起動できないゲームやデータベースの問題があります"
                     + (s.Failed ? "（※一部の情報は取得できませんでした）" : "");
@@ -231,7 +239,9 @@ namespace TonePrism.Manager.Shell
             {
                 DatabaseManager db = Db;
                 await Task.Run(() => DashboardService.Dismiss(db, f.Id));
-                await LoadAsync();
+                // 自動更新の load 進行中なら「終わったらもう一度」を予約、そうでなければ即再描画 (review #5)。
+                if (_loading) _reloadRequested = true;
+                else await LoadAsync();
             }
         }
 
@@ -242,7 +252,8 @@ namespace TonePrism.Manager.Shell
             {
                 DatabaseManager db = Db;
                 await Task.Run(() => DashboardService.Restore(db, f.Id));
-                await LoadAsync();
+                if (_loading) _reloadRequested = true;
+                else await LoadAsync();
             }
         }
 
