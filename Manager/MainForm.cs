@@ -312,6 +312,20 @@ namespace TonePrism.Manager
 
         private void MainForm_Load(object sender, EventArgs e)
         {
+            // (#245 PR5 / レビュー round5 Finding 1) 起動 init の前半 (DB migration / session init / 早期モーダル) も
+            // fallback で受ける。ContinueLoadWithFallback はセッションゲート後しか守らず、前半で例外が出ると
+            // Opacity=0 + 専用スレッドスプラッシュ下で「不可視窓 + スプラッシュ固まり」のサイレントハングになる
+            // 退行があった (round3 で後半だけ守った取りこぼし)。Load 全体を包んで degraded-but-visible へ復元する。
+            try { LoadCore(); }
+            catch (Exception loadEx)
+            {
+                Logger.Error("[MainForm] (#245 PR5 / レビュー Finding 1) 起動 init 前半で例外、旧 WinForms UI へフォールバック", loadEx);
+                FallbackToVisibleMainForm("起動処理中にエラーが発生しました。\n\n" + loadEx.Message + "\n\n旧画面で続行します。");
+            }
+        }
+
+        private void LoadCore()
+        {
             // (#168 brand rename ハード切替 guard) 旧版 (GCTonePrism) install を検出した場合、
             // user が誤って新 zip を旧 install dir に展開した想定。`prism.db` (旧 DB filename) が
             // 残置されているが `toneprism.db` (新 DB filename) は存在しない、というのが旧版痕跡の
