@@ -288,7 +288,7 @@ namespace TonePrism.Manager
         /// 先頭の `v`/`V` を一度剥がしてから小文字 v を被せ直すため、生値が "1.0.0" / "v1.0.0" / "V1.0.0"
         /// のいずれでも同一 leaf に正規化される。case-sensitive な `StartsWith("v")` 実装だと "V1.0.0" が
         /// "vV1.0.0" と二重 prefix になり、disk フォルダ名と DB 保存パス (GameSectionPanel が独立計算する
-        /// prefix) が食い違う死角があったため helper に集約して両者を必ず一致させる (EditGameForm.ToVersionLeaf と同規則)。
+        /// prefix) が食い違う死角があったため helper に集約して両者を必ず一致させる (VersionFolderRenameService.ToVersionLeaf と同規則。null/空の扱いのみ差: 当 helper は空を ArgumentException で弾き、rename 経路の ToVersionLeaf は異常 snapshot 値で throw しないよう空を許容)。
         /// </summary>
         /// <exception cref="ArgumentException">version が null / 空 / 空白のみのとき。
         /// (round 5 M5) 旧実装は `version ?? ""` で空文字を許容し leaf 名が `"v"` 単独になっていた。
