@@ -53,6 +53,8 @@ namespace TonePrism.Manager.Shell
             PlayerMaxBox.ValueChanged += (s, e) => OnPlayerMaxChanged();
             // NavigationView の表示遷移ごとに最新化 (DashboardPage と同様、Loaded は表示ごとに発火)。
             Loaded += (_, _) => LoadGames();
+            // ページ離脱時は進行中のサムネ背景ロードを打ち切る (離脱後も SMB I/O を最後まで続けないため)。
+            Unloaded += (_, _) => _thumbCts?.Cancel();
         }
 
         private void BuildGenreFilterChecks()
@@ -135,7 +137,8 @@ namespace TonePrism.Manager.Shell
                 q = q.Where(i => i.Game.MinPlayers == null || i.Game.MaxPlayers == null
                               || (i.Game.MinPlayers.Value <= phi && i.Game.MaxPlayers.Value >= plo));
             }
-            // 難易度 / プレイ時間 (index 1..3 == 値 1..3)
+            // 難易度 / プレイ時間 (index 1..3 == 値 1..3)。単一値マッチなので未設定 (null) は除外される
+            // (人数は範囲軸で「不明は常に通す」が、こちらは「その難易度/時間と確定した行」だけ出す方が自然＝意図的な非対称)。
             int diff = DiffCombo?.SelectedIndex ?? 0;
             if (diff > 0) q = q.Where(i => i.Game.Difficulty == diff);
             int ptime = TimeCombo?.SelectedIndex ?? 0;
@@ -285,16 +288,24 @@ namespace TonePrism.Manager.Shell
         // 呼び出し元 (UI) スレッドに戻るので Thumbnail setter の PropertyChanged は安全。null の間はアイコン表示。
         private static async Task LoadThumbnailsAsync(List<GameListItem> items, CancellationToken token)
         {
-            foreach (var item in items)
+            try
             {
-                if (token.IsCancellationRequested) return; // 打ち切られた (= 新しい LoadGames が走った) ら以降は無駄なので止める
-                try
+                foreach (var item in items)
                 {
-                    var src = await Task.Run(() => GameListItem.LoadThumbnail(item.Game));
-                    if (token.IsCancellationRequested) return;
-                    if (src != null) item.Thumbnail = src;
+                    if (token.IsCancellationRequested) return; // 打ち切られた (= 新しい LoadGames が走った) ら以降は無駄なので止める
+                    try
+                    {
+                        var src = await Task.Run(() => GameListItem.LoadThumbnail(item.Game));
+                        if (token.IsCancellationRequested) return;
+                        if (src != null) item.Thumbnail = src;
+                    }
+                    catch { /* 個別失敗は無視 (アイコンのまま) */ }
                 }
-                catch { /* 個別失敗は無視 (アイコンのまま) */ }
+            }
+            catch (Exception ex)
+            {
+                // fire-and-forget 起動なので、ループ全体の予期しない例外を unobserved (silent) にせず記録する。
+                Logger.Warn("[GameListPage] サムネ背景ロードが中断: " + ex.Message);
             }
         }
 
@@ -367,8 +378,7 @@ namespace TonePrism.Manager.Shell
                     WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information);
                 return;
             }
-            if (SessionConflictHelper.CheckBeforeWrite("ゲームのバージョンアップ") == WinForms.DialogResult.Cancel) return;
-
+            // (Edit_Click と順序を統一) selection 解決 → 不在チェック → 競合チェックの順。
             var game = Db.GetGameById(selected.GameId);
             if (game == null)
             {
@@ -376,6 +386,8 @@ namespace TonePrism.Manager.Shell
                     WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error);
                 return;
             }
+
+            if (SessionConflictHelper.CheckBeforeWrite("ゲームのバージョンアップ") == WinForms.DialogResult.Cancel) return;
 
             // 重い処理 (コピー / atomic move / DB / アクティブ化 / バックアップ) は GameVersionUpService に委譲。
             VersionUpService.Run(Owner, game, LoadGames);
@@ -440,8 +452,22 @@ namespace TonePrism.Manager.Shell
 
         private void GamesList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
-            // 行 (カード) ダブルクリックで編集 (GameSectionPanel の dgvGames_CellDoubleClick と同挙動)。選択時のみ。
-            if (SelectedGame != null) Edit_Click(sender, e);
+            // 実カード上のダブルクリックでのみ編集 (旧 dgvGames_CellDoubleClick の「セル上のみ」相当)。余白 / スクロール
+            // バー上では発火させず、⋯ ボタン上のダブルクリックはメニュー担当なので除外する (編集と競合させない)。
+            var src = e.OriginalSource as DependencyObject;
+            if (FindAncestor<System.Windows.Controls.Primitives.ButtonBase>(src) != null) return; // ⋯ ボタン等
+            if (FindAncestor<ListBoxItem>(src)?.DataContext is GameListItem item)
+            {
+                GamesList.SelectedItem = item;
+                Edit_Click(sender, e);
+            }
+        }
+
+        // visual 親を辿って最初の T を返す (ヒットテスト用、無ければ null)。
+        private static T FindAncestor<T>(DependencyObject d) where T : DependencyObject
+        {
+            while (d != null && !(d is T)) d = VisualTreeHelper.GetParent(d);
+            return d as T;
         }
 
         /// <summary>
