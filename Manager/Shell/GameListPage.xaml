@@ -176,12 +176,11 @@
                                     <ContentPresenter />
                                 </Border>
                                 <ControlTemplate.Triggers>
+                                    <!-- ホバーのみ淡く反応。選択の青ハイライトは廃止 (操作はカードの ⋯ メニュー /
+                                         ダブルクリックで、選択は内部用途のみ＝どのカードが選択中かを見せる必要がなく
+                                         青発光は視覚的に煩いだけ)。選択の仕組み自体は CardMenu_Click 等で利用継続。 -->
                                     <Trigger Property="IsMouseOver" Value="True">
                                         <Setter TargetName="Card" Property="Background" Value="#FF333333" />
-                                    </Trigger>
-                                    <Trigger Property="IsSelected" Value="True">
-                                        <Setter TargetName="Card" Property="Background" Value="#FF2C3B50" />
-                                        <Setter TargetName="Card" Property="BorderBrush" Value="#5571A8D0" />
                                     </Trigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate>
