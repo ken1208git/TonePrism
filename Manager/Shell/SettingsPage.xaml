@@ -22,9 +22,20 @@
     </Page.Resources>
 
     <!-- (#362) ホスト環境でホイール/二本指スクロールが効かない対策で PreviewMouseWheel を code-behind で拾う。 -->
-    <ScrollViewer x:Name="PageScroll" Padding="36,28,36,28" VerticalScrollBarVisibility="Auto">
-        <StackPanel MaxWidth="1100">
-            <TextBlock Text="設定" FontSize="28" FontWeight="Bold" Margin="0,0,0,16" />
+    <!-- (#245) NavigationView 内蔵 ScrollViewer のページ全体スクロールを止め見出しを固定 (lepoco/wpfui#1041)。
+         root を MaxHeight=祖先 ScrollViewer の ViewportHeight に縛り、見出しは Auto 行で固定、コンテンツのみ内部スクロール。 -->
+    <Grid MaxHeight="{Binding RelativeSource={RelativeSource AncestorType=ScrollViewer}, Path=ViewportHeight}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- 固定見出し (スクロールで流れない) -->
+        <TextBlock Grid.Row="0" Text="設定" FontSize="28" FontWeight="Bold" Margin="36,28,36,14" />
+
+        <!-- スクロールするコンテンツ -->
+        <ScrollViewer Grid.Row="1" x:Name="PageScroll" Padding="36,0,36,28" VerticalScrollBarVisibility="Auto">
+            <StackPanel MaxWidth="1100">
 
             <!-- ===== ログ ===== -->
             <TextBlock Text="ログ" FontWeight="SemiBold" Margin="2,4,0,8" />
@@ -134,6 +145,7 @@
                     <ui:Button x:Name="ResetDbButton" Grid.Column="1" Content="リセット" VerticalAlignment="Center" Appearance="Danger" Click="ResetDb_Click" />
                 </Grid>
             </Border>
-        </StackPanel>
-    </ScrollViewer>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
 </Page>

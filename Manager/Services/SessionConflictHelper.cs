@@ -51,23 +51,9 @@ namespace TonePrism.Manager.Services
             }
             if (mainForm == null)
             {
-                // (round 8 L-2) `Application.OpenForms` の enumeration は別 thread / 別 event handler で
-                // form が `Close` / `Show` されると InvalidOperationException ("Collection was modified") を
-                // 投げる .NET WinForms の既知 race。本 helper の主旨「null 経路の silent skip を物理閉鎖」
-                // と一貫させるため、3 段目 fallback 自身も例外で button click handler を落とさないよう
-                // 握り潰す。catch 後は通常の「mainForm == null → fail-soft OK 返却 + Warn」path に倒す
-                // (= 1 段目 / 2 段目で 99% は hit するため 3 段目 fallback の race は稀 path、Warn trail で十分)。
-                try
-                {
-                    foreach (Form f in Application.OpenForms)
-                    {
-                        if (f is MainForm mf) { mainForm = mf; break; }
-                    }
-                }
-                catch (InvalidOperationException ex)
-                {
-                    Logger.Warn("[SessionConflictHelper] Application.OpenForms enumeration race (collection modified during enumeration)、3 段目 fallback skip: " + ex.Message);
-                }
+                // 3 段目 fallback: Application.OpenForms から MainForm を辿る (Owner が null の race 等)。
+                // enumeration race は FindMainFormViaOpenForms 内で握り潰し済 (詳細は同メソッド)。
+                mainForm = FindMainFormViaOpenForms();
             }
             if (mainForm == null)
             {
@@ -77,6 +63,44 @@ namespace TonePrism.Manager.Services
                 return DialogResult.OK;
             }
             return mainForm.CheckSessionConflictBeforeWrite(operationDescription);
+        }
+
+        /// <summary>
+        /// (#245 ② ゲーム一覧 WPF 化) WinForms <see cref="Control"/> を持たない WPF ページ用 overload。caller
+        /// Control が無いので <see cref="Application.OpenForms"/> から MainForm を辿る (= Control 版の 3 段目
+        /// fallback と同じ)。MainForm 不在なら fail-soft で OK + Warn (Control 版と同方針＝SPEC §3.8.5)。
+        /// </summary>
+        public static DialogResult CheckBeforeWrite(string operationDescription)
+        {
+            var mainForm = FindMainFormViaOpenForms();
+            if (mainForm == null)
+            {
+                Logger.Warn("[SessionConflictHelper] MainForm 取得失敗 (WPF caller)、check skip (fail-soft で OK 返却): op=" + operationDescription);
+                return DialogResult.OK;
+            }
+            return mainForm.CheckSessionConflictBeforeWrite(operationDescription);
+        }
+
+        /// <summary>
+        /// <see cref="Application.OpenForms"/> から MainForm を辿る共通 lookup。enumeration 中に form が
+        /// Close / Show されると .NET WinForms の既知 race で InvalidOperationException ("Collection was
+        /// modified") を投げるため握り潰して null 返却 (button click handler / WPF ページを落とさない)。
+        /// Control 版の 3 段目 fallback と WPF 版 overload で共有する。
+        /// </summary>
+        private static MainForm FindMainFormViaOpenForms()
+        {
+            try
+            {
+                foreach (Form f in Application.OpenForms)
+                {
+                    if (f is MainForm mf) return mf;
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                Logger.Warn("[SessionConflictHelper] Application.OpenForms enumeration race (collection modified during enumeration): " + ex.Message);
+            }
+            return null;
         }
     }
 }

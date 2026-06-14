@@ -89,11 +89,18 @@
         </DataTemplate>
     </Page.Resources>
 
-    <ScrollViewer x:Name="PageScroll" Padding="36,28,36,28" VerticalScrollBarVisibility="Auto">
-        <StackPanel MaxWidth="1120">
+    <!-- (#245) WPF-UI NavigationView の内蔵 ScrollViewer によるページ全体スクロールを止め、見出しを固定する
+         (lepoco/wpfui#1041)。root を MaxHeight=祖先 ScrollViewer の ViewportHeight に縛り、ヘッダは Auto 行で固定、
+         コンテンツだけ内部スクロール。 -->
+    <Grid MaxHeight="{Binding RelativeSource={RelativeSource AncestorType=ScrollViewer}, Path=ViewportHeight}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-            <!-- ヘッダ (全幅) -->
-            <Grid Margin="0,0,0,18">
+        <!-- 固定ヘッダ (スクロールで流れない) -->
+        <Grid Grid.Row="0" Margin="36,28,36,12">
+            <Grid MaxWidth="1120">
                 <StackPanel VerticalAlignment="Center">
                     <TextBlock Text="ダッシュボード" FontSize="28" FontWeight="Bold" Foreground="#F4F4F4" />
                     <TextBlock x:Name="SubtitleText" Foreground="#9AA0A6" FontSize="12" Margin="0,2,0,0"
@@ -110,9 +117,13 @@
                                        Foreground="#D8D8D8" VerticalAlignment="Center" />
                         </StackPanel>
                     </Border>
-                    <ui:Button x:Name="RefreshButton" Content="更新" VerticalAlignment="Center" Click="Refresh_Click" />
                 </StackPanel>
             </Grid>
+        </Grid>
+
+        <!-- スクロールするコンテンツ -->
+        <ScrollViewer Grid.Row="1" x:Name="PageScroll" Padding="36,0,36,28" VerticalScrollBarVisibility="Auto">
+            <StackPanel MaxWidth="1120">
 
             <!-- 2カラム: 左=チェックリスト / 右=概況タイル -->
             <Grid>
@@ -234,6 +245,7 @@
                     </Border>
                 </StackPanel>
             </Grid>
-        </StackPanel>
-    </ScrollViewer>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
 </Page>

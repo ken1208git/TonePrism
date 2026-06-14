@@ -2304,6 +2304,20 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.30.0] - 2026-06-14
+
+#### Added / Changed — ゲーム一覧の WPF ネイティブ化 + 全ページ見出し固定（`feature/manager-game-list-wpf`、#245 関連）
+
+- **ゲーム「一覧」を WPF ネイティブ画面 `GameListPage` に**（ナビ「ゲーム」を旧 `GameHostPage`＝WinForms `GameSectionPanel` の WindowsFormsHost から差し替え）。Win11 設定アプリ「インストール済みアプリ」風のカード型リスト（角丸カード＋アイコン＋2 行テキスト＋右にバージョン）。
+- **検索 / 並べ替え / フィルター**: 検索（名前・ID・製作者の部分一致・大小無視）/ 並べ替え（タイトル・製作者・リリース年）/ フィルターはフライアウトで多軸 AND（ランチャー表示状態・通信プレイ・プレイ人数レンジ・難易度・プレイ時間・ジャンル複数選択）。絞り込みは操作・画面遷移をまたいで維持、件数は「N 個中 M 個を表示」。
+- **サムネイル**: アクティブ版のサムネをアバターに表示（背景スレッドで後追いロード＝SMB でも UI を固めない、`UniformToFill`、解決は `RestoreReconciliationService` と同じ三段＝絶対 / gameFolder / install）。**非表示ゲームはカードごと薄く**（`Opacity` で「ランチャーに出ない」を一目で示す。表示中/非表示バッジは廃止）。
+- **操作は抽出済 service を再利用**（バージョンアップ＝`GameVersionUpService` / 削除＝`GameDeletionService`）+ 既存 `AddGameForm`/`EditGameForm`。WPF から WinForms モーダルを開く owner は**可視シェル窓 HWND を包む `ShellOwner`**、競合チェックは `SessionConflictHelper` に WPF 用 overload（`Application.OpenForms` から MainForm 解決）を追加。各カードの操作は ⋯ メニュー、追加は全体ボタン。
+- **全ページ見出し固定**（ゲーム一覧 / ダッシュボード / 設定）: WPF-UI NavigationView の内蔵 ScrollViewer がページ全体をスクロール可にして見出しが流れる問題（lepoco/wpfui#1041）に対し、各ページ root の `MaxHeight` を祖先 ScrollViewer の `ViewportHeight` に縛り、見出しは固定行・コンテンツのみ内部スクロールに。ゲーム一覧 ListBox は `CanContentScroll=False` でピクセルスクロール（トラックパッドの段飛び解消）。
+- **フライアウト挙動を共通化**（`FlyoutDismiss`）: 左クリックで開く Popup / ContextMenu を Win11 流に（開いている間の本体側クリックは「閉じる」だけに消費＝再オープン / 誤操作なし、中身クリックは操作させる）。フィルターと ⋯ メニューに適用、今後の新フライアウトも本ヘルパーに統一。
+- **ダッシュボードの「更新」ボタンを削除**（タイマー自動更新があり冗長）。ダッシュボードの空状態緑箱・「・自動更新中」文言は v0.29.2 で整理済。
+- bump 判断: 機能追加（破壊的変更 / DB スキーマ変更なし＝v23 据置）。**minor（v0.29.2 → v0.30.0）**。Launcher 変更なし。
+- 残（マージ前）: 新一覧での **追加 / 編集 / バージョンアップ / 削除の実機確認**（捨てゲームで・実データ非破壊）。
+
 ### [Manager v0.29.2] - 2026-06-13
 
 #### Changed — ダッシュボードの冗長表示を整理（`fix/manager-dashboard-drop-empty-state`）

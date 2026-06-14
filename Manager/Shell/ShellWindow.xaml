@@ -57,7 +57,7 @@
                 <ui:NavigationViewItem Content="ダッシュボード" TargetPageType="{x:Type local:DashboardPage}">
                     <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Home24" /></ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
-                <ui:NavigationViewItem Content="ゲーム" TargetPageType="{x:Type local:GameHostPage}">
+                <ui:NavigationViewItem Content="ゲーム" TargetPageType="{x:Type local:GameListPage}">
                     <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Games24" /></ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
                 <ui:NavigationViewItem Content="ストア" TargetPageType="{x:Type local:StoreHostPage}">
