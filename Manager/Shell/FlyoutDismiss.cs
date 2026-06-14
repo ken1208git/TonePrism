@@ -24,6 +24,9 @@ namespace TonePrism.Manager.Shell
     /// </summary>
     internal static class FlyoutDismiss
     {
+        // 前提: 同時に開くフライアウトは 1 つ (Win11 ドロップダウン挙動) なので、現在開いている 1 個だけを static に覚える。
+        // 複数ページが同時にフライアウトを開く設計になったらインスタンス単位 / 添付プロパティ化が必要 (現状利用は GameListPage のみ。
+        // フライアウト open 中に別ページへ遷移しても、次の DismissOpen で null 化されるので致命にはならない)。
         private static Action _closeCurrent;
         private static DependencyObject _openContent;   // 開いてるフライアウトの中身ルート (Popup.Child / ContextMenu)
 

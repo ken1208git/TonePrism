@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -72,6 +73,9 @@ namespace TonePrism.Manager.Shell
             }
         }
 
+        // 進行中のサムネ背景ロード。LoadGames が再入したら前回分を打ち切る (二重 SMB I/O 防止。下記 LoadGames 参照)。
+        private CancellationTokenSource _thumbCts;
+
         // 全件 (検索/フィルター前)。表示は ApplyView で絞り込んで GamesList へ反映する。
         private List<GameListItem> _allItems;
 
@@ -84,7 +88,12 @@ namespace TonePrism.Manager.Shell
                     .Select(g => new GameListItem(g))
                     .ToList();
                 ApplyView();                        // 現在の検索 / フィルター / 並べ替えを適用して表示
-                _ = LoadThumbnailsAsync(_allItems); // サムネは背景で後追いロード (SMB でも UI を固めない)
+                // 直前のサムネ背景ロードを打ち切ってから開始。遷移 (Loaded) や操作後の再 LoadGames で再入すると、旧ループが
+                // 「もう表示されない _allItems」へ SMB I/O を出し続け、新ループと二重に SMB を叩くため (打ち切りで新ループのみ)。
+                _thumbCts?.Cancel();
+                _thumbCts?.Dispose();
+                _thumbCts = new CancellationTokenSource();
+                _ = LoadThumbnailsAsync(_allItems, _thumbCts.Token); // サムネは背景で後追いロード (SMB でも UI を固めない)
             }
             catch (Exception ex)
             {
@@ -94,9 +103,10 @@ namespace TonePrism.Manager.Shell
             }
         }
 
-        // 検索語 / フィルター / 並べ替えを _allItems に適用して GamesList に反映。GameListItem インスタンスは
-        // 再利用するためロード済サムネは保持される (選択は ItemsSource 差し替えでリセット＝絞り込み時は許容)。
-        // 操作後の LoadGames からも呼ばれるので、コンボ/検索欄の現在値が操作をまたいで維持される。
+        // 検索語 / フィルター / 並べ替えを _allItems に適用して GamesList に反映。ApplyView 内 (検索/絞り込み/並べ替え) は
+        // 同じ _allItems の GameListItem を再利用するのでロード済サムネは保持される (LoadGames は _allItems を作り直すため、
+        // 画面遷移・操作後は再ロードになる)。選択は ItemsSource 差し替えでリセット (絞り込み時は許容)。コンボ/検索欄の
+        // 現在値は操作をまたいで維持される。
         private void ApplyView()
         {
             if (_allItems == null) return;
@@ -133,7 +143,7 @@ namespace TonePrism.Manager.Shell
             if (!string.IsNullOrEmpty(term))
                 q = q.Where(i => i.Matches(term));
 
-            // 並べ替え (未設定の数値は int.MaxValue で末尾へ寄せる。第2キーはタイトルで安定化)
+            // 並べ替え (リリース年は未設定を int.MinValue として降順の末尾へ。文字列キーは空文字で安定化。第2キーはタイトル)
             var byTitle = StringComparer.CurrentCulture;
             switch (SortCombo?.SelectedIndex ?? 0)
             {
@@ -239,13 +249,15 @@ namespace TonePrism.Manager.Shell
 
         // サムネを背景で順次ロードし、決まったものから差し替える (SMB I/O で UI を固めない)。await 後は
         // 呼び出し元 (UI) スレッドに戻るので Thumbnail setter の PropertyChanged は安全。null の間はアイコン表示。
-        private static async Task LoadThumbnailsAsync(List<GameListItem> items)
+        private static async Task LoadThumbnailsAsync(List<GameListItem> items, CancellationToken token)
         {
             foreach (var item in items)
             {
+                if (token.IsCancellationRequested) return; // 打ち切られた (= 新しい LoadGames が走った) ら以降は無駄なので止める
                 try
                 {
                     var src = await Task.Run(() => GameListItem.LoadThumbnail(item.Game));
+                    if (token.IsCancellationRequested) return;
                     if (src != null) item.Thumbnail = src;
                 }
                 catch { /* 個別失敗は無視 (アイコンのまま) */ }

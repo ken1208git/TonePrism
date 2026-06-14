@@ -2310,7 +2310,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 - **ゲーム「一覧」を WPF ネイティブ画面 `GameListPage` に**（ナビ「ゲーム」を旧 `GameHostPage`＝WinForms `GameSectionPanel` の WindowsFormsHost から差し替え）。Win11 設定アプリ「インストール済みアプリ」風のカード型リスト（角丸カード＋アイコン＋2 行テキスト＋右にバージョン）。
 - **検索 / 並べ替え / フィルター**: 検索（名前・ID・製作者の部分一致・大小無視）/ 並べ替え（タイトル・製作者・リリース年）/ フィルターはフライアウトで多軸 AND（ランチャー表示状態・通信プレイ・プレイ人数レンジ・難易度・プレイ時間・ジャンル複数選択）。絞り込みは操作・画面遷移をまたいで維持、件数は「N 個中 M 個を表示」。
-- **サムネイル**: アクティブ版のサムネをアバターに表示（背景スレッドで後追いロード＝SMB でも UI を固めない、`UniformToFill`、解決は `RestoreReconciliationService` と同じ三段＝絶対 / gameFolder / install）。**非表示ゲームはカードごと薄く**（`Opacity` で「ランチャーに出ない」を一目で示す。表示中/非表示バッジは廃止）。
+- **サムネイル**: アクティブ版のサムネをアバターに表示（背景スレッドで後追いロード＝SMB でも UI を固めない、`UniformToFill`、解決は `RestoreReconciliationService` と同じ三段＝絶対 / gameFolder / install）。**非表示ゲームはカードごと薄く**（`Opacity` で「ランチャーに出ない」を一目で示す。表示中/非表示バッジは廃止）。サムネ背景ロードは `CancellationTokenSource` で**再入時に前回ループを打ち切る**（画面遷移や操作後の再 `LoadGames` で、もう表示されないリストへ SMB I/O を出し続ける旧ループと新ループが二重に SMB を叩くのを防ぐ。レビュー指摘対応）。
 - **操作は抽出済 service を再利用**（バージョンアップ＝`GameVersionUpService` / 削除＝`GameDeletionService`）+ 既存 `AddGameForm`/`EditGameForm`。WPF から WinForms モーダルを開く owner は**可視シェル窓 HWND を包む `ShellOwner`**、競合チェックは `SessionConflictHelper` に WPF 用 overload（`Application.OpenForms` から MainForm 解決）を追加。各カードの操作は ⋯ メニュー、追加は全体ボタン。
 - **全ページ見出し固定**（ゲーム一覧 / ダッシュボード / 設定）: WPF-UI NavigationView の内蔵 ScrollViewer がページ全体をスクロール可にして見出しが流れる問題（lepoco/wpfui#1041）に対し、各ページ root の `MaxHeight` を祖先 ScrollViewer の `ViewportHeight` に縛り、見出しは固定行・コンテンツのみ内部スクロールに。ゲーム一覧 ListBox は `CanContentScroll=False` でピクセルスクロール（トラックパッドの段飛び解消）。
 - **フライアウト挙動を共通化**（`FlyoutDismiss`）: 左クリックで開く Popup / ContextMenu を Win11 流に（開いている間の本体側クリックは「閉じる」だけに消費＝再オープン / 誤操作なし、中身クリックは操作させる）。フィルターと ⋯ メニューに適用、今後の新フライアウトも本ヘルパーに統一。
