@@ -1162,79 +1162,48 @@ namespace TonePrism.Manager
 
                 if (gameIdChanged)
                 {
-                    // フォルダリネームを先に実行（失敗時にDB不整合を防ぐ）
+                    // (#242 ③) フォルダ rename + DB 更新を GameIdRenameService に抽出。衝突判定 (a/b/c) は service、
+                    // (b) recovery 確認の MessageBox と ProcessingDialog 表示は form 側に残す (UI 責務)。
                     string oldFolder = PathManager.GetGameFolder(oldGameId);
                     string newFolder = PathManager.GetGameFolder(newGameId);
+                    var gameIdRenameService = new GameIdRenameService(dbManager);
 
-                    // (#158 round 7 L-4 + round 8 codex P2) collision 判定を 3 経路に分ける:
-                    //   (a) 両方存在: 真の collision、Move 不能 → throw
-                    //   (b) oldFolder 不在 + newFolder 存在: recovery 可能性 (前回 rename interrupted +
-                    //       disk 既に新名 + DB が旧 ID のまま) または別 user の手動作成 folder で silent
-                    //       merge risk。区別不能なので user に明示確認 dialog (OK = 既存使用 / Cancel = abort)
-                    //   (c) newFolder 不在: 通常 path (oldFolder Move or DB only update)
-                    // round 7 L-4 は (b) を一律 throw にしていたため legitimate recovery が永久 block
-                    // されていたが、確認 dialog で silent merge risk と recovery 両立。
-                    bool oldFolderExists = System.IO.Directory.Exists(oldFolder);
-                    bool newFolderExists = System.IO.Directory.Exists(newFolder);
-                    if (oldFolderExists && newFolderExists)
+                    switch (gameIdRenameService.DecideCollision(oldFolder, newFolder))
                     {
-                        // (a) 両方存在 = collision
-                        throw new InvalidOperationException($"フォルダ「{newFolder}」が既に存在します。");
-                    }
-                    if (!oldFolderExists && newFolderExists)
-                    {
-                        // (b) recovery 可能性 / silent merge risk → user 確認
-                        var dr = MessageBox.Show(this,
-                            "指定された新しいゲーム ID のフォルダが既に存在しますが、旧 ID のフォルダは" +
-                            "見つかりません:\n  " + newFolder + "\n\n" +
-                            "これは前回の rename が DB 更新前に中断された残骸か、別目的で手動作成された" +
-                            "フォルダの可能性があります。\n\n" +
-                            "  ・ 前者なら「OK」で既存フォルダの中身を引き継いで DB のみ更新します\n" +
-                            "  ・ 後者なら「キャンセル」して中身を別の場所に退避してから再試行してください\n\n" +
-                            "既存フォルダの中身をそのまま使って DB を新 gameId に更新しますか?",
-                            "フォルダ同期確認", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
-                        if (dr != DialogResult.OK)
-                        {
-                            throw new OperationCanceledException("ユーザーがフォルダ同期をキャンセルしました。");
-                        }
-                        // OK: ProcessingDialog 内の `if (Directory.Exists(oldFolder)) { Move; folderRenamed=true; }`
-                        // で Move skip + folderRenamed=false のまま DB 更新が走る。
+                        case GameIdRenameService.CollisionDecision.Collision:
+                            // (a) 旧・新 両方存在 = collision (Move 不能)
+                            throw new InvalidOperationException($"フォルダ「{newFolder}」が既に存在します。");
+                        case GameIdRenameService.CollisionDecision.NeedsRecoveryConfirm:
+                            // (b) 旧不在 + 新存在: 前回 rename 中断の残骸 or 手動作成。silent merge risk と recovery を
+                            // user 確認で両立 (#158 round 7 L-4 + round 8 codex P2)。OK = 既存フォルダ流用で DB のみ更新
+                            // (Execute は oldFolder 不在を見て Move skip)、Cancel = abort。
+                            var recoveryDr = MessageBox.Show(this,
+                                "指定された新しいゲーム ID のフォルダが既に存在しますが、旧 ID のフォルダは" +
+                                "見つかりません:\n  " + newFolder + "\n\n" +
+                                "これは前回の rename が DB 更新前に中断された残骸か、別目的で手動作成された" +
+                                "フォルダの可能性があります。\n\n" +
+                                "  ・ 前者なら「OK」で既存フォルダの中身を引き継いで DB のみ更新します\n" +
+                                "  ・ 後者なら「キャンセル」して中身を別の場所に退避してから再試行してください\n\n" +
+                                "既存フォルダの中身をそのまま使って DB を新 gameId に更新しますか?",
+                                "フォルダ同期確認", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
+                            if (recoveryDr != DialogResult.OK)
+                            {
+                                throw new OperationCanceledException("ユーザーがフォルダ同期をキャンセルしました。");
+                            }
+                            break;
                     }
 
-                    // ゲームフォルダのリネームは同一ボリュームでは一瞬だが、共有フォルダ越しや
-                    // クロスボリュームでは内部的にコピー＋削除になり時間がかかる。
-                    // ProcessingDialog で進捗を表示する。
+                    // ゲームフォルダ rename は同一ボリュームでは一瞬だが、共有 / cross-volume では内部 copy+delete で
+                    // 時間がかかるため ProcessingDialog (marquee) で包む。worker は service.Execute (Move + DB + 失敗時
+                    // rollback) を呼び、失敗は caught に退避して rethrow → 外側 catch でエラー表示 (background thread から
+                    // MessageBox を出さない pattern)。
                     Exception caught = null;
+                    bool folderMoved = false;
                     using (var dialog = new ProcessingDialog((IProgress<ProgressInfo> progress, CancellationToken token) =>
                     {
                         try
                         {
-                            progress?.Report(new ProgressInfo(-1, "フォルダをリネーム中...", $"{oldFolder} → {newFolder}"));
-
-                            bool folderRenamed = false;
-                            if (System.IO.Directory.Exists(oldFolder))
-                            {
-                                System.IO.Directory.Move(oldFolder, newFolder);
-                                folderRenamed = true;
-                                AssetsChangedOnDisk = true; // (#295) games/ フォルダを移動した = ゲーム本体が変わった
-                            }
-
-                            progress?.Report(new ProgressInfo(-1, "データベースを更新中...", $"ゲームID: {oldGameId} → {newGameId}"));
-
-                            try
-                            {
-                                dbManager.UpdateGameId(oldGameId, newGameId);
-                            }
-                            catch
-                            {
-                                // DB更新失敗時はフォルダを元に戻す
-                                if (folderRenamed)
-                                {
-                                    progress?.Report(new ProgressInfo(-1, "ロールバック中...", "フォルダを元の名前に戻しています"));
-                                    System.IO.Directory.Move(newFolder, oldFolder);
-                                }
-                                throw;
-                            }
+                            folderMoved = gameIdRenameService.Execute(oldGameId, newGameId, oldFolder, newFolder, progress);
                         }
                         catch (Exception ex)
                         {
@@ -1256,6 +1225,12 @@ namespace TonePrism.Manager
                             return;
                         }
                     }
+
+                    // (#295) games/ フォルダを実際に Move した = ゲーム本体が変わった。Move 成功確定後 (dialog 後・UI
+                    // スレッド) に立てる。DB 失敗時は Execute が rollback (Move 戻し) して throw するため folderMoved は
+                    // false のまま = AssetsChangedOnDisk を立てない (旧実装は worker 内で Move 直後に立て、rollback されても
+                    // true が残る軽微な quirk があった。観測上は成功時同値・失敗時は form が開いたままで次の成功時に設定)。
+                    if (folderMoved) AssetsChangedOnDisk = true;
 
                     // gameFolderを更新（以降のパス処理で使用）
                     gameFolder = newFolder;
