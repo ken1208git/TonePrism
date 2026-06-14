@@ -89,70 +89,6 @@ namespace TonePrism.Manager
         private readonly Dictionary<int, string> _pendingExternalThumbnailByVersionId = new Dictionary<int, string>();
         private readonly Dictionary<int, string> _pendingExternalBackgroundByVersionId = new Dictionary<int, string>();
 
-        // (#158 CX-1) folder rename を 2-phase 化するための plan 単位 (Phase 1 で構築 / Phase 2 で実行)。
-        // (#158 round 4 codex P1) Old{Executable,Thumbnail,Background}Path: in-memory state rollback 用に
-        // path 書き換え前の値を capture。disk Move を rollback しても in-memory が NEW のままだと、同
-        // dialog で再 OK 押下時に diff check が false (originalVer も snapshot 経由で NEW 化済) で
-        // rename skip → DB に NEW 値 + 旧 disk folder 名で書き込む silent drift が再発する。
-        // (#158 round 5 L-5) MoveDone: SourceExists=false 経路 (旧 folder 不在で Move skip) でも
-        // path/snapshot mutation は行うので rollback 対象としては記録しつつ、disk Move 戻しは skip
-        // させる flag。Move を実行した entry のみ true。
-        private class RenamePlan
-        {
-            public GameVersion Version;
-            public string OldDir;
-            public string NewDir;
-            public string OriginalVer;
-            public bool SourceExists;
-            public bool MoveDone;
-            public string OldExecutablePath;
-            public string OldThumbnailPath;
-            public string OldBackgroundPath;
-        }
-
-        /// <summary>
-        /// (#158 round 4 codex P1 + round 5 L-5) rename rollback の共通処理: completedRenames を逆順に
-        /// disk Move を戻し (MoveDone=true のみ)、各エントリの in-memory state (_originalVersionByDbId
-        /// snapshot + GameVersion の path 群) を capture 前の値に restore する。CX-1 (Phase 2 中の Move
-        /// 失敗) と M-4 (UpdateGameVersion 失敗) 両方の catch 経路で呼び出される。disk Move の失敗は
-        /// console log + count、in-memory 復元は失敗しない (= 単純代入)。
-        ///
-        /// **注意 (#158 round 5 codex P1)**: 本 method は「DB が一切 commit されていない」前提でのみ
-        /// 安全に呼べる。`VersionRepository.Update` は call ごとに独立 transaction で commit するため、
-        /// M-4 の UpdateGameVersion ループで N 件目で失敗しても 0..N-1 件目は既に DB commit 済。その
-        /// 状態で本 method を呼ぶと commit 済 row が指す path/folder 名が disk rollback で消失して
-        /// drift する。M-4 catch は dbSucceededCount を track して、>0 なら本 method を呼ばずに別経路
-        /// (ユーザーに partial commit 状態を通知 + Manager 再起動を促す) で処理すること。
-        /// </summary>
-        private void RollbackCompletedRenames(List<RenamePlan> completedRenames, out int rolledBack, out int rollbackFailures)
-        {
-            rolledBack = 0;
-            rollbackFailures = 0;
-            for (int i = completedRenames.Count - 1; i >= 0; i--)
-            {
-                var done = completedRenames[i];
-                if (done.MoveDone)
-                {
-                    try
-                    {
-                        System.IO.Directory.Move(done.NewDir, done.OldDir);
-                        rolledBack++;
-                    }
-                    catch (Exception rbEx)
-                    {
-                        rollbackFailures++;
-                        Logger.Error("[EditGameForm] (#158 rollback) disk rename 戻し失敗: " + done.NewDir + " → " + done.OldDir, rbEx);
-                    }
-                }
-                // in-memory 復元 (disk Move 成否 / SourceExists=false に関わらず、UI/DB drift を最小化
-                // するため必ず実行)。
-                _originalVersionByDbId[done.Version.Id] = done.OriginalVer;
-                done.Version.ExecutablePath = done.OldExecutablePath;
-                done.Version.ThumbnailPath = done.OldThumbnailPath;
-                done.Version.BackgroundPath = done.OldBackgroundPath;
-            }
-        }
-
         /// <summary>
         /// 編集されたゲーム情報（OKボタンがクリックされた場合のみ設定される）
         /// </summary>
@@ -719,35 +655,6 @@ namespace TonePrism.Manager
         /// と二重 prefix の歪な leaf になる経路があった。`TrimStart('v', 'V')` で先頭 v/V を一度
         /// 剥がしてから小文字 v を被せ直す形に統一。
         /// </summary>
-        private static string ToVersionLeaf(string ver)
-        {
-            if (ver == null) return "v";
-            return "v" + ver.TrimStart('v', 'V');
-        }
-
-        /// <summary>
-        /// (#158 Q3) 相対パス先頭の `v<oldVer>/` (or `v<oldVer>\`) prefix を `v<newVer>/` に置換する。
-        /// AddGameForm が「<gameFolder> 起点で相対化」する関係上、executable_path 等は
-        /// 「v<version>/main.exe」のような形で DB 保存されている。version rename 時にこれらも
-        /// 連動して書き換える。前方一致のみ (中間に v<old>/ が登場するケースは触らない、保守的)。
-        /// </summary>
-        private static string ReplaceVersionPrefix(string relPath, string oldVer, string newVer)
-        {
-            if (string.IsNullOrEmpty(relPath)) return relPath;
-            // (#158 round 4 M-1) ToVersionLeaf 経由で大文字 V も leaf 構築可能に統一。
-            string oldLeaf = ToVersionLeaf(oldVer);
-            string newLeaf = ToVersionLeaf(newVer);
-            string oldPrefixFwd = oldLeaf + "/";
-            string newPrefixFwd = newLeaf + "/";
-            string oldPrefixBack = oldLeaf + "\\";
-            string newPrefixBack = newLeaf + "\\";
-            if (relPath.StartsWith(oldPrefixFwd, StringComparison.OrdinalIgnoreCase))
-                return newPrefixFwd + relPath.Substring(oldPrefixFwd.Length);
-            if (relPath.StartsWith(oldPrefixBack, StringComparison.OrdinalIgnoreCase))
-                return newPrefixBack + relPath.Substring(oldPrefixBack.Length);
-            return relPath;
-        }
-
         private void SaveGameDataToVersion(GameVersion version)
         {
             if (version == null) return;
@@ -1578,216 +1485,33 @@ namespace TonePrism.Manager
                     // return」で disk 上に部分 rename 残存 + DB 未更新 (= 後続の UpdateGameVersion 群が
                     // 走らない) の drift で launcher が「rename 後 disk」「rename 前 DB」を見て該当
                     // version の起動失敗 silent corruption が発生していた。
-                    var renamePlan = new List<RenamePlan>();
-                    // (#158 round 6 M-2) Phase 1 衝突 check は disk 現在状態だけ見ると、同 OK 内で
-                    // chained rename (例: A→B + B→C を同時) の場合に A→B 計画が「B が既存 disk に
-                    // ある」で abort される。実際 B は B→C 計画で空く予定 → 順序付ければ成立。
-                    // 全件の oldDir を「予約済み slot (rename で空く予定)」HashSet として除外してから
-                    // 衝突判定する。さらに循環 (A→B + B→A) は両方の oldDir が両方の newDir でもあるので
-                    // 互いに skip してしまう → 後の Phase 2 で先に Move した方の newDir が衝突して fail
-                    // する経路に流れるが、その時の rollback path は既に整備済 (CX-1) のため許容。
-                    var reservedOldDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var item in cmbVersionList.Items)
+                    // (#242 ①) folder rename を VersionFolderRenameService に抽出。Phase 1 (BuildPlan) = 予約 slot 構築 +
+                    // 衝突判定 + topological sort。edge case (#158 chained/cycle/case-only・#221 self-rename・round 8
+                    // partial-commit recovery 等) は service に完全保存。folder base は gameFolder (直前の gameIdChanged
+                    // block で newFolder に上書き済) を使う (#158 H1: gameId + version 同時変更でも正しい base になる)。
+                    var renameService = new VersionFolderRenameService();
+                    var buildResult = renameService.BuildPlan(gameFolder, cmbVersionList.Items.OfType<GameVersion>(), _originalVersionByDbId);
+                    if (buildResult.HasCollision)
                     {
-                        if (!(item is GameVersion vR)) continue;
-                        if (!_originalVersionByDbId.TryGetValue(vR.Id, out string origR))
-                        {
-                            // (#158 round 8 senior Med #3) 現状 LoadVersions のみが snapshot を populate
-                            // するため cmbVersionList.Items の全 item は snapshot 有り = ここに到達は
-                            // 構造上ありえない。将来 form 内に「version 追加」ボタン等が入ると追加直後の
-                            // item が snapshot なし → rename loop が黙って skip → silent drift する死角に
-                            // なるため、defensive log を残しておく (Logger 移行は #166 で sweep)。
-                            Logger.Warn("[EditGameForm] (#158 round 8 Med #3) reservedOldDirs build: snapshot 不在 version id=" + vR.Id + " ('" + (vR.Version ?? "(null)") + "')、rename plan skip");
-                            continue;
-                        }
-                        // (#221) raw 文字列比較ではなく leaf 正規化後で「実際に rename されるか」を判定する。
-                        // v prefix 有無や大文字 V のみの差 ("1.0.0"/"V1.0.0" vs "v1.0.0") は raw 不一致だが
-                        // ToVersionLeaf で同一 leaf に畳まれ rename されない = この slot は空かない。raw guard の
-                        // ままだと「空かない leaf」を予約済み (rename で空く予定) として登録してしまい、別 version
-                        // が同一 leaf を target にした衝突を下の Phase 1 衝突 check で見逃す非対称が生じる
-                        // (renamePlan ループは leaf 同一を skip するのに、こちらは登録してしまう)。
-                        string oldLeafR = ToVersionLeaf(origR);
-                        if (string.Equals(oldLeafR, ToVersionLeaf(vR.Version), StringComparison.OrdinalIgnoreCase)) continue;
-                        reservedOldDirs.Add(System.IO.Path.Combine(gameFolder, oldLeafR));
+                        MessageBox.Show(this, buildResult.CollisionMessage,
+                            "フォルダ衝突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
                     }
-                    foreach (var item in cmbVersionList.Items)
+                    // completedRenames は後続の DB 保存 (UpdateVersionsAndGame) が失敗したとき rollback に渡すため外で保持。
+                    var completedRenames = new List<VersionFolderRenameService.RenamePlan>();
+
+                    // Phase 2 (ExecutePlan): Move + 相対パス prefix 書換 + snapshot 更新 + Move 失敗時 rollback。
+                    // ProcessingDialog (marquee) で包んで UI 応答性を維持 (共有/cross-volume の Directory.Move は
+                    // 内部 copy+delete で時間がかかり、応答停止に見える問題を解消)。ExecutePlan は throw せず
+                    // ErrorMessage を返すので dialog 終了後に MessageBox 表示 (background thread から MessageBox を
+                    // 呼ばない + ProcessingDialog generic error との二重表示回避。worker は throw しない)。
+                    if (buildResult.OrderedPlan.Count > 0)
                     {
-                        if (!(item is GameVersion v)) continue;
-                        if (!_originalVersionByDbId.TryGetValue(v.Id, out string originalVer))
+                        VersionFolderRenameService.ExecuteResult execResult = null;
+                        using (var dialog = new ProcessingDialog((progress, token) =>
                         {
-                            // (#158 round 8 senior Med #3) 同上、defensive log。
-                            Logger.Warn("[EditGameForm] (#158 round 8 Med #3) renamePlan build: snapshot 不在 version id=" + v.Id + " ('" + (v.Version ?? "(null)") + "')、rename plan skip");
-                            continue;
-                        }
-                        // (#158 round 3 H-2) CX-3 で大文字 V を regex IgnoreCase 受理にした副作用で、DB に
-                        // "V1.2.3" があった version は SaveGameDataToVersion で v.Version = "v1.2.3" に
-                        // 正規化される (= getter が常に小文字 v 出力)。case-only な差は disk 上 (Windows
-                        // FS は case-insensitive) で同じフォルダなので rename 不要、`OrdinalIgnoreCase`
-                        // で skip して DB 側だけ normalized 値で書き戻す。生 `Ordinal` 比較だと case-only
-                        // 差で rename path に入り、`Directory.Exists(newDir)` が同フォルダを hit して
-                        // "移動先フォルダが既に存在します" abort で詰む regression が発生していた。
-                        if (string.Equals(originalVer, v.Version, StringComparison.OrdinalIgnoreCase)) continue;
-
-                        // (#158 round 4 M-1) ToVersionLeaf で大文字 V も小文字 v leaf に正規化。
-                        string oldLeaf = ToVersionLeaf(originalVer);
-                        string newLeaf = ToVersionLeaf(v.Version);
-                        string oldDir = System.IO.Path.Combine(gameFolder, oldLeaf);
-                        string newDir = System.IO.Path.Combine(gameFolder, newLeaf);
-
-                        // (#221) ToVersionLeaf 正規化後に old/new が同一フォルダになるケースは disk rename 不要。
-                        // 例: DB の version が "1.0.0" (v prefix 無し) のゲームは、save 時に
-                        // SemverInputControl.VersionString が v.Version へ正規化形 "v1.0.0" を書き戻すため、
-                        // 上の raw 文字列比較 guard (originalVer vs v.Version) は不一致で skip されないが、
-                        // ToVersionLeaf はどちらも "v1.0.0" → oldDir == newDir の self-rename plan が作られ、
-                        // Phase 2 の Directory.Move(oldDir, newDir) が "source == dest" 例外で
-                        // 「フォルダリネーム失敗」になっていた (バージョン未変更の編集が全て詰む)。
-                        // 下の UpdateGameVersion ループが全 version を normalized 値で DB 書き戻すので、
-                        // ここで rename plan から除外すれば disk は触らず DB だけ正規化される正しい挙動になる。
-                        if (string.Equals(oldDir, newDir, StringComparison.OrdinalIgnoreCase)) continue;
-
-                        // (#158 round 6 M-2) reservedOldDirs に含まれる newDir は他 plan の oldDir、
-                        // = rename 実行で空く予定なので衝突 skip。それ以外 (= 純粋に既存 disk フォルダ)
-                        // のみ真の衝突として block する。
-                        // (#158 round 8 codex P1) `Directory.Exists(oldDir) &&` を先頭に追加。oldDir 不在
-                        // + newDir 存在は「partial-commit 後の recovery (= 前回 rename で disk は新版名に
-                        // なったが DB row が旧版名のまま残っている)」シナリオで、user が DB row を新版名に
-                        // 直して OK 押した時にこの check で永久 block されていた。oldDir 不在 = Move 自体
-                        // 走らない (Phase 2 で SourceExists=false 経路) のため衝突判定の対象外、両方存在
-                        // のみ block する形に絞る。version folder は gameFolder 配下に閉じているため cross-
-                        // game 混入の risk なし、silent merge concern は version layer では無視可。
-                        bool srcExistsV = System.IO.Directory.Exists(oldDir);
-                        if (srcExistsV && System.IO.Directory.Exists(newDir) && !reservedOldDirs.Contains(newDir))
-                        {
-                            MessageBox.Show(
-                                "バージョンフォルダのリネームに失敗しました:\n" +
-                                "  " + oldDir + " → " + newDir + "\n\n" +
-                                "  移動先フォルダが既に存在します (他の rename 計画でも空く予定なし)。" +
-                                "別のバージョン番号を指定してください。",
-                                "フォルダ衝突", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                            return;
-                        }
-
-                        renamePlan.Add(new RenamePlan
-                        {
-                            Version = v,
-                            OldDir = oldDir,
-                            NewDir = newDir,
-                            OriginalVer = originalVer,
-                            SourceExists = srcExistsV,
-                            // (#158 round 4 codex P1) in-memory rollback 用に path 書き換え前の値を capture。
-                            OldExecutablePath = v.ExecutablePath,
-                            OldThumbnailPath = v.ThumbnailPath,
-                            OldBackgroundPath = v.BackgroundPath,
-                        });
-                    }
-
-                    // (#158 round 7 H-1 = codex P2) Phase 2 を topological sort で並べ替え。chained
-                    // rename (例: A→B + B→C) は Phase 1 の reservedOldDirs check で衝突 skip 通すが、
-                    // Phase 2 の実行順序を UI 順 (= cmbVersionList.Items の DB 由来 row 順) のままにすると
-                    // A→B が先に走った時点で B disk 残存で Move 失敗 → rollback、と「user 視点で同じ
-                    // 操作が成功したり失敗したりする」非決定挙動になる。
-                    // greedy sort: 「newDir が他 plan の oldDir でない」plan を優先実行 → destination
-                    // が空く plan を先に潰す。cycle (A↔B 等) があれば pickIdx<0 で fall through、残り
-                    // を UI 順で append (Phase 2 で先行 Move の newDir 衝突 → CX-1 rollback で安全)。
-                    var orderedPlan = new List<RenamePlan>();
-                    var pendingPlan = new List<RenamePlan>(renamePlan);
-                    while (pendingPlan.Count > 0)
-                    {
-                        var pendingOldDirs = new HashSet<string>(
-                            pendingPlan.Select(pp => pp.OldDir), StringComparer.OrdinalIgnoreCase);
-                        int pickIdx = pendingPlan.FindIndex(pp => !pendingOldDirs.Contains(pp.NewDir));
-                        if (pickIdx < 0)
-                        {
-                            // cycle 検出: 残りを UI 順で append、Phase 2 で先行 Move が newDir 衝突して
-                            // 通常の CX-1 rollback path に流れる (rollback 経路は整備済 + in-memory revert
-                            // も round 4 codex P1 + L-5 で対応済のため安全)。
-                            orderedPlan.AddRange(pendingPlan);
-                            break;
-                        }
-                        orderedPlan.Add(pendingPlan[pickIdx]);
-                        pendingPlan.RemoveAt(pickIdx);
-                    }
-
-                    // Phase 2: 計画通り rename 実行。例外時は完了済を逆順 rollback。
-                    // (#158 round 5 L-5) SourceExists=false の entry も path/snapshot mutation するため
-                    // completedRenames に追加 (MoveDone=false で disk Move skip flag)。これで
-                    // RollbackCompletedRenames が in-memory revert の対象として拾える。
-                    // (#158 round 8.6 / #165) Phase 2 を ProcessingDialog (marquee) で包んで UI 応答性を
-                    // 維持。共有フォルダ越しや cross-volume では Directory.Move が内部 copy+delete で
-                    // 時間がかかり、orderedPlan.Count > 0 の状況で UI が応答停止に見える問題を解消。
-                    // gameId rename block (line 743 付近) と同 pattern。worker 内の rollback メッセージは
-                    // 文字列を local 変数に format して dialog 終了後に MessageBox 表示する (= MessageBox を
-                    // background thread から直接呼ばない pattern、ProcessingDialog の generic error MessageBox
-                    // との二重表示も回避するため worker 内では throw せず早期 return で抜ける)。
-                    var completedRenames = new List<RenamePlan>();
-                    string phase2ErrorMessage = null;
-                    Action<IProgress<ProgressInfo>, CancellationToken> phase2Worker = (progress, token) =>
-                    {
-                        for (int i = 0; i < orderedPlan.Count; i++)
-                        {
-                            var p = orderedPlan[i];
-                            progress?.Report(new ProgressInfo(-1,
-                                $"バージョンフォルダをリネーム中 ({i + 1}/{orderedPlan.Count})...",
-                                $"{p.OldDir}\n  → {p.NewDir}"));
-
-                            if (!p.SourceExists)
-                            {
-                                // 旧 folder 不在: AddGameForm 経由で作成されなかった version (= DB のみ存在) 等。
-                                // DB 更新だけ続けて警告ログのみ。disk Move 自体は skip するが path/snapshot
-                                // mutation はやるため completedRenames に MoveDone=false で記録。
-                                Logger.Warn("[EditGameForm] (#158 Q3) version '" + p.OriginalVer + "' のフォルダが見つかりません、rename skip: " + p.OldDir);
-                                p.MoveDone = false;
-                                completedRenames.Add(p);
-                            }
-                            else
-                            {
-                                try
-                                {
-                                    System.IO.Directory.Move(p.OldDir, p.NewDir);
-                                    p.MoveDone = true;
-                                    completedRenames.Add(p);
-                                }
-                                catch (Exception ex)
-                                {
-                                    // (#158 CX-1 + round 4 codex P1) rollback: 完了済 rename を逆順で disk Move
-                                    // 戻し + in-memory state (_originalVersionByDbId snapshot + GameVersion の
-                                    // path 群) も capture 前に復元。同 dialog で再 OK 押下時に diff check が
-                                    // 正しく triggered されて rename retry できる状態に戻す。
-                                    // ここは DB write が一切走っていない (UpdateGameVersion ループより前) ため
-                                    // RollbackCompletedRenames は安全に呼べる (round 5 codex P1 の制約該当なし)。
-                                    progress?.Report(new ProgressInfo(-1, "ロールバック中...", "完了済の rename を元の名前に戻しています"));
-                                    int rolledBack, rollbackFailures;
-                                    RollbackCompletedRenames(completedRenames, out rolledBack, out rollbackFailures);
-                                    phase2ErrorMessage =
-                                        "バージョンフォルダのリネームに失敗しました:\n" +
-                                        "  " + p.OldDir + "\n  → " + p.NewDir + "\n\n" +
-                                        "  " + ex.Message + "\n\n" +
-                                        "  完了済の rename " + rolledBack + " 件を元の名前に rollback しました" +
-                                        (rollbackFailures > 0 ? " (rollback 失敗 " + rollbackFailures + " 件、ログファイル参照)" : "") +
-                                        "。\n  DB は更新していないので OK 押下前の状態に戻ります。\n\n" +
-                                        "Launcher / 別プロセスが該当フォルダを使用していないか確認してください。";
-                                    return; // worker 早期終了 (throw しないので ProcessingDialog の generic
-                                            // error MessageBox は出ない、detailed MessageBox は dialog 終了後)
-                                }
-                            }
-
-                            // version 文字列を含む相対パス (`v<old>/...` 形式) を新 prefix に置換。
-                            // (#234 ④ 以降) AddGameForm 経路の path も v<version>/ prefix を持つため対象。
-                            // prefix を持たない path (= 旧データ等) は ReplaceVersionPrefix が前方一致 skip して無変更。
-                            p.Version.ExecutablePath = ReplaceVersionPrefix(p.Version.ExecutablePath, p.OriginalVer, p.Version.Version);
-                            p.Version.ThumbnailPath = ReplaceVersionPrefix(p.Version.ThumbnailPath, p.OriginalVer, p.Version.Version);
-                            p.Version.BackgroundPath = ReplaceVersionPrefix(p.Version.BackgroundPath, p.OriginalVer, p.Version.Version);
-
-                            // _originalVersionByDbId snapshot を最新化 (将来 LoadVersions を OK 内で呼び直す
-                            // path への保険、現状は cmbVersionList.Items 一意 id で同 OK 内の二重処理は
-                            // 構造上ありえない、(#158 round 3 L-1) で review label 衝突を避けるため ID 撤去)。
-                            _originalVersionByDbId[p.Version.Id] = p.Version.Version;
-                        }
-                    };
-
-                    if (orderedPlan.Count > 0)
-                    {
-                        using (var dialog = new ProcessingDialog(phase2Worker)
+                            execResult = renameService.ExecutePlan(buildResult.OrderedPlan, _originalVersionByDbId, progress);
+                        })
                         {
                             Text = "バージョンフォルダをリネーム中",
                             MarqueeMode = true,
@@ -1796,12 +1520,13 @@ namespace TonePrism.Manager
                         {
                             dialog.ShowDialog(this);
                         }
-                        if (phase2ErrorMessage != null)
+                        if (execResult != null && execResult.Failed)
                         {
-                            MessageBox.Show(this, phase2ErrorMessage, "フォルダリネーム失敗",
+                            MessageBox.Show(this, execResult.ErrorMessage, "フォルダリネーム失敗",
                                 MessageBoxButtons.OK, MessageBoxIcon.Error);
                             return;
                         }
+                        if (execResult != null) completedRenames = execResult.CompletedRenames;
                     }
 
                     // (累積監査 round 4 High-2) 旧実装は (a) UpdateGameVersions + (b) UpdateGame を別 transaction で
@@ -1842,7 +1567,7 @@ namespace TonePrism.Manager
                         // 原子的更新のため DB は OK 押下前のまま (部分コミットなし)。完了済 disk rename を
                         // 逆順で元へ戻し、in-memory state も capture 前へ復元して「OK 押下前」に巻き戻す。
                         int rolledBack, rollbackFailures;
-                        RollbackCompletedRenames(completedRenames, out rolledBack, out rollbackFailures);
+                        renameService.Rollback(completedRenames, _originalVersionByDbId, out rolledBack, out rollbackFailures);
                         MessageBox.Show(
                             "バージョン情報 + ゲーム本体情報の DB 更新に失敗しました:\n" +
                             "  " + dbEx.Message + "\n\n" +
