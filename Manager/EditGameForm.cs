@@ -648,13 +648,6 @@ namespace TonePrism.Manager
             return relative;
         }
 
-        /// <summary>
-        /// (#158 round 4 M-1) version 文字列から folder leaf 形式 (`v<X>.<Y>.<Z>[-suffix]`、必ず
-        /// 小文字 v prefix) を作る。CX-3 で大文字 V を regex 受理にした副作用で、`oldVer="V1.2.3"`
-        /// の場合に旧実装の `StartsWith("v")` が case-sensitive で false → `"v" + "V1.2.3" = "vV1.2.3"`
-        /// と二重 prefix の歪な leaf になる経路があった。`TrimStart('v', 'V')` で先頭 v/V を一度
-        /// 剥がしてから小文字 v を被せ直す形に統一。
-        /// </summary>
         private void SaveGameDataToVersion(GameVersion version)
         {
             if (version == null) return;
