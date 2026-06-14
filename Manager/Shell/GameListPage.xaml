@@ -111,8 +111,21 @@
                              「1〜99人」か曖昧なのでチェックで OFF を明示する。NumberBox はチェック時のみ有効。 -->
                         <CheckBox x:Name="PlayerFilterCheck" Content="プレイ人数で絞り込む" Foreground="#ECECEC" FontSize="11.5"
                                   Margin="0,0,0,6" Checked="FilterCheck_Changed" Unchecked="FilterCheck_Changed" />
+                        <!-- チェック OFF 時: IsEnabled=false で入力を止め、さらに Opacity で行全体を一様に減光する
+                             (ui:NumberBox は IsEnabled=false でも矢印/数字が減光されず背景しか暗くならないため、
+                             コンテナ Opacity で見た目を揃える)。 -->
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,12"
                                     IsEnabled="{Binding ElementName=PlayerFilterCheck, Path=IsChecked}">
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="Opacity" Value="1" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ElementName=PlayerFilterCheck, Path=IsChecked}" Value="False">
+                                            <Setter Property="Opacity" Value="0.4" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
                             <ui:NumberBox x:Name="PlayerMinBox" Minimum="1" Maximum="99" Value="1" Width="150"
                                           Foreground="#ECECEC" SpinButtonPlacementMode="Inline" ClearButtonEnabled="False" />
                             <TextBlock Text="〜" Foreground="#C4C8CC" VerticalAlignment="Center" Margin="10,0,10,0" />

@@ -48,8 +48,9 @@ namespace TonePrism.Manager.Shell
             InitializeComponent();
             BuildGenreFilterChecks();
             // NumberBox の ValueChanged はコードで配線 (SettingsPage と同パターン、XAML の TypedEventHandler を避ける)。
-            PlayerMinBox.ValueChanged += (s, e) => OnFilterChanged();
-            PlayerMaxBox.ValueChanged += (s, e) => OnFilterChanged();
+            // 下限/上限は min<=max を保つ。一方が他方を越えたら相手を押し上げ/押し下げる (範囲スライダー的)。
+            PlayerMinBox.ValueChanged += (s, e) => OnPlayerMinChanged();
+            PlayerMaxBox.ValueChanged += (s, e) => OnPlayerMaxChanged();
             // NavigationView の表示遷移ごとに最新化 (DashboardPage と同様、Loaded は表示ごとに発火)。
             Loaded += (_, _) => LoadGames();
         }
@@ -208,6 +209,32 @@ namespace TonePrism.Manager.Shell
             if (_suppressFilter) return;
             ApplyView();
             UpdateFilterButtonText();
+        }
+
+        // 下限/上限の連動: 一方が他方を越えたら相手を押し上げ/押し下げて min<=max を保つ (ブロックでなく押す＝範囲スライダー的)。
+        // 相手を設定する間は _suppressFilter で「相手側ハンドラの再クランプ」と「二重 ApplyView」を抑止し、最後に 1 回だけ反映する。
+        private void OnPlayerMinChanged()
+        {
+            if (_suppressFilter) return;
+            if (PlayerMinBox != null && PlayerMaxBox != null && PlayerMinBox.Value > PlayerMaxBox.Value)
+            {
+                _suppressFilter = true;
+                PlayerMaxBox.Value = PlayerMinBox.Value;  // 上限を押し上げ
+                _suppressFilter = false;
+            }
+            OnFilterChanged();
+        }
+
+        private void OnPlayerMaxChanged()
+        {
+            if (_suppressFilter) return;
+            if (PlayerMinBox != null && PlayerMaxBox != null && PlayerMaxBox.Value < PlayerMinBox.Value)
+            {
+                _suppressFilter = true;
+                PlayerMinBox.Value = PlayerMaxBox.Value;  // 下限を押し下げ
+                _suppressFilter = false;
+            }
+            OnFilterChanged();
         }
 
         private void FilterClear_Click(object sender, RoutedEventArgs e)
