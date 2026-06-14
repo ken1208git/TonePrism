@@ -43,7 +43,7 @@ namespace TonePrism.Manager.Services
 
             using (var form = new VersionUpForm(game, currentVersion, latestVersion, existingVersionStrings))
             {
-                if (form.ShowDialog() == DialogResult.OK && form.NewVersion != null)
+                if (form.ShowDialog(owner) == DialogResult.OK && form.NewVersion != null)
                 {
                     string versionDir = PathManager.GetVersionFolder(game.GameId, form.NewVersion.Version);
 
@@ -61,7 +61,7 @@ namespace TonePrism.Manager.Services
                     // 上書きマージされるため、ここで明示的に衝突を弾く (AddGameForm.CopyGameFolder と同方針)。
                     if (Directory.Exists(versionDir))
                     {
-                        MessageBox.Show(
+                        MessageBox.Show(owner,
                             "バージョンフォルダが既に存在します:\n  " + versionDir + "\n\n" +
                             "前回のバージョンアップが中断された残骸の可能性があります。中身を確認し、" +
                             "必要なファイルを退避してからフォルダを削除して再試行してください。",
@@ -110,7 +110,7 @@ namespace TonePrism.Manager.Services
                     }))
                     {
 
-                    if (processingDialog.ShowDialog() == DialogResult.OK)
+                    if (processingDialog.ShowDialog(owner) == DialogResult.OK)
                     {
                         // (Critical-1) tempDir の中身が全件揃ったので、Directory.Move で atomic に versionDir へ昇格。
                         // Move は移動先が既存だと失敗するため、並行 Manager の勝者が既に versionDir を作っていれば
@@ -123,7 +123,7 @@ namespace TonePrism.Manager.Services
                         }
                         catch (IOException moveEx)
                         {
-                            HandleVersionDirMoveFailure(tempDir, versionDir, moveEx);
+                            HandleVersionDirMoveFailure(owner, tempDir, versionDir, moveEx);
                             return;
                         }
                         // (round 5 H1) MSDN 公式仕様: Directory.Move は権限拒否 (ACL / read-only attr /
@@ -133,7 +133,7 @@ namespace TonePrism.Manager.Services
                         // round 4 R4-M10 で legacy safety MoveTo に既に UAE 別 catch を入れた規約と非対称解消。
                         catch (UnauthorizedAccessException moveEx)
                         {
-                            HandleVersionDirMoveFailure(tempDir, versionDir, moveEx);
+                            HandleVersionDirMoveFailure(owner, tempDir, versionDir, moveEx);
                             return;
                         }
 
@@ -167,7 +167,7 @@ namespace TonePrism.Manager.Services
                                 var delResult = FolderDeletionService.TryDelete(versionDir);
                                 if (!delResult.Success) Logger.Warn("[GameVersionUpService] (追加精査 ②) versionDir 削除失敗 (read-only/ロック等): " + versionDir + ": " + delResult.ErrorMessage);
                             }
-                            MessageBox.Show(
+                            MessageBox.Show(owner,
                                 "コピー後のファイルが見つかりません。バージョンアップを中止しました:\n\n  " +
                                 string.Join("\n  ", missingVersionAssets) +
                                 "\n\nコピー元のパス指定 / 権限 / ディスク容量を確認のうえ再試行してください。",
@@ -192,7 +192,7 @@ namespace TonePrism.Manager.Services
                                 var delResult = FolderDeletionService.TryDelete(versionDir);
                                 if (!delResult.Success) Logger.Warn("[GameVersionUpService] (M4) versionDir 削除失敗 (read-only/ロック等): " + versionDir + ": " + delResult.ErrorMessage);
                             }
-                            MessageBox.Show(
+                            MessageBox.Show(owner,
                                 "実行ファイルの相対パス計算に失敗しました。バージョンアップを中止しました。\n\n" +
                                 "コピー元フォルダを指定し直してください。",
                                 "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -237,7 +237,7 @@ namespace TonePrism.Manager.Services
                         // version 行 INSERT と games 行 UPDATE を 1 transaction で atomic 実行 (partial commit
                         // 窓を物理閉鎖)。No なら従来通り AddGameVersion のみ。旧実装は AddGameVersion 後に
                         // 確認 dialog を出していたが、両 DB write を Yes 確定時に統合できる UI 順序へ整理。
-                        var activationResult = MessageBox.Show(
+                        var activationResult = MessageBox.Show(owner,
                             $"バージョン {form.NewVersion.Version} を現在のバージョン（アクティブ）として設定しますか？\n\n「いいえ」を選択した場合、バージョンは作成されますが、ランチャーで起動するバージョンは変更されません。",
                             "アクティブバージョンの確認",
                             MessageBoxButtons.YesNo, MessageBoxIcon.Question);
@@ -272,13 +272,13 @@ namespace TonePrism.Manager.Services
                             {
                                 cleanupNote = "";
                             }
-                            MessageBox.Show(
+                            MessageBox.Show(owner,
                                 $"バージョン情報のデータベース保存に失敗しました。\n\n{ex.Message}{cleanupNote}",
                                 "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
                             return;
                         }
 
-                        MessageBox.Show(
+                        MessageBox.Show(owner,
                             $"ゲーム「{game.Title}」のバージョン {form.NewVersion.Version} を追加しました。",
                             "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
@@ -299,7 +299,7 @@ namespace TonePrism.Manager.Services
 
                         if (processingDialog.DialogResult == DialogResult.Cancel)
                         {
-                            MessageBox.Show("処理がキャンセルされました。", "キャンセル",
+                            MessageBox.Show(owner, "処理がキャンセルされました。", "キャンセル",
                                 MessageBoxButtons.OK, MessageBoxIcon.Information);
                         }
                         // Abort 経路は ProcessingDialog 内で既に「エラーが発生しました: ...」MessageBox を
@@ -314,7 +314,7 @@ namespace TonePrism.Manager.Services
         /// (round 5 H1) Directory.Move 失敗時の共通 cleanup + 通知。IOException / UnauthorizedAccessException
         /// の両 catch から呼ばれ、tempDir 削除 + user 通知 MessageBox を一元化する。
         /// </summary>
-        private static void HandleVersionDirMoveFailure(string tempDir, string versionDir, Exception moveEx)
+        private static void HandleVersionDirMoveFailure(IWin32Window owner, string tempDir, string versionDir, Exception moveEx)
         {
             // (#288) read-only コピー (.pending-create) でも消せるよう FolderDeletionService 経由。
             var delResult = FolderDeletionService.TryDelete(tempDir);
@@ -324,7 +324,7 @@ namespace TonePrism.Manager.Services
                 ? "別の Manager が同じバージョン番号で既にフォルダを作成した、または対象フォルダの権限が制限されている可能性があります。"
                 : "別の Manager が同じバージョン番号で既にフォルダを作成した可能性があります。";
 
-            MessageBox.Show(
+            MessageBox.Show(owner,
                 "バージョンフォルダの作成に失敗しました:\n  " + versionDir + "\n\n" +
                 detail + "\n" +
                 "別のバージョン番号を指定するか、少し待ってから再試行してください。\n\n" +

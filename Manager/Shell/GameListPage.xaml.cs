@@ -21,7 +21,8 @@ namespace TonePrism.Manager.Shell
     /// WindowsFormsHost でホスト) を置換。一覧は Win11 設定アプリ風のカード型 ListBox、操作 (追加/編集/版up/削除) は
     /// 抽出済 service + 既存 WinForms フォームを可視シェル窓 HWND (<see cref="ShellOwner"/>) を owner にして開く。
     /// 重ロジックは service 側にあるので本ページは「選択検証 + 競合チェック + service 呼び出し + 再読込」の薄い配線
-    /// (CLAUDE.md「UI は薄く、ロジックは外へ」)。挙動は GameSectionPanel のボタンハンドラと同一。
+    /// (CLAUDE.md「UI は薄く、ロジックは外へ」)。挙動は概ね GameSectionPanel のボタンハンドラを踏襲するが、VersionUp の
+    /// 競合チェックは Edit と同順 (解決→不在→競合) に統一した (旧 btnVersionUp の競合チェック前倒しとは意図的に変更)。
     /// </summary>
     public partial class GameListPage : Page
     {
@@ -311,6 +312,9 @@ namespace TonePrism.Manager.Shell
 
         private void Add_Click(object sender, RoutedEventArgs e)
         {
+            // 起動完了前 (SharedDb 未確定) にここへ到達した場合の防御。LoadGames だけにあったガードを操作系にも対称化。
+            // 編集/版up/削除は SelectedGame==null で先に弾かれる (Db null なら一覧が空) が、追加はその経路が無いため明示。
+            if (Db == null) return;
             if (SessionConflictHelper.CheckBeforeWrite("ゲーム追加") == WinForms.DialogResult.Cancel) return;
             using (var form = new AddGameForm(Db))
             {

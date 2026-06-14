@@ -14,7 +14,10 @@
 
     <!-- (#245) WPF-UI NavigationView は内蔵 ScrollViewer でページ全体をスクロール可にする (lepoco/wpfui#1041)。
          root の MaxHeight を祖先 ScrollViewer の ViewportHeight に縛って viewport に収め、ページ全体スクロールを止める。
-         こうすると内側の ListBox が内部スクロールし、ヘッダ行は固定で流れない。 -->
+         こうすると内側の ListBox が内部スクロールし、ヘッダ行は固定で流れない。
+         注意: これは wpfui の内蔵 ScrollViewer 木構造に依存した hack。**wpfui 更新時は見出し固定が効くか要再確認**
+         (祖先 ScrollViewer が見つからないとバインド未解決で MaxHeight=∞ に倒れ、見出し固定が効かなくなる＝crash はしない)。
+         同パターンを DashboardPage.xaml / SettingsPage.xaml も採用。 -->
     <Grid MaxHeight="{Binding RelativeSource={RelativeSource AncestorType=ScrollViewer}, Path=ViewportHeight}"
           PreviewMouseDown="Root_PreviewMouseDown">
     <Grid Margin="24,20,24,20">
