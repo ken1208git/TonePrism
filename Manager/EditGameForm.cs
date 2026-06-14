@@ -1044,140 +1044,73 @@ namespace TonePrism.Manager
                 SaveGameDataToVersion(currentSelected);
             }
 
-            // (#158 round 7 L-2 + L-3) 旧実装は (a) suffix scan / (b) 空文字 scan / (c) 数値 scan の
-            // 3 段 return で、1 つの version が複数違反を持つと user は 2-3 巡 OK を押させられる UX。
-            // 1 ループで classification → empty / malformed-suffix / malformed-numeric の 3 リストに
-            // 分けて 1 つの MessageBox で全件まとめて表示する形に集約。
-            // suffix 切り出しは TrySplit static helper 経由 (round 7 L-3、IndexOf('-') 直書きの
-            // "v-1.0.0" 誤判定余地を排除)。
-            var emptyIds = new List<string>();
-            var malformedSuffixEntries = new List<string>();
-            var malformedNumericEntries = new List<string>();
-            foreach (var item in cmbVersionList.Items)
-            {
-                if (!(item is GameVersion vChk)) continue;
-                string ver = vChk.Version;
-                if (string.IsNullOrEmpty(ver))
-                {
-                    emptyIds.Add("(id=" + vChk.Id + ")");
-                    continue;
-                }
-                string core, sfx;
-                if (SemverInputControl.TrySplit(ver, out core, out sfx))
-                {
-                    if (!SemverInputControl.IsSuffixValid(sfx))
-                    {
-                        malformedSuffixEntries.Add("  - id=" + vChk.Id + ": '" + ver + "' (suffix 部分: '" + sfx + "')");
-                    }
-                }
-                string normIgnored;
-                if (!SemverInputControl.TryNormalize(ver, out normIgnored))
-                {
-                    malformedNumericEntries.Add("  - id=" + vChk.Id + ": '" + ver + "'");
-                }
-            }
-            if (emptyIds.Count > 0 || malformedSuffixEntries.Count > 0 || malformedNumericEntries.Count > 0)
+            // (既知の残存 path #158 round 6 M-1 — caller 側の前提として復元) 直前の
+            // SaveGameDataToVersion(currentSelected) で **表示中版の v.Version は clamp 値** (例: "v0.0.0" / "v99.0.0")
+            // に上書き済 → 下の validator の TryNormalize は succeed し、表示中版の malformed 入力は本 scan では
+            // catch できない。これは仕様で、LoadVersions 警告 + UI の clamp 表示 visibility (表示中版は user の目に
+            // 入る) で代替担保している。表示中版が素通りするのを「バグ」と誤認して validator を強化すると clamp 前提が
+            // 崩れるので注意 (scan は **非表示版の補完** が主目的)。scan 分類 (空/不正suffix/不正数値の 1 ループ集約・
+            // round 7 L-2/L-3) の経緯は GameVersionSetValidator 側コメントに保存。
+            // (#242 ②) 版セット全体の入力検証 (空/不正suffix/不正数値/正規化重複NOCASE/人数min>max) を
+            // GameVersionSetValidator に抽出。scan logic は service、presentation (MessageBox 組み立て + 表示) は
+            // ここ (form) に残す。表示中以外の版も含め全件 scan するため、版切替時の SaveGameDataToVersion で
+            // 各版に commit 済の値が対象になる (直前の SaveGameDataToVersion(currentSelected) で表示中版も反映済)。
+            var versionValidation = new GameVersionSetValidator().Validate(cmbVersionList.Items.OfType<GameVersion>());
+
+            // (1) version 文字列の問題 (空/不正suffix/不正数値) を 1 つの MessageBox に集約 (#158 round 7 L-2)。
+            if (versionValidation.VersionStringIssueCount > 0)
             {
                 var sb = new System.Text.StringBuilder();
                 sb.AppendLine("以下のバージョンに修正が必要です。Manager の dropdown で該当 version を" +
                     "選択して入力欄を直してから再度 OK を押してください (= このまま OK すると DB に" +
                     "書き戻されます)。");
                 sb.AppendLine();
-                if (emptyIds.Count > 0)
+                if (versionValidation.EmptyIds.Count > 0)
                 {
-                    sb.AppendLine("● バージョン文字列が空 / 未設定 (" + emptyIds.Count + " 件):");
-                    sb.AppendLine("  " + string.Join("\n  ", emptyIds));
+                    sb.AppendLine("● バージョン文字列が空 / 未設定 (" + versionValidation.EmptyIds.Count + " 件):");
+                    sb.AppendLine("  " + string.Join("\n  ", versionValidation.EmptyIds));
                     sb.AppendLine();
                 }
-                if (malformedSuffixEntries.Count > 0)
+                if (versionValidation.MalformedSuffixEntries.Count > 0)
                 {
-                    sb.AppendLine("● suffix 部分が SemVer 形式ではない (" + malformedSuffixEntries.Count +
+                    sb.AppendLine("● suffix 部分が SemVer 形式ではない (" + versionValidation.MalformedSuffixEntries.Count +
                         " 件、英数字とハイフンの identifier をピリオドで区切る形式のみ可、例: rc1 / beta.2):");
-                    sb.AppendLine(string.Join("\n", malformedSuffixEntries));
+                    sb.AppendLine(string.Join("\n", versionValidation.MalformedSuffixEntries));
                     sb.AppendLine();
                 }
-                if (malformedNumericEntries.Count > 0)
+                if (versionValidation.MalformedNumericEntries.Count > 0)
                 {
                     sb.AppendLine("● 数値部 (Major/Minor/Patch) または書式が parse 不能 (" +
-                        malformedNumericEntries.Count + " 件):");
-                    sb.AppendLine(string.Join("\n", malformedNumericEntries));
+                        versionValidation.MalformedNumericEntries.Count + " 件):");
+                    sb.AppendLine(string.Join("\n", versionValidation.MalformedNumericEntries));
                     sb.AppendLine();
                 }
-                int total = emptyIds.Count + malformedSuffixEntries.Count + malformedNumericEntries.Count;
                 MessageBox.Show(this, sb.ToString().TrimEnd(),
-                    "バージョン入力エラー (" + total + " 件)",
+                    "バージョン入力エラー (" + versionValidation.VersionStringIssueCount + " 件)",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            // 既知の残存 path (#158 round 6 M-1): currently-displayed の malformed は前段 dup-check 直前
-            // SaveGameDataToVersion(currentSelected) で v.Version が clamp 値 (例: "v0.0.0" or "v99.0.0")
-            // に上書き済 → 上の TryNormalize は succeed → 本 scan では catch できない。LoadVersions
-            // 警告での user 認知 + UI clamp 表示 visibility に頼る (= 表示中 version は user の目に入る)。
-            // (#158 round 6 codex P2) GroupBy のキーを TryNormalize 結果に変える。旧実装は raw v.Version
-            // で比較していたため、過去 DB の "v1.0.0" / "1.0.0" / "V1.0.0" を別 key として素通しして
-            // semantic 上は重複なのに通る silent danger があった (= Q2 fix の裏口再オープン状態)。
-            // (#158 round 7 M-1) 上の事前 scan (空文字 / malformed-suffix / malformed-numeric の 3 段
-            // 集約) で全 malformed を弾いて return しているため、ここに到達する時点で全件 TryNormalize
-            // 成功確定。三項の `: v.Version` fallback path は事実上 dead code だが defensive に残す
-            // (= 万一上の scan が緩められた場合の guard rail として機能、silent regression 防止)。
-            // (#158 round 8 senior Low #4) `.Where(v => !string.IsNullOrEmpty(v.Version))` filter は
-            // L-2 の事前 scan で空文字 version を return で弾いた後なので dead path、defensive guard
-            // rail として残す (round 7 M-1 の fallback コメントと同方針、片方だけ defensive コメント
-            // 付いて非対称だったため両方に注記)。
-            var versionDups = cmbVersionList.Items
-                .OfType<GameVersion>()
-                .Where(v => !string.IsNullOrEmpty(v.Version))
-                // (PR #236 レビュー対応 #2) GroupBy を OrdinalIgnoreCase に。raw-fallback キー (正規化不能版) が
-                // 既定の Ordinal だと "V1.0" と "v1.0" のような case 違いが group 化されず UI 重複ガードを素通りし、
-                // DB の UNIQUE(game_id, version COLLATE NOCASE) に raw で当たって SQLiteException (フレンドリーで
-                // ない技術的エラー) として表面化していた。DB の NOCASE collation と UI 判定を揃えて事前に弾く。
-                .GroupBy(v =>
-                {
-                    string normalized;
-                    return SemverInputControl.TryNormalize(v.Version, out normalized) ? normalized : v.Version;
-                }, StringComparer.OrdinalIgnoreCase)
-                .Where(g => g.Count() > 1)
-                .Select(g =>
-                {
-                    // 重複 key + 重複した raw 値群を表示 (normalize 後同じだが原型は違う場合の手がかり)
-                    var raws = g.Select(v => v.Version).Distinct().ToList();
-                    return raws.Count == 1 ? g.Key : g.Key + " (生値: " + string.Join(" / ", raws) + ")";
-                })
-                .ToList();
-            if (versionDups.Count > 0)
+
+            // (2) 正規化重複 (SemVer 正規化後・v 大小/leading v 無視、DB の UNIQUE NOCASE と整合)。
+            if (versionValidation.DuplicateVersions.Count > 0)
             {
                 MessageBox.Show(
                     "以下のバージョン名が複数のエントリで重複しています (SemVer 正規化後の比較、" +
                     "v 大文字/小文字・leading v 有無は同一視):\n\n  " +
-                    string.Join("\n  ", versionDups) +
+                    string.Join("\n  ", versionValidation.DuplicateVersions) +
                     "\n\nバージョン管理ドロップダウンで該当の項目を選択し、別の名前に変更してください。",
                     "バージョン重複エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            // (Finding #4) 全版の「最小プレイ人数 > 最大プレイ人数」を検出する。OK 時の ValidateInput →
-            // ValidatePlayerCount (下の ~1800) は表示中の NumericUpDown 値しか見ないため、非表示の版で
-            // min>max にしたまま別の版を表示して OK すると素通りしていた (SemVer 重複は上で全件 scan するのに
-            // 対し非対称)。版切替時の SaveGameDataToVersion で各版に commit 済の値を全件比較し、違反版を
-            // 列挙して block する (両方とも非 null のときのみ比較。Add/VersionUp は常に ≥1 を書くため
-            // 実運用で null になる経路は限定的だが、表示中版は ValidateInput が先に弾くので本 scan は非表示版を補完)。
-            var playerCountViolations = new List<string>();
-            foreach (var item in cmbVersionList.Items)
-            {
-                if (!(item is GameVersion vPc)) continue;
-                if (vPc.MinPlayers.HasValue && vPc.MaxPlayers.HasValue && vPc.MinPlayers.Value > vPc.MaxPlayers.Value)
-                {
-                    playerCountViolations.Add("  - " + (vPc.Version ?? "(id=" + vPc.Id + ")")
-                        + ": 最小 " + vPc.MinPlayers.Value + " > 最大 " + vPc.MaxPlayers.Value);
-                }
-            }
-            if (playerCountViolations.Count > 0)
+            // (3) 全版の「最小プレイ人数 > 最大プレイ人数」(表示中版は ValidateInput が先に弾くので非表示版を補完)。
+            if (versionValidation.PlayerCountViolations.Count > 0)
             {
                 MessageBox.Show(this,
                     "以下のバージョンで「最小プレイ人数 > 最大プレイ人数」になっています。\n" +
                     "バージョン管理ドロップダウンで該当の版を選び、人数を修正してから再度 OK してください:\n\n" +
-                    string.Join("\n", playerCountViolations),
-                    "プレイ人数の入力エラー (" + playerCountViolations.Count + " 件)",
+                    string.Join("\n", versionValidation.PlayerCountViolations),
+                    "プレイ人数の入力エラー (" + versionValidation.PlayerCountViolations.Count + " 件)",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
