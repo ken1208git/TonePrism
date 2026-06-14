@@ -238,6 +238,13 @@
 
 **注意 (#160 で section 責務分離)**: `Updater` 等の **runtime exe 群** (= SPEC §2.4 Companions 配置) の changelog は本 section ではなく **`## Companions`** (旧 `## Updater (Companions/Updater)`、本 PR で section 名を一般化) に記載する。本 section は build / 配布スクリプトのみ対象。Bundle v0.4.0 以前 (= 本 PR merge 前) の Updater 変更履歴は `## Release Tooling` の過去 entry (= round 1〜8 review 詳細等) に retain、retroactive consolidation は scope creep のため見送り (= PR #159 round 4 「SPEC 1 PR 1 bump 規約」導入時と同 pattern)。
 
+### [Release Tooling v0.1.28] - 2026-06-14
+
+#### Removed (#245 / #377 後の掃除)
+
+- **開発用 Manager 単体ソリューション `Manager/TonePrism_Manager.slnx` を削除しルート `TonePrism.slnx` に一本化**。旧 #168（GCTonePrism 時代）の名残で中身は `TonePrism_Manager.csproj` 1 個（テスト未収録）。SPEC §2.4（#245 PR5）が**ルート `TonePrism.slnx` を VS 開発の SoT**（「VS では必ず .slnx を開く」）と定めて以降は冗長で、ルート slnx を開いて Manager をスタートアップに設定すれば同じ起動体験 + `Manager.Tests` も Test Explorer で回せる。`Release.ps1` / CI は solution を使わず各 csproj を個別 build するため**参照ゼロ＝ build / 配布に影響なし**（純粋に VS-IDE の開発利便ファイル）。VS で旧 slnx を開いていた場合はルート slnx を開き直すこと。
+- bump 判断: 開発インフラ（VS ソリューション）整理のみで build / 配布スクリプトの挙動は不変。patch (v0.1.27 → v0.1.28)。Bundle 反映は次回リリース時。
+
 ### [Release Tooling v0.1.27] - 2026-06-11
 
 #### Changed (#258 PR4 — net10 self-contained publish 対応)

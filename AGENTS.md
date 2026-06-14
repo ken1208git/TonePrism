@@ -6,7 +6,7 @@
 
 ## Branch Strategy
 - main で直接実装せず、機能単位でブランチを切る。
-- ブランチ名は `feature/〇〇`（新機能）/ `fix/〇〇`（修正）。
+- ブランチ名は `feature/〇〇`（新機能）/ `fix/〇〇`（修正）/ `chore/〇〇`（dead code 削除・依存/ファイル整理・dev tooling 等、機能追加でも bugfix でもない保守）。
 
 ## File Structure
 - 新機能の追加は、既存ファイルへの追記ではなく新ファイル作成を必ず検討する。
