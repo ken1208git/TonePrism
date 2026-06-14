@@ -418,6 +418,26 @@ namespace TonePrism.Manager.Shell
             if (FlyoutDismiss.DismissOpen()) e.Handled = true;
         }
 
+        // カードは選択ハイライトを見せない mouse 主体の UI。クリック後にカードへ keyboard focus が残り、矢印 / Page /
+        // Home / End で ListBox が選択を動かし ScrollIntoView で勝手にスクロールするのを止める (マウスホイール / スクロール
+        // バーは KeyDown を通らないので残る)。
+        private void GamesList_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            switch (e.Key)
+            {
+                case Key.Up:
+                case Key.Down:
+                case Key.Left:
+                case Key.Right:
+                case Key.PageUp:
+                case Key.PageDown:
+                case Key.Home:
+                case Key.End:
+                    e.Handled = true;
+                    break;
+            }
+        }
+
         private void GamesList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
             // 行 (カード) ダブルクリックで編集 (GameSectionPanel の dgvGames_CellDoubleClick と同挙動)。選択時のみ。
