@@ -78,9 +78,7 @@ namespace TonePrism.Manager.Shell
             Unloaded += (_, _) => { _loadedThisShow = false; _autoRefreshTimer.Stop(); };
         }
 
-        private void Refresh_Click(object sender, RoutedEventArgs e) => _ = LoadAsync();
-
-        // silent=true: 自動更新 tick 用。スピナー / ボタン無効化を出さず、結果だけ in-place 反映する (チラつき防止)。
+        // silent=true: 自動更新 tick 用。スピナーを出さず、結果だけ in-place 反映する (チラつき防止)。
         private async Task LoadAsync(bool silent = false)
         {
             if (_loading) return;
@@ -88,10 +86,7 @@ namespace TonePrism.Manager.Shell
             try
             {
                 if (!silent)
-                {
-                    RefreshButton.IsEnabled = false;
                     LoadingPanel.Visibility = Visibility.Visible;
-                }
 
                 DatabaseManager db = Db;
                 // LAN-wide ランチャー検出用サービスは MainForm (編集前競合チェックと同一インスタンス) から借りる。
@@ -106,7 +101,6 @@ namespace TonePrism.Manager.Shell
             }
             finally
             {
-                if (!silent) RefreshButton.IsEnabled = true;
                 LoadingPanel.Visibility = Visibility.Collapsed;
                 _loading = false;
             }

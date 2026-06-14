@@ -1,0 +1,570 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using TonePrism.Manager.Models;
+using TonePrism.Manager.Services;
+using WinForms = System.Windows.Forms;
+
+namespace TonePrism.Manager.Shell
+{
+    /// <summary>
+    /// (#245 ② ゲーム一覧 WPF 化) ゲーム一覧の WPF ネイティブページ。旧 GameHostPage (WinForms GameSectionPanel を
+    /// WindowsFormsHost でホスト) を置換。一覧は Win11 設定アプリ風のカード型 ListBox、操作 (追加/編集/版up/削除) は
+    /// 抽出済 service + 既存 WinForms フォームを可視シェル窓 HWND (<see cref="ShellOwner"/>) を owner にして開く。
+    /// 重ロジックは service 側にあるので本ページは「選択検証 + 競合チェック + service 呼び出し + 再読込」の薄い配線
+    /// (CLAUDE.md「UI は薄く、ロジックは外へ」)。挙動は概ね GameSectionPanel のボタンハンドラを踏襲するが、VersionUp の
+    /// 競合チェックは Edit と同順 (解決→不在→競合) に統一した (旧 btnVersionUp の競合チェック前倒しとは意図的に変更)。
+    /// </summary>
+    public partial class GameListPage : Page
+    {
+        private DatabaseManager Db => ShellWindow.SharedDb;
+
+        // service は Db (= ShellWindow.SharedDb) 依存。Db は起動完了後に確定するため初回操作時に遅延生成。
+        private GameVersionUpService _versionUpService;
+        private GameDeletionService _deletionService;
+        private GameVersionUpService VersionUpService => _versionUpService ??= new GameVersionUpService(Db);
+        private GameDeletionService DeletionService => _deletionService ??= new GameDeletionService(Db);
+
+        // owner = このページが載る可視シェル窓の HWND。WinForms ダイアログ / MessageBox をシェルにモーダルで開くため。
+        private WinForms.IWin32Window Owner => ShellOwner.For(this);
+
+        private GameInfo SelectedGame => (GamesList.SelectedItem as GameListItem)?.Game;
+
+        // ジャンルフィルターのチェックボックス（master 一覧から ctor で一度だけ生成＝LoadGames で再生成しないので選択が保持される）。
+        private readonly List<CheckBox> _genreChecks = new List<CheckBox>();
+        // クリア等で複数のフィルター controls をまとめて変更する間、ApplyView の連続発火を抑える。
+        private bool _suppressFilter;
+
+        public GameListPage()
+        {
+            InitializeComponent();
+            BuildGenreFilterChecks();
+            // NumberBox の ValueChanged はコードで配線 (SettingsPage と同パターン、XAML の TypedEventHandler を避ける)。
+            // 下限/上限は min<=max を保つ。一方が他方を越えたら相手を押し上げ/押し下げる (範囲スライダー的)。
+            PlayerMinBox.ValueChanged += (s, e) => OnPlayerMinChanged();
+            PlayerMaxBox.ValueChanged += (s, e) => OnPlayerMaxChanged();
+            // NavigationView の表示遷移ごとに最新化 (DashboardPage と同様、Loaded は表示ごとに発火)。
+            Loaded += (_, _) => LoadGames();
+            // ページ離脱時は進行中のサムネ背景ロードを打ち切る (離脱後も SMB I/O を最後まで続けないため)。
+            Unloaded += (_, _) => _thumbCts?.Cancel();
+        }
+
+        private void BuildGenreFilterChecks()
+        {
+            var fg = new SolidColorBrush(Color.FromRgb(0xEC, 0xEC, 0xEC));
+            foreach (var genre in GenreList.AvailableGenres)
+            {
+                var cb = new CheckBox
+                {
+                    Content = genre,
+                    Foreground = fg,
+                    FontSize = 12.5,
+                    Margin = new Thickness(0, 0, 14, 7)
+                };
+                cb.Checked += FilterCheck_Changed;
+                cb.Unchecked += FilterCheck_Changed;
+                _genreChecks.Add(cb);
+                GenrePanel.Children.Add(cb);
+            }
+        }
+
+        // 進行中のサムネ背景ロード。LoadGames が再入したら前回分を打ち切る (二重 SMB I/O 防止。下記 LoadGames 参照)。
+        private CancellationTokenSource _thumbCts;
+
+        // 全件 (検索/フィルター前)。表示は ApplyView で絞り込んで GamesList へ反映する。
+        private List<GameListItem> _allItems;
+
+        private void LoadGames()
+        {
+            if (Db == null) return;
+            try
+            {
+                _allItems = Db.GetAllGames()
+                    .Select(g => new GameListItem(g))
+                    .ToList();
+                ApplyView();                        // 現在の検索 / フィルター / 並べ替えを適用して表示
+                // 直前のサムネ背景ロードを打ち切ってから開始。遷移 (Loaded) や操作後の再 LoadGames で再入すると、旧ループが
+                // 「もう表示されない _allItems」へ SMB I/O を出し続け、新ループと二重に SMB を叩くため (打ち切りで新ループのみ)。
+                _thumbCts?.Cancel();
+                _thumbCts?.Dispose();
+                _thumbCts = new CancellationTokenSource();
+                _ = LoadThumbnailsAsync(_allItems, _thumbCts.Token); // サムネは背景で後追いロード (SMB でも UI を固めない)
+            }
+            catch (Exception ex)
+            {
+                WinForms.MessageBox.Show(Owner,
+                    "ゲーム一覧の読み込みに失敗しました。\n\n" + ex.Message,
+                    "エラー", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error);
+            }
+        }
+
+        // 検索語 / フィルター / 並べ替えを _allItems に適用して GamesList に反映。ApplyView 内 (検索/絞り込み/並べ替え) は
+        // 同じ _allItems の GameListItem を再利用するのでロード済サムネは保持される (LoadGames は _allItems を作り直すため、
+        // 画面遷移・操作後は再ロードになる)。選択は ItemsSource 差し替えでリセット (絞り込み時は許容)。コンボ/検索欄の
+        // 現在値は操作をまたいで維持される。
+        private void ApplyView()
+        {
+            if (_allItems == null) return;
+            IEnumerable<GameListItem> q = _allItems;
+
+            // ===== フィルター (フライアウトの各軸を AND で適用) =====
+            // 表示状態
+            switch (VisCombo?.SelectedIndex ?? 0)
+            {
+                case 1: q = q.Where(i => i.IsVisible); break;
+                case 2: q = q.Where(i => !i.IsVisible); break;
+            }
+            // 通信プレイ (index 1..3 → SupportedConnection 0..2)
+            int conn = ConnCombo?.SelectedIndex ?? 0;
+            if (conn > 0) q = q.Where(i => i.Game.SupportedConnection == conn - 1);
+            // プレイ人数: チェックで明示的に有効化したときだけ [下限,上限] で絞る (レンジは [1,99] が「絞らない」か
+            // 「1〜99人」か曖昧なため、コンボの「すべて」に相当する OFF をチェックで明示する)。ゲームの対応範囲
+            // [Min,Max] が指定 [下限,上限] と重なる (overlap) ものを表示。人数未設定 (null=Launcher で「不明」。1人用とは
+            // 別状態で EditGameForm が drift を防いで保持) は範囲不明なので推測で隠さず常に通す。
+            if (PlayerFilterCheck?.IsChecked == true)
+            {
+                int plo = (int)(PlayerMinBox?.Value ?? 1);
+                int phi = (int)(PlayerMaxBox?.Value ?? 99);
+                if (phi < plo) phi = plo;
+                q = q.Where(i => i.Game.MinPlayers == null || i.Game.MaxPlayers == null
+                              || (i.Game.MinPlayers.Value <= phi && i.Game.MaxPlayers.Value >= plo));
+            }
+            // 難易度 / プレイ時間 (index 1..3 == 値 1..3)。単一値マッチなので未設定 (null) は除外される
+            // (人数は範囲軸で「不明は常に通す」が、こちらは「その難易度/時間と確定した行」だけ出す方が自然＝意図的な非対称)。
+            int diff = DiffCombo?.SelectedIndex ?? 0;
+            if (diff > 0) q = q.Where(i => i.Game.Difficulty == diff);
+            int ptime = TimeCombo?.SelectedIndex ?? 0;
+            if (ptime > 0) q = q.Where(i => i.Game.PlayTime == ptime);
+            // ジャンル (チェックされたいずれかを含む = OR)
+            var genres = SelectedGenres();
+            if (genres.Count > 0)
+                q = q.Where(i => i.Game.Genre != null && i.Game.Genre.Any(g => genres.Contains(g)));
+
+            // 検索 (名前 / ID / 製作者の部分一致・大小無視)
+            string term = SearchBox?.Text?.Trim();
+            if (!string.IsNullOrEmpty(term))
+                q = q.Where(i => i.Matches(term));
+
+            // 並べ替え (リリース年は未設定を int.MinValue として降順の末尾へ。文字列キーは空文字で安定化。第2キーはタイトル)
+            var byTitle = StringComparer.CurrentCulture;
+            switch (SortCombo?.SelectedIndex ?? 0)
+            {
+                case 1: // 製作者
+                    q = q.OrderBy(i => i.Game.DevelopersDisplay ?? "", byTitle).ThenBy(i => i.Game.Title, byTitle);
+                    break;
+                case 2: // リリース年（新しい順）
+                    q = q.OrderByDescending(i => i.Game.ReleaseYear ?? int.MinValue).ThenBy(i => i.Game.Title, byTitle);
+                    break;
+                default: // タイトル
+                    q = q.OrderBy(i => i.Game.Title, byTitle);
+                    break;
+            }
+
+            var shown = q.ToList();
+            GamesList.ItemsSource = shown;
+            CountText.Text = shown.Count == _allItems.Count
+                ? _allItems.Count + " 個のゲーム"
+                : _allItems.Count + " 個中 " + shown.Count + " 個を表示";
+        }
+
+        private void Search_TextChanged(object sender, TextChangedEventArgs e) => ApplyView();
+        private void View_Changed(object sender, SelectionChangedEventArgs e) => ApplyView();   // 並べ替え
+
+        // ===== フィルター フライアウト =====
+        private void FilterButton_Click(object sender, RoutedEventArgs e)
+        {
+            // 開く操作のみ。閉じ/トグル/再オープン抑止はページ全体の Root_PreviewMouseDown + FlyoutDismiss が一律に担う。
+            if (FilterPopup != null) FilterPopup.IsOpen = true;
+        }
+
+        private void FilterPopup_Opened(object sender, EventArgs e) => FlyoutDismiss.NotifyOpened(FilterPopup);
+        private void FilterPopup_Closed(object sender, EventArgs e) => FlyoutDismiss.NotifyClosed();
+
+        // ポップアップ上のホイールが裏のゲーム一覧へ抜けて爆速スクロールするのを止める。ジャンルの ScrollViewer は
+        // 自分でホイールを処理 (より深いので先に Handled) するため、そこで未処理 (=コンボ/余白上) の分だけ Border で食う。
+        private void FilterPopup_MouseWheel(object sender, System.Windows.Input.MouseWheelEventArgs e) => e.Handled = true;
+
+        // ジャンル欄のホイール/トラックパッドスクロールが速すぎるので、delta 比例で控えめに自前スクロールする
+        // (既定 ScrollViewer は 1 イベントで数行飛ぶ + トラックパッドは高頻度なので速くなる)。係数は体感調整値。
+        private void GenreScroll_PreviewMouseWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
+        {
+            if (sender is ScrollViewer sv)
+            {
+                sv.ScrollToVerticalOffset(sv.VerticalOffset - e.Delta * 0.3);
+                e.Handled = true;
+            }
+        }
+
+        // コンボ (SelectionChanged) とチェックボックス (Checked/Unchecked) でデリゲート型が違うので入口を2つに分け、共通処理へ。
+        private void FilterCombo_Changed(object sender, SelectionChangedEventArgs e) => OnFilterChanged();
+        private void FilterCheck_Changed(object sender, RoutedEventArgs e) => OnFilterChanged();
+
+        private void OnFilterChanged()
+        {
+            if (_suppressFilter) return;
+            ApplyView();
+            UpdateFilterButtonText();
+        }
+
+        // 下限/上限の連動: 一方が他方を越えたら相手を押し上げ/押し下げて min<=max を保つ (ブロックでなく押す＝範囲スライダー的)。
+        // 相手を設定する間は _suppressFilter で「相手側ハンドラの再クランプ」と「二重 ApplyView」を抑止し、最後に 1 回だけ反映する。
+        private void OnPlayerMinChanged()
+        {
+            if (_suppressFilter) return;
+            if (PlayerMinBox != null && PlayerMaxBox != null && PlayerMinBox.Value > PlayerMaxBox.Value)
+            {
+                _suppressFilter = true;
+                PlayerMaxBox.Value = PlayerMinBox.Value;  // 上限を押し上げ
+                _suppressFilter = false;
+            }
+            OnFilterChanged();
+        }
+
+        private void OnPlayerMaxChanged()
+        {
+            if (_suppressFilter) return;
+            if (PlayerMinBox != null && PlayerMaxBox != null && PlayerMaxBox.Value < PlayerMinBox.Value)
+            {
+                _suppressFilter = true;
+                PlayerMinBox.Value = PlayerMaxBox.Value;  // 下限を押し下げ
+                _suppressFilter = false;
+            }
+            OnFilterChanged();
+        }
+
+        private void FilterClear_Click(object sender, RoutedEventArgs e)
+        {
+            _suppressFilter = true;   // まとめてリセットする間 ApplyView を抑止 (最後に1回だけ流す)
+            if (VisCombo != null) VisCombo.SelectedIndex = 0;
+            if (ConnCombo != null) ConnCombo.SelectedIndex = 0;
+            if (PlayerFilterCheck != null) PlayerFilterCheck.IsChecked = false;
+            if (PlayerMinBox != null) PlayerMinBox.Value = 1;
+            if (PlayerMaxBox != null) PlayerMaxBox.Value = 1;   // プリセットは [1,1] (下限を N に上げるだけで N 人対応ゲームに絞れる)
+            if (DiffCombo != null) DiffCombo.SelectedIndex = 0;
+            if (TimeCombo != null) TimeCombo.SelectedIndex = 0;
+            foreach (var cb in _genreChecks) cb.IsChecked = false;
+            _suppressFilter = false;
+            ApplyView();
+            UpdateFilterButtonText();
+        }
+
+        private HashSet<string> SelectedGenres()
+        {
+            var set = new HashSet<string>();
+            foreach (var cb in _genreChecks)
+                if (cb.IsChecked == true && cb.Content is string g) set.Add(g);
+            return set;
+        }
+
+        private int ActiveFilterCount()
+        {
+            int n = 0;
+            if ((VisCombo?.SelectedIndex ?? 0) > 0) n++;
+            if ((ConnCombo?.SelectedIndex ?? 0) > 0) n++;
+            if (PlayerFilterCheck?.IsChecked == true) n++;
+            if ((DiffCombo?.SelectedIndex ?? 0) > 0) n++;
+            if ((TimeCombo?.SelectedIndex ?? 0) > 0) n++;
+            if (SelectedGenres().Count > 0) n++;
+            return n;
+        }
+
+        // フィルターボタンに適用中の軸数バッジを出す（0 のときは素の「フィルター」）。
+        private void UpdateFilterButtonText()
+        {
+            if (FilterButtonText == null) return;
+            int n = ActiveFilterCount();
+            FilterButtonText.Text = n > 0 ? "フィルター（" + n + "）" : "フィルター";
+        }
+
+        // サムネを背景で順次ロードし、決まったものから差し替える (SMB I/O で UI を固めない)。await 後は
+        // 呼び出し元 (UI) スレッドに戻るので Thumbnail setter の PropertyChanged は安全。null の間はアイコン表示。
+        private static async Task LoadThumbnailsAsync(List<GameListItem> items, CancellationToken token)
+        {
+            try
+            {
+                foreach (var item in items)
+                {
+                    if (token.IsCancellationRequested) return; // 打ち切られた (= 新しい LoadGames が走った) ら以降は無駄なので止める
+                    try
+                    {
+                        var src = await Task.Run(() => GameListItem.LoadThumbnail(item.Game));
+                        if (token.IsCancellationRequested) return;
+                        if (src != null) item.Thumbnail = src;
+                    }
+                    catch { /* 個別失敗は無視 (アイコンのまま) */ }
+                }
+            }
+            catch (Exception ex)
+            {
+                // fire-and-forget 起動なので、ループ全体の予期しない例外を unobserved (silent) にせず記録する。
+                Logger.Warn("[GameListPage] サムネ背景ロードが中断: " + ex.Message);
+            }
+        }
+
+        private void Add_Click(object sender, RoutedEventArgs e)
+        {
+            // 起動完了前 (SharedDb 未確定) にここへ到達した場合の防御。LoadGames だけにあったガードを操作系にも対称化。
+            // 編集/版up/削除は SelectedGame==null で先に弾かれる (Db null なら一覧が空) が、追加はその経路が無いため明示。
+            if (Db == null) return;
+            if (SessionConflictHelper.CheckBeforeWrite("ゲーム追加") == WinForms.DialogResult.Cancel) return;
+            using (var form = new AddGameForm(Db))
+            {
+                if (form.ShowDialog(Owner) == WinForms.DialogResult.OK)
+                {
+                    LoadGames();
+                    WinForms.MessageBox.Show(Owner,
+                        "ゲーム「" + form.AddedGame.Title + "」を追加しました。",
+                        "成功", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information);
+                    // (#295) 成果確認 (MessageBox) を先に見せてから後追い best-effort バックアップ (版up/削除と順序統一)。
+                    // ゲーム追加は games/ を変えるので DB + ゲーム本体を控える。
+                    Db.SessionBackupCoordinator.RunAfterOperation(Owner, assetsChanged: true, "ゲーム追加");
+                }
+            }
+        }
+
+        private void Edit_Click(object sender, RoutedEventArgs e)
+        {
+            // (round 2 High-2) selection 依存 validation を session conflict check より前に倒す。
+            var selected = SelectedGame;
+            if (selected == null)
+            {
+                WinForms.MessageBox.Show(Owner, "編集するゲームを選択してください。", "情報",
+                    WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information);
+                return;
+            }
+
+            var game = Db.GetGameById(selected.GameId);
+            if (game == null)
+            {
+                WinForms.MessageBox.Show(Owner, "選択されたゲームが見つかりません。", "エラー",
+                    WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error);
+                return;
+            }
+
+            if (SessionConflictHelper.CheckBeforeWrite("ゲーム編集") == WinForms.DialogResult.Cancel) return;
+
+            using (var form = new EditGameForm(Db, game))
+            {
+                if (form.ShowDialog(Owner) == WinForms.DialogResult.OK)
+                {
+                    LoadGames();
+                    WinForms.MessageBox.Show(Owner,
+                        "ゲーム「" + form.EditedGame.Title + "」を更新しました。",
+                        "成功", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information);
+                    // (#295) ゲーム本体を変えた編集のときだけアセットも控える (form.AssetsChangedOnDisk)。
+                    Db.SessionBackupCoordinator.RunAfterOperation(Owner, form.AssetsChangedOnDisk, "ゲーム編集");
+                }
+                else if (form.DataChangedOutsideOk)
+                {
+                    // (#209) バージョン即時削除は OK を介さず DB 確定するため、Cancel/×で閉じても一覧を再読込し、
+                    // active 版付け替え後にメイン画面が削除済み版を出し続ける stale を防ぐ。
+                    LoadGames();
+                    Db.SessionBackupCoordinator.RunAfterOperation(Owner, form.AssetsChangedOnDisk, "バージョン削除");
+                }
+            }
+        }
+
+        private void VersionUp_Click(object sender, RoutedEventArgs e)
+        {
+            var selected = SelectedGame;
+            if (selected == null)
+            {
+                WinForms.MessageBox.Show(Owner, "バージョンアップするゲームを選択してください。", "情報",
+                    WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information);
+                return;
+            }
+            // (Edit_Click と順序を統一) selection 解決 → 不在チェック → 競合チェックの順。
+            var game = Db.GetGameById(selected.GameId);
+            if (game == null)
+            {
+                WinForms.MessageBox.Show(Owner, "選択されたゲームが見つかりません。", "エラー",
+                    WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error);
+                return;
+            }
+
+            if (SessionConflictHelper.CheckBeforeWrite("ゲームのバージョンアップ") == WinForms.DialogResult.Cancel) return;
+
+            // 重い処理 (コピー / atomic move / DB / アクティブ化 / バックアップ) は GameVersionUpService に委譲。
+            VersionUpService.Run(Owner, game, LoadGames);
+        }
+
+        private void Delete_Click(object sender, RoutedEventArgs e)
+        {
+            var selected = SelectedGame;
+            if (selected == null)
+            {
+                WinForms.MessageBox.Show(Owner, "削除するゲームを選択してください。", "情報",
+                    WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information);
+                return;
+            }
+            if (SessionConflictHelper.CheckBeforeWrite("ゲーム削除") == WinForms.DialogResult.Cancel) return;
+
+            // rename-rollback の多段削除フロー (退避 → DB 削除 → 物理削除) は GameDeletionService に委譲。
+            DeletionService.Run(Owner, selected, LoadGames);
+        }
+
+        // ⋯ メニュー: クリックで開く (カードを選択してから)。閉じ/トグル/再オープン抑止は Root_PreviewMouseDown + FlyoutDismiss が担う。
+        private void CardMenu_Click(object sender, RoutedEventArgs e)
+        {
+            if (!(sender is FrameworkElement fe) || fe.ContextMenu == null) return;
+            if (fe.DataContext is GameListItem item) GamesList.SelectedItem = item;
+            fe.ContextMenu.PlacementTarget = fe;
+            fe.ContextMenu.IsOpen = true;
+        }
+
+        private void CardMenu_Opened(object sender, RoutedEventArgs e) => FlyoutDismiss.NotifyOpened((ContextMenu)sender);
+        private void CardMenu_Closed(object sender, RoutedEventArgs e) => FlyoutDismiss.NotifyClosed();
+
+        // ページ全体: フライアウト (フィルター Popup / ⋯ ContextMenu) が開いている間の本体側クリックを「閉じる」だけに
+        // 消費し、その下の要素を再反応させない (= Win11 流・FlyoutDismiss に共通化)。他ページでも root に本ハンドラ +
+        // 各フライアウトに Opened/Closed を張れば同じ挙動になる。
+        private void Root_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            // 中身クリック (コンボ/チェック/メニュー項目等) は触らせる。本体側クリックだけ閉じて消費する。
+            if (FlyoutDismiss.IsInsideOpen(e.OriginalSource as DependencyObject)) return;
+            if (FlyoutDismiss.DismissOpen()) e.Handled = true;
+        }
+
+        // カードは選択ハイライトを見せない mouse 主体の UI。クリック後にカードへ keyboard focus が残り、矢印 / Page /
+        // Home / End で ListBox が選択を動かし ScrollIntoView で勝手にスクロールするのを止める (マウスホイール / スクロール
+        // バーは KeyDown を通らないので残る)。
+        private void GamesList_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            switch (e.Key)
+            {
+                case Key.Up:
+                case Key.Down:
+                case Key.Left:
+                case Key.Right:
+                case Key.PageUp:
+                case Key.PageDown:
+                case Key.Home:
+                case Key.End:
+                    e.Handled = true;
+                    break;
+            }
+        }
+
+        private void GamesList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            // 実カード上のダブルクリックでのみ編集 (旧 dgvGames_CellDoubleClick の「セル上のみ」相当)。余白 / スクロール
+            // バー上では発火させず、⋯ ボタン上のダブルクリックはメニュー担当なので除外する (編集と競合させない)。
+            var src = e.OriginalSource as DependencyObject;
+            if (FindAncestor<System.Windows.Controls.Primitives.ButtonBase>(src) != null) return; // ⋯ ボタン等
+            if (FindAncestor<ListBoxItem>(src)?.DataContext is GameListItem item)
+            {
+                GamesList.SelectedItem = item;
+                Edit_Click(sender, e);
+            }
+        }
+
+        // visual 親を辿って最初の T を返す (ヒットテスト用、無ければ null)。
+        private static T FindAncestor<T>(DependencyObject d) where T : DependencyObject
+        {
+            while (d != null && !(d is T)) d = VisualTreeHelper.GetParent(d);
+            return d as T;
+        }
+
+        /// <summary>
+        /// カード 1 枚分の表示用 view-model。<see cref="GameInfo"/> を表示文字列に射影しつつ元データを保持
+        /// (操作は <see cref="Game"/> を介す)。サブタイトルは Win11 設定の「発行元 | 日付」に倣い
+        /// 「ゲームID ・ 製作者 ・ リリース年」を中黒で連結。
+        /// </summary>
+        private sealed class GameListItem : INotifyPropertyChanged
+        {
+            public GameInfo Game { get; }
+            public string Title => string.IsNullOrWhiteSpace(Game.Title) ? Game.GameId : Game.Title;
+            public string Subtitle { get; }
+            public string Version => string.IsNullOrWhiteSpace(Game.Version) ? "—" : Game.Version;
+            public bool IsVisible => Game.IsVisible;
+
+            // サムネは SMB I/O を含むため背景で後追いロードし、決まったら通知して ImageBrush を差し替える
+            // (null の間はゲームアイコンのフォールバックが見える)。
+            private ImageSource _thumbnail;
+            public ImageSource Thumbnail
+            {
+                get => _thumbnail;
+                set { _thumbnail = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Thumbnail))); }
+            }
+
+            public event PropertyChangedEventHandler PropertyChanged;
+
+            public GameListItem(GameInfo game)
+            {
+                Game = game;
+                Subtitle = BuildSubtitle(game);
+            }
+
+            private static string BuildSubtitle(GameInfo g)
+            {
+                var parts = new List<string>();
+                if (!string.IsNullOrWhiteSpace(g.GameId)) parts.Add(g.GameId);
+                if (!string.IsNullOrWhiteSpace(g.DevelopersDisplay)) parts.Add(g.DevelopersDisplay);
+                if (g.ReleaseYear.HasValue) parts.Add(g.ReleaseYear.Value + "年");
+                return string.Join(" ｜ ", parts);
+            }
+
+            /// <summary>名前 / ゲームID / 製作者のいずれかに検索語を部分一致 (大小無視) で含むか。</summary>
+            public bool Matches(string term)
+                => ContainsCI(Game.Title, term) || ContainsCI(Game.GameId, term) || ContainsCI(Game.DevelopersDisplay, term);
+
+            private static bool ContainsCI(string s, string term)
+                => !string.IsNullOrEmpty(s) && s.IndexOf(term, StringComparison.CurrentCultureIgnoreCase) >= 0;
+
+            /// <summary>
+            /// アクティブ版のサムネイルを読み込む。解決は <see cref="RestoreReconciliationService"/> の ResolvesAsset と
+            /// 同じ三段 (絶対 / gameFolder 基準 / install 基準) に合わせ、不備チェックが「在り」と判定する物と一致させる。
+            /// 背景スレッドから呼ばれるため Frozen な BitmapImage を返す。欠落・失敗は null (= アイコンにフォールバック)。
+            /// </summary>
+            public static ImageSource LoadThumbnail(GameInfo g)
+            {
+                try
+                {
+                    string path = ResolveThumbnailPath(g);
+                    if (path == null) return null;
+                    var bmp = new BitmapImage();
+                    bmp.BeginInit();
+                    bmp.CacheOption = BitmapCacheOption.OnLoad;            // 全読込してファイルを掴まない
+                    bmp.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
+                    bmp.DecodePixelWidth = 96;                            // 42px アバター表示に十分 (高DPI 2x強)
+                    bmp.UriSource = new Uri(path, UriKind.Absolute);
+                    bmp.EndInit();
+                    bmp.Freeze();                                         // 背景生成 → UI 使用のため凍結
+                    return bmp;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("[GameListPage] サムネ読込失敗 (" + (g?.GameId ?? "?") + "): " + ex.Message);
+                    return null;
+                }
+            }
+
+            // 三段解決 (絶対 → gameFolder 基準 → install 基準)。RestoreReconciliationService.ResolvesExecutable と同形。
+            private static string ResolveThumbnailPath(GameInfo g)
+            {
+                if (g == null || string.IsNullOrWhiteSpace(g.ThumbnailPath) || string.IsNullOrWhiteSpace(g.GameId))
+                    return null;
+                string p = g.ThumbnailPath.Trim();
+                try
+                {
+                    if (Path.IsPathRooted(p)) return File.Exists(p) ? p : null;
+                    string c1 = Path.Combine(PathManager.GetGameFolder(g.GameId), p);
+                    if (File.Exists(c1)) return c1;
+                    string c2 = Path.Combine(PathManager.BaseDirectory, p);
+                    if (File.Exists(c2)) return c2;
+                }
+                catch { return null; }
+                return null;
+            }
+        }
+    }
+}

@@ -2304,6 +2304,22 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.30.0] - 2026-06-14
+
+#### Added / Changed — ゲーム一覧の WPF ネイティブ化 + 全ページ見出し固定（`feature/manager-game-list-wpf`、#245 関連）
+
+- **ゲーム「一覧」を WPF ネイティブ画面 `GameListPage` に**（ナビ「ゲーム」を旧 `GameHostPage`＝WinForms `GameSectionPanel` の WindowsFormsHost から差し替え）。Win11 設定アプリ「インストール済みアプリ」風のカード型リスト（角丸カード＋アイコン＋2 行テキスト＋右にバージョン）。ホバーで淡く反応するのみで**選択の青ハイライト・フォーカスの黒点線枠は持たない**（`IsSelected` トリガ削除 + `FocusVisualStyle={x:Null}`。操作はカードの ⋯ メニュー / ダブルクリックで、選択は内部用途のみ＝どのカードが選択中かを見せる必要がない。**ダブルクリックは実カード上のみ**で発火し、余白 / スクロールバー / ⋯ ボタン上では編集を開かない＝旧 `dgvGames_CellDoubleClick` の「セル上のみ」相当・レビュー指摘対応）。**キーボード矢印 / Page / Home / End での選択移動・自動スクロールも無効**（mouse 主体。クリック後にカードへ keyboard focus が残り、矢印で `ScrollIntoView` が勝手にスクロールするのを `PreviewKeyDown` で抑止。ホイール / スクロールバーは残す）。
+- **検索 / 並べ替え / フィルター**: 検索（名前・ID・製作者の部分一致・大小無視）/ 並べ替え（タイトル・製作者・リリース年）/ フィルターはフライアウトで多軸 AND（ランチャー表示状態・通信プレイ・プレイ人数レンジ・難易度・プレイ時間・ジャンル複数選択）。絞り込みは操作・画面遷移をまたいで維持、件数は「N 個中 M 個を表示」。
+- **プレイ人数フィルターはチェックボックスで明示的に ON/OFF**（レビュー対応）。コンボの各軸は index 0=「すべて」で OFF を表せるが、人数レンジ単体では「絞らない」状態を表現できないため、`プレイ人数で絞り込む` チェックを OFF の明示トグルにし（NumberBox はチェック時のみ有効）、heuristic（下限>1 or 上限<99）での暗黙有効判定を廃止。**プリセットは `[1,1]`**＝チェックして下限を N に上げるだけで `[N,N]`（連動クランプ）になり「N 人で遊べるゲーム」に絞れる（`[1,99]` 始まりだと両端を触る必要があり、チェックしても全件のまま no-op だった）。あわせて**人数未設定（null=Launcher で「不明」。`EditGameForm` が 1 への drift を防いで保持する 1 人用とは別状態）は範囲不明なので推測で隠さず常に通す**（旧実装は `?? 1` で「不明＝1 人用」と決めつけ、下限>1 で不明ゲームが消えていた。新規 install では UI 上 `Minimum=1` ゆえ実発生はレアだが、システム全体の null=不明 扱いと整合させる）。
+  - 下限/上限は **`min<=max` を「相手を押し上げ/押し下げ」で保つ**（ブロックでなく範囲スライダー的に押す）。チェック OFF 時は `IsEnabled=false` に加え**コンテナ Opacity で行全体を一様減光**（`ui:NumberBox` は `IsEnabled=false` でも矢印/数字が減光されず背景しか暗くならないため）。この連動クランプ方針は今後ゲーム追加・編集の WPF 化（#242/#324）でも採る（保存時 `ValidatePlayerCount` の代わりに対話中に整える）。
+- **サムネイル**: アクティブ版のサムネをアバターに表示（背景スレッドで後追いロード＝SMB でも UI を固めない、`UniformToFill`、解決は `RestoreReconciliationService` と同じ三段＝絶対 / gameFolder / install）。**非表示ゲームはカードごと薄く**（`Opacity` で「ランチャーに出ない」を一目で示す。表示中/非表示バッジは廃止）。サムネ背景ロードは `CancellationTokenSource` で**再入時 + ページ離脱（Unloaded）に前回ループを打ち切る**（画面遷移や操作後の再 `LoadGames` で、もう表示されないリストへ SMB I/O を出し続ける旧ループと新ループが二重に SMB を叩くのを防ぐ。fire-and-forget の予期しない例外も `Logger.Warn` で握る。レビュー指摘対応）。
+- **操作は抽出済 service を再利用**（バージョンアップ＝`GameVersionUpService` / 削除＝`GameDeletionService`）+ 既存 `AddGameForm`/`EditGameForm`。WPF から WinForms モーダルを開く owner は**可視シェル窓 HWND を包む `ShellOwner`**、競合チェックは `SessionConflictHelper` に WPF 用 overload（`Application.OpenForms` から MainForm 解決）を追加。各カードの操作は ⋯ メニュー、追加は全体ボタン。版up の `VersionUpForm`/`ProcessingDialog`/各 `MessageBox` も `owner` を渡してシェルに正しくモーダル化（削除経路と対称・レビュー指摘対応）。`Add_Click` は起動完了前(SharedDb 未確定)の NRE 防御に Db null ガードを追加。
+- **全ページ見出し固定**（ゲーム一覧 / ダッシュボード / 設定）: WPF-UI NavigationView の内蔵 ScrollViewer がページ全体をスクロール可にして見出しが流れる問題（lepoco/wpfui#1041）に対し、各ページ root の `MaxHeight` を祖先 ScrollViewer の `ViewportHeight` に縛り、見出しは固定行・コンテンツのみ内部スクロールに。ゲーム一覧 ListBox は `CanContentScroll=False` でピクセルスクロール（トラックパッドの段飛び解消）。
+- **フライアウト挙動を共通化**（`FlyoutDismiss`）: 左クリックで開く Popup / ContextMenu を Win11 流に（開いている間の本体側クリックは「閉じる」だけに消費＝再オープン / 誤操作なし、中身クリックは操作させる）。フィルターと ⋯ メニューに適用、今後の新フライアウトも本ヘルパーに統一。
+- **ダッシュボードの「更新」ボタンを削除**（タイマー自動更新があり冗長）。ダッシュボードの空状態緑箱・「・自動更新中」文言は v0.29.2 で整理済。
+- bump 判断: 機能追加（破壊的変更 / DB スキーマ変更なし＝v23 据置）。**minor（v0.29.2 → v0.30.0）**。Launcher 変更なし。
+- 残（マージ前）: 新一覧での **追加 / 編集 / バージョンアップ / 削除の実機確認**（捨てゲームで・実データ非破壊）。
+
 ### [Manager v0.29.2] - 2026-06-13
 
 #### Changed — ダッシュボードの冗長表示を整理（`fix/manager-dashboard-drop-empty-state`）
