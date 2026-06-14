@@ -92,6 +92,7 @@ namespace TonePrism.Manager.Tests
             Assert.False(moved);
             Assert.Empty(moves);
             Assert.Single(dbCalls);
+            Assert.Equal(("g1", "g2"), dbCalls[0]);   // recovery (b) 経路でも DB に正しい (old,new) が渡る
         }
 
         [Fact]

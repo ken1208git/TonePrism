@@ -5,7 +5,10 @@ namespace TonePrism.Manager.Services
     /// <summary>
     /// (#242 ③ ゲーム登録フォーム WPF 化) ゲーム ID 変更に伴う games フォルダの rename + DB 更新を
     /// EditGameForm.btnOK_Click から抽出した service。元は god-method 直書きの重ロジック
-    /// (CLAUDE.md「UI は薄く、ロジックは外へ」)。挙動は完全保存。
+    /// (CLAUDE.md「UI は薄く、ロジックは外へ」)。挙動は基本保存。唯一の差分は <c>AssetsChangedOnDisk</c> の扱いで、
+    /// 旧は worker 内 Move 直後に立てて DB 失敗 rollback でも true が残る quirk があったが、新は Execute が DB 失敗時に
+    /// throw → caller が Move+DB 成功確定後にのみ立てる (= rollback を正しく反映、観測上は成功時同値。EditGameForm の
+    /// 該当コメント参照)。
     ///
     /// 2 段構成:
     ///   <see cref="DecideCollision"/> (副作用は dirExists のみ) = 旧/新フォルダの存在から衝突 3 経路を判定。
