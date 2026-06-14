@@ -244,7 +244,7 @@ namespace TonePrism.Manager.Shell
             if (ConnCombo != null) ConnCombo.SelectedIndex = 0;
             if (PlayerFilterCheck != null) PlayerFilterCheck.IsChecked = false;
             if (PlayerMinBox != null) PlayerMinBox.Value = 1;
-            if (PlayerMaxBox != null) PlayerMaxBox.Value = 99;
+            if (PlayerMaxBox != null) PlayerMaxBox.Value = 1;   // プリセットは [1,1] (下限を N に上げるだけで N 人対応ゲームに絞れる)
             if (DiffCombo != null) DiffCombo.SelectedIndex = 0;
             if (TimeCombo != null) TimeCombo.SelectedIndex = 0;
             foreach (var cb in _genreChecks) cb.IsChecked = false;
