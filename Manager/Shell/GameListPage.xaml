@@ -168,6 +168,8 @@
                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                     <Setter Property="Margin" Value="0,0,0,8" />
                     <Setter Property="Padding" Value="0" />
+                    <!-- クリック/フォーカス時に WPF 既定が描く黒い点線フォーカス枠を消す (青ハイライト廃止で露出した「黒枠」)。 -->
+                    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
                     <Setter Property="Template">
                         <Setter.Value>
                             <ControlTemplate TargetType="ListBoxItem">
