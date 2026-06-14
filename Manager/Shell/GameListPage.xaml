@@ -106,9 +106,13 @@
                             </StackPanel>
                         </Grid>
 
-                        <!-- プレイ人数: ゲームの対応範囲 [Min,Max] がこの [下限,上限] と重なるものを表示。全幅 (数値2つで幅が要る)。 -->
-                        <TextBlock Text="プレイ人数（対応範囲）" Foreground="#9AA0A6" FontSize="11.5" Margin="0,0,0,4" />
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
+                        <!-- プレイ人数: チェックで明示的に有効化したときだけ、ゲームの対応範囲 [Min,Max] がこの [下限,上限] と
+                             重なるものを表示。コンボは index 0=「すべて」で OFF を示せるが、レンジは [1,99] が「絞らない」か
+                             「1〜99人」か曖昧なのでチェックで OFF を明示する。NumberBox はチェック時のみ有効。 -->
+                        <CheckBox x:Name="PlayerFilterCheck" Content="プレイ人数で絞り込む" Foreground="#ECECEC" FontSize="11.5"
+                                  Margin="0,0,0,6" Checked="FilterCheck_Changed" Unchecked="FilterCheck_Changed" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12"
+                                    IsEnabled="{Binding ElementName=PlayerFilterCheck, Path=IsChecked}">
                             <ui:NumberBox x:Name="PlayerMinBox" Minimum="1" Maximum="99" Value="1" Width="150"
                                           Foreground="#ECECEC" SpinButtonPlacementMode="Inline" ClearButtonEnabled="False" />
                             <TextBlock Text="〜" Foreground="#C4C8CC" VerticalAlignment="Center" Margin="10,0,10,0" />
@@ -116,7 +120,6 @@
                                           Foreground="#ECECEC" SpinButtonPlacementMode="Inline" ClearButtonEnabled="False" />
                             <TextBlock Text="人" Foreground="#9AA0A6" VerticalAlignment="Center" Margin="8,0,0,0" />
                         </StackPanel>
-                        <TextBlock Text="上限を 99 にすると人数で絞り込みません" Foreground="#7A7F85" FontSize="10.5" Margin="2,0,0,12" />
 
                         <TextBlock Text="ジャンル（複数選択可・いずれかを含む）" Foreground="#9AA0A6" FontSize="11.5" Margin="0,0,0,6" />
                         <ScrollViewer x:Name="GenreScroll" MaxHeight="120" VerticalScrollBarVisibility="Auto"

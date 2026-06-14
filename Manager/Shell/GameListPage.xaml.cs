@@ -122,12 +122,18 @@ namespace TonePrism.Manager.Shell
             // 通信プレイ (index 1..3 → SupportedConnection 0..2)
             int conn = ConnCombo?.SelectedIndex ?? 0;
             if (conn > 0) q = q.Where(i => i.Game.SupportedConnection == conn - 1);
-            // プレイ人数: ゲームの対応範囲 [Min,Max] が指定 [下限,上限] と重なる (overlap) ものを表示。不明は 1人用扱い。
-            int plo = (int)(PlayerMinBox?.Value ?? 1);
-            int phi = (int)(PlayerMaxBox?.Value ?? 99);
-            if (phi < plo) phi = plo;
-            if (plo > 1 || phi < 99)
-                q = q.Where(i => (i.Game.MinPlayers ?? 1) <= phi && (i.Game.MaxPlayers ?? 1) >= plo);
+            // プレイ人数: チェックで明示的に有効化したときだけ [下限,上限] で絞る (レンジは [1,99] が「絞らない」か
+            // 「1〜99人」か曖昧なため、コンボの「すべて」に相当する OFF をチェックで明示する)。ゲームの対応範囲
+            // [Min,Max] が指定 [下限,上限] と重なる (overlap) ものを表示。人数未設定 (null=Launcher で「不明」。1人用とは
+            // 別状態で EditGameForm が drift を防いで保持) は範囲不明なので推測で隠さず常に通す。
+            if (PlayerFilterCheck?.IsChecked == true)
+            {
+                int plo = (int)(PlayerMinBox?.Value ?? 1);
+                int phi = (int)(PlayerMaxBox?.Value ?? 99);
+                if (phi < plo) phi = plo;
+                q = q.Where(i => i.Game.MinPlayers == null || i.Game.MaxPlayers == null
+                              || (i.Game.MinPlayers.Value <= phi && i.Game.MaxPlayers.Value >= plo));
+            }
             // 難易度 / プレイ時間 (index 1..3 == 値 1..3)
             int diff = DiffCombo?.SelectedIndex ?? 0;
             if (diff > 0) q = q.Where(i => i.Game.Difficulty == diff);
@@ -209,6 +215,7 @@ namespace TonePrism.Manager.Shell
             _suppressFilter = true;   // まとめてリセットする間 ApplyView を抑止 (最後に1回だけ流す)
             if (VisCombo != null) VisCombo.SelectedIndex = 0;
             if (ConnCombo != null) ConnCombo.SelectedIndex = 0;
+            if (PlayerFilterCheck != null) PlayerFilterCheck.IsChecked = false;
             if (PlayerMinBox != null) PlayerMinBox.Value = 1;
             if (PlayerMaxBox != null) PlayerMaxBox.Value = 99;
             if (DiffCombo != null) DiffCombo.SelectedIndex = 0;
@@ -232,7 +239,7 @@ namespace TonePrism.Manager.Shell
             int n = 0;
             if ((VisCombo?.SelectedIndex ?? 0) > 0) n++;
             if ((ConnCombo?.SelectedIndex ?? 0) > 0) n++;
-            if (((int)(PlayerMinBox?.Value ?? 1)) > 1 || ((int)(PlayerMaxBox?.Value ?? 99)) < 99) n++;
+            if (PlayerFilterCheck?.IsChecked == true) n++;
             if ((DiffCombo?.SelectedIndex ?? 0) > 0) n++;
             if ((TimeCombo?.SelectedIndex ?? 0) > 0) n++;
             if (SelectedGenres().Count > 0) n++;
