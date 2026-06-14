@@ -31,6 +31,10 @@ namespace TonePrism.Manager.Tests
                 {
                     if (failOn != null && (string.Equals(src, failOn, StringComparison.OrdinalIgnoreCase) || string.Equals(dst, failOn, StringComparison.OrdinalIgnoreCase)))
                         throw new IOException("locked: " + src);
+                    // 実 Directory.Move は移動先が既存だと IOException を投げる。swap/cycle の「先行 Move が
+                    // dst 既存で失敗 → 安全失敗」経路を忠実に再現するため fake も同挙動にする。
+                    if (existing.Contains(dst))
+                        throw new IOException("移動先が既存: " + dst);
                     moves?.Add((src, dst));
                     existing.Remove(src);
                     existing.Add(dst);
@@ -110,7 +114,8 @@ namespace TonePrism.Manager.Tests
         [Fact]
         public void BuildPlan_Swap_NoCollision_ReservedSlots()
         {
-            // v1.0.0↔v2.0.0 の入れ替え。両 newDir が相手の oldDir = 予約済みなので衝突しない (cycle は UI 順 append)。
+            // v1.0.0↔v2.0.0 の入れ替え。両 newDir が相手の oldDir = 予約済みなので BuildPlan は衝突を返さず 2 plan。
+            // ただし swap は実 disk では成立しない (ExecutePlan で安全失敗する。下の ExecutePlan_Swap_FailsSafely 参照)。
             var existing = Set(Dir("v1.0.0"), Dir("v2.0.0"));
             var versions = new[] { V(1, "v2.0.0"), V(2, "v1.0.0") };
             var orig = new Dictionary<int, string> { { 1, "v1.0.0" }, { 2, "v2.0.0" } };
@@ -234,6 +239,33 @@ namespace TonePrism.Manager.Tests
             Assert.Equal(0, rollbackFailures);
             Assert.Equal("v1.0.0/main.exe", v.ExecutablePath);   // path 復元
             Assert.Equal("v1.0.0", orig[1]);                     // snapshot 復元
+        }
+
+        [Fact]
+        public void ExecutePlan_Swap_FailsSafely_NoMutation()
+        {
+            // swap (A: v1.0.0→v2.0.0, B: v2.0.0→v1.0.0) は循環。BuildPlan は衝突を返さず 2 plan を作るが、
+            // topological sort が cycle で UI 順 append → ExecutePlan の先行 Move が「移動先 dir 既存」で
+            // 失敗 → swap は安全に失敗する仕様 (= disk/in-memory は OK 押下前のまま、部分破壊なし)。
+            var existing = Set(Dir("v1.0.0"), Dir("v2.0.0"));
+            var moves = new List<(string, string)>();
+            var svc = Svc(existing, moves);
+            var vA = V(1, "v2.0.0", exe: "v1.0.0/a.exe");
+            var vB = V(2, "v1.0.0", exe: "v2.0.0/b.exe");
+            var orig = new Dictionary<int, string> { { 1, "v1.0.0" }, { 2, "v2.0.0" } };
+
+            var plan = svc.BuildPlan(GF, new[] { vA, vB }, orig);
+            Assert.False(plan.HasCollision);
+            Assert.Equal(2, plan.OrderedPlan.Count);
+
+            var res = svc.ExecutePlan(plan.OrderedPlan, orig, null);
+
+            Assert.True(res.Failed);                       // 先行 Move が dst 既存で失敗
+            Assert.Empty(moves);                           // 1 件目で即失敗 = disk Move は 1 つも成立せず
+            Assert.Equal("v1.0.0/a.exe", vA.ExecutablePath); // path 不変
+            Assert.Equal("v2.0.0/b.exe", vB.ExecutablePath);
+            Assert.Equal("v1.0.0", orig[1]);                 // snapshot 不変
+            Assert.Equal("v2.0.0", orig[2]);
         }
     }
 }

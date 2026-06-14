@@ -107,6 +107,8 @@ namespace TonePrism.Manager.Services
             var reservedOldDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var vR in versionList)
             {
+                // 防御: 現 caller は cmbVersionList.Items.OfType<GameVersion>() で null 除外済だが、param は
+                // IEnumerable<GameVersion> ゆえ将来 OfType 以外の経路から渡される場合の保険 (害なし、下の v も同様)。
                 if (vR == null) continue;
                 if (!originalByDbId.TryGetValue(vR.Id, out string origR))
                 {
