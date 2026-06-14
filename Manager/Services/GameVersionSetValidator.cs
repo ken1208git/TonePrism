@@ -23,11 +23,11 @@ namespace TonePrism.Manager.Services
         /// <summary>検証結果。各リストは表示用の per-entry 文字列 (caller は header を付けて MessageBox 化)。</summary>
         public class Result
         {
-            public List<string> EmptyIds = new List<string>();               // "(id=N)"
-            public List<string> MalformedSuffixEntries = new List<string>(); // "  - id=N: 'ver' (suffix 部分: 'sfx')"
-            public List<string> MalformedNumericEntries = new List<string>();// "  - id=N: 'ver'"
-            public List<string> DuplicateVersions = new List<string>();      // "key" or "key (生値: a / b)"
-            public List<string> PlayerCountViolations = new List<string>();  // "  - ver: 最小 N > 最大 M"
+            public List<string> EmptyIds { get; } = new List<string>();               // "(id=N)"
+            public List<string> MalformedSuffixEntries { get; } = new List<string>(); // "  - id=N: 'ver' (suffix 部分: 'sfx')"
+            public List<string> MalformedNumericEntries { get; } = new List<string>();// "  - id=N: 'ver'"
+            public List<string> DuplicateVersions { get; } = new List<string>();      // "key" or "key (生値: a / b)"
+            public List<string> PlayerCountViolations { get; } = new List<string>();  // "  - ver: 最小 N > 最大 M"
 
             /// <summary>version 文字列の問題 (空 + 不正 suffix + 不正数値) の合計件数。1 つの MessageBox に集約する単位。</summary>
             public int VersionStringIssueCount =>
@@ -36,7 +36,7 @@ namespace TonePrism.Manager.Services
 
         public Result Validate(IEnumerable<GameVersion> versions)
         {
-            var list = versions.ToList();
+            var list = (versions ?? Enumerable.Empty<GameVersion>()).ToList();
             var r = new Result();
 
             // ===== (1) version 文字列 scan (#158 round 7 L-2 + L-3) =====
@@ -73,7 +73,7 @@ namespace TonePrism.Manager.Services
             // DB の UNIQUE(game_id, version COLLATE NOCASE) と判定を揃え、case 違い重複が SQLiteException で表面化
             // するのを事前に弾く。`: v.Version` fallback (正規化不能版) と `Where(!IsNullOrEmpty)` は (1) で弾いた
             // 後の dead path だが defensive guard rail として残す (#158 round 7 M-1 / round 8 Low #4)。
-            r.DuplicateVersions = list
+            r.DuplicateVersions.AddRange(list
                 .Where(v => v != null && !string.IsNullOrEmpty(v.Version))
                 .GroupBy(v =>
                 {
@@ -85,8 +85,7 @@ namespace TonePrism.Manager.Services
                 {
                     var raws = g.Select(v => v.Version).Distinct().ToList();
                     return raws.Count == 1 ? g.Key : g.Key + " (生値: " + string.Join(" / ", raws) + ")";
-                })
-                .ToList();
+                }));
 
             // ===== (3) 人数 min>max (#158 Finding #4) =====
             // 表示中の NumericUpDown 値しか見ない ValidateInput を補完し、非表示版で min>max のまま別版を表示して

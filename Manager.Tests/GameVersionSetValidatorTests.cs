@@ -86,6 +86,15 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
+        public void NullCollection_ReturnsEmptyResult_NoCrash()
+        {
+            var r = new GameVersionSetValidator().Validate(null);
+            Assert.Equal(0, r.VersionStringIssueCount);
+            Assert.Empty(r.DuplicateVersions);
+            Assert.Empty(r.PlayerCountViolations);
+        }
+
+        [Fact]
         public void NullEntries_SkippedWithoutCrash()
         {
             var r = new GameVersionSetValidator().Validate(new GameVersion[] { null, V(1, "v1.0.0"), null });

@@ -1044,12 +1044,13 @@ namespace TonePrism.Manager
                 SaveGameDataToVersion(currentSelected);
             }
 
-            // (#158 round 7 L-2 + L-3) 旧実装は (a) suffix scan / (b) 空文字 scan / (c) 数値 scan の
-            // 3 段 return で、1 つの version が複数違反を持つと user は 2-3 巡 OK を押させられる UX。
-            // 1 ループで classification → empty / malformed-suffix / malformed-numeric の 3 リストに
-            // 分けて 1 つの MessageBox で全件まとめて表示する形に集約。
-            // suffix 切り出しは TrySplit static helper 経由 (round 7 L-3、IndexOf('-') 直書きの
-            // "v-1.0.0" 誤判定余地を排除)。
+            // (既知の残存 path #158 round 6 M-1 — caller 側の前提として復元) 直前の
+            // SaveGameDataToVersion(currentSelected) で **表示中版の v.Version は clamp 値** (例: "v0.0.0" / "v99.0.0")
+            // に上書き済 → 下の validator の TryNormalize は succeed し、表示中版の malformed 入力は本 scan では
+            // catch できない。これは仕様で、LoadVersions 警告 + UI の clamp 表示 visibility (表示中版は user の目に
+            // 入る) で代替担保している。表示中版が素通りするのを「バグ」と誤認して validator を強化すると clamp 前提が
+            // 崩れるので注意 (scan は **非表示版の補完** が主目的)。scan 分類 (空/不正suffix/不正数値の 1 ループ集約・
+            // round 7 L-2/L-3) の経緯は GameVersionSetValidator 側コメントに保存。
             // (#242 ②) 版セット全体の入力検証 (空/不正suffix/不正数値/正規化重複NOCASE/人数min>max) を
             // GameVersionSetValidator に抽出。scan logic は service、presentation (MessageBox 組み立て + 表示) は
             // ここ (form) に残す。表示中以外の版も含め全件 scan するため、版切替時の SaveGameDataToVersion で
