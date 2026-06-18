@@ -2311,6 +2311,20 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.31.0] - 2026-06-18
+
+#### Added / Changed — ゲーム「編集」の WPF ネイティブ化（`feature/manager-game-edit-wpf`、#324 PR1 / #242）
+
+- **ゲーム編集を WinForms モーダル `EditGameForm` → WPF サブページ `EditGamePage`** に（一覧の「編集」が `RootNavigation.Navigate` で遷移、MVVM = `GameFormViewModel`/`EditViewModel` + 葉 UserControl 群＝メタデータ/製作者/版/画像/プレビュー/SemVer）。保存オーケストレーションは #380/#381 で抽出済みの service（`GameVersionSetValidator`/`GameIdRenameService`/`VersionFolderRenameService`/`UpdateVersionsAndGame`）を再利用し、旧 `btnOK_Click` フロー（検証→アクティブ版確認→session conflict→gameId rename→版フォルダ rename→1 トランザクション保存→失敗時 rollback）を再現。ゲーム「追加」は当面 WinForms 据え置き（#324 後続）。
+- 人数/難易度/年を `int?` 直持ちにして旧 WinForms の null 保護スナップショット glue を撤去（難易度/プレイ時間の null は WPF binding の挙動で保持＝触らなければ書き戻らない）。**プレイ人数は常に数値**（旧 NumericUpDown 同様「不明」不可、null は 1 にコアース）。
+- **製作者をカード型インライン編集**（姓/名/期生を直接入力、教員/不明の排他トグル、左ハンドルでドラッグ並べ替え＝離した順＝クレジット順で保存）。**画像プレビューはランチャー表示を模した合成 1 枚**（背景枠＝PC の縦横比、その上に正方形サムネを左寄せ、両方 UniformToFill）。
+- **保存成功は右下の緑トースト**（非モーダル・約3秒で自動消滅、WinForms ダイアログを廃止）。シェルレベルの `ShowSuccessToast` なので GoBack 後の一覧の上に表示。成功通知 + #295 アセットバックアップは保存成功直後に同期実行し、`Loaded` 再発火依存を排除。
+- **意図的な挙動差**: SemVer 不正な version は保存前に修正必須（旧の silent v0.0.0 化を廃止、load 時に集約警告）／範囲外メタデータは保存時に矯正／外部フォルダの画像・exe は保存前にブロック（版フォルダ自動コピーは #324 PR4 送り）／版即時削除は #324 follow-up 送り。
+- gameId 変更後に DB 更新が失敗した場合、失敗メッセージで「ゲームID 変更は確定済み」と正確に表示（部分 rollback の既知ギャップ #382 (iii)、完全 rollback は #382 で継続）。未保存のまま画面離脱時の破棄ガードは #383 で follow-up。
+- （付随）全 NumberBox の幅を最大桁に合わせ統一（一覧の人数フィルタ・設定の保存日数/世代数を含む）。`Program.cs` への横断スタイル注入は不要と判断し撤去、各欄インライン指定に統一。
+- bump 判断: 機能追加（破壊的変更 / DB スキーマ変更なし＝v23 据置）。**minor（v0.30.0 → v0.31.0）**。Launcher 変更なし。
+- docs（部員向け編集手順 `docs/usage/games.md`）は **WPF 編集画面が未リリースのため今回は更新せず**（部員が使うのはリリース版＝現行 WinForms）。WPF 編集をリリースする回でまとめて更新（版ドロップダウンのラベル変更・「このバージョンを削除」の扱い等）。
+
 ### [Manager v0.30.0] - 2026-06-14
 
 #### Added / Changed — ゲーム一覧の WPF ネイティブ化 + 全ページ見出し固定（`feature/manager-game-list-wpf`、#245 関連）

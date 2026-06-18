@@ -1,0 +1,33 @@
+<UserControl x:Class="TonePrism.Manager.Shell.GameForm.LauncherPreview"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Name="Root">
+    <!-- (#324 PR1) ランチャーの実表示を模した合成プレビュー。背景枠 = PC の縦横比 (SystemParameters から code-behind が
+         BgFrame.Width を算出)、その上に正方形サムネを左寄せ・縦中央のタイルとして重ねる (高さ=ThumbSize 固定、幅は
+         自身の ActualHeight に束縛して正方)。どちらの画像も ImageBrush(Stretch=UniformToFill) で塗る:
+         (a) 比を保ったまま枠いっぱいに拡大＋クロップ (= Godot KEEP_ASPECT_COVERED)、
+         (b) Border.Background は CornerRadius が効くので角丸が画像にも掛かる (矩形 ClipToBounds では角が丸まらない)。
+         ThumbnailPath / BackgroundPath は DP で host が VM に束縛。 -->
+    <StackPanel>
+        <TextBlock Text="プレビュー（ランチャー表示イメージ）" Foreground="#8A9098" FontSize="11" Margin="0,0,0,4" />
+        <Border x:Name="BgFrame" Background="#FF161616" BorderBrush="#22FFFFFF" BorderThickness="1" CornerRadius="8"
+                HorizontalAlignment="Left">
+            <Grid>
+                <!-- 背景: 枠全体を覆う (角丸) -->
+                <Border CornerRadius="7">
+                    <Border.Background>
+                        <ImageBrush x:Name="BgBrush" Stretch="UniformToFill" />
+                    </Border.Background>
+                </Border>
+                <!-- サムネ: 正方形・左寄せ・縦中央の浮かぶタイル (角丸) -->
+                <Border x:Name="ThumbFrame" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="18,0,0,0"
+                        Width="{Binding ActualHeight, RelativeSource={RelativeSource Self}}"
+                        BorderBrush="#99000000" BorderThickness="1" CornerRadius="12">
+                    <Border.Background>
+                        <ImageBrush x:Name="ThumbBrush" Stretch="UniformToFill" />
+                    </Border.Background>
+                </Border>
+            </Grid>
+        </Border>
+    </StackPanel>
+</UserControl>

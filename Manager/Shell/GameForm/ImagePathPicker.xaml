@@ -1,0 +1,24 @@
+<UserControl x:Class="TonePrism.Manager.Shell.GameForm.ImagePathPicker"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             x:Name="Root">
+    <!-- (#324 PR1) 画像 path 入力 (ラベル + パス + 参照/クリア)。プレビューは別部品 ImagePreview に分離して
+         「パスは直列・プレビューは横並び」のレイアウトを組めるようにした。Path(TwoWay DP) を host が VM の
+         ThumbnailPath / BackgroundPath に束縛、Label で見出しを差し替える。 -->
+    <StackPanel>
+        <TextBlock Text="{Binding Label, ElementName=Root}" Foreground="#9AA0A6" FontSize="11.5" Margin="0,0,0,4" />
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <ui:TextBox Grid.Column="0"
+                        Text="{Binding Path, ElementName=Root, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        PlaceholderText="画像ファイルのパス（未設定可）" Foreground="#ECECEC" />
+            <ui:Button Grid.Column="1" Content="参照…" Click="Browse_Click" Margin="8,0,0,0" VerticalAlignment="Center" />
+            <ui:Button Grid.Column="2" Content="クリア" Appearance="Transparent" Click="Clear_Click" Margin="6,0,0,0" VerticalAlignment="Center" />
+        </Grid>
+    </StackPanel>
+</UserControl>

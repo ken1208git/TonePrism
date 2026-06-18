@@ -83,6 +83,19 @@
             </ui:NavigationView.FooterMenuItems>
         </ui:NavigationView>
 
+        <!-- (#324) 保存成功などの非モーダル通知 = 右下隅に出る小さい一行トースト。コンテンツ領域 (Row1) に重ね、
+             ページ遷移 (GoBack) をまたいで一覧の上にふわっと出て数秒で自動消滅 (ShowSuccessToast がフェード制御)。
+             既定は Collapsed/透過なので操作を邪魔しない。 -->
+        <Border x:Name="ToastBox" Grid.Row="1" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                Margin="0,0,18,16" Background="#FF1B9E4F" BorderThickness="0"
+                CornerRadius="6" Padding="12,7" Visibility="Collapsed" Opacity="0">
+            <StackPanel Orientation="Horizontal">
+                <ui:SymbolIcon Symbol="CheckmarkCircle24" FontSize="15" Foreground="#FFFFFFFF" VerticalAlignment="Center" Margin="0,0,7,0" />
+                <TextBlock x:Name="ToastText" FontSize="12.5" FontWeight="SemiBold" Foreground="#FFFFFFFF" VerticalAlignment="Center"
+                           MaxWidth="320" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+        </Border>
+
         <!-- (#245 PR5 step4) Fluent ネイティブのステータスバー。左=DB接続状態(全体)、右=バックアップ feedback
              (進捗/✓/⚠/中止/今すぐ、全体に関係)。値は MainForm が集めて SetStatusText / ShowBackupProgress 等で
              流し込む。ホストではなく WPF ネイティブなので airspace/黒文字なし。 -->

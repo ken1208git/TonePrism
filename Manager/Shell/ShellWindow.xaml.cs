@@ -95,6 +95,31 @@ namespace TonePrism.Manager.Shell
             StatusText.Text = text ?? string.Empty;
         }
 
+        private System.Windows.Threading.DispatcherTimer _toastTimer;
+
+        /// <summary>(#324) 保存成功などの非モーダル成功トースト。右下隅に小さい一行を 160ms でフェードイン → 約2.6秒
+        /// 保持 → 360ms でフェードアウトして畳む。WinForms ダイアログを置き換え、操作を止めない。UI スレッド外でも安全。
+        /// 連続呼び出しはタイマー再起動で最新メッセージに差し替わる。</summary>
+        public void ShowSuccessToast(string message)
+        {
+            if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(new Action(() => ShowSuccessToast(message))); return; }
+            ToastText.Text = message ?? string.Empty;
+            ToastBox.Visibility = Visibility.Visible;
+            ToastBox.BeginAnimation(OpacityProperty,
+                new System.Windows.Media.Animation.DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(160))));
+
+            _toastTimer?.Stop();
+            _toastTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2600) };
+            _toastTimer.Tick += (_, __) =>
+            {
+                _toastTimer.Stop();
+                var fadeOut = new System.Windows.Media.Animation.DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(360)));
+                fadeOut.Completed += (_, ___) => ToastBox.Visibility = Visibility.Collapsed;
+                ToastBox.BeginAnimation(OpacityProperty, fadeOut);
+            };
+            _toastTimer.Start();
+        }
+
         // ===== (#245 PR5) Windows タスクバーアイコンの進捗 (緑バー) =====
         // ProcessingDialog (全進捗オペレーションの関所) が ReportProgress からここを叩く。復元/バックアップ/
         // 更新/アセット処理が横断的にタスクバーへ乗る。表示は cosmetic なので、ここでの失敗は握り潰して

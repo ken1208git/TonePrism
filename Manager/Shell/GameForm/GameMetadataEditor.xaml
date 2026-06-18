@@ -1,0 +1,87 @@
+<UserControl x:Class="TonePrism.Manager.Shell.GameForm.GameMetadataEditor"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:gf="clr-namespace:TonePrism.Manager.Shell.GameForm">
+    <!-- (#324 PR1) 共通メタデータ編集部品。DataContext は host (EditGamePage) から GameFormViewModel を継承。
+         人数/難易度/時間/年は int? なので NumberBox(double?)/ComboBox(index) との橋渡しにコンバータを使う。 -->
+    <UserControl.Resources>
+        <gf:NullableIntToDoubleConverter x:Key="IntDouble" />
+        <gf:LevelToIndexConverter x:Key="LevelIndex" />
+        <gf:InverseBooleanConverter x:Key="InvBool" />
+        <gf:BooleanToDimOpacityConverter x:Key="DimOpacity" />
+    </UserControl.Resources>
+
+    <!-- 並び順は旧 WinForms (EditGameForm) の左列に準拠: ジャンル→リリース年→人数→難易度/時間→
+         コントローラ/表示→通信。ジャンルは入れ子スクロールに入れず WrapPanel で素直に折り返す。 -->
+    <StackPanel>
+        <!-- ジャンル (複数選択・code-behind で GenreList から生成して VM.SelectedGenres と同期) -->
+        <TextBlock Text="ジャンル（複数選択可）" Foreground="#9AA0A6" FontSize="11.5" Margin="0,0,0,6" />
+        <WrapPanel x:Name="GenrePanel" Margin="0,0,0,14" />
+
+        <!-- リリース年 (不明チェックで NumberBox を無効化 + Opacity 減衰でグレーアウト) -->
+        <TextBlock Text="リリース年" Foreground="#9AA0A6" FontSize="11.5" Margin="0,0,0,4" />
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+            <ui:NumberBox Value="{Binding ReleaseYear, Converter={StaticResource IntDouble}, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                          Minimum="1970" Maximum="3000" MinWidth="0" Width="144" PlaceholderText="不明"
+                          SpinButtonPlacementMode="Inline" ClearButtonEnabled="False" Foreground="#ECECEC"
+                          IsEnabled="{Binding ReleaseYearUnknown, Converter={StaticResource InvBool}}"
+                          Opacity="{Binding ReleaseYearUnknown, Converter={StaticResource DimOpacity}}" />
+            <CheckBox Content="不明" Foreground="#ECECEC" FontSize="12.5" VerticalAlignment="Center" Margin="14,0,0,0"
+                      IsChecked="{Binding ReleaseYearUnknown, Mode=TwoWay}" />
+        </StackPanel>
+
+        <!-- プレイ人数 (常に数値。旧 WinForms の NumericUpDown 同様「不明」不可。min<=max は VM が連動クランプ) -->
+        <TextBlock Text="プレイ人数（対応範囲）" Foreground="#9AA0A6" FontSize="11.5" Margin="0,0,0,4" />
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+            <ui:NumberBox Value="{Binding MinPlayers, Converter={StaticResource IntDouble}, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                          Minimum="1" Maximum="99" MinWidth="0" Width="132"
+                          SpinButtonPlacementMode="Inline" ClearButtonEnabled="False" Foreground="#ECECEC" />
+            <TextBlock Text="〜" Foreground="#C4C8CC" VerticalAlignment="Center" Margin="10,0,10,0" />
+            <ui:NumberBox Value="{Binding MaxPlayers, Converter={StaticResource IntDouble}, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                          Minimum="1" Maximum="99" MinWidth="0" Width="132"
+                          SpinButtonPlacementMode="Inline" ClearButtonEnabled="False" Foreground="#ECECEC" />
+            <TextBlock Text="人" Foreground="#9AA0A6" VerticalAlignment="Center" Margin="8,0,0,0" />
+        </StackPanel>
+
+        <!-- 難易度 / プレイ時間 (2列) -->
+        <Grid Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                <TextBlock Text="難易度" Foreground="#9AA0A6" FontSize="11.5" Margin="0,0,0,4" />
+                <ComboBox SelectedIndex="{Binding Difficulty, Converter={StaticResource LevelIndex}, Mode=TwoWay}">
+                    <ComboBoxItem Content="易しい" />
+                    <ComboBoxItem Content="普通" />
+                    <ComboBoxItem Content="難しい" />
+                </ComboBox>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                <TextBlock Text="プレイ時間" Foreground="#9AA0A6" FontSize="11.5" Margin="0,0,0,4" />
+                <ComboBox SelectedIndex="{Binding PlayTime, Converter={StaticResource LevelIndex}, Mode=TwoWay}">
+                    <ComboBoxItem Content="短い（～5分）" />
+                    <ComboBoxItem Content="普通（5～15分）" />
+                    <ComboBoxItem Content="長い（15分～）" />
+                </ComboBox>
+            </StackPanel>
+        </Grid>
+
+        <!-- コントローラー / ランチャー表示 (横並び・旧 WinForms の Y=400 行) -->
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+            <CheckBox Content="コントローラー対応" Foreground="#ECECEC" FontSize="12.5"
+                      IsChecked="{Binding ControllerSupport, Mode=TwoWay}" />
+            <CheckBox Content="ランチャーに表示する" Foreground="#ECECEC" FontSize="12.5" Margin="24,0,0,0"
+                      IsChecked="{Binding IsVisible, Mode=TwoWay}" />
+        </StackPanel>
+
+        <!-- 通信プレイ -->
+        <TextBlock Text="通信プレイ" Foreground="#9AA0A6" FontSize="11.5" Margin="0,0,0,4" />
+        <ComboBox SelectedIndex="{Binding SupportedConnection, Mode=TwoWay}" Width="220" HorizontalAlignment="Left">
+            <ComboBoxItem Content="なし（1台で遊ぶ）" />
+            <ComboBoxItem Content="ローカル通信" />
+            <ComboBoxItem Content="オンライン通信" />
+        </ComboBox>
+    </StackPanel>
+</UserControl>
