@@ -42,14 +42,17 @@ namespace TonePrism.Manager.Shell.GameForm
 
         // 人数: min<=max を「相手を押し上げ/押し下げ」で保つ（範囲スライダー的・[[feedback_minmax_coupled_clamp]]）。
         // 片方 null の間はクランプしない。_clamping で相手側 setter の再入クランプを抑止。
+        // _suppressClamp は load 時専用: 連動クランプを止めて破損 (min>max) を温存し、保存時に検証でブロックさせる
+        // (閲覧しただけで silent heal せず、SemVer 不正版と同じ「直させる」方針に揃える)。対話入力時はクランプ有効。
         private bool _clamping;
+        private bool _suppressClamp;
         private int? _minPlayers;
         public int? MinPlayers
         {
             get => _minPlayers;
             set
             {
-                if (!SetField(ref _minPlayers, value) || _clamping) return;
+                if (!SetField(ref _minPlayers, value) || _clamping || _suppressClamp) return;
                 if (_minPlayers.HasValue && _maxPlayers.HasValue && _minPlayers.Value > _maxPlayers.Value)
                 {
                     _clamping = true;
@@ -65,7 +68,7 @@ namespace TonePrism.Manager.Shell.GameForm
             get => _maxPlayers;
             set
             {
-                if (!SetField(ref _maxPlayers, value) || _clamping) return;
+                if (!SetField(ref _maxPlayers, value) || _clamping || _suppressClamp) return;
                 if (_minPlayers.HasValue && _maxPlayers.HasValue && _maxPlayers.Value < _minPlayers.Value)
                 {
                     _clamping = true;
@@ -73,6 +76,16 @@ namespace TonePrism.Manager.Shell.GameForm
                     finally { _clamping = false; }      // binding 更新が万一 throw しても guard を残さない
                 }
             }
+        }
+
+        /// <summary>load 時専用: 連動クランプを抑止して min/max をそのまま設定する。破損 (min&gt;max) を温存し、保存時に
+        /// <see cref="GameVersionSetValidator"/> の PlayerCountViolations でブロック → ユーザーに直させる
+        /// (SemVer 不正版と同方針)。範囲 [1,99] クランプ・null→1 コアースは呼び出し側で済ませてから渡す。</summary>
+        protected void SetPlayerCountsForLoad(int? min, int? max)
+        {
+            _suppressClamp = true;
+            try { MinPlayers = min; MaxPlayers = max; }
+            finally { _suppressClamp = false; }
         }
 
         private int? _difficulty;

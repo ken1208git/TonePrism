@@ -4,7 +4,7 @@ using System.Windows.Controls;
 namespace TonePrism.Manager.Shell.GameForm
 {
     /// <summary>
-    /// (#324 PR1) 画像 path 入力部品 (ラベル + パス TextBox + 参照/クリア)。プレビューは <see cref="ImagePreview"/> に分離。
+    /// (#324 PR1) 画像 path 入力部品 (ラベル + パス TextBox + 参照/クリア)。プレビューは <see cref="LauncherPreview"/> に分離。
     /// <see cref="Path"/>(TwoWay DP) を host が VM の ThumbnailPath / BackgroundPath に束縛し、<see cref="Label"/> で
     /// 見出しを差し替える。参照は WPF ネイティブ OpenFileDialog。
     /// </summary>

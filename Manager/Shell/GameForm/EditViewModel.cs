@@ -139,8 +139,12 @@ namespace TonePrism.Manager.Shell.GameForm
             if (genre != null) foreach (var g in genre) SelectedGenres.Add(g);
 
             // プレイ人数は常に数値 (旧 WinForms の NumericUpDown 同様、不明=null 不可)。DB が null でも 1 にコアース。
-            MinPlayers = ClampPlayer(v.MinPlayers ?? (active ? OriginalGame.MinPlayers : null)) ?? 1;
-            MaxPlayers = ClampPlayer(v.MaxPlayers ?? (active ? OriginalGame.MaxPlayers : null)) ?? 1;
+            // 範囲 [1,99] は load 時クランプ。ただし min>max の破損は連動クランプを抑止して温存し (SetPlayerCountsForLoad)、
+            // 保存時に GameVersionSetValidator.PlayerCountViolations でブロック → ユーザーに直させる。連動クランプを load 時に
+            // 効かせると「閲覧しただけで 5/3 → 3/3 に silent heal」して検証が dead になるため (#324 PR1 レビュー C-1)。
+            SetPlayerCountsForLoad(
+                ClampPlayer(v.MinPlayers ?? (active ? OriginalGame.MinPlayers : null)) ?? 1,
+                ClampPlayer(v.MaxPlayers ?? (active ? OriginalGame.MaxPlayers : null)) ?? 1);
             Difficulty = ValidLevel(v.Difficulty) ?? (active ? ValidLevel(OriginalGame.Difficulty) : null);
             PlayTime = ValidLevel(v.PlayTime) ?? (active ? ValidLevel(OriginalGame.PlayTime) : null);
             // 通信/コントローラは非 nullable で「未設定」を判別できないため、アクティブ版は games 行 (mirror=真値) を採用。

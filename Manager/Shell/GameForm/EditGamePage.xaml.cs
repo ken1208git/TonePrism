@@ -52,10 +52,10 @@ namespace TonePrism.Manager.Shell.GameForm
             if (vm == null || vm.MalformedWarningShown || vm.MalformedVersionsOnLoad.Count == 0) return;
             vm.MalformedWarningShown = true;
             WinForms.MessageBox.Show(Owner,
-                "DB に保存されている version 文字列のうち " + Vm.MalformedVersionsOnLoad.Count + " 件が SemVer 形式では" +
+                "DB に保存されている version 文字列のうち " + vm.MalformedVersionsOnLoad.Count + " 件が SemVer 形式では" +
                 "ありません。該当バージョンを選択すると v0.0.0 または上限値に clamp されて表示されるので、UI で実表示値を" +
-                "確認 → 意図した version 番号に修正してから保存してください。\n\n" + string.Join("\n", Vm.MalformedVersionsOnLoad),
-                "バージョン読み込み警告 (" + Vm.MalformedVersionsOnLoad.Count + " 件)",
+                "確認 → 意図した version 番号に修正してから保存してください。\n\n" + string.Join("\n", vm.MalformedVersionsOnLoad),
+                "バージョン読み込み警告 (" + vm.MalformedVersionsOnLoad.Count + " 件)",
                 WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Warning);
         }
 

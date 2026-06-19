@@ -2322,6 +2322,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **意図的な挙動差**: SemVer 不正な version は保存前に修正必須（旧の silent v0.0.0 化を廃止、load 時に集約警告）／範囲外メタデータは保存時に矯正／外部フォルダの画像・exe は保存前にブロック（版フォルダ自動コピーは #324 PR4 送り）／版即時削除は #324 follow-up 送り。
 - gameId 変更後に DB 更新が失敗した場合、失敗メッセージで「ゲームID 変更は確定済み」と正確に表示（部分 rollback の既知ギャップ #382 (iii)、完全 rollback は #382 で継続）。未保存のまま画面離脱時の破棄ガードは #383 で follow-up。
 - （付随）全 NumberBox の幅を最大桁に合わせ統一（一覧の人数フィルタ・設定の保存日数/世代数を含む）。`Program.cs` への横断スタイル注入は不要と判断し撤去、各欄インライン指定に統一。
+- （レビュー対応 C-1）人数 **min>max の破損版は load 時に連動クランプで silent heal せず温存**し、保存時に `GameVersionSetValidator.PlayerCountViolations` でブロック → ユーザーに修正させる。旧実装は「閲覧しただけで 5/3 → 3/3 に heal」して当該検証が viewed 版に対し dead 化していた（SemVer 不正版の「直させる」方針と非対称）。範囲 [1,99] クランプ・null→1 コアースは維持。あわせて `ImagePathPicker` docstring の dangling cref（`ImagePreview`→`LauncherPreview`）と警告組立の `vm` 参照統一を修正。
 - bump 判断: 機能追加（破壊的変更 / DB スキーマ変更なし＝v23 据置）。**minor（v0.30.0 → v0.31.0）**。Launcher 変更なし。
 - docs（部員向け編集手順 `docs/usage/games.md`）は **WPF 編集画面が未リリースのため今回は更新せず**（部員が使うのはリリース版＝現行 WinForms）。WPF 編集をリリースする回でまとめて更新（版ドロップダウンのラベル変更・「このバージョンを削除」の扱い等）。
 
