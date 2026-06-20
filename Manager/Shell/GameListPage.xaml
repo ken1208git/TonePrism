@@ -129,10 +129,10 @@
                                     </Style.Triggers>
                                 </Style>
                             </StackPanel.Style>
-                            <ui:NumberBox x:Name="PlayerMinBox" Minimum="1" Maximum="99" Value="1" Width="150"
+                            <ui:NumberBox x:Name="PlayerMinBox" Minimum="1" Maximum="99" Value="1" MinWidth="0" Width="120"
                                           Foreground="#ECECEC" SpinButtonPlacementMode="Inline" ClearButtonEnabled="False" />
                             <TextBlock Text="〜" Foreground="#C4C8CC" VerticalAlignment="Center" Margin="10,0,10,0" />
-                            <ui:NumberBox x:Name="PlayerMaxBox" Minimum="1" Maximum="99" Value="1" Width="150"
+                            <ui:NumberBox x:Name="PlayerMaxBox" Minimum="1" Maximum="99" Value="1" MinWidth="0" Width="120"
                                           Foreground="#ECECEC" SpinButtonPlacementMode="Inline" ClearButtonEnabled="False" />
                             <TextBlock Text="人" Foreground="#9AA0A6" VerticalAlignment="Center" Margin="8,0,0,0" />
                         </StackPanel>

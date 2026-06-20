@@ -12,6 +12,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using TonePrism.Manager.Models;
 using TonePrism.Manager.Services;
+using TonePrism.Manager.Shell.GameForm;
 using WinForms = System.Windows.Forms;
 
 namespace TonePrism.Manager.Shell
@@ -52,7 +53,8 @@ namespace TonePrism.Manager.Shell
             // 下限/上限は min<=max を保つ。一方が他方を越えたら相手を押し上げ/押し下げる (範囲スライダー的)。
             PlayerMinBox.ValueChanged += (s, e) => OnPlayerMinChanged();
             PlayerMaxBox.ValueChanged += (s, e) => OnPlayerMaxChanged();
-            // NavigationView の表示遷移ごとに最新化 (DashboardPage と同様、Loaded は表示ごとに発火)。
+            // NavigationView の表示遷移ごとに一覧を最新化 (DashboardPage と同様、Loaded は表示ごとに発火)。
+            // 編集の成功通知 + #295 バックアップは EditGamePage.Save() がその場で確定実行する (Loaded 依存を排除)。
             Loaded += (_, _) => LoadGames();
             // ページ離脱時は進行中のサムネ背景ロードを打ち切る (離脱後も SMB I/O を最後まで続けないため)。
             Unloaded += (_, _) => _thumbCts?.Cancel();
@@ -352,25 +354,23 @@ namespace TonePrism.Manager.Shell
 
             if (SessionConflictHelper.CheckBeforeWrite("ゲーム編集") == WinForms.DialogResult.Cancel) return;
 
-            using (var form = new EditGameForm(Db, game))
+            // (#324 PR1) WinForms モーダル (EditGameForm) → WPF EditGamePage へのサブページ遷移に差し替え。
+            // VM は EditGamePage.PendingViewModel (static) で確実にハンドオフ (cache 済みページに Navigate が DataContext を
+            // 再適用しなくても OnLoaded で適用)。保存成功通知 + #295 バックアップは EditGamePage.Save() がその場で同期実行し、
+            // 戻り後は一覧 reload のみ GoBack 後の Loaded 再走で自動。
+            // 旧 DataChangedOutsideOk 経路 (版即時削除) は版削除機能ごと #324 follow-up 送り。
+            // (レビュー #8) シェル未確立 (teardown 中等) なら遷移できず編集ボタンが無反応になる。silent no-op を避け診断ログを残す。
+            var nav = ShellWindow.Instance?.RootNavigation;
+            if (nav == null)
             {
-                if (form.ShowDialog(Owner) == WinForms.DialogResult.OK)
-                {
-                    LoadGames();
-                    WinForms.MessageBox.Show(Owner,
-                        "ゲーム「" + form.EditedGame.Title + "」を更新しました。",
-                        "成功", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information);
-                    // (#295) ゲーム本体を変えた編集のときだけアセットも控える (form.AssetsChangedOnDisk)。
-                    Db.SessionBackupCoordinator.RunAfterOperation(Owner, form.AssetsChangedOnDisk, "ゲーム編集");
-                }
-                else if (form.DataChangedOutsideOk)
-                {
-                    // (#209) バージョン即時削除は OK を介さず DB 確定するため、Cancel/×で閉じても一覧を再読込し、
-                    // active 版付け替え後にメイン画面が削除済み版を出し続ける stale を防ぐ。
-                    LoadGames();
-                    Db.SessionBackupCoordinator.RunAfterOperation(Owner, form.AssetsChangedOnDisk, "バージョン削除");
-                }
+                Logger.Warn("[GameListPage] シェル (RootNavigation) 未確立のため編集ページへ遷移できません。");
+                return;
             }
+            var editVm = new EditViewModel(Db, game);
+            // (レビュー High-1) Navigate の dataContext 引数だけに頼らず、static ハンドオフでも VM を渡す。cache 済み
+            // ページに DataContext が再適用されなくても、EditGamePage.OnLoaded がこの VM を確実に適用する (取り違え防止)。
+            EditGamePage.PendingViewModel = editVm;
+            nav.Navigate(typeof(EditGamePage), editVm);
         }
 
         private void VersionUp_Click(object sender, RoutedEventArgs e)

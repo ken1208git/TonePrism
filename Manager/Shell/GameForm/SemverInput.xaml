@@ -1,0 +1,21 @@
+<UserControl x:Class="TonePrism.Manager.Shell.GameForm.SemverInput"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+    <!-- (#324 PR1) 版番号入力: NumberBox×3 (major.minor.patch) + suffix。VersionString DP を介して VM.VersionName と
+         TwoWay バインド。parse/compose は SemverInputControl の static ロジックに委譲。 -->
+    <!-- スピナーは Inline のまま。矢印で数値が埋もれていたのは幅不足が原因だったので、box を広げて数字+矢印を両立。 -->
+    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <TextBlock Text="v" Foreground="#C4C8CC" VerticalAlignment="Center" Margin="0,0,2,0" FontSize="14" />
+        <ui:NumberBox x:Name="MajorBox" Minimum="0" Maximum="999" Value="1" MinWidth="0" Width="132"
+                      SpinButtonPlacementMode="Inline" ClearButtonEnabled="False" Foreground="#ECECEC" />
+        <TextBlock Text="." Foreground="#C4C8CC" VerticalAlignment="Center" Margin="4,0,4,0" FontSize="14" />
+        <ui:NumberBox x:Name="MinorBox" Minimum="0" Maximum="999" Value="0" MinWidth="0" Width="132"
+                      SpinButtonPlacementMode="Inline" ClearButtonEnabled="False" Foreground="#ECECEC" />
+        <TextBlock Text="." Foreground="#C4C8CC" VerticalAlignment="Center" Margin="4,0,4,0" FontSize="14" />
+        <ui:NumberBox x:Name="PatchBox" Minimum="0" Maximum="999" Value="0" MinWidth="0" Width="132"
+                      SpinButtonPlacementMode="Inline" ClearButtonEnabled="False" Foreground="#ECECEC" />
+        <TextBlock Text="-" Foreground="#C4C8CC" VerticalAlignment="Center" Margin="8,0,4,0" FontSize="14" />
+        <ui:TextBox x:Name="SuffixBox" PlaceholderText="rc1 等 (任意)" Width="120" Foreground="#ECECEC" />
+    </StackPanel>
+</UserControl>

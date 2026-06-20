@@ -1,0 +1,89 @@
+<Page x:Class="TonePrism.Manager.Shell.GameForm.EditGamePage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:gf="clr-namespace:TonePrism.Manager.Shell.GameForm"
+      Background="#FF202020">
+
+    <!-- (#324 PR1) ゲーム編集 WPF ページ。DataContext = EditViewModel (GameListPage が Navigate(typeof, vm) で注入)。
+         見出し+保存/戻るは固定行、フォームは内側 ScrollViewer。並びは 1 カラムだが、順序は旧 WinForms (EditGameForm) の
+         「左列を上→下、続いて右列を上→下」の読み順を踏襲する:
+           左列: ゲームID → タイトル → 説明 → (ジャンル/年/人数/難易度/時間/コントローラ/表示/通信 = GameMetadataEditor)
+           右列: サムネ → 背景 → 実行ファイル → 起動オプション → 版番号/版選択/更新メモ → 製作者
+         葉部品 (GameMetadataEditor/ImagePickerWithPreview/VersionEditor/DeveloperListEditor) を組み、
+         保存は code-behind が抽出済 service で旧 btnOK を再現。 -->
+
+    <Grid MaxHeight="{Binding RelativeSource={RelativeSource AncestorType=ScrollViewer}, Path=ViewportHeight}">
+        <Grid Margin="24,20,24,20">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- 見出し + 保存/戻る (固定) -->
+            <Grid Grid.Row="0" Margin="0,0,0,16">
+                <TextBlock Text="ゲーム編集" FontSize="26" FontWeight="Bold" Foreground="#F4F4F4" VerticalAlignment="Center" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <ui:Button Content="戻る" Click="Back_Click" Margin="0,0,8,0" />
+                    <ui:Button Content="保存" Appearance="Primary" Click="Save_Click" />
+                </StackPanel>
+            </Grid>
+
+            <ScrollViewer Grid.Row="1" x:Name="PageScroll" VerticalScrollBarVisibility="Auto" Padding="0,0,14,0">
+                <StackPanel MaxWidth="720" HorizontalAlignment="Left">
+                    <!-- ===== 旧 WinForms 左列 (上→下) ===== -->
+                    <!-- ゲームID (slug) -->
+                    <TextBlock Text="ゲームID（英数字/ハイフン/アンダースコア）" Foreground="#9AA0A6" FontSize="11.5" Margin="0,0,0,4" />
+                    <ui:TextBox Text="{Binding GameId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, ValidatesOnNotifyDataErrors=True}"
+                                Foreground="#ECECEC" Margin="0,0,0,12" />
+
+                    <!-- タイトル -->
+                    <TextBlock Text="タイトル" Foreground="#9AA0A6" FontSize="11.5" Margin="0,0,0,4" />
+                    <ui:TextBox Text="{Binding Title, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, ValidatesOnNotifyDataErrors=True}"
+                                Foreground="#ECECEC" Margin="0,0,0,12" />
+
+                    <!-- 説明 -->
+                    <TextBlock Text="説明" Foreground="#9AA0A6" FontSize="11.5" Margin="0,0,0,4" />
+                    <ui:TextBox Text="{Binding Description, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                AcceptsReturn="True" TextWrapping="Wrap" Height="72" Foreground="#ECECEC" Margin="0,0,0,16" />
+
+                    <!-- ジャンル/年/人数/難易度/時間/コントローラ/表示/通信 (WinForms 左列の続き) -->
+                    <gf:GameMetadataEditor Margin="0,0,0,16" />
+
+                    <!-- 製作者 -->
+                    <gf:DeveloperListEditor Margin="0,0,0,16" />
+
+                    <!-- ===== ファイルパス類 (画像 → 実行ファイル → 起動オプション) ===== -->
+                    <!-- 画像: パス入力は直列 (サムネ→背景)、プレビューはランチャー表示を模した合成1枚 -->
+                    <gf:ImagePathPicker Path="{Binding ThumbnailPath, Mode=TwoWay}" Label="サムネイル画像" Margin="0,0,0,12" />
+                    <gf:ImagePathPicker Path="{Binding BackgroundPath, Mode=TwoWay}" Label="背景画像" Margin="0,0,0,12" />
+                    <gf:LauncherPreview ThumbnailPath="{Binding ThumbnailPath}" BackgroundPath="{Binding BackgroundPath}" Margin="0,0,0,16" />
+
+                    <!-- 実行ファイル (参照/テスト起動をパス行にインライン) -->
+                    <TextBlock Text="実行ファイル" Foreground="#9AA0A6" FontSize="11.5" Margin="0,0,0,4" />
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ui:TextBox Grid.Column="0" Text="{Binding ExecutablePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                    Foreground="#ECECEC" />
+                        <ui:Button Grid.Column="1" Content="参照…" Click="BrowseExe_Click" Margin="8,0,0,0" VerticalAlignment="Center" />
+                        <ui:Button Grid.Column="2" Content="テスト起動" Click="TestRun_Click" Margin="6,0,0,0" VerticalAlignment="Center">
+                            <ui:Button.Icon><ui:SymbolIcon Symbol="Play24" /></ui:Button.Icon>
+                        </ui:Button>
+                    </Grid>
+
+                    <!-- 起動オプション -->
+                    <TextBlock Text="起動オプション（任意）" Foreground="#9AA0A6" FontSize="11.5" Margin="0,0,0,4" />
+                    <ui:TextBox Text="{Binding Arguments, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                Foreground="#ECECEC" Margin="0,0,0,16" />
+
+                    <!-- 版番号/版選択/更新メモ -->
+                    <gf:VersionEditor />
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</Page>

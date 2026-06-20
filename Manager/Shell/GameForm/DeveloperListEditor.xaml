@@ -1,0 +1,80 @@
+<UserControl x:Class="TonePrism.Manager.Shell.GameForm.DeveloperListEditor"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:gf="clr-namespace:TonePrism.Manager.Shell.GameForm">
+    <!-- (#324 PR1) 製作者リスト編集。一覧は VM.Developers(ObservableCollection<DeveloperEditViewModel>) にバインド。
+         各カードで 姓/名/期生 を直接インライン編集する (ダイアログ不要)。期生は数値 NumberBox + 不明/教員 の排他チェック
+         (DeveloperEditViewModel が Grade 文字列 ""=不明 / "0"=教員 / "N"=N期生 へ変換)。追加=空カード、削除=カードの🗑。 -->
+    <UserControl.Resources>
+        <gf:NullableIntToDoubleConverter x:Key="IntDouble" />
+        <gf:BooleanToDimOpacityConverter x:Key="DimOpacity" />
+    </UserControl.Resources>
+
+    <StackPanel>
+        <Grid Margin="0,0,0,8">
+            <TextBlock Text="製作者" Foreground="#9AA0A6" FontSize="11.5" VerticalAlignment="Center" />
+            <ui:Button Content="追加" Click="Add_Click" HorizontalAlignment="Right">
+                <ui:Button.Icon><ui:SymbolIcon Symbol="Add24" /></ui:Button.Icon>
+            </ui:Button>
+        </Grid>
+
+        <!-- 空状態 (code-behind が Developers の件数で表示制御) -->
+        <Border x:Name="EmptyHint" Background="#14FFFFFF" CornerRadius="6" Padding="14,12" Visibility="Collapsed">
+            <TextBlock Text="製作者が登録されていません。「追加」から登録できます。" Foreground="#8A9098" FontSize="12" />
+        </Border>
+
+        <ItemsControl x:Name="DevItems" ItemsSource="{Binding Developers}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Border Background="#16FFFFFF" CornerRadius="6" Padding="12,10" Margin="0,0,0,8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <!-- 並べ替えハンドル (掴んでドラッグ → Drop 先で Vm.Developers を Move)。透明 Border でヒット領域確保。 -->
+                            <Border Grid.Column="0" Background="Transparent" Cursor="SizeAll" Margin="0,0,10,0"
+                                    VerticalAlignment="Stretch" PreviewMouseLeftButtonDown="Handle_MouseDown" ToolTip="ドラッグして並べ替え">
+                                <ui:SymbolIcon Symbol="ReOrderDotsVertical24" FontSize="18" Foreground="#7A7F86" VerticalAlignment="Center" />
+                            </Border>
+                            <StackPanel Grid.Column="1">
+                                <!-- 1行目: 姓 / 名 を均等分割 (各 * で半々) -->
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="姓" Foreground="#9AA0A6" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <ui:TextBox Grid.Column="1" Text="{Binding LastName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Foreground="#ECECEC" />
+                                    <TextBlock Grid.Column="2" Text="名" Foreground="#9AA0A6" FontSize="12" VerticalAlignment="Center" Margin="16,0,6,0" />
+                                    <ui:TextBox Grid.Column="3" Text="{Binding FirstName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Foreground="#ECECEC" />
+                                </Grid>
+                                <!-- 2行目: 期生 (数値 + 不明/教員 排他) -->
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="期生" Foreground="#9AA0A6" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <ui:NumberBox Value="{Binding GradeNumber, Converter={StaticResource IntDouble}, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Minimum="1" Maximum="999" MinWidth="0" Width="132" SpinButtonPlacementMode="Inline"
+                                                  ClearButtonEnabled="False" Foreground="#ECECEC"
+                                                  IsEnabled="{Binding GradeNumberEnabled}"
+                                                  Opacity="{Binding GradeNumberDimmed, Converter={StaticResource DimOpacity}}" />
+                                    <CheckBox Content="教員" Foreground="#ECECEC" FontSize="12.5" VerticalAlignment="Center" MinWidth="0" Margin="14,0,0,0"
+                                              IsChecked="{Binding IsTeacher, Mode=TwoWay}" />
+                                    <CheckBox Content="不明" Foreground="#ECECEC" FontSize="12.5" VerticalAlignment="Center" MinWidth="0" Margin="12,0,0,0"
+                                              IsChecked="{Binding IsUnknown, Mode=TwoWay}" />
+                                </StackPanel>
+                            </StackPanel>
+                            <ui:Button Grid.Column="2" Appearance="Transparent" Click="DeleteItem_Click" ToolTip="削除"
+                                       Padding="8" VerticalAlignment="Center" Margin="8,0,0,0">
+                                <ui:Button.Icon><ui:SymbolIcon Symbol="Delete24" /></ui:Button.Icon>
+                            </ui:Button>
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+    </StackPanel>
+</UserControl>
