@@ -84,12 +84,14 @@ namespace TonePrism.Manager.Shell.GameForm
             ReleaseYear = yearInRange ? game.ReleaseYear : (int?)null;
             ReleaseYearUnknown = !yearInRange;
             LoadVersions();
+            NormalizeAllVersionsForBaseline();              // (#383 レビュー指摘1) 全版を正規化してから基準署名を取る (対称性)。
             _originalSignature = ComputeStateSignature();   // (#383) load 完了時の状態を未保存判定の基準にする。
         }
 
         // ===== (#383) 未保存判定: load 時スナップショットとの比較 =====
         // フィールド単位の dirty フラグだと「変更 → 元に戻す」で false dirty になる。保存対象の全状態 (ゲーム項目 +
-        // 全版 + 選択版 + 製作者) を canonical 文字列化し、load 時と比較する。版の閲覧切替も、戻せば一致して未保存にならない。
+        // 全版 + 選択版 + 製作者) を canonical 文字列化し、load 時と比較する。基準は全版を正規化済 (下記) なので、
+        // 版の閲覧切替も戻せば署名が一致して未保存にならない。
         private string _originalSignature;
 
         /// <summary>現在の編集状態が load 時から実質的に変わっているか (戻る時の確認要否)。</summary>
@@ -97,6 +99,15 @@ namespace TonePrism.Manager.Shell.GameForm
 
         /// <summary>(#383) 保存成功時に基準を現在状態へ更新し、以降は未保存なし扱いにする (保存直後の GoBack で離脱割り込みが再確認しないように)。</summary>
         public void MarkSaved() => _originalSignature = ComputeStateSignature();
+
+        /// <summary>(#383 レビュー指摘1) 基準署名の対称性確保。非アクティブ版は閲覧/切替で初めて load→commit 往復して
+        /// 正規化 (人数 null→1・パス区切り・level/conn clamp 等) が焼き付くため、基準を取る前に全版を同じ往復で正規化して
+        /// おく。これをしないと「版を見て元に戻しただけ」で署名が基準と食い違い未保存と誤検知する。表示は元の選択版へ戻す。</summary>
+        private void NormalizeAllVersionsForBaseline()
+        {
+            foreach (var v in Versions) { LoadFromVersion(v); CommitToVersion(v); }
+            if (_selectedVersion != null) LoadFromVersion(_selectedVersion);
+        }
 
         private string ComputeStateSignature()
         {

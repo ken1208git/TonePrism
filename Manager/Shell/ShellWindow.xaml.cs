@@ -7,12 +7,6 @@ using Wpf.Ui.Controls;
 
 namespace TonePrism.Manager.Shell
 {
-    /// <summary>
-    /// (#245 PR5) Manager の本シェル (可視メイン窓)。Win11 設定アプリ風の FluentWindow(ダーク) +
-    /// NavigationView(左サイドバー)。各 NavigationView ページが既存 WinForms セクションパネルを
-    /// WindowsFormsHost で単一インスタンスホストする (設定のみ WPF ネイティブ)。MainForm は隠し裏方
-    /// オーケストレータとして message loop を駆動し、シェル生成失敗時は旧 WinForms UI へ graceful fallback。
-    /// </summary>
     /// <summary>(#383) ゲーム編集ページが実装してシェルに登録する未保存ガード。Navigating 割り込みが参照する。</summary>
     internal interface IEditUnsavedGuard
     {
@@ -20,6 +14,12 @@ namespace TonePrism.Manager.Shell
         void RequestSaveFromGuard();
     }
 
+    /// <summary>
+    /// (#245 PR5) Manager の本シェル (可視メイン窓)。Win11 設定アプリ風の FluentWindow(ダーク) +
+    /// NavigationView(左サイドバー)。各 NavigationView ページが既存 WinForms セクションパネルを
+    /// WindowsFormsHost で単一インスタンスホストする (設定のみ WPF ネイティブ)。MainForm は隠し裏方
+    /// オーケストレータとして message loop を駆動し、シェル生成失敗時は旧 WinForms UI へ graceful fallback。
+    /// </summary>
     public partial class ShellWindow : FluentWindow
     {
         // (#245 PR5) ホストする DB 接続パネル (ゲーム/ストア等) に渡す dbManager。NavigationView の Page は
