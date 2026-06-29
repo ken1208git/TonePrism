@@ -13,6 +13,13 @@ namespace TonePrism.Manager.Shell
     /// WindowsFormsHost で単一インスタンスホストする (設定のみ WPF ネイティブ)。MainForm は隠し裏方
     /// オーケストレータとして message loop を駆動し、シェル生成失敗時は旧 WinForms UI へ graceful fallback。
     /// </summary>
+    /// <summary>(#383) ゲーム編集ページが実装してシェルに登録する未保存ガード。Navigating 割り込みが参照する。</summary>
+    internal interface IEditUnsavedGuard
+    {
+        bool HasUnsavedChanges();
+        void RequestSaveFromGuard();
+    }
+
     public partial class ShellWindow : FluentWindow
     {
         // (#245 PR5) ホストする DB 接続パネル (ゲーム/ストア等) に渡す dbManager。NavigationView の Page は
@@ -34,6 +41,14 @@ namespace TonePrism.Manager.Shell
         {
             InitializeComponent();
             Instance = this;
+            // (#383) あらゆるナビゲーション離脱を割り込み、未保存編集があれば確認ダイアログを出す (サイドバー/戻る共通)。
+            // cancel は同期的に設定してからダイアログを非同期で出す (await 後に cancel しても遷移は止まらないため)。
+            RootNavigation.Navigating += (s, e) =>
+            {
+                if (_navBypass || ActiveEditGuard == null || !ActiveEditGuard.HasUnsavedChanges()) return;
+                e.Cancel = true;
+                _ = HandleGuardedExitAsync(e.Page);
+            };
             // (ダッシュボード) 起動着地はダッシュボード (準備完了度の一目把握)。データは背景取得で固めない。
             Loaded += (_, _) => RootNavigation.Navigate(typeof(DashboardPage));
             // シェルが閉じたら Instance を掃除し、破棄済み窓を掴み続けないようにする (ProcessingDialog /
@@ -118,6 +133,40 @@ namespace TonePrism.Manager.Shell
                 ToastBox.BeginAnimation(OpacityProperty, fadeOut);
             };
             _toastTimer.Start();
+        }
+
+        // ===== (#383) 未保存編集の離脱ガード (Navigating 割り込み + Fluent ダイアログ) =====
+        /// <summary>現在表示中のゲーム編集ページ (未保存ガード)。編集ページが Loaded/Unloaded で自分を登録/解除する。</summary>
+        internal IEditUnsavedGuard ActiveEditGuard;
+        private bool _navBypass;   // 確認後の再ナビゲーション中は割り込みを素通りさせる
+
+        private enum UnsavedChoice { Save, Discard, Stay }
+
+        private async System.Threading.Tasks.Task HandleGuardedExitAsync(object target)
+        {
+            var choice = await ShowUnsavedDialogAsync();
+            if (choice == UnsavedChoice.Stay) return;                                  // 編集に戻る (遷移は cancel 済)
+            if (choice == UnsavedChoice.Save) { ActiveEditGuard?.RequestSaveFromGuard(); return; }  // 保存→成功で一覧へ
+            // 破棄 → 捕捉した遷移先へ改めて遷移 (割り込みは bypass)。target は遷移先ページ (型 or インスタンス)。
+            var t = (target as System.Type) ?? target?.GetType();
+            if (t != null) { _navBypass = true; try { RootNavigation.Navigate(t); } finally { _navBypass = false; } }
+        }
+
+        /// <summary>(#383/#324) シェルと一貫した Fluent な未保存確認ダイアログ (旧 WinForms MessageBox 置換)。</summary>
+        private static async System.Threading.Tasks.Task<UnsavedChoice> ShowUnsavedDialogAsync()
+        {
+            var box = new Wpf.Ui.Controls.MessageBox
+            {
+                Title = "未保存の変更",
+                Content = "編集中の変更がまだ保存されていません。どうしますか?",
+                PrimaryButtonText = "保存",
+                SecondaryButtonText = "破棄して移動",
+                CloseButtonText = "編集に戻る"
+            };
+            var r = await box.ShowDialogAsync();
+            if (r == Wpf.Ui.Controls.MessageBoxResult.Primary) return UnsavedChoice.Save;
+            if (r == Wpf.Ui.Controls.MessageBoxResult.Secondary) return UnsavedChoice.Discard;
+            return UnsavedChoice.Stay;
         }
 
         // ===== (#245 PR5) Windows タスクバーアイコンの進捗 (緑バー) =====

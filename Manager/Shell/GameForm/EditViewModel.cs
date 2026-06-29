@@ -84,6 +84,45 @@ namespace TonePrism.Manager.Shell.GameForm
             ReleaseYear = yearInRange ? game.ReleaseYear : (int?)null;
             ReleaseYearUnknown = !yearInRange;
             LoadVersions();
+            _originalSignature = ComputeStateSignature();   // (#383) load 完了時の状態を未保存判定の基準にする。
+        }
+
+        // ===== (#383) 未保存判定: load 時スナップショットとの比較 =====
+        // フィールド単位の dirty フラグだと「変更 → 元に戻す」で false dirty になる。保存対象の全状態 (ゲーム項目 +
+        // 全版 + 選択版 + 製作者) を canonical 文字列化し、load 時と比較する。版の閲覧切替も、戻せば一致して未保存にならない。
+        private string _originalSignature;
+
+        /// <summary>現在の編集状態が load 時から実質的に変わっているか (戻る時の確認要否)。</summary>
+        public bool HasUnsavedChanges() => ComputeStateSignature() != _originalSignature;
+
+        /// <summary>(#383) 保存成功時に基準を現在状態へ更新し、以降は未保存なし扱いにする (保存直後の GoBack で離脱割り込みが再確認しないように)。</summary>
+        public void MarkSaved() => _originalSignature = ComputeStateSignature();
+
+        private string ComputeStateSignature()
+        {
+            // 表示中版へ in-memory commit してから全版 + ゲーム項目を直列化 (load 時と同手順で対称比較。正規化 = trim/
+            // 人数コアース/Grade 整形も両側で同じく効くため、保存しても変わらない編集は「未保存」と判定されない)。
+            if (_selectedVersion != null) CommitToVersion(_selectedVersion);
+            var sb = new System.Text.StringBuilder();
+            sb.Append("gid=").Append(GameId)
+              .Append("|year=").Append(ReleaseYearUnknown ? "?" : ReleaseYear?.ToString())
+              .Append("|vis=").Append(IsVisible)
+              .Append("|sel=").Append(_selectedVersion?.Id ?? -1).Append('\n');
+            foreach (var v in Versions.OrderBy(x => x.Id))
+            {
+                sb.Append(v.Id).Append(':').Append(v.Version).Append('|').Append(v.Title).Append('|')
+                  .Append(v.Description).Append('|').Append(v.Arguments).Append('|').Append(v.UpdateNote).Append('|')
+                  .Append(v.Genre == null ? "" : string.Join(",", v.Genre)).Append('|')
+                  .Append(v.MinPlayers).Append('/').Append(v.MaxPlayers).Append('|')
+                  .Append(v.Difficulty).Append('|').Append(v.PlayTime).Append('|')
+                  .Append(v.ControllerSupport).Append('|').Append(v.SupportedConnection).Append('|')
+                  .Append(v.ExecutablePath).Append('|').Append(v.ThumbnailPath).Append('|').Append(v.BackgroundPath).Append('|');
+                if (v.Developers != null)
+                    foreach (var d in v.Developers)
+                        sb.Append(d.LastName).Append('~').Append(d.FirstName).Append('~').Append(d.Grade).Append(';');
+                sb.Append('\n');
+            }
+            return sb.ToString();
         }
 
         private bool IsActive(GameVersion v) => InitialSelectedVersionId.HasValue && v != null && v.Id == InitialSelectedVersionId.Value;

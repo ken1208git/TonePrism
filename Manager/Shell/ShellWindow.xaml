@@ -52,7 +52,11 @@
         <ui:NavigationView
             x:Name="RootNavigation"
             Grid.Row="1"
-            Background="#FF202020">
+            Background="#FF202020"
+            IsBackButtonVisible="Collapsed">
+            <!-- (#383) 組み込み戻るボタンは常時非表示。Navigate でバックスタックを作るサブページは EditGamePage だけで、
+                 それは自前の「戻る」ボタン (未保存確認あり) を持つ。既定 Auto だと編集画面に dirty チェックを迂回する
+                 2 個目の戻るボタンが出てしまうため Collapsed にする (サブページは各自の戻るボタンを持つ規約)。 -->
             <ui:NavigationView.MenuItems>
                 <ui:NavigationViewItem Content="ダッシュボード" TargetPageType="{x:Type local:DashboardPage}">
                     <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Home24" /></ui:NavigationViewItem.Icon>

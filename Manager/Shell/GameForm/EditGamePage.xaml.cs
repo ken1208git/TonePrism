@@ -21,7 +21,7 @@ namespace TonePrism.Manager.Shell.GameForm
     /// 保存を「通して」いたが、本実装は VersionName(=生値) を SoT とするため GameVersionSetValidator が不正としてブロックする。
     /// 不正値 (例 "abc") を黙って v0.0.0 に潰す silent データ消失を避け、load 時の警告 + 実行可能なエラー文言で直させる方針。
     /// </summary>
-    public partial class EditGamePage : Page
+    public partial class EditGamePage : Page, IEditUnsavedGuard
     {
         private EditViewModel Vm => DataContext as EditViewModel;
         private DatabaseManager Db => ShellWindow.SharedDb;
@@ -38,6 +38,7 @@ namespace TonePrism.Manager.Shell.GameForm
         {
             InitializeComponent();
             Loaded += OnLoaded;
+            Unloaded += OnUnloaded;
         }
 
         private void OnLoaded(object sender, RoutedEventArgs e)
@@ -45,6 +46,10 @@ namespace TonePrism.Manager.Shell.GameForm
             // (High-1) cache 再利用で DataContext が古いままでも、直前に積まれた VM を確実に適用する (誤ったゲームの
             // 表示・上書き防止)。同一参照なら再代入は no-op。
             if (PendingViewModel != null) { DataContext = PendingViewModel; PendingViewModel = null; }
+
+            // (#383) このページを未保存ガードとしてシェルに登録。サイドバー/戻る等あらゆる離脱を Navigating 割り込みが
+            // 捕捉し、未保存があれば Fluent 確認ダイアログを出す (サイドバーは押せるまま = グレーアウトしない)。
+            if (ShellWindow.Instance != null) ShellWindow.Instance.ActiveEditGuard = this;
 
             // 不正 version の集約警告 (旧 LoadVersions の MessageBox) を編集 1 回につき一度だけ。フラグは VM 側に
             // 持たせる (ページが type 単位で cache 再利用されても別ゲーム編集で再警告するため)。
@@ -59,7 +64,19 @@ namespace TonePrism.Manager.Shell.GameForm
                 WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Warning);
         }
 
+        private void OnUnloaded(object sender, RoutedEventArgs e)
+        {
+            // (#383) 編集ページを離れたらガード登録を解除。
+            if (ShellWindow.Instance != null && ReferenceEquals(ShellWindow.Instance.ActiveEditGuard, this))
+                ShellWindow.Instance.ActiveEditGuard = null;
+        }
+
+        // (#383) 戻るボタンはナビゲーションするだけ。未保存確認はシェルの Navigating 割り込み (全離脱口共通) が出す。
         private void Back_Click(object sender, RoutedEventArgs e) => GoBack();
+
+        // (#383) IEditUnsavedGuard: シェルの離脱割り込みが参照する。
+        public bool HasUnsavedChanges() => Vm?.HasUnsavedChanges() ?? false;
+        public void RequestSaveFromGuard() => Save_Click(this, null);   // 保存成功で MarkSaved + GoBack、失敗でページ留め
 
         private static void GoBack()
         {
@@ -304,6 +321,7 @@ namespace TonePrism.Manager.Shell.GameForm
             //    ので GoBack 前 (ページ有効中) に。成功通知は WinForms ダイアログをやめ、シェルレベルの非モーダル
             //    トーストにして GoBack 後の一覧の上に出す (#324 Snackbar 化)。
             Db.SessionBackupCoordinator.RunAfterOperation(Owner, assetsChanged, "ゲーム編集");
+            vm.MarkSaved();   // (#383) 保存成功 → 未保存なし基準に更新 (GoBack の Navigating 割り込みが再確認しないように)
             GoBack();
             ShellWindow.Instance?.ShowSuccessToast("ゲーム「" + game.Title + "」を更新しました");
         }
