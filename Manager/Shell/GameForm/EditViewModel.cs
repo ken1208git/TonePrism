@@ -96,7 +96,11 @@ namespace TonePrism.Manager.Shell.GameForm
         //   正規化し、ToRel が非選択版の外部パスを silent に null 化して保存に乗せる (silent データ消失) ため (#383 レビュー指摘1)。
         private string _originalSignature;
 
-        /// <summary>現在の編集状態が load 時から実質的に変わっているか (戻る時の確認要否)。</summary>
+        /// <summary>現在の編集状態が load 時から実質的に変わっているか (戻る時の確認要否)。
+        /// ※意図的な副作用あり・離脱直前専用: <see cref="ComputeStateSignature"/> が表示中版へ in-memory commit する
+        ///   (= 署名が「いま保存したら DB に乗る内容」と一致する対称性を保つため)。冪等なので連続呼び出しは安全だが、
+        ///   保存ボタン活性制御や定期 dirty チェックなど別文脈から呼ぶと閲覧中の版が黙って正規化される。新たな呼び出し
+        ///   元を足すときは非破壊化を検討すること (#383 指摘7)。</summary>
         public bool HasUnsavedChanges() => ComputeStateSignature() != _originalSignature;
 
         /// <summary>(#383) 保存成功時に基準を現在状態へ更新し、以降は未保存なし扱いにする (保存直後の GoBack で離脱割り込みが再確認しないように)。</summary>
@@ -108,26 +112,37 @@ namespace TonePrism.Manager.Shell.GameForm
             // 人数コアース/Grade 整形も両側で同じく効くため、保存しても変わらない編集は「未保存」と判定されない)。
             if (_selectedVersion != null) CommitToVersion(_selectedVersion);
             var sb = new System.Text.StringBuilder();
-            sb.Append("gid=").Append(GameId)
-              .Append("|year=").Append(ReleaseYearUnknown ? "?" : ReleaseYear?.ToString())
+            // 自由入力文字列は Field() で長さプレフィックス付き連結する。区切り文字 (| / : 改行等) が Title/Description/
+            // Genre 名/製作者名などに含まれても、異なる状態が同一署名へ潰れない (= false-negative で未保存を無確認破棄
+            // する事故) を構造的に防ぐ (#383 指摘5)。数値/bool は区切り文字を含み得ないので素で append してよい。
+            sb.Append("year=").Append(ReleaseYearUnknown ? "?" : ReleaseYear?.ToString())
               .Append("|vis=").Append(IsVisible)
-              .Append("|sel=").Append(_selectedVersion?.Id ?? -1).Append('\n');
+              .Append("|sel=").Append(_selectedVersion?.Id ?? -1).Append("|gid=");
+            Field(sb, GameId);
+            sb.Append('\n');
             foreach (var v in Versions.OrderBy(x => x.Id))
             {
-                sb.Append(v.Id).Append(':').Append(v.Version).Append('|').Append(v.Title).Append('|')
-                  .Append(v.Description).Append('|').Append(v.Arguments).Append('|').Append(v.UpdateNote).Append('|')
-                  .Append(v.Genre == null ? "" : string.Join(",", v.Genre)).Append('|')
-                  .Append(v.MinPlayers).Append('/').Append(v.MaxPlayers).Append('|')
+                sb.Append(v.Id).Append(':');
+                Field(sb, v.Version); Field(sb, v.Title); Field(sb, v.Description);
+                Field(sb, v.Arguments); Field(sb, v.UpdateNote);
+                sb.Append(v.Genre?.Count ?? -1).Append(':');
+                if (v.Genre != null) foreach (var g in v.Genre) Field(sb, g);
+                sb.Append(v.MinPlayers).Append('/').Append(v.MaxPlayers).Append('|')
                   .Append(v.Difficulty).Append('|').Append(v.PlayTime).Append('|')
-                  .Append(v.ControllerSupport).Append('|').Append(v.SupportedConnection).Append('|')
-                  .Append(v.ExecutablePath).Append('|').Append(v.ThumbnailPath).Append('|').Append(v.BackgroundPath).Append('|');
+                  .Append(v.ControllerSupport).Append('|').Append(v.SupportedConnection).Append('|');
+                Field(sb, v.ExecutablePath); Field(sb, v.ThumbnailPath); Field(sb, v.BackgroundPath);
+                sb.Append(v.Developers?.Count ?? -1).Append(':');
                 if (v.Developers != null)
-                    foreach (var d in v.Developers)
-                        sb.Append(d.LastName).Append('~').Append(d.FirstName).Append('~').Append(d.Grade).Append(';');
+                    foreach (var d in v.Developers) { Field(sb, d.LastName); Field(sb, d.FirstName); Field(sb, d.Grade); }
                 sb.Append('\n');
             }
             return sb.ToString();
         }
+
+        // 長さプレフィックス連結 ("<len>:<value>|")。value に区切り文字が含まれても境界が一意に定まり、異なる状態が
+        // 同じ署名へ衝突しない (injective)。署名はメモリ内比較専用なので parse はしない (衝突回避だけが目的・#383 指摘5)。
+        private static void Field(System.Text.StringBuilder sb, string s)
+            => sb.Append(s?.Length ?? -1).Append(':').Append(s).Append('|');
 
         private bool IsActive(GameVersion v) => InitialSelectedVersionId.HasValue && v != null && v.Id == InitialSelectedVersionId.Value;
 

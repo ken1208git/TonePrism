@@ -50,6 +50,9 @@ namespace TonePrism.Manager.Shell
                 bool isBack = _backRequested; _backRequested = false;   // 戻るボタンが GoBack 直前にセット (Navigating に mode 無し・#383 指摘6)
                 if (_navBypass || ActiveEditGuard == null || !ActiveEditGuard.HasUnsavedChanges()) return;
                 e.Cancel = true;
+                // (#383 指摘1) 確認ダイアログ (Wpf.Ui MessageBox = owner 非モーダル) 表示中に別項目を押されても、
+                // 遷移は止めるが 2 個目のダイアログは出さない (ダイアログのスタック / 二重保存を防ぐ)。
+                if (_guardDialogOpen) return;
                 _ = HandleGuardedExitAsync(e.Page, isBack);
             };
             // (ダッシュボード) 起動着地はダッシュボード (準備完了度の一目把握)。データは背景取得で固めない。
@@ -149,13 +152,19 @@ namespace TonePrism.Manager.Shell
         internal IEditUnsavedGuard ActiveEditGuard;
         private bool _navBypass;       // 確認後の再ナビゲーション中は割り込みを素通りさせる
         private bool _backRequested;   // 編集ページの「戻る」ボタンが GoBack 直前にセット (Navigating で消費し pop と判別)
+        private bool _guardDialogOpen; // (#383 指摘1) 未保存確認ダイアログ表示中フラグ (再入で 2 個目を出さない)
         internal void MarkBackRequested() => _backRequested = true;
 
         private enum UnsavedChoice { Save, Discard, Stay }
 
         private async System.Threading.Tasks.Task HandleGuardedExitAsync(object target, bool isBack)
         {
-            var choice = await ShowUnsavedDialogAsync();
+            UnsavedChoice choice;
+            // ダイアログ await 中だけ再入ガードを立てる (閉じた後の Save/Discard 続行は同期 = ユーザー入力が割り込めない。
+            // Save 経路の WinForms ダイアログ / ProcessingDialog は owner モーダルで主窓を無効化するため別途守られる)。
+            _guardDialogOpen = true;
+            try { choice = await ShowUnsavedDialogAsync(); }
+            finally { _guardDialogOpen = false; }
             if (choice == UnsavedChoice.Stay) return;                                  // 編集に戻る (遷移は cancel 済)
             // 保存: 成功時のみ捕捉した離脱を続行 (失敗=検証エラーはページ留め)。破棄: そのまま続行。(#383 指摘2)
             if (choice == UnsavedChoice.Save) { ActiveEditGuard?.RequestSaveFromGuard(() => ProceedNavigation(target, isBack)); return; }

@@ -2320,7 +2320,10 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **確認ダイアログを Fluent 化**: 旧 WinForms `MessageBox`（OS ネイティブの古い見た目）→ WPF-UI `MessageBox`（ダーク・モダン、Primary/Secondary/Close の3ボタン）。シェルと一貫した見た目に。
 - **組み込み戻るボタンを全廃**（`IsBackButtonVisible="Collapsed"`）: `Navigate` でバックスタックを作るサブページは編集画面だけで、それは自前の戻るボタンを持つ。既定 Auto だと dirty チェックを迂回する2個目の戻るが出ていたため除去（サブページは各自の戻るボタンを持つ規約）。
 - **保存成功トーストを Popup 化**（レビュー派生）: WinForms ホスト画面（ストア/初回説明/バックアップ/ログ/アップデート＝`WindowsFormsHost`）の上にも出るように。Grid 内 Border だと airspace で裏に隠れ、指摘2 で保存後にホスト画面へ着地できるようになると保存フィードバックが見えなくなるため、別 HWND の Popup（右下配置 `CustomPopupPlacementCallback`）に移した。見た目/寸法は従来のまま。各画面の WPF 化後も有効。
-- bump 判断: v0.31.0 編集フォームの退行修正 + UX 改善（破壊的変更 / DB スキーマ変更なし）。**patch（v0.31.0 → v0.31.1）**。Launcher 変更なし。
+- **確認ダイアログの再入防止**（レビュー指摘1）: 確認ダイアログ（WPF-UI `MessageBox` = owner 非モーダル）の表示中に別のサイドバー項目を押されても、遷移は止めるが2個目のダイアログを出さない再入ガード（`_guardDialogOpen`）を追加。ダイアログのスタック・二重保存を防ぐ。
+- **未保存判定の署名を衝突耐性化**（レビュー指摘5）: 状態の canonical 文字列化を長さプレフィックス符号化に変更。Title/説明/ジャンル名/製作者名などの自由入力に区切り文字（`|` `:` 改行等）が含まれても、異なる状態が同一署名へ潰れない（= false-negative で未保存を無確認破棄する事故を構造的に防止）。回帰テスト 4 件を追加（`EditViewModelDirtyTests`）。
+- **`HasUnsavedChanges` の副作用を明文化**（レビュー指摘7）: 署名計算が表示中版へ in-memory commit する意図的な副作用（署名 ＝「いま保存したら DB に乗る内容」の対称性を保つため）・離脱直前専用・冪等であることを doc コメントで明示。新たな呼び出し元を足す際は非破壊化を検討する旨を注記。
+- bump 判断: v0.31.0 編集フォームの退行修正 + UX 改善 + レビュー対応（破壊的変更 / DB スキーマ変更なし）。**patch（v0.31.0 → v0.31.1）**。Launcher 変更なし。
 
 ### [Manager v0.31.0] - 2026-06-18
 
