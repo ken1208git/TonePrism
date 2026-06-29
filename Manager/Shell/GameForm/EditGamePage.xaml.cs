@@ -76,12 +76,15 @@ namespace TonePrism.Manager.Shell.GameForm
 
         // (#383) IEditUnsavedGuard: シェルの離脱割り込みが参照する。
         public bool HasUnsavedChanges() => Vm?.HasUnsavedChanges() ?? false;
-        public void RequestSaveFromGuard() => Save_Click(this, null);   // 保存成功で MarkSaved + GoBack、失敗でページ留め
+        // (#383 レビュー指摘2) ガードからの保存。成功時の着地はガードが渡す (押した先 / 戻る由来なら pop)。
+        public void RequestSaveFromGuard(Action onSavedSuccess) => TrySave(onSavedSuccess);
 
         private static void GoBack()
         {
             var nav = ShellWindow.Instance?.RootNavigation;
-            if (nav != null && nav.CanGoBack) nav.GoBack();
+            if (nav == null || !nav.CanGoBack) return;
+            ShellWindow.Instance.MarkBackRequested();   // (#383 指摘6) 戻る由来を通知 → ガードは pop で戻す
+            nav.GoBack();
         }
 
         private void BrowseExe_Click(object sender, RoutedEventArgs e)
@@ -105,13 +108,16 @@ namespace TonePrism.Manager.Shell.GameForm
             GameFormHelper.TestRunGame(Vm.ExecutablePath, Vm.Arguments, Vm.GameFolder);
         }
 
-        private void Save_Click(object sender, RoutedEventArgs e)
+        private void Save_Click(object sender, RoutedEventArgs e) => TrySave(GoBack);   // ボタン保存は成功で一覧へ
+
+        // 保存を try/catch で包んで実行。成功時の着地は onSuccess に委ねる (ボタン=GoBack / ガード=押した先)。
+        private void TrySave(Action onSuccess)
         {
             var vm = Vm;
             if (vm == null) return;
             try
             {
-                Save(vm);
+                Save(vm, onSuccess);
             }
             catch (System.Data.SQLite.SQLiteException ex)
             {
@@ -129,7 +135,7 @@ namespace TonePrism.Manager.Shell.GameForm
             }
         }
 
-        private void Save(EditViewModel vm)
+        private void Save(EditViewModel vm, Action onSuccess)
         {
             // 1. 表示中版を in-memory commit (旧 dup-check 直前の SaveGameDataToVersion(currentSelected))。
             if (vm.SelectedVersion != null) vm.CommitToVersion(vm.SelectedVersion);
@@ -321,8 +327,8 @@ namespace TonePrism.Manager.Shell.GameForm
             //    ので GoBack 前 (ページ有効中) に。成功通知は WinForms ダイアログをやめ、シェルレベルの非モーダル
             //    トーストにして GoBack 後の一覧の上に出す (#324 Snackbar 化)。
             Db.SessionBackupCoordinator.RunAfterOperation(Owner, assetsChanged, "ゲーム編集");
-            vm.MarkSaved();   // (#383) 保存成功 → 未保存なし基準に更新 (GoBack の Navigating 割り込みが再確認しないように)
-            GoBack();
+            vm.MarkSaved();   // (#383) 保存成功 → 未保存なし基準に更新 (再ナビゲーションの割り込みが再確認しないように)
+            onSuccess?.Invoke();   // (#383 レビュー指摘2) 着地先は呼び出し側が決める (ボタン=一覧 / ガード=押した先)
             ShellWindow.Instance?.ShowSuccessToast("ゲーム「" + game.Title + "」を更新しました");
         }
 

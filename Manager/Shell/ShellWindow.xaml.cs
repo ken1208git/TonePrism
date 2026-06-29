@@ -11,7 +11,7 @@ namespace TonePrism.Manager.Shell
     internal interface IEditUnsavedGuard
     {
         bool HasUnsavedChanges();
-        void RequestSaveFromGuard();
+        void RequestSaveFromGuard(Action onSavedSuccess);
     }
 
     /// <summary>
@@ -45,9 +45,10 @@ namespace TonePrism.Manager.Shell
             // cancel は同期的に設定してからダイアログを非同期で出す (await 後に cancel しても遷移は止まらないため)。
             RootNavigation.Navigating += (s, e) =>
             {
+                bool isBack = _backRequested; _backRequested = false;   // 戻るボタンが GoBack 直前にセット (Navigating に mode 無し・#383 指摘6)
                 if (_navBypass || ActiveEditGuard == null || !ActiveEditGuard.HasUnsavedChanges()) return;
                 e.Cancel = true;
-                _ = HandleGuardedExitAsync(e.Page);
+                _ = HandleGuardedExitAsync(e.Page, isBack);
             };
             // (ダッシュボード) 起動着地はダッシュボード (準備完了度の一目把握)。データは背景取得で固めない。
             Loaded += (_, _) => RootNavigation.Navigate(typeof(DashboardPage));
@@ -138,18 +139,32 @@ namespace TonePrism.Manager.Shell
         // ===== (#383) 未保存編集の離脱ガード (Navigating 割り込み + Fluent ダイアログ) =====
         /// <summary>現在表示中のゲーム編集ページ (未保存ガード)。編集ページが Loaded/Unloaded で自分を登録/解除する。</summary>
         internal IEditUnsavedGuard ActiveEditGuard;
-        private bool _navBypass;   // 確認後の再ナビゲーション中は割り込みを素通りさせる
+        private bool _navBypass;       // 確認後の再ナビゲーション中は割り込みを素通りさせる
+        private bool _backRequested;   // 編集ページの「戻る」ボタンが GoBack 直前にセット (Navigating で消費し pop と判別)
+        internal void MarkBackRequested() => _backRequested = true;
 
         private enum UnsavedChoice { Save, Discard, Stay }
 
-        private async System.Threading.Tasks.Task HandleGuardedExitAsync(object target)
+        private async System.Threading.Tasks.Task HandleGuardedExitAsync(object target, bool isBack)
         {
             var choice = await ShowUnsavedDialogAsync();
             if (choice == UnsavedChoice.Stay) return;                                  // 編集に戻る (遷移は cancel 済)
-            if (choice == UnsavedChoice.Save) { ActiveEditGuard?.RequestSaveFromGuard(); return; }  // 保存→成功で一覧へ
-            // 破棄 → 捕捉した遷移先へ改めて遷移 (割り込みは bypass)。target は遷移先ページ (型 or インスタンス)。
-            var t = (target as System.Type) ?? target?.GetType();
-            if (t != null) { _navBypass = true; try { RootNavigation.Navigate(t); } finally { _navBypass = false; } }
+            // 保存: 成功時のみ捕捉した離脱を続行 (失敗=検証エラーはページ留め)。破棄: そのまま続行。(#383 指摘2)
+            if (choice == UnsavedChoice.Save) { ActiveEditGuard?.RequestSaveFromGuard(() => ProceedNavigation(target, isBack)); return; }
+            ProceedNavigation(target, isBack);
+        }
+
+        // (#383 指摘2/6) 確認後に元の離脱を続行。戻る由来なら pop (バックスタックを伸ばさない)、サイドバー等は捕捉先へ前進。
+        private void ProceedNavigation(object target, bool isBack)
+        {
+            _navBypass = true;
+            try
+            {
+                if (isBack && RootNavigation.CanGoBack) { RootNavigation.GoBack(); return; }
+                var t = (target as System.Type) ?? target?.GetType();
+                if (t != null) RootNavigation.Navigate(t);
+            }
+            finally { _navBypass = false; }
         }
 
         /// <summary>(#383/#324) シェルと一貫した Fluent な未保存確認ダイアログ (旧 WinForms MessageBox 置換)。</summary>
