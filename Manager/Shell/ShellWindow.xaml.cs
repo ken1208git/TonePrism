@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Shell;
 using System.Windows.Threading;
+using TonePrism.Manager.Services;
 using Wpf.Ui.Controls;
 
 namespace TonePrism.Manager.Shell
@@ -50,8 +51,9 @@ namespace TonePrism.Manager.Shell
                 bool isBack = _backRequested; _backRequested = false;   // 戻るボタンが GoBack 直前にセット (Navigating に mode 無し・#383 指摘6)
                 if (_navBypass || ActiveEditGuard == null || !ActiveEditGuard.HasUnsavedChanges()) return;
                 e.Cancel = true;
-                // (#383 指摘1) 確認ダイアログ (Wpf.Ui MessageBox = owner 非モーダル) 表示中に別項目を押されても、
-                // 遷移は止めるが 2 個目のダイアログは出さない (ダイアログのスタック / 二重保存を防ぐ)。
+                // (#383 指摘1) 確認ダイアログ (Wpf.Ui MessageBox = 主窓を無効化しない非モーダル) 表示中に別項目を
+                // 押されても、遷移は止めるが 2 個目のダイアログは出さない (ダイアログのスタック / 二重保存を防ぐ)。
+                // この間の 2 個目クリックは最初に捕捉した離脱先が優先される (最新クリック先ではない・#383 指摘7)。
                 if (_guardDialogOpen) return;
                 _ = HandleGuardedExitAsync(e.Page, isBack);
             };
@@ -119,6 +121,7 @@ namespace TonePrism.Manager.Shell
         private System.Windows.Threading.DispatcherTimer _toastTimer;
 
         // (#324/#383) トーストを PlacementTarget (コンテンツ領域) の右下隅へ。18/16 の inset は旧 Border Margin 相当。
+        // 注: Popup は別 HWND で、表示中 (~3秒) に主窓を移動/リサイズしても再評価されず位置が取り残される。一過性のため許容 (#383 指摘6)。
         private System.Windows.Controls.Primitives.CustomPopupPlacement[] PlaceToastBottomRight(Size popupSize, Size targetSize, Point offset)
             => new[] { new System.Windows.Controls.Primitives.CustomPopupPlacement(
                 new Point(targetSize.Width - popupSize.Width - 18, targetSize.Height - popupSize.Height - 16),
@@ -159,16 +162,26 @@ namespace TonePrism.Manager.Shell
 
         private async System.Threading.Tasks.Task HandleGuardedExitAsync(object target, bool isBack)
         {
-            UnsavedChoice choice;
-            // ダイアログ await 中だけ再入ガードを立てる (閉じた後の Save/Discard 続行は同期 = ユーザー入力が割り込めない。
-            // Save 経路の WinForms ダイアログ / ProcessingDialog は owner モーダルで主窓を無効化するため別途守られる)。
-            _guardDialogOpen = true;
-            try { choice = await ShowUnsavedDialogAsync(); }
-            finally { _guardDialogOpen = false; }
-            if (choice == UnsavedChoice.Stay) return;                                  // 編集に戻る (遷移は cancel 済)
-            // 保存: 成功時のみ捕捉した離脱を続行 (失敗=検証エラーはページ留め)。破棄: そのまま続行。(#383 指摘2)
-            if (choice == UnsavedChoice.Save) { ActiveEditGuard?.RequestSaveFromGuard(() => ProceedNavigation(target, isBack)); return; }
-            ProceedNavigation(target, isBack);
+            // (#383 指摘2) fire-and-forget (_ = ...) で起動されるため、ここで例外を捕まえないと unobserved task として
+            // 消え、ユーザーは無言で編集画面に取り残される (silent failure)。ダイアログ/遷移の失敗はログに残し、
+            // 編集画面に留める (= 安全側: 未保存は保持される)。
+            try
+            {
+                UnsavedChoice choice;
+                // ダイアログ await 中だけ再入ガードを立てる (閉じた後の Save/Discard 続行は同期 = ユーザー入力が割り込めない。
+                // Save 経路の WinForms ダイアログ / ProcessingDialog は owner モーダルで主窓を無効化するため別途守られる)。
+                _guardDialogOpen = true;
+                try { choice = await ShowUnsavedDialogAsync(); }
+                finally { _guardDialogOpen = false; }
+                if (choice == UnsavedChoice.Stay) return;                                  // 編集に戻る (遷移は cancel 済)
+                // 保存: 成功時のみ捕捉した離脱を続行 (失敗=検証エラーはページ留め)。破棄: そのまま続行。(#383 指摘2)
+                if (choice == UnsavedChoice.Save) { ActiveEditGuard?.RequestSaveFromGuard(() => ProceedNavigation(target, isBack)); return; }
+                ProceedNavigation(target, isBack);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("未保存ガードの離脱処理に失敗しました (編集画面に留まります)。", ex);
+            }
         }
 
         // (#383 指摘2/6) 確認後に元の離脱を続行。戻る由来なら pop (バックスタックを伸ばさない)、サイドバー等は捕捉先へ前進。
@@ -179,13 +192,16 @@ namespace TonePrism.Manager.Shell
             {
                 if (isBack && RootNavigation.CanGoBack) { RootNavigation.GoBack(); return; }
                 var t = (target as System.Type) ?? target?.GetType();
-                if (t != null) RootNavigation.Navigate(t);
+                if (t != null) { RootNavigation.Navigate(t); return; }
+                // (#383 指摘3) 前進遷移で離脱先の型が解決できない (e.Page が null 等) と、破棄を選んでも無反応になる。
+                // silent no-op を避けてログに残す (実機での発生有無は要確認。発生するなら fallback 遷移先を検討)。
+                Logger.Warn("未保存ガード: 離脱先の型が解決できず遷移をスキップしました (target=null)。");
             }
             finally { _navBypass = false; }
         }
 
         /// <summary>(#383/#324) シェルと一貫した Fluent な未保存確認ダイアログ (旧 WinForms MessageBox 置換)。</summary>
-        private static async System.Threading.Tasks.Task<UnsavedChoice> ShowUnsavedDialogAsync()
+        private async System.Threading.Tasks.Task<UnsavedChoice> ShowUnsavedDialogAsync()
         {
             var box = new Wpf.Ui.Controls.MessageBox
             {
@@ -193,7 +209,10 @@ namespace TonePrism.Manager.Shell
                 Content = "編集中の変更がまだ保存されていません。どうしますか?",
                 PrimaryButtonText = "保存",
                 SecondaryButtonText = "破棄して移動",
-                CloseButtonText = "編集に戻る"
+                CloseButtonText = "編集に戻る",
+                // (#383 指摘5) 主窓に紐付ける: z-order・最小化連動・主窓中央表示を担保する (非モーダルは維持)。
+                Owner = this,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner
             };
             var r = await box.ShowDialogAsync();
             if (r == Wpf.Ui.Controls.MessageBoxResult.Primary) return UnsavedChoice.Save;

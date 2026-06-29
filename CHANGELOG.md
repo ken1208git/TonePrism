@@ -2323,6 +2323,8 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **確認ダイアログの再入防止**（レビュー指摘1）: 確認ダイアログ（WPF-UI `MessageBox` = owner 非モーダル）の表示中に別のサイドバー項目を押されても、遷移は止めるが2個目のダイアログを出さない再入ガード（`_guardDialogOpen`）を追加。ダイアログのスタック・二重保存を防ぐ。
 - **未保存判定の署名を衝突耐性化**（レビュー指摘5）: 状態の canonical 文字列化を長さプレフィックス符号化に変更。Title/説明/ジャンル名/製作者名などの自由入力に区切り文字（`|` `:` 改行等）が含まれても、異なる状態が同一署名へ潰れない（= false-negative で未保存を無確認破棄する事故を構造的に防止）。回帰テスト 4 件を追加（`EditViewModelDirtyTests`）。
 - **`HasUnsavedChanges` の副作用を明文化**（レビュー指摘7）: 署名計算が表示中版へ in-memory commit する意図的な副作用（署名 ＝「いま保存したら DB に乗る内容」の対称性を保つため）・離脱直前専用・冪等であることを doc コメントで明示。新たな呼び出し元を足す際は非破壊化を検討する旨を注記。
+- **離脱処理の silent failure 防止**（レビュー指摘2/3）: `Navigating` 割り込みの離脱処理（`HandleGuardedExitAsync`）は fire-and-forget 起動のため、ダイアログ/遷移で例外が出ると unobserved task として消えユーザーが無言で取り残される。全体を try/catch で包み `Logger.Error` に残す（失敗時は編集画面に留まる＝安全側）。前進遷移で離脱先の型が解決できない場合も `Logger.Warn` でログ化し silent no-op を排除。
+- **確認ダイアログを主窓に紐付け**（レビュー指摘5）: 確認ダイアログに `Owner` + `WindowStartupLocation=CenterOwner` を設定。z-order・最小化連動・主窓中央表示を担保（マルチモニタ/最小化での迷子を防止。非モーダルは維持）。
 - bump 判断: v0.31.0 編集フォームの退行修正 + UX 改善 + レビュー対応（破壊的変更 / DB スキーマ変更なし）。**patch（v0.31.0 → v0.31.1）**。Launcher 変更なし。
 
 ### [Manager v0.31.0] - 2026-06-18
