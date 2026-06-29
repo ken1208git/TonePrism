@@ -2319,6 +2319,7 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **未保存判定は load 時スナップショット比較**: フィールド単位の dirty フラグだと「変更 → 元に戻す」で誤検知するため、保存対象の全状態（ゲーム項目 + 全版 + 選択版 + 製作者）を canonical 文字列化して load 時と比較。trim / 人数コアース / Grade 整形等の正規化も両側で効くため、保存しても実質変わらない編集は未保存扱いにしない。保存成功時は基準を更新（`MarkSaved`）。
 - **確認ダイアログを Fluent 化**: 旧 WinForms `MessageBox`（OS ネイティブの古い見た目）→ WPF-UI `MessageBox`（ダーク・モダン、Primary/Secondary/Close の3ボタン）。シェルと一貫した見た目に。
 - **組み込み戻るボタンを全廃**（`IsBackButtonVisible="Collapsed"`）: `Navigate` でバックスタックを作るサブページは編集画面だけで、それは自前の戻るボタンを持つ。既定 Auto だと dirty チェックを迂回する2個目の戻るが出ていたため除去（サブページは各自の戻るボタンを持つ規約）。
+- **保存成功トーストを Popup 化**（レビュー派生）: WinForms ホスト画面（ストア/初回説明/バックアップ/ログ/アップデート＝`WindowsFormsHost`）の上にも出るように。Grid 内 Border だと airspace で裏に隠れ、指摘2 で保存後にホスト画面へ着地できるようになると保存フィードバックが見えなくなるため、別 HWND の Popup（右下配置 `CustomPopupPlacementCallback`）に移した。見た目/寸法は従来のまま。各画面の WPF 化後も有効。
 - bump 判断: v0.31.0 編集フォームの退行修正 + UX 改善（破壊的変更 / DB スキーマ変更なし）。**patch（v0.31.0 → v0.31.1）**。Launcher 変更なし。
 
 ### [Manager v0.31.0] - 2026-06-18

@@ -41,6 +41,8 @@ namespace TonePrism.Manager.Shell
         {
             InitializeComponent();
             Instance = this;
+            ToastPopup.PlacementTarget = RootNavigation;                       // (#324/#383) トーストはコンテンツ領域の右下に出す
+            ToastPopup.CustomPopupPlacementCallback = PlaceToastBottomRight;    // Popup=別 HWND ゆえ WinForms ホスト画面の上にも出る
             // (#383) あらゆるナビゲーション離脱を割り込み、未保存編集があれば確認ダイアログを出す (サイドバー/戻る共通)。
             // cancel は同期的に設定してからダイアログを非同期で出す (await 後に cancel しても遷移は止まらないため)。
             RootNavigation.Navigating += (s, e) =>
@@ -113,6 +115,12 @@ namespace TonePrism.Manager.Shell
 
         private System.Windows.Threading.DispatcherTimer _toastTimer;
 
+        // (#324/#383) トーストを PlacementTarget (コンテンツ領域) の右下隅へ。18/16 の inset は旧 Border Margin 相当。
+        private System.Windows.Controls.Primitives.CustomPopupPlacement[] PlaceToastBottomRight(Size popupSize, Size targetSize, Point offset)
+            => new[] { new System.Windows.Controls.Primitives.CustomPopupPlacement(
+                new Point(targetSize.Width - popupSize.Width - 18, targetSize.Height - popupSize.Height - 16),
+                System.Windows.Controls.Primitives.PopupPrimaryAxis.None) };
+
         /// <summary>(#324) 保存成功などの非モーダル成功トースト。右下隅に小さい一行を 160ms でフェードイン → 約2.6秒
         /// 保持 → 360ms でフェードアウトして畳む。WinForms ダイアログを置き換え、操作を止めない。UI スレッド外でも安全。
         /// 連続呼び出しはタイマー再起動で最新メッセージに差し替わる。</summary>
@@ -120,7 +128,7 @@ namespace TonePrism.Manager.Shell
         {
             if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(new Action(() => ShowSuccessToast(message))); return; }
             ToastText.Text = message ?? string.Empty;
-            ToastBox.Visibility = Visibility.Visible;
+            ToastPopup.IsOpen = true;
             ToastBox.BeginAnimation(OpacityProperty,
                 new System.Windows.Media.Animation.DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(160))));
 
@@ -130,7 +138,7 @@ namespace TonePrism.Manager.Shell
             {
                 _toastTimer.Stop();
                 var fadeOut = new System.Windows.Media.Animation.DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(360)));
-                fadeOut.Completed += (_, ___) => ToastBox.Visibility = Visibility.Collapsed;
+                fadeOut.Completed += (_, ___) => ToastPopup.IsOpen = false;
                 ToastBox.BeginAnimation(OpacityProperty, fadeOut);
             };
             _toastTimer.Start();

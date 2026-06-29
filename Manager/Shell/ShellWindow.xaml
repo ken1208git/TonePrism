@@ -87,18 +87,19 @@
             </ui:NavigationView.FooterMenuItems>
         </ui:NavigationView>
 
-        <!-- (#324) 保存成功などの非モーダル通知 = 右下隅に出る小さい一行トースト。コンテンツ領域 (Row1) に重ね、
-             ページ遷移 (GoBack) をまたいで一覧の上にふわっと出て数秒で自動消滅 (ShowSuccessToast がフェード制御)。
-             既定は Collapsed/透過なので操作を邪魔しない。 -->
-        <Border x:Name="ToastBox" Grid.Row="1" HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                Margin="0,0,18,16" Background="#FF1B9E4F" BorderThickness="0"
-                CornerRadius="6" Padding="12,7" Visibility="Collapsed" Opacity="0">
-            <StackPanel Orientation="Horizontal">
-                <ui:SymbolIcon Symbol="CheckmarkCircle24" FontSize="15" Foreground="#FFFFFFFF" VerticalAlignment="Center" Margin="0,0,7,0" />
-                <TextBlock x:Name="ToastText" FontSize="12.5" FontWeight="SemiBold" Foreground="#FFFFFFFF" VerticalAlignment="Center"
-                           MaxWidth="320" TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-        </Border>
+        <!-- (#324/#383) 保存成功などの非モーダル通知 = 右下隅に出る小さい一行トースト。Popup (別 HWND) で描画するので
+             WinForms ホスト画面 (ストア等・WindowsFormsHost) の上にも出る (Grid 内 Border だと airspace で裏に隠れる)。
+             位置は ctor の PlacementTarget=RootNavigation + CustomPopupPlacementCallback で右下に。中身の見た目/寸法は従来のまま。 -->
+        <Popup x:Name="ToastPopup" AllowsTransparency="True" StaysOpen="True" Placement="Custom" IsOpen="False">
+            <Border x:Name="ToastBox" Background="#FF1B9E4F" BorderThickness="0"
+                    CornerRadius="6" Padding="12,7" Opacity="0">
+                <StackPanel Orientation="Horizontal">
+                    <ui:SymbolIcon Symbol="CheckmarkCircle24" FontSize="15" Foreground="#FFFFFFFF" VerticalAlignment="Center" Margin="0,0,7,0" />
+                    <TextBlock x:Name="ToastText" FontSize="12.5" FontWeight="SemiBold" Foreground="#FFFFFFFF" VerticalAlignment="Center"
+                               MaxWidth="320" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Border>
+        </Popup>
 
         <!-- (#245 PR5 step4) Fluent ネイティブのステータスバー。左=DB接続状態(全体)、右=バックアップ feedback
              (進捗/✓/⚠/中止/今すぐ、全体に関係)。値は MainForm が集めて SetStatusText / ShowBackupProgress 等で
