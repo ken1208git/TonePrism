@@ -2311,6 +2311,23 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 
 ## Manager（管理ソフト）
 
+### [Manager v0.31.1] - 2026-06-29
+
+#### Fixed / Changed — ゲーム編集の未保存離脱ガード + 確認ダイアログのモダン化（`fix/manager-edit-unsaved-guard`、#383）
+
+- **未保存のまま離脱時の破棄ガード**（#383）: WPF サブページ化（v0.31.0）で編集中もサイドバーが活性になり、誤クリックで未保存入力が無確認破棄される退行を解消。シェルの `NavigationView.Navigating` を割り込み、未保存があれば確認ダイアログを出して遷移を保留する（サイドバー・戻る等のナビゲーション離脱で共通。ウィンドウ自体を閉じる経路 `×`/Alt+F4 は本 PR では未ガード＝follow-up）。`e.Cancel` で同期的に遷移を止めてから非同期ダイアログ → **保存 / 破棄して移動 / 編集に戻る** の3択。当初の「編集中サイドバーをグレーアウトする擬似モーダル」案から、**サイドバーは押せるまま割り込む**方式に変更（より自然）。
+- **未保存判定は load 時スナップショット比較**: フィールド単位の dirty フラグだと「変更 → 元に戻す」で誤検知するため、保存対象の全状態（ゲーム項目 + 全版 + 選択版 + 製作者）を canonical 文字列化して load 時と比較。trim / 人数コアース / Grade 整形等の正規化も両側で効くため、保存しても実質変わらない編集は未保存扱いにしない。保存成功時は基準を更新（`MarkSaved`）。
+- **確認ダイアログを Fluent 化**: 旧 WinForms `MessageBox`（OS ネイティブの古い見た目）→ WPF-UI `MessageBox`（ダーク・モダン、Primary/Secondary/Close の3ボタン）。シェルと一貫した見た目に。
+- **組み込み戻るボタンを全廃**（`IsBackButtonVisible="Collapsed"`）: `Navigate` でバックスタックを作るサブページは編集画面だけで、それは自前の戻るボタンを持つ。既定 Auto だと dirty チェックを迂回する2個目の戻るが出ていたため除去（サブページは各自の戻るボタンを持つ規約）。
+- **保存成功トーストを Popup 化**（レビュー派生）: WinForms ホスト画面（ストア/初回説明/バックアップ/ログ/アップデート＝`WindowsFormsHost`）の上にも出るように。Grid 内 Border だと airspace で裏に隠れ、指摘2 で保存後にホスト画面へ着地できるようになると保存フィードバックが見えなくなるため、別 HWND の Popup（右下配置 `CustomPopupPlacementCallback`）に移した。見た目/寸法は従来のまま。各画面の WPF 化後も有効。
+- **確認ダイアログはモーダル**（レビュー指摘1）: WPF-UI `MessageBox.ShowDialogAsync()` は既定で `base.ShowDialog`＝モーダル（表示中は主窓を無効化。逆コンパイルで確認、`Show`/`ShowDialog` は例外を投げ ShowDialogAsync 一択の設計）。よってダイアログ中の再入（別項目クリック）は起きず、`Owner`/`WindowStartupLocation=CenterOwner` もこの前提で正しく機能する。
+- **未保存判定の署名を衝突耐性化**（レビュー指摘5）: 状態の canonical 文字列化を長さプレフィックス符号化に変更。Title/説明/ジャンル名/製作者名などの自由入力に区切り文字（`|` `:` 改行等）が含まれても、異なる状態が同一署名へ潰れない（= false-negative で未保存を無確認破棄する事故を構造的に防止）。回帰テスト 4 件を追加（`EditViewModelDirtyTests`）。
+- **`HasUnsavedChanges` の副作用を明文化**（レビュー指摘7）: 署名計算が表示中版へ in-memory commit する意図的な副作用（署名 ＝「いま保存したら DB に乗る内容」の対称性を保つため）・離脱直前専用・冪等であることを doc コメントで明示。新たな呼び出し元を足す際は非破壊化を検討する旨を注記。
+- **離脱処理の silent failure 防止**（レビュー指摘2/3）: `Navigating` 割り込みの離脱処理（`HandleGuardedExitAsync`）は fire-and-forget 起動のため、ダイアログ/遷移で例外が出ると unobserved task として消えユーザーが無言で取り残される。全体を try/catch で包み `Logger.Error` に残す（失敗時は編集画面に留まる＝安全側）。前進遷移で離脱先の型が解決できない場合も `Logger.Warn` でログ化し silent no-op を排除。
+- **確認ダイアログを主窓に紐付け**（レビュー指摘5）: 確認ダイアログに `Owner` + `WindowStartupLocation=CenterOwner` を設定。z-order・最小化連動・主窓中央表示を担保（マルチモニタ/最小化での迷子を防止）。
+- **離脱判定・保存後遷移の堅牢化**（追加レビュー）: (1) `Navigating` 内の未保存判定（`HasUnsavedChanges`）を try/catch し、失敗時は安全側＝未保存ありとみなして確認ダイアログを出す（判定例外で遷移が素通りし無確認破棄するのを防止）。(2) ガード経由保存の**成功後**に画面遷移が失敗した場合、「更新に失敗しました」と誤表示せずログのみにし保存成功トーストは出す（保存済をユーザーに正しく伝える）。
+- bump 判断: v0.31.0 編集フォームの退行修正 + UX 改善 + レビュー対応（破壊的変更 / DB スキーマ変更なし）。**patch（v0.31.0 → v0.31.1）**。Launcher 変更なし。
+
 ### [Manager v0.31.0] - 2026-06-18
 
 #### Added / Changed — ゲーム「編集」の WPF ネイティブ化（`feature/manager-game-edit-wpf`、#324 PR1 / #242）
