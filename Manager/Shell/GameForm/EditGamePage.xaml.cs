@@ -328,7 +328,11 @@ namespace TonePrism.Manager.Shell.GameForm
             //    トーストにして GoBack 後の一覧の上に出す (#324 Snackbar 化)。
             Db.SessionBackupCoordinator.RunAfterOperation(Owner, assetsChanged, "ゲーム編集");
             vm.MarkSaved();   // (#383) 保存成功 → 未保存なし基準に更新 (再ナビゲーションの割り込みが再確認しないように)
-            onSuccess?.Invoke();   // (#383 レビュー指摘2) 着地先は呼び出し側が決める (ボタン=一覧 / ガード=押した先)
+            // (#383 指摘6) 着地先は呼び出し側が決める (ボタン=一覧 / ガード=押した先)。ただし保存は既に成功済なので、
+            // 遷移 (onSuccess) の失敗を TrySave の catch に飛ばすと「更新に失敗しました」と嘘表示になる。ここで握って
+            // ログのみにし、保存成功トーストは出す (遷移できなくてもデータは保存済 = 利用者に正しく伝える)。
+            try { onSuccess?.Invoke(); }
+            catch (Exception navEx) { Logger.Error("保存は成功しましたが、画面遷移に失敗しました。", navEx); }
             ShellWindow.Instance?.ShowSuccessToast("ゲーム「" + game.Title + "」を更新しました");
         }
 

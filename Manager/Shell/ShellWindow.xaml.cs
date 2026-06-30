@@ -49,11 +49,17 @@ namespace TonePrism.Manager.Shell
             RootNavigation.Navigating += (s, e) =>
             {
                 bool isBack = _backRequested; _backRequested = false;   // 戻るボタンが GoBack 直前にセット (Navigating に mode 無し・#383 指摘6)
-                if (_navBypass || ActiveEditGuard == null || !ActiveEditGuard.HasUnsavedChanges()) return;
+                if (_navBypass || ActiveEditGuard == null) return;
+                // (#383) 未保存判定は e.Cancel 設定の前にあり、ここで例外が漏れると遷移が止まらず未保存が無確認破棄
+                // されかねない (判定は守るべき)。try/catch し、失敗時は安全側 = 未保存ありとみなして確認ダイアログを出す。
+                bool dirty;
+                try { dirty = ActiveEditGuard.HasUnsavedChanges(); }
+                catch (Exception ex) { Logger.Error("未保存判定に失敗しました。安全側で確認ダイアログを出します。", ex); dirty = true; }
+                if (!dirty) return;
                 e.Cancel = true;
-                // (#383 指摘1) 確認ダイアログ (Wpf.Ui MessageBox = 主窓を無効化しない非モーダル) 表示中に別項目を
-                // 押されても、遷移は止めるが 2 個目のダイアログは出さない (ダイアログのスタック / 二重保存を防ぐ)。
-                // この間の 2 個目クリックは最初に捕捉した離脱先が優先される (最新クリック先ではない・#383 指摘7)。
+                // (#383 指摘1) 確認ダイアログは ShowDialogAsync()=modal (内部 base.ShowDialog) で、表示中は主窓 (サイドバー
+                // 含む) が無効化される → 通常この再入は起きない。非モーダル化 (showAsDialog:false) した場合の保険として
+                // 再入ガードを残す (harmless)。発火時は最初に捕捉した離脱先が優先される (最新クリック先ではない・#383 指摘7)。
                 if (_guardDialogOpen) return;
                 _ = HandleGuardedExitAsync(e.Page, isBack);
             };
@@ -210,10 +216,11 @@ namespace TonePrism.Manager.Shell
                 PrimaryButtonText = "保存",
                 SecondaryButtonText = "破棄して移動",
                 CloseButtonText = "編集に戻る",
-                // (#383 指摘5) 主窓に紐付ける: z-order・最小化連動・主窓中央表示を担保する (非モーダルは維持)。
+                // (#383 指摘5) 主窓に紐付ける: z-order・最小化連動・主窓中央表示を担保する。
                 Owner = this,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner
             };
+            // ShowDialogAsync() は既定 showAsDialog=true = modal (内部 base.ShowDialog)。表示中は Owner (主窓) が無効化される。
             var r = await box.ShowDialogAsync();
             if (r == Wpf.Ui.Controls.MessageBoxResult.Primary) return UnsavedChoice.Save;
             if (r == Wpf.Ui.Controls.MessageBoxResult.Secondary) return UnsavedChoice.Discard;

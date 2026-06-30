@@ -2320,11 +2320,12 @@ PR #150 で dir rename (`GCTonePrism_Launcher/` → `Launcher/`) に連動して
 - **確認ダイアログを Fluent 化**: 旧 WinForms `MessageBox`（OS ネイティブの古い見た目）→ WPF-UI `MessageBox`（ダーク・モダン、Primary/Secondary/Close の3ボタン）。シェルと一貫した見た目に。
 - **組み込み戻るボタンを全廃**（`IsBackButtonVisible="Collapsed"`）: `Navigate` でバックスタックを作るサブページは編集画面だけで、それは自前の戻るボタンを持つ。既定 Auto だと dirty チェックを迂回する2個目の戻るが出ていたため除去（サブページは各自の戻るボタンを持つ規約）。
 - **保存成功トーストを Popup 化**（レビュー派生）: WinForms ホスト画面（ストア/初回説明/バックアップ/ログ/アップデート＝`WindowsFormsHost`）の上にも出るように。Grid 内 Border だと airspace で裏に隠れ、指摘2 で保存後にホスト画面へ着地できるようになると保存フィードバックが見えなくなるため、別 HWND の Popup（右下配置 `CustomPopupPlacementCallback`）に移した。見た目/寸法は従来のまま。各画面の WPF 化後も有効。
-- **確認ダイアログの再入防止**（レビュー指摘1）: 確認ダイアログ（WPF-UI `MessageBox` = owner 非モーダル）の表示中に別のサイドバー項目を押されても、遷移は止めるが2個目のダイアログを出さない再入ガード（`_guardDialogOpen`）を追加。ダイアログのスタック・二重保存を防ぐ。
+- **確認ダイアログの再入ガード（防御的）**（レビュー指摘1）: 表示中に別のサイドバー項目を押されても、遷移は止めるが2個目のダイアログを出さない再入ガード（`_guardDialogOpen`）を追加（ダイアログのスタック・二重保存を防ぐ）。※その後の調査で WPF-UI `MessageBox.ShowDialogAsync()` は既定で **modal**（内部 `base.ShowDialog`、表示中は主窓を無効化）と判明＝通常この再入は起きない。非モーダル化した場合の保険として残置（harmless）。
 - **未保存判定の署名を衝突耐性化**（レビュー指摘5）: 状態の canonical 文字列化を長さプレフィックス符号化に変更。Title/説明/ジャンル名/製作者名などの自由入力に区切り文字（`|` `:` 改行等）が含まれても、異なる状態が同一署名へ潰れない（= false-negative で未保存を無確認破棄する事故を構造的に防止）。回帰テスト 4 件を追加（`EditViewModelDirtyTests`）。
 - **`HasUnsavedChanges` の副作用を明文化**（レビュー指摘7）: 署名計算が表示中版へ in-memory commit する意図的な副作用（署名 ＝「いま保存したら DB に乗る内容」の対称性を保つため）・離脱直前専用・冪等であることを doc コメントで明示。新たな呼び出し元を足す際は非破壊化を検討する旨を注記。
 - **離脱処理の silent failure 防止**（レビュー指摘2/3）: `Navigating` 割り込みの離脱処理（`HandleGuardedExitAsync`）は fire-and-forget 起動のため、ダイアログ/遷移で例外が出ると unobserved task として消えユーザーが無言で取り残される。全体を try/catch で包み `Logger.Error` に残す（失敗時は編集画面に留まる＝安全側）。前進遷移で離脱先の型が解決できない場合も `Logger.Warn` でログ化し silent no-op を排除。
-- **確認ダイアログを主窓に紐付け**（レビュー指摘5）: 確認ダイアログに `Owner` + `WindowStartupLocation=CenterOwner` を設定。z-order・最小化連動・主窓中央表示を担保（マルチモニタ/最小化での迷子を防止。非モーダルは維持）。
+- **確認ダイアログを主窓に紐付け**（レビュー指摘5）: 確認ダイアログに `Owner` + `WindowStartupLocation=CenterOwner` を設定。z-order・最小化連動・主窓中央表示を担保（マルチモニタ/最小化での迷子を防止）。
+- **離脱判定・保存後遷移の堅牢化**（追加レビュー）: (1) `Navigating` 内の未保存判定（`HasUnsavedChanges`）を try/catch し、失敗時は安全側＝未保存ありとみなして確認ダイアログを出す（判定例外で遷移が素通りし無確認破棄するのを防止）。(2) ガード経由保存の**成功後**に画面遷移が失敗した場合、「更新に失敗しました」と誤表示せずログのみにし保存成功トーストは出す（保存済をユーザーに正しく伝える）。
 - bump 判断: v0.31.0 編集フォームの退行修正 + UX 改善 + レビュー対応（破壊的変更 / DB スキーマ変更なし）。**patch（v0.31.0 → v0.31.1）**。Launcher 変更なし。
 
 ### [Manager v0.31.0] - 2026-06-18

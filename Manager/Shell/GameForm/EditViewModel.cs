@@ -91,7 +91,8 @@ namespace TonePrism.Manager.Shell.GameForm
         // フィールド単位の dirty フラグだと「変更 → 元に戻す」で false dirty になる。保存対象の状態 (ゲーム項目 +
         // 全版 + 選択版 + 製作者) を canonical 文字列化し、load 時と比較する。正規化済データなら版の閲覧切替も戻せば
         // 一致する (CommitToVersion 往復が冪等)。非正規化の legacy 版 (外部/絶対パス・null 人数等) を閲覧すると版切替の
-        // commit で正規化が焼いて署名が食い違い「未保存」と出うるが、安全側 (確認が出るだけ・データ損失なし) なので許容。
+        // commit で正規化が焼いて署名が食い違い「未保存」と出うるが、安全側 (確認が出るだけ・データ損失なし) なので許容
+        // (本番データは #386 で正規化済 = ほぼ発生しない。非破壊な対称署名化での恒久対応は #394 で追跡)。
         // ※全版を基準時に正規化する案 (旧 NormalizeAllVersionsForBaseline) は不採用: 保存対象の版オブジェクトを破壊的に
         //   正規化し、ToRel が非選択版の外部パスを silent に null 化して保存に乗せる (silent データ消失) ため (#383 レビュー指摘1)。
         private string _originalSignature;
