@@ -57,10 +57,9 @@ namespace TonePrism.Manager.Shell
                 catch (Exception ex) { Logger.Error("未保存判定に失敗しました。安全側で確認ダイアログを出します。", ex); dirty = true; }
                 if (!dirty) return;
                 e.Cancel = true;
-                // (#383 指摘1) 確認ダイアログは ShowDialogAsync()=modal (内部 base.ShowDialog) で、表示中は主窓 (サイドバー
-                // 含む) が無効化される → 通常この再入は起きない。非モーダル化 (showAsDialog:false) した場合の保険として
-                // 再入ガードを残す (harmless)。発火時は最初に捕捉した離脱先が優先される (最新クリック先ではない・#383 指摘7)。
-                if (_guardDialogOpen) return;
+                // (#383) 確認ダイアログは modal (ShowUnsavedDialogAsync = ShowDialogAsync()→base.ShowDialog、逆コンパイルで確認済)
+                // で、表示中は主窓 (サイドバー含む) が無効化される → ダイアログ中に別項目を押す再入は起きない。
+                // 非モーダル化 (showAsDialog:false) する場合は再入ガードを足すこと。
                 _ = HandleGuardedExitAsync(e.Page, isBack);
             };
             // (ダッシュボード) 起動着地はダッシュボード (準備完了度の一目把握)。データは背景取得で固めない。
@@ -161,7 +160,6 @@ namespace TonePrism.Manager.Shell
         internal IEditUnsavedGuard ActiveEditGuard;
         private bool _navBypass;       // 確認後の再ナビゲーション中は割り込みを素通りさせる
         private bool _backRequested;   // 編集ページの「戻る」ボタンが GoBack 直前にセット (Navigating で消費し pop と判別)
-        private bool _guardDialogOpen; // (#383 指摘1) 未保存確認ダイアログ表示中フラグ (再入で 2 個目を出さない)
         internal void MarkBackRequested() => _backRequested = true;
 
         private enum UnsavedChoice { Save, Discard, Stay }
@@ -173,12 +171,7 @@ namespace TonePrism.Manager.Shell
             // 編集画面に留める (= 安全側: 未保存は保持される)。
             try
             {
-                UnsavedChoice choice;
-                // ダイアログ await 中だけ再入ガードを立てる (閉じた後の Save/Discard 続行は同期 = ユーザー入力が割り込めない。
-                // Save 経路の WinForms ダイアログ / ProcessingDialog は owner モーダルで主窓を無効化するため別途守られる)。
-                _guardDialogOpen = true;
-                try { choice = await ShowUnsavedDialogAsync(); }
-                finally { _guardDialogOpen = false; }
+                var choice = await ShowUnsavedDialogAsync();   // modal: 表示中は主窓無効化 (別項目クリックは届かない)
                 if (choice == UnsavedChoice.Stay) return;                                  // 編集に戻る (遷移は cancel 済)
                 // 保存: 成功時のみ捕捉した離脱を続行 (失敗=検証エラーはページ留め)。破棄: そのまま続行。(#383 指摘2)
                 if (choice == UnsavedChoice.Save) { ActiveEditGuard?.RequestSaveFromGuard(() => ProceedNavigation(target, isBack)); return; }
