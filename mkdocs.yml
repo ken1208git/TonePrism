@@ -81,6 +81,7 @@ nav:
       - ゲームの追加・編集・更新: usage/games.md
       - ストアの設定: usage/store.md
       - 初回説明の設定: usage/intro.md
+      - 記録を見る: usage/records.md
       - トラブル対応: usage/troubleshooting.md
   - 運用（刀根山）:
       - 当日運用: operations/overview.md
