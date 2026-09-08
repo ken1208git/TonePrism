@@ -508,8 +508,8 @@ TonePrism は、大阪府立刀根山高校パソコン部が文化祭で展示�
   - **ファイル名からの復元**: 中身が壊れたプレイ記録はファイル名 (`<unix_ts>-<game_no>-<uuid>.json`) から回数だけ復元する（→ §7.5.3 の「中身が正本・名前は索引」規約）。アンケートは名前に★が無いので復元しない（回答率の母数がズレる）。
   - **プレイ時間の異常値**: 0 未満（時計の巻き戻り）と 2 時間超（閉じ忘れ）は時間統計から外すが、**プレイ回数には残す**。
   - **ストアの人気順 (#36) とは別集計**。あちらは「直近 N 日の単純回数」の運用値、こちらは会期全体の読み物。共有するのは読み方 (`PlayStatsLoader`) までとする。
-- **書き出し**: 画面の内容を**自己完結の HTML 1 枚**へ出力する（`RecordsHtmlExporter`）。配布先がネットに繋がらない学校 PC / USB 経由を想定し、CSS も含めて**外部参照を一切持たない**（JavaScript も使わない、印刷可）。CSV は未実装。
-- **実装**: `Manager/Shell/Records/`（画面）/ `Manager/Services/PlayStatsLoader.cs`（I/O）/ `Manager/Services/PlayStatsService.cs`（集計・純粋計算）/ `Manager/Services/RecordsHtmlExporter.cs`
+- **書き出しは持たない**: 当初は自己完結 HTML への出力を実装したが、**画面と同じ内容を 2 箇所で持つことになり、表示項目を足すたびに両方直す必要がある**（直し忘れると静かにズレる）ため撤去した。結果を別 PC で見たい場合は `responses/` と `toneprism.db` をその PC の install へ写せば同じ画面が出る。復活させるなら、画面と出力を**同一のモデル（`RecordsViewModel`）から組み立てる**形にすること。
+- **実装**: `Manager/Shell/Records/`（画面・presenter・時間帯グラフ）/ `Manager/Services/PlayStatsLoader.cs`（I/O）/ `Manager/Services/PlayStatsService.cs`（集計・純粋計算）
 
 #### 設定管理機能
 

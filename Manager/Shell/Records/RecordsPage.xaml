@@ -325,8 +325,6 @@
                         <TextBlock x:Name="StatusText" Foreground="#8A9096" FontSize="11.5" Margin="0,2,0,0" />
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                        <ui:Button x:Name="ExportButton" Content="書き出し…" Click="Export_Click"
-                                   Padding="12,5" Margin="0,0,8,0" />
                         <ui:Button x:Name="RefreshButton" Content="更新" Appearance="Primary" Click="Refresh_Click"
                                    Padding="14,5" />
                     </StackPanel>
