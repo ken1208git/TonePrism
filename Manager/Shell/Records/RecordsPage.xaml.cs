@@ -331,18 +331,26 @@ namespace TonePrism.Manager.Shell.Records
             }
         }
 
+        /// <summary>
+        /// 見出し下の 1 行。**ここは「ファイルから読み込んだもの全部」の話で、下の集計とは母数が違う。**
+        /// 期間を絞っても件数は動かない (絞り込みはメモリ上の再集計で、読み込み結果そのものは変わらない)
+        /// ため、黙って並べると下の数字と食い違って見える。**先頭の「全期間：」がそれを引き受ける。**
+        /// </summary>
         private string BuildStatusText()
         {
             if (_data == null) return null;
 
             var parts = new List<string>();
-            parts.Add("プレイ " + _data.Plays.Count + " 件 / アンケート " + _data.Surveys.Count + " 件");
-            if (_data.AvailableDates.Count > 0)
-            {
-                parts.Add(_data.AvailableDates[0].ToString("M/d") + "〜"
-                    + _data.AvailableDates[_data.AvailableDates.Count - 1].ToString("M/d"));
-            }
-            parts.Add(_data.LoadedAt.ToString("HH:mm") + " 時点");
+            string span = _data.AvailableDates.Count > 0
+                ? "（" + _data.AvailableDates[0].ToString("M/d") + "〜"
+                    + _data.AvailableDates[_data.AvailableDates.Count - 1].ToString("M/d") + "）"
+                : string.Empty;
+            parts.Add("全期間：プレイ " + _data.Plays.Count + " 件・アンケート "
+                + _data.Surveys.Count + " 件" + span);
+            // **日付は常に出す。** 走査は「更新」を押したときだけなので、この画面の数字がいつのものかは
+            // ここだけが伝える。「当日は時刻だけ」にすると、日付が無いのが今日だからなのか表示が
+            // 壊れているのか読み手には区別できず、条件で見え方が変わるぶん説明もしづらい。
+            parts.Add(_data.LoadedAt.ToString("M/d HH:mm") + " 時点");
             if (_data.GamesUnavailable) parts.Add("※ゲーム一覧を読めず番号のまま表示しています");
             if (_data.RecoveredFromFileNameCount > 0)
                 parts.Add("※" + _data.RecoveredFromFileNameCount + " 件はファイル名から復元");
