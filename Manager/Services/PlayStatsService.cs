@@ -483,7 +483,13 @@ namespace TonePrism.Manager.Services
 
             int best = pool.Max(g => g.PlayCount);
             List<PlayStatsGroup> winners = pool.Where(g => g.PlayCount == best).ToList();
-            if (winners.Count > PlayStatsTuning.MaxAwardWinners) return null;
+
+            // **ここでは同点を切り捨てない (ゲームの賞と規則を変える)。** ゲーム側の
+            // `MaxAwardWinners` は「4 本が同率 = 指標が差を付けられていない」という失敗の印なので
+            // 賞ごと落としてよい。一方こちらの同点は**共作**で、共作者は同じゲーム群を共有する以上
+            // 合計プレイ回数が必ず一致する = 構造的に起きる正常な結果。4 人で作ったゲームが最多
+            // プレイだったときに賞が消えるのは、まさに表彰したい相手を落とすことになる。
+            // よってチーム全員を連名で出す。
 
             return new PlayStatsAward
             {

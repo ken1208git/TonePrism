@@ -444,6 +444,53 @@ namespace TonePrism.Manager.Tests
         }
 
         [Fact]
+        public void Compute_DeveloperAward_KeepsWholeTeamEvenBeyondTheTieCap()
+        {
+            // 共作者は同じゲーム群を共有するので合計プレイ回数が**必ず一致する**。ゲームの賞の
+            // 同点上限 (3) をそのまま当てると、4 人で作ったゲームが最多プレイだったときに賞が
+            // 丸ごと消え、いちばん表彰したい相手を落とすことになる。全員を連名で出す。
+            GameInfo team = Game(1, "a", "4 人でつくった");
+            team.Developers = new List<DeveloperInfo>
+            {
+                new DeveloperInfo { LastName = "あ", FirstName = "一", Grade = "76" },
+                new DeveloperInfo { LastName = "い", FirstName = "二", Grade = "76" },
+                new DeveloperInfo { LastName = "う", FirstName = "三", Grade = "76" },
+                new DeveloperInfo { LastName = "え", FirstName = "四", Grade = "76" },
+            };
+            var data = new PlayStatsData
+            {
+                Games = new List<GameInfo> { team },
+                Plays = new List<PlayRecordEntry> { Play(1, Day2, 60), Play(1, Day2, 60) },
+            };
+
+            PlayStatsAward award = PlayStatsService.Compute(data, null).Awards
+                .Single(a => a.Title == "いちばん遊ばれた制作者");
+
+            Assert.True(award.IsTie);
+            foreach (string who in new[] { "あ 一", "い 二", "う 三", "え 四" })
+                Assert.Contains(who, award.WinnerNames);
+        }
+
+        [Fact]
+        public void Compute_Awards_DropAnAwardWhenTooManyGamesTie()
+        {
+            // ゲーム側は逆。母数まで並んで 4 本が完全同率なら、その指標は差を付けられていない
+            // = 賞として意味を成さないので出さない (共作の同点とは意味が違う)。
+            var games = new List<GameInfo>();
+            var plays = new List<PlayRecordEntry>();
+            for (int i = 1; i <= 4; i++)
+            {
+                games.Add(Game(i, "g" + i, "同着" + i));
+                plays.Add(Play(i, Day2, 60, "PC-1"));
+            }
+
+            PlayStatsSnapshot snap = PlayStatsService.Compute(
+                new PlayStatsData { Games = games, Plays = plays }, null);
+
+            Assert.DoesNotContain(snap.Awards, a => a.Title == "最多プレイ賞");
+        }
+
+        [Fact]
         public void Presenter_Highlights_ReportFirstLastAndBusiestPc()
         {
             var data = new PlayStatsData
