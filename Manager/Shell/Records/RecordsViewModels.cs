@@ -266,6 +266,8 @@ namespace TonePrism.Manager.Shell.Records
                 };
             }
 
+            // **「この期間の記録」と重ねない。** ピークはあちらが日付つきで持っているので、ここには
+            // 置かない (同じ数字が 2 か所にあると、どちらかを直したときに片方だけ古くなる)。
             vm.Strip = new List<RecordsMeta>
             {
                 new RecordsMeta { Label = "総プレイ時間", Value = PlayStatsService.FormatHours(s.TotalPlaySeconds) },
@@ -274,13 +276,6 @@ namespace TonePrism.Manager.Shell.Records
                 {
                     Label = "アンケート回答",
                     Value = s.TotalSurveys + " 件（ゲーム別 " + s.GameSurveys + "・全体 " + s.Overall.Count + "）",
-                },
-                new RecordsMeta
-                {
-                    Label = "ピーク時間帯",
-                    Value = s.PeakAt.HasValue
-                        ? s.PeakAt.Value.ToString("HH:mm") + " から 15 分で " + s.PeakCount + " プレイ"
-                        : "—",
                 },
             };
         }
@@ -628,18 +623,8 @@ namespace TonePrism.Manager.Shell.Records
                     Value = snap.BusiestPc + "　" + snap.BusiestPcPlays + " プレイ",
                 });
             }
-            rows.Add(new RecordsMeta
-            {
-                Label = "遊ばれたゲーム",
-                // 登録本数はゲーム一覧を読めたときだけ添える (読めないと「登録 0 本」という嘘になる)。
-                Value = snap.PlayedGameCount + " 種類"
-                    + (snap.RegisteredGameCount > 0 ? "　（登録 " + snap.RegisteredGameCount + " 本）" : ""),
-            });
-            rows.Add(new RecordsMeta
-            {
-                Label = "総プレイ時間",
-                Value = PlayStatsService.FormatHours(snap.TotalPlaySeconds),
-            });
+            // 遊ばれたゲーム数は「遊ばれたゲーム」メーターが、総プレイ時間は概況の帯が持っている。
+            // 同じ数字を 2 か所に出さない。
             return rows;
         }
 
