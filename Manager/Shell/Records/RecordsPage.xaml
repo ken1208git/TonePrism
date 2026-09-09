@@ -180,7 +180,7 @@
                         <ColumnDefinition Width="{Binding BarStar}" />
                         <ColumnDefinition Width="{Binding RestStar}" />
                     </Grid.ColumnDefinitions>
-                    <Border Grid.Column="0" Height="11" CornerRadius="5.5" Background="#FF3C6FB4" />
+                    <Border Grid.Column="0" Height="11" MinWidth="11" CornerRadius="5.5" Background="#FF3C6FB4" />
                 </Grid>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="{Binding PlaysText}" Foreground="#ECECEC" FontSize="12" MinWidth="62" />
@@ -277,7 +277,7 @@
                                                             <ColumnDefinition Width="{Binding BarStar}" />
                                                             <ColumnDefinition Width="{Binding RestStar}" />
                                                         </Grid.ColumnDefinitions>
-                                                        <Border Grid.Column="0" Height="11" CornerRadius="5.5" Background="#FF3C6FB4" />
+                                                        <Border Grid.Column="0" Height="11" MinWidth="11" CornerRadius="5.5" Background="#FF3C6FB4" />
                                                     </Grid>
 
                                                     <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">

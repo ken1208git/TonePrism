@@ -160,8 +160,21 @@ namespace TonePrism.Manager.Shell.Records
         private const double DetailBarMax = 165;
         private const double HourBarMax = 110;
 
+        /// <summary>
+        /// 棒の高さ (XAML と揃えること)。**0 より大きい値の棒はこれ未満にしない** — 幅が直径を下回ると
+        /// 角丸が潰れて、丸い棒ではなく細い縦棒に見える (実測で 2px の棒が出ていた)。
+        /// </summary>
+        private const double BarHeight = 11;
+
         /// <summary>0 より大きい値は必ず見えるだけの太さを残す (0 と「ごくわずか」を見分けるため)。</summary>
         private const double MinVisibleBar = 0.02;
+
+        /// <summary>比率を px に。0 は 0、それ以外は最低でも高さぶん確保して丸い形を保つ。</summary>
+        private static double BarPx(double ratio, double max)
+        {
+            if (ratio <= 0) return 0;
+            return Math.Max(BarHeight, Math.Min(1, ratio) * max);
+        }
 
         private static GridLength Bar(double ratio)
         {
@@ -443,7 +456,7 @@ namespace TonePrism.Manager.Shell.Records
                     Label = new string('★', star),
                     CountText = c.ToString(CultureInfo.InvariantCulture) + " 件",
                     PercentText = total > 0 ? (100.0 * c / total).ToString("0.0") + "%" : "—",
-                    BarWidth = max > 0 ? (double)c / max * DetailBarMax : 0,
+                    BarWidth = BarPx(max > 0 ? (double)c / max : 0, DetailBarMax),
                     Highlight = max > 0 && c == max,
                 });
             }
@@ -463,7 +476,7 @@ namespace TonePrism.Manager.Shell.Records
                     CountText = counts[i] + " 回",
                     PercentText = g.SaneDurationCount > 0
                         ? (100.0 * counts[i] / g.SaneDurationCount).ToString("0") + "%" : "—",
-                    BarWidth = max > 0 ? (double)counts[i] / max * DetailBarMax : 0,
+                    BarWidth = BarPx(max > 0 ? (double)counts[i] / max : 0, DetailBarMax),
                     Highlight = max > 0 && counts[i] == max,
                 });
             }
@@ -486,7 +499,7 @@ namespace TonePrism.Manager.Shell.Records
                     Label = i.ToString("00") + "時",
                     CountText = h[i] + " 回",
                     PercentText = null,
-                    BarWidth = (double)h[i] / max * HourBarMax,
+                    BarWidth = BarPx((double)h[i] / max, HourBarMax),
                     Highlight = h[i] == max,
                 });
             }
