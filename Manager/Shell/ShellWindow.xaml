@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:local="clr-namespace:TonePrism.Manager.Shell"
+    xmlns:records="clr-namespace:TonePrism.Manager.Shell.Records"
     Title="TonePrism マネージャー"
     Width="1040" Height="680"
     MinWidth="820" MinHeight="520"
@@ -75,6 +76,11 @@
                 </ui:NavigationViewItem>
                 <ui:NavigationViewItem Content="ログ" TargetPageType="{x:Type local:LogHostPage}">
                     <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="Document24" /></ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <!-- (#464) 会期のプレイ記録・アンケートの振り返り (読み取り専用)。
+                     『ログ』は障害調査用の生ログ、こちらは来場データの集計で目的が違うので別項目にする。 -->
+                <ui:NavigationViewItem Content="記録" TargetPageType="{x:Type records:RecordsPage}">
+                    <ui:NavigationViewItem.Icon><ui:SymbolIcon Symbol="DataHistogram24" /></ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
             </ui:NavigationView.MenuItems>
             <ui:NavigationView.FooterMenuItems>

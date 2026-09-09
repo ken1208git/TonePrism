@@ -1,0 +1,634 @@
+<Page
+    x:Class="TonePrism.Manager.Shell.Records.RecordsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:local="clr-namespace:TonePrism.Manager.Shell.Records"
+    Background="#FF202020">
+
+    <!-- (#464) 会期の記録 (responses/) を DB のゲーム情報と突き合わせて振り返る読み取り専用ページ。
+         書き込みは一切しない。記録は取り直しの効かないデータなので、この画面から DB / responses を
+         変更する API を足さないこと。
+         注意: DataTemplate 内の TextBlock には Page.Resources の暗黙スタイルが届かず WPF 既定の黒文字に
+         落ちるため、テンプレ内テキストは必ず明示 Foreground を付ける (DashboardPage と同じ罠)。
+
+         **並び順の規約: 高さが読めるパネルを上、データ次第で伸びるパネルを下に置く。**
+         ゲーム別は登録ゲーム数ぶん行が伸び (29 本なら約 1900px、行を展開すればさらに)、その下に
+         置いたパネルは事実上たどり着けなくなる。概況・時間帯・全体アンケート・注記は件数に関係なく
+         高さがほぼ一定なので上に固め、可変長 (切り口別 → コメント → ゲーム別) を長い順に下へ送る。
+         新しいパネルを足すときもこの規約に従うこと。 -->
+
+    <Page.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#ECECEC" />
+        </Style>
+
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="#FF2B2B2B" />
+            <Setter Property="BorderBrush" Value="#1AFFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="18,15" />
+            <Setter Property="Margin" Value="0,0,0,14" />
+        </Style>
+
+        <Style x:Key="CardHeader" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#ECECEC" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+
+        <Style x:Key="Caption" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#9AA0A6" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+
+        <!-- 期間 / 指標 / 切り口の選択チップ。RadioButton を丸いタブに見せる。 -->
+        <Style x:Key="Chip" TargetType="RadioButton">
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Bg" Background="#FF333333" BorderBrush="#22FFFFFF"
+                                BorderThickness="1" CornerRadius="14" Padding="13,5">
+                            <TextBlock x:Name="Tx" Text="{TemplateBinding Content}"
+                                       Foreground="#C2C7CC" FontSize="12" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#FF3C6FB4" />
+                                <Setter TargetName="Bg" Property="BorderBrush" Value="#FF5C93DC" />
+                                <Setter TargetName="Tx" Property="Foreground" Value="#FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="BorderBrush" Value="#55FFFFFF" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 表彰カード 1 枚 -->
+        <DataTemplate x:Key="AwardTemplate">
+            <Border Background="#FF332D1F" BorderBrush="#55E0A03E" BorderThickness="1"
+                    CornerRadius="8" Padding="15,12" Margin="0,0,12,12" MinWidth="236" MaxWidth="300">
+                <StackPanel>
+                    <TextBlock Text="{Binding Title}" Foreground="#F0C97C" FontSize="11.5" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding WinnerNames}" Foreground="#F2F2F2" FontSize="15"
+                               FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    <TextBlock Text="{Binding ValueText}" Foreground="#E8B863" FontSize="19"
+                               FontWeight="SemiBold" Margin="0,1,0,0" />
+                    <TextBlock Text="{Binding Note}" Foreground="#A79B85" FontSize="10.5" TextWrapping="Wrap"
+                               Visibility="{Binding HasNote, Converter={StaticResource BoolToVis}}" />
+                    <TextBlock Text="{Binding Criterion}" Foreground="#8A8477" FontSize="10"
+                               TextWrapping="Wrap" Margin="0,5,0,0" />
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <!-- 汎用の横棒 1 行 (★内訳・時間分布) -->
+        <DataTemplate x:Key="BarTemplate">
+            <Grid Margin="0,0,0,5">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="76" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{Binding Label}" Foreground="#C2C7CC" FontSize="11.5"
+                           VerticalAlignment="Center" />
+                <!-- **長さは星指定** (px 固定だと列が狭いとき行ごと切られ、丸い右端だけ消える)。
+                     高さと角丸は全ての棒で揃える。角丸は高さの半分 = ピル。
+                     MinWidth は直径ぶん — これを下回ると角丸が潰れて細い縦棒に見える。 -->
+                <Grid Grid.Column="1" VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="{Binding BarStar}" />
+                        <ColumnDefinition Width="{Binding RestStar}" />
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Height="11" MinWidth="11" CornerRadius="5.5"
+                            Visibility="{Binding HasBar, Converter={StaticResource BoolToVis}}">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#FF3C6FB4" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Highlight}" Value="True">
+                                        <Setter Property="Background" Value="#FF5C93DC" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                    </Border>
+                </Grid>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                    <TextBlock Text="{Binding CountText}" Foreground="#ECECEC" FontSize="11.5" MinWidth="46" />
+                    <TextBlock Text="{Binding PercentText}" Foreground="#8A9096" FontSize="10.5" MinWidth="42" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <!-- 概況ストリップ 1 項目 (上限の無い数字はメーターにせず数値のまま並べる) -->
+        <DataTemplate x:Key="StripTemplate">
+            <StackPanel Margin="0,0,34,0">
+                <TextBlock Text="{Binding Label}" Foreground="#8A9096" FontSize="10.5" />
+                <TextBlock Text="{Binding Value}" Foreground="#ECECEC" FontSize="14"
+                           FontWeight="SemiBold" Margin="0,2,0,0" />
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- メタ情報 1 行 -->
+        <DataTemplate x:Key="MetaTemplate">
+            <Grid Margin="0,0,0,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="150" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{Binding Label}" Foreground="#8A9096" FontSize="11.5" />
+                <TextBlock Grid.Column="1" Text="{Binding Value}" Foreground="#ECECEC" FontSize="11.5"
+                           TextWrapping="Wrap" />
+            </Grid>
+        </DataTemplate>
+
+        <!-- コメント 1 件 -->
+        <DataTemplate x:Key="CommentTemplate">
+            <Border Background="#FF303030" BorderBrush="#1AFFFFFF" BorderThickness="1"
+                    CornerRadius="6" Padding="12,9" Margin="0,0,0,8">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                        <TextBlock Text="{Binding RatingStars}" Foreground="#E0A03E" FontSize="12" />
+                        <TextBlock Text="{Binding GameTitle}" Foreground="#C2C7CC" FontSize="11.5" Margin="10,0,0,0" />
+                        <TextBlock Text="{Binding AtDisplay}" Foreground="#7C8288" FontSize="10.5" Margin="10,0,0,0" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding Text}" Foreground="#ECECEC" FontSize="12.5" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <!-- 切り口別 1 行 -->
+        <DataTemplate x:Key="GroupTemplate">
+            <Grid Margin="0,0,0,7">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="210" MinWidth="120" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                    <TextBlock Text="{Binding Key}" Foreground="#ECECEC" FontSize="12.5" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding TopGameText}" Foreground="#7C8288" FontSize="10.5"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <Grid Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="{Binding BarStar}" />
+                        <ColumnDefinition Width="{Binding RestStar}" />
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Height="11" MinWidth="11" CornerRadius="5.5" Background="#FF3C6FB4"
+                            Visibility="{Binding HasBar, Converter={StaticResource BoolToVis}}" />
+                </Grid>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding PlaysText}" Foreground="#ECECEC" FontSize="12" MinWidth="62" />
+                    <TextBlock Text="{Binding GamesText}" Foreground="#8A9096" FontSize="11" MinWidth="50" />
+                    <TextBlock Text="{Binding RatingText}" Foreground="#C2C7CC" FontSize="11" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <!-- ゲーム 1 行。ヘッダをクリックすると詳細が開く (自前テンプレートの Expander)。 -->
+        <DataTemplate x:Key="GameRowTemplate">
+            <Border Background="#FF303030" BorderBrush="#1AFFFFFF" BorderThickness="1"
+                    CornerRadius="8" Margin="0,0,0,8">
+                <Expander Background="Transparent" BorderThickness="0">
+                    <Expander.Style>
+                        <Style TargetType="Expander">
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="Expander">
+                                        <StackPanel>
+                                            <!-- **Horizontal*Alignment を 2 つとも明示すること**。これが無いと行の中身が
+                                                 希望幅に縮んで左寄せになり、見出し行と右側 4 指標の列が揃わない。
+                                                 決定的だったのは HorizontalAlignment の方で、**WPF-UI の暗黙 ToggleButton スタイルが
+                                                 左寄せを setter で当ててくる**ため (Template だけ差し替えても style setter は生き残る)。
+                                                 レンダリングして目で見ないと気づけない種類のズレなので、外さないこと。 -->
+                                            <ToggleButton x:Name="Head" Cursor="Hand" HorizontalContentAlignment="Stretch"
+                                                          HorizontalAlignment="Stretch"
+                                                          IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                                                <ToggleButton.Template>
+                                                    <ControlTemplate TargetType="ToggleButton">
+                                                        <Border x:Name="HeadBg" Background="Transparent" Padding="14,11"
+                                                                HorizontalAlignment="Stretch">
+                                                            <ContentPresenter HorizontalAlignment="Stretch" />
+                                                        </Border>
+                                                        <ControlTemplate.Triggers>
+                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                <Setter TargetName="HeadBg" Property="Background" Value="#12FFFFFF" />
+                                                            </Trigger>
+                                                        </ControlTemplate.Triggers>
+                                                    </ControlTemplate>
+                                                </ToggleButton.Template>
+
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <!-- **縮むのは名前と棒 (星指定) だけ**。ここを固定幅にすると、
+                                                             幅が足りないときに右端の指標が切られる (実際に見切れた)。
+                                                             指標側は Auto のまま = 必ず全部出る。 -->
+                                                        <ColumnDefinition Width="34" />
+                                                        <ColumnDefinition Width="2*" MinWidth="96" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="1*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="30" />
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <TextBlock Grid.Column="0" Text="{Binding RankText}" Foreground="#7C8288"
+                                                               FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+
+                                                    <StackPanel Grid.Column="1" Margin="0,0,12,0" VerticalAlignment="Center">
+                                                        <!-- Grid にしているのは TextTrimming のため。横 StackPanel の中の
+                                                             TextBlock は無限幅で測られるので省略記号が出ず、はみ出す。 -->
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Grid.Column="0" Text="{Binding Title}" Foreground="#F2F2F2" FontSize="13.5"
+                                                                       FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                            <Border Grid.Column="1" Background="#33FFFFFF" CornerRadius="4" Padding="5,0" Margin="8,1,0,0"
+                                                                    VerticalAlignment="Center"
+                                                                    Visibility="{Binding HasBadge, Converter={StaticResource BoolToVis}}">
+                                                                <TextBlock Text="{Binding Badge}" Foreground="#D8DDE2" FontSize="10" />
+                                                            </Border>
+                                                        </Grid>
+                                                        <TextBlock Text="{Binding SubTitle}" Foreground="#7C8288" FontSize="10.5"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+
+                                                    <StackPanel Grid.Column="2" VerticalAlignment="Center" MinWidth="92" Margin="0,0,10,0">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="{Binding MetricText}" Foreground="#F2F2F2"
+                                                                       FontSize="15" FontWeight="SemiBold" />
+                                                            <Border Background="#44A0783C" CornerRadius="4" Padding="5,0" Margin="7,3,0,0"
+                                                                    VerticalAlignment="Center"
+                                                                    Visibility="{Binding IsReference, Converter={StaticResource BoolToVis}}">
+                                                                <TextBlock Text="参考" Foreground="#E8C48A" FontSize="9.5" />
+                                                            </Border>
+                                                        </StackPanel>
+                                                        <TextBlock Text="{Binding MetricSubText}" Foreground="#7C8288" FontSize="10" />
+                                                    </StackPanel>
+
+                                                    <Grid Grid.Column="3" VerticalAlignment="Center" Margin="0,0,10,0">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="{Binding BarStar}" />
+                                                            <ColumnDefinition Width="{Binding RestStar}" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <Border Grid.Column="0" Height="11" MinWidth="11" CornerRadius="5.5" Background="#FF3C6FB4"
+                            Visibility="{Binding HasBar, Converter={StaticResource BoolToVis}}" />
+                                                    </Grid>
+
+                                                    <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding PlaysText}" Foreground="#C2C7CC" FontSize="11.5" MinWidth="56" TextAlignment="Right" />
+                                                        <TextBlock Text="{Binding RatingText}" Foreground="#C2C7CC" FontSize="11.5" MinWidth="58" TextAlignment="Right" />
+                                                        <TextBlock Text="{Binding DurationText}" Foreground="#C2C7CC" FontSize="11.5" MinWidth="70" TextAlignment="Right" />
+                                                        <TextBlock Text="{Binding ResponseRateText}" Foreground="#C2C7CC" FontSize="11.5" MinWidth="46" TextAlignment="Right" />
+                                                    </StackPanel>
+
+                                                    <!-- 展開マーク。小さい「⌄」だけだとクリックできることに気づけないので、
+                                                         丸い受け皿を敷いて面積とコントラストを上げる。 -->
+                                                    <Border x:Name="ArrowChip" Grid.Column="5" Width="26" Height="26"
+                                                            CornerRadius="13" Background="#1FFFFFFF"
+                                                            VerticalAlignment="Center" HorizontalAlignment="Right">
+                                                        <TextBlock x:Name="Arrow" Text="⌄" Foreground="#E4E4E4"
+                                                                   FontSize="15" FontWeight="Bold"
+                                                                   VerticalAlignment="Center" HorizontalAlignment="Center"
+                                                                   Margin="0,-3,0,0" />
+                                                    </Border>
+                                                </Grid>
+                                            </ToggleButton>
+
+                                            <ContentPresenter x:Name="Body" Visibility="Collapsed" />
+                                        </StackPanel>
+
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsExpanded" Value="True">
+                                                <Setter TargetName="Body" Property="Visibility" Value="Visible" />
+                                                <Setter TargetName="Arrow" Property="Text" Value="⌃" />
+                                                <Setter TargetName="Arrow" Property="Margin" Value="0,3,0,0" />
+                                                <Setter TargetName="ArrowChip" Property="Background" Value="#FF3C6FB4" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </Expander.Style>
+
+                    <!-- 展開したときの中身 -->
+                    <Border Background="#FF2A2A2A" CornerRadius="0,0,8,8" Padding="16,14">
+                        <StackPanel>
+                            <TextBlock Text="{Binding EmptyNote}" Foreground="#9AA0A6" FontSize="12" TextWrapping="Wrap"
+                                       Visibility="{Binding HasEmptyNote, Converter={StaticResource BoolToVis}}" />
+
+                            <Grid Visibility="{Binding HasPlays, Converter={StaticResource BoolToVis}}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0" Margin="0,0,18,0">
+                                    <TextBlock Text="評価の内訳" Foreground="#C2C7CC" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,8"
+                                               Visibility="{Binding HasSurveys, Converter={StaticResource BoolToVis}}" />
+                                    <ItemsControl ItemsSource="{Binding RatingBars}" ItemTemplate="{StaticResource BarTemplate}"
+                                                  Visibility="{Binding HasSurveys, Converter={StaticResource BoolToVis}}" />
+
+                                    <TextBlock Text="1回あたりのプレイ時間" Foreground="#C2C7CC" FontSize="12" FontWeight="SemiBold"
+                                               Margin="0,14,0,8" />
+                                    <ItemsControl ItemsSource="{Binding DurationBars}" ItemTemplate="{StaticResource BarTemplate}" />
+
+                                    <TextBlock Text="遊ばれた時間帯" Foreground="#C2C7CC" FontSize="12" FontWeight="SemiBold"
+                                               Margin="0,14,0,8" />
+                                    <ItemsControl ItemsSource="{Binding HourBars}" ItemTemplate="{StaticResource BarTemplate}" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="このゲームについて" Foreground="#C2C7CC" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,8" />
+                                    <ItemsControl ItemsSource="{Binding Meta}" ItemTemplate="{StaticResource MetaTemplate}" />
+
+                                    <TextBlock Text="{Binding CommentsHeader}" Foreground="#C2C7CC" FontSize="12" FontWeight="SemiBold"
+                                               Margin="0,16,0,8"
+                                               Visibility="{Binding HasComments, Converter={StaticResource BoolToVis}}" />
+                                    <ItemsControl ItemsSource="{Binding Comments}" ItemTemplate="{StaticResource CommentTemplate}"
+                                                  Visibility="{Binding HasComments, Converter={StaticResource BoolToVis}}" />
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </Expander>
+            </Border>
+        </DataTemplate>
+    </Page.Resources>
+
+    <Grid>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
+            <StackPanel Margin="24,20,24,32">
+
+                <!-- ===== ヘッダ ===== -->
+                <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="記録" FontSize="22" FontWeight="SemiBold" Foreground="#F2F2F2" />
+                        <TextBlock x:Name="StatusText" Foreground="#8A9096" FontSize="11.5" Margin="0,2,0,0" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <ui:Button x:Name="RefreshButton" Content="更新" Appearance="Primary" Click="Refresh_Click"
+                                   Padding="14,5" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- 期間の選択。チップ (プリセット) + 「期間を指定」で開く日付ピッカー。 -->
+                <StackPanel x:Name="FilterArea" Margin="0,10,0,16">
+                    <StackPanel x:Name="DayFilterPanel" Orientation="Horizontal" />
+                    <StackPanel x:Name="CustomRangePanel" Orientation="Horizontal"
+                                Margin="0,10,0,0" Visibility="Collapsed">
+                        <TextBlock Text="開始" Foreground="#9AA0A6" FontSize="11.5"
+                                   VerticalAlignment="Center" Margin="0,0,7,0" />
+                        <DatePicker x:Name="RangeFrom" Width="140"
+                                    SelectedDateChanged="CustomRange_Changed" />
+                        <TextBlock Text="〜" Foreground="#9AA0A6" FontSize="12"
+                                   VerticalAlignment="Center" Margin="9,0,9,0" />
+                        <TextBlock Text="終了" Foreground="#9AA0A6" FontSize="11.5"
+                                   VerticalAlignment="Center" Margin="0,0,7,0" />
+                        <DatePicker x:Name="RangeTo" Width="140"
+                                    SelectedDateChanged="CustomRange_Changed" />
+                        <TextBlock x:Name="RangeSummary" Foreground="#7C8288" FontSize="11.5"
+                                   VerticalAlignment="Center" Margin="14,0,0,0" />
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- ===== 読み込み中 / 空 ===== -->
+                <Border x:Name="LoadingPanel" Style="{StaticResource Card}" Visibility="Collapsed">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:ProgressRing IsIndeterminate="True" Width="22" Height="22" Margin="0,0,12,0" />
+                        <TextBlock Text="記録を読み込んでいます…" Foreground="#C2C7CC" FontSize="12.5" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+
+                <Border x:Name="EmptyPanel" Style="{StaticResource Card}" Visibility="Collapsed">
+                    <TextBlock x:Name="EmptyText" Foreground="#C2C7CC" FontSize="12.5" TextWrapping="Wrap" />
+                </Border>
+
+                <StackPanel x:Name="ContentRoot">
+
+                    <!-- ===== 概況 =====
+                         形は指標の性質で決めている:
+                          - ヒーロー数値は 1 画面に 1 つだけ (プレイ回数)。
+                          - 弧のメーターは**上限が実在する比率**にだけ使う (5 点満点 / 回答 ÷ プレイ /
+                            遊ばれた種類 ÷ 登録数)。上限の無い量に当てると存在しない目標を発明する。
+                          - 残りの量 (総プレイ時間・台数) はメーターにせず数値のまま帯に並べる。
+                         **ここにグラフは置かない。** 時間帯のスパークラインを置いていたが、期間が短いと
+                         下の「いつ遊ばれたか」と同じ絵になった (役割が分かれるのは期間が長いときだけで、
+                         「長い期間のときだけ意味が違う」区別は説明できない)。
+                         色は 3 指標の識別用。ダーク面で CVD 検証済み (最悪隣接 ΔE 8.4)。
+                         文字は必ず文字色トークンのままにし、色は弧だけが持つ。 -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <!-- ヒーロー数値 -->
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,28,0" MinWidth="190">
+                                    <TextBlock x:Name="HeroLabel" Foreground="#9AA0A6" FontSize="12" />
+                                    <TextBlock x:Name="HeroValue" Foreground="#F2F2F2" FontSize="52"
+                                               FontWeight="SemiBold" Margin="0,-4,0,-4" />
+                                    <TextBlock x:Name="HeroSub" Foreground="#8A9096" FontSize="11.5"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <!-- 上限の無い数字。ヒーロー数値の横に置く (下に別の帯を作らない)。 -->
+                                <Border Grid.Column="1" Background="#14FFFFFF" CornerRadius="6"
+                                        Padding="16,12" VerticalAlignment="Center">
+                                    <ItemsControl x:Name="StripList" ItemTemplate="{StaticResource StripTemplate}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                    </ItemsControl>
+                                </Border>
+                            </Grid>
+
+                            <!-- メーター 3 つ -->
+                            <UniformGrid x:Name="MetersPanel" Columns="3" Margin="0,18,0,0">
+                                <Grid x:Name="RatingMeterHost" Margin="0,0,10,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid Grid.Column="0" Width="86" Height="86">
+                                        <local:StatMeter x:Name="RatingMeter" />
+                                        <TextBlock x:Name="RatingMeterValue" Foreground="#F2F2F2" FontSize="17"
+                                                   FontWeight="SemiBold" HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                                    </Grid>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0">
+                                        <TextBlock x:Name="RatingMeterLabel" Foreground="#ECECEC" FontSize="12.5"
+                                                   FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="RatingMeterSub" Foreground="#8A9096" FontSize="10.5"
+                                                   TextWrapping="Wrap" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid x:Name="ResponseMeterHost" Margin="0,0,10,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid Grid.Column="0" Width="86" Height="86">
+                                        <local:StatMeter x:Name="ResponseMeter" />
+                                        <TextBlock x:Name="ResponseMeterValue" Foreground="#F2F2F2" FontSize="17"
+                                                   FontWeight="SemiBold" HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                                    </Grid>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0">
+                                        <TextBlock x:Name="ResponseMeterLabel" Foreground="#ECECEC" FontSize="12.5"
+                                                   FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="ResponseMeterSub" Foreground="#8A9096" FontSize="10.5"
+                                                   TextWrapping="Wrap" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid x:Name="CoverageMeterHost">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid Grid.Column="0" Width="86" Height="86">
+                                        <local:StatMeter x:Name="CoverageMeter" />
+                                        <TextBlock x:Name="CoverageMeterValue" Foreground="#F2F2F2" FontSize="17"
+                                                   FontWeight="SemiBold" HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                                    </Grid>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0">
+                                        <TextBlock x:Name="CoverageMeterLabel" Foreground="#ECECEC" FontSize="12.5"
+                                                   FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="CoverageMeterSub" Foreground="#8A9096" FontSize="10.5"
+                                                   TextWrapping="Wrap" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </Grid>
+                            </UniformGrid>
+
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ===== 表彰 ===== -->
+                    <Border x:Name="AwardsCard" Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="表彰" Style="{StaticResource CardHeader}" />
+                            <ItemsControl x:Name="AwardsList" ItemTemplate="{StaticResource AwardTemplate}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ===== この期間の記録 ===== -->
+                    <Border x:Name="HighlightsCard" Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="この期間の記録" Style="{StaticResource CardHeader}" />
+                            <ItemsControl x:Name="HighlightsList" ItemTemplate="{StaticResource MetaTemplate}" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ===== 時間帯 ===== -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="いつ遊ばれたか" Style="{StaticResource CardHeader}" />
+                            <TextBlock x:Name="TrendCaption" Style="{StaticResource Caption}" />
+                            <local:TimelineChart x:Name="TrendChart" Height="190" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ===== 全体アンケート ===== -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="全体アンケート" Style="{StaticResource CardHeader}" />
+                            <TextBlock x:Name="OverallCaption" Style="{StaticResource Caption}" />
+                            <ItemsControl x:Name="OverallBars" ItemTemplate="{StaticResource BarTemplate}" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ===== 切り口別 ===== -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="切り口べつに見る" Style="{StaticResource CardHeader}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,10">
+                                <RadioButton x:Name="AxisGenre" Style="{StaticResource Chip}" Content="ジャンル"
+                                             GroupName="axis" IsChecked="True" Checked="Axis_Changed" />
+                                <RadioButton x:Name="AxisDifficulty" Style="{StaticResource Chip}" Content="難易度"
+                                             GroupName="axis" Checked="Axis_Changed" />
+                                <RadioButton x:Name="AxisGrade" Style="{StaticResource Chip}" Content="期生"
+                                             GroupName="axis" Checked="Axis_Changed" />
+                                <RadioButton x:Name="AxisDeveloper" Style="{StaticResource Chip}" Content="制作者"
+                                             GroupName="axis" Checked="Axis_Changed" />
+                            </StackPanel>
+                            <TextBlock Text="1 本のゲームが複数に属することがあるため、合計は全体と一致しません。"
+                                       Style="{StaticResource Caption}" />
+                            <ItemsControl x:Name="GroupsList" ItemTemplate="{StaticResource GroupTemplate}" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ===== コメント ===== -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="もらったコメント" Style="{StaticResource CardHeader}" />
+                            <TextBlock x:Name="CommentsCaption" Style="{StaticResource Caption}" />
+                            <ItemsControl x:Name="CommentsList" ItemTemplate="{StaticResource CommentTemplate}" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ===== ゲーム別ランキング ===== -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="ゲーム別" Style="{StaticResource CardHeader}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,10">
+                                <RadioButton x:Name="MetricPlays" Style="{StaticResource Chip}" Content="遊ばれた回数"
+                                             GroupName="metric" IsChecked="True" Checked="Metric_Changed" />
+                                <RadioButton x:Name="MetricRating" Style="{StaticResource Chip}" Content="平均★"
+                                             GroupName="metric" Checked="Metric_Changed" />
+                                <RadioButton x:Name="MetricDuration" Style="{StaticResource Chip}" Content="合計プレイ時間"
+                                             GroupName="metric" Checked="Metric_Changed" />
+                                <RadioButton x:Name="MetricRate" Style="{StaticResource Chip}" Content="アンケート回答率"
+                                             GroupName="metric" Checked="Metric_Changed" />
+                            </StackPanel>
+                            <TextBlock x:Name="RankingCaption" Style="{StaticResource Caption}" />
+
+                            <!-- 一覧の見出し (行の右側 4 指標に対応)。
+                                 右余白は行側の内訳と厳密に合わせること:
+                                 枠 1 + Border の Padding 14 + 展開マーク列 30 = 45px。
+                                 ここがずれると見出しラベルと値の右端が縦に揃わない。 -->
+                            <Grid Margin="0,0,45,6">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <TextBlock Text="回数" Foreground="#7C8288" FontSize="10.5" MinWidth="56" TextAlignment="Right" />
+                                    <TextBlock Text="平均★" Foreground="#7C8288" FontSize="10.5" MinWidth="58" TextAlignment="Right" />
+                                    <TextBlock Text="合計時間" Foreground="#7C8288" FontSize="10.5" MinWidth="70" TextAlignment="Right" />
+                                    <TextBlock Text="回答率" Foreground="#7C8288" FontSize="10.5" MinWidth="46" TextAlignment="Right" />
+                                </StackPanel>
+                            </Grid>
+
+                            <ItemsControl x:Name="GamesList" ItemTemplate="{StaticResource GameRowTemplate}" />
+                        </StackPanel>
+                    </Border>
+
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Page>

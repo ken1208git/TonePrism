@@ -243,8 +243,15 @@ namespace TonePrism.Manager
         /// </summary>
         public static string PlayRecordsFolder
         {
-            get { return Path.Combine(ResponsesFolder, "play_records"); }
+            get { return Path.Combine(ResponsesFolder, PlayRecordsFolderName); }
         }
+
+        /// <summary>
+        /// `responses/` 直下のフォルダ名。**別の場所から持ち帰った `responses/` を読む側
+        /// (`PlayStatsLoader`) が同じ名前を組み立てる必要があるので公開する。** ベタ書きだと
+        /// 片方を改名しても気づけず、失敗の出方が「まだ記録がありません」で silent になる。
+        /// </summary>
+        public const string PlayRecordsFolderName = "play_records";
 
         /// <summary>
         /// (#297) アンケートの data drop folder (`&lt;install&gt;/responses/surveys/`)。命名規則は
@@ -252,8 +259,11 @@ namespace TonePrism.Manager
         /// </summary>
         public static string SurveysFolder
         {
-            get { return Path.Combine(ResponsesFolder, "surveys"); }
+            get { return Path.Combine(ResponsesFolder, SurveysFolderName); }
         }
+
+        /// <summary><see cref="PlayRecordsFolderName"/> と対。</summary>
+        public const string SurveysFolderName = "surveys";
 
         /// <summary>
         /// アップデート用 staging dir (`%TEMP%/TonePrism_update_<version>/`)。SPEC §3.7.3 [6]。
