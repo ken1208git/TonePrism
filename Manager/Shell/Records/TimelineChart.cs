@@ -13,24 +13,33 @@ namespace TonePrism.Manager.Shell.Records
     /// 依存を 1 つ増やすと配布 zip・オフライン更新・ライセンス表記まで波及する (Manager は単一 exe を
     /// SMB 越しに置き換える配布形態)。`OnRender` 数十行で足りるものに依存は増やさない。
     ///
-    /// **見た目は Windows 標準寄り** (タスクマネージャーのグラフが基準): 実測値どおりの折れ線、
-    /// 平坦な半透明の塗り、髪の毛ほどのグリッド。スプラインで滑らかにする案は取っていない —
-    /// 15 分刻みの実測点の間を勝手に補間すると、記録に無い山や谷を描くことになるため。
+    /// **柱で描く。折れ線ではない。** これは「15 分ごとに何回遊ばれたか」= ビンに入った件数で、
+    /// 連続量を一定間隔で測った値ではない。線でつなぐと点と点の間を補間することになり、記録に無い
+    /// 山や谷を描く (スプラインを外したのと同じ理由が、折れ線そのものにも当てはまる)。柱なら 1 本が
+    /// 「この 15 分に N 回」という完結した事実になる。
+    ///
+    /// ページ内の他の棒 (★内訳 / プレイ時間分布 / ランキング / 切り口別) と同じ語彙になる利点もある。
     /// </summary>
     public sealed class TimelineChart : FrameworkElement
     {
-        // 概況のメーターと同じ青 (CVD 検証済みの slot)。画面内でアクセント色を増やさない。
-    private static readonly Brush LineBrush = new SolidColorBrush(Color.FromRgb(0x39, 0x87, 0xE5));
-        private static readonly Brush AxisBrush = new SolidColorBrush(Color.FromRgb(0x6A, 0x6A, 0x6A));
+            private static readonly Brush AxisBrush = new SolidColorBrush(Color.FromRgb(0x6A, 0x6A, 0x6A));
         private static readonly Brush LabelBrush = new SolidColorBrush(Color.FromRgb(0x9A, 0xA0, 0xA6));
         private static readonly Brush PeakBrush = new SolidColorBrush(Color.FromRgb(0xE0, 0xA0, 0x3E));
         private static readonly Brush EmptyBrush = new SolidColorBrush(Color.FromRgb(0x77, 0x7D, 0x83));
-        private static readonly Pen LinePen = MakePen(LineBrush, 1.6);
+        // 柱は塗りで描く (線ではない)。ピークだけ明るくして直接ラベルと対応させる。
+        private static readonly Brush ColumnBrush = Freeze(new SolidColorBrush(Color.FromRgb(0x39, 0x87, 0xE5)));
+        private static readonly Brush PeakColumnBrush = Freeze(new SolidColorBrush(Color.FromRgb(0x6C, 0xA8, 0xF0)));
+        /// <summary>柱と柱のすき間 (px)。隣同士がくっつくと 1 本の帯に見えて境目が読めない。</summary>
+        private const double ColumnGap = 2;
+
+        /// <summary>
+        /// 柱の最大幅 (px)。記録が少ない日は 1 本あたりの枠が広がり、1 件の柱が画面幅いっぱいの
+        /// 塊になってしまう (会期 1 日目がまさにそれで、1 プレイが巨大な四角に見えた)。
+        /// 上限を置くと、柱は細いまま時刻の位置に立つ。
+        /// </summary>
+        private const double MaxColumnWidth = 26;
         private static readonly Pen AxisPen = MakePen(AxisBrush, 1.0);
         private static readonly Pen GridPen = MakePen(new SolidColorBrush(Color.FromArgb(0x16, 0xFF, 0xFF, 0xFF)), 1.0);
-        private static readonly Pen PeakPen = MakePen(PeakBrush, 1.5);
-
-        private static readonly Brush AreaBrush = MakeAreaBrush();
 
         private const double PadLeft = 34;
         private const double PadRight = 12;
@@ -46,25 +55,17 @@ namespace TonePrism.Manager.Shell.Records
             set { _timeline = value; InvalidateVisual(); }
         }
 
+        private static Brush Freeze(Brush b)
+        {
+            b.Freeze();
+            return b;
+        }
+
         private static Pen MakePen(Brush b, double thickness)
         {
             var p = new Pen(b, thickness);
             p.Freeze();
             return p;
-        }
-
-        private static Brush MakeAreaBrush()
-        {
-            var g = new LinearGradientBrush
-            {
-                StartPoint = new Point(0, 0),
-                EndPoint = new Point(0, 1),
-            };
-            // 平坦に近い塗り (Windows 標準のグラフは濃いグラデーションを使わない)。
-            g.GradientStops.Add(new GradientStop(Color.FromArgb(0x40, 0x39, 0x87, 0xE5), 0));
-            g.GradientStops.Add(new GradientStop(Color.FromArgb(0x14, 0x39, 0x87, 0xE5), 1));
-            g.Freeze();
-            return g;
         }
 
         protected override void OnRender(DrawingContext dc)
@@ -117,25 +118,32 @@ namespace TonePrism.Manager.Shell.Records
                 dc.DrawText(ft, new Point(PadLeft - 6 - ft.Width, y - ft.Height / 2));
             }
 
-            // --- 面 + 線 ---
-            var points = new Point[n];
-            for (int i = 0; i < n; i++) points[i] = new Point(xAt(first + i), yAt(t.Buckets[first + i]));
-
-            StreamGeometry line = BuildPath(points, false, 0);
-            StreamGeometry area = BuildPath(points, true, PadTop + plotH);
-            dc.DrawGeometry(AreaBrush, null, area);
-            dc.DrawGeometry(null, LinePen, line);
-
-            // --- ピーク ---
+            // --- 柱 ---
             int peakIdx = first;
             for (int i = first; i <= last; i++) if (t.Buckets[i] > t.Buckets[peakIdx]) peakIdx = i;
-            var peak = new Point(xAt(peakIdx), yAt(t.Buckets[peakIdx]));
-            dc.DrawEllipse(PeakBrush, PeakPen, peak, 3.5, 3.5);
+
+            double slot = plotW / n;
+            double colW = Math.Max(1, Math.Min(MaxColumnWidth, slot - ColumnGap));
+            double baseY = PadTop + plotH;
+            for (int i = first; i <= last; i++)
+            {
+                int value = t.Buckets[i];
+                if (value <= 0) continue;   // 0 は描かない (0 と「ごくわずか」を見分けるため)
+                double top = yAt(value);
+                double x = PadLeft + slot * (i - first) + (slot - colW) / 2;
+                double radius = Math.Min(3, colW / 2);
+                dc.DrawRoundedRectangle(i == peakIdx ? PeakColumnBrush : ColumnBrush, null,
+                    new Rect(x, top, colW, Math.Max(1, baseY - top)), radius, radius);
+            }
+
+            // --- ピークの直接ラベル (数字を置くのはここだけ) ---
+            double peakX = PadLeft + slot * (peakIdx - first) + slot / 2;
+            double peakY = yAt(t.Buckets[peakIdx]);
             string peakLabel = string.Format("{0} 　{1} プレイ",
                 t.Date.AddMinutes(peakIdx * perBucket).ToString("HH:mm"), t.Buckets[peakIdx]);
             FormattedText pf = Text(peakLabel, 11, PeakBrush);
-            double px = Math.Min(Math.Max(PadLeft, peak.X - pf.Width / 2), w - PadRight - pf.Width);
-            dc.DrawText(pf, new Point(px, Math.Max(0, peak.Y - pf.Height - 7)));
+            double px = Math.Min(Math.Max(PadLeft, peakX - pf.Width / 2), w - PadRight - pf.Width);
+            dc.DrawText(pf, new Point(px, Math.Max(0, peakY - pf.Height - 5)));
 
             // --- 時刻の目盛り (1 時間ごと、狭ければ 2 時間ごと) ---
             int perHour = 60 / perBucket;
@@ -161,30 +169,6 @@ namespace TonePrism.Manager.Shell.Records
         {
             return new FormattedText(s, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
                 new Typeface("Yu Gothic UI"), size, brush, VisualTreeHelper.GetDpi(this).PixelsPerDip);
-        }
-
-        /// <summary>
-        /// 実測点を直線でつなぐ。<paramref name="close"/> が true なら <paramref name="baseline"/> まで
-        /// 下ろして閉じ、面塗り用の形にする。
-        ///
-        /// **補間しない**のは、点と点の間に記録が無いから。スプラインを通すと見た目は滑らかになるが、
-        /// 実際には無い山や谷を描き、しかも 0 の区間を軸下に潜らせるので別途クランプが要る。
-        /// </summary>
-        private static StreamGeometry BuildPath(Point[] p, bool close, double baseline)
-        {
-            var geo = new StreamGeometry();
-            using (StreamGeometryContext ctx = geo.Open())
-            {
-                ctx.BeginFigure(p[0], close, close);
-                for (int i = 1; i < p.Length; i++) ctx.LineTo(p[i], true, false);
-                if (close)
-                {
-                    ctx.LineTo(new Point(p[p.Length - 1].X, baseline), false, false);
-                    ctx.LineTo(new Point(p[0].X, baseline), false, false);
-                }
-            }
-            geo.Freeze();
-            return geo;
         }
     }
 }

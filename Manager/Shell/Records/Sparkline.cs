@@ -10,7 +10,8 @@ namespace TonePrism.Manager.Shell.Records
     /// (単系列なので凡例は不要、値は隣の数値が持っている)。
     ///
     /// **直接ラベルはピークだけ**。点ごとに数字を置くと読まれないうえ画面が荒れる。
-    /// 実測点は直線でつなぐ (補間すると記録に無い山や谷を描くことになる)。
+    /// **柱で描く** — これは時間帯ごとの件数 (ビンに入った数) で、線でつなぐと点の間を補間して
+    /// 記録に無い形を描くことになる。<see cref="TimelineChart"/> と同じ理由。
     /// <see cref="TimelineChart"/> は日ごとの詳細を軸つきで見せる別物で、こちらは「形」だけを伝える。
     /// </summary>
     public sealed class Sparkline : FrameworkElement
@@ -41,6 +42,13 @@ namespace TonePrism.Manager.Shell.Records
 
         private const double PadTop = 16;
         private const double PadBottom = 4;
+        /// <summary>柱と柱のすき間 (px)。くっつくと 1 本の帯に見えて境目が読めない。</summary>
+        private const double ColumnGap = 2;
+        /// <summary>
+        /// 柱の最大幅 (px)。上限を厳しくすると、時間帯が 10 本ほどしかないこの帯では柱が細く離れて
+        /// 並び、間が抜けて見える。幅いっぱいに近い柱の方が「1 日のかたち」として読める。
+        /// </summary>
+        private const double MaxColumnWidth = 64;
 
         protected override void OnRender(DrawingContext dc)
         {
@@ -65,31 +73,31 @@ namespace TonePrism.Manager.Shell.Records
             for (int i = first; i <= last; i++) max = Math.Max(max, v[i]);
             if (max <= 0) return;
 
-            var pts = new Point[n];
-            for (int i = 0; i < n; i++)
-            {
-                pts[i] = new Point(
-                    w * i / (n - 1),
-                    PadTop + plotH * (1 - v[first + i] / max));
-            }
-
-            // 平坦に近い塗り + 細い線 (Windows 標準のグラフに合わせる)。
-            var area = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
-            area.GradientStops.Add(new GradientStop(Color.FromArgb(0x40, _hue.R, _hue.G, _hue.B), 0));
-            area.GradientStops.Add(new GradientStop(Color.FromArgb(0x14, _hue.R, _hue.G, _hue.B), 1));
-            area.Freeze();
-
-            var pen = new Pen(new SolidColorBrush(_hue), 1.6);
-            pen.Freeze();
-
-            dc.DrawGeometry(area, null, Path(pts, true, PadTop + plotH));
-            dc.DrawGeometry(null, pen, Path(pts, false, 0));
-
-            // ピークだけ点 + ラベル。
             int peak = 0;
             for (int i = 1; i < n; i++) if (v[first + i] > v[first + peak]) peak = i;
-            var peakPoint = pts[peak];
-            dc.DrawEllipse(new SolidColorBrush(_hue), null, peakPoint, 4, 4);   // >= 8px マーカー
+
+            var normal = new SolidColorBrush(Color.FromArgb(0xB0, _hue.R, _hue.G, _hue.B));
+            var accent = new SolidColorBrush(_hue);
+            normal.Freeze();
+            accent.Freeze();
+
+            double slot = w / n;
+            double colW = Math.Max(1, Math.Min(MaxColumnWidth, slot - ColumnGap));
+            double baseY = PadTop + plotH;
+            double peakX = slot * peak + slot / 2;
+            double peakTop = baseY;
+
+            for (int i = 0; i < n; i++)
+            {
+                int value = v[first + i];
+                if (value <= 0) continue;   // 0 は描かない
+                double top = PadTop + plotH * (1 - value / max);
+                double x = slot * i + (slot - colW) / 2;
+                double radius = Math.Min(3, colW / 2);
+                dc.DrawRoundedRectangle(i == peak ? accent : normal, null,
+                    new Rect(x, top, colW, Math.Max(1, baseY - top)), radius, radius);
+                if (i == peak) peakTop = top;
+            }
 
             if (_labelAt != null)
             {
@@ -100,28 +108,10 @@ namespace TonePrism.Manager.Shell.Records
                         FlowDirection.LeftToRight, new Typeface("Yu Gothic UI"), 10.5,
                         new SolidColorBrush(Color.FromRgb(0x9A, 0xA0, 0xA6)),
                         VisualTreeHelper.GetDpi(this).PixelsPerDip);
-                    double x = Math.Min(Math.Max(0, peakPoint.X - ft.Width / 2), w - ft.Width);
-                    dc.DrawText(ft, new Point(x, Math.Max(0, peakPoint.Y - ft.Height - 6)));
+                    double x = Math.Min(Math.Max(0, peakX - ft.Width / 2), w - ft.Width);
+                    dc.DrawText(ft, new Point(x, Math.Max(0, peakTop - ft.Height - 4)));
                 }
             }
-        }
-
-        /// <summary>実測点を直線でつないだ経路。<paramref name="close"/> で面塗り用に閉じる。</summary>
-        private static Geometry Path(Point[] p, bool close, double baseline)
-        {
-            var geo = new StreamGeometry();
-            using (StreamGeometryContext ctx = geo.Open())
-            {
-                ctx.BeginFigure(p[0], close, close);
-                for (int i = 1; i < p.Length; i++) ctx.LineTo(p[i], true, false);
-                if (close)
-                {
-                    ctx.LineTo(new Point(p[p.Length - 1].X, baseline), false, false);
-                    ctx.LineTo(new Point(p[0].X, baseline), false, false);
-                }
-            }
-            geo.Freeze();
-            return geo;
         }
     }
 }
