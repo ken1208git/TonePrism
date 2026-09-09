@@ -155,8 +155,10 @@ namespace TonePrism.Manager.Shell.Records
     /// </summary>
     public static class RecordsPresenter
     {
-        private const double DetailBarMax = 220;
-        private const double HourBarMax = 130;
+        // 棒の長さの上限 (px)。**長くしすぎない** — 高さ 11px に対して 220px あると縦横比が 20:1 を
+        // 超え、端が完全な半円でも等倍では直線に見えてしまう (実際に「丸みがない」と指摘された)。
+        private const double DetailBarMax = 165;
+        private const double HourBarMax = 110;
 
         /// <summary>0 より大きい値は必ず見えるだけの太さを残す (0 と「ごくわずか」を見分けるため)。</summary>
         private const double MinVisibleBar = 0.02;
