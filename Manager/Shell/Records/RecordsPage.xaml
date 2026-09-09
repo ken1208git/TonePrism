@@ -86,6 +86,24 @@
             </Border>
         </DataTemplate>
 
+        <!-- 表彰カード 1 枚 -->
+        <DataTemplate x:Key="AwardTemplate">
+            <Border Background="#FF332D1F" BorderBrush="#55E0A03E" BorderThickness="1"
+                    CornerRadius="8" Padding="15,12" Margin="0,0,12,12" MinWidth="236" MaxWidth="300">
+                <StackPanel>
+                    <TextBlock Text="{Binding Title}" Foreground="#F0C97C" FontSize="11.5" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding WinnerNames}" Foreground="#F2F2F2" FontSize="15"
+                               FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    <TextBlock Text="{Binding ValueText}" Foreground="#E8B863" FontSize="19"
+                               FontWeight="SemiBold" Margin="0,1,0,0" />
+                    <TextBlock Text="{Binding Note}" Foreground="#A79B85" FontSize="10.5" TextWrapping="Wrap"
+                               Visibility="{Binding HasNote, Converter={StaticResource BoolToVis}}" />
+                    <TextBlock Text="{Binding Criterion}" Foreground="#8A8477" FontSize="10"
+                               TextWrapping="Wrap" Margin="0,5,0,0" />
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
         <!-- 汎用の横棒 1 行 (★内訳・時間分布) -->
         <DataTemplate x:Key="BarTemplate">
             <Grid Margin="0,0,0,5">
@@ -358,6 +376,30 @@
                             <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                     </ItemsControl>
+
+                    <!-- ===== 表彰 ===== -->
+                    <Border x:Name="AwardsCard" Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="表彰" Style="{StaticResource CardHeader}" />
+                            <TextBlock Text="集計から自動で選びました。同じゲームが複数の賞を取ることもあります。該当者がいない賞は出ません。"
+                                       Style="{StaticResource Caption}" />
+                            <ItemsControl x:Name="AwardsList" ItemTemplate="{StaticResource AwardTemplate}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ===== この期間の記録 ===== -->
+                    <Border x:Name="HighlightsCard" Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="この期間の記録" Style="{StaticResource CardHeader}" />
+                            <TextBlock Text="ランキングには出ないけれど、話のネタになる数字です。"
+                                       Style="{StaticResource Caption}" />
+                            <ItemsControl x:Name="HighlightsList" ItemTemplate="{StaticResource MetaTemplate}" />
+                        </StackPanel>
+                    </Border>
 
                     <!-- ===== 時間帯 ===== -->
                     <Border Style="{StaticResource Card}">

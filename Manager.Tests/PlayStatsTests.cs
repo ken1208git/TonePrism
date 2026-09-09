@@ -327,6 +327,154 @@ namespace TonePrism.Manager.Tests
         }
 
         // ==================================================================
+        // 表彰
+        // ==================================================================
+
+        [Fact]
+        public void Compute_RepeatPlay_CountsOnlySameGameOnSamePcWithinTheGap()
+        {
+            // 「終わってすぐ、同じ台でもう一度」だけを数える。別の台・別のゲーム・間が空いたものは
+            // 数えない (数えると「その場の熱気」ではなく単なる人気を測ることになる)。
+            long gap = PlayStatsTuning.RepeatGapSeconds;
+            var data = new PlayStatsData
+            {
+                Games = new List<GameInfo> { Game(1, "a", "A"), Game(2, "b", "B") },
+                Plays = new List<PlayRecordEntry>
+                {
+                    Play(1, Day2, 60, "PC-1"),                                   // 12:00:00-12:01:00
+                    Play(1, Day2.AddSeconds(60 + 30), 60, "PC-1"),               // 30 秒後に同じゲーム → 数える
+                    Play(1, Day2.AddSeconds(60 + 30 + 60 + gap + 60), 60, "PC-1"),  // 間が空きすぎ → 数えない
+                    Play(1, Day2, 60, "PC-2"),                                   // 別の台 → 数えない
+                    Play(2, Day2.AddSeconds(60 + 10), 60, "PC-2"),               // 別のゲーム → 数えない
+                },
+            };
+
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+            Assert.Equal(1, snap.Games.Single(g => g.GameNo == 1).RepeatPlayCount);
+            Assert.Equal(0, snap.Games.Single(g => g.GameNo == 2).RepeatPlayCount);
+        }
+
+        [Fact]
+        public void Compute_Awards_PickTheTopOfEachAxis()
+        {
+            var surveys = new List<SurveyEntry>();
+            for (int i = 0; i < 6; i++) surveys.Add(Survey(1, Day2, 3));   // よく遊ばれるが評価は普通
+            for (int i = 0; i < 6; i++) surveys.Add(Survey(2, Day2, 5));   // 少数だが高評価
+
+            var plays = new List<PlayRecordEntry>();
+            for (int i = 0; i < 30; i++) plays.Add(Play(1, Day2, 60));
+            for (int i = 0; i < 8; i++) plays.Add(Play(2, Day2, 600));
+
+            var data = new PlayStatsData
+            {
+                Games = new List<GameInfo> { Game(1, "a", "みんなの定番"), Game(2, "b", "じっくり系") },
+                Plays = plays,
+                Surveys = surveys,
+            };
+
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+
+            Assert.Equal("みんなの定番", Winner(snap, "最多プレイ賞"));
+            Assert.Equal("じっくり系", Winner(snap, "満足度賞"));
+            Assert.Equal("じっくり系", Winner(snap, "熱中賞"));
+        }
+
+        [Fact]
+        public void Compute_Awards_BreakTiesByTheLargerSample()
+        {
+            // ★5 率が同じなら回答が多い方。実データでも★5 率 0.80 が 4 本並び、ここで決着させないと
+            // 「同点が多すぎる」で賞ごと消えていた。
+            var surveys = new List<SurveyEntry>();
+            for (int i = 0; i < 8; i++) surveys.Add(Survey(1, Day2, 5));   // 10 件中 8 件が★5
+            for (int i = 0; i < 2; i++) surveys.Add(Survey(1, Day2, 4));
+            for (int i = 0; i < 4; i++) surveys.Add(Survey(2, Day2, 5));   // 5 件中 4 件が★5 (同率 80%)
+            surveys.Add(Survey(2, Day2, 4));
+
+            var data = new PlayStatsData
+            {
+                Games = new List<GameInfo> { Game(1, "a", "回答が多い"), Game(2, "b", "回答が少ない") },
+                Plays = new List<PlayRecordEntry> { Play(1, Day2, 60), Play(2, Day2, 60) },
+                Surveys = surveys,
+            };
+
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+            PlayStatsAward award = snap.Awards.Single(a => a.Title == "満点賞");
+            Assert.Equal("回答が多い", award.WinnerNames);
+            Assert.False(award.IsTie);
+        }
+
+        [Fact]
+        public void Compute_Awards_AreOmittedWhenNobodyQualifies()
+        {
+            // 回答が閾値に届かなければ満足度賞は出さない。「該当なし」の枠を並べない方が読みやすい。
+            var data = new PlayStatsData
+            {
+                Games = new List<GameInfo> { Game(1, "a", "A") },
+                Plays = new List<PlayRecordEntry> { Play(1, Day2, 60) },
+                Surveys = new List<SurveyEntry> { Survey(1, Day2, 5) },
+            };
+
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+            Assert.DoesNotContain(snap.Awards, a => a.Title == "満足度賞");
+            Assert.DoesNotContain(snap.Awards, a => a.Title == "もう一回賞");
+            Assert.Contains(snap.Awards, a => a.Title == "最多プレイ賞");   // 回数の賞は 1 回でも成立
+        }
+
+        [Fact]
+        public void Compute_DeveloperAward_SkipsTheUnregisteredBucket()
+        {
+            // 「(制作者未登録)」が受賞すると表彰にならない。
+            GameInfo named = Game(1, "a", "登録あり");
+            named.Developers = new List<DeveloperInfo>
+            {
+                new DeveloperInfo { LastName = "山田", FirstName = "太郎", Grade = "76" },
+            };
+            var data = new PlayStatsData
+            {
+                Games = new List<GameInfo> { named, Game(2, "b", "登録なし") },
+                Plays = new List<PlayRecordEntry>
+                {
+                    Play(1, Day2, 60), Play(2, Day2, 60), Play(2, Day2, 60), Play(2, Day2, 60),
+                },
+            };
+
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+            PlayStatsAward award = snap.Awards.Single(a => a.Title == "いちばん遊ばれた制作者");
+            Assert.Equal("山田 太郎", award.WinnerNames);   // プレイ数では登録なしの方が多いが対象外
+        }
+
+        [Fact]
+        public void Presenter_Highlights_ReportFirstLastAndBusiestPc()
+        {
+            var data = new PlayStatsData
+            {
+                Games = new List<GameInfo> { Game(1, "a", "さいしょ"), Game(2, "b", "さいご") },
+                Plays = new List<PlayRecordEntry>
+                {
+                    Play(1, Day2, 60, "PC-A"),
+                    Play(2, Day2.AddHours(2), 60, "PC-B"),
+                    Play(2, Day2.AddHours(1), 60, "PC-B"),
+                },
+            };
+
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+            Assert.Equal(1, snap.FirstPlayGameNo);
+            Assert.Equal(2, snap.LastPlayGameNo);
+            Assert.Equal("PC-B", snap.BusiestPc);
+            Assert.Equal(2, snap.BusiestPcPlays);
+
+            RecordsViewModel vm = RecordsPresenter.Build(snap, RecordsMetric.Plays, RecordsGroupAxis.Genre);
+            Assert.Contains(vm.Highlights, h => h.Label == "最初のプレイ" && h.Value.Contains("さいしょ"));
+            Assert.Contains(vm.Highlights, h => h.Label == "いちばん働いたPC" && h.Value.Contains("PC-B"));
+        }
+
+        private static string Winner(PlayStatsSnapshot snap, string title)
+        {
+            PlayStatsAward a = snap.Awards.SingleOrDefault(x => x.Title == title);
+            return a == null ? null : a.WinnerNames;
+        }
+
+        // ==================================================================
         // 読み込み (I/O)
         // ==================================================================
 

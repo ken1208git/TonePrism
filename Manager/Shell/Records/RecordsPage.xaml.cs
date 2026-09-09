@@ -167,6 +167,10 @@ namespace TonePrism.Manager.Shell.Records
             OverallCaption.Text = vm.OverallCaption;
             OverallBars.ItemsSource = vm.OverallRatingBars;
             GroupsList.ItemsSource = vm.Groups;
+            AwardsList.ItemsSource = vm.Awards;
+            AwardsCard.Visibility = vm.HasAwards ? Visibility.Visible : Visibility.Collapsed;
+            HighlightsList.ItemsSource = vm.Highlights;
+            HighlightsCard.Visibility = vm.HasHighlights ? Visibility.Visible : Visibility.Collapsed;
             NotesList.ItemsSource = vm.Notes;
 
             BuildTimelines();

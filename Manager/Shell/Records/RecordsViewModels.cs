@@ -107,6 +107,10 @@ namespace TonePrism.Manager.Shell.Records
         public List<RecordsGameRow> Games { get; set; } = new List<RecordsGameRow>();
         public List<PlayStatsComment> Comments { get; set; } = new List<PlayStatsComment>();
         public List<RecordsGroupRow> Groups { get; set; } = new List<RecordsGroupRow>();
+        public List<PlayStatsAward> Awards { get; set; } = new List<PlayStatsAward>();
+        public List<RecordsMeta> Highlights { get; set; } = new List<RecordsMeta>();
+        public bool HasAwards { get { return Awards.Count > 0; } }
+        public bool HasHighlights { get { return Highlights.Count > 0; } }
 
         public string RankingCaption { get; set; }
         public string CommentsCaption { get; set; }
@@ -137,6 +141,8 @@ namespace TonePrism.Manager.Shell.Records
             vm.Games = BuildGameRows(snap, metric);
             vm.Comments = snap.Comments;
             vm.Groups = BuildGroupRows(snap, axis);
+            vm.Awards = snap.Awards;
+            vm.Highlights = BuildHighlights(snap);
             vm.RankingCaption = RankingCaption(metric);
             vm.CommentsCaption = string.Format("{0} 件（アンケート {1} 件のうち）", snap.Comments.Count, snap.TotalSurveys);
             vm.OverallCaption = BuildOverallCaption(snap.Overall);
@@ -473,6 +479,71 @@ namespace TonePrism.Manager.Shell.Records
             if (o.Count == 0) return "この期間の全体アンケートはありません。";
             return string.Format("{0} 件・平均 ★{1}　（ランチャーを終了するときに聞く「TONE 全体はどうだった？」の回答。ゲーム別とは別集計です）",
                 o.Count, o.AverageRating.HasValue ? o.AverageRating.Value.ToString("0.00") : "—");
+        }
+
+        /// <summary>
+        /// 表彰の合間に読み上げられる「この期間の記録」。ランキングに載らないが場が沸く数字を拾う。
+        /// 値が取れなかった行は**足さない** (「—」の行が並ぶより短い方が読み上げやすい)。
+        /// </summary>
+        private static List<RecordsMeta> BuildHighlights(PlayStatsSnapshot snap)
+        {
+            var rows = new List<RecordsMeta>();
+            if (snap.TotalPlays == 0) return rows;
+
+            var names = new Dictionary<long, string>();
+            foreach (GameStats g in snap.Games) names[g.GameNo] = g.Title;
+
+            Func<long, string> name = no =>
+            {
+                string t;
+                return names.TryGetValue(no, out t) ? t : "no." + no;
+            };
+
+            if (snap.FirstPlayAt.HasValue)
+            {
+                rows.Add(new RecordsMeta
+                {
+                    Label = "最初のプレイ",
+                    Value = snap.FirstPlayAt.Value.ToString("M/d HH:mm") + "　" + name(snap.FirstPlayGameNo),
+                });
+            }
+            if (snap.LastPlayAt.HasValue)
+            {
+                rows.Add(new RecordsMeta
+                {
+                    Label = "最後のプレイ",
+                    Value = snap.LastPlayAt.Value.ToString("M/d HH:mm") + "　" + name(snap.LastPlayGameNo),
+                });
+            }
+            if (snap.PeakAt.HasValue)
+            {
+                rows.Add(new RecordsMeta
+                {
+                    Label = "いちばん忙しかった15分",
+                    Value = snap.PeakAt.Value.ToString("M/d HH:mm") + " から　" + snap.PeakCount + " プレイ",
+                });
+            }
+            if (!string.IsNullOrEmpty(snap.BusiestPc))
+            {
+                rows.Add(new RecordsMeta
+                {
+                    Label = "いちばん働いたPC",
+                    Value = snap.BusiestPc + "　" + snap.BusiestPcPlays + " プレイ",
+                });
+            }
+            rows.Add(new RecordsMeta
+            {
+                Label = "遊ばれたゲーム",
+                // 登録本数はゲーム一覧を読めたときだけ添える (読めないと「登録 0 本」という嘘になる)。
+                Value = snap.PlayedGameCount + " 種類"
+                    + (snap.RegisteredGameCount > 0 ? "　（登録 " + snap.RegisteredGameCount + " 本）" : ""),
+            });
+            rows.Add(new RecordsMeta
+            {
+                Label = "総プレイ時間",
+                Value = PlayStatsService.FormatHours(snap.TotalPlaySeconds),
+            });
+            return rows;
         }
 
         private static List<RecordsGroupRow> BuildGroupRows(PlayStatsSnapshot snap, RecordsGroupAxis axis)

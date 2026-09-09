@@ -51,6 +51,8 @@ namespace TonePrism.Manager.Services
             snap.PlayedGameCount = plays.Select(p => p.GameNo).Where(n => n > 0).Distinct().Count();
 
             snap.Games = BuildGameStats(plays, gameSurveys, byNo, data.Games);
+            ApplyRepeatPlays(snap.Games, plays);
+            FillHighlights(snap, plays);
             snap.Overall = BuildOverallStats(overallSurveys);
             snap.Comments = CollectComments(snap.Games, snap.Overall);
             snap.Timelines = BuildTimelines(plays);
@@ -70,6 +72,9 @@ namespace TonePrism.Manager.Services
                 g.Developers.Select(d => GradeLabel(d)), "(期生未設定)"));
             snap.ByDeveloper = GroupBy(snap.Games, g => DistinctOrUnset(
                 g.Developers.Select(DeveloperLabel), "(制作者未登録)"));
+
+            // 賞は切り口別まで揃ってから (制作者賞が ByDeveloper を使う)。
+            snap.Awards = BuildAwards(snap);
 
             return snap;
         }
@@ -276,6 +281,221 @@ namespace TonePrism.Manager.Services
                     };
                 })
                 .ToList();
+        }
+
+        // ------------------------------------------------------------------
+        // 再プレイ / この期間の記録
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// 「終わってすぐ、同じ台で同じゲームがもう一度始まった」回数を数える。
+        ///
+        /// **PC ごとに時系列へ並べ直して隣同士を見る**。ゲーム単位で見ると別の台の記録が隣接して
+        /// しまい、無関係なプレイを再プレイと誤認する。判定は前のプレイの**終了**から次の**開始**まで
+        /// (開始同士の差ではない — 長いゲームほど再プレイ扱いされにくくなってしまう)。
+        ///
+        /// **これは「同じ人がもう一度遊んだ」の代理指標であって証明ではない。** 次の来場者が
+        /// たまたま同じゲームを選んだ場合も混ざる。窓を 2 分と短く取っているのはその混入を抑えるため
+        /// (<see cref="PlayStatsTuning.RepeatGapSeconds"/> のコメント参照)。
+        /// </summary>
+        private static void ApplyRepeatPlays(List<GameStats> games, List<PlayRecordEntry> plays)
+        {
+            var counts = new Dictionary<long, int>();
+
+            foreach (IGrouping<string, PlayRecordEntry> perPc in plays
+                .Where(p => !string.IsNullOrEmpty(p.SourcePc))
+                .GroupBy(p => p.SourcePc, StringComparer.OrdinalIgnoreCase))
+            {
+                List<PlayRecordEntry> ordered = perPc.OrderBy(p => p.StartTime).ToList();
+                for (int i = 1; i < ordered.Count; i++)
+                {
+                    PlayRecordEntry prev = ordered[i - 1];
+                    PlayRecordEntry cur = ordered[i];
+                    if (cur.GameNo != prev.GameNo) continue;
+                    long gap = cur.StartTime - prev.EndTime;
+                    if (gap < 0 || gap > PlayStatsTuning.RepeatGapSeconds) continue;
+                    int n;
+                    counts[cur.GameNo] = counts.TryGetValue(cur.GameNo, out n) ? n + 1 : 1;
+                }
+            }
+
+            foreach (GameStats g in games)
+            {
+                int n;
+                g.RepeatPlayCount = counts.TryGetValue(g.GameNo, out n) ? n : 0;
+            }
+        }
+
+        /// <summary>表彰の合間に読み上げられる「この期間の記録」を拾う。</summary>
+        private static void FillHighlights(PlayStatsSnapshot snap, List<PlayRecordEntry> plays)
+        {
+            if (plays.Count == 0) return;
+
+            PlayRecordEntry first = plays.OrderBy(p => p.StartTime).First();
+            PlayRecordEntry last = plays.OrderByDescending(p => p.EndTime).First();
+            snap.FirstPlayAt = first.CreatedAtLocal;
+            snap.FirstPlayGameNo = first.GameNo;
+            snap.LastPlayAt = last.CreatedAtLocal;
+            snap.LastPlayGameNo = last.GameNo;
+
+            IGrouping<string, PlayRecordEntry> busiest = plays
+                .Where(p => !string.IsNullOrEmpty(p.SourcePc))
+                .GroupBy(p => p.SourcePc, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(g => g.Count())
+                .FirstOrDefault();
+            if (busiest != null)
+            {
+                snap.BusiestPc = busiest.Key;
+                snap.BusiestPcPlays = busiest.Count();
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // 表彰
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// 表彰を自動選出する。
+        ///
+        /// **軸は互いに相関しにくいものを選んである** — 回数 / 満足度 / 熱中 / 再プレイ / 回答率 /
+        /// ★5 率 / 隠れた名作 / 制作者。全部が同じゲームに集まると表彰として機能しないため。
+        /// 2026 年の実データでは 8 賞が 6 ゲームに散った。
+        ///
+        /// **率で競う賞にはプレイ回数の下限を置く**。置かないと 2 回遊ばれて 1 回答された
+        /// ゲームが「回答率 50%」で 1 位を取り、賞が母数の小ささを表彰することになる。
+        ///
+        /// **「最長 1 プレイ」は意図的に入れていない**。実データの 1 位は 1 時間 50 分で、
+        /// 上限 (2 時間) の内側なので異常値として弾かれないが、実態はゲームの閉じ忘れが濃厚。
+        /// 賞にすると「いちばん長く遊ばれた」という嘘を表彰することになる。
+        /// コメント数も入れていない (母数 17 件で最多 4 件、賞として薄い)。
+        /// </summary>
+        private static List<PlayStatsAward> BuildAwards(PlayStatsSnapshot snap)
+        {
+            var awards = new List<PlayStatsAward>();
+            List<GameStats> games = snap.Games;
+            if (games.Count == 0) return awards;
+
+            int minPlays = PlayStatsTuning.MinPlaysForAward;
+            int minSurveys = PlayStatsTuning.MinSurveysForReliableAverage;
+
+            Add(awards, games, "最多プレイ賞", "遊ばれた回数がいちばん多い",
+                g => g.PlayCount > 0, g => g.PlayCount,
+                g => g.PlayCount + " 回", g => g.PcCount + " 台で遊ばれました",
+                g => g.PcCount);
+
+            Add(awards, games, "満足度賞", "アンケートの平均★がいちばん高い（回答 " + minSurveys + " 件以上）",
+                g => g.SurveyCount >= minSurveys, g => g.AverageRating.Value,
+                g => "★" + g.AverageRating.Value.ToString("0.00"), g => g.SurveyCount + " 件の回答",
+                g => g.SurveyCount);
+
+            Add(awards, games, "熱中賞", "1 回あたりのプレイ時間（中央値）がいちばん長い",
+                g => g.PlayCount >= minPlays && g.MedianDurationSeconds.HasValue,
+                g => g.MedianDurationSeconds.Value,
+                g => FormatDuration(g.MedianDurationSeconds), g => g.PlayCount + " 回のまん中の値",
+                g => g.PlayCount);
+
+            Add(awards, games, "もう一回賞", "終わってすぐ、同じ台でもう一度遊ばれた回数がいちばん多い",
+                g => g.RepeatPlayCount > 0, g => g.RepeatPlayCount,
+                g => g.RepeatPlayCount + " 回",
+                g => g.PlayCount + " 回のうち " + g.RepeatPlayCount + " 回が続けての 2 回目",
+                g => g.PlayCount);
+
+            Add(awards, games, "語りたくなる賞", "遊んだあとアンケートまで答えてもらえた割合がいちばん高い",
+                g => g.PlayCount >= minPlays && g.ResponseRate.HasValue, g => g.ResponseRate.Value,
+                g => (g.ResponseRate.Value * 100).ToString("0") + "%",
+                g => g.PlayCount + " 回中 " + g.SurveyCount + " 件の回答",
+                g => g.PlayCount);
+
+            Add(awards, games, "満点賞", "★5 の割合がいちばん高い（回答 " + minSurveys + " 件以上）",
+                g => g.SurveyCount >= minSurveys && g.FiveStarRate.HasValue, g => g.FiveStarRate.Value,
+                g => (g.FiveStarRate.Value * 100).ToString("0") + "%",
+                g => g.SurveyCount + " 件中 " + g.RatingCounts[4] + " 件が★5",
+                g => g.SurveyCount);
+
+            // 「隠れた名作」= 回数はプレイ回数の中央値未満だが評価が高い。中央値を境にするのは、
+            // 固定回数だと会期の規模 (総プレイ数) が変わるたびに意味が変わってしまうため。
+            double medianPlays = Median(games.Select(g => (long)g.PlayCount).OrderBy(v => v).ToList());
+            Add(awards, games, "隠れた名作賞",
+                "プレイ回数は控えめ（全体のまん中より下）でも評価が高い",
+                g => g.PlayCount > 0 && g.PlayCount < medianPlays
+                     && g.SurveyCount >= PlayStatsTuning.MinSurveysForHiddenGem,
+                g => g.AverageRating.Value,
+                g => "★" + g.AverageRating.Value.ToString("0.00"),
+                g => g.PlayCount + " 回・" + g.SurveyCount + " 件の回答",
+                g => g.SurveyCount);
+
+            PlayStatsAward dev = BuildDeveloperAward(snap);
+            if (dev != null) awards.Add(dev);
+
+            return awards;
+        }
+
+        /// <summary>
+        /// 1 つの賞を作って追加する。受賞者が居ない (条件を満たすゲームが無い) 場合と、同点が多すぎて
+        /// 賞として意味を成さない場合は**何も追加しない** — 「該当なし」の枠が並ぶより出さない方がよい。
+        /// </summary>
+        private static void Add(List<PlayStatsAward> awards, List<GameStats> games,
+            string title, string criterion,
+            Func<GameStats, bool> eligible, Func<GameStats, double> score,
+            Func<GameStats, string> value, Func<GameStats, string> note,
+            Func<GameStats, double> sample)
+        {
+            List<GameStats> pool = games.Where(eligible).ToList();
+            if (pool.Count == 0) return;
+
+            double best = pool.Max(score);
+            List<GameStats> winners = pool.Where(g => score(g) >= best).ToList();
+
+            // **同率は母数の多い方を採る。** 率で競う賞では同率が普通に起きる (実データでは★5 率 0.80 が
+            // 4 本並んだ) が、10 件の回答で 80% と 5 件で 80% を対等に扱うと、賞が母数の小ささを
+            // 表彰しかねない。ここで落とすと賞自体が消えてしまうので、切るのではなく順位を付ける。
+            if (winners.Count > 1)
+            {
+                double bestSample = winners.Max(sample);
+                winners = winners.Where(g => sample(g) >= bestSample).ToList();
+            }
+
+            // それでも並ぶなら本物の同点。多すぎると賞として意味を成さないので出さない。
+            if (winners.Count > PlayStatsTuning.MaxAwardWinners) return;
+
+            awards.Add(new PlayStatsAward
+            {
+                Title = title,
+                Criterion = criterion,
+                WinnerNames = string.Join("・", winners.Select(g => g.Title)),
+                ValueText = value(winners[0]),
+                // 同点のときは 1 本目の補足だけ出すと他の受賞者に嘘をつくので出さない。
+                Note = winners.Count == 1 ? note(winners[0]) : null,
+                WinnerGameNos = winners.Select(g => g.GameNo).ToList(),
+                IsTie = winners.Count > 1,
+            });
+        }
+
+        /// <summary>
+        /// 制作者の賞。担当ゲームの合計プレイ回数で決める。**共作は両方に計上**されるので、
+        /// 合計はのべ数であり全体のプレイ回数とは一致しない (切り口別と同じ扱い)。
+        /// </summary>
+        private static PlayStatsAward BuildDeveloperAward(PlayStatsSnapshot snap)
+        {
+            List<PlayStatsGroup> pool = snap.ByDeveloper
+                .Where(g => g.PlayCount > 0 && !g.Key.StartsWith("(")).ToList();
+            if (pool.Count == 0) return null;
+
+            int best = pool.Max(g => g.PlayCount);
+            List<PlayStatsGroup> winners = pool.Where(g => g.PlayCount == best).ToList();
+            if (winners.Count > PlayStatsTuning.MaxAwardWinners) return null;
+
+            return new PlayStatsAward
+            {
+                Title = "いちばん遊ばれた制作者",
+                Criterion = "つくったゲームの合計プレイ回数がいちばん多い",
+                WinnerNames = string.Join("・", winners.Select(g => g.Key)),
+                ValueText = best + " 回",
+                Note = winners.Count == 1
+                    ? winners[0].GameCount + " 本・いちばん遊ばれたのは「" + winners[0].TopGameTitle + "」"
+                    : null,
+                IsTie = winners.Count > 1,
+            };
         }
 
         // ------------------------------------------------------------------

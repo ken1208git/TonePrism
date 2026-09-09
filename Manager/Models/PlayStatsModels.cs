@@ -89,6 +89,26 @@ namespace TonePrism.Manager.Models
 
         /// <summary>時間帯グラフの刻み (分)。15 分 = 1 日 96 本。</summary>
         public const int TimelineBucketMinutes = 15;
+
+        /// <summary>
+        /// 「終わってすぐもう一度」とみなす間隔 (秒)。同じ PC で前のプレイが終わってからこの秒数以内に
+        /// **同じゲーム**が始まったら再プレイとして数える。
+        ///
+        /// 2 分にしたのは、来場者がまだ台の前に居ると言える範囲に絞るため。長く取ると「次の人が
+        /// たまたま同じゲームを選んだ」が混ざり、意味が「その場の熱気」から「単なる人気」へ薄まる。
+        /// 実データ (2026 年) では 2 分と 5 分で件数が同じ 80 件 = 再プレイは即座に起きており、
+        /// 広げても拾えるものが増えないことを確認済み。
+        /// </summary>
+        public const long RepeatGapSeconds = 120;
+
+        /// <summary>賞の対象に入れるための最低プレイ回数 (率で競う賞が少数プレイに攫われないように)。</summary>
+        public const int MinPlaysForAward = 5;
+
+        /// <summary>「隠れた名作」の対象に入れるための最低アンケート件数。</summary>
+        public const int MinSurveysForHiddenGem = 3;
+
+        /// <summary>同点がこれを超えたら賞として意味を成さないので出さない。</summary>
+        public const int MaxAwardWinners = 3;
     }
 
     /// <summary>1 件のコメント (ゲーム名を解決済み)。全ゲーム横断の一覧と、ゲーム詳細の両方で使う。</summary>
@@ -158,10 +178,23 @@ namespace TonePrism.Manager.Models
         public List<DeveloperInfo> Developers { get; set; } = new List<DeveloperInfo>();
 
         // --- 派生 ---
+        /// <summary>
+        /// 同じ PC で「終わってすぐもう一度」遊ばれた回数
+        /// (<see cref="PlayStatsTuning.RepeatGapSeconds"/> 以内の同ゲーム再開)。
+        /// 来場者がその場でもう 1 回やりたくなった度合いの代理指標。
+        /// </summary>
+        public int RepeatPlayCount { get; set; }
+
         /// <summary>回答率 = アンケート件数 / プレイ回数。プレイ 0 なら null。</summary>
         public double? ResponseRate
         {
             get { return PlayCount > 0 ? (double?)SurveyCount / PlayCount : null; }
+        }
+
+        /// <summary>★5 の割合。平均★と違い「刺さった人にどれだけ強く刺さったか」が出る。</summary>
+        public double? FiveStarRate
+        {
+            get { return SurveyCount > 0 ? (double?)RatingCounts[4] / SurveyCount : null; }
         }
 
         /// <summary>平均★を額面通り読んでよいか (件数が閾値以上)。false なら UI で「参考値」と明示する。</summary>
@@ -211,6 +244,32 @@ namespace TonePrism.Manager.Models
     }
 
     /// <summary>
+    /// 表彰 1 つぶん。**受賞者は複数になりうる** (同点) ので名前は連結済みで持つ。
+    ///
+    /// 賞の軸は「互いに相関しにくいもの」を選んである — 回数・満足度・熱中・再プレイ・回答率・
+    /// ★5 率・隠れた名作・制作者。全部が同じゲームに集まると表彰として機能しないため。
+    /// 2026 年の実データでは 8 賞が 6 ゲームに散った。
+    /// </summary>
+    public sealed class PlayStatsAward
+    {
+        /// <summary>賞の名前 (「最多プレイ賞」など)。</summary>
+        public string Title { get; set; }
+        /// <summary>何で決めたか。読み手が納得できるよう必ず添える。</summary>
+        public string Criterion { get; set; }
+        /// <summary>受賞者の表示名 (同点は「・」で連結)。</summary>
+        public string WinnerNames { get; set; }
+        /// <summary>受賞の決め手になった数値の表示。</summary>
+        public string ValueText { get; set; }
+        /// <summary>補足 (「32 台で遊ばれました」など)。null なら出さない。</summary>
+        public string Note { get; set; }
+        public List<long> WinnerGameNos { get; set; } = new List<long>();
+        public bool IsTie { get; set; }
+
+        /// <summary>補足を出すか (同点だと個別の補足が他の受賞者に対して嘘になるので出さない)。</summary>
+        public bool HasNote { get { return !string.IsNullOrEmpty(Note); } }
+    }
+
+    /// <summary>
     /// 集計 1 回分の結果。`responses/` の全走査 (<see cref="Services.PlayStatsLoader"/>) は 1 度だけ行い、
     /// 期間の切り替えはメモリ上の再集計で済ませる — SMB 越しの走査を日付タブを押すたびに走らせない。
     /// </summary>
@@ -233,6 +292,18 @@ namespace TonePrism.Manager.Models
         public int PeakCount { get; set; }
         /// <summary>プレイ時間が異常で時間統計から外した件数 (0 でなければ画面に注記する)。</summary>
         public int OutlierDurationCount { get; set; }
+
+        /// <summary>自動選出した表彰。受賞者がいない賞は入らない。</summary>
+        public List<PlayStatsAward> Awards { get; set; } = new List<PlayStatsAward>();
+
+        // --- 「この期間の記録」用 (表彰の合間に読み上げられるネタ) ---
+        public DateTime? FirstPlayAt { get; set; }
+        public long FirstPlayGameNo { get; set; }
+        public DateTime? LastPlayAt { get; set; }
+        public long LastPlayGameNo { get; set; }
+        /// <summary>いちばんプレイ数を叩き出した PC 名。</summary>
+        public string BusiestPc { get; set; }
+        public int BusiestPcPlays { get; set; }
 
         public List<GameStats> Games { get; set; } = new List<GameStats>();
         public List<PlayStatsComment> Comments { get; set; } = new List<PlayStatsComment>();
