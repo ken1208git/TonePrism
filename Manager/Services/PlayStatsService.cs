@@ -408,7 +408,7 @@ namespace TonePrism.Manager.Services
             // のべ時間なら「来場者の時間をどれだけ占めたか」という事実に留まる。
             // **賞名に「合計」を入れること** — 「いちばん長く遊ばれた賞」だと 1 プレイの長さと読める。
             // 母数の下限も自然に効く — 1 回だけのゲームは合計では上位に来られない。
-            Add(awards, games, "合計プレイ時間賞", "みんなが遊んだ時間の合計がいちばん長い（1 回の長さではない）",
+            Add(awards, games, "合計プレイ時間賞", "みんなが遊んだ時間の合計がいちばん長い",
                 g => g.TotalDurationSeconds > 0, g => g.TotalDurationSeconds,
                 g => FormatSpan(g.TotalDurationSeconds),
                 g => g.PlayCount + " 回 × 1 回あたり中央 " + FormatDuration(g.MedianDurationSeconds),
