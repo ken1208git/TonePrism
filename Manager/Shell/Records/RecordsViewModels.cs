@@ -290,19 +290,12 @@ namespace TonePrism.Manager.Shell.Records
 
         private static string RankingCaption(RecordsMetric metric)
         {
-            switch (metric)
-            {
-                case RecordsMetric.Rating:
-                    return "平均★の高い順。回答が " + PlayStatsTuning.MinSurveysForReliableAverage
-                        + " 件未満のゲームは「参考」として下にまとめています（1〜2件の★5で 1 位になるのを防ぐため）。";
-                case RecordsMetric.TotalTime:
-                    return "みんなが遊んだ合計時間が長い順。1 回あたりの長さはゲームの作り（終わったらすぐ閉じるか、"
-                        + "タイトル画面に戻って待つか）でも変わるので、1 回の長さでは並べていません。";
-                case RecordsMetric.ResponseRate:
-                    return "遊んだあとアンケートまで答えてくれた割合の高い順。";
-                default:
-                    return "遊ばれた回数の多い順。登録済みで 1 回も遊ばれなかったゲームも下に並びます。";
-            }
+            // **並べ替えの軸はチップが言っているので繰り返さない。** 残すのは、画面を見ただけでは
+            // 分からない規則だけ ＝ 「参考」の印の意味。
+            return metric == RecordsMetric.Rating
+                ? "回答が " + PlayStatsTuning.MinSurveysForReliableAverage
+                    + " 件未満のゲームは「参考」として下にまとめています。"
+                : null;
         }
 
         private static List<RecordsGameRow> BuildGameRows(PlayStatsSnapshot snap, RecordsMetric metric)
@@ -584,7 +577,7 @@ namespace TonePrism.Manager.Shell.Records
         private static string BuildOverallCaption(OverallSurveyStats o)
         {
             if (o.Count == 0) return "この期間の全体アンケートはありません。";
-            return string.Format("{0} 件・平均 ★{1}　（ランチャーを終了するときに聞く「TONE 全体はどうだった？」の回答。ゲーム別とは別集計です）",
+            return string.Format("{0} 件・平均 ★{1}　ランチャー終了時に聞く TONE 全体の評価です（ゲーム別とは別）",
                 o.Count, o.AverageRating.HasValue ? o.AverageRating.Value.ToString("0.00") : "—");
         }
 

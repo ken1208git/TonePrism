@@ -224,7 +224,7 @@ namespace TonePrism.Manager.Shell.Records
             ContentRoot.Visibility = Visibility.Visible;
 
             PopulateOverview(vm);
-            RankingCaption.Text = vm.RankingCaption;
+            SetCaption(RankingCaption, vm.RankingCaption);
             GamesList.ItemsSource = vm.Games;
             CommentsCaption.Text = vm.CommentsCaption;
             CommentsList.ItemsSource = vm.Comments;
@@ -303,10 +303,8 @@ namespace TonePrism.Manager.Shell.Records
 
             PlayStatsTrend trend = _snapshot.Trend;
             TrendChart.Trend = trend;
-            TrendCaption.Text = trend.HasData
-                ? trend.UnitLabel + "のプレイ数です。棒が高いほど、そのとき人が集まっていました。"
-                    + "期間を広く取ると刻みは自動で粗くなります。"
-                : "この期間のプレイ記録がありません。";
+            // 刻みは画面から読み取れないので残す。棒の読み方 (高いほど多い) は書かない。
+            SetCaption(TrendCaption, trend.HasData ? trend.UnitLabel + "のプレイ数" : null);
         }
 
         private string BuildStatusText()
@@ -333,6 +331,13 @@ namespace TonePrism.Manager.Shell.Records
             if (_snapshot != null && _snapshot.OutlierDurationCount > 0)
                 parts.Add("※" + _snapshot.OutlierDurationCount + " 件はプレイ時間が異常で時間の集計から除外");
             return string.Join("　/　", parts);
+        }
+
+        /// <summary>説明文は無ければ枠ごと隠す (空の TextBlock が余白だけ残すのを防ぐ)。</summary>
+        private static void SetCaption(TextBlock target, string text)
+        {
+            target.Text = text;
+            target.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
         }
 
         private void ShowEmpty(string message)

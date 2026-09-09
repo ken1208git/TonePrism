@@ -534,8 +534,6 @@
                     <Border x:Name="AwardsCard" Style="{StaticResource Card}">
                         <StackPanel>
                             <TextBlock Text="表彰" Style="{StaticResource CardHeader}" />
-                            <TextBlock Text="集計から自動で選びました。同じゲームが複数の賞を取ることもあります。該当者がいない賞は出ません。"
-                                       Style="{StaticResource Caption}" />
                             <ItemsControl x:Name="AwardsList" ItemTemplate="{StaticResource AwardTemplate}">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
@@ -548,8 +546,6 @@
                     <Border x:Name="HighlightsCard" Style="{StaticResource Card}">
                         <StackPanel>
                             <TextBlock Text="この期間の記録" Style="{StaticResource CardHeader}" />
-                            <TextBlock Text="ランキングには出ないけれど、話のネタになる数字です。"
-                                       Style="{StaticResource Caption}" />
                             <ItemsControl x:Name="HighlightsList" ItemTemplate="{StaticResource MetaTemplate}" />
                         </StackPanel>
                     </Border>
@@ -586,7 +582,7 @@
                                 <RadioButton x:Name="AxisDeveloper" Style="{StaticResource Chip}" Content="制作者"
                                              GroupName="axis" Checked="Axis_Changed" />
                             </StackPanel>
-                            <TextBlock Text="区分名の下の「最多」は、その区分でいちばん遊ばれたゲームです。1 本のゲームが複数のジャンル・複数の制作者に属することがあるため、合計は全体と一致しません。平均★は回答 1 件ずつで重み付けしています。"
+                            <TextBlock Text="1 本のゲームが複数に属することがあるため、合計は全体と一致しません。"
                                        Style="{StaticResource Caption}" />
                             <ItemsControl x:Name="GroupsList" ItemTemplate="{StaticResource GroupTemplate}" />
                         </StackPanel>
