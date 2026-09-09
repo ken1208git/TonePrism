@@ -841,6 +841,87 @@ namespace TonePrism.Manager.Tests
             Assert.Equal("no2", gem.WinnerNames);
         }
 
+        /// <summary>
+        /// 時計が丸ごと狂った台の記録 1 件で、会期ぶんのグラフが「1 年ごと」の柱 1 本に潰れない。
+        /// `DurationIsSane` は end &lt; start の相対ズレしか見ないので、この経路は素通りしていた。
+        /// </summary>
+        [Fact]
+        public void Compute_BrokenClockRecord_DoesNotCollapseTheTrend()
+        {
+            var data = new PlayStatsData
+            {
+                Games = new List<GameInfo> { Game(1, "a", "A") },
+                Plays = new List<PlayRecordEntry>
+                {
+                    Play(1, Day1, 60),
+                    Play(1, Day2, 60),
+                    Play(1, new DateTime(1970, 1, 1, 9, 0, 0, DateTimeKind.Local), 60),
+                },
+            };
+
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
+            Assert.Equal(PlayStatsTrendUnit.Hour, snap.Trend.Unit);   // 2 日ぶん = 1 時間ごと
+            Assert.Equal(1, snap.OutlierDateCount);
+            Assert.Equal(3, snap.TotalPlays);                          // 回数には残す
+            Assert.Equal(Day1.Date, snap.FirstPlayAt.Value.Date);      // 1970 を「最初のプレイ」にしない
+        }
+
+        /// <summary>
+        /// `game_no` が未採番の登録ゲームは 1 行も出せないので、網羅率の分母にも入れない。
+        /// 入れると「28 / 29」のまま永久に満杯にならず、その 1 本が消えた理由も画面に出ない。
+        /// </summary>
+        [Fact]
+        public void Presenter_UnnumberedGame_IsNotCountedInTheDenominator()
+        {
+            var data = new PlayStatsData
+            {
+                Games = new List<GameInfo>
+                {
+                    new GameInfo { GameNo = 1, Title = "採番済み" },
+                    new GameInfo { GameNo = null, Title = "未採番" },
+                },
+                Plays = new List<PlayRecordEntry> { Play(1, Day1, 60) },
+            };
+
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
+            Assert.Equal(1, snap.RegisteredGameCount);
+            Assert.Equal(1, snap.UnnumberedGameCount);
+
+            RecordsViewModel vm = RecordsPresenter.Build(snap, RecordsMetric.Plays, RecordsGroupAxis.Genre);
+            Assert.Equal("1 / 1", vm.CoverageMeter.ValueText);
+            Assert.Contains("番号未設定 1 本", vm.CoverageMeter.Sub);
+        }
+
+        /// <summary>
+        /// ゲーム別にも全体にも入らないアンケート (trigger 欠落 + game_no = 0) を黙って落とさない。
+        /// 帯は「N 件（ゲーム別 X・全体 Y）」なので、黙ると X + Y &lt; N の差が説明できなくなる。
+        /// </summary>
+        [Fact]
+        public void Compute_SurveyThatFitsNeitherBucket_IsCounted()
+        {
+            var data = new PlayStatsData
+            {
+                Games = new List<GameInfo> { Game(1, "a", "A") },
+                Plays = new List<PlayRecordEntry> { Play(1, Day1, 60) },
+                Surveys = new List<SurveyEntry>
+                {
+                    Survey(1, Day1, 5),
+                    // trigger は game_end に倒れるが game_no = 0 なのでどちらの母集団にも属さない
+                    new SurveyEntry
+                    {
+                        CreatedAt = 0, GameNo = 0, Rating = 4,
+                        Trigger = SurveyEntry.TriggerGameEnd, CreatedAtLocal = Day1,
+                    },
+                },
+            };
+
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
+            Assert.Equal(2, snap.TotalSurveys);
+            Assert.Equal(1, snap.GameSurveys);
+            Assert.Equal(0, snap.Overall.Count);
+            Assert.Equal(1, snap.UnclassifiedSurveys);
+        }
+
         [Fact]
         public void Load_MissingFolder_ReportsInsteadOfThrowing()
         {

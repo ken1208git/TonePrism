@@ -35,15 +35,26 @@ namespace TonePrism.Manager.Services
             // 混ぜると「no.0」という存在しないゲームが評価件数トップに現れる。
             List<SurveyEntry> gameSurveys = surveys.Where(s => !s.IsOverall && s.GameNo > 0).ToList();
             List<SurveyEntry> overallSurveys = surveys.Where(s => s.IsOverall).ToList();
+            // **どちらにも入らない**アンケート (trigger 欠落 + game_no = 0) を黙って落とさない。
+            // 件数は TotalSurveys に乗るので、放っておくと帯の「N 件（ゲーム別 X・全体 Y）」で
+            // X + Y < N になり、差の理由が画面のどこにも無くなる。
+            snap.UnclassifiedSurveys = surveys.Count - gameSurveys.Count - overallSurveys.Count;
 
             Dictionary<long, GameInfo> byNo = BuildGameIndex(data.Games);
 
-            snap.RegisteredGameCount = data.Games != null ? data.Games.Count : 0;
+            // **分母は「番号を持つ登録ゲーム」**。game_no が NULL の行は BuildGameIndex が捨てて
+            // 1 行も出ないのに、Games.Count で数えると分母にだけ残る = メーターが永久に満杯に
+            // ならず、その 1 本がどこにも現れない理由も画面に出ない (分子が分母を超える問題の鏡像)。
+            snap.RegisteredGameCount = data.Games != null
+                ? data.Games.Count(g => g.GameNo.HasValue && g.GameNo.Value > 0) : 0;
+            snap.UnnumberedGameCount = data.Games != null
+                ? data.Games.Count(g => !g.GameNo.HasValue || g.GameNo.Value <= 0) : 0;
             snap.TotalPlays = plays.Count;
             snap.TotalSurveys = surveys.Count;
             snap.GameSurveys = gameSurveys.Count;
             snap.AverageRating = Average(gameSurveys.Select(s => (double)s.Rating));
             snap.OutlierDurationCount = plays.Count(p => p.HasUnusableDuration);
+            snap.OutlierDateCount = plays.Count(p => !p.DateIsSane);
             snap.TotalPlaySeconds = plays.Where(p => p.DurationIsSane).Sum(p => p.DurationSeconds);
             snap.PcCount = plays.Select(p => p.SourcePc)
                 .Concat(surveys.Select(s => s.SourcePc))
@@ -262,7 +273,7 @@ namespace TonePrism.Manager.Services
             var buckets = new Dictionary<DateTime, int>();
             foreach (PlayRecordEntry p in plays)
             {
-                if (p.CreatedAtLocal == DateTime.MinValue) continue;
+                if (!p.DateIsSane) continue;
                 DateTime key = p.CreatedAtLocal.Date
                     .AddMinutes((p.CreatedAtLocal.Hour * 60 + p.CreatedAtLocal.Minute) / per * per);
                 int n;
@@ -300,7 +311,7 @@ namespace TonePrism.Manager.Services
         private static PlayStatsTrend BuildTrend(List<PlayRecordEntry> plays)
         {
             var trend = new PlayStatsTrend { Unit = PlayStatsTrendUnit.Minute15 };
-            List<PlayRecordEntry> valid = plays.Where(p => p.CreatedAtLocal != DateTime.MinValue).ToList();
+            List<PlayRecordEntry> valid = plays.Where(p => p.DateIsSane).ToList();
             if (valid.Count == 0) return trend;
 
             DateTime from = valid.Min(p => p.CreatedAtLocal);
@@ -428,6 +439,9 @@ namespace TonePrism.Manager.Services
         /// <summary>表彰の合間に読み上げられる「この期間の記録」を拾う。</summary>
         private static void FillHighlights(PlayStatsSnapshot snap, List<PlayRecordEntry> plays)
         {
+            // 日付が壊れた記録を混ぜない (FillPeak / BuildTrend と同じ防御)。ここだけ素通しだと
+            // 「最初のプレイ 1/1 00:00」のような行が出る。
+            plays = plays.Where(p => p.DateIsSane).ToList();
             if (plays.Count == 0) return;
 
             // **並べ替えも表示も `CreatedAtLocal`。** 期間フィルタ・時系列・ピーク・ゲーム別の
@@ -532,7 +546,8 @@ namespace TonePrism.Manager.Services
             double medianPlays = Median(games.Where(g => g.PlayCount > 0)
                 .Select(g => (long)g.PlayCount).OrderBy(v => v).ToList());
             Add(awards, games, "隠れた名作賞",
-                "プレイ回数は控えめ（全体のまん中より下）でも評価が高い",
+                "プレイ回数は控えめ（全体のまん中より下）でも評価が高い（回答 "
+                    + PlayStatsTuning.MinSurveysForHiddenGem + " 件以上）",
                 g => g.PlayCount > 0 && g.PlayCount < medianPlays
                      && g.SurveyCount >= PlayStatsTuning.MinSurveysForHiddenGem,
                 g => g.AverageRating.Value,
@@ -582,7 +597,6 @@ namespace TonePrism.Manager.Services
                 ValueText = value(winners[0]),
                 // 同点のときは 1 本目の補足だけ出すと他の受賞者に嘘をつくので出さない。
                 Note = winners.Count == 1 ? note(winners[0]) : null,
-                WinnerGameNos = winners.Select(g => g.GameNo).ToList(),
                 IsTie = winners.Count > 1,
             });
         }

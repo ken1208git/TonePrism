@@ -191,7 +191,7 @@ namespace TonePrism.Manager.Shell.Records
         }
 
         public static RecordsViewModel Build(PlayStatsSnapshot snap, RecordsMetric metric,
-            RecordsGroupAxis axis, bool scanFailed = false)
+            RecordsGroupAxis axis, bool scanFailed = false, bool folderMissing = false)
         {
             var vm = new RecordsViewModel();
             if (snap == null) return vm;
@@ -207,7 +207,7 @@ namespace TonePrism.Manager.Shell.Records
             vm.OverallCaption = BuildOverallCaption(snap.Overall);
             vm.OverallRatingBars = BuildRatingBars(snap.Overall.RatingCounts, snap.Overall.Count);
             vm.IsEmpty = snap.TotalPlays == 0 && snap.TotalSurveys == 0;
-            vm.EmptyMessage = vm.IsEmpty ? EmptyMessage(snap, scanFailed) : null;
+            vm.EmptyMessage = vm.IsEmpty ? EmptyMessage(snap, scanFailed, folderMissing) : null;
             return vm;
         }
 
@@ -216,10 +216,15 @@ namespace TonePrism.Manager.Shell.Records
         /// 読めていないだけかもしれない状態を「遊ばれていない」と断言すると、会期のデータが
         /// 消えたのか元々無いのかを読み手が区別できない。
         /// </summary>
-        private static string EmptyMessage(PlayStatsSnapshot snap, bool scanFailed)
+        private static string EmptyMessage(PlayStatsSnapshot snap, bool scanFailed, bool folderMissing)
         {
             if (scanFailed)
                 return "記録を読み込めませんでした。保存先にアクセスできるか確認して「更新」を押してください。";
+            // **「保存先が違う」を「まだ遊ばれていない」と同じ文言にしない。** 走査した場所に
+            // responses フォルダ自体が無いなら、原因はプレイの有無ではなく設定の可能性が高い。
+            if (folderMissing && snap.Range.IsAll)
+                return "記録の保存先に responses フォルダがありません。"
+                    + "まだ一度も遊ばれていないか、「設定」タブの保存先が別の場所を指しています。";
             return snap.Range.IsAll
                 ? "まだ記録がありません。ランチャーでゲームが遊ばれると、ここに集計が出ます。"
                 : snap.Range.Label + " の記録はありません。";
@@ -255,7 +260,10 @@ namespace TonePrism.Manager.Shell.Records
                 };
             }
 
-            if (s.TotalPlays > 0)
+            // **分子が分母を超えないときだけメーターにする。** 期間の境目で「プレイは 23:5x /
+            // 回答は 0 時過ぎ」と分断されると回答が分母より多くなりうる。超えたまま出すと弧は
+            // 満杯にクランプされ文字だけ「103%」になる (網羅率で直したのと同じ嘘)。
+            if (s.TotalPlays > 0 && s.GameSurveys <= s.TotalPlays)
             {
                 double rate = (double)s.GameSurveys / s.TotalPlays;
                 vm.ResponseMeter = new RecordsMeter
@@ -283,9 +291,7 @@ namespace TonePrism.Manager.Shell.Records
                     Max = s.RegisteredGameCount,
                     ValueText = played + " / " + s.RegisteredGameCount,
                     // 登録が消えた番号も遊ばれている場合は黙らない (合計が合わない理由になる)。
-                    Sub = extra > 0
-                        ? "登録されているゲームのうち（ほかに登録なし " + extra + " 本）"
-                        : "登録されているゲームのうち",
+                    Sub = BuildCoverageSub(extra, s.UnnumberedGameCount),
                 };
             }
 
@@ -301,6 +307,20 @@ namespace TonePrism.Manager.Shell.Records
                     Value = s.TotalSurveys + " 件（ゲーム別 " + s.GameSurveys + "・全体 " + s.Overall.Count + "）",
                 },
             };
+        }
+
+        /// <summary>
+        /// 網羅率メーターの補足。**分母に入れなかった本数は必ず言う** — 黙ると「28 / 29 のまま
+        /// 満杯にならない」「1 本がどこにも出てこない」の理由が画面から消える。
+        /// </summary>
+        private static string BuildCoverageSub(int unregistered, int unnumbered)
+        {
+            var extras = new List<string>();
+            if (unregistered > 0) extras.Add("登録なし " + unregistered + " 本");
+            if (unnumbered > 0) extras.Add("番号未設定 " + unnumbered + " 本");
+            return extras.Count > 0
+                ? "登録されているゲームのうち（ほかに" + string.Join("・", extras) + "）"
+                : "登録されているゲームのうち";
         }
 
         private static string RankingCaption(RecordsMetric metric)
@@ -592,8 +612,17 @@ namespace TonePrism.Manager.Shell.Records
         private static string BuildOverallCaption(OverallSurveyStats o)
         {
             if (o.Count == 0) return "この期間の全体アンケートはありません。";
-            return string.Format("{0} 件・平均 ★{1}　ランチャー終了時に聞く TONE 全体の評価です（ゲーム別とは別）",
+            string text = string.Format("{0} 件・平均 ★{1}　ランチャー終了時に聞く TONE 全体の評価です（ゲーム別とは別）",
                 o.Count, o.AverageRating.HasValue ? o.AverageRating.Value.ToString("0.00") : "—");
+            // (#463) 意思のある回答だけの平均。ゲーム別の詳細では出しているのに、全体側は
+            // 計算だけして捨てていた。★3 の寄りを読む手がかりなので同じように出す。
+            if (o.AverageRatingWithComment.HasValue)
+            {
+                text += "／コメント付きだけの平均 ★"
+                    + o.AverageRatingWithComment.Value.ToString("0.00")
+                    + "（" + o.CommentCount + " 件）";
+            }
+            return text;
         }
 
         /// <summary>

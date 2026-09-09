@@ -201,7 +201,7 @@ namespace TonePrism.Manager.Shell.Records
             {
                 _snapshot = PlayStatsService.Compute(_data, _range);
                 RecordsViewModel vm = RecordsPresenter.Build(_snapshot, _metric, _axis,
-                    _data != null && _data.ScanFailed);
+                    _data != null && _data.ScanFailed, _data != null && _data.ResponsesFolderMissing);
                 Populate(vm);
             }
             catch (Exception ex)
@@ -327,6 +327,10 @@ namespace TonePrism.Manager.Shell.Records
             // 時間統計から外した件数もここに出す (黙って除くと数字が合わない理由が分からない)。
             if (_snapshot != null && _snapshot.OutlierDurationCount > 0)
                 parts.Add("※" + _snapshot.OutlierDurationCount + " 件はプレイ時間が異常で時間の集計から除外");
+            if (_snapshot != null && _snapshot.OutlierDateCount > 0)
+                parts.Add("※" + _snapshot.OutlierDateCount + " 件は日付が異常で時間帯の集計から除外");
+            if (_snapshot != null && _snapshot.UnclassifiedSurveys > 0)
+                parts.Add("※アンケート " + _snapshot.UnclassifiedSurveys + " 件は種別が不明で内訳に入りません");
             return string.Join("　/　", parts);
         }
 

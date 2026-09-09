@@ -31,6 +31,16 @@ namespace TonePrism.Manager.Services
         /// <summary>中身もファイル名も解釈できず捨てた件数。</summary>
         public int UnreadableFileCount { get; set; }
 
+        /// <summary>
+        /// `trigger` が欠けている / 未知で、**ゲーム別にも全体にも入らなかった**アンケートの件数。
+        ///
+        /// `trigger` 欠落は `game_end` に倒すが、そのとき `game_no = 0` だと
+        /// 「ゲーム個別 (game_no > 0)」にも「全体 (launcher_end)」にも該当しない。件数は
+        /// `TotalSurveys` に乗るので、黙ると帯の「N 件（ゲーム別 X・全体 Y）」で X + Y &lt; N に
+        /// なり、差の説明がどこにも無くなる。現行 Launcher では起きないが、破損・手編集で起きうる。
+        /// </summary>
+        public int UnclassifiedSurveyCount { get; set; }
+
         /// <summary>ゲーム一覧の取得に失敗した (集計は出せるがゲーム名が番号のままになる)。</summary>
         public bool GamesUnavailable { get; set; }
 
@@ -99,8 +109,8 @@ namespace TonePrism.Manager.Services
 
             // --- 記録本体 ---
             string root = string.IsNullOrWhiteSpace(responsesRoot) ? PathManager.ResponsesFolder : responsesRoot;
-            string playRoot = Path.Combine(root, "play_records");
-            string surveyRoot = Path.Combine(root, "surveys");
+            string playRoot = Path.Combine(root, PathManager.PlayRecordsFolderName);
+            string surveyRoot = Path.Combine(root, PathManager.SurveysFolderName);
             bool anyFolder = SafeDirectoryExists(playRoot) || SafeDirectoryExists(surveyRoot);
             if (!anyFolder)
             {

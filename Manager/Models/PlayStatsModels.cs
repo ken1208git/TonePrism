@@ -59,6 +59,27 @@ namespace TonePrism.Manager.Models
         }
 
         /// <summary>
+        /// `created_at` が時系列の目盛りに使える値か。
+        ///
+        /// **<see cref="DurationIsSane"/> が捕まえるのは `end &lt; start` の相対ズレだけ**で、
+        /// CMOS 電池切れなどで PC の時計が丸ごとずれている場合は start/end が互いに整合するため
+        /// プレイ時間は「正常」と判定され、狂っているのは `created_at` の絶対値だけになる。
+        ///
+        /// 時系列グラフの刻みは記録の最小〜最大の幅で決まるので、**1970 年の記録が 1 件混ざるだけで
+        /// 会期 2 日ぶんが「1 年ごと」の柱 1 本に潰れる**。日付ピッカーの選択可能範囲も同じ理由で
+        /// 数十年前まで開く。件数には残し、時間軸の話からだけ外す (プレイ時間と同じ規律)。
+        /// </summary>
+        public bool DateIsSane
+        {
+            get
+            {
+                if (CreatedAtLocal == DateTime.MinValue) return false;
+                return CreatedAtLocal >= PlayStatsTuning.EarliestPlausibleDate
+                    && CreatedAtLocal <= PlayStatsTuning.LatestPlausibleDate;
+            }
+        }
+
+        /// <summary>
         /// プレイ時間が**異常値として**除外されたか。画面の「※N 件はプレイ時間が異常で…」に使う。
         /// ファイル名復元ぶんは別枠 (`RecoveredFromFileNameCount`) で開示するのでここには含めない。
         /// </summary>
@@ -135,11 +156,40 @@ namespace TonePrism.Manager.Models
         /// <summary>賞の対象に入れるための最低プレイ回数 (率で競う賞が少数プレイに攫われないように)。</summary>
         public const int MinPlaysForAward = 5;
 
-        /// <summary>「隠れた名作」の対象に入れるための最低アンケート件数。</summary>
+        /// <summary>
+        /// 「隠れた名作」の対象に入れるための最低アンケート件数。
+        ///
+        /// **<see cref="MinSurveysForReliableAverage"/> (5) より低いのは意図的**。この賞の趣旨は
+        /// 「回数が少なくて並べ替えでは埋もれるゲームを拾う」ことなので、並べ替えの信頼線と
+        /// 同じ高さにすると賞そのものが成立しない。実データ (2026 年) で 5 件に上げて確認したところ、
+        /// 候補が 4 本 → 1 本に減り、**受賞ゲームが満足度賞と同一 (no.5) になった** — 賞が別の賞に
+        /// 潰れ、「軸は互いに相関しにくいものを選ぶ」という表彰の設計が壊れる。
+        ///
+        /// 代わりに**下限は賞の説明文に明記する** (満足度賞・満点賞と同じ扱い)。同じ画面が
+        /// 「参考」札と受賞を同時に出しうるが、両者は別のことを言っている — 札は「並べ替えの
+        /// 根拠としては弱い」、賞は「回数が少ないのに評価が高い」。読み手が再構成できるよう、
+        /// どちらの数字も画面に出しておく。
+        /// </summary>
         public const int MinSurveysForHiddenGem = 3;
 
         /// <summary>同点がこれを超えたら賞として意味を成さないので出さない。</summary>
         public const int MaxAwardWinners = 3;
+
+        /// <summary>
+        /// `created_at` を時間軸に使ってよい範囲 (→ <see cref="PlayRecordEntry.DateIsSane"/>)。
+        ///
+        /// **両端とも絶対値で持つ。`DateTime.Now` を使わないこと** — <see cref="PlayStatsService"/> は
+        /// 同じ入力から同じ結果を返す純粋計算で、実行時刻で結果が変わると再現も検証もできなくなる。
+        ///
+        /// 下限は**企画そのものが存在しなかった時期**という基準なので年が進んでも陳腐化しない。
+        /// これで拾えるのは、電池切れ等で時計がエポックや 2000 年に落ちた台 (現実に起きる壊れ方)。
+        /// **任意の未来年に進んだ時計は上限まで素通りする** — そこまで防ぐには「今」が要るので、
+        /// 純粋性と引き換えにしない。
+        /// </summary>
+        public static readonly DateTime EarliestPlausibleDate = new DateTime(2020, 1, 1);
+
+        /// <summary><see cref="EarliestPlausibleDate"/> と対になる上限。</summary>
+        public static readonly DateTime LatestPlausibleDate = new DateTime(2100, 1, 1);
     }
 
     /// <summary>
@@ -449,7 +499,6 @@ namespace TonePrism.Manager.Models
         public string ValueText { get; set; }
         /// <summary>補足 (「32 台で遊ばれました」など)。null なら出さない。</summary>
         public string Note { get; set; }
-        public List<long> WinnerGameNos { get; set; } = new List<long>();
         public bool IsTie { get; set; }
 
         /// <summary>補足を出すか (同点だと個別の補足が他の受賞者に対して嘘になるので出さない)。</summary>
@@ -487,6 +536,15 @@ namespace TonePrism.Manager.Models
         public int PeakCount { get; set; }
         /// <summary>プレイ時間が異常で時間統計から外した件数 (0 でなければ画面に注記する)。</summary>
         public int OutlierDurationCount { get; set; }
+
+        /// <summary>`created_at` が壊れていて時間軸から外した件数 (→ <see cref="PlayRecordEntry.DateIsSane"/>)。</summary>
+        public int OutlierDateCount { get; set; }
+
+        /// <summary>ゲーム別にも全体にも入らなかったアンケートの件数 (`trigger` 欠落 + `game_no = 0`)。</summary>
+        public int UnclassifiedSurveys { get; set; }
+
+        /// <summary>`game_no` が未採番で 1 行も出せない登録ゲームの本数 (分母から外している)。</summary>
+        public int UnnumberedGameCount { get; set; }
 
         /// <summary>自動選出した表彰。受賞者がいない賞は入らない。</summary>
         public List<PlayStatsAward> Awards { get; set; } = new List<PlayStatsAward>();

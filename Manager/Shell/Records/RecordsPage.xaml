@@ -610,14 +610,16 @@
                             </StackPanel>
                             <TextBlock x:Name="RankingCaption" Style="{StaticResource Caption}" />
 
-                            <!-- 一覧の見出し (行の右側 4 指標に対応) -->
-                            <Grid Margin="0,0,44,6">
+                            <!-- 一覧の見出し (行の右側 4 指標に対応)。
+                                 右余白は行側の内訳と厳密に合わせること:
+                                 枠 1 + Border の Padding 14 + 展開マーク列 30 = 45px。
+                                 ここがずれると見出しラベルと値の右端が縦に揃わない。 -->
+                            <Grid Margin="0,0,45,6">
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                     <TextBlock Text="回数" Foreground="#7C8288" FontSize="10.5" MinWidth="56" TextAlignment="Right" />
                                     <TextBlock Text="平均★" Foreground="#7C8288" FontSize="10.5" MinWidth="58" TextAlignment="Right" />
                                     <TextBlock Text="合計時間" Foreground="#7C8288" FontSize="10.5" MinWidth="70" TextAlignment="Right" />
                                     <TextBlock Text="回答率" Foreground="#7C8288" FontSize="10.5" MinWidth="46" TextAlignment="Right" />
-                                    <TextBlock Text="" MinWidth="16" />
                                 </StackPanel>
                             </Grid>
 
