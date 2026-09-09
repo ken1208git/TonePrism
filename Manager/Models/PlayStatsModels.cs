@@ -111,6 +111,83 @@ namespace TonePrism.Manager.Models
         public const int MaxAwardWinners = 3;
     }
 
+    /// <summary>
+    /// 集計の対象期間。**両端を含む日付の閉区間**で、どちらも未指定なら全期間。
+    ///
+    /// `DateTime?` を 2 本引き回さず型にしてあるのは、(a) 開始と終了を取り違えても気づけないから、
+    /// (b) 「片方だけ指定」「逆順に指定」の正規化を 1 箇所に閉じ込めたいから。日付だけを見る
+    /// (時刻は落とす) ので、終了日の 23:59 の記録も必ず入る。
+    /// </summary>
+    public sealed class PlayStatsRange
+    {
+        private PlayStatsRange(DateTime? from, DateTime? to)
+        {
+            From = from;
+            To = to;
+        }
+
+        /// <summary>開始日 (この日を含む)。null = 下限なし。</summary>
+        public DateTime? From { get; private set; }
+        /// <summary>終了日 (この日を含む)。null = 上限なし。</summary>
+        public DateTime? To { get; private set; }
+
+        /// <summary>全期間。</summary>
+        public static readonly PlayStatsRange All = new PlayStatsRange(null, null);
+
+        /// <summary>1 日だけ。</summary>
+        public static PlayStatsRange Day(DateTime day)
+        {
+            return new PlayStatsRange(day.Date, day.Date);
+        }
+
+        /// <summary>
+        /// 期間を指定する。**逆順で渡されたら入れ替える** — 画面で終了日を先に選ぶ操作は普通に
+        /// 起きるので、そこで 0 件になるより素直に期間として扱う方がよい。
+        /// </summary>
+        public static PlayStatsRange Between(DateTime? from, DateTime? to)
+        {
+            DateTime? f = from.HasValue ? from.Value.Date : (DateTime?)null;
+            DateTime? t = to.HasValue ? to.Value.Date : (DateTime?)null;
+            if (f.HasValue && t.HasValue && f.Value > t.Value)
+            {
+                DateTime? swap = f;
+                f = t;
+                t = swap;
+            }
+            return new PlayStatsRange(f, t);
+        }
+
+        public bool IsAll { get { return !From.HasValue && !To.HasValue; } }
+
+        public bool IsSingleDay
+        {
+            get { return From.HasValue && To.HasValue && From.Value == To.Value; }
+        }
+
+        /// <summary>その日時が期間に入るか (日付だけで判定)。</summary>
+        public bool Contains(DateTime at)
+        {
+            DateTime d = at.Date;
+            if (From.HasValue && d < From.Value) return false;
+            if (To.HasValue && d > To.Value) return false;
+            return true;
+        }
+
+        /// <summary>画面に出す期間の表示 (「全期間」「9月5日」「9月4日 〜 9月5日」)。</summary>
+        public string Label
+        {
+            get
+            {
+                if (IsAll) return "全期間";
+                if (IsSingleDay) return From.Value.ToString("M月d日");
+                if (From.HasValue && To.HasValue)
+                    return From.Value.ToString("M月d日") + " 〜 " + To.Value.ToString("M月d日");
+                if (From.HasValue) return From.Value.ToString("M月d日") + " 以降";
+                return To.Value.ToString("M月d日") + " まで";
+            }
+        }
+    }
+
     /// <summary>1 件のコメント (ゲーム名を解決済み)。全ゲーム横断の一覧と、ゲーム詳細の両方で使う。</summary>
     public sealed class PlayStatsComment
     {
@@ -275,8 +352,8 @@ namespace TonePrism.Manager.Models
     /// </summary>
     public sealed class PlayStatsSnapshot
     {
-        /// <summary>この集計の対象日。null = 全期間。</summary>
-        public DateTime? Day { get; set; }
+        /// <summary>この集計の対象期間。</summary>
+        public PlayStatsRange Range { get; set; } = PlayStatsRange.All;
 
         // 概況
         public int TotalPlays { get; set; }

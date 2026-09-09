@@ -16,19 +16,20 @@ namespace TonePrism.Manager.Services
     public static class PlayStatsService
     {
         /// <summary>
-        /// 指定日 (null = 全期間) で集計する。
+        /// 指定期間 (null = 全期間) で集計する。
         /// </summary>
-        public static PlayStatsSnapshot Compute(PlayStatsData data, DateTime? day)
+        public static PlayStatsSnapshot Compute(PlayStatsData data, PlayStatsRange range)
         {
-            var snap = new PlayStatsSnapshot { Day = day };
+            PlayStatsRange span = range ?? PlayStatsRange.All;
+            var snap = new PlayStatsSnapshot { Range = span };
             if (data == null) return snap;
 
-            List<PlayRecordEntry> plays = day.HasValue
-                ? data.Plays.Where(p => p.CreatedAtLocal.Date == day.Value.Date).ToList()
-                : data.Plays;
-            List<SurveyEntry> surveys = day.HasValue
-                ? data.Surveys.Where(s => s.CreatedAtLocal.Date == day.Value.Date).ToList()
-                : data.Surveys;
+            List<PlayRecordEntry> plays = span.IsAll
+                ? data.Plays
+                : data.Plays.Where(p => span.Contains(p.CreatedAtLocal)).ToList();
+            List<SurveyEntry> surveys = span.IsAll
+                ? data.Surveys
+                : data.Surveys.Where(s => span.Contains(s.CreatedAtLocal)).ToList();
 
             // game_end (ゲーム個別) と launcher_end (全体アンケート) は母集団も問いも違うので必ず分ける。
             // 混ぜると「no.0」という存在しないゲームが評価件数トップに現れる。

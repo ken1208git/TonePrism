@@ -150,9 +150,9 @@ namespace TonePrism.Manager.Shell.Records
             vm.Notes = BuildNotes(snap);
             vm.IsEmpty = snap.TotalPlays == 0 && snap.TotalSurveys == 0;
             vm.EmptyMessage = vm.IsEmpty
-                ? (snap.Day.HasValue
-                    ? snap.Day.Value.ToString("M月d日") + " の記録はありません。"
-                    : "まだ記録がありません。ランチャーでゲームが遊ばれると、ここに集計が出ます。")
+                ? (snap.Range.IsAll
+                    ? "まだ記録がありません。ランチャーでゲームが遊ばれると、ここに集計が出ます。"
+                    : snap.Range.Label + " の記録はありません。")
                 : null;
             return vm;
         }

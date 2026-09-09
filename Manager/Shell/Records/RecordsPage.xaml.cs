@@ -28,7 +28,14 @@ namespace TonePrism.Manager.Shell.Records
         private DatabaseManager Db { get { return ShellWindow.SharedDb; } }
 
         private PlayStatsData _data;
-        private DateTime? _day;                 // null = 全期間
+        private PlayStatsRange _range = PlayStatsRange.All;
+
+        /// <summary>
+        /// 日付を 1 つずつチップに出す上限。会期 (2〜3 日) はこれで全部並ぶが、`responses/` は
+        /// 部活のたびに増えるので、放っておくと数十個のチップが折り返して画面を埋める。
+        /// 超えたら日ごとのチップをやめてプリセット (今日 / 直近 N 日) に切り替える。
+        /// </summary>
+        private const int MaxDayChips = 7;
         private RecordsMetric _metric = RecordsMetric.Plays;
         private RecordsGroupAxis _axis = RecordsGroupAxis.Genre;
         private PlayStatsSnapshot _snapshot;
@@ -37,6 +44,8 @@ namespace TonePrism.Manager.Shell.Records
         private bool _loadedThisShow;
         /// <summary>XAML の <c>IsChecked="True"</c> が InitializeComponent 中に Checked を投げるため、初期化中の再集計を抑える。</summary>
         private bool _ready;
+        /// <summary>ピッカーへ既定値を流し込む間だけ立てる (SelectedDateChanged の連鎖再集計を防ぐ)。</summary>
+        private bool _suppressRangePickers;
 
         public RecordsPage()
         {
@@ -72,7 +81,7 @@ namespace TonePrism.Manager.Shell.Records
                 // SMB 越しの全走査を含むので必ず背景スレッドで。
                 _data = await Task.Run(() => PlayStatsLoader.Load(db));
 
-                BuildDayChips();
+                BuildRangeChips();
                 Recompute();
             }
             catch (Exception ex)
@@ -88,25 +97,45 @@ namespace TonePrism.Manager.Shell.Records
             }
         }
 
-        /// <summary>記録のある日付ぶんだけチップを作る (「全期間」+ 各日)。</summary>
-        private void BuildDayChips()
+        /// <summary>
+        /// 期間のチップを作る。記録のある日が少ないうちは日ごとに並べ (会期の振り返りはこれが一番速い)、
+        /// 増えてきたらプリセットに切り替える。末尾に「期間を指定」を必ず置く。
+        /// </summary>
+        private void BuildRangeChips()
         {
             DayFilterPanel.Children.Clear();
+            CustomRangePanel.Visibility = Visibility.Collapsed;
+            _range = PlayStatsRange.All;
             if (_data == null) return;
 
-            AddDayChip("全期間", null, true);
-            foreach (DateTime d in _data.AvailableDates)
+            List<DateTime> dates = _data.AvailableDates;
+
+            AddChip("全期間", PlayStatsRange.All, true);
+
+            if (dates.Count <= MaxDayChips)
             {
-                int plays = 0;
-                foreach (PlayRecordEntry p in _data.Plays) if (p.CreatedAtLocal.Date == d) plays++;
-                AddDayChip(d.ToString("M/d") + "（" + plays + "）", d, false);
+                foreach (DateTime d in dates)
+                {
+                    int plays = 0;
+                    foreach (PlayRecordEntry p in _data.Plays) if (p.CreatedAtLocal.Date == d) plays++;
+                    AddChip(d.ToString("M/d") + "（" + plays + "）", PlayStatsRange.Day(d), false);
+                }
             }
-            // 日が 1 つしか無いなら切り替える意味が無いので隠す。
-            DayFilterPanel.Visibility = _data.AvailableDates.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
-            _day = null;
+            else
+            {
+                DateTime today = DateTime.Now.Date;
+                AddChip("今日", PlayStatsRange.Day(today), false);
+                AddChip("直近7日", PlayStatsRange.Between(today.AddDays(-6), today), false);
+                AddChip("直近30日", PlayStatsRange.Between(today.AddDays(-29), today), false);
+            }
+
+            AddCustomRangeChip(dates);
+
+            // 期間が 1 日しか無いなら選びようが無いので帯ごと隠す。
+            FilterArea.Visibility = dates.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        private void AddDayChip(string label, DateTime? day, bool isChecked)
+        private void AddChip(string label, PlayStatsRange range, bool isChecked)
         {
             var rb = new RadioButton
             {
@@ -114,15 +143,62 @@ namespace TonePrism.Manager.Shell.Records
                 GroupName = "day",
                 IsChecked = isChecked,
                 Style = (Style)FindResource("Chip"),
-                Tag = day,
+                Tag = range,
             };
             rb.Checked += (s, e) =>
             {
                 if (!_ready) return;
-                _day = (DateTime?)((RadioButton)s).Tag;
+                CustomRangePanel.Visibility = Visibility.Collapsed;
+                _range = (PlayStatsRange)((RadioButton)s).Tag;
                 Recompute();
             };
             DayFilterPanel.Children.Add(rb);
+        }
+
+        /// <summary>
+        /// 「期間を指定」チップ。選ぶと日付ピッカーが開く。**開いた時点では集計を変えない** —
+        /// 既定値のまま勝手に絞り込むと、押した人が意図していない期間の数字を見ることになる。
+        /// 初期値には記録の最初と最後を入れておき、動かした時点で初めて反映する。
+        /// </summary>
+        private void AddCustomRangeChip(List<DateTime> dates)
+        {
+            var rb = new RadioButton
+            {
+                Content = "期間を指定",
+                GroupName = "day",
+                Style = (Style)FindResource("Chip"),
+            };
+            rb.Checked += (s, e) =>
+            {
+                if (!_ready) return;
+                _suppressRangePickers = true;
+                try
+                {
+                    if (!RangeFrom.SelectedDate.HasValue && dates.Count > 0)
+                        RangeFrom.SelectedDate = dates[0];
+                    if (!RangeTo.SelectedDate.HasValue && dates.Count > 0)
+                        RangeTo.SelectedDate = dates[dates.Count - 1];
+                }
+                finally { _suppressRangePickers = false; }
+
+                CustomRangePanel.Visibility = Visibility.Visible;
+                ApplyCustomRange();
+            };
+            DayFilterPanel.Children.Add(rb);
+        }
+
+        private void CustomRange_Changed(object sender, SelectionChangedEventArgs e)
+        {
+            if (!_ready || _suppressRangePickers) return;
+            if (CustomRangePanel.Visibility != Visibility.Visible) return;
+            ApplyCustomRange();
+        }
+
+        private void ApplyCustomRange()
+        {
+            _range = PlayStatsRange.Between(RangeFrom.SelectedDate, RangeTo.SelectedDate);
+            RangeSummary.Text = _range.IsAll ? null : _range.Label;
+            Recompute();
         }
 
         // ------------------------------------------------------------------
@@ -135,7 +211,7 @@ namespace TonePrism.Manager.Shell.Records
             if (_data == null) return;
             try
             {
-                _snapshot = PlayStatsService.Compute(_data, _day);
+                _snapshot = PlayStatsService.Compute(_data, _range);
                 RecordsViewModel vm = RecordsPresenter.Build(_snapshot, _metric, _axis);
                 Populate(vm);
             }

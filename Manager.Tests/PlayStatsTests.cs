@@ -92,7 +92,7 @@ namespace TonePrism.Manager.Tests
                 },
             };
 
-            PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
 
             Assert.Equal(3, snap.TotalSurveys);
             Assert.Equal(1, snap.GameSurveys);              // ゲーム別は 1 件だけ
@@ -116,7 +116,7 @@ namespace TonePrism.Manager.Tests
                 Plays = new List<PlayRecordEntry> { Play(1, Day2, 60) },
             };
 
-            PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
 
             Assert.Equal(2, snap.Games.Count);
             GameStats zero = snap.Games.Single(g => g.GameNo == 2);
@@ -136,7 +136,7 @@ namespace TonePrism.Manager.Tests
                 Plays = new List<PlayRecordEntry> { Play(99, Day2, 60) },
             };
 
-            GameStats g = PlayStatsService.Compute(data, null).Games.Single();
+            GameStats g = PlayStatsService.Compute(data, PlayStatsRange.All).Games.Single();
             Assert.False(g.KnownGame);
             Assert.Contains("99", g.Title);
             Assert.Equal(1, g.PlayCount);
@@ -163,7 +163,7 @@ namespace TonePrism.Manager.Tests
                 },
             };
 
-            PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
             GameStats g = snap.Games.Single();
 
             Assert.Equal(5, g.PlayCount);            // 回数は 5 のまま
@@ -201,10 +201,58 @@ namespace TonePrism.Manager.Tests
                 Surveys = new List<SurveyEntry> { Survey(1, Day1, 5), Survey(1, Day2, 3) },
             };
 
-            Assert.Equal(3, PlayStatsService.Compute(data, null).TotalPlays);
-            Assert.Equal(1, PlayStatsService.Compute(data, Day1.Date).TotalPlays);
-            Assert.Equal(2, PlayStatsService.Compute(data, Day2.Date).TotalPlays);
-            Assert.Equal(5.0, PlayStatsService.Compute(data, Day1.Date).AverageRating.Value, 3);
+            Assert.Equal(3, PlayStatsService.Compute(data, PlayStatsRange.All).TotalPlays);
+            Assert.Equal(1, PlayStatsService.Compute(data, PlayStatsRange.Day(Day1)).TotalPlays);
+            Assert.Equal(2, PlayStatsService.Compute(data, PlayStatsRange.Day(Day2)).TotalPlays);
+            Assert.Equal(5.0, PlayStatsService.Compute(data, PlayStatsRange.Day(Day1)).AverageRating.Value, 3);
+        }
+
+        [Fact]
+        public void Compute_Range_IsInclusiveOnBothEndsAndToleratesReversedInput()
+        {
+            var data = new PlayStatsData
+            {
+                Games = new List<GameInfo> { Game(1, "a", "A") },
+                Plays = new List<PlayRecordEntry>
+                {
+                    Play(1, Day1, 60),                       // 9/4
+                    Play(1, Day2, 60),                       // 9/5
+                    Play(1, Day2.AddDays(1), 60),            // 9/6
+                },
+            };
+
+            // 両端を含む閉区間。
+            Assert.Equal(2, PlayStatsService.Compute(
+                data, PlayStatsRange.Between(Day1, Day2)).TotalPlays);
+
+            // **逆順で渡されても入れ替えて扱う。** 画面で終了日を先に選ぶ操作は普通に起きるので、
+            // そこで 0 件になるより期間として解釈する方がよい。
+            Assert.Equal(2, PlayStatsService.Compute(
+                data, PlayStatsRange.Between(Day2, Day1)).TotalPlays);
+
+            // 片側だけの指定も通る。
+            Assert.Equal(2, PlayStatsService.Compute(
+                data, PlayStatsRange.Between(Day2, null)).TotalPlays);
+            Assert.Equal(1, PlayStatsService.Compute(
+                data, PlayStatsRange.Between(null, Day1)).TotalPlays);
+
+            // 終了日の 23:59 の記録も落とさない (日付だけで判定する)。
+            var late = new PlayStatsData
+            {
+                Games = data.Games,
+                Plays = new List<PlayRecordEntry> { Play(1, Day2.Date.AddHours(23).AddMinutes(59), 30) },
+            };
+            Assert.Equal(1, PlayStatsService.Compute(late, PlayStatsRange.Day(Day2)).TotalPlays);
+        }
+
+        [Fact]
+        public void PlayStatsRange_Label_ReadsAsAPeriod()
+        {
+            Assert.Equal("全期間", PlayStatsRange.All.Label);
+            Assert.Equal("9月5日", PlayStatsRange.Day(Day2).Label);
+            Assert.Equal("9月4日 〜 9月5日", PlayStatsRange.Between(Day1, Day2).Label);
+            Assert.Equal("9月5日 以降", PlayStatsRange.Between(Day2, null).Label);
+            Assert.Equal("9月4日 まで", PlayStatsRange.Between(null, Day1).Label);
         }
 
         // ==================================================================
@@ -225,7 +273,7 @@ namespace TonePrism.Manager.Tests
                 Surveys = surveys,
             };
 
-            PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
             RecordsViewModel vm = RecordsPresenter.Build(snap, RecordsMetric.Rating, RecordsGroupAxis.Genre);
 
             Assert.Equal("たくさん回答", vm.Games[0].Title);
@@ -247,7 +295,7 @@ namespace TonePrism.Manager.Tests
             };
 
             RecordsViewModel vm = RecordsPresenter.Build(
-                PlayStatsService.Compute(data, null), RecordsMetric.Plays, RecordsGroupAxis.Genre);
+                PlayStatsService.Compute(data, PlayStatsRange.All), RecordsMetric.Plays, RecordsGroupAxis.Genre);
 
             Assert.Equal("多い", vm.Games[0].Title);
             Assert.Equal(1, vm.Games[0].Rank);
@@ -272,7 +320,7 @@ namespace TonePrism.Manager.Tests
                 Surveys = surveys,
             };
 
-            PlayStatsGroup g = PlayStatsService.Compute(data, null).ByGenre.Single();
+            PlayStatsGroup g = PlayStatsService.Compute(data, PlayStatsRange.All).ByGenre.Single();
             Assert.Equal("アクション", g.Key);
             Assert.Equal(2, g.GameCount);
             Assert.Equal(10, g.SurveyCount);
@@ -294,7 +342,7 @@ namespace TonePrism.Manager.Tests
                 Plays = new List<PlayRecordEntry> { Play(1, Day2, 60), Play(1, Day2, 60) },
             };
 
-            PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
 
             Assert.Equal(2, snap.ByDeveloper.Count);
             Assert.All(snap.ByDeveloper, g => Assert.Equal(2, g.PlayCount));   // 共作は両方に計上
@@ -321,7 +369,7 @@ namespace TonePrism.Manager.Tests
             };
 
             RecordsViewModel vm = RecordsPresenter.Build(
-                PlayStatsService.Compute(data, null), RecordsMetric.Plays, RecordsGroupAxis.Genre);
+                PlayStatsService.Compute(data, PlayStatsRange.All), RecordsMetric.Plays, RecordsGroupAxis.Genre);
 
             Assert.Contains(vm.Notes, n => n.Contains("★3"));
         }
@@ -349,7 +397,7 @@ namespace TonePrism.Manager.Tests
                 },
             };
 
-            PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
             Assert.Equal(1, snap.Games.Single(g => g.GameNo == 1).RepeatPlayCount);
             Assert.Equal(0, snap.Games.Single(g => g.GameNo == 2).RepeatPlayCount);
         }
@@ -372,7 +420,7 @@ namespace TonePrism.Manager.Tests
                 Surveys = surveys,
             };
 
-            PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
 
             Assert.Equal("みんなの定番", Winner(snap, "最多プレイ賞"));
             Assert.Equal("じっくり系", Winner(snap, "満足度賞"));
@@ -397,7 +445,7 @@ namespace TonePrism.Manager.Tests
                 Surveys = surveys,
             };
 
-            PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
             PlayStatsAward award = snap.Awards.Single(a => a.Title == "満点賞");
             Assert.Equal("回答が多い", award.WinnerNames);
             Assert.False(award.IsTie);
@@ -414,7 +462,7 @@ namespace TonePrism.Manager.Tests
                 Surveys = new List<SurveyEntry> { Survey(1, Day2, 5) },
             };
 
-            PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
             Assert.DoesNotContain(snap.Awards, a => a.Title == "満足度賞");
             Assert.DoesNotContain(snap.Awards, a => a.Title == "もう一回賞");
             Assert.Contains(snap.Awards, a => a.Title == "最多プレイ賞");   // 回数の賞は 1 回でも成立
@@ -438,7 +486,7 @@ namespace TonePrism.Manager.Tests
                 },
             };
 
-            PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
             PlayStatsAward award = snap.Awards.Single(a => a.Title == "いちばん遊ばれた制作者");
             Assert.Equal("山田 太郎", award.WinnerNames);   // プレイ数では登録なしの方が多いが対象外
         }
@@ -463,7 +511,7 @@ namespace TonePrism.Manager.Tests
                 Plays = new List<PlayRecordEntry> { Play(1, Day2, 60), Play(1, Day2, 60) },
             };
 
-            PlayStatsAward award = PlayStatsService.Compute(data, null).Awards
+            PlayStatsAward award = PlayStatsService.Compute(data, PlayStatsRange.All).Awards
                 .Single(a => a.Title == "いちばん遊ばれた制作者");
 
             Assert.True(award.IsTie);
@@ -504,7 +552,7 @@ namespace TonePrism.Manager.Tests
                 },
             };
 
-            PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
             Assert.Equal(1, snap.FirstPlayGameNo);
             Assert.Equal(2, snap.LastPlayGameNo);
             Assert.Equal("PC-B", snap.BusiestPc);
@@ -566,7 +614,7 @@ namespace TonePrism.Manager.Tests
                 Assert.Equal(1, data.UnreadableFileCount);
                 Assert.Single(data.AvailableDates);
 
-                PlayStatsSnapshot snap = PlayStatsService.Compute(data, null);
+                PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
                 Assert.Equal(2, snap.TotalPlays);
                 Assert.Equal(1, snap.GameSurveys);
                 Assert.Equal(1, snap.Overall.Count);

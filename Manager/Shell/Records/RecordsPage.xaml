@@ -354,7 +354,25 @@
                     </StackPanel>
                 </Grid>
 
-                <StackPanel x:Name="DayFilterPanel" Orientation="Horizontal" Margin="0,10,0,16" />
+                <!-- 期間の選択。チップ (プリセット) + 「期間を指定」で開く日付ピッカー。 -->
+                <StackPanel x:Name="FilterArea" Margin="0,10,0,16">
+                    <StackPanel x:Name="DayFilterPanel" Orientation="Horizontal" />
+                    <StackPanel x:Name="CustomRangePanel" Orientation="Horizontal"
+                                Margin="0,10,0,0" Visibility="Collapsed">
+                        <TextBlock Text="開始" Foreground="#9AA0A6" FontSize="11.5"
+                                   VerticalAlignment="Center" Margin="0,0,7,0" />
+                        <DatePicker x:Name="RangeFrom" Width="140"
+                                    SelectedDateChanged="CustomRange_Changed" />
+                        <TextBlock Text="〜" Foreground="#9AA0A6" FontSize="12"
+                                   VerticalAlignment="Center" Margin="9,0,9,0" />
+                        <TextBlock Text="終了" Foreground="#9AA0A6" FontSize="11.5"
+                                   VerticalAlignment="Center" Margin="0,0,7,0" />
+                        <DatePicker x:Name="RangeTo" Width="140"
+                                    SelectedDateChanged="CustomRange_Changed" />
+                        <TextBlock x:Name="RangeSummary" Foreground="#7C8288" FontSize="11.5"
+                                   VerticalAlignment="Center" Margin="14,0,0,0" />
+                    </StackPanel>
+                </StackPanel>
 
                 <!-- ===== 読み込み中 / 空 ===== -->
                 <Border x:Name="LoadingPanel" Style="{StaticResource Card}" Visibility="Collapsed">
