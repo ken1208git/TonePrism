@@ -38,11 +38,18 @@ namespace TonePrism.Manager.Shell.Records
         public string Value { get; set; }
     }
 
-    /// <summary>概況タイル 1 枚。</summary>
-    public sealed class RecordsTile
+    /// <summary>
+    /// 概況のメーター 1 つ。**上限が実在する比率にだけ使う** (平均★ = 5 点満点、回答率 =
+    /// アンケート / プレイ、網羅率 = 遊ばれた種類 / 登録数)。上限の無い値に弧を当てると
+    /// 存在しない目標を発明することになるので、そちらは数値のまま出す。
+    /// </summary>
+    public sealed class RecordsMeter
     {
-        public string Value { get; set; }
         public string Label { get; set; }
+        public double Value { get; set; }
+        public double Max { get; set; }
+        /// <summary>中央に出す文字 (「★4.28」「40%」など)。</summary>
+        public string ValueText { get; set; }
         public string Sub { get; set; }
     }
 
@@ -103,7 +110,18 @@ namespace TonePrism.Manager.Shell.Records
     /// <summary>画面 1 枚ぶんの表示データ。</summary>
     public sealed class RecordsViewModel
     {
-        public List<RecordsTile> Tiles { get; set; } = new List<RecordsTile>();
+        // --- 概況 ---
+        /// <summary>この画面がいちばん大きく出す 1 つの数字 (規約: ヒーロー数値は 1 画面に 1 つだけ)。</summary>
+        public string HeroValue { get; set; }
+        public string HeroLabel { get; set; }
+        public string HeroSub { get; set; }
+        /// <summary>ヒーローに添える時間帯別プレイ数 (0〜23 時)。</summary>
+        public int[] HeroSpark { get; set; }
+        public RecordsMeter RatingMeter { get; set; }
+        public RecordsMeter ResponseMeter { get; set; }
+        public RecordsMeter CoverageMeter { get; set; }
+        /// <summary>上限の無い数字 (総プレイ時間・台数など) を並べる帯。</summary>
+        public List<RecordsMeta> Strip { get; set; } = new List<RecordsMeta>();
         public List<RecordsGameRow> Games { get; set; } = new List<RecordsGameRow>();
         public List<PlayStatsComment> Comments { get; set; } = new List<PlayStatsComment>();
         public List<RecordsGroupRow> Groups { get; set; } = new List<RecordsGroupRow>();
@@ -137,7 +155,7 @@ namespace TonePrism.Manager.Shell.Records
             var vm = new RecordsViewModel();
             if (snap == null) return vm;
 
-            vm.Tiles = BuildTiles(snap);
+            BuildOverview(vm, snap);
             vm.Games = BuildGameRows(snap, metric);
             vm.Comments = snap.Comments;
             vm.Groups = BuildGroupRows(snap, axis);
@@ -159,48 +177,74 @@ namespace TonePrism.Manager.Shell.Records
 
         // ------------------------------------------------------------------
 
-        private static List<RecordsTile> BuildTiles(PlayStatsSnapshot s)
+        /// <summary>
+        /// 概況を組み立てる。形は指標の性質で決める:
+        /// **上限が実在する比率はメーター**、**上限の無い量は数値のまま**、そして
+        /// **いちばん大きい数字は 1 つだけ** (ヒーロー数値)。プレイ回数や総プレイ時間に
+        /// 弧やゲージを当てると、存在しない目標を発明して「達成率」に見せてしまう。
+        /// </summary>
+        private static void BuildOverview(RecordsViewModel vm, PlayStatsSnapshot s)
         {
-            var tiles = new List<RecordsTile>
+            vm.HeroLabel = "プレイ回数";
+            vm.HeroValue = s.TotalPlays.ToString(CultureInfo.InvariantCulture);
+            vm.HeroSub = s.PlayedGameCount + " 種類のゲームが遊ばれました";
+            vm.HeroSpark = s.HourCounts;
+
+            if (s.AverageRating.HasValue)
             {
-                new RecordsTile
+                vm.RatingMeter = new RecordsMeter
                 {
-                    Value = s.TotalPlays.ToString(CultureInfo.InvariantCulture),
-                    Label = "プレイ回数",
-                    Sub = s.PlayedGameCount + " 種類が遊ばれた",
-                },
-                new RecordsTile
+                    Label = "平均評価",
+                    Value = s.AverageRating.Value,
+                    Max = 5,
+                    ValueText = "★" + s.AverageRating.Value.ToString("0.00"),
+                    Sub = "ゲーム別 " + s.GameSurveys + " 件の平均",
+                };
+            }
+
+            if (s.TotalPlays > 0)
+            {
+                double rate = (double)s.GameSurveys / s.TotalPlays;
+                vm.ResponseMeter = new RecordsMeter
                 {
-                    Value = s.TotalSurveys.ToString(CultureInfo.InvariantCulture),
+                    Label = "アンケート回答率",
+                    Value = s.GameSurveys,
+                    Max = s.TotalPlays,
+                    ValueText = (rate * 100).ToString("0") + "%",
+                    Sub = s.TotalPlays + " 回中 " + s.GameSurveys + " 件",
+                };
+            }
+
+            // 登録本数はゲーム一覧を読めたときだけ。読めないと「0 本中 29 種類」という嘘になる。
+            if (s.RegisteredGameCount > 0)
+            {
+                vm.CoverageMeter = new RecordsMeter
+                {
+                    Label = "遊ばれたゲーム",
+                    Value = s.PlayedGameCount,
+                    Max = s.RegisteredGameCount,
+                    ValueText = s.PlayedGameCount + " / " + s.RegisteredGameCount,
+                    Sub = "登録されているゲームのうち",
+                };
+            }
+
+            vm.Strip = new List<RecordsMeta>
+            {
+                new RecordsMeta { Label = "総プレイ時間", Value = PlayStatsService.FormatHours(s.TotalPlaySeconds) },
+                new RecordsMeta { Label = "稼働したPC", Value = s.PcCount + " 台" },
+                new RecordsMeta
+                {
                     Label = "アンケート回答",
-                    Sub = string.Format("ゲーム別 {0} / 全体 {1}", s.GameSurveys, s.Overall.Count),
+                    Value = s.TotalSurveys + " 件（ゲーム別 " + s.GameSurveys + "・全体 " + s.Overall.Count + "）",
                 },
-                new RecordsTile
+                new RecordsMeta
                 {
-                    Value = s.AverageRating.HasValue ? "★" + s.AverageRating.Value.ToString("0.00") : "—",
-                    Label = "平均評価（ゲーム別）",
-                    Sub = s.GameSurveys + " 件の平均",
-                },
-                new RecordsTile
-                {
-                    Value = PlayStatsService.FormatHours(s.TotalPlaySeconds),
-                    Label = "総プレイ時間",
-                    Sub = "みんなが遊んだ合計",
-                },
-                new RecordsTile
-                {
-                    Value = s.PcCount.ToString(CultureInfo.InvariantCulture),
-                    Label = "稼働したPC",
-                    Sub = "記録を書いた台数",
-                },
-                new RecordsTile
-                {
-                    Value = s.PeakAt.HasValue ? s.PeakAt.Value.ToString("HH:mm") : "—",
                     Label = "ピーク時間帯",
-                    Sub = s.PeakCount > 0 ? "15分で " + s.PeakCount + " プレイ" : "—",
+                    Value = s.PeakAt.HasValue
+                        ? s.PeakAt.Value.ToString("HH:mm") + " から 15 分で " + s.PeakCount + " プレイ"
+                        : "—",
                 },
             };
-            return tiles;
         }
 
         private static string RankingCaption(RecordsMetric metric)

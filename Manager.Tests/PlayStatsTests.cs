@@ -375,6 +375,78 @@ namespace TonePrism.Manager.Tests
         }
 
         // ==================================================================
+        // 概況 (ヒーロー数値 + メーター)
+        // ==================================================================
+
+        [Fact]
+        public void Presenter_Meters_OnlyAppearWhenTheyHaveARealDenominator()
+        {
+            // 弧のメーターは「上限のうちどこまで」を意味する。分母が無いのに描くと、存在しない
+            // 目標を発明して達成率に見せてしまう。分母が取れないメーターは枠ごと出さない。
+            var noSurvey = new PlayStatsData
+            {
+                Games = new List<GameInfo>(),                       // 登録一覧が読めなかった状況
+                Plays = new List<PlayRecordEntry> { Play(1, Day2, 60) },
+            };
+
+            RecordsViewModel vm = RecordsPresenter.Build(
+                PlayStatsService.Compute(noSurvey, PlayStatsRange.All),
+                RecordsMetric.Plays, RecordsGroupAxis.Genre);
+
+            Assert.Null(vm.RatingMeter);      // アンケート 0 件 → 平均★の分子が無い
+            Assert.Null(vm.CoverageMeter);    // 登録本数 0 → 「0 本中 1 種類」という嘘を出さない
+            Assert.NotNull(vm.ResponseMeter); // プレイ回数は分母になる
+            Assert.Equal(0, vm.ResponseMeter.Value);
+            Assert.Equal(1, vm.ResponseMeter.Max);
+        }
+
+        [Fact]
+        public void Presenter_Overview_UsesPlaysAsTheSingleHeroNumber()
+        {
+            var data = new PlayStatsData
+            {
+                Games = new List<GameInfo> { Game(1, "a", "A"), Game(2, "b", "B") },
+                Plays = new List<PlayRecordEntry>
+                {
+                    Play(1, Day2, 60), Play(1, Day2, 60), Play(2, Day2, 60),
+                },
+                Surveys = new List<SurveyEntry> { Survey(1, Day2, 4) },
+            };
+
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
+            RecordsViewModel vm = RecordsPresenter.Build(snap, RecordsMetric.Plays, RecordsGroupAxis.Genre);
+
+            Assert.Equal("3", vm.HeroValue);
+            Assert.Equal(5, vm.RatingMeter.Max);                 // ★は 5 点満点
+            Assert.Equal(3, vm.ResponseMeter.Max);               // 回答率の分母はプレイ回数
+            Assert.Equal(1, vm.ResponseMeter.Value);
+            Assert.Equal(2, vm.CoverageMeter.Max);               // 網羅率の分母は登録本数
+            Assert.Equal(2, vm.CoverageMeter.Value);
+            Assert.NotEmpty(vm.Strip);                           // 上限の無い量は帯に出す
+        }
+
+        [Fact]
+        public void Compute_HourCounts_AggregateAcrossDays()
+        {
+            // 概況のスパークラインは期間全体を時間帯で束ねる (日ごとの内訳は Timelines が持つ)。
+            var data = new PlayStatsData
+            {
+                Games = new List<GameInfo> { Game(1, "a", "A") },
+                Plays = new List<PlayRecordEntry>
+                {
+                    Play(1, Day1.Date.AddHours(13), 0),
+                    Play(1, Day2.Date.AddHours(13), 0),
+                    Play(1, Day2.Date.AddHours(9), 0),
+                },
+            };
+
+            int[] hours = PlayStatsService.Compute(data, PlayStatsRange.All).HourCounts;
+            Assert.Equal(2, hours[13]);   // 日をまたいで同じ時刻に足し込む
+            Assert.Equal(1, hours[9]);
+            Assert.Equal(0, hours[0]);
+        }
+
+        // ==================================================================
         // 表彰
         // ==================================================================
 

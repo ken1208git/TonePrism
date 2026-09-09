@@ -223,7 +223,7 @@ namespace TonePrism.Manager.Shell.Records
             EmptyPanel.Visibility = Visibility.Collapsed;
             ContentRoot.Visibility = Visibility.Visible;
 
-            TilesList.ItemsSource = vm.Tiles;
+            PopulateOverview(vm);
             RankingCaption.Text = vm.RankingCaption;
             GamesList.ItemsSource = vm.Games;
             CommentsCaption.Text = vm.CommentsCaption;
@@ -238,6 +238,59 @@ namespace TonePrism.Manager.Shell.Records
             NotesList.ItemsSource = vm.Notes;
 
             BuildTimelines();
+        }
+
+        // 3 指標を見分けるための色。ダーク面で CVD 検証済み (validate_palette、最悪隣接 ΔE 8.4)。
+        // 弧だけが色を持ち、文字は文字色トークンのままにする。
+        private static readonly System.Windows.Media.Color RatingHue =
+            System.Windows.Media.Color.FromRgb(0xC9, 0x85, 0x00);   // 黄
+        private static readonly System.Windows.Media.Color ResponseHue =
+            System.Windows.Media.Color.FromRgb(0x39, 0x87, 0xE5);   // 青
+        private static readonly System.Windows.Media.Color CoverageHue =
+            System.Windows.Media.Color.FromRgb(0x19, 0x9E, 0x70);   // 緑
+
+        /// <summary>概況 (ヒーロー数値 + スパークライン + メーター 3 つ + 数値の帯) を流し込む。</summary>
+        private void PopulateOverview(RecordsViewModel vm)
+        {
+            HeroLabel.Text = vm.HeroLabel;
+            HeroValue.Text = vm.HeroValue;
+            HeroSub.Text = vm.HeroSub;
+
+            HeroSpark.Hue = ResponseHue;
+            HeroSpark.Values = vm.HeroSpark;
+            int[] hours = vm.HeroSpark;
+            // 直接ラベルはピークだけ (点ごとに数字を置くと読まれないうえ画面が荒れる)。
+            HeroSpark.LabelAt = i => hours != null && i >= 0 && i < hours.Length
+                ? i.ToString("00") + "時　" + hours[i] + " プレイ"
+                : null;
+
+            ApplyMeter(vm.RatingMeter, RatingMeterHost, RatingMeter, RatingMeterValue,
+                RatingMeterLabel, RatingMeterSub, RatingHue);
+            ApplyMeter(vm.ResponseMeter, ResponseMeterHost, ResponseMeter, ResponseMeterValue,
+                ResponseMeterLabel, ResponseMeterSub, ResponseHue);
+            ApplyMeter(vm.CoverageMeter, CoverageMeterHost, CoverageMeter, CoverageMeterValue,
+                CoverageMeterLabel, CoverageMeterSub, CoverageHue);
+
+            StripList.ItemsSource = vm.Strip;
+        }
+
+        /// <summary>値が取れなかったメーターは**枠ごと隠す**(空の弧が「0%」に見えるのを避ける)。</summary>
+        private static void ApplyMeter(RecordsMeter model, System.Windows.Controls.Grid host,
+            StatMeter meter, TextBlock value, TextBlock label, TextBlock sub,
+            System.Windows.Media.Color hue)
+        {
+            if (model == null)
+            {
+                host.Visibility = Visibility.Collapsed;
+                return;
+            }
+            host.Visibility = Visibility.Visible;
+            meter.Hue = hue;
+            meter.Max = model.Max;
+            meter.Value = model.Value;
+            value.Text = model.ValueText;
+            label.Text = model.Label;
+            sub.Text = model.Sub;
         }
 
         /// <summary>日ごとに 1 枚ずつ折れ線を積む。日付見出し + グラフ。</summary>

@@ -3,6 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:local="clr-namespace:TonePrism.Manager.Shell.Records"
     Background="#FF202020">
 
     <!-- (#464) 会期の記録 (responses/) を DB のゲーム情報と突き合わせて振り返る読み取り専用ページ。
@@ -74,18 +75,6 @@
             </Setter>
         </Style>
 
-        <!-- 概況タイル -->
-        <DataTemplate x:Key="TileTemplate">
-            <Border Background="#FF303030" BorderBrush="#1AFFFFFF" BorderThickness="1"
-                    CornerRadius="8" Padding="16,13" Margin="0,0,12,12" MinWidth="152">
-                <StackPanel>
-                    <TextBlock Text="{Binding Value}" Foreground="#F2F2F2" FontSize="26" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding Label}" Foreground="#C2C7CC" FontSize="12" Margin="0,3,0,0" />
-                    <TextBlock Text="{Binding Sub}" Foreground="#8A9096" FontSize="10.5" Margin="0,1,0,0" />
-                </StackPanel>
-            </Border>
-        </DataTemplate>
-
         <!-- 表彰カード 1 枚 -->
         <DataTemplate x:Key="AwardTemplate">
             <Border Background="#FF332D1F" BorderBrush="#55E0A03E" BorderThickness="1"
@@ -132,6 +121,15 @@
                     <TextBlock Text="{Binding PercentText}" Foreground="#8A9096" FontSize="10.5" MinWidth="42" />
                 </StackPanel>
             </Grid>
+        </DataTemplate>
+
+        <!-- 概況ストリップ 1 項目 (上限の無い数字はメーターにせず数値のまま並べる) -->
+        <DataTemplate x:Key="StripTemplate">
+            <StackPanel Margin="0,0,34,0">
+                <TextBlock Text="{Binding Label}" Foreground="#8A9096" FontSize="10.5" />
+                <TextBlock Text="{Binding Value}" Foreground="#ECECEC" FontSize="14"
+                           FontWeight="SemiBold" Margin="0,2,0,0" />
+            </StackPanel>
         </DataTemplate>
 
         <!-- メタ情報 1 行 -->
@@ -388,12 +386,110 @@
 
                 <StackPanel x:Name="ContentRoot">
 
-                    <!-- ===== 概況 ===== -->
-                    <ItemsControl x:Name="TilesList" ItemTemplate="{StaticResource TileTemplate}" Margin="0,0,0,4">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                    </ItemsControl>
+                    <!-- ===== 概況 =====
+                         形は指標の性質で決めている:
+                          - ヒーロー数値は 1 画面に 1 つだけ (プレイ回数)。添えるのは単系列の
+                            スパークラインなので凡例は置かず、直接ラベルはピークだけ。
+                          - 弧のメーターは**上限が実在する比率**にだけ使う (5 点満点 / 回答 ÷ プレイ /
+                            遊ばれた種類 ÷ 登録数)。上限の無い量に当てると存在しない目標を発明する。
+                          - 残りの量 (総プレイ時間・台数) はメーターにせず数値のまま帯に並べる。
+                         色は 3 指標の識別用。ダーク面で CVD 検証済み (最悪隣接 ΔE 8.4)。
+                         文字は必ず文字色トークンのままにし、色は弧だけが持つ。 -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <!-- ヒーロー数値 -->
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,28,0" MinWidth="190">
+                                    <TextBlock x:Name="HeroLabel" Foreground="#9AA0A6" FontSize="12" />
+                                    <TextBlock x:Name="HeroValue" Foreground="#F2F2F2" FontSize="52"
+                                               FontWeight="SemiBold" Margin="0,-4,0,-4" />
+                                    <TextBlock x:Name="HeroSub" Foreground="#8A9096" FontSize="11.5"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <!-- 時間帯のかたち -->
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="時間帯別のプレイ数（期間の合計）" Foreground="#8A9096" FontSize="10.5"
+                                               Margin="0,0,0,2" />
+                                    <local:Sparkline x:Name="HeroSpark" Height="74" />
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- メーター 3 つ -->
+                            <UniformGrid x:Name="MetersPanel" Columns="3" Margin="0,18,0,0">
+                                <Grid x:Name="RatingMeterHost" Margin="0,0,10,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid Grid.Column="0" Width="86" Height="86">
+                                        <local:StatMeter x:Name="RatingMeter" />
+                                        <TextBlock x:Name="RatingMeterValue" Foreground="#F2F2F2" FontSize="17"
+                                                   FontWeight="SemiBold" HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                                    </Grid>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0">
+                                        <TextBlock x:Name="RatingMeterLabel" Foreground="#ECECEC" FontSize="12.5"
+                                                   FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="RatingMeterSub" Foreground="#8A9096" FontSize="10.5"
+                                                   TextWrapping="Wrap" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid x:Name="ResponseMeterHost" Margin="0,0,10,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid Grid.Column="0" Width="86" Height="86">
+                                        <local:StatMeter x:Name="ResponseMeter" />
+                                        <TextBlock x:Name="ResponseMeterValue" Foreground="#F2F2F2" FontSize="17"
+                                                   FontWeight="SemiBold" HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                                    </Grid>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0">
+                                        <TextBlock x:Name="ResponseMeterLabel" Foreground="#ECECEC" FontSize="12.5"
+                                                   FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="ResponseMeterSub" Foreground="#8A9096" FontSize="10.5"
+                                                   TextWrapping="Wrap" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid x:Name="CoverageMeterHost">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid Grid.Column="0" Width="86" Height="86">
+                                        <local:StatMeter x:Name="CoverageMeter" />
+                                        <TextBlock x:Name="CoverageMeterValue" Foreground="#F2F2F2" FontSize="17"
+                                                   FontWeight="SemiBold" HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                                    </Grid>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0">
+                                        <TextBlock x:Name="CoverageMeterLabel" Foreground="#ECECEC" FontSize="12.5"
+                                                   FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="CoverageMeterSub" Foreground="#8A9096" FontSize="10.5"
+                                                   TextWrapping="Wrap" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </Grid>
+                            </UniformGrid>
+
+                            <!-- 上限の無い数字 -->
+                            <Border Background="#14FFFFFF" CornerRadius="6" Padding="15,11" Margin="0,18,0,0">
+                                <ItemsControl x:Name="StripList" ItemTemplate="{StaticResource StripTemplate}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                </ItemsControl>
+                            </Border>
+                        </StackPanel>
+                    </Border>
 
                     <!-- ===== 表彰 ===== -->
                     <Border x:Name="AwardsCard" Style="{StaticResource Card}">
@@ -423,7 +519,7 @@
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
                             <TextBlock Text="時間帯ごとの盛り上がり" Style="{StaticResource CardHeader}" />
-                            <TextBlock Text="15 分ごとのプレイ数です。山が高いほど、その時間に人が集まっていました。"
+                            <TextBlock Text="こちらは日ごとの内訳です。15 分きざみで、山が高いほどその時間に人が集まっていました。"
                                        Style="{StaticResource Caption}" />
                             <StackPanel x:Name="TimelinePanel" />
                         </StackPanel>
