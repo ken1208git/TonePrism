@@ -456,6 +456,16 @@ namespace TonePrism.Manager.Shell.Records
                 meta.Add(new RecordsMeta { Label = "平均プレイ時間", Value = PlayStatsService.FormatDuration(g.AverageDurationSeconds) });
                 meta.Add(new RecordsMeta { Label = "合計プレイ時間", Value = PlayStatsService.FormatHours(g.TotalDurationSeconds) });
                 meta.Add(new RecordsMeta { Label = "遊ばれたPC", Value = g.PcCount + " 台" });
+                if (g.RepeatPlayCount > 0)
+                {
+                    // 賞にはしない数字 (1 回が短いゲームほど有利になる交絡があるため)。
+                    // ただしそのゲーム単体で読むぶんには事実なので、詳細には出す。
+                    meta.Add(new RecordsMeta
+                    {
+                        Label = "続けてもう一度",
+                        Value = g.RepeatPlayCount + " 回（" + g.PlayCount + " 回のうち）",
+                    });
+                }
                 if (g.FirstPlayAt.HasValue)
                     meta.Add(new RecordsMeta { Label = "はじめて遊ばれた", Value = g.FirstPlayAt.Value.ToString("M/d HH:mm") });
                 if (g.LastPlayAt.HasValue)

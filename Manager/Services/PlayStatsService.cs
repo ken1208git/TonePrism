@@ -365,10 +365,17 @@ namespace TonePrism.Manager.Services
         /// **率で競う賞にはプレイ回数の下限を置く**。置かないと 2 回遊ばれて 1 回答された
         /// ゲームが「回答率 50%」で 1 位を取り、賞が母数の小ささを表彰することになる。
         ///
-        /// **「最長 1 プレイ」は意図的に入れていない**。実データの 1 位は 1 時間 50 分で、
-        /// 上限 (2 時間) の内側なので異常値として弾かれないが、実態はゲームの閉じ忘れが濃厚。
-        /// 賞にすると「いちばん長く遊ばれた」という嘘を表彰することになる。
-        /// コメント数も入れていない (母数 17 件で最多 4 件、賞として薄い)。
+        /// **入れていない軸が 3 つある。いずれも「作りの違い」を実力として表彰してしまうため。**
+        ///
+        /// - **最長 1 プレイ**: 実データの 1 位は 1 時間 50 分で上限 (2 時間) の内側なので異常値として
+        ///   弾かれないが、実態はゲームの閉じ忘れが濃厚。「いちばん長く遊ばれた」という嘘を表彰する。
+        /// - **もう一回 (再プレイ回数)**: <see cref="GameStats.RepeatPlayCount"/> は残してあるが賞にはしない。
+        ///   **1 回の短いゲームほど有利になる交絡がある** — 実データで中央プレイ時間と再プレイ率の相関は
+        ///   -0.547、再プレイ率の上位 5 本は中央値がすべて 31 秒以下 (最上位は 12 秒)、中央値 2 分以下の
+        ///   平均再プレイ率 0.30 に対し 5 分以上は 0.03 と 10 倍開く。さらに**ゲーム内でリトライできる
+        ///   作品は再起動が起きないので原理的に受賞できない**。ランチャーはプロセスの起動と終了しか
+        ///   観測できず、ゲーム内の遊び直しは見えないので、この交絡はデータ側では外せない。
+        /// - **コメント数**: 母数 17 件で最多 4 件。賞として薄い。
         /// </summary>
         private static List<PlayStatsAward> BuildAwards(PlayStatsSnapshot snap)
         {
@@ -393,12 +400,6 @@ namespace TonePrism.Manager.Services
                 g => g.PlayCount >= minPlays && g.MedianDurationSeconds.HasValue,
                 g => g.MedianDurationSeconds.Value,
                 g => FormatDuration(g.MedianDurationSeconds), g => g.PlayCount + " 回のまん中の値",
-                g => g.PlayCount);
-
-            Add(awards, games, "もう一回賞", "終わってすぐ、同じ台でもう一度遊ばれた回数がいちばん多い",
-                g => g.RepeatPlayCount > 0, g => g.RepeatPlayCount,
-                g => g.RepeatPlayCount + " 回",
-                g => g.PlayCount + " 回のうち " + g.RepeatPlayCount + " 回が続けての 2 回目",
                 g => g.PlayCount);
 
             Add(awards, games, "語りたくなる賞", "遊んだあとアンケートまで答えてもらえた割合がいちばん高い",

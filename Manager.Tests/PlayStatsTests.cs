@@ -400,6 +400,11 @@ namespace TonePrism.Manager.Tests
             PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
             Assert.Equal(1, snap.Games.Single(g => g.GameNo == 1).RepeatPlayCount);
             Assert.Equal(0, snap.Games.Single(g => g.GameNo == 2).RepeatPlayCount);
+
+            // **賞にはしない。** 1 回が短いゲームほど有利になる交絡があり (実データで中央プレイ時間と
+            // 再プレイ率の相関 -0.547)、ゲーム内リトライを持つ作品は再起動が起きないので原理的に
+            // 受賞できない。数値はゲーム詳細に出すだけに留める。
+            Assert.DoesNotContain(snap.Awards, a => a.Title.Contains("もう一回"));
         }
 
         [Fact]
@@ -464,7 +469,6 @@ namespace TonePrism.Manager.Tests
 
             PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
             Assert.DoesNotContain(snap.Awards, a => a.Title == "満足度賞");
-            Assert.DoesNotContain(snap.Awards, a => a.Title == "もう一回賞");
             Assert.Contains(snap.Awards, a => a.Title == "最多プレイ賞");   // 回数の賞は 1 回でも成立
         }
 
