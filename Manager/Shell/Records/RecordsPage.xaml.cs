@@ -29,13 +29,6 @@ namespace TonePrism.Manager.Shell.Records
 
         private PlayStatsData _data;
         private PlayStatsRange _range = PlayStatsRange.All;
-
-        /// <summary>
-        /// 日付を 1 つずつチップに出す上限。会期 (2〜3 日) はこれで全部並ぶが、`responses/` は
-        /// 部活のたびに増えるので、放っておくと数十個のチップが折り返して画面を埋める。
-        /// 超えたら日ごとのチップをやめてプリセット (今日 / 直近 N 日) に切り替える。
-        /// </summary>
-        private const int MaxDayChips = 7;
         private RecordsMetric _metric = RecordsMetric.Plays;
         private RecordsGroupAxis _axis = RecordsGroupAxis.Genre;
         private PlayStatsSnapshot _snapshot;
@@ -98,8 +91,14 @@ namespace TonePrism.Manager.Shell.Records
         }
 
         /// <summary>
-        /// 期間のチップを作る。記録のある日が少ないうちは日ごとに並べ (会期の振り返りはこれが一番速い)、
-        /// 増えてきたらプリセットに切り替える。末尾に「期間を指定」を必ず置く。
+        /// 期間のチップを作る。**「全期間」と「期間を指定」の 2 つだけ**。
+        ///
+        /// 日ごとのチップは置かない。`responses/` は部活のたびに増えるので、日数に比例してチップが
+        /// 伸び続ける。件数で表示を切り替える (少ないうちは日ごと / 増えたらプリセット) 案も入れて
+        /// みたが、**データ量で画面が勝手に組み変わる**のは説明しづらく、切り替わる日が来ることを
+        /// 誰も覚えていられない。会期の 2〜3 日だけ嬉しくて以降ずっと分かりにくい取引になる。
+        ///
+        /// 日ごとの件数は失われない — 時間帯グラフの見出しが「9月5日（土）　613 プレイ」を出す。
         /// </summary>
         private void BuildRangeChips()
         {
@@ -111,24 +110,6 @@ namespace TonePrism.Manager.Shell.Records
             List<DateTime> dates = _data.AvailableDates;
 
             AddChip("全期間", PlayStatsRange.All, true);
-
-            if (dates.Count <= MaxDayChips)
-            {
-                foreach (DateTime d in dates)
-                {
-                    int plays = 0;
-                    foreach (PlayRecordEntry p in _data.Plays) if (p.CreatedAtLocal.Date == d) plays++;
-                    AddChip(d.ToString("M/d") + "（" + plays + "）", PlayStatsRange.Day(d), false);
-                }
-            }
-            else
-            {
-                DateTime today = DateTime.Now.Date;
-                AddChip("今日", PlayStatsRange.Day(today), false);
-                AddChip("直近7日", PlayStatsRange.Between(today.AddDays(-6), today), false);
-                AddChip("直近30日", PlayStatsRange.Between(today.AddDays(-29), today), false);
-            }
-
             AddCustomRangeChip(dates);
 
             // 期間が 1 日しか無いなら選びようが無いので帯ごと隠す。
@@ -174,10 +155,17 @@ namespace TonePrism.Manager.Shell.Records
                 _suppressRangePickers = true;
                 try
                 {
-                    if (!RangeFrom.SelectedDate.HasValue && dates.Count > 0)
-                        RangeFrom.SelectedDate = dates[0];
-                    if (!RangeTo.SelectedDate.HasValue && dates.Count > 0)
-                        RangeTo.SelectedDate = dates[dates.Count - 1];
+                    if (dates.Count > 0)
+                    {
+                        // 記録が 1 件も無い月へ迷い込めないよう、選べる範囲を記録の実期間に収める。
+                        RangeFrom.DisplayDateStart = dates[0];
+                        RangeFrom.DisplayDateEnd = dates[dates.Count - 1];
+                        RangeTo.DisplayDateStart = dates[0];
+                        RangeTo.DisplayDateEnd = dates[dates.Count - 1];
+
+                        if (!RangeFrom.SelectedDate.HasValue) RangeFrom.SelectedDate = dates[0];
+                        if (!RangeTo.SelectedDate.HasValue) RangeTo.SelectedDate = dates[dates.Count - 1];
+                    }
                 }
                 finally { _suppressRangePickers = false; }
 
