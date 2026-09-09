@@ -504,7 +504,7 @@ namespace TonePrism.Manager.Tests
             Assert.Equal("みんなの定番", Winner(snap, "最多プレイ賞"));
             Assert.Equal("じっくり系", Winner(snap, "満足度賞"));
             // のべ時間: 8 回 × 600 秒 = 80 分 > 30 回 × 60 秒 = 30 分。
-            Assert.Equal("じっくり系", Winner(snap, "いちばん長く遊ばれた賞"));
+            Assert.Equal("じっくり系", Winner(snap, "合計プレイ時間賞"));
         }
 
         [Fact]
