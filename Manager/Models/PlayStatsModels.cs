@@ -23,6 +23,15 @@ namespace TonePrism.Manager.Models
         /// <summary>記録が書かれたローカル日時 (`created_at` 由来)。日付フォルダもこれから導かれている。</summary>
         public DateTime CreatedAtLocal { get; set; }
 
+        /// <summary>
+        /// 中身が壊れていてファイル名から起こした記録。**救えたのは「遊ばれた事実」だけ**で、
+        /// ファイル名は開始・終了時刻を持たない。
+        ///
+        /// **この印が無いと 0 秒のプレイとして時間統計に混ざる** — 中央値と平均が下振れし、
+        /// 「1分未満」バケットが実際より膨らむ。件数 (プレイ回数) には残し、時間の話からは外す。
+        /// </summary>
+        public bool RecoveredFromFileName { get; set; }
+
         /// <summary>プレイ時間 (秒)。異常値を含みうる (<see cref="DurationIsSane"/> 参照)。</summary>
         public long DurationSeconds { get { return EndTime - StartTime; } }
 
@@ -40,7 +49,22 @@ namespace TonePrism.Manager.Models
         /// </summary>
         public bool DurationIsSane
         {
-            get { return DurationSeconds >= 0 && DurationSeconds <= PlayStatsTuning.MaxSaneDurationSeconds; }
+            get
+            {
+                // ファイル名から起こした記録は時刻を持たない (0 秒)。異常値ではなく**不明**なので、
+                // 時間統計から外すが「異常なプレイ時間」としても数えない (→ HasUnusableDuration)。
+                if (RecoveredFromFileName) return false;
+                return DurationSeconds >= 0 && DurationSeconds <= PlayStatsTuning.MaxSaneDurationSeconds;
+            }
+        }
+
+        /// <summary>
+        /// プレイ時間が**異常値として**除外されたか。画面の「※N 件はプレイ時間が異常で…」に使う。
+        /// ファイル名復元ぶんは別枠 (`RecoveredFromFileNameCount`) で開示するのでここには含めない。
+        /// </summary>
+        public bool HasUnusableDuration
+        {
+            get { return !RecoveredFromFileName && !DurationIsSane; }
         }
     }
 
@@ -408,9 +432,10 @@ namespace TonePrism.Manager.Models
     /// <summary>
     /// 表彰 1 つぶん。**受賞者は複数になりうる** (同点) ので名前は連結済みで持つ。
     ///
-    /// 賞の軸は「互いに相関しにくいもの」を選んである — 回数・満足度・熱中・再プレイ・回答率・
-    /// ★5 率・隠れた名作・制作者。全部が同じゲームに集まると表彰として機能しないため。
-    /// 2026 年の実データでは 8 賞が 6 ゲームに散った。
+    /// 賞の軸は「互いに相関しにくいもの」を選んである。全部が同じゲームに集まると表彰として
+    /// 機能しないため。**軸の一覧はここに書かない** — 実装 (`PlayStatsService.BuildAwards`) が
+    /// 唯一の正で、二重に持つと片方だけ古びる (実際に「熱中」「再プレイ」を撤去したあとも
+    /// このコメントだけ残っていた)。2026 年の実データではゲームの 6 賞が 5 本に散った。
     /// </summary>
     public sealed class PlayStatsAward
     {
@@ -433,7 +458,7 @@ namespace TonePrism.Manager.Models
 
     /// <summary>
     /// 集計 1 回分の結果。`responses/` の全走査 (<see cref="Services.PlayStatsLoader"/>) は 1 度だけ行い、
-    /// 期間の切り替えはメモリ上の再集計で済ませる — SMB 越しの走査を日付タブを押すたびに走らせない。
+    /// 期間の切り替えはメモリ上の再集計で済ませる — SMB 越しの走査を切り替えのたびに走らせない。
     /// </summary>
     public sealed class PlayStatsSnapshot
     {
@@ -448,7 +473,15 @@ namespace TonePrism.Manager.Models
         public double? AverageRating { get; set; }
         public long TotalPlaySeconds { get; set; }
         public int PcCount { get; set; }
+        /// <summary>記録に現れたゲームの種類数。**登録が削除された番号も含む**。</summary>
         public int PlayedGameCount { get; set; }
+
+        /// <summary>
+        /// そのうち**いま登録されている**ゲームの本数。網羅率メーターの分子はこちらを使う
+        /// (<see cref="PlayedGameCount"/> は分母 <see cref="RegisteredGameCount"/> を超えうる)。
+        /// </summary>
+        public int PlayedRegisteredGameCount { get; set; }
+
         public int RegisteredGameCount { get; set; }
         public DateTime? PeakAt { get; set; }
         public int PeakCount { get; set; }

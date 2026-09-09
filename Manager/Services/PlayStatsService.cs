@@ -43,15 +43,20 @@ namespace TonePrism.Manager.Services
             snap.TotalSurveys = surveys.Count;
             snap.GameSurveys = gameSurveys.Count;
             snap.AverageRating = Average(gameSurveys.Select(s => (double)s.Rating));
-            snap.OutlierDurationCount = plays.Count(p => !p.DurationIsSane);
+            snap.OutlierDurationCount = plays.Count(p => p.HasUnusableDuration);
             snap.TotalPlaySeconds = plays.Where(p => p.DurationIsSane).Sum(p => p.DurationSeconds);
             snap.PcCount = plays.Select(p => p.SourcePc)
                 .Concat(surveys.Select(s => s.SourcePc))
                 .Where(pc => !string.IsNullOrEmpty(pc))
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count();
             snap.PlayedGameCount = plays.Select(p => p.GameNo).Where(n => n > 0).Distinct().Count();
+            // **網羅率の分子は「登録されているゲームのうち遊ばれた本数」**。PlayedGameCount は
+            // 記録に現れた番号の種類数で、登録が削除されたゲームも含むため分母 (登録数) を超えうる。
+            // 超えるとメーターは満杯にクランプされ、文字だけ「30 / 29」と出て弧が嘘をつく。
+            snap.PlayedRegisteredGameCount = plays.Select(p => p.GameNo)
+                .Where(n => n > 0 && byNo.ContainsKey(n)).Distinct().Count();
 
-            snap.Games = BuildGameStats(plays, gameSurveys, byNo, data.Games);
+            snap.Games = BuildGameStats(plays, gameSurveys, byNo);
             ApplyRepeatPlays(snap.Games, plays);
             FillHighlights(snap, plays);
             snap.Overall = BuildOverallStats(overallSurveys);
@@ -96,7 +101,7 @@ namespace TonePrism.Manager.Services
 
         private static List<GameStats> BuildGameStats(
             List<PlayRecordEntry> plays, List<SurveyEntry> gameSurveys,
-            Dictionary<long, GameInfo> byNo, List<GameInfo> allGames)
+            Dictionary<long, GameInfo> byNo)
         {
             // 母集合は「登録済みの全ゲーム ∪ 記録に現れた番号」。
             // **登録済みで 1 回も遊ばれなかったゲームを 0 件の行として残すのが要点** — 記録側だけを
@@ -272,7 +277,9 @@ namespace TonePrism.Manager.Services
         }
 
         /// <summary>
-        /// 「いつ遊ばれたか」の時系列を 1 本だけ作る。**刻みは期間の長さで決める。**
+        /// 「いつ遊ばれたか」の時系列を 1 本だけ作る。**刻みは、その期間に実際に記録がある幅で決める**
+        /// (選んだ期間の長さではない) — 9/1〜9/30 を選んでも記録が 9/5 だけなら 15 分きざみになる。
+        /// 記録の無い日を埋めるために粗くしても読めるものが増えないため。
         ///
         /// 日ごとに 1 枚ずつ描く作りだと、記録が増えるほどグラフの枚数が際限なく増えた。
         /// 刻みを期間に従わせれば本数は常に有界になる (下の表のとおり最大 96 本)。
@@ -423,8 +430,11 @@ namespace TonePrism.Manager.Services
         {
             if (plays.Count == 0) return;
 
-            PlayRecordEntry first = plays.OrderBy(p => p.StartTime).First();
-            PlayRecordEntry last = plays.OrderByDescending(p => p.EndTime).First();
+            // **並べ替えも表示も `CreatedAtLocal`。** 期間フィルタ・時系列・ピーク・ゲーム別の
+            // 初回/最終がすべて created_at 基準なので、ここだけ start/end を見ると、時計ズレの
+            // 1 件で「最初のプレイ 9/5」と出しながら他所には 9/4 が並ぶ矛盾が起きる。
+            PlayRecordEntry first = plays.OrderBy(p => p.CreatedAtLocal).First();
+            PlayRecordEntry last = plays.OrderByDescending(p => p.CreatedAtLocal).First();
             snap.FirstPlayAt = first.CreatedAtLocal;
             snap.FirstPlayGameNo = first.GameNo;
             snap.LastPlayAt = last.CreatedAtLocal;
@@ -516,7 +526,11 @@ namespace TonePrism.Manager.Services
 
             // 「隠れた名作」= 回数はプレイ回数の中央値未満だが評価が高い。中央値を境にするのは、
             // 固定回数だと会期の規模 (総プレイ数) が変わるたびに意味が変わってしまうため。
-            double medianPlays = Median(games.Select(g => (long)g.PlayCount).OrderBy(v => v).ToList());
+            // **母集合は「1 回以上遊ばれたゲーム」**。登録済み未プレイ (0 件の行) を混ぜると、
+            // 静かな 1 日を指定したときに中央値が 0 になり `PlayCount < 0` が誰にも成立せず、
+            // 賞が「該当なし」で消える。消える理由が母数の取り方なのは説明できない。
+            double medianPlays = Median(games.Where(g => g.PlayCount > 0)
+                .Select(g => (long)g.PlayCount).OrderBy(v => v).ToList());
             Add(awards, games, "隠れた名作賞",
                 "プレイ回数は控えめ（全体のまん中より下）でも評価が高い",
                 g => g.PlayCount > 0 && g.PlayCount < medianPlays

@@ -190,7 +190,8 @@ namespace TonePrism.Manager.Shell.Records
             return new GridLength(1 - r, GridUnitType.Star);
         }
 
-        public static RecordsViewModel Build(PlayStatsSnapshot snap, RecordsMetric metric, RecordsGroupAxis axis)
+        public static RecordsViewModel Build(PlayStatsSnapshot snap, RecordsMetric metric,
+            RecordsGroupAxis axis, bool scanFailed = false)
         {
             var vm = new RecordsViewModel();
             if (snap == null) return vm;
@@ -206,12 +207,22 @@ namespace TonePrism.Manager.Shell.Records
             vm.OverallCaption = BuildOverallCaption(snap.Overall);
             vm.OverallRatingBars = BuildRatingBars(snap.Overall.RatingCounts, snap.Overall.Count);
             vm.IsEmpty = snap.TotalPlays == 0 && snap.TotalSurveys == 0;
-            vm.EmptyMessage = vm.IsEmpty
-                ? (snap.Range.IsAll
-                    ? "まだ記録がありません。ランチャーでゲームが遊ばれると、ここに集計が出ます。"
-                    : snap.Range.Label + " の記録はありません。")
-                : null;
+            vm.EmptyMessage = vm.IsEmpty ? EmptyMessage(snap, scanFailed) : null;
             return vm;
+        }
+
+        /// <summary>
+        /// 0 件のときの文言。**走査に失敗しているなら「まだ記録がありません」と言い切らない** —
+        /// 読めていないだけかもしれない状態を「遊ばれていない」と断言すると、会期のデータが
+        /// 消えたのか元々無いのかを読み手が区別できない。
+        /// </summary>
+        private static string EmptyMessage(PlayStatsSnapshot snap, bool scanFailed)
+        {
+            if (scanFailed)
+                return "記録を読み込めませんでした。保存先にアクセスできるか確認して「更新」を押してください。";
+            return snap.Range.IsAll
+                ? "まだ記録がありません。ランチャーでゲームが遊ばれると、ここに集計が出ます。"
+                : snap.Range.Label + " の記録はありません。";
         }
 
         // ------------------------------------------------------------------
@@ -226,7 +237,11 @@ namespace TonePrism.Manager.Shell.Records
         {
             vm.HeroLabel = "プレイ回数";
             vm.HeroValue = s.TotalPlays.ToString(CultureInfo.InvariantCulture);
-            vm.HeroSub = s.PlayedGameCount + " 種類のゲームが遊ばれました";
+            // **遊ばれた種類数はメーターが持っているときは副題に出さない** (同じ数字を 2 か所に
+            // 置かない)。メーターは登録数が読めないと枠ごと消えるので、そのときだけ副題で出す。
+            vm.HeroSub = s.RegisteredGameCount > 0
+                ? null
+                : s.PlayedGameCount + " 種類のゲームが遊ばれました";
 
             if (s.AverageRating.HasValue)
             {
@@ -256,13 +271,21 @@ namespace TonePrism.Manager.Shell.Records
             // 登録本数はゲーム一覧を読めたときだけ。読めないと「0 本中 29 種類」という嘘になる。
             if (s.RegisteredGameCount > 0)
             {
+                // **分子は「登録されているゲームのうち遊ばれた本数」**。記録に現れた種類数
+                // (PlayedGameCount) には登録が削除された番号も入るので、そのまま使うと分母を
+                // 超えて弧が満杯にクランプされ、文字だけ「30 / 29」と出る。
+                int played = s.PlayedRegisteredGameCount;
+                int extra = s.PlayedGameCount - played;
                 vm.CoverageMeter = new RecordsMeter
                 {
                     Label = "遊ばれたゲーム",
-                    Value = s.PlayedGameCount,
+                    Value = played,
                     Max = s.RegisteredGameCount,
-                    ValueText = s.PlayedGameCount + " / " + s.RegisteredGameCount,
-                    Sub = "登録されているゲームのうち",
+                    ValueText = played + " / " + s.RegisteredGameCount,
+                    // 登録が消えた番号も遊ばれている場合は黙らない (合計が合わない理由になる)。
+                    Sub = extra > 0
+                        ? "登録されているゲームのうち（ほかに登録なし " + extra + " 本）"
+                        : "登録されているゲームのうち",
                 };
             }
 

@@ -743,9 +743,17 @@ namespace TonePrism.Manager.Tests
                 Assert.Equal(2, snap.TotalPlays);
                 Assert.Equal(1, snap.GameSurveys);
                 Assert.Equal(1, snap.Overall.Count);
-                // 復元した記録は長さが分からないので 0 秒扱い。中央値は {0, 120} の真ん中 = 60。
-                // 回数は救いつつ時間は引っ張られるという trade-off をここで固定しておく。
-                Assert.Equal(60, snap.Games.Single().MedianDurationSeconds);
+                // **復元した記録は回数だけ。時間統計には入らない。** ファイル名は開始・終了を
+                // 持たないので、0 秒として混ぜると中央値・平均が下振れし「1分未満」が膨らむ。
+                // 中央値は生きている 1 件 (120 秒) がそのまま出る。
+                GameStats g = snap.Games.Single();
+                Assert.Equal(120, g.MedianDurationSeconds);
+                Assert.Equal(120, g.TotalDurationSeconds);
+                Assert.Equal(1, g.SaneDurationCount);       // 時間統計の母数は生きている 1 件だけ
+                Assert.Equal(2, g.PlayCount);               // 回数には残る
+                // 「異常なプレイ時間」ではなく「不明」なので、除外件数の注記にも出さない
+                // (復元件数は RecoveredFromFileNameCount が別に開示している)。
+                Assert.Equal(0, snap.OutlierDurationCount);
 
                 PlayStatsComment comment = snap.Comments.Single(c => !c.IsOverall);
                 Assert.Equal("たのしかった", comment.Text);
@@ -754,6 +762,83 @@ namespace TonePrism.Manager.Tests
             {
                 try { Directory.Delete(root, true); } catch { /* 後片付けの失敗は無視 */ }
             }
+        }
+
+        /// <summary>
+        /// 網羅率メーターの分子は**登録されているゲーム**だけ。登録が削除された番号も遊ばれて
+        /// いると、素朴に「記録に現れた種類数」を使った分子が分母 (登録数) を超え、弧が満杯に
+        /// クランプされて文字だけ「3 / 2」と出る。
+        /// </summary>
+        [Fact]
+        public void Presenter_CoverageMeter_NeverExceedsRegisteredCount()
+        {
+            var data = new PlayStatsData
+            {
+                Games = new List<GameInfo>
+                {
+                    new GameInfo { GameNo = 1, Title = "のこっているゲーム" },
+                    new GameInfo { GameNo = 2, Title = "もう 1 本" },
+                },
+                Plays = new List<PlayRecordEntry>
+                {
+                    Play(1, Day1, 60),
+                    Play(2, Day1, 60),
+                    Play(99, Day1, 60),   // 登録が削除された番号
+                },
+            };
+
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
+            Assert.Equal(3, snap.PlayedGameCount);             // 記録に現れた種類数は 3
+            Assert.Equal(2, snap.PlayedRegisteredGameCount);   // うち登録済みは 2
+
+            RecordsViewModel vm = RecordsPresenter.Build(snap, RecordsMetric.Plays, RecordsGroupAxis.Genre);
+            Assert.NotNull(vm.CoverageMeter);
+            Assert.True(vm.CoverageMeter.Value <= vm.CoverageMeter.Max);
+            Assert.Equal("2 / 2", vm.CoverageMeter.ValueText);
+            Assert.Contains("登録なし 1 本", vm.CoverageMeter.Sub);
+            // 同じ数字をヒーローの副題と 2 か所に出さない (メーターが出ているときは副題なし)。
+            Assert.Null(vm.HeroSub);
+        }
+
+        /// <summary>
+        /// 走査に失敗したときは「まだ記録がありません」と言い切らない。読めていないだけの状態を
+        /// 「遊ばれていない」と断言すると、当日のデータが消えたのか元々無いのか区別できない。
+        /// </summary>
+        [Fact]
+        public void Presenter_ScanFailure_DoesNotClaimNobodyPlayed()
+        {
+            PlayStatsSnapshot snap = PlayStatsService.Compute(new PlayStatsData(), PlayStatsRange.All);
+
+            RecordsViewModel ok = RecordsPresenter.Build(snap, RecordsMetric.Plays, RecordsGroupAxis.Genre, false);
+            Assert.True(ok.IsEmpty);
+            Assert.Contains("まだ記録がありません", ok.EmptyMessage);
+
+            RecordsViewModel failed = RecordsPresenter.Build(snap, RecordsMetric.Plays, RecordsGroupAxis.Genre, true);
+            Assert.True(failed.IsEmpty);
+            Assert.DoesNotContain("まだ記録がありません", failed.EmptyMessage);
+            Assert.Contains("読み込めませんでした", failed.EmptyMessage);
+        }
+
+        /// <summary>
+        /// 「隠れた名作」の「まん中」は**遊ばれたゲームの中央値**。登録済み未プレイ (0 件の行) を
+        /// 混ぜると、静かな期間では中央値が 0 になり誰も条件を満たさず賞が丸ごと消える。
+        /// </summary>
+        [Fact]
+        public void Compute_HiddenGem_SurvivesWhenMostRegisteredGamesAreUnplayed()
+        {
+            var games = new List<GameInfo>();
+            for (int no = 1; no <= 10; no++) games.Add(new GameInfo { GameNo = no, Title = "no" + no });
+
+            var data = new PlayStatsData { Games = games };
+            // 遊ばれたのは 2 本だけ (登録 10 本中 8 本が未プレイ = 全体の中央値は 0 になる)。
+            for (int i = 0; i < 10; i++) data.Plays.Add(Play(1, Day1, 60));
+            for (int i = 0; i < 3; i++) data.Plays.Add(Play(2, Day1, 60));
+            for (int i = 0; i < 3; i++) data.Surveys.Add(Survey(2, Day1, 5));
+
+            PlayStatsSnapshot snap = PlayStatsService.Compute(data, PlayStatsRange.All);
+            PlayStatsAward gem = snap.Awards.SingleOrDefault(a => a.Title == "隠れた名作賞");
+            Assert.NotNull(gem);
+            Assert.Equal("no2", gem.WinnerNames);
         }
 
         [Fact]

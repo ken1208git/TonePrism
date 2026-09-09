@@ -13,7 +13,7 @@ namespace TonePrism.Manager.Shell.Records
     /// (#464) 会期の記録を振り返る**読み取り専用**ページ。`responses/` のプレイ記録・アンケートを
     /// DB のゲーム情報 (名前 / ジャンル / 難易度 / 制作者) と突き合わせて集計する。
     ///
-    /// **走査は 1 回・再集計はメモリ内**: `responses/` は本番では SMB 共有上にあり、日付タブや指標を
+    /// **走査は 1 回・再集計はメモリ内**: `responses/` は本番では SMB 共有上にあり、期間や指標を
     /// 切り替えるたびに数百ファイルを開き直すのは往復の無駄。<see cref="PlayStatsLoader"/> で生データを
     /// 1 度だけ読み、<see cref="PlayStatsService.Compute"/> をその場で回す (「更新」を押したときだけ再走査)。
     ///
@@ -200,7 +200,8 @@ namespace TonePrism.Manager.Shell.Records
             try
             {
                 _snapshot = PlayStatsService.Compute(_data, _range);
-                RecordsViewModel vm = RecordsPresenter.Build(_snapshot, _metric, _axis);
+                RecordsViewModel vm = RecordsPresenter.Build(_snapshot, _metric, _axis,
+                    _data != null && _data.ScanFailed);
                 Populate(vm);
             }
             catch (Exception ex)
@@ -248,12 +249,12 @@ namespace TonePrism.Manager.Shell.Records
         private static readonly System.Windows.Media.Color CoverageHue =
             System.Windows.Media.Color.FromRgb(0x19, 0x9E, 0x70);   // 緑
 
-        /// <summary>概況 (ヒーロー数値 + スパークライン + メーター 3 つ + 数値の帯) を流し込む。</summary>
+        /// <summary>概況 (ヒーロー数値 + 数値の帯 + メーター 3 つ) を流し込む。</summary>
         private void PopulateOverview(RecordsViewModel vm)
         {
             HeroLabel.Text = vm.HeroLabel;
             HeroValue.Text = vm.HeroValue;
-            HeroSub.Text = vm.HeroSub;
+            SetCaption(HeroSub, vm.HeroSub);
 
             ApplyMeter(vm.RatingMeter, RatingMeterHost, RatingMeter, RatingMeterValue,
                 RatingMeterLabel, RatingMeterSub, RatingHue);
@@ -314,6 +315,10 @@ namespace TonePrism.Manager.Shell.Records
             // ここだけが伝える。「当日は時刻だけ」にすると、日付が無いのが今日だからなのか表示が
             // 壊れているのか読み手には区別できず、条件で見え方が変わるぶん説明もしづらい。
             parts.Add(_data.LoadedAt.ToString("M/d HH:mm") + " 時点");
+            // **走査に失敗した区画は必ず出す。** 黙ると 0 件が「まだ誰も遊んでいない」と
+            // 見分けられず、会期のデータが読めていないのに正常な空画面に見える。
+            if (_data.ScanFailed)
+                parts.Add("※" + string.Join("・", _data.ScanFailures) + " を読み込めませんでした（集計は不完全です）");
             if (_data.GamesUnavailable) parts.Add("※ゲーム一覧を読めず番号のまま表示しています");
             if (_data.RecoveredFromFileNameCount > 0)
                 parts.Add("※" + _data.RecoveredFromFileNameCount + " 件はファイル名から復元");

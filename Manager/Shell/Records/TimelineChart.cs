@@ -148,7 +148,22 @@ namespace TonePrism.Manager.Shell.Records
             int every = Math.Max(1, (int)Math.Ceiling(need / Math.Max(1, slot)));
 
             bool clock = t.Unit == PlayStatsTrendUnit.Minute15 || t.Unit == PlayStatsTrendUnit.Hour;
-            for (int i = 0; i < n; i += every)
+
+            // **目盛りの位相を日の変わり目に合わせる。** 等間隔に置くだけだと 0 時が間引きに
+            // 当たらず、下の「0 時は日付を出す」分岐に一度も入らないことがある。そうなると
+            // 「16:00 … 14:00」と時刻だけが並び、2 日ぶんであることが読めない。
+            int start = 0;
+            if (clock)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    if (pts[i].Start.TimeOfDay != TimeSpan.Zero) continue;
+                    start = i % every;
+                    break;
+                }
+            }
+
+            for (int i = start; i < n; i += every)
             {
                 double x = left + slot * i + slot / 2;
                 dc.DrawLine(GridPen, new Point(x, PadTop), new Point(x, baseY));

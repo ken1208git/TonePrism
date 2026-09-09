@@ -10,8 +10,8 @@ namespace TonePrism.Manager.Services
 {
     /// <summary>
     /// (#464) `responses/` の走査結果 (生データ) + DB のゲーム一覧。**期間の切り替えはこのデータの
-    /// 再集計で行い、走査はやり直さない** — 本番の `responses/` は SMB 共有上にあり、日付タブを
-    /// 押すたびに数百ファイルを開き直すのは往復が無駄すぎる。
+    /// 再集計で行い、走査はやり直さない** — 本番の `responses/` は SMB 共有上にあり、期間や指標を
+    /// 切り替えるたびに数百ファイルを開き直すのは往復が無駄すぎる。
     /// </summary>
     public sealed class PlayStatsData
     {
@@ -19,7 +19,7 @@ namespace TonePrism.Manager.Services
         public List<SurveyEntry> Surveys { get; set; } = new List<SurveyEntry>();
         public List<GameInfo> Games { get; set; } = new List<GameInfo>();
 
-        /// <summary>記録が存在する日 (昇順)。画面の日付タブはこれで作る。</summary>
+        /// <summary>記録が存在する日 (昇順)。日付ピッカーの選択可能範囲をこれに収める。</summary>
         public List<DateTime> AvailableDates { get; set; } = new List<DateTime>();
 
         /// <summary>`responses/` そのものが無い (= まだ 1 度も遊ばれていない / パス設定が違う)。</summary>
@@ -33,6 +33,19 @@ namespace TonePrism.Manager.Services
 
         /// <summary>ゲーム一覧の取得に失敗した (集計は出せるがゲーム名が番号のままになる)。</summary>
         public bool GamesUnavailable { get; set; }
+
+        /// <summary>
+        /// 記録フォルダの**列挙そのもの**に失敗した区画 (SMB 切断・権限不足など)。
+        ///
+        /// **握って 0 件にすると「まだ誰も遊んでいない」と区別が付かない。** 1 ファイル単位の失敗は
+        /// <see cref="UnreadableFileCount"/> が数えるが、列挙が丸ごとこけると件数は 0 のままで、
+        /// 画面は「まだ記録がありません」と言い切ってしまう。会期のデータが読めていないのに
+        /// 正常な空状態に見えるのがいちばん危ないので、失敗した場所を残して画面に出す。
+        /// </summary>
+        public List<string> ScanFailures { get; set; } = new List<string>();
+
+        /// <summary>走査に失敗した区画があるか。</summary>
+        public bool ScanFailed { get { return ScanFailures.Count > 0; } }
 
         public DateTime LoadedAt { get; set; }
     }
@@ -72,7 +85,10 @@ namespace TonePrism.Manager.Services
             // --- ゲーム一覧 (名前・ジャンル・制作者の解決に使う) ---
             try
             {
-                if (db != null) data.Games = db.GetAllGames() ?? new List<GameInfo>();
+                // db が無い場合も結果は例外時と同じ (全ゲームが番号のまま) なので、同じ注記を出す。
+                // 黙ると「登録が全部消えた」ようにも読めてしまう。
+                if (db == null) data.GamesUnavailable = true;
+                else data.Games = db.GetAllGames() ?? new List<GameInfo>();
             }
             catch (Exception ex)
             {
@@ -110,7 +126,7 @@ namespace TonePrism.Manager.Services
 
         private static void LoadPlays(string root, PlayStatsData data)
         {
-            foreach (string path in EnumerateRecordFiles(root))
+            foreach (string path in EnumerateRecordFiles(root, data))
             {
                 FileNameKey key = ParseFileName(path);
                 try
@@ -140,11 +156,14 @@ namespace TonePrism.Manager.Services
                         data.Plays.Add(new PlayRecordEntry
                         {
                             CreatedAt = key.UnixTime,
+                            // ファイル名は開始・終了を持たない。0 秒を入れておくが、
+                            // RecoveredFromFileName が立っているので時間統計には参加しない。
                             StartTime = key.UnixTime,
-                            EndTime = key.UnixTime,   // 時間統計には 0 秒として入るが DurationIsSane が拾う
+                            EndTime = key.UnixTime,
                             GameNo = key.GameNo,
                             SourcePc = null,
                             CreatedAtLocal = ToLocal(key.UnixTime),
+                            RecoveredFromFileName = true,
                         });
                     }
                     else
@@ -159,7 +178,7 @@ namespace TonePrism.Manager.Services
 
         private static void LoadSurveys(string root, PlayStatsData data)
         {
-            foreach (string path in EnumerateRecordFiles(root))
+            foreach (string path in EnumerateRecordFiles(root, data))
             {
                 FileNameKey key = ParseFileName(path);
                 try
@@ -202,8 +221,11 @@ namespace TonePrism.Manager.Services
             }
         }
 
-        /// <summary>日付フォルダ配下の `*.json` を列挙する。フォルダ単位の失敗は握って続行。</summary>
-        private static IEnumerable<string> EnumerateRecordFiles(string root)
+        /// <summary>
+        /// 日付フォルダ配下の `*.json` を列挙する。**失敗しても例外は投げないが、黙らない** —
+        /// 列挙がこけた区画は <see cref="PlayStatsData.ScanFailures"/> に残して画面へ持ち上げる。
+        /// </summary>
+        private static IEnumerable<string> EnumerateRecordFiles(string root, PlayStatsData data)
         {
             if (!SafeDirectoryExists(root)) yield break;
 
@@ -214,6 +236,7 @@ namespace TonePrism.Manager.Services
             }
             catch (Exception ex)
             {
+                data.ScanFailures.Add(Path.GetFileName(root.TrimEnd(Path.DirectorySeparatorChar)));
                 Logger.Warn("[PlayStatsLoader] 記録フォルダを列挙できません: " + root + " / " + ex.Message);
                 yield break;
             }
