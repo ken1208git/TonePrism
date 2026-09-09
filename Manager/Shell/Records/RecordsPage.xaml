@@ -563,21 +563,6 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- ===== 注記 ===== -->
-                    <Border Style="{StaticResource Card}">
-                        <StackPanel>
-                            <TextBlock Text="この数字の読み方" Style="{StaticResource CardHeader}" />
-                            <ItemsControl x:Name="NotesList" Margin="0,6,0,0">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding}" Foreground="#9AA0A6" FontSize="11.5"
-                                                   TextWrapping="Wrap" Margin="0,0,0,6" />
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </StackPanel>
-                    </Border>
-
                     <!-- ===== 切り口別 ===== -->
                     <Border Style="{StaticResource Card}">
                         <StackPanel>

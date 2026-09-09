@@ -235,7 +235,6 @@ namespace TonePrism.Manager.Shell.Records
             AwardsCard.Visibility = vm.HasAwards ? Visibility.Visible : Visibility.Collapsed;
             HighlightsList.ItemsSource = vm.Highlights;
             HighlightsCard.Visibility = vm.HasHighlights ? Visibility.Visible : Visibility.Collapsed;
-            NotesList.ItemsSource = vm.Notes;
 
             BuildTimelines();
         }
@@ -356,6 +355,9 @@ namespace TonePrism.Manager.Shell.Records
                 parts.Add("※" + _data.RecoveredFromFileNameCount + " 件はファイル名から復元");
             if (_data.UnreadableFileCount > 0)
                 parts.Add("※" + _data.UnreadableFileCount + " 件は読めず除外");
+            // 時間統計から外した件数もここに出す (黙って除くと数字が合わない理由が分からない)。
+            if (_snapshot != null && _snapshot.OutlierDurationCount > 0)
+                parts.Add("※" + _snapshot.OutlierDurationCount + " 件はプレイ時間が異常で時間の集計から除外");
             return string.Join("　/　", parts);
         }
 

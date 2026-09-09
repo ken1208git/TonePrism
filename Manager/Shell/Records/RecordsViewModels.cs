@@ -163,7 +163,6 @@ namespace TonePrism.Manager.Shell.Records
         public string CommentsCaption { get; set; }
         public string OverallCaption { get; set; }
         public List<RecordsBar> OverallRatingBars { get; set; } = new List<RecordsBar>();
-        public List<string> Notes { get; set; } = new List<string>();
         public bool IsEmpty { get; set; }
         public string EmptyMessage { get; set; }
     }
@@ -208,7 +207,6 @@ namespace TonePrism.Manager.Shell.Records
             vm.CommentsCaption = string.Format("{0} 件（アンケート {1} 件のうち）", snap.Comments.Count, snap.TotalSurveys);
             vm.OverallCaption = BuildOverallCaption(snap.Overall);
             vm.OverallRatingBars = BuildRatingBars(snap.Overall.RatingCounts, snap.Overall.Count);
-            vm.Notes = BuildNotes(snap);
             vm.IsEmpty = snap.TotalPlays == 0 && snap.TotalSurveys == 0;
             vm.EmptyMessage = vm.IsEmpty
                 ? (snap.Range.IsAll
@@ -680,28 +678,6 @@ namespace TonePrism.Manager.Shell.Records
                 RestStar = Rest(max > 0 ? (double)g.PlayCount / max : 0),
                 HasBar = g.PlayCount > 0,
             }).ToList();
-        }
-
-        private static List<string> BuildNotes(PlayStatsSnapshot snap)
-        {
-            var notes = new List<string>();
-            notes.Add("この画面は読むだけです。ここでの操作でゲームの登録や記録が変わることはありません。");
-            notes.Add("「プレイ回数」はゲームが 1 回起動して終わるごとに 1 件です。サービスモードの試遊テストは記録されません。");
-            notes.Add("アンケートは「ゲームを終えたとき」と「ランチャーを終了するとき（全体）」の 2 種類があり、"
-                + "ゲーム別ランキングにはゲームを終えたときの回答だけを使っています。");
-            // (#463) ★3 に初期カーソルが当たる導線は**データに関係なく常にある**ので、分析ではなく
-            // UI の事実として淡々と 1 行置く。逆転の有無を判定して警告を出す作りは、結果を見せる場で
-            // 前置きが主役になってしまうため撤去した (判定ロジックごと削除済み)。
-            notes.Add("アンケートは★を選ばないと送信できませんが、開いた直後は★3 にカーソルが当たっています。"
-                + "そのまま決定を押すと★3 で送られるため、★3 はやや多めに出ている可能性があります。");
-            notes.Add("ストアの「人気」並び順（直近の回数で決まる運用値）とは別の集計です。数字が違っていて問題ありません。");
-            if (snap.OutlierDurationCount > 0)
-            {
-                notes.Add(string.Format(
-                    "プレイ時間が異常だった {0} 件は時間の統計から除きました（ゲームを閉じずに放置された記録など）。"
-                    + "プレイ回数には含めています。", snap.OutlierDurationCount));
-            }
-            return notes;
         }
     }
 

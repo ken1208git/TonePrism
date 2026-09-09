@@ -354,29 +354,6 @@ namespace TonePrism.Manager.Tests
         }
 
         // ==================================================================
-        // 注記
-        // ==================================================================
-
-        [Fact]
-        public void Presenter_Notes_AlwaysMentionTheStarThreeInitialFocus()
-        {
-            // (#463) ★3 に初期カーソルが当たる導線はデータに関係なく常にあるので、注記も常に出す。
-            // 「★3 が★4 を上回ったときだけ警告カードを出す」作りは、結果を見せる場で前置きが主役に
-            // なってしまうため撤去した。ここが消えると注意書きが無いまま数字だけが独り歩きする。
-            var data = new PlayStatsData
-            {
-                Games = new List<GameInfo> { Game(1, "a", "A") },
-                Plays = new List<PlayRecordEntry> { Play(1, Day2, 60) },
-                Surveys = new List<SurveyEntry> { Survey(1, Day2, 5) },
-            };
-
-            RecordsViewModel vm = RecordsPresenter.Build(
-                PlayStatsService.Compute(data, PlayStatsRange.All), RecordsMetric.Plays, RecordsGroupAxis.Genre);
-
-            Assert.Contains(vm.Notes, n => n.Contains("★3"));
-        }
-
-        // ==================================================================
         // 概況 (ヒーロー数値 + メーター)
         // ==================================================================
 
