@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Windows;
 using TonePrism.Manager.Models;
 using TonePrism.Manager.Services;
 
@@ -73,7 +74,15 @@ namespace TonePrism.Manager.Shell.Records
         public string MetricSubText { get; set; }
         /// <summary>件数が少なく額面通り読めない (平均★の参考値扱い)。</summary>
         public bool IsReference { get; set; }
-        public double BarWidth { get; set; }
+
+        /// <summary>
+        /// 棒の長さ。**px ではなく比率で持つ。** px 固定だと窓が狭いときに列の幅で頭打ちになり、
+        /// 値の違うゲームの棒が同じ長さに見えてしまう (棒が嘘をつく)。星指定なら列がどれだけ
+        /// 縮んでも比は保たれる。
+        /// </summary>
+        public GridLength BarStar { get; set; } = new GridLength(0, GridUnitType.Star);
+        /// <summary>棒の残り (空き) 側。<see cref="BarStar"/> と合わせて 1 になる。</summary>
+        public GridLength RestStar { get; set; } = new GridLength(1, GridUnitType.Star);
 
         // 常時表示する 4 指標 (並べ替え軸に関わらず横に並べる)
         public string PlaysText { get; set; }
@@ -104,7 +113,8 @@ namespace TonePrism.Manager.Shell.Records
         public string GamesText { get; set; }
         public string RatingText { get; set; }
         public string TopGameText { get; set; }
-        public double BarWidth { get; set; }
+        public GridLength BarStar { get; set; } = new GridLength(0, GridUnitType.Star);
+        public GridLength RestStar { get; set; } = new GridLength(1, GridUnitType.Star);
     }
 
     /// <summary>画面 1 枚ぶんの表示データ。</summary>
@@ -145,10 +155,23 @@ namespace TonePrism.Manager.Shell.Records
     /// </summary>
     public static class RecordsPresenter
     {
-        private const double RankBarMax = 300;
         private const double DetailBarMax = 220;
         private const double HourBarMax = 130;
-        private const double GroupBarMax = 260;
+
+        /// <summary>0 より大きい値は必ず見えるだけの太さを残す (0 と「ごくわずか」を見分けるため)。</summary>
+        private const double MinVisibleBar = 0.02;
+
+        private static GridLength Bar(double ratio)
+        {
+            double r = ratio <= 0 ? 0 : Math.Max(MinVisibleBar, Math.Min(1, ratio));
+            return new GridLength(r, GridUnitType.Star);
+        }
+
+        private static GridLength Rest(double ratio)
+        {
+            double r = ratio <= 0 ? 0 : Math.Max(MinVisibleBar, Math.Min(1, ratio));
+            return new GridLength(1 - r, GridUnitType.Star);
+        }
 
         public static RecordsViewModel Build(PlayStatsSnapshot snap, RecordsMetric metric, RecordsGroupAxis axis)
         {
@@ -281,7 +304,8 @@ namespace TonePrism.Manager.Shell.Records
                     SubTitle = BuildSubTitle(g),
                     Badge = BuildBadge(g),
                     IsReference = metric == RecordsMetric.Rating && !g.RatingIsReliable && g.SurveyCount > 0,
-                    BarWidth = max > 0 && value.HasValue ? Math.Max(2, value.Value / max * RankBarMax) : 0,
+                    BarStar = Bar(max > 0 && value.HasValue ? value.Value / max : 0),
+                    RestStar = Rest(max > 0 && value.HasValue ? value.Value / max : 0),
                     PlaysText = g.PlayCount + " 回",
                     RatingText = g.AverageRating.HasValue ? "★" + g.AverageRating.Value.ToString("0.00") : "—",
                     DurationText = PlayStatsService.FormatDuration(g.MedianDurationSeconds),
@@ -619,8 +643,10 @@ namespace TonePrism.Manager.Shell.Records
                 RatingText = g.AverageRating.HasValue
                     ? "★" + g.AverageRating.Value.ToString("0.00") + "（" + g.SurveyCount + " 件）"
                     : "回答なし",
-                TopGameText = g.TopGameTitle,
-                BarWidth = max > 0 ? Math.Max(2, (double)g.PlayCount / max * GroupBarMax) : 0,
+                // ラベルなしでゲーム名だけ置くと何の名前か伝わらない (実際に「これは何?」と聞かれた)。
+                TopGameText = string.IsNullOrEmpty(g.TopGameTitle) ? null : "最多：" + g.TopGameTitle,
+                BarStar = Bar(max > 0 ? (double)g.PlayCount / max : 0),
+                RestStar = Rest(max > 0 ? (double)g.PlayCount / max : 0),
             }).ToList();
         }
 

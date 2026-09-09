@@ -299,7 +299,9 @@ namespace TonePrism.Manager.Tests
 
             Assert.Equal("多い", vm.Games[0].Title);
             Assert.Equal(1, vm.Games[0].Rank);
-            Assert.True(vm.Games[0].BarWidth > vm.Games[1].BarWidth);
+            // 棒は px ではなく比率。窓が狭くても比が保たれる。
+            Assert.True(vm.Games[0].BarStar.Value > vm.Games[1].BarStar.Value);
+            Assert.Equal(1.0, vm.Games[0].BarStar.Value + vm.Games[0].RestStar.Value, 3);
         }
 
         // ==================================================================

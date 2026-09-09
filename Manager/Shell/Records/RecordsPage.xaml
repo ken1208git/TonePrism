@@ -164,18 +164,23 @@
         <DataTemplate x:Key="GroupTemplate">
             <Grid Margin="0,0,0,7">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="180" />
-                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="210" MinWidth="120" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Margin="0,0,10,0">
                     <TextBlock Text="{Binding Key}" Foreground="#ECECEC" FontSize="12.5" TextTrimming="CharacterEllipsis" />
                     <TextBlock Text="{Binding TopGameText}" Foreground="#7C8288" FontSize="10.5"
                                TextTrimming="CharacterEllipsis" />
                 </StackPanel>
-                <Border Grid.Column="1" Height="10" CornerRadius="5" Background="#FF3C6FB4"
-                        HorizontalAlignment="Left" VerticalAlignment="Center" Width="{Binding BarWidth}" />
-                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                <Grid Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="{Binding BarStar}" />
+                        <ColumnDefinition Width="{Binding RestStar}" />
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Height="10" CornerRadius="5" Background="#FF3C6FB4" />
+                </Grid>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="{Binding PlaysText}" Foreground="#ECECEC" FontSize="12" MinWidth="62" />
                     <TextBlock Text="{Binding GamesText}" Foreground="#8A9096" FontSize="11" MinWidth="50" />
                     <TextBlock Text="{Binding RatingText}" Foreground="#C2C7CC" FontSize="11" />
@@ -218,10 +223,13 @@
 
                                                 <Grid>
                                                     <Grid.ColumnDefinitions>
+                                                        <!-- **縮むのは名前と棒 (星指定) だけ**。ここを固定幅にすると、
+                                                             幅が足りないときに右端の指標が切られる (実際に見切れた)。
+                                                             指標側は Auto のまま = 必ず全部出る。 -->
                                                         <ColumnDefinition Width="34" />
-                                                        <ColumnDefinition Width="230" />
+                                                        <ColumnDefinition Width="2*" MinWidth="96" />
                                                         <ColumnDefinition Width="Auto" />
-                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="1*" />
                                                         <ColumnDefinition Width="Auto" />
                                                         <ColumnDefinition Width="16" />
                                                     </Grid.ColumnDefinitions>
@@ -230,15 +238,21 @@
                                                                FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
 
                                                     <StackPanel Grid.Column="1" Margin="0,0,12,0" VerticalAlignment="Center">
-                                                        <StackPanel Orientation="Horizontal">
-                                                            <TextBlock Text="{Binding Title}" Foreground="#F2F2F2" FontSize="13.5"
+                                                        <!-- Grid にしているのは TextTrimming のため。横 StackPanel の中の
+                                                             TextBlock は無限幅で測られるので省略記号が出ず、はみ出す。 -->
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Grid.Column="0" Text="{Binding Title}" Foreground="#F2F2F2" FontSize="13.5"
                                                                        FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                                            <Border Background="#33FFFFFF" CornerRadius="4" Padding="5,0" Margin="8,1,0,0"
+                                                            <Border Grid.Column="1" Background="#33FFFFFF" CornerRadius="4" Padding="5,0" Margin="8,1,0,0"
                                                                     VerticalAlignment="Center"
                                                                     Visibility="{Binding HasBadge, Converter={StaticResource BoolToVis}}">
                                                                 <TextBlock Text="{Binding Badge}" Foreground="#D8DDE2" FontSize="10" />
                                                             </Border>
-                                                        </StackPanel>
+                                                        </Grid>
                                                         <TextBlock Text="{Binding SubTitle}" Foreground="#7C8288" FontSize="10.5"
                                                                    TextTrimming="CharacterEllipsis" />
                                                     </StackPanel>
@@ -256,9 +270,13 @@
                                                         <TextBlock Text="{Binding MetricSubText}" Foreground="#7C8288" FontSize="10" />
                                                     </StackPanel>
 
-                                                    <Border Grid.Column="3" Height="10" CornerRadius="5" Background="#FF3C6FB4"
-                                                            HorizontalAlignment="Left" VerticalAlignment="Center"
-                                                            Width="{Binding BarWidth}" />
+                                                    <Grid Grid.Column="3" VerticalAlignment="Center" Margin="0,0,10,0">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="{Binding BarStar}" />
+                                                            <ColumnDefinition Width="{Binding RestStar}" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <Border Grid.Column="0" Height="10" CornerRadius="5" Background="#FF3C6FB4" />
+                                                    </Grid>
 
                                                     <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding PlaysText}" Foreground="#C2C7CC" FontSize="11.5" MinWidth="56" TextAlignment="Right" />
@@ -563,7 +581,7 @@
                                 <RadioButton x:Name="AxisDeveloper" Style="{StaticResource Chip}" Content="制作者"
                                              GroupName="axis" Checked="Axis_Changed" />
                             </StackPanel>
-                            <TextBlock Text="1 本のゲームが複数のジャンル・複数の制作者に属することがあるため、合計は全体と一致しません。平均★は回答 1 件ずつで重み付けしています。"
+                            <TextBlock Text="区分名の下の「最多」は、その区分でいちばん遊ばれたゲームです。1 本のゲームが複数のジャンル・複数の制作者に属することがあるため、合計は全体と一致しません。平均★は回答 1 件ずつで重み付けしています。"
                                        Style="{StaticResource Caption}" />
                             <ItemsControl x:Name="GroupsList" ItemTemplate="{StaticResource GroupTemplate}" />
                         </StackPanel>

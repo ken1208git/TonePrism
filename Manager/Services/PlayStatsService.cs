@@ -543,7 +543,11 @@ namespace TonePrism.Manager.Services
                     grp.PlayCount += g.PlayCount;
                     grp.SurveyCount += g.SurveyCount;
                     if (g.AverageRating.HasValue) ratingSum[key] += g.AverageRating.Value * g.SurveyCount;
-                    if (g.PlayCount > topPlays[key])
+                    // その区分でいちばん遊ばれた 1 本。**0 回のときは出さない** — 初期値との比較で
+                    // 素通しすると、1 本も遊ばれなかった区分にも「最多」としてゲーム名が付いてしまう。
+                    // 同数のときは先に現れた方が残る。games は回数降順→名前順で並んでいるので、
+                    // 同数なら名前順で先のものになり、集計し直しても結果は変わらない。
+                    if (g.PlayCount > 0 && g.PlayCount > topPlays[key])
                     {
                         topPlays[key] = g.PlayCount;
                         grp.TopGameTitle = g.Title;
