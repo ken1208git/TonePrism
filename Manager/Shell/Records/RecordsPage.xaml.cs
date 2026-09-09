@@ -255,14 +255,6 @@ namespace TonePrism.Manager.Shell.Records
             HeroValue.Text = vm.HeroValue;
             HeroSub.Text = vm.HeroSub;
 
-            HeroSpark.Hue = ResponseHue;
-            HeroSpark.Values = vm.HeroSpark;
-            int[] hours = vm.HeroSpark;
-            // 直接ラベルはピークだけ (点ごとに数字を置くと読まれないうえ画面が荒れる)。
-            HeroSpark.LabelAt = i => hours != null && i >= 0 && i < hours.Length
-                ? i.ToString("00") + "時　" + hours[i] + " プレイ"
-                : null;
-
             ApplyMeter(vm.RatingMeter, RatingMeterHost, RatingMeter, RatingMeterValue,
                 RatingMeterLabel, RatingMeterSub, RatingHue);
             ApplyMeter(vm.ResponseMeter, ResponseMeterHost, ResponseMeter, ResponseMeterValue,

@@ -427,11 +427,13 @@
 
                     <!-- ===== 概況 =====
                          形は指標の性質で決めている:
-                          - ヒーロー数値は 1 画面に 1 つだけ (プレイ回数)。添えるのは単系列の
-                            スパークラインなので凡例は置かず、直接ラベルはピークだけ。
+                          - ヒーロー数値は 1 画面に 1 つだけ (プレイ回数)。
                           - 弧のメーターは**上限が実在する比率**にだけ使う (5 点満点 / 回答 ÷ プレイ /
                             遊ばれた種類 ÷ 登録数)。上限の無い量に当てると存在しない目標を発明する。
                           - 残りの量 (総プレイ時間・台数) はメーターにせず数値のまま帯に並べる。
+                         **ここにグラフは置かない。** 時間帯のスパークラインを置いていたが、期間が短いと
+                         下の「いつ遊ばれたか」と同じ絵になった (役割が分かれるのは期間が長いときだけで、
+                         「長い期間のときだけ意味が違う」区別は説明できない)。
                          色は 3 指標の識別用。ダーク面で CVD 検証済み (最悪隣接 ΔE 8.4)。
                          文字は必ず文字色トークンのままにし、色は弧だけが持つ。 -->
                     <Border Style="{StaticResource Card}">
@@ -451,12 +453,15 @@
                                                TextWrapping="Wrap" />
                                 </StackPanel>
 
-                                <!-- 時間帯のかたち -->
-                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                    <TextBlock Text="時間帯別のプレイ数（期間の合計）" Foreground="#8A9096" FontSize="10.5"
-                                               Margin="0,0,0,2" />
-                                    <local:Sparkline x:Name="HeroSpark" Height="74" />
-                                </StackPanel>
+                                <!-- 上限の無い数字。ヒーロー数値の横に置く (下に別の帯を作らない)。 -->
+                                <Border Grid.Column="1" Background="#14FFFFFF" CornerRadius="6"
+                                        Padding="16,12" VerticalAlignment="Center">
+                                    <ItemsControl x:Name="StripList" ItemTemplate="{StaticResource StripTemplate}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                    </ItemsControl>
+                                </Border>
                             </Grid>
 
                             <!-- メーター 3 つ -->
@@ -519,14 +524,6 @@
                                 </Grid>
                             </UniformGrid>
 
-                            <!-- 上限の無い数字 -->
-                            <Border Background="#14FFFFFF" CornerRadius="6" Padding="15,11" Margin="0,18,0,0">
-                                <ItemsControl x:Name="StripList" ItemTemplate="{StaticResource StripTemplate}">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                </ItemsControl>
-                            </Border>
                         </StackPanel>
                     </Border>
 

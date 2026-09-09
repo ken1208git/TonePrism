@@ -455,13 +455,6 @@ namespace TonePrism.Manager.Models
         /// <summary>プレイ時間が異常で時間統計から外した件数 (0 でなければ画面に注記する)。</summary>
         public int OutlierDurationCount { get; set; }
 
-        /// <summary>
-        /// 期間全体の時間帯別プレイ数 (0〜23 時)。日をまたいでも同じ時刻に足し込む。
-        /// 概況のスパークライン用。「何時に混むか」を答えるもので、期間のどこで盛り上がったかは
-        /// <see cref="Trend"/> が答える (役割を分けることで、どちらも本数が有界になる)。
-        /// </summary>
-        public int[] HourCounts { get; set; } = new int[24];
-
         /// <summary>自動選出した表彰。受賞者がいない賞は入らない。</summary>
         public List<PlayStatsAward> Awards { get; set; } = new List<PlayStatsAward>();
 

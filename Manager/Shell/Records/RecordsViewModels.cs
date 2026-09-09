@@ -144,8 +144,6 @@ namespace TonePrism.Manager.Shell.Records
         public string HeroValue { get; set; }
         public string HeroLabel { get; set; }
         public string HeroSub { get; set; }
-        /// <summary>ヒーローに添える時間帯別プレイ数 (0〜23 時)。</summary>
-        public int[] HeroSpark { get; set; }
         public RecordsMeter RatingMeter { get; set; }
         public RecordsMeter ResponseMeter { get; set; }
         public RecordsMeter CoverageMeter { get; set; }
@@ -229,7 +227,6 @@ namespace TonePrism.Manager.Shell.Records
             vm.HeroLabel = "プレイ回数";
             vm.HeroValue = s.TotalPlays.ToString(CultureInfo.InvariantCulture);
             vm.HeroSub = s.PlayedGameCount + " 種類のゲームが遊ばれました";
-            vm.HeroSpark = s.HourCounts;
 
             if (s.AverageRating.HasValue)
             {

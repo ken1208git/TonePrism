@@ -50,11 +50,6 @@ namespace TonePrism.Manager.Services
                 .Where(pc => !string.IsNullOrEmpty(pc))
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count();
             snap.PlayedGameCount = plays.Select(p => p.GameNo).Where(n => n > 0).Distinct().Count();
-            foreach (PlayRecordEntry p in plays)
-            {
-                int hour = p.CreatedAtLocal.Hour;
-                if (hour >= 0 && hour < 24) snap.HourCounts[hour]++;
-            }
 
             snap.Games = BuildGameStats(plays, gameSurveys, byNo, data.Games);
             ApplyRepeatPlays(snap.Games, plays);

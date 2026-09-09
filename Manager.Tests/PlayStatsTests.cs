@@ -494,27 +494,6 @@ namespace TonePrism.Manager.Tests
             Assert.NotEmpty(vm.Strip);                           // 上限の無い量は帯に出す
         }
 
-        [Fact]
-        public void Compute_HourCounts_AggregateAcrossDays()
-        {
-            // 概況のスパークラインは期間全体を時間帯で束ねる (日ごとの内訳は Timelines が持つ)。
-            var data = new PlayStatsData
-            {
-                Games = new List<GameInfo> { Game(1, "a", "A") },
-                Plays = new List<PlayRecordEntry>
-                {
-                    Play(1, Day1.Date.AddHours(13), 0),
-                    Play(1, Day2.Date.AddHours(13), 0),
-                    Play(1, Day2.Date.AddHours(9), 0),
-                },
-            };
-
-            int[] hours = PlayStatsService.Compute(data, PlayStatsRange.All).HourCounts;
-            Assert.Equal(2, hours[13]);   // 日をまたいで同じ時刻に足し込む
-            Assert.Equal(1, hours[9]);
-            Assert.Equal(0, hours[0]);
-        }
-
         // ==================================================================
         // 表彰
         // ==================================================================
