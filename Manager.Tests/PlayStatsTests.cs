@@ -304,51 +304,26 @@ namespace TonePrism.Manager.Tests
         }
 
         // ==================================================================
-        // ★3 バイアスの検出 (#463)
+        // 注記
         // ==================================================================
 
         [Fact]
-        public void Presenter_Caveat_FiresWhenStarThreeOutnumbersStarFour()
+        public void Presenter_Notes_AlwaysMentionTheStarThreeInitialFocus()
         {
-            // ★3 > ★4 の逆転は満足度分布として不自然 = ★3 に初期フォーカスがある導線の影響を疑う材料。
-            var surveys = new List<SurveyEntry>();
-            for (int i = 0; i < 20; i++) surveys.Add(Survey(1, Day2, 3));
-            for (int i = 0; i < 10; i++) surveys.Add(Survey(1, Day2, 4));
-            for (int i = 0; i < 40; i++) surveys.Add(Survey(1, Day2, 5));
-
+            // (#463) ★3 に初期カーソルが当たる導線はデータに関係なく常にあるので、注記も常に出す。
+            // 「★3 が★4 を上回ったときだけ警告カードを出す」作りは、結果を見せる場で前置きが主役に
+            // なってしまうため撤去した。ここが消えると注意書きが無いまま数字だけが独り歩きする。
             var data = new PlayStatsData
             {
                 Games = new List<GameInfo> { Game(1, "a", "A") },
                 Plays = new List<PlayRecordEntry> { Play(1, Day2, 60) },
-                Surveys = surveys,
+                Surveys = new List<SurveyEntry> { Survey(1, Day2, 5) },
             };
 
             RecordsViewModel vm = RecordsPresenter.Build(
                 PlayStatsService.Compute(data, null), RecordsMetric.Plays, RecordsGroupAxis.Genre);
 
-            Assert.True(vm.Caveat.Detected);
-            Assert.NotEmpty(vm.Caveat.Evidence);
-        }
-
-        [Fact]
-        public void Presenter_Caveat_StaysQuietWhenDistributionIsMonotonic()
-        {
-            var surveys = new List<SurveyEntry>();
-            for (int i = 0; i < 5; i++) surveys.Add(Survey(1, Day2, 3));
-            for (int i = 0; i < 15; i++) surveys.Add(Survey(1, Day2, 4));
-            for (int i = 0; i < 40; i++) surveys.Add(Survey(1, Day2, 5));
-
-            var data = new PlayStatsData
-            {
-                Games = new List<GameInfo> { Game(1, "a", "A") },
-                Plays = new List<PlayRecordEntry> { Play(1, Day2, 60) },
-                Surveys = surveys,
-            };
-
-            RecordsViewModel vm = RecordsPresenter.Build(
-                PlayStatsService.Compute(data, null), RecordsMetric.Plays, RecordsGroupAxis.Genre);
-
-            Assert.False(vm.Caveat.Detected);
+            Assert.Contains(vm.Notes, n => n.Contains("★3"));
         }
 
         // ==================================================================

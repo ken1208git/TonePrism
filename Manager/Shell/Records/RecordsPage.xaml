@@ -9,7 +9,13 @@
          書き込みは一切しない。記録は取り直しの効かないデータなので、この画面から DB / responses を
          変更する API を足さないこと。
          注意: DataTemplate 内の TextBlock には Page.Resources の暗黙スタイルが届かず WPF 既定の黒文字に
-         落ちるため、テンプレ内テキストは必ず明示 Foreground を付ける (DashboardPage と同じ罠)。 -->
+         落ちるため、テンプレ内テキストは必ず明示 Foreground を付ける (DashboardPage と同じ罠)。
+
+         **並び順の規約: 高さが読めるパネルを上、データ次第で伸びるパネルを下に置く。**
+         ゲーム別は登録ゲーム数ぶん行が伸び (29 本なら約 1900px、行を展開すればさらに)、その下に
+         置いたパネルは事実上たどり着けなくなる。概況・時間帯・全体アンケート・注記は件数に関係なく
+         高さがほぼ一定なので上に固め、可変長 (切り口別 → コメント → ゲーム別) を長い順に下へ送る。
+         新しいパネルを足すときもこの規約に従うこと。 -->
 
     <Page.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
@@ -353,54 +359,6 @@
                         </ItemsControl.ItemsPanel>
                     </ItemsControl>
 
-                    <!-- ===== ★3 の注意 (#463) ===== -->
-                    <Border x:Name="CaveatCard" Background="#FF3A3323" BorderBrush="#55E0A03E" BorderThickness="1"
-                            CornerRadius="8" Padding="18,15" Margin="0,0,0,14" Visibility="Collapsed">
-                        <StackPanel>
-                            <TextBlock x:Name="CaveatHeadline" Foreground="#F0C97C" FontSize="13.5" FontWeight="SemiBold"
-                                       TextWrapping="Wrap" Margin="0,0,0,8" />
-                            <ItemsControl x:Name="CaveatList">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding}" Foreground="#DCD2BC" FontSize="11.5"
-                                                   TextWrapping="Wrap" Margin="0,0,0,5" />
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </StackPanel>
-                    </Border>
-
-                    <!-- ===== ゲーム別ランキング ===== -->
-                    <Border Style="{StaticResource Card}">
-                        <StackPanel>
-                            <TextBlock Text="ゲーム別" Style="{StaticResource CardHeader}" />
-                            <StackPanel Orientation="Horizontal" Margin="0,6,0,10">
-                                <RadioButton x:Name="MetricPlays" Style="{StaticResource Chip}" Content="遊ばれた回数"
-                                             GroupName="metric" IsChecked="True" Checked="Metric_Changed" />
-                                <RadioButton x:Name="MetricRating" Style="{StaticResource Chip}" Content="平均★"
-                                             GroupName="metric" Checked="Metric_Changed" />
-                                <RadioButton x:Name="MetricDuration" Style="{StaticResource Chip}" Content="熱中度（プレイ時間）"
-                                             GroupName="metric" Checked="Metric_Changed" />
-                                <RadioButton x:Name="MetricRate" Style="{StaticResource Chip}" Content="アンケート回答率"
-                                             GroupName="metric" Checked="Metric_Changed" />
-                            </StackPanel>
-                            <TextBlock x:Name="RankingCaption" Style="{StaticResource Caption}" />
-
-                            <!-- 一覧の見出し (行の右側 4 指標に対応) -->
-                            <Grid Margin="0,0,30,6">
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                    <TextBlock Text="回数" Foreground="#7C8288" FontSize="10.5" MinWidth="56" TextAlignment="Right" />
-                                    <TextBlock Text="平均★" Foreground="#7C8288" FontSize="10.5" MinWidth="58" TextAlignment="Right" />
-                                    <TextBlock Text="中央時間" Foreground="#7C8288" FontSize="10.5" MinWidth="70" TextAlignment="Right" />
-                                    <TextBlock Text="回答率" Foreground="#7C8288" FontSize="10.5" MinWidth="46" TextAlignment="Right" />
-                                    <TextBlock Text="" MinWidth="16" />
-                                </StackPanel>
-                            </Grid>
-
-                            <ItemsControl x:Name="GamesList" ItemTemplate="{StaticResource GameRowTemplate}" />
-                        </StackPanel>
-                    </Border>
-
                     <!-- ===== 時間帯 ===== -->
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
@@ -417,6 +375,21 @@
                             <TextBlock Text="全体アンケート" Style="{StaticResource CardHeader}" />
                             <TextBlock x:Name="OverallCaption" Style="{StaticResource Caption}" />
                             <ItemsControl x:Name="OverallBars" ItemTemplate="{StaticResource BarTemplate}" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ===== 注記 ===== -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="この数字の読み方" Style="{StaticResource CardHeader}" />
+                            <ItemsControl x:Name="NotesList" Margin="0,6,0,0">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" Foreground="#9AA0A6" FontSize="11.5"
+                                                   TextWrapping="Wrap" Margin="0,0,0,6" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                         </StackPanel>
                     </Border>
 
@@ -449,18 +422,34 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- ===== 注記 ===== -->
+                    <!-- ===== ゲーム別ランキング ===== -->
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
-                            <TextBlock Text="この数字の読み方" Style="{StaticResource CardHeader}" />
-                            <ItemsControl x:Name="NotesList" Margin="0,6,0,0">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding}" Foreground="#9AA0A6" FontSize="11.5"
-                                                   TextWrapping="Wrap" Margin="0,0,0,6" />
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
+                            <TextBlock Text="ゲーム別" Style="{StaticResource CardHeader}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,10">
+                                <RadioButton x:Name="MetricPlays" Style="{StaticResource Chip}" Content="遊ばれた回数"
+                                             GroupName="metric" IsChecked="True" Checked="Metric_Changed" />
+                                <RadioButton x:Name="MetricRating" Style="{StaticResource Chip}" Content="平均★"
+                                             GroupName="metric" Checked="Metric_Changed" />
+                                <RadioButton x:Name="MetricDuration" Style="{StaticResource Chip}" Content="熱中度（プレイ時間）"
+                                             GroupName="metric" Checked="Metric_Changed" />
+                                <RadioButton x:Name="MetricRate" Style="{StaticResource Chip}" Content="アンケート回答率"
+                                             GroupName="metric" Checked="Metric_Changed" />
+                            </StackPanel>
+                            <TextBlock x:Name="RankingCaption" Style="{StaticResource Caption}" />
+
+                            <!-- 一覧の見出し (行の右側 4 指標に対応) -->
+                            <Grid Margin="0,0,30,6">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <TextBlock Text="回数" Foreground="#7C8288" FontSize="10.5" MinWidth="56" TextAlignment="Right" />
+                                    <TextBlock Text="平均★" Foreground="#7C8288" FontSize="10.5" MinWidth="58" TextAlignment="Right" />
+                                    <TextBlock Text="中央時間" Foreground="#7C8288" FontSize="10.5" MinWidth="70" TextAlignment="Right" />
+                                    <TextBlock Text="回答率" Foreground="#7C8288" FontSize="10.5" MinWidth="46" TextAlignment="Right" />
+                                    <TextBlock Text="" MinWidth="16" />
+                                </StackPanel>
+                            </Grid>
+
+                            <ItemsControl x:Name="GamesList" ItemTemplate="{StaticResource GameRowTemplate}" />
                         </StackPanel>
                     </Border>
 

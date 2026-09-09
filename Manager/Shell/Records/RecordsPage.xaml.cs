@@ -169,17 +169,6 @@ namespace TonePrism.Manager.Shell.Records
             GroupsList.ItemsSource = vm.Groups;
             NotesList.ItemsSource = vm.Notes;
 
-            if (vm.Caveat.Detected)
-            {
-                CaveatHeadline.Text = vm.Caveat.Headline;
-                CaveatList.ItemsSource = vm.Caveat.Evidence;
-                CaveatCard.Visibility = Visibility.Visible;
-            }
-            else
-            {
-                CaveatCard.Visibility = Visibility.Collapsed;
-            }
-
             BuildTimelines();
         }
 

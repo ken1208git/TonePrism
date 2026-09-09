@@ -100,20 +100,6 @@ namespace TonePrism.Manager.Shell.Records
         public double BarWidth { get; set; }
     }
 
-    /// <summary>
-    /// (#463) ★3 が多く出ているかの判定材料。**断定はしない** — 画面には根拠を並べて読み手に委ねる。
-    ///
-    /// 「送信ボタンは★未選択だと押せない」ので『既定で★3が入る』は誤りだが、
-    /// `survey_dialog.gd` が `_stars[STAR_COUNT / 2]` (= ★3) に初期フォーカスを当てるため、
-    /// **決定を 1 回押すだけで★3 が確定する導線**は実在する。
-    /// </summary>
-    public sealed class RecordsRatingCaveat
-    {
-        public bool Detected { get; set; }
-        public string Headline { get; set; }
-        public List<string> Evidence { get; set; } = new List<string>();
-    }
-
     /// <summary>画面 1 枚ぶんの表示データ。</summary>
     public sealed class RecordsViewModel
     {
@@ -121,7 +107,6 @@ namespace TonePrism.Manager.Shell.Records
         public List<RecordsGameRow> Games { get; set; } = new List<RecordsGameRow>();
         public List<PlayStatsComment> Comments { get; set; } = new List<PlayStatsComment>();
         public List<RecordsGroupRow> Groups { get; set; } = new List<RecordsGroupRow>();
-        public RecordsRatingCaveat Caveat { get; set; } = new RecordsRatingCaveat();
 
         public string RankingCaption { get; set; }
         public string CommentsCaption { get; set; }
@@ -152,7 +137,6 @@ namespace TonePrism.Manager.Shell.Records
             vm.Games = BuildGameRows(snap, metric);
             vm.Comments = snap.Comments;
             vm.Groups = BuildGroupRows(snap, axis);
-            vm.Caveat = BuildCaveat(snap);
             vm.RankingCaption = RankingCaption(metric);
             vm.CommentsCaption = string.Format("{0} 件（アンケート {1} 件のうち）", snap.Comments.Count, snap.TotalSurveys);
             vm.OverallCaption = BuildOverallCaption(snap.Overall);
@@ -491,59 +475,6 @@ namespace TonePrism.Manager.Shell.Records
                 o.Count, o.AverageRating.HasValue ? o.AverageRating.Value.ToString("0.00") : "—");
         }
 
-        /// <summary>
-        /// (#463) ★3 の出方が不自然かを判定する。**判定条件は「★3 が★4 を上回っている」**。
-        /// 満足度の分布は普通★5→★4→★3 と単調に減るので、★3 だけが★4 を追い越すのは
-        /// 「★3 に初期フォーカスがあり、決定を 1 回押しただけで確定する」導線があることの示唆になる。
-        /// 断定はせず、根拠を並べて読み手に判断を渡す。
-        /// </summary>
-        private static RecordsRatingCaveat BuildCaveat(PlayStatsSnapshot snap)
-        {
-            var c = new RecordsRatingCaveat();
-            int[] game = new int[5];
-            foreach (GameStats g in snap.Games)
-                for (int i = 0; i < 5; i++) game[i] += g.RatingCounts[i];
-
-            int three = game[2], four = game[3];
-            int total = game.Sum();
-            if (total == 0 || three <= four) return c;
-
-            c.Detected = true;
-            c.Headline = "★3 が実際より多く出ている可能性があります";
-            c.Evidence.Add(string.Format(
-                "ゲーム別の回答は ★3 が {0} 件（{1:0.0}%）で、★4 の {2} 件（{3:0.0}%）を上回っています。"
-                + "満足度は普通 ★5→★4→★3 と減るので、この逆転は不自然です。",
-                three, 100.0 * three / total, four, 100.0 * four / total));
-
-            int[] ov = snap.Overall.RatingCounts;
-            int ovTotal = ov.Sum();
-            if (ovTotal > 0 && ov[2] > ov[3])
-            {
-                c.Evidence.Add(string.Format(
-                    "全体アンケートでも同じ逆転が起きています（★3 が {0} 件・★4 が {1} 件）。"
-                    + "内容ではなく操作のしかたに理由がありそうです。", ov[2], ov[3]));
-            }
-
-            int cThree = 0, cFour = 0, cTotal = 0;
-            foreach (GameStats g in snap.Games)
-                foreach (PlayStatsComment cm in g.Comments)
-                {
-                    cTotal++;
-                    if (cm.Rating == 3) cThree++;
-                    if (cm.Rating == 4) cFour++;
-                }
-            if (cTotal > 0 && cThree <= cFour)
-            {
-                c.Evidence.Add(string.Format(
-                    "一方でコメントまで書いた {0} 件に絞ると逆転は消えます（★3 が {1} 件・★4 が {2} 件）。"
-                    + "しっかり答えた人ほど★3 に偏っていない、と読めます。", cTotal, cThree, cFour));
-            }
-
-            c.Evidence.Add("アンケートは★を選ばないと送信できませんが、開いた直後は★3 にカーソルが当たっています"
-                + "（そのまま決定を押すと★3 で送られます）。数字を読むときはこの分だけ差し引いてください。");
-            return c;
-        }
-
         private static List<RecordsGroupRow> BuildGroupRows(PlayStatsSnapshot snap, RecordsGroupAxis axis)
         {
             List<PlayStatsGroup> src;
@@ -575,6 +506,11 @@ namespace TonePrism.Manager.Shell.Records
             notes.Add("「プレイ回数」はゲームが 1 回起動して終わるごとに 1 件です。サービスモードの試遊テストは記録されません。");
             notes.Add("アンケートは「ゲームを終えたとき」と「ランチャーを終了するとき（全体）」の 2 種類があり、"
                 + "ゲーム別ランキングにはゲームを終えたときの回答だけを使っています。");
+            // (#463) ★3 に初期カーソルが当たる導線は**データに関係なく常にある**ので、分析ではなく
+            // UI の事実として淡々と 1 行置く。逆転の有無を判定して警告を出す作りは、結果を見せる場で
+            // 前置きが主役になってしまうため撤去した (判定ロジックごと削除済み)。
+            notes.Add("アンケートは★を選ばないと送信できませんが、開いた直後は★3 にカーソルが当たっています。"
+                + "そのまま決定を押すと★3 で送られるため、★3 はやや多めに出ている可能性があります。");
             notes.Add("ストアの「人気」並び順（直近の回数で決まる運用値）とは別の集計です。数字が違っていて問題ありません。");
             if (snap.OutlierDurationCount > 0)
             {
