@@ -7,25 +7,27 @@ using TonePrism.Manager.Models;
 namespace TonePrism.Manager.Shell.Records
 {
     /// <summary>
-    /// (#464) 1 日ぶんの時間帯グラフ (15 分刻み) を滑らかな面グラフで描く軽量コントロール。
+    /// (#464) 1 日ぶんの時間帯グラフ (15 分刻み) を面グラフで描く軽量コントロール。
     ///
     /// **チャートライブラリを足さずに自前で描く理由**: 必要なのは「1 本の折れ線を塗る」だけで、
     /// 依存を 1 つ増やすと配布 zip・オフライン更新・ライセンス表記まで波及する (Manager は単一 exe を
     /// SMB 越しに置き換える配布形態)。`OnRender` 数十行で足りるものに依存は増やさない。
     ///
-    /// 線は Catmull-Rom スプラインを 3 次ベジェに変換して滑らかにする。折れ線のままだと 15 分刻みの
-    /// ギザギザが目立ち、来場の波という「読み取りたい形」が見えないため。
+    /// **見た目は Windows 標準寄り** (タスクマネージャーのグラフが基準): 実測値どおりの折れ線、
+    /// 平坦な半透明の塗り、髪の毛ほどのグリッド。スプラインで滑らかにする案は取っていない —
+    /// 15 分刻みの実測点の間を勝手に補間すると、記録に無い山や谷を描くことになるため。
     /// </summary>
     public sealed class TimelineChart : FrameworkElement
     {
-        private static readonly Brush LineBrush = new SolidColorBrush(Color.FromRgb(0x6C, 0xB6, 0xFF));
+        // 概況のメーターと同じ青 (CVD 検証済みの slot)。画面内でアクセント色を増やさない。
+    private static readonly Brush LineBrush = new SolidColorBrush(Color.FromRgb(0x39, 0x87, 0xE5));
         private static readonly Brush AxisBrush = new SolidColorBrush(Color.FromRgb(0x6A, 0x6A, 0x6A));
         private static readonly Brush LabelBrush = new SolidColorBrush(Color.FromRgb(0x9A, 0xA0, 0xA6));
         private static readonly Brush PeakBrush = new SolidColorBrush(Color.FromRgb(0xE0, 0xA0, 0x3E));
         private static readonly Brush EmptyBrush = new SolidColorBrush(Color.FromRgb(0x77, 0x7D, 0x83));
-        private static readonly Pen LinePen = MakePen(LineBrush, 2.0);
+        private static readonly Pen LinePen = MakePen(LineBrush, 1.6);
         private static readonly Pen AxisPen = MakePen(AxisBrush, 1.0);
-        private static readonly Pen GridPen = MakePen(new SolidColorBrush(Color.FromArgb(0x22, 0xFF, 0xFF, 0xFF)), 1.0);
+        private static readonly Pen GridPen = MakePen(new SolidColorBrush(Color.FromArgb(0x16, 0xFF, 0xFF, 0xFF)), 1.0);
         private static readonly Pen PeakPen = MakePen(PeakBrush, 1.5);
 
         private static readonly Brush AreaBrush = MakeAreaBrush();
@@ -58,8 +60,9 @@ namespace TonePrism.Manager.Shell.Records
                 StartPoint = new Point(0, 0),
                 EndPoint = new Point(0, 1),
             };
-            g.GradientStops.Add(new GradientStop(Color.FromArgb(0x66, 0x6C, 0xB6, 0xFF), 0));
-            g.GradientStops.Add(new GradientStop(Color.FromArgb(0x08, 0x6C, 0xB6, 0xFF), 1));
+            // 平坦に近い塗り (Windows 標準のグラフは濃いグラデーションを使わない)。
+            g.GradientStops.Add(new GradientStop(Color.FromArgb(0x40, 0x39, 0x87, 0xE5), 0));
+            g.GradientStops.Add(new GradientStop(Color.FromArgb(0x14, 0x39, 0x87, 0xE5), 1));
             g.Freeze();
             return g;
         }
@@ -118,8 +121,8 @@ namespace TonePrism.Manager.Shell.Records
             var points = new Point[n];
             for (int i = 0; i < n; i++) points[i] = new Point(xAt(first + i), yAt(t.Buckets[first + i]));
 
-            StreamGeometry line = BuildSmoothPath(points, false, 0);
-            StreamGeometry area = BuildSmoothPath(points, true, PadTop + plotH);
+            StreamGeometry line = BuildPath(points, false, 0);
+            StreamGeometry area = BuildPath(points, true, PadTop + plotH);
             dc.DrawGeometry(AreaBrush, null, area);
             dc.DrawGeometry(null, LinePen, line);
 
@@ -161,30 +164,19 @@ namespace TonePrism.Manager.Shell.Records
         }
 
         /// <summary>
-        /// Catmull-Rom を 3 次ベジェに変換して滑らかな経路を作る。<paramref name="close"/> が true なら
-        /// <paramref name="baseline"/> まで下ろして閉じ、面塗り用の形にする。
+        /// 実測点を直線でつなぐ。<paramref name="close"/> が true なら <paramref name="baseline"/> まで
+        /// 下ろして閉じ、面塗り用の形にする。
+        ///
+        /// **補間しない**のは、点と点の間に記録が無いから。スプラインを通すと見た目は滑らかになるが、
+        /// 実際には無い山や谷を描き、しかも 0 の区間を軸下に潜らせるので別途クランプが要る。
         /// </summary>
-        private static StreamGeometry BuildSmoothPath(Point[] p, bool close, double baseline)
+        private static StreamGeometry BuildPath(Point[] p, bool close, double baseline)
         {
             var geo = new StreamGeometry();
             using (StreamGeometryContext ctx = geo.Open())
             {
                 ctx.BeginFigure(p[0], close, close);
-                for (int i = 0; i < p.Length - 1; i++)
-                {
-                    Point p0 = i == 0 ? p[0] : p[i - 1];
-                    Point p1 = p[i];
-                    Point p2 = p[i + 1];
-                    Point p3 = i + 2 < p.Length ? p[i + 2] : p[i + 1];
-
-                    // Catmull-Rom (張力 1/6) → ベジェ制御点。値が負に沈まないよう Y をクランプする
-                    // (プレイ数は 0 未満にならないのに、スプラインの overshoot で軸下に潜るのを防ぐ)。
-                    var c1 = new Point(p1.X + (p2.X - p0.X) / 6.0, p1.Y + (p2.Y - p0.Y) / 6.0);
-                    var c2 = new Point(p2.X - (p3.X - p1.X) / 6.0, p2.Y - (p3.Y - p1.Y) / 6.0);
-                    double floor = Math.Max(p1.Y, p2.Y);
-                    if (p1.Y == p2.Y) { c1.Y = Math.Min(c1.Y, floor); c2.Y = Math.Min(c2.Y, floor); }
-                    ctx.BezierTo(c1, c2, p2, true, false);
-                }
+                for (int i = 1; i < p.Length; i++) ctx.LineTo(p[i], true, false);
                 if (close)
                 {
                     ctx.LineTo(new Point(p[p.Length - 1].X, baseline), false, false);

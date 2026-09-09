@@ -241,7 +241,7 @@
                                                         <ColumnDefinition Width="Auto" />
                                                         <ColumnDefinition Width="1*" />
                                                         <ColumnDefinition Width="Auto" />
-                                                        <ColumnDefinition Width="16" />
+                                                        <ColumnDefinition Width="30" />
                                                     </Grid.ColumnDefinitions>
 
                                                     <TextBlock Grid.Column="0" Text="{Binding RankText}" Foreground="#7C8288"
@@ -296,8 +296,16 @@
                                                         <TextBlock Text="{Binding ResponseRateText}" Foreground="#C2C7CC" FontSize="11.5" MinWidth="46" TextAlignment="Right" />
                                                     </StackPanel>
 
-                                                    <TextBlock x:Name="Arrow" Grid.Column="5" Text="⌄" Foreground="#8A9096"
-                                                               FontSize="13" VerticalAlignment="Center" HorizontalAlignment="Right" />
+                                                    <!-- 展開マーク。小さい「⌄」だけだとクリックできることに気づけないので、
+                                                         丸い受け皿を敷いて面積とコントラストを上げる。 -->
+                                                    <Border x:Name="ArrowChip" Grid.Column="5" Width="26" Height="26"
+                                                            CornerRadius="13" Background="#1FFFFFFF"
+                                                            VerticalAlignment="Center" HorizontalAlignment="Right">
+                                                        <TextBlock x:Name="Arrow" Text="⌄" Foreground="#E4E4E4"
+                                                                   FontSize="15" FontWeight="Bold"
+                                                                   VerticalAlignment="Center" HorizontalAlignment="Center"
+                                                                   Margin="0,-3,0,0" />
+                                                    </Border>
                                                 </Grid>
                                             </ToggleButton>
 
@@ -308,6 +316,8 @@
                                             <Trigger Property="IsExpanded" Value="True">
                                                 <Setter TargetName="Body" Property="Visibility" Value="Visible" />
                                                 <Setter TargetName="Arrow" Property="Text" Value="⌃" />
+                                                <Setter TargetName="Arrow" Property="Margin" Value="0,3,0,0" />
+                                                <Setter TargetName="ArrowChip" Property="Background" Value="#FF3C6FB4" />
                                             </Trigger>
                                         </ControlTemplate.Triggers>
                                     </ControlTemplate>
@@ -609,7 +619,7 @@
                             <TextBlock x:Name="RankingCaption" Style="{StaticResource Caption}" />
 
                             <!-- 一覧の見出し (行の右側 4 指標に対応) -->
-                            <Grid Margin="0,0,30,6">
+                            <Grid Margin="0,0,44,6">
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                     <TextBlock Text="回数" Foreground="#7C8288" FontSize="10.5" MinWidth="56" TextAlignment="Right" />
                                     <TextBlock Text="平均★" Foreground="#7C8288" FontSize="10.5" MinWidth="58" TextAlignment="Right" />

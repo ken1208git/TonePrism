@@ -10,6 +10,7 @@ namespace TonePrism.Manager.Shell.Records
     /// (単系列なので凡例は不要、値は隣の数値が持っている)。
     ///
     /// **直接ラベルはピークだけ**。点ごとに数字を置くと読まれないうえ画面が荒れる。
+    /// 実測点は直線でつなぐ (補間すると記録に無い山や谷を描くことになる)。
     /// <see cref="TimelineChart"/> は日ごとの詳細を軸つきで見せる別物で、こちらは「形」だけを伝える。
     /// </summary>
     public sealed class Sparkline : FrameworkElement
@@ -72,12 +73,13 @@ namespace TonePrism.Manager.Shell.Records
                     PadTop + plotH * (1 - v[first + i] / max));
             }
 
+            // 平坦に近い塗り + 細い線 (Windows 標準のグラフに合わせる)。
             var area = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
-            area.GradientStops.Add(new GradientStop(Color.FromArgb(0x59, _hue.R, _hue.G, _hue.B), 0));
-            area.GradientStops.Add(new GradientStop(Color.FromArgb(0x00, _hue.R, _hue.G, _hue.B), 1));
+            area.GradientStops.Add(new GradientStop(Color.FromArgb(0x40, _hue.R, _hue.G, _hue.B), 0));
+            area.GradientStops.Add(new GradientStop(Color.FromArgb(0x14, _hue.R, _hue.G, _hue.B), 1));
             area.Freeze();
 
-            var pen = new Pen(new SolidColorBrush(_hue), 2);   // 細いマーク
+            var pen = new Pen(new SolidColorBrush(_hue), 1.6);
             pen.Freeze();
 
             dc.DrawGeometry(area, null, Path(pts, true, PadTop + plotH));
@@ -104,30 +106,14 @@ namespace TonePrism.Manager.Shell.Records
             }
         }
 
-        /// <summary>Catmull-Rom を 3 次ベジェに変換した滑らかな経路。<paramref name="close"/> で面塗り用に閉じる。</summary>
+        /// <summary>実測点を直線でつないだ経路。<paramref name="close"/> で面塗り用に閉じる。</summary>
         private static Geometry Path(Point[] p, bool close, double baseline)
         {
             var geo = new StreamGeometry();
             using (StreamGeometryContext ctx = geo.Open())
             {
                 ctx.BeginFigure(p[0], close, close);
-                for (int i = 0; i < p.Length - 1; i++)
-                {
-                    Point p0 = i == 0 ? p[0] : p[i - 1];
-                    Point p1 = p[i];
-                    Point p2 = p[i + 1];
-                    Point p3 = i + 2 < p.Length ? p[i + 2] : p[i + 1];
-                    var c1 = new Point(p1.X + (p2.X - p0.X) / 6.0, p1.Y + (p2.Y - p0.Y) / 6.0);
-                    var c2 = new Point(p2.X - (p3.X - p1.X) / 6.0, p2.Y - (p3.Y - p1.Y) / 6.0);
-                    // 値は 0 未満にならないので、スプラインの行き過ぎで軸下に潜らせない。
-                    if (p1.Y == p2.Y)
-                    {
-                        double floor = Math.Max(p1.Y, p2.Y);
-                        c1.Y = Math.Min(c1.Y, floor);
-                        c2.Y = Math.Min(c2.Y, floor);
-                    }
-                    ctx.BezierTo(c1, c2, p2, true, false);
-                }
+                for (int i = 1; i < p.Length; i++) ctx.LineTo(p[i], true, false);
                 if (close)
                 {
                     ctx.LineTo(new Point(p[p.Length - 1].X, baseline), false, false);
