@@ -236,7 +236,7 @@ namespace TonePrism.Manager.Shell.Records
             HighlightsList.ItemsSource = vm.Highlights;
             HighlightsCard.Visibility = vm.HasHighlights ? Visibility.Visible : Visibility.Collapsed;
 
-            BuildTimelines();
+            PopulateTrend();
         }
 
         // 3 指標を見分けるための色。ダーク面で CVD 検証済み (validate_palette、最悪隣接 ΔE 8.4)。
@@ -292,49 +292,23 @@ namespace TonePrism.Manager.Shell.Records
             sub.Text = model.Sub;
         }
 
-        /// <summary>日ごとに 1 枚ずつ折れ線を積む。日付見出し + グラフ。</summary>
-        private void BuildTimelines()
+        /// <summary>
+        /// 「いつ遊ばれたか」のグラフを流し込む。**常に 1 枚**で、刻みは期間の長さから
+        /// <see cref="PlayStatsService"/> が決める (日ごとに 1 枚ずつ積む作りは、記録が増えるほど
+        /// 枚数が際限なく増えるのでやめた)。
+        /// </summary>
+        private void PopulateTrend()
         {
-            TimelinePanel.Children.Clear();
             if (_snapshot == null) return;
 
-            if (_snapshot.Timelines.Count == 0)
-            {
-                TimelinePanel.Children.Add(new TextBlock
-                {
-                    Text = "この期間のプレイ記録がありません。",
-                    Foreground = System.Windows.Media.Brushes.Gray,
-                    FontSize = 12,
-                });
-                return;
-            }
-
-            foreach (PlayStatsTimeline t in _snapshot.Timelines)
-            {
-                var header = new TextBlock
-                {
-                    Text = t.Date.ToString("M月d日（ddd）", CultureInfo.CurrentCulture) + "　" + t.Total + " プレイ",
-                    FontSize = 12,
-                    FontWeight = FontWeights.SemiBold,
-                    Foreground = new System.Windows.Media.SolidColorBrush(
-                        System.Windows.Media.Color.FromRgb(0xC2, 0xC7, 0xCC)),
-                    Margin = new Thickness(0, 6, 0, 6),
-                };
-                TimelinePanel.Children.Add(header);
-                TimelinePanel.Children.Add(new TimelineChart
-                {
-                    Timeline = t,
-                    Height = 150,
-                    Margin = new Thickness(0, 0, 0, 12),
-                });
-            }
+            PlayStatsTrend trend = _snapshot.Trend;
+            TrendChart.Trend = trend;
+            TrendCaption.Text = trend.HasData
+                ? trend.UnitLabel + "のプレイ数です。棒が高いほど、そのとき人が集まっていました。"
+                    + "期間を広く取ると刻みは自動で粗くなります。"
+                : "この期間のプレイ記録がありません。";
         }
 
-        /// <summary>
-        /// 見出し下の 1 行。**ここは「ファイルから読み込んだもの全部」の話で、下の集計とは母数が違う。**
-        /// 期間を絞っても件数は動かない (絞り込みはメモリ上の再集計で、読み込み結果そのものは変わらない)
-        /// ため、黙って並べると下の数字と食い違って見える。**先頭の「全期間：」がそれを引き受ける。**
-        /// </summary>
         private string BuildStatusText()
         {
             if (_data == null) return null;

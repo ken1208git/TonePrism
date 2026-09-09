@@ -354,6 +354,96 @@ namespace TonePrism.Manager.Tests
         }
 
         // ==================================================================
+        // 「いつ遊ばれたか」の時系列
+        // ==================================================================
+
+        [Theory]
+        [InlineData(1, PlayStatsTrendUnit.Minute15)]
+        [InlineData(2, PlayStatsTrendUnit.Hour)]
+        [InlineData(3, PlayStatsTrendUnit.Hour)]
+        [InlineData(4, PlayStatsTrendUnit.Day)]
+        [InlineData(31, PlayStatsTrendUnit.Day)]
+        [InlineData(32, PlayStatsTrendUnit.Week)]
+        [InlineData(182, PlayStatsTrendUnit.Week)]
+        [InlineData(183, PlayStatsTrendUnit.Month)]
+        [InlineData(1096, PlayStatsTrendUnit.Month)]
+        [InlineData(1097, PlayStatsTrendUnit.Year)]
+        public void Compute_Trend_PicksTheUnitFromTheSpan(int spanDays, PlayStatsTrendUnit expected)
+        {
+            // 刻みが期間に従うことが、グラフを 1 枚に保つ仕組みそのもの。境界を固定しておく。
+            var data = new PlayStatsData
+            {
+                Games = new List<GameInfo> { Game(1, "a", "A") },
+                Plays = new List<PlayRecordEntry>
+                {
+                    Play(1, Day2, 60),
+                    Play(1, Day2.AddDays(spanDays - 1), 60),
+                },
+            };
+
+            PlayStatsTrend trend = PlayStatsService.Compute(data, PlayStatsRange.All).Trend;
+            Assert.Equal(expected, trend.Unit);
+        }
+
+        [Fact]
+        public void Compute_Trend_IsAlwaysOneBoundedSeries()
+        {
+            // 記録が何日ぶんあってもグラフは 1 本で、本数は有界。日ごとに 1 枚ずつ積む作りは
+            // 記録が増えるほど枚数が増え続けるのでやめた。
+            var plays = new List<PlayRecordEntry>();
+            for (int d = 0; d < 400; d++) plays.Add(Play(1, Day2.AddDays(d), 60));
+
+            PlayStatsTrend trend = PlayStatsService.Compute(
+                new PlayStatsData { Games = new List<GameInfo> { Game(1, "a", "A") }, Plays = plays },
+                PlayStatsRange.All).Trend;
+
+            Assert.Equal(PlayStatsTrendUnit.Month, trend.Unit);
+            Assert.True(trend.Points.Count <= 36, "本数 " + trend.Points.Count);
+            Assert.Equal(400, trend.Points.Sum(p => p.Count));   // 1 件も落とさない
+        }
+
+        [Fact]
+        public void Compute_Trend_KeepsEmptyBucketsSoTimeDoesNotShrink()
+        {
+            // 空の区間を詰めると、夜や休みの日が消えて時間が縮んで見える。連続した軸として残す。
+            var data = new PlayStatsData
+            {
+                Games = new List<GameInfo> { Game(1, "a", "A") },
+                Plays = new List<PlayRecordEntry>
+                {
+                    Play(1, Day2.Date.AddHours(9), 60),
+                    Play(1, Day2.Date.AddHours(12), 60),
+                },
+            };
+
+            PlayStatsTrend trend = PlayStatsService.Compute(data, PlayStatsRange.All).Trend;
+
+            Assert.Equal(PlayStatsTrendUnit.Minute15, trend.Unit);   // 1 日なので 15 分きざみ
+            Assert.Equal(13, trend.Points.Count);                    // 09:00〜12:00 を 15 分で刻んだ本数
+            Assert.Equal(2, trend.Points.Count(p => p.Count > 0));   // 中身があるのは 2 本だけ
+            Assert.Equal(1, trend.PeakCount);
+        }
+
+        [Fact]
+        public void Compute_Peak_StaysOn15MinutesRegardlessOfTheTrendUnit()
+        {
+            // 概況タイルは「15 分で N プレイ」と言い切っているので、グラフの粒度が変わっても
+            // ここは 15 分固定にする。
+            var plays = new List<PlayRecordEntry>();
+            for (int d = 0; d < 40; d++) plays.Add(Play(1, Day2.AddDays(d), 60));
+            plays.Add(Play(1, Day2.Date.AddHours(10), 60));
+            plays.Add(Play(1, Day2.Date.AddHours(10).AddMinutes(5), 60));
+
+            PlayStatsSnapshot snap = PlayStatsService.Compute(
+                new PlayStatsData { Games = new List<GameInfo> { Game(1, "a", "A") }, Plays = plays },
+                PlayStatsRange.All);
+
+            Assert.Equal(PlayStatsTrendUnit.Week, snap.Trend.Unit);   // グラフは週きざみ
+            Assert.Equal(2, snap.PeakCount);                          // ピークは 15 分の中の 2 件
+            Assert.Equal(Day2.Date.AddHours(10), snap.PeakAt.Value);
+        }
+
+        // ==================================================================
         // 概況 (ヒーロー数値 + メーター)
         // ==================================================================
 

@@ -557,10 +557,9 @@
                     <!-- ===== 時間帯 ===== -->
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
-                            <TextBlock Text="時間帯ごとの盛り上がり" Style="{StaticResource CardHeader}" />
-                            <TextBlock Text="こちらは日ごとの内訳です。15 分きざみで、山が高いほどその時間に人が集まっていました。"
-                                       Style="{StaticResource Caption}" />
-                            <StackPanel x:Name="TimelinePanel" />
+                            <TextBlock Text="いつ遊ばれたか" Style="{StaticResource CardHeader}" />
+                            <TextBlock x:Name="TrendCaption" Style="{StaticResource Caption}" />
+                            <local:TimelineChart x:Name="TrendChart" Height="190" />
                         </StackPanel>
                     </Border>
 

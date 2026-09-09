@@ -61,14 +61,8 @@ namespace TonePrism.Manager.Services
             FillHighlights(snap, plays);
             snap.Overall = BuildOverallStats(overallSurveys);
             snap.Comments = CollectComments(snap.Games, snap.Overall);
-            snap.Timelines = BuildTimelines(plays);
-
-            PlayStatsTimeline peak = snap.Timelines.OrderByDescending(t => t.PeakCount).FirstOrDefault();
-            if (peak != null && peak.PeakCount > 0)
-            {
-                snap.PeakAt = peak.PeakAt;
-                snap.PeakCount = peak.PeakCount;
-            }
+            snap.Trend = BuildTrend(plays);
+            FillPeak(snap, plays);
 
             snap.ByGenre = GroupBy(snap.Games, g => g.Genre != null && g.Genre.Count > 0
                 ? g.Genre.Where(x => !string.IsNullOrWhiteSpace(x)).ToList()
@@ -258,35 +252,132 @@ namespace TonePrism.Manager.Services
         // 時間帯
         // ------------------------------------------------------------------
 
-        private static List<PlayStatsTimeline> BuildTimelines(List<PlayRecordEntry> plays)
+        /// <summary>
+        /// 概況タイルの「ピーク時間帯」。**刻みは 15 分で固定**する — タイルの文言が
+        /// 「15 分で N プレイ」と言い切っているので、グラフの粒度が変わってもここは動かさない。
+        /// </summary>
+        private static void FillPeak(PlayStatsSnapshot snap, List<PlayRecordEntry> plays)
         {
             int per = PlayStatsTuning.TimelineBucketMinutes;
-            int count = 24 * 60 / per;
+            var buckets = new Dictionary<DateTime, int>();
+            foreach (PlayRecordEntry p in plays)
+            {
+                if (p.CreatedAtLocal == DateTime.MinValue) continue;
+                DateTime key = p.CreatedAtLocal.Date
+                    .AddMinutes((p.CreatedAtLocal.Hour * 60 + p.CreatedAtLocal.Minute) / per * per);
+                int n;
+                buckets[key] = buckets.TryGetValue(key, out n) ? n + 1 : 1;
+            }
+            if (buckets.Count == 0) return;
 
-            return plays
-                .Where(p => p.CreatedAtLocal != DateTime.MinValue)
-                .GroupBy(p => p.CreatedAtLocal.Date)
-                .OrderBy(g => g.Key)
-                .Select(g =>
-                {
-                    var buckets = new int[count];
-                    foreach (PlayRecordEntry p in g)
-                    {
-                        int idx = (p.CreatedAtLocal.Hour * 60 + p.CreatedAtLocal.Minute) / per;
-                        if (idx >= 0 && idx < count) buckets[idx]++;
-                    }
-                    int peakIdx = 0;
-                    for (int i = 1; i < count; i++) if (buckets[i] > buckets[peakIdx]) peakIdx = i;
-                    return new PlayStatsTimeline
-                    {
-                        Date = g.Key,
-                        Buckets = buckets,
-                        Total = g.Count(),
-                        PeakCount = buckets[peakIdx],
-                        PeakAt = g.Key.AddMinutes(peakIdx * per),
-                    };
-                })
-                .ToList();
+            KeyValuePair<DateTime, int> best = buckets
+                .OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key).First();
+            snap.PeakAt = best.Key;
+            snap.PeakCount = best.Value;
+        }
+
+        /// <summary>
+        /// 「いつ遊ばれたか」の時系列を 1 本だけ作る。**刻みは期間の長さで決める。**
+        ///
+        /// 日ごとに 1 枚ずつ描く作りだと、記録が増えるほどグラフの枚数が際限なく増えた。
+        /// 刻みを期間に従わせれば本数は常に有界になる (下の表のとおり最大 96 本)。
+        /// カレンダーが日表示と月表示を持つのと同じ理屈で、期間が広がれば粒度も粗くなる。
+        ///
+        /// | 期間 | 刻み | 本数の上限 |
+        /// |---|---|---|
+        /// | 1 日 | 15 分 | 96 |
+        /// | 2〜3 日 | 1 時間 | 72 |
+        /// | 4〜31 日 | 1 日 | 31 |
+        /// | 32〜182 日 | 1 週 | 26 |
+        /// | 183 日〜3 年 | 1 か月 | 36 |
+        /// | 3 年超 | 1 年 | — |
+        ///
+        /// **空の区間も点として残す。** 連続した時間軸なので「その間は遊ばれていない」ことも情報で、
+        /// 詰めてしまうと夜や休みの日が消えて時間が縮んで見える。
+        /// </summary>
+        private static PlayStatsTrend BuildTrend(List<PlayRecordEntry> plays)
+        {
+            var trend = new PlayStatsTrend { Unit = PlayStatsTrendUnit.Minute15 };
+            List<PlayRecordEntry> valid = plays.Where(p => p.CreatedAtLocal != DateTime.MinValue).ToList();
+            if (valid.Count == 0) return trend;
+
+            DateTime from = valid.Min(p => p.CreatedAtLocal);
+            DateTime to = valid.Max(p => p.CreatedAtLocal);
+            int days = (int)(to.Date - from.Date).TotalDays + 1;
+
+            trend.Unit = PickUnit(days);
+
+            var counts = new Dictionary<DateTime, int>();
+            foreach (PlayRecordEntry p in valid)
+            {
+                DateTime key = Truncate(p.CreatedAtLocal, trend.Unit);
+                int n;
+                counts[key] = counts.TryGetValue(key, out n) ? n + 1 : 1;
+            }
+
+            DateTime cursor = Truncate(from, trend.Unit);
+            DateTime end = Truncate(to, trend.Unit);
+            // 上限を切って暴走を防ぐ (刻みの選択が想定外でも 1 本のグラフに収める)。
+            for (int guard = 0; cursor <= end && guard < 1000; guard++)
+            {
+                int n;
+                counts.TryGetValue(cursor, out n);
+                trend.Points.Add(new PlayStatsTrendPoint { Start = cursor, Count = n });
+                cursor = Next(cursor, trend.Unit);
+            }
+
+            for (int i = 0; i < trend.Points.Count; i++)
+            {
+                if (trend.PeakIndex >= 0 && trend.Points[i].Count <= trend.PeakCount) continue;
+                trend.PeakIndex = i;
+                trend.PeakCount = trend.Points[i].Count;
+            }
+            return trend;
+        }
+
+        private static PlayStatsTrendUnit PickUnit(int days)
+        {
+            if (days <= 1) return PlayStatsTrendUnit.Minute15;
+            if (days <= 3) return PlayStatsTrendUnit.Hour;
+            if (days <= 31) return PlayStatsTrendUnit.Day;
+            if (days <= 182) return PlayStatsTrendUnit.Week;
+            if (days <= 1096) return PlayStatsTrendUnit.Month;
+            return PlayStatsTrendUnit.Year;
+        }
+
+        /// <summary>その時刻が属する区間の開始。週は月曜始まり。</summary>
+        private static DateTime Truncate(DateTime at, PlayStatsTrendUnit unit)
+        {
+            switch (unit)
+            {
+                case PlayStatsTrendUnit.Minute15:
+                    int per = PlayStatsTuning.TimelineBucketMinutes;
+                    return at.Date.AddMinutes((at.Hour * 60 + at.Minute) / per * per);
+                case PlayStatsTrendUnit.Hour:
+                    return at.Date.AddHours(at.Hour);
+                case PlayStatsTrendUnit.Day:
+                    return at.Date;
+                case PlayStatsTrendUnit.Week:
+                    int back = ((int)at.DayOfWeek + 6) % 7;   // 月曜を週の頭にする
+                    return at.Date.AddDays(-back);
+                case PlayStatsTrendUnit.Month:
+                    return new DateTime(at.Year, at.Month, 1);
+                default:
+                    return new DateTime(at.Year, 1, 1);
+            }
+        }
+
+        private static DateTime Next(DateTime start, PlayStatsTrendUnit unit)
+        {
+            switch (unit)
+            {
+                case PlayStatsTrendUnit.Minute15: return start.AddMinutes(PlayStatsTuning.TimelineBucketMinutes);
+                case PlayStatsTrendUnit.Hour: return start.AddHours(1);
+                case PlayStatsTrendUnit.Day: return start.AddDays(1);
+                case PlayStatsTrendUnit.Week: return start.AddDays(7);
+                case PlayStatsTrendUnit.Month: return start.AddMonths(1);
+                default: return start.AddYears(1);
+            }
         }
 
         // ------------------------------------------------------------------

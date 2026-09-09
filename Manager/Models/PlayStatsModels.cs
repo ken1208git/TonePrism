@@ -300,16 +300,94 @@ namespace TonePrism.Manager.Models
         public string TopGameTitle { get; set; }
     }
 
-    /// <summary>1 日分の時間帯ヒストグラム (15 分刻み)。</summary>
-    public sealed class PlayStatsTimeline
+    /// <summary>時系列グラフの刻み。</summary>
+    public enum PlayStatsTrendUnit
     {
-        public DateTime Date { get; set; }
-        /// <summary>15 分バケットごとのプレイ数 (1 日 96 本)。</summary>
-        public int[] Buckets { get; set; }
+        Minute15,
+        Hour,
+        Day,
+        Week,
+        Month,
+        Year,
+    }
+
+    /// <summary>時系列グラフの 1 本。</summary>
+    public sealed class PlayStatsTrendPoint
+    {
+        /// <summary>この本が受け持つ区間の開始時刻。</summary>
+        public DateTime Start { get; set; }
+        public int Count { get; set; }
+    }
+
+    /// <summary>
+    /// 「いつ遊ばれたか」の時系列。**常に 1 本の連続した並び**で、日ごとに別のグラフを作らない。
+    ///
+    /// 日ごとに 1 枚ずつ描く作りだと、`responses/` が部活のたびに増えるぶんグラフの枚数が
+    /// 際限なく増える (期間を広く取っても同じ)。刻みを期間の長さで決めれば、**本数は常に有界**になる。
+    /// カレンダーが日表示と月表示を持つのと同じで、時間軸の粒度が期間に従うのは自然な振る舞い。
+    ///
+    /// 空の区間も点として持つ (連続した時間軸なので、間が空いていることも情報)。
+    /// </summary>
+    public sealed class PlayStatsTrend
+    {
+        public PlayStatsTrendUnit Unit { get; set; }
+        public List<PlayStatsTrendPoint> Points { get; set; } = new List<PlayStatsTrendPoint>();
+        /// <summary>いちばん多かった本の index。点が無ければ -1。</summary>
+        public int PeakIndex { get; set; } = -1;
         public int PeakCount { get; set; }
-        /// <summary>ピークのバケット先頭時刻。</summary>
-        public DateTime PeakAt { get; set; }
-        public int Total { get; set; }
+
+        public bool HasData { get { return Points.Count > 0 && PeakCount > 0; } }
+
+        /// <summary>「15 分ごと」など、いま何刻みで見ているかの表示。</summary>
+        public string UnitLabel
+        {
+            get
+            {
+                switch (Unit)
+                {
+                    case PlayStatsTrendUnit.Minute15: return "15 分ごと";
+                    case PlayStatsTrendUnit.Hour: return "1 時間ごと";
+                    case PlayStatsTrendUnit.Day: return "1 日ごと";
+                    case PlayStatsTrendUnit.Week: return "1 週ごと";
+                    case PlayStatsTrendUnit.Month: return "1 か月ごと";
+                    default: return "1 年ごと";
+                }
+            }
+        }
+
+        /// <summary>軸に出す目盛りの書式。</summary>
+        public string TickFormat
+        {
+            get
+            {
+                switch (Unit)
+                {
+                    case PlayStatsTrendUnit.Minute15:
+                    case PlayStatsTrendUnit.Hour: return "HH:mm";
+                    case PlayStatsTrendUnit.Day:
+                    case PlayStatsTrendUnit.Week: return "M/d";
+                    case PlayStatsTrendUnit.Month: return "yyyy/M";
+                    default: return "yyyy";
+                }
+            }
+        }
+
+        /// <summary>ピークの直接ラベル (時刻きざみなら時刻まで、日きざみなら日付まで)。</summary>
+        public string PeakLabelFormat
+        {
+            get
+            {
+                switch (Unit)
+                {
+                    case PlayStatsTrendUnit.Minute15:
+                    case PlayStatsTrendUnit.Hour: return "M/d HH:mm";
+                    case PlayStatsTrendUnit.Day:
+                    case PlayStatsTrendUnit.Week: return "M/d";
+                    case PlayStatsTrendUnit.Month: return "yyyy/M";
+                    default: return "yyyy";
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -379,7 +457,8 @@ namespace TonePrism.Manager.Models
 
         /// <summary>
         /// 期間全体の時間帯別プレイ数 (0〜23 時)。日をまたいでも同じ時刻に足し込む。
-        /// 概況のスパークライン用で、日ごとの詳細は <see cref="Timelines"/> が持つ。
+        /// 概況のスパークライン用。「何時に混むか」を答えるもので、期間のどこで盛り上がったかは
+        /// <see cref="Trend"/> が答える (役割を分けることで、どちらも本数が有界になる)。
         /// </summary>
         public int[] HourCounts { get; set; } = new int[24];
 
@@ -397,7 +476,8 @@ namespace TonePrism.Manager.Models
 
         public List<GameStats> Games { get; set; } = new List<GameStats>();
         public List<PlayStatsComment> Comments { get; set; } = new List<PlayStatsComment>();
-        public List<PlayStatsTimeline> Timelines { get; set; } = new List<PlayStatsTimeline>();
+        /// <summary>「いつ遊ばれたか」の時系列 (刻みは期間の長さで自動)。</summary>
+        public PlayStatsTrend Trend { get; set; } = new PlayStatsTrend();
         public OverallSurveyStats Overall { get; set; } = new OverallSurveyStats();
 
         // 切り口別
