@@ -616,7 +616,7 @@
                                              GroupName="metric" IsChecked="True" Checked="Metric_Changed" />
                                 <RadioButton x:Name="MetricRating" Style="{StaticResource Chip}" Content="平均★"
                                              GroupName="metric" Checked="Metric_Changed" />
-                                <RadioButton x:Name="MetricDuration" Style="{StaticResource Chip}" Content="熱中度（プレイ時間）"
+                                <RadioButton x:Name="MetricDuration" Style="{StaticResource Chip}" Content="合計プレイ時間"
                                              GroupName="metric" Checked="Metric_Changed" />
                                 <RadioButton x:Name="MetricRate" Style="{StaticResource Chip}" Content="アンケート回答率"
                                              GroupName="metric" Checked="Metric_Changed" />
@@ -628,7 +628,7 @@
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                     <TextBlock Text="回数" Foreground="#7C8288" FontSize="10.5" MinWidth="56" TextAlignment="Right" />
                                     <TextBlock Text="平均★" Foreground="#7C8288" FontSize="10.5" MinWidth="58" TextAlignment="Right" />
-                                    <TextBlock Text="中央時間" Foreground="#7C8288" FontSize="10.5" MinWidth="70" TextAlignment="Right" />
+                                    <TextBlock Text="合計時間" Foreground="#7C8288" FontSize="10.5" MinWidth="70" TextAlignment="Right" />
                                     <TextBlock Text="回答率" Foreground="#7C8288" FontSize="10.5" MinWidth="46" TextAlignment="Right" />
                                     <TextBlock Text="" MinWidth="16" />
                                 </StackPanel>

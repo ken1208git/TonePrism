@@ -363,9 +363,10 @@ namespace TonePrism.Manager.Services
         /// <summary>
         /// 表彰を自動選出する。
         ///
-        /// **軸は互いに相関しにくいものを選んである** — 回数 / 満足度 / 熱中 / 再プレイ / 回答率 /
+        /// **軸は互いに相関しにくいものを選んである** — 回数 / 満足度 / のべ時間 / 回答率 /
         /// ★5 率 / 隠れた名作 / 制作者。全部が同じゲームに集まると表彰として機能しないため。
-        /// 2026 年の実データでは 8 賞が 6 ゲームに散った。
+        /// のべ時間は回数と順位相関 0.887 とよく似た並びになるが、1 位は入れ替わる
+        /// (実データでは回数 1 位と合計時間 1 位が別のゲームだった) ので賞としては成立する。
         ///
         /// **率で競う賞にはプレイ回数の下限を置く**。置かないと 2 回遊ばれて 1 回答された
         /// ゲームが「回答率 50%」で 1 位を取り、賞が母数の小ささを表彰することになる。
@@ -401,10 +402,16 @@ namespace TonePrism.Manager.Services
                 g => "★" + g.AverageRating.Value.ToString("0.00"), g => g.SurveyCount + " 件の回答",
                 g => g.SurveyCount);
 
-            Add(awards, games, "熱中賞", "1 回あたりのプレイ時間（中央値）がいちばん長い",
-                g => g.PlayCount >= minPlays && g.MedianDurationSeconds.HasValue,
-                g => g.MedianDurationSeconds.Value,
-                g => FormatDuration(g.MedianDurationSeconds), g => g.PlayCount + " 回のまん中の値",
+            // **1 回あたりの長さでは競わせない (旧「熱中賞」)。** 終了のしかたはゲームの作り次第で、
+            // 終わったら即閉じる作品と、タイトル画面に戻って待つ作品では記録される長さが桁で変わる。
+            // 「熱中度」という名前は遊びの濃さを主張するが、実際に測っているのは終了設計の差。
+            // のべ時間なら「来場者の時間をどれだけ占めたか」という事実に留まる (それでも 1 回の長さの
+            // 影響は受けるので、賞名も「長く遊ばれた」という事実の言い方にする)。
+            // 母数の下限も自然に効く — 1 回だけのゲームは合計では上位に来られない。
+            Add(awards, games, "いちばん長く遊ばれた賞", "みんなが遊んだ合計時間がいちばん長い",
+                g => g.TotalDurationSeconds > 0, g => g.TotalDurationSeconds,
+                g => FormatSpan(g.TotalDurationSeconds),
+                g => g.PlayCount + " 回 × 1 回あたり中央 " + FormatDuration(g.MedianDurationSeconds),
                 g => g.PlayCount);
 
             Add(awards, games, "語りたくなる賞", "遊んだあとアンケートまで答えてもらえた割合がいちばん高い",
@@ -657,6 +664,17 @@ namespace TonePrism.Manager.Services
         public static string FormatHours(long seconds)
         {
             return (seconds / 3600.0).ToString("0.0") + "時間";
+        }
+
+        /// <summary>
+        /// 合計時間を一覧に出す用。1 時間未満は「36 分」、それ以上は「6.6 時間」。
+        /// 短いゲームが軒並み「0.1 時間」で並ぶと差が読めないため、桁で単位を変える。
+        /// </summary>
+        public static string FormatSpan(long seconds)
+        {
+            if (seconds <= 0) return "—";
+            if (seconds < 3600) return Math.Max(1, seconds / 60) + "分";
+            return FormatHours(seconds);
         }
 
         private static double? Average(IEnumerable<double> values)

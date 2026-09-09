@@ -15,8 +15,13 @@ namespace TonePrism.Manager.Shell.Records
         Plays,
         /// <summary>平均★。回答が少ないゲームは参考値扱いで下に落とす。</summary>
         Rating,
-        /// <summary>プレイ時間の中央値。長く遊ばれた = 熱中度の代理指標。</summary>
-        Duration,
+        /// <summary>
+        /// みんなが遊んだ合計時間。**1 回あたりの長さでは並べない** — 終了のしかたはゲームの作り
+        /// 次第で、即閉じる作品とタイトル画面に戻って待つ作品では記録される長さが桁で変わる。
+        /// 「熱中度」と名付けると遊びの濃さを主張することになるが、実際に測っているのは終了設計の差。
+        /// のべ時間なら「来場者の時間をどれだけ占めたか」という事実に留まる。
+        /// </summary>
+        TotalTime,
         /// <summary>回答率 (アンケート / プレイ)。アンケートまで進んだ割合。</summary>
         ResponseRate,
     }
@@ -292,8 +297,9 @@ namespace TonePrism.Manager.Shell.Records
                 case RecordsMetric.Rating:
                     return "平均★の高い順。回答が " + PlayStatsTuning.MinSurveysForReliableAverage
                         + " 件未満のゲームは「参考」として下にまとめています（1〜2件の★5で 1 位になるのを防ぐため）。";
-                case RecordsMetric.Duration:
-                    return "1 回あたりのプレイ時間（中央値）が長い順。長く遊ばれた＝熱中度の目安です。";
+                case RecordsMetric.TotalTime:
+                    return "みんなが遊んだ合計時間が長い順。1 回あたりの長さはゲームの作り（終わったらすぐ閉じるか、"
+                        + "タイトル画面に戻って待つか）でも変わるので、1 回の長さでは並べていません。";
                 case RecordsMetric.ResponseRate:
                     return "遊んだあとアンケートまで答えてくれた割合の高い順。";
                 default:
@@ -324,7 +330,7 @@ namespace TonePrism.Manager.Shell.Records
                     HasBar = max > 0 && value.HasValue && value.Value > 0,
                     PlaysText = g.PlayCount + " 回",
                     RatingText = g.AverageRating.HasValue ? "★" + g.AverageRating.Value.ToString("0.00") : "—",
-                    DurationText = PlayStatsService.FormatDuration(g.MedianDurationSeconds),
+                    DurationText = PlayStatsService.FormatSpan(g.TotalDurationSeconds),
                     ResponseRateText = g.ResponseRate.HasValue ? (g.ResponseRate.Value * 100).ToString("0") + "%" : "—",
                     HasPlays = g.PlayCount > 0,
                     HasSurveys = g.SurveyCount > 0,
@@ -356,9 +362,11 @@ namespace TonePrism.Manager.Shell.Records
                     row.MetricText = g.AverageRating.HasValue ? "★" + g.AverageRating.Value.ToString("0.00") : "—";
                     row.MetricSubText = g.SurveyCount > 0 ? g.SurveyCount + " 件の回答" : "回答なし";
                     break;
-                case RecordsMetric.Duration:
-                    row.MetricText = PlayStatsService.FormatDuration(g.MedianDurationSeconds);
-                    row.MetricSubText = g.SaneDurationCount > 0 ? g.SaneDurationCount + " 回の中央値" : "記録なし";
+                case RecordsMetric.TotalTime:
+                    row.MetricText = PlayStatsService.FormatSpan(g.TotalDurationSeconds);
+                    row.MetricSubText = g.MedianDurationSeconds.HasValue
+                        ? "1 回あたり中央 " + PlayStatsService.FormatDuration(g.MedianDurationSeconds)
+                        : "記録なし";
                     break;
                 case RecordsMetric.ResponseRate:
                     row.MetricText = g.ResponseRate.HasValue ? (g.ResponseRate.Value * 100).ToString("0") + "%" : "—";
@@ -384,10 +392,10 @@ namespace TonePrism.Manager.Shell.Records
                         .ThenByDescending(g => g.SurveyCount)
                         .ThenBy(g => g.Title, StringComparer.CurrentCulture)
                         .ToList();
-                case RecordsMetric.Duration:
+                case RecordsMetric.TotalTime:
                     return games
-                        .OrderByDescending(g => g.MedianDurationSeconds.HasValue)
-                        .ThenByDescending(g => g.MedianDurationSeconds ?? 0)
+                        .OrderByDescending(g => g.TotalDurationSeconds)
+                        .ThenByDescending(g => g.PlayCount)
                         .ThenBy(g => g.Title, StringComparer.CurrentCulture)
                         .ToList();
                 case RecordsMetric.ResponseRate:
@@ -410,7 +418,7 @@ namespace TonePrism.Manager.Shell.Records
             switch (metric)
             {
                 case RecordsMetric.Rating: return g.AverageRating;
-                case RecordsMetric.Duration: return g.MedianDurationSeconds;
+                case RecordsMetric.TotalTime: return g.TotalDurationSeconds;
                 case RecordsMetric.ResponseRate: return g.ResponseRate;
                 default: return g.PlayCount;
             }
@@ -543,7 +551,8 @@ namespace TonePrism.Manager.Shell.Records
 
             if (g.PlayCount > 0)
             {
-                meta.Add(new RecordsMeta { Label = "平均プレイ時間", Value = PlayStatsService.FormatDuration(g.AverageDurationSeconds) });
+                meta.Add(new RecordsMeta { Label = "1回あたり（中央値）", Value = PlayStatsService.FormatDuration(g.MedianDurationSeconds) });
+                meta.Add(new RecordsMeta { Label = "1回あたり（平均）", Value = PlayStatsService.FormatDuration(g.AverageDurationSeconds) });
                 meta.Add(new RecordsMeta { Label = "合計プレイ時間", Value = PlayStatsService.FormatHours(g.TotalDurationSeconds) });
                 meta.Add(new RecordsMeta { Label = "遊ばれたPC", Value = g.PcCount + " 台" });
                 if (g.RepeatPlayCount > 0)

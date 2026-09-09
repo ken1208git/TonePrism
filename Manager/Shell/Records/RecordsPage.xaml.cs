@@ -374,7 +374,7 @@ namespace TonePrism.Manager.Shell.Records
         {
             if (!_ready) return;
             if (MetricRating.IsChecked == true) _metric = RecordsMetric.Rating;
-            else if (MetricDuration.IsChecked == true) _metric = RecordsMetric.Duration;
+            else if (MetricDuration.IsChecked == true) _metric = RecordsMetric.TotalTime;
             else if (MetricRate.IsChecked == true) _metric = RecordsMetric.ResponseRate;
             else _metric = RecordsMetric.Plays;
             Recompute();
