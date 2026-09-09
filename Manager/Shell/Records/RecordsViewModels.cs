@@ -21,13 +21,24 @@ namespace TonePrism.Manager.Shell.Records
         ResponseRate,
     }
 
-    /// <summary>横棒 1 本 (★内訳・時間分布・時間帯で共用)。幅は px で持たせて XAML から converter 無しで使う。</summary>
+    /// <summary>
+    /// 横棒 1 本 (★内訳・時間分布・時間帯で共用)。
+    ///
+    /// **長さは px ではなく比率で持つ。** px 固定にすると、列が要求幅より狭いときに WPF が行ごと
+    /// レイアウトクリップし、**棒の右端 (丸い部分) だけが切り落とされて角ばって見える**。
+    /// しかも切っているのは行のグリッド側なので、棒自身の `ActualWidth` は要求値のままで、
+    /// 棒を調べても検出できない (実際それで一度見逃した)。星指定なら列に必ず収まる。
+    /// </summary>
     public sealed class RecordsBar
     {
         public string Label { get; set; }
         public string CountText { get; set; }
         public string PercentText { get; set; }
-        public double BarWidth { get; set; }
+        public GridLength BarStar { get; set; } = new GridLength(0, GridUnitType.Star);
+        public GridLength RestStar { get; set; } = new GridLength(1, GridUnitType.Star);
+        /// <summary>棒を描くか。**0 件は描かない** — 最低幅の芯が出ると 0 と「ごくわずか」を見分けられない。</summary>
+        public bool HasBar { get; set; }
+
         /// <summary>強調表示するか (ピーク・最頻バケットなど)。</summary>
         public bool Highlight { get; set; }
     }
@@ -83,6 +94,8 @@ namespace TonePrism.Manager.Shell.Records
         public GridLength BarStar { get; set; } = new GridLength(0, GridUnitType.Star);
         /// <summary>棒の残り (空き) 側。<see cref="BarStar"/> と合わせて 1 になる。</summary>
         public GridLength RestStar { get; set; } = new GridLength(1, GridUnitType.Star);
+        /// <summary>棒を描くか (0 回のゲームには描かない)。</summary>
+        public bool HasBar { get; set; }
 
         // 常時表示する 4 指標 (並べ替え軸に関わらず横に並べる)
         public string PlaysText { get; set; }
@@ -115,6 +128,7 @@ namespace TonePrism.Manager.Shell.Records
         public string TopGameText { get; set; }
         public GridLength BarStar { get; set; } = new GridLength(0, GridUnitType.Star);
         public GridLength RestStar { get; set; } = new GridLength(1, GridUnitType.Star);
+        public bool HasBar { get; set; }
     }
 
     /// <summary>画面 1 枚ぶんの表示データ。</summary>
@@ -155,26 +169,12 @@ namespace TonePrism.Manager.Shell.Records
     /// </summary>
     public static class RecordsPresenter
     {
-        // 棒の長さの上限 (px)。**長くしすぎない** — 高さ 11px に対して 220px あると縦横比が 20:1 を
-        // 超え、端が完全な半円でも等倍では直線に見えてしまう (実際に「丸みがない」と指摘された)。
-        private const double DetailBarMax = 165;
-        private const double HourBarMax = 110;
-
-        /// <summary>
-        /// 棒の高さ (XAML と揃えること)。**0 より大きい値の棒はこれ未満にしない** — 幅が直径を下回ると
-        /// 角丸が潰れて、丸い棒ではなく細い縦棒に見える (実測で 2px の棒が出ていた)。
-        /// </summary>
-        private const double BarHeight = 11;
+        // 棒の長さはすべて比率 (星指定)。px の上限は持たない — 列に収まることを型で保証したいのと、
+        // 窓幅で縦横比が変わっても「値の比」は保たれるため。細くなりすぎる問題は XAML 側の
+        // MinWidth (= 高さ) で受ける。
 
         /// <summary>0 より大きい値は必ず見えるだけの太さを残す (0 と「ごくわずか」を見分けるため)。</summary>
         private const double MinVisibleBar = 0.02;
-
-        /// <summary>比率を px に。0 は 0、それ以外は最低でも高さぶん確保して丸い形を保つ。</summary>
-        private static double BarPx(double ratio, double max)
-        {
-            if (ratio <= 0) return 0;
-            return Math.Max(BarHeight, Math.Min(1, ratio) * max);
-        }
 
         private static GridLength Bar(double ratio)
         {
@@ -321,6 +321,7 @@ namespace TonePrism.Manager.Shell.Records
                     IsReference = metric == RecordsMetric.Rating && !g.RatingIsReliable && g.SurveyCount > 0,
                     BarStar = Bar(max > 0 && value.HasValue ? value.Value / max : 0),
                     RestStar = Rest(max > 0 && value.HasValue ? value.Value / max : 0),
+                    HasBar = max > 0 && value.HasValue && value.Value > 0,
                     PlaysText = g.PlayCount + " 回",
                     RatingText = g.AverageRating.HasValue ? "★" + g.AverageRating.Value.ToString("0.00") : "—",
                     DurationText = PlayStatsService.FormatDuration(g.MedianDurationSeconds),
@@ -456,7 +457,9 @@ namespace TonePrism.Manager.Shell.Records
                     Label = new string('★', star),
                     CountText = c.ToString(CultureInfo.InvariantCulture) + " 件",
                     PercentText = total > 0 ? (100.0 * c / total).ToString("0.0") + "%" : "—",
-                    BarWidth = BarPx(max > 0 ? (double)c / max : 0, DetailBarMax),
+                    BarStar = Bar(max > 0 ? (double)c / max : 0),
+                    RestStar = Rest(max > 0 ? (double)c / max : 0),
+                    HasBar = c > 0,
                     Highlight = max > 0 && c == max,
                 });
             }
@@ -476,7 +479,9 @@ namespace TonePrism.Manager.Shell.Records
                     CountText = counts[i] + " 回",
                     PercentText = g.SaneDurationCount > 0
                         ? (100.0 * counts[i] / g.SaneDurationCount).ToString("0") + "%" : "—",
-                    BarWidth = BarPx(max > 0 ? (double)counts[i] / max : 0, DetailBarMax),
+                    BarStar = Bar(max > 0 ? (double)counts[i] / max : 0),
+                    RestStar = Rest(max > 0 ? (double)counts[i] / max : 0),
+                    HasBar = counts[i] > 0,
                     Highlight = max > 0 && counts[i] == max,
                 });
             }
@@ -499,7 +504,9 @@ namespace TonePrism.Manager.Shell.Records
                     Label = i.ToString("00") + "時",
                     CountText = h[i] + " 回",
                     PercentText = null,
-                    BarWidth = BarPx((double)h[i] / max, HourBarMax),
+                    BarStar = Bar((double)h[i] / max),
+                    RestStar = Rest((double)h[i] / max),
+                    HasBar = h[i] > 0,
                     Highlight = h[i] == max,
                 });
             }
@@ -662,6 +669,7 @@ namespace TonePrism.Manager.Shell.Records
                 TopGameText = string.IsNullOrEmpty(g.TopGameTitle) ? null : "最多：" + g.TopGameTitle,
                 BarStar = Bar(max > 0 ? (double)g.PlayCount / max : 0),
                 RestStar = Rest(max > 0 ? (double)g.PlayCount / max : 0),
+                HasBar = g.PlayCount > 0,
             }).ToList();
         }
 

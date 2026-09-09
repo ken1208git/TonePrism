@@ -103,22 +103,29 @@
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="{Binding Label}" Foreground="#C2C7CC" FontSize="11.5"
                            VerticalAlignment="Center" />
-                <!-- 高さと角丸は全ての棒で揃える (ランキング / 切り口別 / ここ)。角丸は高さの半分 = ピル。
-                     細長すぎると端が半円でも直線に見えるので、長さの上限は presenter 側で抑えている。 -->
-                <Border Grid.Column="1" Height="11" CornerRadius="5.5" HorizontalAlignment="Left"
-                        VerticalAlignment="Center" Width="{Binding BarWidth}">
-                    <Border.Style>
-                        <Style TargetType="Border">
-                            <Setter Property="Background" Value="#FF3C6FB4" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding Highlight}" Value="True">
-                                    <Setter Property="Background" Value="#FF5C93DC" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Border.Style>
-                </Border>
-                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
+                <!-- **長さは星指定** (px 固定だと列が狭いとき行ごと切られ、丸い右端だけ消える)。
+                     高さと角丸は全ての棒で揃える。角丸は高さの半分 = ピル。
+                     MinWidth は直径ぶん — これを下回ると角丸が潰れて細い縦棒に見える。 -->
+                <Grid Grid.Column="1" VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="{Binding BarStar}" />
+                        <ColumnDefinition Width="{Binding RestStar}" />
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Height="11" MinWidth="11" CornerRadius="5.5"
+                            Visibility="{Binding HasBar, Converter={StaticResource BoolToVis}}">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#FF3C6FB4" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Highlight}" Value="True">
+                                        <Setter Property="Background" Value="#FF5C93DC" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                    </Border>
+                </Grid>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
                     <TextBlock Text="{Binding CountText}" Foreground="#ECECEC" FontSize="11.5" MinWidth="46" />
                     <TextBlock Text="{Binding PercentText}" Foreground="#8A9096" FontSize="10.5" MinWidth="42" />
                 </StackPanel>
@@ -180,7 +187,8 @@
                         <ColumnDefinition Width="{Binding BarStar}" />
                         <ColumnDefinition Width="{Binding RestStar}" />
                     </Grid.ColumnDefinitions>
-                    <Border Grid.Column="0" Height="11" MinWidth="11" CornerRadius="5.5" Background="#FF3C6FB4" />
+                    <Border Grid.Column="0" Height="11" MinWidth="11" CornerRadius="5.5" Background="#FF3C6FB4"
+                            Visibility="{Binding HasBar, Converter={StaticResource BoolToVis}}" />
                 </Grid>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="{Binding PlaysText}" Foreground="#ECECEC" FontSize="12" MinWidth="62" />
@@ -277,7 +285,8 @@
                                                             <ColumnDefinition Width="{Binding BarStar}" />
                                                             <ColumnDefinition Width="{Binding RestStar}" />
                                                         </Grid.ColumnDefinitions>
-                                                        <Border Grid.Column="0" Height="11" MinWidth="11" CornerRadius="5.5" Background="#FF3C6FB4" />
+                                                        <Border Grid.Column="0" Height="11" MinWidth="11" CornerRadius="5.5" Background="#FF3C6FB4"
+                            Visibility="{Binding HasBar, Converter={StaticResource BoolToVis}}" />
                                                     </Grid>
 
                                                     <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
